@@ -10,12 +10,12 @@ until the human merges or aborts.
 Read the owed relay from the durable log — do not act on the nudge alone:
 
 ```bash
-waypoint board log {{ticket_channel}} --grep relay
+waypoint board log {{ticket_channel}} --json | jq -c '.[] | select(.metadata.kind == "relay")'
 ```
 
-Take the post whose `relay_version` exceeds the highest you have already handled,
-act on it **once**, and record that version. If several rounds queued while you
-were away, apply them in version order.
+Take the relay posts whose board-entry `id` exceeds the highest relay `id` you have
+already handled, act on each **once**, and record that id. If several rounds queued
+while you were away, apply them in id order.
 
 ## 2. Address each finding
 

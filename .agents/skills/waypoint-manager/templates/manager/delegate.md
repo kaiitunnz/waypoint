@@ -5,19 +5,10 @@ and the `attempts` budget is not exhausted). Delegate it to an ephemeral tech-le
 in its own worktree. **Record intent before spawning** so a crash resumes rather
 than double-spawns.
 
-A `ready` ticket arrives by one of three routes set in triage
-(`templates/manager/triage.md`), which differ only in the `spec_ref` you carry
-into the kickoff — the spawn below is identical for all three:
-
-- **produced-and-approved** — a prd-writer/rfc-writer wrote the spec and it passed
-  the `spec_review` gate; `spec_ref` = the produced PRD/RFC.
-- **pass-through** — a large/well-defined or impl-open input PRD, or an input RFC,
-  used as-is (no writer, no gate); `spec_ref` = the input doc.
-- **trivial direct-instruction** — no spec; the lead works from the ticket body.
-
-The writer spawn (prd-writer / rfc-writer) lives in triage, not here; by the time
-a ticket is `ready`, any authoring is done. The ticket record already carries the
-right `spec_ref`, so the kickoff renders it unchanged.
+The ticket already carries the `spec_ref` triage set — a produced-and-approved
+PRD/RFC, a pass-through input PRD/RFC, or none (trivial direct-instruction). The
+spawn is identical for all three; the kickoff renders whatever `spec_ref` the ticket
+holds.
 
 ## 1. Reconcile first
 
@@ -65,8 +56,9 @@ exactly once.
 ## 3. Spawn the lead in its worktree
 
 ```bash
-# {{tech_lead_launch}} expands from roles.tech_lead in the manifest (its preset:
-# name or inline launch: flags) — never hardcode a preset/model here.
+# {{tech_lead_launch}} expands from roles.tech_lead in the manifest — a preset: role
+# becomes `--preset <name>`, an inline launch: becomes `--backend <b> --model <m>
+# --permission-mode <p>`. Never hardcode a preset/model here.
 sid=$(waypoint sessions start {{tech_lead_launch}} \
   --cwd <repo-root> \
   --worktree {{branch}} --worktree-base {{trunk}} \
@@ -78,10 +70,10 @@ waypoint sessions wake-on-board "$sid" --channels {{ticket_channel}} --wake-on-i
 ```
 
 If the model/permission were wrong the lead dies on turn 1; confirm it actually
-started (`waypoint sessions show "$sid"` → `running`/`working`, not `exited`/
-`error`). A turn-1 death is a spawn failure — move `delegated → ready` (still under
-budget) or `→ blocked` (budget exhausted), and add the ticket to this drain's
-`tried` set.
+started (`waypoint sessions show "$sid"` → `starting`/`idle`/`running`, not
+`exited`/`error`). A turn-1 death is a spawn failure — move `delegated → ready`
+(still under budget) or `→ blocked` (budget exhausted), and add the ticket to this
+drain's `tried` set.
 
 ## 4. Send the kickoff
 

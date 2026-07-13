@@ -40,13 +40,17 @@ and cannot skip a gate: every ticket routed to `spec_pending` to author a PRD/RF
 passes the `spec_review` human gate. What scale governs is the bug-report branch
 below (a trivial fix takes the direct-instruction `triaged → ready` path with no
 spec; a non-trivial one is specced) and, for a PRD input, whether it is small
-enough to reduce to an RFC. Estimate a **coarse footprint** — the path globs the
-work will likely touch — from the body and a quick look at the repo; it need only
-be good enough to order overlapping tickets, and the spec (if any) refines it.
+enough to reduce to an RFC. Estimate a **coarse footprint** — the path globs the work will likely touch — from
+the body and a quick look at the repo. It is recorded for observability; scheduling
+is priority + FIFO (conflict-aware use of the footprint is a future addition), so
+overlapping tickets are caught at the integration rebase rather than pre-ordered.
+
+Record the scale **on the `intake → triaged` transition** so it lands atomically — a
+crash can't strand a triaged ticket with no scale — then set the coarse footprint:
 
 ```bash
-waypoint manager ticket update {{ticket_id}} --scale {{scale}} \
-  --footprint "{{footprint}}"   # repeat --footprint per glob; add --kind if useful
+waypoint manager ticket transition {{ticket_id}} --to triaged --scale {{scale}}
+waypoint manager ticket update {{ticket_id}} --footprint "{{footprint}}"   # repeat per glob; add --kind if useful
 ```
 
 ## Route
@@ -126,6 +130,10 @@ sid=$(waypoint sessions start {{writer_launch}} \
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
 waypoint sessions send "$sid" "$(render templates/$role/write.md)"
 ```
+
+To **resume** a writer that died mid-spec, re-run this same spawn after terminating
+the dead session and self-looping `spec_pending → spec_pending` (`--reason
+lead-died`, spends `lead_restarts`); past `max_lead_restarts`, escalate `--to blocked`.
 
 When the `rfc-writer` route is **converting an input PRD**, pass that PRD to the
 writer as its primary input — it preserves the PRD's intent and reduces it to a

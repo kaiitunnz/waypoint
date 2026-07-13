@@ -1,10 +1,10 @@
 # waypoint-manager.yaml — project-local Waypoint Manager config.
 #
 # `waypoint manager init --manifest <this file>` persists the machine-relevant
-# fields (trunk, concurrency, retry, priority, integration, timeouts) server-side,
-# so `manager next`/`transition` enforce them. board, scale, escalation, and roles
-# are skill-consumed: the manager reads this file directly for spawn config and
-# policy. Full field and `{{placeholder}}` reference: docs/waypoint-manager.md.
+# fields (trunk, concurrency, retry, priority, timeouts) server-side, so
+# `manager next`/`transition` enforce them. board, scale, escalation, integration,
+# and roles are skill-consumed: the manager reads this file directly for spawn
+# config and policy. Full field and `{{placeholder}}` reference: docs/waypoint-manager.md.
 
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket worktree is cut from; the sole integrator advances it
@@ -16,16 +16,13 @@ board:
 
 concurrency:
   execution_slots: 2                      # max tickets in delegated|building|revising; parked leads do not count
-  max_parked_leads: null                  # optional cap on live-but-idle leads (null = unbounded)
 
 retry:
   max_delegate_attempts: 3                # initial-spawn retries before blocked-awaiting-human
   max_lead_restarts: 3                    # fresh-lead resumes after a lead death before blocked (independent of attempts)
-  backoff_seconds: 60                     # base backoff between re-delegations
 
 priority:
-  levels: [p0, p1, p2, p3]                # ordered high-to-low; a ticket's --priority must be one of these
-  tiebreak: fifo                          # ties break oldest-first by created_at
+  levels: [p0, p1, p2, p3]                # ordered high-to-low; ties break oldest-first (FIFO by created_at)
 
 scale:
   substantial_when: >-                    # triage's rule for substantial (→ spec) vs trivial (→ direct)
@@ -50,7 +47,7 @@ escalation:
 # claude_tty so its turn survives a backend restart. Full reference: docs/waypoint-manager.md.
 roles:
   manager:
-    launch: { backend: claude_code, model: "opus[1m]", permission_mode: dontAsk }
+    launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: dontAsk }
     templates: templates/manager
   prd_writer:
     preset: writer-opus                   # e.g. an opus claude_code preset; must pre-exist

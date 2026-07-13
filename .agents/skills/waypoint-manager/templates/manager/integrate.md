@@ -80,7 +80,8 @@ A dead owner's lease is recoverable only by `waypoint manager lock steal --owner
   Spawn follow-up tickets for the unmet goals **only here**, once the subset has
   merged, with a deterministic id/dedup key so a re-run does not double-create:
   ```bash
-  waypoint manager ticket add "follow-up: <goal>" --id ticket-{{ticket_id}}-f1 \
+  waypoint board post {{tickets_channel}} "<goal>" --key ticket:{{ticket_id}}-f1   # registry cell, like intake
+  waypoint manager ticket add "follow-up: <goal>" --id {{ticket_id}}-f1 \
     --priority {{priority}} --dep {{ticket_id}}
   ```
 - **CI red / needs human** → release lease, `merging → blocked`, escalate.
@@ -94,8 +95,12 @@ recorded lead sid — reap the lead's descendants, then delete the lead itself
 
 ```bash
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-waypoint sessions reap --spawned-by "$lead" --recursive --prune-branches   # the lead's workers; branch landed on {{trunk}}
-waypoint sessions delete "$lead" --force                                    # the lead itself (removes its worktree)
+# Delete the lead's whole subtree (descendants first), then the lead. The branch
+# has landed on {{trunk}}, so pruning branches is safe.
+for s in $(waypoint sessions list --spawned-by "$lead" --recursive | jq -r '.sessions[].id'); do
+  waypoint sessions delete "$s" --force --prune-branches
+done
+waypoint sessions delete "$lead" --force --prune-branches                   # removes the lead's worktree
 ```
 
 Post a one-line outcome to your `{{org_channel}}` channel and return to

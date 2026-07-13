@@ -39,13 +39,12 @@ it, so a manager relay (a human answer, review feedback) wakes you.
 every wake:
 
 ```bash
-waypoint board log {{ticket_channel}} --grep relay
+waypoint board log {{ticket_channel}} --json | jq -c '.[] | select(.metadata.kind == "relay")'
 ```
 
-Read posts whose `relay_version` meta exceeds the highest you have already acted on
-(compare the meta yourself — `relay_version` is the inbox answer's version, a
-different counter from the board post id `--since` filters on),
-apply each **once**, and remember that version. A duplicate nudge or a re-post
+Act on relays whose board-entry `id` exceeds the highest relay `id` you have already
+acted on, apply each **once**, and remember that id — the board id is a monotonic
+per-channel cursor, so nothing is skipped or re-applied across wakes. A duplicate nudge or a re-post
 changes nothing. A relay carries the authoritative payload; a bare `sessions send`
 nudge does not — always re-read the log. If you died and restarted, the log still
 holds every owed relay: re-read from the top and reapply what you hadn't recorded.

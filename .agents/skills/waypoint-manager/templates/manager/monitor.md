@@ -58,24 +58,24 @@ waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{s
 
 The answer lands on a later wake, so recover the item from the ticket rather than a
 prior turn's variable — the item's subject carries `{{ticket_channel}}`. Read the
-answer (never injected — pull it), then post it to the durable versioned log and
-nudge:
+answer (never injected — pull it), then post it to the durable log and nudge:
 
 ```bash
 item=$(waypoint inbox list --q "{{ticket_channel}}" | jq -r '.items[0].id')   # newest inbox item for this ticket
-answer=$(waypoint inbox get "$item")                   # emits {"item": {...}} — branch on the block's answer
-ver=$(echo "$answer" | jq -r '.item.version')
-waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" \
-  --meta relay_version="$ver" --meta kind=relay
+answer=$(waypoint inbox get "$item")                   # {"item": {...}} — branch on the block's answer
+waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
 waypoint sessions send "$lead" \
-  "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}} (v$ver); read owed relays and act."
+  "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
 ```
 
 Then transition out of the awaiting state — `blocked → building` (answer relayed),
-or `spec_review → ready`. `awaiting_since` clears automatically on exit. The lead
-consumes the relay by version and is idempotent, so a duplicate nudge is harmless;
-if the lead is dead, the relay is still on the log for its replacement to read.
+or `spec_review → ready`. `awaiting_since` clears automatically on exit. Each relay
+is a `kind=relay` post; the lead consumes them in board-entry-`id` order and applies
+each once, so a duplicate nudge is harmless, and if the lead is dead the relay stays
+on the log for its replacement to read. The relay is posted before the exit
+transition; a crash between re-posts it under a higher id, which the lead harmlessly
+re-applies — the accepted tradeoff, since transition-first would risk a lost relay.
 
 ## Done / partial
 

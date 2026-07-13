@@ -282,25 +282,24 @@ payload; merge only if `gh pr view` does not already report `MERGED`.
 A `waypoint sessions send` is a fire-and-forget, non-observable sink — it starts a
 turn but leaves no durable record, so a lead that dies mid-processing loses the
 message. Every manager→lead relay (a human answer to a blocker, review feedback, a
-re-delegate briefing) is an append-log post to the ticket channel stamped with the
-source version, followed by a content-free nudge:
+re-delegate briefing) is a `kind=relay` append-log post to the ticket channel,
+followed by a content-free nudge:
 
 ```
-# Durable payload on the log, versioned by the inbox answer's version:
-waypoint board post <ticket-channel> "<the human answer / review feedback>" \
-  --meta relay_version=<inbox answer version> --meta kind=relay
+# Durable payload on the log:
+waypoint board post <ticket-channel> "<the human answer / review feedback>" --meta kind=relay
 # Content-free nudge — carries no payload, just wakes the lead:
 waypoint sessions send <lead-sid> "[wp-msg from=<manager-sid>] Relay posted; read owed relays and act."
 ```
 
 The lead is wake-subscribed to its own ticket channel, so the post wakes it; the
-`sessions send` is a fallback. This makes relays complete (re-derivable from the log
+`sessions send` is a fallback. The lead consumes `kind=relay` posts in board-entry
+`id` order — the id is a monotonic per-channel cursor — acting on those past the
+highest id it has processed. This makes relays complete (re-derivable from the log
 on every lead re-entry, so a fresh lead after a death still sees every owed relay),
-idempotent (the lead consumes posts whose `relay_version` exceeds the highest it has
-processed, acts once, and records that version), and death-surviving (the payload is
-on the durable board). A human answer is delivered at-least-once and applied
-at-most-once. The ticket-channel log is authoritative; the manager's own
-`last_relayed_version` is only a hint.
+idempotent (each applied once, keyed by id), and death-surviving (the payload is on
+the durable board). A human answer is delivered at-least-once and applied
+at-most-once; the ticket-channel log is authoritative.
 
 ### Backend restarts
 
@@ -324,8 +323,10 @@ subscriptions from the database. Two consequences:
 Two guarantees are always on: per-ticket worktree isolation (no two sessions share a
 working tree) and a serialized single-integrator gate (trunk advances only through
 the manager, behind a lease). Conflicts surface only at that gate, never as a
-corrupted tree. Footprint-based conflict-aware scheduling is an optimization layered
-on top, not the guarantee.
+corrupted tree. Scheduling itself is priority + FIFO; a ticket's recorded `footprint`
+and `deps` are not yet read by the scheduler (footprint-based conflict-aware
+scheduling is a future addition), so overlapping tickets are caught at the
+integration rebase rather than pre-ordered.
 
 ### Per-ticket worktree isolation
 
@@ -433,12 +434,9 @@ the backend neither reads nor needs them.
 | `board.org_channel` | skill | Human-visible summaries and the `lock:integration` cell. |
 | `board.ticket_channel_prefix` | skill | Per-ticket channel is `<prefix><id>` (e.g. `ticket-42`). |
 | `concurrency.execution_slots` | backend | Max tickets in `{delegated, building, revising}`. Bounds concurrent compute, not liveness — parked leads do not count. |
-| `concurrency.max_parked_leads` | skill | Optional cap on live-but-idle leads under host pressure (`null` = unbounded). |
 | `retry.max_delegate_attempts` | backend | Initial-spawn retry budget before `blocked`-awaiting-human. Enforced on `ready → delegated`. |
 | `retry.max_lead_restarts` | backend | Fresh-lead resumes after a lead death before `blocked`. Enforced on the lead-died self-loop. Independent of `attempts`. |
-| `retry.backoff_seconds` | skill | Base backoff between re-delegations. |
-| `priority.levels` | backend | Ordered high-to-low (`p0` highest); a ticket's `--priority` must be one of these. |
-| `priority.tiebreak` | backend | `fifo`: ties break oldest-first by `created_at`. |
+| `priority.levels` | backend | Ordered high-to-low (`p0` highest); a ticket's `--priority` must be one of these. Ties break oldest-first (FIFO by `created_at`). |
 | `scale.substantial_when` | skill | Natural-language rule triage applies to label a ticket `substantial` (→ spec) vs `trivial` (→ direct). |
 | `integration.mode` | skill | `pr` (GitHub PR) or `local` (rebase-ff). Sole integrator either way. |
 | `integration.require_ci_green` | skill | Gate the merge on green CI. |
@@ -456,8 +454,9 @@ Each role under `roles` is configured one of two ways, the choice being the user
   the manager verifies it exists with `waypoint presets show <name>` and halts,
   flagging the user, if it is missing — it never runs `presets create`. Inspect the
   preset's model and permission posture rather than trusting the name.
-- **`launch: { backend, model, permission_mode, … }`** — an inline launch block
-  passed as explicit `sessions start` flags.
+- **`launch: { backend, model, permission_mode, … }`** — an inline launch block,
+  passed as the matching `sessions start` flags (`--backend`, `--model`,
+  `--permission-mode`, …).
 
 `--cwd` and `--title` are always per-launch; the manager supplies `--cwd`,
 `--worktree`/`--worktree-base`, the `subagent:ticket-<id>:<role>` title, and

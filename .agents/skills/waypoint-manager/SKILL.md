@@ -18,8 +18,8 @@ procedure to run.
 
 ## Setup
 
-Confirm the CLI is reachable (`waypoint manager state` returns JSON) and everything
-below is present before entering the loop. A missing prerequisite is a
+Confirm the CLI is reachable (`waypoint manager state --json` returns JSON) and
+everything below is present before entering the loop. A missing prerequisite is a
 halt-and-flag, never a `create`/`install`.
 
 1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
@@ -80,7 +80,8 @@ ticket's budget.
 The manager renders each step template with the ticket's values and sends it; role
 templates come from each `roles.<role>.templates` dir. In a template, `$(render
 <path>)` is shorthand — substitute this ticket's `{{placeholders}}` into that file
-and send the text as the message body; it is not a shell command.
+and send the text as the message body; it is not a shell command. `{{manager_session_id}}`
+is your own session id (`$WAYPOINT_SESSION_ID`).
 
 - Manager loop entry — `templates/manager/loop-cycle.md`
 - Triage and route by input type — `templates/manager/triage.md`

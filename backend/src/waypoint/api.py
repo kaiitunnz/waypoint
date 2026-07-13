@@ -83,6 +83,8 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTagsUpdateRequest,
     SessionTitleRequest,
+    WakeRegisterRequest,
+    WakeSubscriptionListResponse,
 )
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import (
@@ -1517,7 +1519,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # validated against the target block's type in the storage layer.
         try:
             item = await context.runtime.submit_inbox_block(
-                item_id, block_id, answer=body.answer, reply=body.reply
+                item_id,
+                block_id,
+                answer=body.answer,
+                reply=body.reply,
+                actor_session_id=body.actor_session_id,
             )
         except InboxBlockNotFoundError as exc:
             raise HTTPException(
@@ -1533,8 +1539,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def inbox_read(
         item_id: str,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
-        item = await context.runtime.mark_inbox_read(item_id)
+        item = await context.runtime.mark_inbox_read(
+            item_id, actor_session_id=actor_session_id
+        )
         if item is None:
             raise HTTPException(status_code=404, detail="inbox item not found")
         return {"item": item.model_dump(mode="json")}
@@ -1788,6 +1797,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "preset": redact_preset(preset).model_dump(mode="json") if preset else None
         }
+
+    # ── Wake subscriptions ───────────────────────────────────────────────
+    @app.post("/api/sessions/{session_id}/wake-subscriptions")
+    async def register_wake_subscription(
+        session_id: str,
+        body: WakeRegisterRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        sub = context.runtime.register_wake(session_id, body)
+        return {"subscription": sub.model_dump(mode="json")}
+
+    @app.get("/api/sessions/{session_id}/wake-subscriptions")
+    async def list_wake_subscriptions(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        subs = context.runtime.list_wakes(session_id)
+        return WakeSubscriptionListResponse(subscriptions=subs).model_dump(mode="json")
+
+    @app.delete("/api/sessions/{session_id}/wake-subscriptions/{sub_id}")
+    async def delete_wake_subscription(
+        session_id: str,
+        sub_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = context.runtime.unregister_wake(session_id, sub_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="wake subscription not found",
+            )
+        return {"deleted": True}
 
     @app.get("/api/message-schedules")
     async def list_message_schedules(

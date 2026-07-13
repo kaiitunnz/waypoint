@@ -39,6 +39,7 @@ from waypoint.schemas import (
     SessionTokenUsage,
     TokenUsageInit,
     TokenUsageRecord,
+    WakeSubscription,
 )
 from waypoint.telemetry.store import TelemetryStore
 
@@ -350,6 +351,19 @@ class Storage:
                 WHERE is_default = 1;
             CREATE UNIQUE INDEX IF NOT EXISTS idx_session_presets_name_nocase
                 ON session_presets(LOWER(name));
+
+            -- A session's standing wake subscriptions. ``channel_globs``/``kinds``
+            -- are JSON lists; ``wake_on_inbox`` is a 0/1 flag. Read fresh on every
+            -- board/inbox mutation, so no in-memory re-registration on boot.
+            CREATE TABLE IF NOT EXISTS wake_subscriptions (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                channel_globs TEXT NOT NULL DEFAULT '[]',
+                kinds TEXT NOT NULL DEFAULT '[]',
+                wake_on_inbox INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
             """)
         # Register any channels that predate the board_channels table.
         self.connection.execute(
@@ -422,6 +436,8 @@ class Storage:
                 ON sessions(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_last_event
                 ON sessions(last_event_at);
+            CREATE INDEX IF NOT EXISTS idx_wake_subs_session
+                ON wake_subscriptions(session_id);
             """)
         self.telemetry.init_schema()
         if token_usage_column_is_new:
@@ -577,6 +593,10 @@ class Storage:
         # per-turn token ledger explicitly in the same synchronized transaction.
         self.connection.execute(
             "DELETE FROM session_token_usage_records WHERE session_id = ?",
+            (session_id,),
+        )
+        self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE session_id = ?",
             (session_id,),
         )
         self.telemetry.delete_session(session_id)
@@ -1904,6 +1924,73 @@ class Storage:
             parsed_spec = {}
         payload["spec"] = parsed_spec if isinstance(parsed_spec, dict) else {}
         return SessionPresetRecord.model_validate(payload)
+
+    @_synchronized
+    def create_wake_subscription(self, sub: WakeSubscription) -> WakeSubscription:
+        self.connection.execute(
+            """
+            INSERT INTO wake_subscriptions (
+                id, session_id, channel_globs, kinds, wake_on_inbox, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sub.id,
+                sub.session_id,
+                json.dumps(list(sub.channel_globs)),
+                json.dumps(list(sub.kinds)),
+                1 if sub.wake_on_inbox else 0,
+                sub.created_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return sub
+
+    @_synchronized
+    def list_wake_subscriptions(self) -> list[WakeSubscription]:
+        rows = self.connection.execute(
+            "SELECT * FROM wake_subscriptions ORDER BY created_at ASC"
+        ).fetchall()
+        return [self._wake_subscription_from_row(row) for row in rows]
+
+    @_synchronized
+    def list_wake_subscriptions_for_session(
+        self, session_id: str
+    ) -> list[WakeSubscription]:
+        rows = self.connection.execute(
+            "SELECT * FROM wake_subscriptions WHERE session_id = ? "
+            "ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+        return [self._wake_subscription_from_row(row) for row in rows]
+
+    @_synchronized
+    def delete_wake_subscription(self, sub_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE id = ?", (sub_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def delete_wake_subscriptions_for_session(self, session_id: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE session_id = ?", (session_id,)
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    def _wake_subscription_from_row(self, row: sqlite3.Row) -> WakeSubscription:
+        payload = dict(row)
+        payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+        payload["wake_on_inbox"] = bool(payload.get("wake_on_inbox", 0))
+        for field_name in ("channel_globs", "kinds"):
+            raw = payload.get(field_name) or "[]"
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = []
+            payload[field_name] = parsed if isinstance(parsed, list) else []
+        return WakeSubscription.model_validate(payload)
 
     @_synchronized
     def create_scheduled_message(

@@ -746,16 +746,28 @@ class WaypointClient:
         *,
         answer: dict[str, Any] | None = None,
         reply: dict[str, Any] | None = None,
+        actor_session_id: str | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"answer": answer, "reply": reply}
+        body: dict[str, Any] = {
+            "answer": answer,
+            "reply": reply,
+            "actor_session_id": actor_session_id,
+        }
         data: dict[str, Any] = self._request(
             "POST", f"/api/inbox/{item_id}/blocks/{block_id}", json=body
         ).json()["item"]
         return data
 
-    def mark_inbox_read(self, item_id: str) -> dict[str, Any]:
+    def mark_inbox_read(
+        self, item_id: str, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = (
+            {"actor_session_id": actor_session_id}
+            if actor_session_id is not None
+            else None
+        )
         data: dict[str, Any] = self._request(
-            "POST", f"/api/inbox/{item_id}/read"
+            "POST", f"/api/inbox/{item_id}/read", params=params
         ).json()["item"]
         return data
 
@@ -786,6 +798,40 @@ class WaypointClient:
         async with ws_connect(url) as connection:
             async for message in connection:
                 yield json.loads(message)
+
+    async def stream_global_envelopes(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield decoded envelopes from the global ``/ws/sessions`` WebSocket.
+
+        Carries ``session_list_update``/``session_state`` frames plus the
+        content-free ``board_update`` frame (payload ``{"channel": ...}``, or
+        ``{"channel": null}`` for a broad change). Decoding only; callers filter.
+        """
+        url = websocket_url(
+            str(self._client.base_url), "/ws/sessions", token=self.token()
+        )
+        async with ws_connect(url) as connection:
+            async for message in connection:
+                yield json.loads(message)
+
+    # ── wake subscriptions ────────────────────────────────────────────────
+
+    def register_wake(self, session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/wake-subscriptions", json=body
+        ).json()["subscription"]
+        return data
+
+    def list_wakes(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/sessions/{session_id}/wake-subscriptions"
+        ).json()
+        return data
+
+    def unregister_wake(self, session_id: str, sub_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/sessions/{session_id}/wake-subscriptions/{sub_id}"
+        ).json()
+        return data
 
     # ── schedules ───────────────────────────────────────────────────────
 

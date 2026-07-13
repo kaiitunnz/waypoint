@@ -625,6 +625,30 @@ class SessionPresetListResponse(BaseModel):
     default_preset_id: str | None = None
 
 
+class WakeSubscription(BaseModel):
+    # A session's standing request to be woken (a content-free ``handle_input``)
+    # when a matching board channel or the inbox mutates. ``channel_globs`` are
+    # fnmatch patterns over channel names; ``kinds`` is stored for future use but
+    # not enforced by dispatch (the ``board_update`` envelope carries only the
+    # channel name).
+    id: str
+    session_id: str
+    channel_globs: list[str] = Field(default_factory=list)
+    kinds: list[str] = Field(default_factory=list)
+    wake_on_inbox: bool = False
+    created_at: datetime
+
+
+class WakeRegisterRequest(BaseModel):
+    channel_globs: list[str] = Field(default_factory=list)
+    kinds: list[str] = Field(default_factory=list)
+    wake_on_inbox: bool = False
+
+
+class WakeSubscriptionListResponse(BaseModel):
+    subscriptions: list[WakeSubscription] = Field(default_factory=list)
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"
@@ -1193,6 +1217,9 @@ class InboxBlockSubmitRequest(BaseModel):
     # ``answer`` is validated against the target block's type server-side.
     answer: dict[str, Any] | None = None
     reply: InboxReplyInput | None = None
+    # The session performing the submit, so a wake subscriber is not woken by its
+    # own mutation. ``None`` for human/UI answers (which do wake a subscriber).
+    actor_session_id: str | None = None
 
 
 class InboxListResponse(BaseModel):

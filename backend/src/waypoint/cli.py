@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import importlib.metadata
 import json
 import os
@@ -1016,6 +1017,128 @@ async def _wait_for_inbox(
         except WaypointError:
             item = None
         return _InboxWaitResult("timeout", item)
+
+
+class _BoardWaitClient(Protocol):
+    """The slice of ``WaypointClient`` the board-wait engine needs."""
+
+    def stream_global_envelopes(self) -> AsyncIterator[dict[str, Any]]: ...
+
+    def list_board_channels(self) -> list[dict[str, Any]]: ...
+
+    def read_board(
+        self, channel: str, *, since: int | None = ..., key: str | None = ...
+    ) -> list[dict[str, Any]]: ...
+
+
+class _BoardWaitResult(NamedTuple):
+    outcome: str  # changed | timeout
+    channel: str | None
+    entries: list[dict[str, Any]]
+
+
+def _board_channel_matches(channel: str, globs: list[str]) -> bool:
+    return any(fnmatch.fnmatch(channel, glob) for glob in globs)
+
+
+async def _resolve_board_since(
+    client: _BoardWaitClient, globs: list[str], since: int | None
+) -> int:
+    # Fix the baseline at the highest current entry id across watched channels
+    # so an already-present post never self-triggers the wait (board ids are
+    # globally monotonic, so one cursor spans channels).
+    if since is not None:
+        return since
+    channels = await asyncio.to_thread(client.list_board_channels)
+    highest = 0
+    for channel in channels:
+        name = channel.get("channel")
+        if not isinstance(name, str) or not _board_channel_matches(name, globs):
+            continue
+        for entry in await asyncio.to_thread(client.read_board, name):
+            eid = entry.get("id")
+            if isinstance(eid, int) and eid > highest:
+                highest = eid
+    return highest
+
+
+async def _board_scan(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult | None:
+    """Return the first watched channel with an entry past ``since``, else None."""
+    channels = await asyncio.to_thread(client.list_board_channels)
+    for channel in channels:
+        name = channel.get("channel")
+        if not isinstance(name, str) or not _board_channel_matches(name, globs):
+            continue
+        entries = await asyncio.to_thread(client.read_board, name, since=since)
+        if entries:
+            return _BoardWaitResult("changed", name, entries)
+    return None
+
+
+async def _await_board_via_ws(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult | None:
+    """Block on the global stream until a matching change confirms via re-read.
+
+    Returns ``None`` if the stream cannot connect (caller polls). The frame is
+    content-free, so every candidate is confirmed by an explicit re-read."""
+    try:
+        async for envelope in client.stream_global_envelopes():
+            if envelope.get("type") != "board_update":
+                continue
+            channel = envelope.get("payload", {}).get("channel")
+            # A concrete channel must match a glob; a broad change (``None``)
+            # always triggers a re-scan.
+            if isinstance(channel, str) and not _board_channel_matches(channel, globs):
+                continue
+            result = await _board_scan(client, globs, since)
+            if result is not None:
+                return result
+    except (OSError, WebSocketException):
+        return None
+    return None
+
+
+async def _await_board_via_poll(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult:
+    while True:
+        try:
+            result = await _board_scan(client, globs, since)
+        except WaypointError as exc:
+            if exc.status_code is not None and 400 <= exc.status_code < 500:
+                raise  # a genuine client error (e.g. 401) — don't spin on it
+            result = None  # transient (server restarting) — keep polling
+        if result is not None:
+            return result
+        await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+
+
+async def _wait_for_board(
+    client: _BoardWaitClient,
+    globs: list[str],
+    since: int | None,
+    timeout: float | None,
+) -> _BoardWaitResult:
+    """Block until a watched channel gets a new entry, or ``timeout`` elapses.
+
+    Prefers the global WS stream, falling back to polling. An already-present
+    change (relative to an explicit ``--since``) returns immediately.
+    """
+    try:
+        async with asyncio.timeout(timeout):
+            effective_since = await _resolve_board_since(client, globs, since)
+            initial = await _board_scan(client, globs, effective_since)
+            if initial is not None:
+                return initial
+            streamed = await _await_board_via_ws(client, globs, effective_since)
+            if streamed is not None:
+                return streamed
+            return await _await_board_via_poll(client, globs, effective_since)
+    except TimeoutError:
+        return _BoardWaitResult("timeout", None, [])
 
 
 async def _await_status_via_ws(
@@ -2196,6 +2319,82 @@ def sessions_delete(
     )
 
 
+@sessions_app.command("wake-on-board")
+def sessions_wake_on_board(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    channels: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--channels",
+            help="Channel glob to wake on (fnmatch, e.g. 'ticket-*'). Repeatable.",
+        ),
+    ] = None,
+    kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--kinds",
+            help="Optional status kinds to record on the subscription. Repeatable. "
+            "Stored for reference; not enforced by the content-free wake.",
+        ),
+    ] = None,
+    wake_on_inbox: Annotated[
+        bool,
+        typer.Option(
+            "--wake-on-inbox",
+            help="Also wake on any non-self inbox mutation (a human answer to an "
+            "owned item).",
+        ),
+    ] = False,
+) -> None:
+    """Register a board/inbox wake subscription for a session."""
+    if not channels and not wake_on_inbox:
+        raise typer.BadParameter("provide --channels and/or --wake-on-inbox")
+    body = {
+        "channel_globs": channels or [],
+        "kinds": kinds or [],
+        "wake_on_inbox": wake_on_inbox,
+    }
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"subscription": c.register_wake(session_id, body)},
+    )
+
+
+@sessions_app.command("wake-off")
+def sessions_wake_off(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    sub_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Subscription id to remove."),
+    ] = None,
+    all_subs: Annotated[
+        bool,
+        typer.Option("--all", help="Remove every subscription for the session."),
+    ] = False,
+) -> None:
+    """Remove one or all wake subscriptions for a session."""
+    if sub_id is None and not all_subs:
+        raise typer.BadParameter("provide --id or --all")
+    if sub_id is not None and all_subs:
+        raise typer.BadParameter("--id and --all are mutually exclusive")
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        if all_subs:
+            listed = c.list_wakes(session_id)
+            removed = [
+                sub["id"]
+                for sub in listed.get("subscriptions", [])
+                if c.unregister_wake(session_id, sub["id"]).get("deleted")
+            ]
+            return {"removed": removed}
+        assert sub_id is not None
+        return c.unregister_wake(session_id, sub_id)
+
+    _emit(_settings_from_ctx(ctx), run)
+
+
 @sessions_app.command("reap")
 def sessions_reap(
     ctx: typer.Context,
@@ -2788,6 +2987,58 @@ def board_set_meta(
     _emit(_settings_from_ctx(ctx), _run)
 
 
+@board_app.command("wait")
+def board_wait(
+    ctx: typer.Context,
+    channels: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--channels",
+            help="Channel glob to wait on (fnmatch, e.g. 'ticket-*'). Repeatable.",
+        ),
+    ] = None,
+    since: Annotated[
+        int | None,
+        typer.Option(
+            "--since",
+            help="Only entries with an id greater than this; defaults to the "
+            "highest id present at connect.",
+        ),
+    ] = None,
+    timeout: Annotated[
+        str | None,
+        typer.Option(
+            "--timeout",
+            help="Give up after this duration (e.g. 5m, 2h); exit 124 on timeout.",
+        ),
+    ] = None,
+) -> None:
+    """Block until a watched board channel gets a new entry, or time out.
+
+    Emits ``{"outcome": ..., "channel": ..., "entries": [...]}`` where outcome is
+    ``changed`` or ``timeout``. Exit codes: 0 on changed, 124 on timeout. Prefers
+    the global WS stream, falling back to polling. An interactive convenience —
+    not the manager's loop driver.
+    """
+    if not channels:
+        raise typer.BadParameter("provide at least one --channels glob")
+    timeout_seconds = _parse_duration(timeout) if timeout is not None else None
+    outcomes: list[str] = []
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        result = asyncio.run(_wait_for_board(c, channels, since, timeout_seconds))
+        outcomes.append(result.outcome)
+        return {
+            "outcome": result.outcome,
+            "channel": result.channel,
+            "entries": result.entries,
+        }
+
+    _emit(_settings_from_ctx(ctx), run)
+    if outcomes and outcomes[0] == "timeout":
+        raise typer.Exit(code=WAIT_TIMEOUT_EXIT_CODE)
+
+
 @inbox_app.command("post")
 def inbox_post(
     ctx: typer.Context,
@@ -2881,6 +3132,15 @@ def inbox_answer(
             help="Attach an existing blob as session_id:attachment_id. Repeatable.",
         ),
     ] = None,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Answering session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own answer (a human answer, with no "
+            "session, does wake it).",
+        ),
+    ] = None,
 ) -> None:
     """Answer and/or reply to one block (scripting path; the UI is primary)."""
     answer: dict[str, Any] | None = None
@@ -2910,15 +3170,37 @@ def inbox_answer(
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
-            "item": c.submit_inbox_block(item_id, block_id, answer=answer, reply=reply)
+            "item": c.submit_inbox_block(
+                item_id,
+                block_id,
+                answer=answer,
+                reply=reply,
+                actor_session_id=actor_session_id,
+            )
         },
     )
 
 
 @inbox_app.command("read")
-def inbox_read(ctx: typer.Context, item_id: Annotated[str, typer.Argument()]) -> None:
+def inbox_read(
+    ctx: typer.Context,
+    item_id: Annotated[str, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Reading session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own mark-read.",
+        ),
+    ] = None,
+) -> None:
     """Mark an item read (resolves a no-action FYI item)."""
-    _emit(_settings_from_ctx(ctx), lambda c: {"item": c.mark_inbox_read(item_id)})
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "item": c.mark_inbox_read(item_id, actor_session_id=actor_session_id)
+        },
+    )
 
 
 @inbox_app.command("delete")

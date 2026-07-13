@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,10 @@ from waypoint.schemas import (
     InboxReply,
     InboxReplyInput,
     InboxStatus,
+    IntegrationLock,
+    ManagerConfig,
+    ManagerTicket,
+    ManagerTicketState,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
     ScheduledSessionRecord,
@@ -132,6 +136,10 @@ class InboxBlockNotFoundError(InboxError):
 
 class InboxBlockTypeError(InboxError):
     """The submitted answer does not fit the target block's type (→ 422)."""
+
+
+class ManagerTicketConflict(Exception):
+    """A version-checked manager-ticket update lost the CAS race (→ 409)."""
 
 
 def _materialize_blocks(blocks: list[InboxBlockInput]) -> list[InboxBlock]:
@@ -364,6 +372,39 @@ class Storage:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
+
+            -- Waypoint Manager state machine. Filterable columns
+            -- (state/priority/scale) + timestamps are denormalized for
+            -- querying/ordering; the whole ticket is the JSON ``payload`` blob,
+            -- updated in place via a version-checked read-modify-write.
+            CREATE TABLE IF NOT EXISTS manager_tickets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'p2',
+                state TEXT NOT NULL DEFAULT 'intake',
+                scale TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
+
+            -- Serialized integration lease (single row per lock name, only
+            -- ``integration`` in the MVP). Acquire/steal are CAS upserts guarded
+            -- by expiry; the storage lock makes the read-modify-write atomic.
+            CREATE TABLE IF NOT EXISTS integration_lock (
+                name TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                acquired_at TEXT NOT NULL,
+                ttl_seconds INTEGER NOT NULL
+            );
+
+            -- Single-row persisted ManagerConfig (the machine-relevant subset of
+            -- the project manifest). ``id`` is pinned to 1.
+            CREATE TABLE IF NOT EXISTS manager_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
             """)
         # Register any channels that predate the board_channels table.
         self.connection.execute(
@@ -438,6 +479,10 @@ class Storage:
                 ON sessions(last_event_at);
             CREATE INDEX IF NOT EXISTS idx_wake_subs_session
                 ON wake_subscriptions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_state
+                ON manager_tickets(state);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_priority
+                ON manager_tickets(priority);
             """)
         self.telemetry.init_schema()
         if token_usage_column_is_new:
@@ -1991,6 +2036,198 @@ class Storage:
                 parsed = []
             payload[field_name] = parsed if isinstance(parsed, list) else []
         return WakeSubscription.model_validate(payload)
+
+    @_synchronized
+    def create_manager_ticket(self, ticket: ManagerTicket) -> ManagerTicket:
+        self.connection.execute(
+            """
+            INSERT INTO manager_tickets (
+                id, title, priority, state, scale, version, created_at,
+                updated_at, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            self._manager_ticket_columns(ticket),
+        )
+        self.connection.commit()
+        return ticket
+
+    @_synchronized
+    def get_manager_ticket(self, ticket_id: str) -> ManagerTicket | None:
+        row = self.connection.execute(
+            "SELECT * FROM manager_tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        return self._manager_ticket_from_row(row) if row is not None else None
+
+    @_synchronized
+    def list_manager_tickets(
+        self, *, states: list[ManagerTicketState] | None = None
+    ) -> list[ManagerTicket]:
+        sql = "SELECT * FROM manager_tickets"
+        params: list[Any] = []
+        if states:
+            placeholders = ",".join("?" for _ in states)
+            sql += f" WHERE state IN ({placeholders})"
+            params.extend(str(state) for state in states)
+        sql += " ORDER BY created_at ASC, id ASC"
+        rows = self.connection.execute(sql, params).fetchall()
+        return [self._manager_ticket_from_row(row) for row in rows]
+
+    @_synchronized
+    def update_manager_ticket(self, ticket: ManagerTicket) -> ManagerTicket:
+        # Version-checked read-modify-write: the caller passes the ticket it read
+        # (``ticket.version`` is the expected current version); the row is bumped
+        # to ``version + 1`` only when it still matches. A mismatch (concurrent
+        # write or a vanished row) raises ManagerTicketConflict, mapped to 409.
+        expected = ticket.version
+        bumped = ticket.model_copy(update={"version": expected + 1})
+        columns = self._manager_ticket_columns(bumped)
+        cursor = self.connection.execute(
+            """
+            UPDATE manager_tickets SET
+                title = ?, priority = ?, state = ?, scale = ?, version = ?,
+                created_at = ?, updated_at = ?, payload = ?
+            WHERE id = ? AND version = ?
+            """,
+            (*columns[1:], ticket.id, expected),
+        )
+        if (cursor.rowcount or 0) == 0:
+            self.connection.rollback()
+            raise ManagerTicketConflict(ticket.id)
+        self.connection.commit()
+        return bumped
+
+    @_synchronized
+    def delete_manager_ticket(self, ticket_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM manager_tickets WHERE id = ?", (ticket_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def get_manager_config(self) -> ManagerConfig | None:
+        row = self.connection.execute(
+            "SELECT payload FROM manager_config WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            parsed = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            return None
+        return ManagerConfig.model_validate(parsed if isinstance(parsed, dict) else {})
+
+    @_synchronized
+    def set_manager_config(self, config: ManagerConfig) -> ManagerConfig:
+        self.connection.execute(
+            "INSERT INTO manager_config (id, payload) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
+            (json.dumps(config.model_dump(mode="json")),),
+        )
+        self.connection.commit()
+        return config
+
+    @_synchronized
+    def get_integration_lock(self, name: str) -> IntegrationLock | None:
+        row = self.connection.execute(
+            "SELECT * FROM integration_lock WHERE name = ?", (name,)
+        ).fetchone()
+        return self._integration_lock_from_row(row) if row is not None else None
+
+    @_synchronized
+    def acquire_integration_lock(
+        self, name: str, owner: str, ttl_seconds: int, now: datetime
+    ) -> IntegrationLock | None:
+        # Take the lease when it is free or already ours (re-entrant refresh).
+        # A lease held by another owner — expired or not — is refused; reclaiming
+        # a dead owner's lease is the explicit ``steal`` path (after a liveness
+        # check), never a silent acquire.
+        row = self.connection.execute(
+            "SELECT * FROM integration_lock WHERE name = ?", (name,)
+        ).fetchone()
+        if row is not None and row["owner"] != owner:
+            return None
+        return self._write_integration_lock(name, owner, ttl_seconds, now)
+
+    @_synchronized
+    def steal_integration_lock(
+        self, name: str, owner: str, ttl_seconds: int, now: datetime
+    ) -> IntegrationLock | None:
+        # Reclaim only a free/ours/expired lease; a live foreign lease is never
+        # force-taken (steal-on-expiry, after the caller's owner-liveness check).
+        row = self.connection.execute(
+            "SELECT * FROM integration_lock WHERE name = ?", (name,)
+        ).fetchone()
+        if (
+            row is not None
+            and row["owner"] != owner
+            and not self._lock_row_expired(row, now)
+        ):
+            return None
+        return self._write_integration_lock(name, owner, ttl_seconds, now)
+
+    @_synchronized
+    def release_integration_lock(self, name: str, owner: str, now: datetime) -> bool:
+        row = self.connection.execute(
+            "SELECT * FROM integration_lock WHERE name = ?", (name,)
+        ).fetchone()
+        if row is None:
+            return True
+        if row["owner"] != owner and not self._lock_row_expired(row, now):
+            return False
+        self.connection.execute("DELETE FROM integration_lock WHERE name = ?", (name,))
+        self.connection.commit()
+        return True
+
+    def _write_integration_lock(
+        self, name: str, owner: str, ttl_seconds: int, now: datetime
+    ) -> IntegrationLock:
+        self.connection.execute(
+            "INSERT INTO integration_lock (name, owner, acquired_at, ttl_seconds) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+            "owner = excluded.owner, acquired_at = excluded.acquired_at, "
+            "ttl_seconds = excluded.ttl_seconds",
+            (name, owner, now.isoformat(), ttl_seconds),
+        )
+        self.connection.commit()
+        return IntegrationLock(
+            name=name, owner=owner, acquired_at=now, ttl_seconds=ttl_seconds
+        )
+
+    @staticmethod
+    def _lock_row_expired(row: sqlite3.Row, now: datetime) -> bool:
+        acquired = datetime.fromisoformat(row["acquired_at"])
+        return acquired + timedelta(seconds=int(row["ttl_seconds"])) < now
+
+    @staticmethod
+    def _manager_ticket_columns(ticket: ManagerTicket) -> tuple[Any, ...]:
+        return (
+            ticket.id,
+            ticket.title,
+            ticket.priority,
+            str(ticket.state),
+            str(ticket.scale) if ticket.scale is not None else None,
+            ticket.version,
+            ticket.created_at.isoformat(),
+            ticket.updated_at.isoformat(),
+            json.dumps(ticket.model_dump(mode="json")),
+        )
+
+    def _manager_ticket_from_row(self, row: sqlite3.Row) -> ManagerTicket:
+        raw = row["payload"] or "{}"
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = {}
+        return ManagerTicket.model_validate(parsed if isinstance(parsed, dict) else {})
+
+    def _integration_lock_from_row(self, row: sqlite3.Row) -> IntegrationLock:
+        return IntegrationLock(
+            name=row["name"],
+            owner=row["owner"],
+            acquired_at=datetime.fromisoformat(row["acquired_at"]),
+            ttl_seconds=int(row["ttl_seconds"]),
+        )
 
     @_synchronized
     def create_scheduled_message(

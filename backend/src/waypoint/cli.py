@@ -17,6 +17,7 @@ import click
 import httpx
 import typer
 import uvicorn
+import yaml
 from fastapi import HTTPException
 from websockets.exceptions import WebSocketException
 
@@ -168,6 +169,18 @@ accounts_app = typer.Typer(
     help="Inspect configured account/config-profile switching options.",
     no_args_is_help=True,
 )
+manager_app = typer.Typer(
+    help="Drive the Waypoint Manager per-project ticket state machine.",
+    no_args_is_help=True,
+)
+manager_ticket_app = typer.Typer(
+    help="Add, inspect, update, and transition manager tickets.",
+    no_args_is_help=True,
+)
+manager_lock_app = typer.Typer(
+    help="Acquire, release, or steal the serialized integration lease.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -179,6 +192,9 @@ schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
 app.add_typer(presets_app, name="presets")
 app.add_typer(accounts_app, name="accounts")
+app.add_typer(manager_app, name="manager")
+manager_app.add_typer(manager_ticket_app, name="ticket")
+manager_app.add_typer(manager_lock_app, name="lock")
 
 
 def _version_callback(value: bool) -> None:
@@ -3621,6 +3637,336 @@ def presets_default(
 def presets_clear_default(ctx: typer.Context) -> None:
     """Clear the default preset (leaves all presets in place)."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_default_session_preset())
+
+
+def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
+    """Extract the machine-relevant ManagerConfig fields from a manifest.
+
+    The role/preset/template/channel fields are skill-consumed and ignored here;
+    only the fields the server-side scheduler enforces are forwarded.
+    """
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        raise typer.BadParameter(f"could not read manifest {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise typer.BadParameter(f"manifest {path} is not valid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise typer.BadParameter("manifest must be a top-level mapping")
+
+    def _section(name: str) -> dict[str, Any]:
+        value = raw.get(name)
+        return value if isinstance(value, dict) else {}
+
+    concurrency = _section("concurrency")
+    retry = _section("retry")
+    priority = _section("priority")
+    timeouts = _section("timeouts")
+    config: dict[str, Any] = {}
+    sources: list[tuple[str, dict[str, Any], str]] = [
+        ("execution_slots", concurrency, "execution_slots"),
+        ("max_delegate_attempts", retry, "max_delegate_attempts"),
+        ("max_lead_restarts", retry, "max_lead_restarts"),
+        ("backoff_seconds", retry, "backoff_seconds"),
+        ("human_latency_hours", timeouts, "human_latency_hours"),
+        ("lock_ttl_seconds", timeouts, "lock_ttl_seconds"),
+    ]
+    for dest, source, name in sources:
+        if source.get(name) is not None:
+            config[dest] = source[name]
+    if raw.get("trunk") is not None:
+        config["trunk"] = raw["trunk"]
+    levels = priority.get("levels")
+    if isinstance(levels, list) and levels:
+        config["priority_levels"] = list(levels)
+    return config
+
+
+def _render_manager_slots(slots: dict[str, Any]) -> None:
+    typer.echo(
+        f"slots: {slots.get('used')}/{slots.get('total')} used "
+        f"({slots.get('free')} free)"
+    )
+
+
+@manager_app.command("init")
+def manager_init(
+    ctx: typer.Context,
+    manifest: Annotated[
+        Path,
+        typer.Option(
+            "--manifest",
+            exists=True,
+            dir_okay=False,
+            help="Path to the project's waypoint-manager.yaml.",
+        ),
+    ],
+) -> None:
+    """Persist the manifest's machine-relevant fields as the server ManagerConfig."""
+    config = _manager_config_from_manifest(manifest)
+    _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
+
+
+@manager_app.command("state")
+def manager_state(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Show the whole ticket set, derived slot state, and the integration lease."""
+    state = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_state())
+    if json_output:
+        typer.echo(json.dumps(state, indent=2))
+        return
+    _render_manager_slots(state.get("slots") or {})
+    lock = state.get("lock")
+    if lock:
+        typer.echo(
+            f"integration lock: {lock.get('owner')} "
+            f"(acquired {lock.get('acquired_at')}, ttl {lock.get('ttl_seconds')}s)"
+        )
+    tickets = state.get("tickets") or []
+    if not tickets:
+        typer.echo("(no tickets)")
+        return
+    for ticket in tickets:
+        typer.echo(
+            f"  {ticket.get('id')}  [{ticket.get('priority')}]  "
+            f"{ticket.get('state')}  {ticket.get('title')}"
+        )
+
+
+@manager_app.command("next")
+def manager_next(
+    ctx: typer.Context,
+    tried: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tried",
+            help="Ticket id to exclude from the recommendation (this drain's "
+            "tried set). Repeatable.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Re-anchor: derived slots, per-ticket legal transitions, one recommendation."""
+    result = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_next(tried))
+    if json_output:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    _render_manager_slots(result.get("slots") or {})
+    recommended = result.get("recommended")
+    if recommended:
+        typer.echo(
+            f"recommended: {recommended.get('ticket_id')} "
+            f"{recommended.get('from_state')} -> {recommended.get('to_state')} "
+            f"({recommended.get('event')}: {recommended.get('reason')})"
+        )
+    else:
+        typer.echo("recommended: (none — drained to fixpoint)")
+    for ticket in result.get("tickets") or []:
+        legal = ", ".join(ticket.get("legal_transitions") or [])
+        typer.echo(
+            f"  {ticket.get('ticket_id')} [{ticket.get('priority')}] "
+            f"{ticket.get('state')} -> {{{legal}}}"
+        )
+
+
+@manager_ticket_app.command("add")
+def manager_ticket_add(
+    ctx: typer.Context,
+    title: Annotated[str, typer.Argument(help="Human-readable ticket title.")],
+    ticket_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Explicit ticket id (else server-generated)."),
+    ] = None,
+    priority: Annotated[str, typer.Option(help="Priority level, e.g. p0..p3.")] = "p2",
+    kind: Annotated[str | None, typer.Option()] = None,
+    scale: Annotated[
+        str | None, typer.Option(help="'trivial' or 'substantial'.")
+    ] = None,
+    footprint: Annotated[
+        list[str] | None,
+        typer.Option("--footprint", help="Coarse path glob. Repeatable."),
+    ] = None,
+    deps: Annotated[
+        list[str] | None,
+        typer.Option("--dep", help="Dependency ticket id. Repeatable."),
+    ] = None,
+) -> None:
+    """Create an intake ticket."""
+    body: dict[str, Any] = {"title": title, "priority": priority}
+    if ticket_id is not None:
+        body["id"] = ticket_id
+    if kind is not None:
+        body["kind"] = kind
+    if scale is not None:
+        body["scale"] = scale
+    if footprint:
+        body["footprint"] = footprint
+    if deps:
+        body["deps"] = deps
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_create_ticket(body)},
+    )
+
+
+@manager_ticket_app.command("show")
+def manager_ticket_show(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+) -> None:
+    """Show a single ticket."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_get_ticket(ticket_id)},
+    )
+
+
+@manager_ticket_app.command("update")
+def manager_ticket_update(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    priority: Annotated[str | None, typer.Option()] = None,
+    kind: Annotated[str | None, typer.Option()] = None,
+    scale: Annotated[str | None, typer.Option()] = None,
+    footprint: Annotated[list[str] | None, typer.Option("--footprint")] = None,
+    deps: Annotated[list[str] | None, typer.Option("--dep")] = None,
+    spec_ref: Annotated[str | None, typer.Option()] = None,
+    intended_lead_title: Annotated[str | None, typer.Option()] = None,
+    lead_session_id: Annotated[str | None, typer.Option()] = None,
+    branch: Annotated[str | None, typer.Option()] = None,
+    worktree_path: Annotated[str | None, typer.Option()] = None,
+    pr_url: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Edit ticket metadata (no state change; use 'transition' for that)."""
+    body: dict[str, Any] = {}
+    for name, value in (
+        ("priority", priority),
+        ("kind", kind),
+        ("scale", scale),
+        ("spec_ref", spec_ref),
+        ("intended_lead_title", intended_lead_title),
+        ("lead_session_id", lead_session_id),
+        ("branch", branch),
+        ("worktree_path", worktree_path),
+        ("pr_url", pr_url),
+    ):
+        if value is not None:
+            body[name] = value
+    if footprint is not None:
+        body["footprint"] = footprint
+    if deps is not None:
+        body["deps"] = deps
+    if not body:
+        raise typer.BadParameter("provide at least one field to update")
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_update_ticket(ticket_id, body)},
+    )
+
+
+@manager_ticket_app.command("transition")
+def manager_ticket_transition(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    to: Annotated[str, typer.Option("--to", help="Target state.")],
+    reason: Annotated[str | None, typer.Option("--reason")] = None,
+    scale: Annotated[str | None, typer.Option()] = None,
+    spec_ref: Annotated[str | None, typer.Option()] = None,
+    intended_lead_title: Annotated[str | None, typer.Option()] = None,
+    lead_session_id: Annotated[str | None, typer.Option()] = None,
+    branch: Annotated[str | None, typer.Option()] = None,
+    worktree_path: Annotated[str | None, typer.Option()] = None,
+    pr_url: Annotated[str | None, typer.Option()] = None,
+    is_partial: Annotated[
+        bool | None, typer.Option("--is-partial/--not-partial")
+    ] = None,
+) -> None:
+    """Transition a ticket to a target state (server validates legality)."""
+    body: dict[str, Any] = {"to": to}
+    for name, value in (
+        ("reason", reason),
+        ("scale", scale),
+        ("spec_ref", spec_ref),
+        ("intended_lead_title", intended_lead_title),
+        ("lead_session_id", lead_session_id),
+        ("branch", branch),
+        ("worktree_path", worktree_path),
+        ("pr_url", pr_url),
+    ):
+        if value is not None:
+            body[name] = value
+    if is_partial is not None:
+        body["is_partial"] = is_partial
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_transition_ticket(ticket_id, body)},
+    )
+
+
+_LockOwnerOption = Annotated[
+    str,
+    typer.Option(
+        "--owner",
+        envvar="WAYPOINT_SESSION_ID",
+        help="Lease owner (defaults to $WAYPOINT_SESSION_ID).",
+    ),
+]
+_LockTtlOption = Annotated[
+    int | None,
+    typer.Option("--ttl-seconds", help="Lease TTL (defaults to the manifest value)."),
+]
+
+
+@manager_lock_app.command("acquire")
+def manager_lock_acquire(
+    ctx: typer.Context,
+    owner: _LockOwnerOption,
+    ttl_seconds: _LockTtlOption = None,
+) -> None:
+    """Acquire the integration lease (fails if held by another owner)."""
+    body: dict[str, Any] = {"owner": owner}
+    if ttl_seconds is not None:
+        body["ttl_seconds"] = ttl_seconds
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"lock": c.manager_lock_acquire(body)},
+    )
+
+
+@manager_lock_app.command("steal")
+def manager_lock_steal(
+    ctx: typer.Context,
+    owner: _LockOwnerOption,
+    ttl_seconds: _LockTtlOption = None,
+) -> None:
+    """Steal the integration lease (only succeeds once the current lease expired)."""
+    body: dict[str, Any] = {"owner": owner}
+    if ttl_seconds is not None:
+        body["ttl_seconds"] = ttl_seconds
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"lock": c.manager_lock_steal(body)},
+    )
+
+
+@manager_lock_app.command("release")
+def manager_lock_release(
+    ctx: typer.Context,
+    owner: _LockOwnerOption,
+) -> None:
+    """Release the integration lease (must be the current owner)."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_lock_release({"owner": owner}),
+    )
 
 
 @accounts_app.command("list")

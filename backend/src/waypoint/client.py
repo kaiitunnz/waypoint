@@ -957,6 +957,71 @@ class WaypointClient:
         ).json()
         return data
 
+    # ── manager state machine ────────────────────────────────────────────
+
+    def manager_init(self, config: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/init", json={"config": config}
+        ).json()["config"]
+        return data
+
+    def manager_state(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/manager/state").json()
+        return data
+
+    def manager_next(self, tried: list[str] | None = None) -> dict[str, Any]:
+        params = {"tried": tried} if tried else None
+        data: dict[str, Any] = self._request(
+            "GET", "/api/manager/next", params=params
+        ).json()
+        return data
+
+    def manager_create_ticket(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/tickets", json=body
+        ).json()["ticket"]
+        return data
+
+    def manager_get_ticket(self, ticket_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/manager/tickets/{ticket_id}"
+        ).json()["ticket"]
+        return data
+
+    def manager_update_ticket(
+        self, ticket_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/manager/tickets/{ticket_id}", json=body
+        ).json()["ticket"]
+        return data
+
+    def manager_transition_ticket(
+        self, ticket_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/manager/tickets/{ticket_id}/transition", json=body
+        ).json()["ticket"]
+        return data
+
+    def manager_lock_acquire(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/lock", json=body
+        ).json()["lock"]
+        return data
+
+    def manager_lock_steal(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/lock/steal", json=body
+        ).json()["lock"]
+        return data
+
+    def manager_lock_release(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", "/api/manager/lock", json=body
+        ).json()
+        return data
+
     # ── message schedules ────────────────────────────────────────────────
 
     def list_message_schedules(

@@ -60,7 +60,11 @@ from waypoint.schemas import (
     LaunchSettingsUpdateRequest,
     LaunchTargetConnectRequest,
     LaunchTargetConnectResponse,
+    LockRequest,
     LoginRequest,
+    ManagerInitRequest,
+    ManagerNextResponse,
+    ManagerStateResponse,
     MeResponse,
     ProfileDoctorReport,
     ScheduledMessageCreateRequest,
@@ -83,6 +87,9 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTagsUpdateRequest,
     SessionTitleRequest,
+    TicketCreateRequest,
+    TicketTransitionRequest,
+    TicketUpdateRequest,
     WakeRegisterRequest,
     WakeSubscriptionListResponse,
 )
@@ -1829,6 +1836,86 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="wake subscription not found",
             )
         return {"deleted": True}
+
+    # ── Waypoint Manager ─────────────────────────────────────────────────
+    @app.post("/api/manager/init")
+    async def manager_init(
+        request: ManagerInitRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        config = context.runtime.manager.init(request)
+        return {"config": config.model_dump(mode="json")}
+
+    @app.get("/api/manager/state", response_model=ManagerStateResponse)
+    async def manager_state(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> ManagerStateResponse:
+        return context.runtime.manager.state()
+
+    @app.get("/api/manager/next", response_model=ManagerNextResponse)
+    async def manager_next(
+        _: Annotated[str, Depends(token_dependency())],
+        tried: Annotated[list[str] | None, Query()] = None,
+    ) -> ManagerNextResponse:
+        return context.runtime.manager.next(tried or [])
+
+    @app.post("/api/manager/tickets")
+    async def manager_create_ticket(
+        request: TicketCreateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.create_ticket(request)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.get("/api/manager/tickets/{ticket_id}")
+    async def manager_get_ticket(
+        ticket_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.get_ticket(ticket_id)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.patch("/api/manager/tickets/{ticket_id}")
+    async def manager_update_ticket(
+        ticket_id: str,
+        request: TicketUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.update_ticket(ticket_id, request)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.post("/api/manager/tickets/{ticket_id}/transition")
+    async def manager_transition_ticket(
+        ticket_id: str,
+        request: TicketTransitionRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.transition(ticket_id, request)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.post("/api/manager/lock")
+    async def manager_acquire_lock(
+        request: LockRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        lock = context.runtime.manager.acquire_lock(request)
+        return {"lock": lock.model_dump(mode="json")}
+
+    @app.post("/api/manager/lock/steal")
+    async def manager_steal_lock(
+        request: LockRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        lock = context.runtime.manager.steal_lock(request)
+        return {"lock": lock.model_dump(mode="json")}
+
+    @app.delete("/api/manager/lock")
+    async def manager_release_lock(
+        request: LockRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        context.runtime.manager.release_lock(request)
+        return {"released": True}
 
     @app.get("/api/message-schedules")
     async def list_message_schedules(

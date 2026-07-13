@@ -649,6 +649,183 @@ class WakeSubscriptionListResponse(BaseModel):
     subscriptions: list[WakeSubscription] = Field(default_factory=list)
 
 
+class ManagerTicketState(StrEnum):
+    # The 14 states of a ticket in the Waypoint Manager state machine. The three
+    # terminals are ``MERGED``, ``DEFERRED``, ``ABANDONED``; every other state has
+    # outgoing edges in the transition table (``waypoint.manager._ADJACENCY``).
+    INTAKE = "intake"
+    TRIAGED = "triaged"
+    SPEC_PENDING = "spec_pending"
+    SPEC_REVIEW = "spec_review"
+    READY = "ready"
+    DELEGATED = "delegated"
+    BUILDING = "building"
+    BLOCKED = "blocked"
+    REVIEW_REQUESTED = "review_requested"
+    REVISING = "revising"
+    MERGING = "merging"
+    MERGED = "merged"
+    DEFERRED = "deferred"
+    ABANDONED = "abandoned"
+
+
+class ManagerTicketScale(StrEnum):
+    TRIVIAL = "trivial"
+    SUBSTANTIAL = "substantial"
+
+
+class ManagerTicket(BaseModel):
+    # One record per ticket. Filterable columns (id/title/priority/state/scale/
+    # version/timestamps) are denormalized in storage; the whole model is the
+    # source of truth (persisted as a JSON payload blob).
+    id: str
+    title: str
+    priority: str = "p2"
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    state: ManagerTicketState = ManagerTicketState.INTAKE
+    # Coarse code paths the ticket is expected to touch (globs); refined by a spec.
+    footprint: list[str] = Field(default_factory=list)
+    is_partial: bool = False
+    spec_ref: str | None = None
+    # Deterministic per-ticket lead title; the spawn dedup key. Unique across all
+    # non-terminal tickets (server-enforced invariant).
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    branch: str | None = None
+    worktree_path: str | None = None
+    pr_url: str | None = None
+    # Initial-delegate spawn-failure budget (distinct from ``lead_restarts``).
+    attempts: int = 0
+    # Post-work lead-death resume budget (distinct from ``attempts``).
+    lead_restarts: int = 0
+    deps: list[str] = Field(default_factory=list)
+    # Set on entry to a genuinely awaiting-human state; cleared when the ticket
+    # leaves it (so a latency timeout only counts real human waits).
+    awaiting_since: datetime | None = None
+    # Hint only; the ``ticket-<id>`` relay log is the authoritative cursor.
+    last_relayed_version: int = 0
+    created_at: datetime
+    updated_at: datetime
+    version: int = 0
+
+
+class ManagerConfig(BaseModel):
+    # The machine-relevant subset of the project manifest (the role/preset/
+    # template/channel fields are skill-consumed, not persisted here). Drives the
+    # server-side scheduler invariants so a drifting manager context cannot enact
+    # an illegal step.
+    execution_slots: int = Field(default=2, ge=0)
+    max_delegate_attempts: int = Field(default=3, ge=0)
+    max_lead_restarts: int = Field(default=3, ge=0)
+    backoff_seconds: int = Field(default=60, ge=0)
+    human_latency_hours: int = Field(default=72, ge=0)
+    lock_ttl_seconds: int = Field(default=900, ge=0)
+    priority_levels: list[str] = Field(default_factory=lambda: ["p0", "p1", "p2", "p3"])
+    trunk: str = "main"
+
+
+class IntegrationLock(BaseModel):
+    name: str
+    owner: str
+    acquired_at: datetime
+    ttl_seconds: int
+
+
+class ManagerSlotState(BaseModel):
+    # Derived, never stored: a slot is held only by a ticket in a compute state
+    # (delegated/building/revising).
+    total: int
+    used: int
+    free: int
+
+
+class ManagerTicketTransitions(BaseModel):
+    ticket_id: str
+    priority: str
+    state: ManagerTicketState
+    legal_transitions: list[ManagerTicketState] = Field(default_factory=list)
+
+
+class ManagerRecommendedAction(BaseModel):
+    ticket_id: str
+    from_state: ManagerTicketState
+    to_state: ManagerTicketState
+    event: str
+    reason: str
+
+
+class TicketCreateRequest(BaseModel):
+    title: str
+    id: str | None = None
+    priority: str = "p2"
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    footprint: list[str] = Field(default_factory=list)
+    deps: list[str] = Field(default_factory=list)
+
+
+class TicketTransitionRequest(BaseModel):
+    # Transition by target state (matching the RFC CLI ``--to <state>``); the
+    # transition table is the from→{to} adjacency and per-edge guards/meta encode
+    # the events. ``reason`` distinguishes edges the RFC labels with two events
+    # sharing one (from, to) — e.g. reject vs latency-timeout, done vs partial.
+    to: ManagerTicketState
+    reason: str | None = None
+    scale: ManagerTicketScale | None = None
+    kind: str | None = None
+    footprint: list[str] | None = None
+    spec_ref: str | None = None
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    branch: str | None = None
+    worktree_path: str | None = None
+    pr_url: str | None = None
+    is_partial: bool | None = None
+    deps: list[str] | None = None
+    last_relayed_version: int | None = None
+
+
+class TicketUpdateRequest(BaseModel):
+    # Edit ticket metadata without a state transition (priority, footprint,
+    # spec/lead refs). State changes go through ``TicketTransitionRequest``.
+    priority: str | None = None
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    footprint: list[str] | None = None
+    deps: list[str] | None = None
+    spec_ref: str | None = None
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    branch: str | None = None
+    worktree_path: str | None = None
+    pr_url: str | None = None
+    is_partial: bool | None = None
+    last_relayed_version: int | None = None
+
+
+class ManagerInitRequest(BaseModel):
+    config: ManagerConfig = Field(default_factory=ManagerConfig)
+
+
+class ManagerNextResponse(BaseModel):
+    slots: ManagerSlotState
+    tickets: list[ManagerTicketTransitions] = Field(default_factory=list)
+    recommended: ManagerRecommendedAction | None = None
+
+
+class ManagerStateResponse(BaseModel):
+    config: ManagerConfig | None = None
+    slots: ManagerSlotState
+    tickets: list[ManagerTicket] = Field(default_factory=list)
+    lock: IntegrationLock | None = None
+
+
+class LockRequest(BaseModel):
+    owner: str
+    ttl_seconds: int | None = None
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"

@@ -61,6 +61,7 @@ from waypoint.backends.transcripts import (
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.manager import ManagerManager
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
@@ -466,6 +467,7 @@ class SessionRuntime:
         for plugin in self.registry.all():
             plugin.setup(self)
         self.presets = PresetManager(storage)
+        self.manager = ManagerManager(storage)
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:

@@ -586,3 +586,16 @@ def test_deinit_if_owner_matches_only_the_owner(tmp_path: Path) -> None:
     assert len(mgr.list_tickets()) == 1
     assert mgr.deinit_if_owner("mgr") is True
     assert mgr.list_tickets() == []
+
+
+def test_init_preserves_owner_when_not_resupplied(tmp_path: Path) -> None:
+    mgr = ManagerManager(_storage(tmp_path))
+    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr")))
+    # Re-init from a manifest (which carries no owner) keeps the recorded owner.
+    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=3)))
+    config = mgr.config()
+    assert config.owner_session_id == "mgr"
+    assert config.execution_slots == 3
+    # An explicit new owner overrides.
+    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr2")))
+    assert mgr.config().owner_session_id == "mgr2"

@@ -516,8 +516,11 @@ def test_cli_manager_deinit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_cli_manager_deinit_aborts_without_confirmation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
-        raise AssertionError("must not reach the server when the prompt is declined")
+    hit = {"server": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hit["server"] = True
+        return httpx.Response(200, json={})
 
     _mock_cli(monkeypatch, handler)
     result = runner.invoke(
@@ -526,6 +529,7 @@ def test_cli_manager_deinit_aborts_without_confirmation(
         input="n\n",
     )
     assert result.exit_code != 0  # aborted at the confirmation prompt
+    assert hit["server"] is False  # the server is never hit on abort
 
 
 def test_cli_manager_ticket_delete(

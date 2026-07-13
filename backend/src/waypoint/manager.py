@@ -351,7 +351,18 @@ class ManagerManager:
         return self._storage.get_manager_config() or ManagerConfig()
 
     def init(self, request: ManagerInitRequest) -> ManagerConfig:
-        return self._storage.set_manager_config(request.config)
+        # init replaces the config wholesale from the manifest, which never
+        # carries an owner. Preserve a previously-recorded owner_session_id when
+        # this call does not supply one, so re-running init after a manifest edit
+        # does not silently drop the session-delete cascade binding.
+        config = request.config
+        if config.owner_session_id is None:
+            existing = self._storage.get_manager_config()
+            if existing is not None and existing.owner_session_id is not None:
+                config = config.model_copy(
+                    update={"owner_session_id": existing.owner_session_id}
+                )
+        return self._storage.set_manager_config(config)
 
     def list_tickets(self) -> list[ManagerTicket]:
         return self._storage.list_manager_tickets()

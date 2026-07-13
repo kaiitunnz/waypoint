@@ -3838,25 +3838,29 @@ def manager_render(
     if manifest is not None:
         bindings.update(_manifest_render_bindings(manifest))
     if ticket_id is not None:
-        settings = _settings_from_ctx(ctx)
-        ticket = _run_client(settings, lambda c: c.manager_get_ticket(ticket_id))
+        tickets_channel = bindings.get("tickets_channel")
+
+        def _fetch(c: WaypointClient) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+            ticket = c.manager_get_ticket(ticket_id)
+            cell = (
+                c.read_board(tickets_channel, key=f"ticket:{ticket_id}")
+                if tickets_channel is not None
+                else []
+            )
+            return ticket, cell
+
+        ticket, cell = _run_client(_settings_from_ctx(ctx), _fetch)
         bindings.update(_ticket_render_bindings(ticket))
         prefix = bindings.get("ticket_channel_prefix")
         if prefix is not None:
             bindings["ticket_channel"] = f"{prefix}{ticket_id}"
-        tickets_channel = bindings.get("tickets_channel")
-        if tickets_channel is not None:
-            cell = _run_client(
-                settings,
-                lambda c: c.read_board(tickets_channel, key=f"ticket:{ticket_id}"),
-            )
-            if cell:
-                entry = cell[-1]
-                bindings["ticket_body"] = entry.get("text") or ""
-                meta = entry.get("metadata") or {}
-                for field in ("input_type", "spec_route"):
-                    if meta.get(field) is not None:
-                        bindings[field] = str(meta[field])
+        if cell:
+            entry = cell[-1]
+            bindings["ticket_body"] = entry.get("text") or ""
+            meta = entry.get("metadata") or {}
+            for field in ("input_type", "spec_route"):
+                if meta.get(field) is not None:
+                    bindings[field] = str(meta[field])
     for item in overrides or []:
         key, sep, value = item.partition("=")
         if not sep:

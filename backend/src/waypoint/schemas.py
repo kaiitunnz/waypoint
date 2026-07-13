@@ -692,8 +692,9 @@ class ManagerTicket(BaseModel):
     # non-terminal tickets (server-enforced invariant).
     intended_lead_title: str | None = None
     lead_session_id: str | None = None
+    # The ticket's branch, checked out in the manager's shared working tree while
+    # the ticket occupies it (there is no per-ticket sibling worktree).
     branch: str | None = None
-    worktree_path: str | None = None
     pr_url: str | None = None
     # Initial-delegate spawn-failure budget (distinct from ``lead_restarts``).
     attempts: int = 0
@@ -715,7 +716,11 @@ class ManagerConfig(BaseModel):
     # template/channel fields are skill-consumed, not persisted here). Drives the
     # server-side scheduler invariants so a drifting manager context cannot enact
     # an illegal step.
-    execution_slots: int = Field(default=2, ge=0)
+    # Number of tickets that may occupy the shared working tree at once
+    # (delegated..merging). The tech-lead runs in the manager's own tree, so the
+    # model is single-tree: 1. Only read-only writers and pre-delegate states run
+    # off-tree and are not counted.
+    execution_slots: int = Field(default=1, ge=0)
     max_delegate_attempts: int = Field(default=3, ge=0)
     max_lead_restarts: int = Field(default=3, ge=0)
     backoff_seconds: int = Field(default=60, ge=0)
@@ -733,8 +738,8 @@ class IntegrationLock(BaseModel):
 
 
 class ManagerSlotState(BaseModel):
-    # Derived, never stored: a slot is held only by a ticket in a compute state
-    # (delegated/building/revising).
+    # Derived, never stored: a slot is the shared working tree, held by a ticket
+    # from delegate through terminal (delegated..merging).
     total: int
     used: int
     free: int
@@ -779,7 +784,6 @@ class TicketTransitionRequest(BaseModel):
     intended_lead_title: str | None = None
     lead_session_id: str | None = None
     branch: str | None = None
-    worktree_path: str | None = None
     pr_url: str | None = None
     is_partial: bool | None = None
     deps: list[str] | None = None
@@ -798,7 +802,6 @@ class TicketUpdateRequest(BaseModel):
     intended_lead_title: str | None = None
     lead_session_id: str | None = None
     branch: str | None = None
-    worktree_path: str | None = None
     pr_url: str | None = None
     is_partial: bool | None = None
     last_relayed_version: int | None = None

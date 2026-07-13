@@ -121,7 +121,7 @@ async def test_next_recommends_triage_for_fresh_intake(tmp_path: Path) -> None:
     # Envelope shape the skill's re-anchor depends on: slots + per-ticket legal
     # transitions + a single recommended pull move.
     assert set(body["slots"]) == {"total", "used", "free"}
-    assert body["slots"]["free"] == 2  # default execution_slots
+    assert body["slots"]["free"] == 1  # default execution_slots (single shared tree)
     (entry,) = body["tickets"]
     assert entry["ticket_id"] == ticket_id
     assert entry["legal_transitions"] == ["triaged"]
@@ -172,8 +172,8 @@ async def test_invariant_slot_cap_is_409(tmp_path: Path) -> None:
         for to in ("triaged", "ready", "delegated", "building"):
             meta = {"intended_lead_title": "a-lead"} if to == "delegated" else {}
             assert (await _transition(client, token, a, to, **meta)).status_code == 200
-        # B reaches ready without a slot; delegating it would put two tickets in a
-        # compute state with the cap at 1 -> the second compute entry is a 409.
+        # B reaches ready without a slot; delegating it would put two tickets on
+        # the shared tree with the cap at 1 -> the second delegate is a 409.
         b = await _create(client, token, title="b", scale="trivial")
         for to in ("triaged", "ready"):
             assert (await _transition(client, token, b, to)).status_code == 200

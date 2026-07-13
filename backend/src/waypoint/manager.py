@@ -54,10 +54,22 @@ INTEGRATION_LOCK_NAME = "integration"
 _TERMINAL_STATES: frozenset[ManagerTicketState] = frozenset(
     {_S.MERGED, _S.DEFERRED, _S.ABANDONED}
 )
-# A build/execution slot is held only by a ticket running a tech-lead compute
-# session. Awaiting-human states release the slot even while a parked lead lives.
-_COMPUTE_STATES: frozenset[ManagerTicketState] = frozenset(
-    {_S.DELEGATED, _S.BUILDING, _S.REVISING}
+# The tech-lead runs in the manager's own working tree (no per-ticket sibling
+# worktree), so the tree is a single serial resource: a ticket holds it from the
+# moment it is delegated (its branch is checked out) until it reaches a terminal
+# state, and no second ticket may occupy it in the meantime. ``execution_slots``
+# is the number of such trees — one for the shared-tree model. Only the
+# off-tree states (intake/triaged/ready and the read-only spec_pending/
+# spec_review, where a PRD/RFC writer runs in parallel) leave the tree free.
+_TREE_STATES: frozenset[ManagerTicketState] = frozenset(
+    {
+        _S.DELEGATED,
+        _S.BUILDING,
+        _S.REVISING,
+        _S.BLOCKED,
+        _S.REVIEW_REQUESTED,
+        _S.MERGING,
+    }
 )
 # Genuinely awaiting a human decision: ``awaiting_since`` is stamped on entry and
 # cleared on exit so a latency timeout only counts real human waits.
@@ -65,7 +77,8 @@ _AWAITING_STATES: frozenset[ManagerTicketState] = frozenset(
     {_S.SPEC_REVIEW, _S.BLOCKED, _S.REVIEW_REQUESTED}
 )
 # States whose self-loop is the lead-died / writer-died resume (a fresh session
-# bound to the preserved worktree), consuming the ``lead_restarts`` budget.
+# bound to the ticket branch preserved in the working tree), consuming the
+# ``lead_restarts`` budget.
 _RESUMABLE_STATES: frozenset[ManagerTicketState] = frozenset(
     {
         _S.SPEC_PENDING,
@@ -118,7 +131,7 @@ def is_terminal(state: ManagerTicketState) -> bool:
 def slot_state(
     tickets: Iterable[ManagerTicket], config: ManagerConfig
 ) -> ManagerSlotState:
-    used = sum(1 for t in tickets if t.state in _COMPUTE_STATES)
+    used = sum(1 for t in tickets if t.state in _TREE_STATES)
     total = config.execution_slots
     return ManagerSlotState(total=total, used=used, free=max(0, total - used))
 
@@ -186,8 +199,6 @@ def apply_transition(
         updates["lead_session_id"] = request.lead_session_id
     if request.branch is not None:
         updates["branch"] = request.branch
-    if request.worktree_path is not None:
-        updates["worktree_path"] = request.worktree_path
     if request.pr_url is not None:
         updates["pr_url"] = request.pr_url
     if request.is_partial is not None:
@@ -209,11 +220,11 @@ def apply_transition(
 
 def check_invariants(tickets: Sequence[ManagerTicket], config: ManagerConfig) -> None:
     """Enforce the server-side scheduler invariants over the whole ticket set."""
-    compute = sum(1 for t in tickets if t.state in _COMPUTE_STATES)
-    if compute > config.execution_slots:
+    on_tree = sum(1 for t in tickets if t.state in _TREE_STATES)
+    if on_tree > config.execution_slots:
         raise ManagerStateError(
-            f"execution-slot cap exceeded: {compute} in "
-            f"{{delegated,building,revising}} > {config.execution_slots}"
+            f"working-tree cap exceeded: {on_tree} tickets occupy the shared "
+            f"tree (delegated..merging) > {config.execution_slots}"
         )
     if sum(1 for t in tickets if t.state == _S.MERGING) > 1:
         raise ManagerStateError("at most one ticket may be in 'merging'")
@@ -280,7 +291,7 @@ def _recommended_action(
             return None
         if ticket.attempts >= config.max_delegate_attempts:
             return None
-        return (_S.DELEGATED, "delegate", "execution slot free; delegate to a lead")
+        return (_S.DELEGATED, "delegate", "working tree free; delegate to a lead")
     return None
 
 
@@ -417,8 +428,6 @@ class ManagerManager:
             updates["lead_session_id"] = request.lead_session_id
         if request.branch is not None:
             updates["branch"] = request.branch
-        if request.worktree_path is not None:
-            updates["worktree_path"] = request.worktree_path
         if request.pr_url is not None:
             updates["pr_url"] = request.pr_url
         if request.is_partial is not None:

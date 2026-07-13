@@ -3842,7 +3842,6 @@ def manager_ticket_update(
     intended_lead_title: Annotated[str | None, typer.Option()] = None,
     lead_session_id: Annotated[str | None, typer.Option()] = None,
     branch: Annotated[str | None, typer.Option()] = None,
-    worktree_path: Annotated[str | None, typer.Option()] = None,
     pr_url: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     """Edit ticket metadata (no state change; use 'transition' for that)."""
@@ -3855,7 +3854,6 @@ def manager_ticket_update(
         ("intended_lead_title", intended_lead_title),
         ("lead_session_id", lead_session_id),
         ("branch", branch),
-        ("worktree_path", worktree_path),
         ("pr_url", pr_url),
     ):
         if value is not None:
@@ -3883,7 +3881,6 @@ def manager_ticket_transition(
     intended_lead_title: Annotated[str | None, typer.Option()] = None,
     lead_session_id: Annotated[str | None, typer.Option()] = None,
     branch: Annotated[str | None, typer.Option()] = None,
-    worktree_path: Annotated[str | None, typer.Option()] = None,
     pr_url: Annotated[str | None, typer.Option()] = None,
     is_partial: Annotated[
         bool | None, typer.Option("--is-partial/--not-partial")
@@ -3898,7 +3895,6 @@ def manager_ticket_transition(
         ("intended_lead_title", intended_lead_title),
         ("lead_session_id", lead_session_id),
         ("branch", branch),
-        ("worktree_path", worktree_path),
         ("pr_url", pr_url),
     ):
         if value is not None:

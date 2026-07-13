@@ -222,15 +222,41 @@ def test_lead_death_does_not_consume_spawn_budget() -> None:
 # ── Invariants ──────────────────────────────────────────────────────────────
 
 
-def test_slot_cap_over_compute_states() -> None:
-    tickets = [mk(S.BUILDING, "a"), mk(S.REVISING, "b")]
-    entering = apply_transition(
-        mk(S.BLOCKED, "c"), TicketTransitionRequest(to=S.BUILDING), _CONFIG, _now()
-    )
+def test_tree_cap_counts_every_on_tree_state() -> None:
+    # The shared working tree is held from delegate through terminal, so the
+    # awaiting-human states blocked/review_requested occupy it too — not just the
+    # active compute states. Two is fine (== cap), a third is a violation.
+    check_invariants([mk(S.BUILDING, "a"), mk(S.REVIEW_REQUESTED, "b")], _CONFIG)
+    check_invariants([mk(S.BLOCKED, "a"), mk(S.MERGING, "b")], _CONFIG)
     with pytest.raises(ManagerStateError):
-        check_invariants([*tickets, entering], _CONFIG)
-    # Two is fine (== cap).
-    check_invariants(tickets, _CONFIG)
+        check_invariants(
+            [mk(S.BUILDING, "a"), mk(S.REVISING, "b"), mk(S.BLOCKED, "c")], _CONFIG
+        )
+
+
+def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
+    # Strict serial on one tree: a ticket parked in review_requested still holds
+    # the tree, so a second ticket cannot be delegated until the first terminates.
+    mgr = ManagerManager(_storage(tmp_path))
+    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=1)))
+    a = mgr.create_ticket(TicketCreateRequest(title="a", scale=Sc.TRIVIAL))
+    for req in (
+        TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL),
+        TicketTransitionRequest(to=S.READY),
+        TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="a-lead"),
+        TicketTransitionRequest(to=S.BUILDING),
+        TicketTransitionRequest(to=S.REVIEW_REQUESTED),
+    ):
+        mgr.transition(a.id, req)
+    assert mgr.next().slots.free == 0  # the parked ticket still occupies the tree
+    b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.TRIVIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.READY))
+    with pytest.raises(HTTPException) as exc:
+        mgr.transition(
+            b.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="b-lead")
+        )
+    assert exc.value.status_code == 409
 
 
 def test_at_most_one_merging() -> None:
@@ -384,8 +410,8 @@ def test_next_excludes_tried_set() -> None:
 def test_next_derives_slot_state() -> None:
     tickets = [mk(S.DELEGATED, "a"), mk(S.BUILDING, "b"), mk(S.BLOCKED, "c")]
     result = compute_next(tickets, _CONFIG)
-    # blocked releases its slot; only delegated+building occupy.
-    assert result.slots.used == 2
+    # All three hold the shared tree (delegated..merging spans blocked too).
+    assert result.slots.used == 3
     assert result.slots.free == 0
 
 
@@ -456,7 +482,7 @@ def test_update_ticket_metadata_only(tmp_path: Path) -> None:
 def test_config_defaults_when_uninitialized(tmp_path: Path) -> None:
     mgr = ManagerManager(_storage(tmp_path))
     config = mgr.config()
-    assert config.execution_slots == 2  # ManagerConfig default
+    assert config.execution_slots == 1  # ManagerConfig default (single shared tree)
 
 
 def test_init_persists_config(tmp_path: Path) -> None:

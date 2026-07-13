@@ -35,7 +35,7 @@ S = ManagerTicketState
 Sc = ManagerTicketScale
 
 _TERMINALS = {S.MERGED, S.DEFERRED, S.ABANDONED}
-_CONFIG = ManagerConfig(execution_slots=2, max_delegate_attempts=3, max_lead_restarts=3)
+_CONFIG = ManagerConfig(max_delegate_attempts=3, max_lead_restarts=3)
 
 
 def _now() -> datetime:
@@ -223,22 +223,24 @@ def test_lead_death_does_not_consume_spawn_budget() -> None:
 
 
 def test_tree_cap_counts_every_on_tree_state() -> None:
-    # The shared working tree is held from delegate through terminal, so the
-    # awaiting-human states blocked/review_requested occupy it too — not just the
-    # active compute states. Two is fine (== cap), a third is a violation.
-    check_invariants([mk(S.BUILDING, "a"), mk(S.REVIEW_REQUESTED, "b")], _CONFIG)
-    check_invariants([mk(S.BLOCKED, "a"), mk(S.MERGING, "b")], _CONFIG)
-    with pytest.raises(ManagerStateError):
-        check_invariants(
-            [mk(S.BUILDING, "a"), mk(S.REVISING, "b"), mk(S.BLOCKED, "c")], _CONFIG
-        )
+    # One shared tree: at most one ticket occupies it. The awaiting-human states
+    # blocked/review_requested count too, not just the active compute states.
+    check_invariants([mk(S.BUILDING, "a")], _CONFIG)
+    check_invariants([mk(S.REVIEW_REQUESTED, "a")], _CONFIG)
+    check_invariants([mk(S.BLOCKED, "a")], _CONFIG)
+    for pair in (
+        (mk(S.BUILDING, "a"), mk(S.REVIEW_REQUESTED, "b")),
+        (mk(S.BLOCKED, "a"), mk(S.MERGING, "b")),
+        (mk(S.DELEGATED, "a"), mk(S.BUILDING, "b")),
+    ):
+        with pytest.raises(ManagerStateError):
+            check_invariants(list(pair), _CONFIG)
 
 
 def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
     # Strict serial on one tree: a ticket parked in review_requested still holds
     # the tree, so a second ticket cannot be delegated until the first terminates.
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=1)))
+    mgr = _manager(tmp_path)
     a = mgr.create_ticket(TicketCreateRequest(title="a", scale=Sc.TRIVIAL))
     for req in (
         TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL),
@@ -272,8 +274,10 @@ def test_at_most_one_spec_pending() -> None:
 
 
 def test_unique_intended_lead_title_across_live_tickets() -> None:
+    # Isolated from the tree cap: one on-tree ticket plus an off-tree one sharing a
+    # title (the tree cap alone would not catch this).
     a = mk(S.DELEGATED, "a", intended_lead_title="dup")
-    b = mk(S.BUILDING, "b", intended_lead_title="dup")
+    b = mk(S.READY, "b", intended_lead_title="dup")
     with pytest.raises(ManagerStateError):
         check_invariants([a, b], _CONFIG)
     # A terminal ticket does not reserve the title.
@@ -281,17 +285,16 @@ def test_unique_intended_lead_title_across_live_tickets() -> None:
     check_invariants([terminal, b], _CONFIG)
 
 
-def test_slot_cap_enforced_through_manager_transition(tmp_path: Path) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=1)))
-    # Occupy the single slot with ticket A in delegated.
+def test_tree_cap_enforced_through_manager_transition(tmp_path: Path) -> None:
+    mgr = _manager(tmp_path)
+    # Occupy the tree with ticket A in delegated.
     a = mgr.create_ticket(TicketCreateRequest(title="a", scale=Sc.TRIVIAL))
     mgr.transition(a.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(a.id, TicketTransitionRequest(to=S.READY))
     mgr.transition(
         a.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="a-lead")
     )
-    # B reaches ready; delegating it would make two in compute > 1 → 409.
+    # B reaches ready; delegating it would put two tickets on the one tree → 409.
     b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.READY))
@@ -302,26 +305,10 @@ def test_slot_cap_enforced_through_manager_transition(tmp_path: Path) -> None:
     assert exc.value.status_code == 409
 
 
-def test_duplicate_intended_lead_title_rejected_through_transition(
-    tmp_path: Path,
-) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=5)))
-    ids = []
-    for name in ("a", "b"):
-        t = mgr.create_ticket(TicketCreateRequest(title=name, scale=Sc.TRIVIAL))
-        mgr.transition(t.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
-        mgr.transition(t.id, TicketTransitionRequest(to=S.READY))
-        ids.append(t.id)
-    mgr.transition(
-        ids[0], TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="shared")
-    )
-    with pytest.raises(HTTPException) as exc:
-        mgr.transition(
-            ids[1],
-            TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="shared"),
-        )
-    assert exc.value.status_code == 409
+# The duplicate-intended-lead-title-through-transition case is unreachable under the
+# single-tree cap (a second ticket can never enter delegated while one holds the
+# tree); the invariant's logic is covered by the pure
+# test_unique_intended_lead_title_across_live_tickets above.
 
 
 # ── next(): enumeration, recommendation, priority/FIFO, gating, tried set ───
@@ -359,11 +346,10 @@ def test_next_recommends_delegate_when_slot_free() -> None:
 
 
 def test_next_slot_gating_skips_ready_but_still_triages() -> None:
-    # Both slots busy: a ready ticket cannot be delegated, but an intake ticket
-    # can still be triaged (triage needs no slot).
+    # The tree is busy: a ready ticket cannot be delegated, but an intake ticket
+    # can still be triaged (triage needs no tree).
     tickets = [
         mk(S.BUILDING, "b1"),
-        mk(S.BUILDING, "b2"),
         mk(S.READY, "r", priority="p0"),
         mk(S.INTAKE, "i", priority="p3"),
     ]
@@ -374,8 +360,8 @@ def test_next_slot_gating_skips_ready_but_still_triages() -> None:
     assert result.recommended.to_state == S.TRIAGED
 
 
-def test_next_no_recommendation_when_only_slot_blocked_ready() -> None:
-    tickets = [mk(S.BUILDING, "b1"), mk(S.BUILDING, "b2"), mk(S.READY, "r")]
+def test_next_no_recommendation_when_only_tree_blocked_ready() -> None:
+    tickets = [mk(S.BUILDING, "b1"), mk(S.READY, "r")]
     result = compute_next(tickets, _CONFIG)
     assert result.recommended is None
 
@@ -482,16 +468,19 @@ def test_update_ticket_metadata_only(tmp_path: Path) -> None:
 def test_config_defaults_when_uninitialized(tmp_path: Path) -> None:
     mgr = ManagerManager(_storage(tmp_path))
     config = mgr.config()
-    assert config.execution_slots == 1  # ManagerConfig default (single shared tree)
+    assert config.trunk == "main"  # ManagerConfig default
+    assert config.max_delegate_attempts == 3
 
 
 def test_init_persists_config(tmp_path: Path) -> None:
     mgr = ManagerManager(_storage(tmp_path))
     mgr.init(
-        ManagerInitRequest(config=ManagerConfig(execution_slots=4, trunk="develop"))
+        ManagerInitRequest(
+            config=ManagerConfig(max_delegate_attempts=5, trunk="develop")
+        )
     )
     config = mgr.config()
-    assert config.execution_slots == 4
+    assert config.max_delegate_attempts == 5
     assert config.trunk == "develop"
 
 
@@ -592,10 +581,10 @@ def test_init_preserves_owner_when_not_resupplied(tmp_path: Path) -> None:
     mgr = ManagerManager(_storage(tmp_path))
     mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr")))
     # Re-init from a manifest (which carries no owner) keeps the recorded owner.
-    mgr.init(ManagerInitRequest(config=ManagerConfig(execution_slots=3)))
+    mgr.init(ManagerInitRequest(config=ManagerConfig(trunk="develop")))
     config = mgr.config()
     assert config.owner_session_id == "mgr"
-    assert config.execution_slots == 3
+    assert config.trunk == "develop"
     # An explicit new owner overrides.
     mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr2")))
     assert mgr.config().owner_session_id == "mgr2"

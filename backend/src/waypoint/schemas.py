@@ -716,11 +716,6 @@ class ManagerConfig(BaseModel):
     # template/channel fields are skill-consumed, not persisted here). Drives the
     # server-side scheduler invariants so a drifting manager context cannot enact
     # an illegal step.
-    # Number of tickets that may occupy the shared working tree at once
-    # (delegated..merging). The tech-lead runs in the manager's own tree, so the
-    # model is single-tree: 1. Only read-only writers and pre-delegate states run
-    # off-tree and are not counted.
-    execution_slots: int = Field(default=1, ge=0)
     max_delegate_attempts: int = Field(default=3, ge=0)
     max_lead_restarts: int = Field(default=3, ge=0)
     backoff_seconds: int = Field(default=60, ge=0)

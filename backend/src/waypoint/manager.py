@@ -57,10 +57,9 @@ _TERMINAL_STATES: frozenset[ManagerTicketState] = frozenset(
 # The tech-lead runs in the manager's own working tree (no per-ticket sibling
 # worktree), so the tree is a single serial resource: a ticket holds it from the
 # moment it is delegated (its branch is checked out) until it reaches a terminal
-# state, and no second ticket may occupy it in the meantime. ``execution_slots``
-# is the number of such trees — one for the shared-tree model. Only the
-# off-tree states (intake/triaged/ready and the read-only spec_pending/
-# spec_review, where a PRD/RFC writer runs in parallel) leave the tree free.
+# state, and no second ticket may occupy it in the meantime. Only the off-tree
+# states (intake/triaged/ready and the read-only spec_pending/spec_review, where a
+# PRD/RFC writer runs in parallel) leave the tree free.
 _TREE_STATES: frozenset[ManagerTicketState] = frozenset(
     {
         _S.DELEGATED,
@@ -71,6 +70,10 @@ _TREE_STATES: frozenset[ManagerTicketState] = frozenset(
         _S.MERGING,
     }
 )
+# There is exactly one shared tree, so at most one ticket may occupy it at a time.
+# This is intrinsic to the single-tree model, not a tunable — more than one would
+# mean two leads editing the same tree.
+_TREE_CAPACITY = 1
 # Genuinely awaiting a human decision: ``awaiting_since`` is stamped on entry and
 # cleared on exit so a latency timeout only counts real human waits.
 _AWAITING_STATES: frozenset[ManagerTicketState] = frozenset(
@@ -128,12 +131,11 @@ def is_terminal(state: ManagerTicketState) -> bool:
     return state in _TERMINAL_STATES
 
 
-def slot_state(
-    tickets: Iterable[ManagerTicket], config: ManagerConfig
-) -> ManagerSlotState:
+def slot_state(tickets: Iterable[ManagerTicket]) -> ManagerSlotState:
     used = sum(1 for t in tickets if t.state in _TREE_STATES)
-    total = config.execution_slots
-    return ManagerSlotState(total=total, used=used, free=max(0, total - used))
+    return ManagerSlotState(
+        total=_TREE_CAPACITY, used=used, free=max(0, _TREE_CAPACITY - used)
+    )
 
 
 def apply_transition(
@@ -221,10 +223,10 @@ def apply_transition(
 def check_invariants(tickets: Sequence[ManagerTicket], config: ManagerConfig) -> None:
     """Enforce the server-side scheduler invariants over the whole ticket set."""
     on_tree = sum(1 for t in tickets if t.state in _TREE_STATES)
-    if on_tree > config.execution_slots:
+    if on_tree > _TREE_CAPACITY:
         raise ManagerStateError(
             f"working-tree cap exceeded: {on_tree} tickets occupy the shared "
-            f"tree (delegated..merging) > {config.execution_slots}"
+            f"tree (delegated..merging) > {_TREE_CAPACITY}"
         )
     if sum(1 for t in tickets if t.state == _S.MERGING) > 1:
         raise ManagerStateError("at most one ticket may be in 'merging'")
@@ -304,7 +306,7 @@ def compute_next(
     highest-priority recommended action (priority then FIFO, slot/invariant
     gated), excluding any ticket in this drain's ``tried`` set."""
     tried_set = set(tried)
-    slots = slot_state(tickets, config)
+    slots = slot_state(tickets)
     live = [t for t in tickets if t.state not in _TERMINAL_STATES]
     per_ticket = [
         ManagerTicketTransitions(
@@ -517,7 +519,7 @@ class ManagerManager:
     def state(self) -> ManagerStateResponse:
         config = self._storage.get_manager_config()
         tickets = self._storage.list_manager_tickets()
-        slots = slot_state(tickets, config or ManagerConfig())
+        slots = slot_state(tickets)
         lock = self._storage.get_integration_lock(INTEGRATION_LOCK_NAME)
         return ManagerStateResponse(
             config=config, slots=slots, tickets=tickets, lock=lock

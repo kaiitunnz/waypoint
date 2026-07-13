@@ -133,8 +133,8 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         return httpx.Response(
             200,
             json={
-                "config": {"execution_slots": 3},
-                "slots": {"total": 3, "used": 1, "free": 2},
+                "config": {"trunk": "main"},
+                "slots": {"total": 1, "used": 1, "free": 0},
                 "tickets": [{"id": "ticket-1", "priority": "p2", "state": "building"}],
                 "lock": None,
             },
@@ -147,7 +147,7 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert result.exit_code == 0, result.stdout
     body = json.loads(result.stdout)
-    assert body["slots"]["free"] == 2
+    assert body["slots"]["free"] == 0
     assert body["tickets"][0]["id"] == "ticket-1"
 
 

@@ -3659,13 +3659,11 @@ def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
         value = raw.get(name)
         return value if isinstance(value, dict) else {}
 
-    concurrency = _section("concurrency")
     retry = _section("retry")
     priority = _section("priority")
     timeouts = _section("timeouts")
     config: dict[str, Any] = {}
     sources: list[tuple[str, dict[str, Any], str]] = [
-        ("execution_slots", concurrency, "execution_slots"),
         ("max_delegate_attempts", retry, "max_delegate_attempts"),
         ("max_lead_restarts", retry, "max_lead_restarts"),
         ("backoff_seconds", retry, "backoff_seconds"),

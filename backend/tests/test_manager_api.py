@@ -85,15 +85,15 @@ async def test_init_sets_config(tmp_path: Path) -> None:
         resp = await client.post(
             "/api/manager/init",
             headers=_auth(token),
-            json={"config": {"execution_slots": 4, "trunk": "develop"}},
+            json={"config": {"max_delegate_attempts": 5, "trunk": "develop"}},
         )
         assert resp.status_code == 200
         config = resp.json()["config"]
-        assert config["execution_slots"] == 4
+        assert config["max_delegate_attempts"] == 5
         assert config["trunk"] == "develop"
         # The persisted config is reflected back through /state.
         state = await client.get("/api/manager/state", headers=_auth(token))
-    assert state.json()["config"]["execution_slots"] == 4
+    assert state.json()["config"]["max_delegate_attempts"] == 5
 
 
 async def test_create_ticket_starts_in_intake(tmp_path: Path) -> None:
@@ -121,7 +121,7 @@ async def test_next_recommends_triage_for_fresh_intake(tmp_path: Path) -> None:
     # Envelope shape the skill's re-anchor depends on: slots + per-ticket legal
     # transitions + a single recommended pull move.
     assert set(body["slots"]) == {"total", "used", "free"}
-    assert body["slots"]["free"] == 1  # default execution_slots (single shared tree)
+    assert body["slots"]["free"] == 1  # the single shared tree is free
     (entry,) = body["tickets"]
     assert entry["ticket_id"] == ticket_id
     assert entry["legal_transitions"] == ["triaged"]
@@ -160,20 +160,15 @@ async def test_illegal_transition_is_409(tmp_path: Path) -> None:
     assert resp.status_code == 409
 
 
-async def test_invariant_slot_cap_is_409(tmp_path: Path) -> None:
+async def test_invariant_tree_cap_is_409(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:
-        await client.post(
-            "/api/manager/init",
-            headers=_auth(token),
-            json={"config": {"execution_slots": 1}},
-        )
         a = await _create(client, token, title="a", scale="trivial")
         for to in ("triaged", "ready", "delegated", "building"):
             meta = {"intended_lead_title": "a-lead"} if to == "delegated" else {}
             assert (await _transition(client, token, a, to, **meta)).status_code == 200
-        # B reaches ready without a slot; delegating it would put two tickets on
-        # the shared tree with the cap at 1 -> the second delegate is a 409.
+        # B reaches ready while A holds the tree; delegating it would put two
+        # tickets on the one shared tree -> the second delegate is a 409.
         b = await _create(client, token, title="b", scale="trivial")
         for to in ("triaged", "ready"):
             assert (await _transition(client, token, b, to)).status_code == 200
@@ -200,31 +195,10 @@ async def test_invariant_second_spec_pending_is_409(tmp_path: Path) -> None:
         resp = await _transition(client, token, ids[1], "spec_pending")
     assert resp.status_code == 409
 
-
-async def test_invariant_duplicate_lead_title_is_409(tmp_path: Path) -> None:
-    app, token = _build(tmp_path)
-    async with _client(app) as client:
-        await client.post(
-            "/api/manager/init",
-            headers=_auth(token),
-            json={"config": {"execution_slots": 5}},
-        )
-        ids = []
-        for name in ("a", "b"):
-            tid = await _create(client, token, title=name, scale="trivial")
-            for to in ("triaged", "ready"):
-                assert (await _transition(client, token, tid, to)).status_code == 200
-            ids.append(tid)
-        assert (
-            await _transition(
-                client, token, ids[0], "delegated", intended_lead_title="shared"
-            )
-        ).status_code == 200
-        # The spawn-dedup key must be unique across live tickets.
-        resp = await _transition(
-            client, token, ids[1], "delegated", intended_lead_title="shared"
-        )
-    assert resp.status_code == 409
+    # (The duplicate-intended-lead-title invariant is unreachable through
+    # transitions under the single-tree cap — a second ticket can never enter
+    # delegated while one holds the tree — so it is covered by the pure
+    # test_unique_intended_lead_title_across_live_tickets in test_manager.py.)
 
 
 async def test_state_reports_config_slots_tickets_lock(tmp_path: Path) -> None:
@@ -233,13 +207,13 @@ async def test_state_reports_config_slots_tickets_lock(tmp_path: Path) -> None:
         await client.post(
             "/api/manager/init",
             headers=_auth(token),
-            json={"config": {"execution_slots": 3}},
+            json={"config": {"trunk": "develop"}},
         )
         ticket_id = await _create(client, token, title="t")
         resp = await client.get("/api/manager/state", headers=_auth(token))
         assert resp.status_code == 200
         body = resp.json()
-    assert body["config"]["execution_slots"] == 3
+    assert body["config"]["trunk"] == "develop"
     assert set(body["slots"]) == {"total", "used", "free"}
     assert [t["id"] for t in body["tickets"]] == [ticket_id]
     assert body["lock"] is None

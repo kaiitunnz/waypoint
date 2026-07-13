@@ -35,10 +35,12 @@ scale. Classify from the content, not a label the user attached.
 
 Apply the manifest `scale.substantial_when` rule. **Substantial** when the work
 needs a schema/API/UX change, touches more than one module, or has ambiguous
-intent; otherwise **trivial**. Scale governs the **human approval gate**, not which
-artifact is written (input-type governs that): it refines the bug-report branch
-below (trivial fix vs. non-trivial) and decides whether a spec route passes
-through the `spec_review` gate. Estimate a **coarse footprint** — the path globs the
+intent; otherwise **trivial**. Scale does not pick the artifact (input-type does)
+and cannot skip a gate: every ticket routed to `spec_pending` to author a PRD/RFC
+passes the `spec_review` human gate. What scale governs is the bug-report branch
+below (a trivial fix takes the direct-instruction `triaged → ready` path with no
+spec; a non-trivial one is specced) and, for a PRD input, whether it is small
+enough to reduce to an RFC. Estimate a **coarse footprint** — the path globs the
 work will likely touch — from the body and a quick look at the repo; it need only
 be good enough to order overlapping tickets, and the spec (if any) refines it.
 

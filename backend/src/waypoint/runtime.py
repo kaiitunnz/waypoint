@@ -3667,9 +3667,11 @@ class SessionRuntime:
         self, *, channel: str | None, is_inbox: bool, actor_session_id: str | None
     ) -> None:
         # Non-blocking: a poster's request latency must not include a
-        # subscriber's ``send_input`` (slow for SSH transports). An immediate
-        # double-fire (two posts a debounce apart both reading IDLE) is benign —
-        # the wake is content-free and the woken drain is idempotent.
+        # subscriber's ``send_input`` (slow for SSH transports). There is no
+        # debounce yet; two mutations landing while a subscriber is IDLE can each
+        # fire a wake before the first flips it to RUNNING. Low-impact — the wake
+        # is content-free and the woken drain is idempotent — but a per-session
+        # in-flight guard is a tracked follow-up.
         task = asyncio.create_task(
             self._dispatch_subscription_wakes(
                 channel=channel,

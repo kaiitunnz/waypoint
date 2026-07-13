@@ -81,9 +81,12 @@ each iteration:
   $WAYPOINT_SESSION_ID --recursive` and match `subagent:ticket-<id>:<role>` titles:
   - a **live** child whose ticket is not recorded as spawned → **adopt** it (record
     its `--lead-session-id`); do not re-spawn.
-  - a **dead** child (`sessions show` → `exited`/`error`) in any live-lead state
-    (`delegated`, `building`, `revising`, `blocked`, `review_requested`,
-    `spec_pending`) → drive the **lead-died self-loop** (`references/git-integration.md`).
+  - a **dead** child (`sessions show` → `exited`/`error`) → recover per
+    `references/git-integration.md`: a death in `building`/`revising`/`blocked`/
+    `review_requested`/`spec_pending` (work exists on the branch) is a **lead-died
+    self-loop** (spends `lead_restarts`, resumes the preserved worktree); a death in
+    `delegated` with **no committed work** (a turn-1 spawn/startup failure) is a
+    **spawn failure** → `delegated → ready` (spends `attempts`), not a resume.
 - **Check PR/CI reality.** For a ticket in `review_requested`/`merging`, `gh pr
   view <pr-url> --json state,mergeStateStatus,statusCheckRollup`: an
   already-`MERGED` PR means the merge happened (record it, do not re-merge); CI

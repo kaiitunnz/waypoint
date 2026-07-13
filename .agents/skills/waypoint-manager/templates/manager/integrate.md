@@ -46,8 +46,12 @@ out, so it never contends with your main checkout:
 git -C {{worktree_path}} fetch origin {{trunk}}
 git -C {{worktree_path}} rebase origin/{{trunk}}
 # Trivial conflicts only (lockfiles, generated files): resolve, `git add`, `git rebase --continue`.
-# A SEMANTIC conflict → `git rebase --abort`, release the lease, transition
-#   `merging → revising`, and relay the conflict to the lead. Do NOT hand-resolve logic.
+# A SEMANTIC conflict → `git rebase --abort` and release the lease (`manager lock
+#   release`) so the single merging lane frees at once. If a build slot is free,
+#   transition `merging → revising` and relay the conflict to the lead; if the slot
+#   cap is full, transition `merging → blocked` instead and re-delegate the
+#   rebase-and-resolve when a slot frees (never leave the ticket stuck in `merging`
+#   holding the lane). Do NOT hand-resolve logic yourself.
 git -C {{worktree_path}} push --force-with-lease
 ```
 

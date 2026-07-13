@@ -76,19 +76,22 @@ ticket's budget.
 
 ## Templates
 
-The manager renders each step template with the ticket's values and sends it; role
-templates come from each `roles.<role>.templates` dir. In a template, `$(render
-<path>)` is shorthand — substitute this ticket's `{{placeholders}}` into that file
-and send the text as the message body; it is not a shell command. `{{manager_session_id}}`
-is your own session id (`$WAYPOINT_SESSION_ID`).
+Each role's step templates live in **its `roles.<role>.templates` dir from the
+manifest**. The shipped defaults are `templates/manager/`, `templates/tech-lead/`,
+`templates/prd-writer/`, `templates/rfc-writer/`, but a manifest may relocate them —
+resolve every path through the manifest, not the default literally. A
+`templates/<role>/<step>.md` reference (here or inside any template) means the
+`<step>` file in that role's `templates:` dir. `$(render <path>)` is shorthand —
+substitute this ticket's `{{placeholders}}` into that file and send the text as the
+message body; it is not a shell command. `{{manager_session_id}}` is your own session
+id (`$WAYPOINT_SESSION_ID`).
 
-- Manager loop entry — `templates/manager/loop-cycle.md`
-- Triage and route by input type — `templates/manager/triage.md`
-- Delegate a `ready` ticket — `templates/manager/delegate.md`
-- Monitor build / blocker / spec-gate / relay — `templates/manager/monitor.md`
-- Review-until-merge and land the PR — `templates/manager/integrate.md`
-- PRD / RFC writers — `templates/prd-writer/`, `templates/rfc-writer/`
-- Tech-lead (kickoff, strategy gate, execute, report, address-review) — `templates/tech-lead/`
+- **manager** (`roles.manager.templates`) — `loop-cycle` (loop entry), `triage`
+  (route by input type), `delegate` (spawn a lead for a `ready` ticket), `monitor`
+  (build / blocker / spec-gate / relay), `integrate` (review-until-merge, land PR).
+- **prd_writer** / **rfc_writer** (`roles.<writer>.templates`) — `write`.
+- **tech_lead** (`roles.tech_lead.templates`) — `kickoff`, `strategy-gate`,
+  `execute`, `report`, `address-review`.
 
 ## Placeholders
 

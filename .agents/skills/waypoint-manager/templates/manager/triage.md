@@ -117,7 +117,9 @@ a spec doc). The `role` (title suffix + template dir) is the `spec_route`:
 
 ```bash
 role=<prd-writer|rfc-writer>          # from spec_route
-sid=$(waypoint sessions start --preset writer-opus \
+# {{writer_launch}} expands from the matching writer role in the manifest
+# (roles.prd_writer / roles.rfc_writer) — never hardcode a preset/model here.
+sid=$(waypoint sessions start {{writer_launch}} \
   --cwd <repo-root> \
   --title "subagent:ticket-{{ticket_id}}:$role" \
   --spawner-session-id {{manager_session_id}} | jq -r .session.id)

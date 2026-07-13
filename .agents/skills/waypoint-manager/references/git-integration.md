@@ -13,7 +13,7 @@ manager delegates:
 
 ```bash
 sid=$(waypoint sessions start \
-  --preset lead-opus-1m \
+  {{tech_lead_launch}} \
   --cwd <repo-root> \
   --worktree ticket/<id> --worktree-base {{trunk}} \
   --title "subagent:ticket-<id>:tech-lead" \
@@ -69,11 +69,11 @@ fail):
 waypoint sessions terminate <dead-lead-sid>          # preserve the branch + worktree
 waypoint manager ticket transition <id> --to <same-state> \
   --lead-session-id <new-sid> --reason lead-died      # self-loop: consumes lead_restarts
-new=$(waypoint sessions start --preset lead-opus-1m \
+new=$(waypoint sessions start {{tech_lead_launch}} \
   --cwd <preserved-worktree-path> \
   --title "subagent:ticket-<id>:tech-lead" \
   --spawner-session-id "$WAYPOINT_SESSION_ID" | jq -r .session.id)
-waypoint sessions wake-on-board "$new" --channels ticket-<id> --wake-on-inbox
+waypoint sessions wake-on-board "$new" --channels {{ticket_channel}} --wake-on-inbox
 ```
 
 The fresh lead re-reads the durable `ticket-<id>` log — the `status` cell and every

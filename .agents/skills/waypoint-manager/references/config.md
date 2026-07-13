@@ -113,3 +113,28 @@ before `sessions send`. The shipped examples are self-contained per the
 portability principle: PRD/RFC authoring, PR creation, rebasing, and
 review-addressing are **inlined as prose**, not personal-skill calls. See
 `templates/` and the SKILL overview.
+
+## Manifest-derived placeholders
+
+A template **never hardcodes** a preset, model, or channel name — every
+manifest-owned value is a `{{placeholder}}` the manager expands from the loaded
+manifest, so changing a preset or a channel prefix flows through without editing a
+template. Besides the ticket-scoped placeholders (`{{ticket_id}}`,
+`{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}`,
+`{{worktree_path}}`, `{{pr_url}}`) the manager fills per ticket, these come
+straight from the manifest:
+
+- `{{trunk}}` — `trunk`.
+- `{{tickets_channel}}` / `{{org_channel}}` — `board.tickets_channel` /
+  `board.org_channel`.
+- `{{ticket_channel}}` — the current ticket's channel: `board.ticket_channel_prefix`
+  + the ticket id (e.g. `ticket-42`). `{{ticket_channel_prefix}}` is the bare prefix,
+  for referring to *other* in-flight tickets' channels (`{{ticket_channel_prefix}}<id>`).
+- `{{tech_lead_launch}}` / `{{writer_launch}}` — the launch args for the role being
+  spawned, expanded from that role's manifest entry: `--preset <name>` for a
+  `preset:` role, or `--backend … --model … --permission-mode …` for an inline
+  `launch:` role. `{{writer_launch}}` resolves to the matching writer
+  (`roles.prd_writer` or `roles.rfc_writer`) for the ticket's spec route. The
+  per-launch flags (`--cwd` / `--title` / `--worktree` / `--spawner-session-id`) are
+  always added on top, and an explicit flag overrides a preset value.

@@ -141,10 +141,10 @@ with the source version, followed by a **content-free** nudge:
 
 ```bash
 # 1. Durable payload on the log, versioned by the inbox answer's version:
-waypoint board post ticket-<id> "<the human answer / review feedback>" \
+waypoint board post {{ticket_channel}} "<the human answer / review feedback>" \
   --meta relay_version=<inbox answer version> --meta kind=relay
 # 2. Content-free nudge — carries NO authoritative payload, just wakes the lead:
-waypoint sessions send <lead-sid> "[wp-msg from=<manager-sid>] Relay posted on ticket-<id>; read owed relays and act."
+waypoint sessions send <lead-sid> "[wp-msg from=<manager-sid>] Relay posted on {{ticket_channel}}; read owed relays and act."
 ```
 
 The lead is **wake-subscribed to its own `ticket-<id>` channel**, so the post

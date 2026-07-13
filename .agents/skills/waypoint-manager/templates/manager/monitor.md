@@ -1,6 +1,6 @@
 # Manager — monitor
 
-A `ticket-{{ticket_id}}` post or an inbox answer woke you. Read the lead's typed
+A `{{ticket_channel}}` post or an inbox answer woke you. Read the lead's typed
 feedback, drive the state, and relay any human answer back **durably**. This step
 covers the substantial-spec gate, mid-build blockers, and the done/partial signal;
 the merge itself is `templates/manager/integrate.md`.
@@ -8,8 +8,8 @@ the merge itself is `templates/manager/integrate.md`.
 ## Read the feedback
 
 ```bash
-waypoint board read ticket-{{ticket_id}} --key status        # the status cell (by key — --since misses cell overwrites)
-waypoint board log ticket-{{ticket_id}} --since <last-seen>  # append-log narrative + relay acks
+waypoint board read {{ticket_channel}} --key status        # the status cell (by key — --since misses cell overwrites)
+waypoint board log {{ticket_channel}} --since <last-seen>  # append-log narrative + relay acks
 ```
 
 The `status` cell's `kind=` is the feedback vocabulary:
@@ -33,7 +33,7 @@ is now stamped (the server does it):
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
 id=$(waypoint inbox post --json - <<'JSON' | jq -r .item.id
-{ "subject": "ticket-{{ticket_id}}: {{ticket_title}} — decision needed",
+{ "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "The lead reports: <blocker detail>." },
     { "type": "question", "question": "How should it proceed?",
@@ -63,11 +63,11 @@ log and nudge:
 ```bash
 answer=$(waypoint inbox get "$id")                     # emits {"item": {...}} — branch on the block's answer
 ver=$(echo "$answer" | jq -r '.item.version')
-waypoint board post ticket-{{ticket_id}} "<the human's decision, verbatim enough to act on>" \
+waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" \
   --meta relay_version="$ver" --meta kind=relay
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
 waypoint sessions send "$lead" \
-  "[wp-msg from={{manager_session_id}}] Relay posted on ticket-{{ticket_id}} (v$ver); read owed relays and act."
+  "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}} (v$ver); read owed relays and act."
 ```
 
 Then transition out of the awaiting state — `blocked → building` (answer relayed),

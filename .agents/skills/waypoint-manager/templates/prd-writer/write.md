@@ -56,10 +56,10 @@ will be reaped, and a keyed cell is pruned with its author, whereas a keyless lo
 post is durable history the manager reads with `board log`:
 
 ```bash
-waypoint board post ticket-{{ticket_id}} \
+waypoint board post {{ticket_channel}} \
   "PRD ready: docs/prd-{{ticket_id}}-<slug>.md" \
   --meta kind=spec_ready --meta spec_ref=docs/prd-{{ticket_id}}-<slug>.md
-waypoint board post ticket-{{ticket_id}} \
+waypoint board post {{ticket_channel}} \
   "footprint: <refined globs>; recommended strategy: <inline|/waypoint-subagents|/waypoint-workqueue|/waypoint-crew> because <reason>" \
   --meta kind=recommendation
 ```

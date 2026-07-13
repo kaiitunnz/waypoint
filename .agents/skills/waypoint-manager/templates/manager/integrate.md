@@ -12,7 +12,7 @@ integration lease. Never merge on your own authority.
    `--wake-on-inbox`-subscribed, so the answer wakes you.
 2. On the answer:
    - **request-changes** → transition `review_requested → revising`, then relay the
-     feedback to the lead **durably** (versioned `ticket-{{ticket_id}}` post + a
+     feedback to the lead **durably** (versioned `{{ticket_channel}}` post + a
      content-free nudge — see `templates/manager/monitor.md`). The lead addresses it
      (`templates/tech-lead/address-review.md`), re-pushes, and re-posts `done`; you
      move `revising → review_requested` and re-post the gate on the new head.
@@ -99,5 +99,5 @@ waypoint sessions reap --spawned-by "$lead" --recursive --prune-branches   # the
 waypoint sessions delete "$lead" --force                                    # the lead itself (removes its worktree)
 ```
 
-Post a one-line outcome to your `org` channel and return to
+Post a one-line outcome to your `{{org_channel}}` channel and return to
 `templates/manager/loop-cycle.md`.

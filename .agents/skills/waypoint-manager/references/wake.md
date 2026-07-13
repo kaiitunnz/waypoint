@@ -13,14 +13,14 @@ to its own inbox items:
 
 ```bash
 waypoint sessions wake-on-board "$WAYPOINT_SESSION_ID" \
-  --channels tickets \
-  --channels 'ticket-*' \
+  --channels {{tickets_channel}} \
+  --channels '{{ticket_channel_prefix}}*' \
   --wake-on-inbox
 ```
 
-- `--channels <glob>` is an **fnmatch** glob, repeatable. `tickets` catches new and
-  changed tickets; `ticket-*` catches every lead's status/relay posts across all
-  per-ticket channels in one subscription.
+- `--channels <glob>` is an **fnmatch** glob, repeatable. `{{tickets_channel}}`
+  catches new and changed tickets; `{{ticket_channel_prefix}}*` catches every lead's
+  status/relay posts across all per-ticket channels in one subscription.
 - `--wake-on-inbox` wakes on any **non-self** inbox mutation — i.e. a human
   answering one of the manager's own items. This is how the substantial-spec gate
   and the per-PR review answers reach the manager.
@@ -40,7 +40,7 @@ When the manager spawns a tech-lead, it registers that lead's wake on the lead's
 own channel so relays wake it:
 
 ```bash
-waypoint sessions wake-on-board <lead-sid> --channels ticket-<id> --wake-on-inbox
+waypoint sessions wake-on-board <lead-sid> --channels {{ticket_channel}} --wake-on-inbox
 ```
 
 This is what makes the durable relay (`references/loop.md`) wake the lead the

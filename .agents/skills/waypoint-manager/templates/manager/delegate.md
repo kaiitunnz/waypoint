@@ -50,14 +50,16 @@ exactly once.
 ## 3. Spawn the lead in its worktree
 
 ```bash
-sid=$(waypoint sessions start --preset lead-opus-1m \
+# {{tech_lead_launch}} expands from roles.tech_lead in the manifest (its preset:
+# name or inline launch: flags) — never hardcode a preset/model here.
+sid=$(waypoint sessions start {{tech_lead_launch}} \
   --cwd <repo-root> \
   --worktree {{branch}} --worktree-base {{trunk}} \
   --title "subagent:ticket-{{ticket_id}}:tech-lead" \
   --spawner-session-id {{manager_session_id}} | jq -r .session.id)
 wt=$(waypoint sessions show "$sid" | jq -r '.session.cwd')   # the derived sibling worktree path
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid" --worktree-path "$wt"
-waypoint sessions wake-on-board "$sid" --channels ticket-{{ticket_id}} --wake-on-inbox
+waypoint sessions wake-on-board "$sid" --channels {{ticket_channel}} --wake-on-inbox
 ```
 
 If the model/permission were wrong the lead dies on turn 1; confirm it actually
@@ -77,8 +79,8 @@ waypoint sessions send "$sid" "$(render templates/tech-lead/kickoff.md)"
 The kickoff (`templates/tech-lead/kickoff.md`) tells the lead to investigate, then
 run the **strategy gate** (`templates/tech-lead/strategy-gate.md`) — an explicit,
 justified choice among `/waypoint-subagents`, `/waypoint-workqueue`, and
-`/waypoint-crew` — post its `accepted` + chosen strategy to `ticket-{{ticket_id}}`,
+`/waypoint-crew` — post its `accepted` + chosen strategy to `{{ticket_channel}}`,
 and begin. When you observe that post, move `delegated → building`.
 
 Then return to `templates/manager/loop-cycle.md` and continue the drain — do not
-block waiting for the lead; its progress wakes you via `ticket-{{ticket_id}}`.
+block waiting for the lead; its progress wakes you via `{{ticket_channel}}`.

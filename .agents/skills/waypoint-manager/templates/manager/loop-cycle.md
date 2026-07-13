@@ -21,8 +21,9 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    substantial-spec, trivial-ready, delegate).
 
 2. **Reconcile — adopt reality before acting** (see `references/loop.md`):
-   - Read `{{tickets_channel}}` and every in-flight `ticket-<id>` `status` cell **by
-     key** (`board read ticket-<id> --key status`), and the relay logs by `--since`.
+   - Read `{{tickets_channel}}` and every in-flight ticket's per-ticket channel
+     `status` cell **by key** (`board read {{ticket_channel_prefix}}<id> --key status`),
+     and the relay logs by `--since`.
    - `waypoint sessions list --spawned-by {{manager_session_id}} --recursive`;
      match `subagent:ticket-<id>:<role>` titles. Adopt a live orphan; drive the
      lead-died self-loop for a dead lead in any live-lead state (check liveness in
@@ -73,5 +74,5 @@ own authority.
 ## Stop condition
 
 `manager next` recommends nothing, no external edge is outstanding, and no relay is
-owed. Post a one-line drain summary to your `org` channel (manifest
-`board.org_channel`) and go idle. The next wake resumes you.
+owed. Post a one-line drain summary to your `{{org_channel}}` channel and go idle.
+The next wake resumes you.

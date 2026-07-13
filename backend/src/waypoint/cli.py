@@ -3,6 +3,7 @@ import fnmatch
 import importlib.metadata
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -3682,6 +3683,76 @@ def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
     return config
 
 
+def _manifest_render_bindings(path: Path) -> dict[str, str]:
+    """The skill-owned placeholder values a manifest supplies to `manager render`.
+
+    These are the manifest fields that appear in prompt-template bodies — the
+    trunk branch and the board channel names. Role/preset/template fields are not
+    template-body placeholders and are skipped.
+    """
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        raise typer.BadParameter(f"could not read manifest {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise typer.BadParameter(f"manifest {path} is not valid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise typer.BadParameter("manifest must be a top-level mapping")
+    board_raw = raw.get("board")
+    board = board_raw if isinstance(board_raw, dict) else {}
+    bindings: dict[str, str] = {}
+    if raw.get("trunk") is not None:
+        bindings["trunk"] = str(raw["trunk"])
+    for field in ("tickets_channel", "org_channel", "ticket_channel_prefix"):
+        if board.get(field) is not None:
+            bindings[field] = str(board[field])
+    return bindings
+
+
+def _ticket_render_bindings(ticket: dict[str, Any]) -> dict[str, str]:
+    """Ticket-record placeholder values (a null field renders as empty, not left
+    unresolved — e.g. a trivial ticket legitimately has no `spec_ref`)."""
+    return {
+        "ticket_id": str(ticket.get("id", "")),
+        "ticket_title": str(ticket.get("title", "")),
+        "priority": str(ticket.get("priority", "")),
+        "scale": str(ticket.get("scale") or ""),
+        "footprint": ", ".join(ticket.get("footprint") or []),
+        "spec_ref": str(ticket.get("spec_ref") or ""),
+        "branch": str(ticket.get("branch") or ""),
+        "pr_url": str(ticket.get("pr_url") or ""),
+    }
+
+
+def _git_toplevel() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    top = result.stdout.strip()
+    return top or str(Path.cwd())
+
+
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+def _substitute_placeholders(
+    text: str, bindings: dict[str, str]
+) -> tuple[str, set[str]]:
+    unresolved: set[str] = set()
+
+    def _repl(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in bindings:
+            return bindings[name]
+        unresolved.add(name)
+        return match.group(0)
+
+    return _PLACEHOLDER_RE.sub(_repl, text), unresolved
+
+
 def _render_manager_slots(slots: dict[str, Any]) -> None:
     typer.echo(
         f"slots: {slots.get('used')}/{slots.get('total')} used "
@@ -3705,6 +3776,100 @@ def manager_init(
     """Persist the manifest's machine-relevant fields as the server ManagerConfig."""
     config = _manager_config_from_manifest(manifest)
     _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
+
+
+@manager_app.command("render")
+def manager_render(
+    ctx: typer.Context,
+    template: Annotated[
+        Path,
+        typer.Argument(
+            exists=True, dir_okay=False, help="Prompt-template file to render."
+        ),
+    ],
+    manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--manifest",
+            exists=True,
+            dir_okay=False,
+            envvar="WAYPOINT_MANAGER_MANIFEST",
+            help="waypoint-manager.yaml; resolves trunk and channel placeholders "
+            "(defaults to $WAYPOINT_MANAGER_MANIFEST).",
+        ),
+    ] = None,
+    ticket_id: Annotated[
+        str | None,
+        typer.Option(
+            "--ticket",
+            help="Ticket id; resolves ticket-scoped placeholders from the server "
+            "and the ticket's board cell.",
+        ),
+    ] = None,
+    overrides: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--set",
+            help="Override or add a binding as key=value (repeatable; highest "
+            "precedence). For runtime values a template needs that the manifest "
+            "and ticket do not carry.",
+        ),
+    ] = None,
+    allow_unresolved: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unresolved",
+            help="Leave unknown {{placeholders}} in place instead of failing.",
+        ),
+    ] = False,
+) -> None:
+    """Render a prompt template: substitute {{placeholders}} and print the body.
+
+    Resolves placeholders, lowest precedence first: env (repo_dir,
+    manager_session_id) < manifest (trunk, channels) < ticket record < the
+    ticket's board cell (ticket_body, input_type, spec_route) < --set. Fails on an
+    unknown placeholder unless --allow-unresolved.
+    """
+    text = template.read_text(encoding="utf-8")
+    bindings: dict[str, str] = {"repo_dir": _git_toplevel()}
+    session_id = os.environ.get("WAYPOINT_SESSION_ID")
+    if session_id:
+        bindings["manager_session_id"] = session_id
+    if manifest is not None:
+        bindings.update(_manifest_render_bindings(manifest))
+    if ticket_id is not None:
+        settings = _settings_from_ctx(ctx)
+        ticket = _run_client(settings, lambda c: c.manager_get_ticket(ticket_id))
+        bindings.update(_ticket_render_bindings(ticket))
+        prefix = bindings.get("ticket_channel_prefix")
+        if prefix is not None:
+            bindings["ticket_channel"] = f"{prefix}{ticket_id}"
+        tickets_channel = bindings.get("tickets_channel")
+        if tickets_channel is not None:
+            cell = _run_client(
+                settings,
+                lambda c: c.read_board(tickets_channel, key=f"ticket:{ticket_id}"),
+            )
+            if cell:
+                entry = cell[-1]
+                bindings["ticket_body"] = entry.get("text") or ""
+                meta = entry.get("metadata") or {}
+                for field in ("input_type", "spec_route"):
+                    if meta.get(field) is not None:
+                        bindings[field] = str(meta[field])
+    for item in overrides or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--set expects key=value, got {item!r}")
+        bindings[key.strip()] = value
+    rendered, unresolved = _substitute_placeholders(text, bindings)
+    if unresolved and not allow_unresolved:
+        raise typer.BadParameter(
+            "unresolved placeholders: "
+            + ", ".join(sorted(unresolved))
+            + " (supply --manifest/--ticket, a --set binding, or --allow-unresolved)"
+        )
+    typer.echo(rendered, nl=False)
 
 
 @manager_app.command("state")

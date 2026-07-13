@@ -309,3 +309,182 @@ def test_cli_board_wait_timeout(
     )
     assert result.exit_code == 124, result.stdout
     assert json.loads(result.stdout)["outcome"] == "timeout"
+
+
+# ── manager render ──────────────────────────────────────────────────────────
+
+
+def _manifest(tmp_path: Path) -> Path:
+    path = tmp_path / "waypoint-manager.yaml"
+    path.write_text(
+        "trunk: main\n"
+        "board:\n"
+        "  tickets_channel: tickets\n"
+        "  org_channel: org\n"
+        "  ticket_channel_prefix: ticket-\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _template(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "tmpl.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
+    # No --ticket, so no server call: manifest + --set resolve everything.
+    tmpl = _template(
+        tmp_path, "Ticket {{ticket_id}} on {{trunk}} / {{tickets_channel}}: {{note}}"
+    )
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            str(tmpl),
+            "--manifest",
+            str(_manifest(tmp_path)),
+            "--set",
+            "ticket_id=ticket-9",
+            "--set",
+            "note=hello",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout == "Ticket ticket-9 on main / tickets: hello"
+
+
+def test_cli_manager_render_strict_fails_on_unknown(tmp_path: Path) -> None:
+    tmpl = _template(tmp_path, "Hi {{mystery}}")
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "render", str(tmpl)],
+    )
+    assert result.exit_code != 0
+    assert "unresolved placeholders: mystery" in result.output
+
+
+def test_cli_manager_render_allow_unresolved(tmp_path: Path) -> None:
+    tmpl = _template(tmp_path, "Hi {{mystery}}")
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            str(tmpl),
+            "--allow-unresolved",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout == "Hi {{mystery}}"
+
+
+def test_cli_manager_render_ticket_pulls_record_and_board_cell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/manager/tickets/42":
+            return httpx.Response(
+                200,
+                json={
+                    "ticket": {
+                        "id": "42",
+                        "title": "Fix bug",
+                        "priority": "p1",
+                        "scale": "trivial",
+                        "footprint": [],
+                        "spec_ref": "docs/x.md",
+                        "branch": "ticket/42",
+                        "pr_url": None,
+                    }
+                },
+            )
+        assert request.url.path == "/api/board/tickets"
+        assert request.url.params.get("key") == "ticket:42"
+        return httpx.Response(
+            200,
+            json={
+                "entries": [
+                    {
+                        "text": "the reported bug",
+                        "metadata": {"input_type": "bug-report"},
+                    }
+                ]
+            },
+        )
+
+    _mock_cli(monkeypatch, handler)
+    tmpl = _template(
+        tmp_path,
+        "{{ticket_title}} [{{input_type}}] on {{ticket_channel}}: {{ticket_body}} (spec {{spec_ref}})",
+    )
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            str(tmpl),
+            "--manifest",
+            str(_manifest(tmp_path)),
+            "--ticket",
+            "42",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout == (
+        "Fix bug [bug-report] on ticket-42: the reported bug (spec docs/x.md)"
+    )
+
+
+def test_cli_manager_render_set_overrides_board_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/manager/tickets/42":
+            return httpx.Response(
+                200,
+                json={
+                    "ticket": {
+                        "id": "42",
+                        "title": "t",
+                        "priority": "p2",
+                        "scale": None,
+                        "footprint": [],
+                        "spec_ref": None,
+                        "branch": None,
+                        "pr_url": None,
+                    }
+                },
+            )
+        return httpx.Response(
+            200, json={"entries": [{"text": "board body", "metadata": {}}]}
+        )
+
+    _mock_cli(monkeypatch, handler)
+    tmpl = _template(tmp_path, "body={{ticket_body}}")
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            str(tmpl),
+            "--manifest",
+            str(_manifest(tmp_path)),
+            "--ticket",
+            "42",
+            "--set",
+            "ticket_body=override wins",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout == "body=override wins"

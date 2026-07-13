@@ -44,27 +44,31 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      {{tickets_channel}} --key ticket:{{ticket_id}} --merge --meta
      latency_renotified=<awaiting_since>`); if it already equals the current
      `awaiting_since` (re-notified, still unanswered) → transition to `abandoned`.
-     Checked each wake — on a silent board it fires on the next event.
+     If the abandoned ticket was on-tree (`blocked`/`review_requested`), reap it and
+     release the tree (`templates/manager/integrate.md`, Finalize). Checked each wake
+     — on a silent board it fires on the next event.
    - `waypoint sessions list --spawned-by {{manager_session_id}} --recursive`;
      match `subagent:ticket-<id>:<role>` titles. Adopt a live orphan; resume a dead
      lead in any live-lead state (check liveness in **every** one, including parked
      `blocked`/`review_requested`). Resume terminates the dead session and self-loops
      (`--reason lead-died`), then re-spawns the **same role**: a tech-lead in a build
-     state onto its preserved worktree (`templates/manager/delegate.md`); a
-     `spec_pending` writer with no worktree (`templates/manager/triage.md`). Either
-     role: past `max_lead_restarts` the self-loop 409s → escalate `--to blocked`.
+     state onto its branch checked out in your tree (`templates/manager/delegate.md`);
+     a `spec_pending` writer, which reads the repo read-only and needs no branch
+     (`templates/manager/triage.md`). Either role: past `max_lead_restarts` the
+     self-loop 409s → escalate `--to blocked`.
    - For `review_requested`/`merging` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup`.
 
 3. **Choose one action** — the highest-priority of: the `recommended` pull move, or
-   an external edge reconcile surfaced (spec posted → `spec_review`; human answer →
+   an external edge reconcile surfaced (spec posted → `spec_review`; lead posted
+   `accepted` + strategy → `delegated → building`; human answer →
    relay + `building`/`ready`/`revising`/`merging`/`abandoned`; lead reported
    done/partial → `review_requested`; human merge → `merging`; dead lead →
    self-loop or `blocked`; merged PR → record it).
 
 4. **Record intent before the side effect.** Transition first (carrying the dedup
-   key: `--intended-lead-title`, `--branch`, `--worktree-path`, or `--pr-url`),
-   then act. Never act before the transition commits.
+   key: `--intended-lead-title`, `--branch`, or `--pr-url`), then act. Never act
+   before the transition commits.
 
 5. **Act idempotently** — spawn only if no live same-title session exists; relay via
    the durable versioned log + a content-free nudge; `gh pr merge` only if not
@@ -82,7 +86,9 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 
 ## Invariants you cannot violate (the server rejects them with 409)
 
-- ≤ `execution_slots` tickets in `{delegated, building, revising}`.
+- ≤ `execution_slots` tickets occupy the shared tree (`delegated` through
+  `merging`, including parked `blocked`/`review_requested`) — one for the
+  single-tree model, so execution is strictly serial.
 - ≤ 1 ticket in `merging`; ≤ 1 in `spec_pending`.
 - `intended_lead_title` unique across live tickets.
 - `attempts ≤ max_delegate_attempts`, `lead_restarts ≤ max_lead_restarts`.

@@ -116,15 +116,19 @@ waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
 ## Spawn the writer (spec_pending routes only)
 
 For a `prd-writer` or `rfc-writer` route, spawn the matching writer — ephemeral,
-owner-scoped, titled for reconcile; it does **not** need a worktree (it only writes
-a spec doc). The `role` (title suffix + template dir) is the `spec_route`:
+owner-scoped, titled for reconcile. It runs in your tree ({{repo_dir}}) to read the
+codebase but is **read-only**: it writes only its spec doc under `.waypoint/specs/`
+and touches no tracked file or branch, so it runs safely in parallel with a
+tech-lead building another ticket. Spec authoring therefore does not occupy the tree
+and never blocks a delegate. The `role` (title suffix + template dir) is the
+`spec_route`:
 
 ```bash
 role=<prd-writer|rfc-writer>          # from spec_route
 # {{writer_launch}} expands from the matching writer role in the manifest
 # (roles.prd_writer / roles.rfc_writer) — never hardcode a preset/model here.
 sid=$(waypoint sessions start {{writer_launch}} \
-  --cwd <repo-root> \
+  --cwd {{repo_dir}} \
   --title "subagent:ticket-{{ticket_id}}:$role" \
   --spawner-session-id {{manager_session_id}} | jq -r .session.id)
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
@@ -142,4 +146,4 @@ spec ref back and recommends an execution strategy; you then move the ticket
 `spec_pending → spec_review` and open the human approval gate
 (`templates/manager/monitor.md` covers the gate and the relay). Reap the writer
 after the spec lands — it is ephemeral. Pass-through and trivial routes skip this
-section; `templates/manager/delegate.md` picks them up when a slot frees.
+section; `templates/manager/delegate.md` picks them up when the tree frees.

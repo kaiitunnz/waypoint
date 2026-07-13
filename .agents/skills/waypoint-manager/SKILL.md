@@ -1,6 +1,6 @@
 ---
 name: waypoint-manager
-description: Use when a coding agent must run as an autonomous, long-running product owner for a single project — continuously draining a priority-ordered ticket board, specifying substantial tickets through an ephemeral PRD/RFC writer, delegating each ticket to an ephemeral tech-lead in its own git worktree, escalating blockers and every merge decision to the human through the inbox, and integrating merged work as the sole integrator of trunk. The manager is driven by board/inbox wake events and a durable `waypoint manager` state machine, so it survives its own context exhaustion and backend restarts without duplicating a spawn, a relay, or a merge. Not for a one-shot batch of independent tasks (use waypoint-workqueue), a single coupled change (use waypoint-subagents), or a fixed-scope product build a human lead is actively driving (use waypoint-crew).
+description: Use when a coding agent must run as an autonomous, long-running product owner for a single project — continuously draining a priority-ordered ticket board, specifying substantial tickets through an ephemeral PRD/RFC writer, delegating each ticket to an ephemeral tech-lead that builds in the manager's own working tree one ticket at a time, escalating blockers and every merge decision to the human through the inbox, and integrating merged work as the sole integrator of trunk. The manager is driven by board/inbox wake events and a durable `waypoint manager` state machine, so it survives its own context exhaustion and backend restarts without duplicating a spawn, a relay, or a merge. Not for a one-shot batch of independent tasks (use waypoint-workqueue), a single coupled change (use waypoint-subagents), or a fixed-scope product build a human lead is actively driving (use waypoint-crew).
 ---
 
 # Waypoint Manager
@@ -8,18 +8,22 @@ description: Use when a coding agent must run as an autonomous, long-running pro
 Run one durable Waypoint session as the product owner of a single project. Drain a
 priority-ordered ticket board for the session's lifetime: triage each ticket, spec
 the substantial ones through an ephemeral writer, delegate each to an ephemeral
-tech-lead in its own worktree, monitor the build over the board, escalate blockers
-and every merge to the human through the inbox, integrate merged work as the sole
-integrator of trunk, then loop.
+tech-lead that builds in your own working tree — one ticket at a time, strictly
+serial — monitor the build over the board, escalate blockers and every merge to the
+human through the inbox, integrate merged work as the sole integrator of trunk, then
+loop.
 
 This file plus the per-step templates are the procedure to run; the manifest
 (`waypoint-manager.yaml`) documents every config field and placeholder inline.
 
 ## Setup
 
-Confirm the CLI is reachable (`waypoint manager state --json` returns JSON) and
-everything below is present before entering the loop. A missing prerequisite is a
-halt-and-flag, never a `create`/`install`.
+You run in the project's working tree — your own cwd, `{{repo_dir}}`. Every
+tech-lead builds **here**, on its ticket branch, so the tree must be clean on
+`{{trunk}}` before you start and returns to `{{trunk}}` between tickets. Confirm the
+CLI is reachable (`waypoint manager state --json` returns JSON) and everything below
+is present before entering the loop. A missing prerequisite is a halt-and-flag,
+never a `create`/`install`.
 
 1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
    (idempotent). Read the manifest — its `board`, `roles`, `scale`, and `escalation`
@@ -61,8 +65,7 @@ an action this drain. Each iteration:
    external edge reconcile surfaced (spec posted, human answer, done/partial, human
    merge, dead lead, merged PR).
 4. **Record intent before the side effect** — transition first, carrying the dedup
-   key (`--intended-lead-title` / `--branch` / `--worktree-path` / `--pr-url`), then
-   act.
+   key (`--intended-lead-title` / `--branch` / `--pr-url`), then act.
 5. **Act idempotently** — spawn only if no live same-title session exists; relay via
    a versioned board post + a content-free nudge; `gh pr merge` only if not already
    `MERGED`. Route to the per-step template (below).
@@ -104,9 +107,10 @@ Substitute these before sending a template; never hardcode a preset or channel.
   `--backend/--model/--permission-mode`).
 - **Per ticket:** `{{ticket_id}}`, `{{ticket_title}}`, `{{ticket_body}}`,
   `{{priority}}`, `{{scale}}`, `{{footprint}}`, `{{input_type}}`, `{{spec_route}}`,
-  `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by convention), `{{worktree_path}}`
-  (runtime-derived), `{{pr_url}}`.
-- **Constant:** `{{manager_session_id}}` = `$WAYPOINT_SESSION_ID`.
+  `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by convention), `{{pr_url}}`.
+- **Constant:** `{{manager_session_id}}` = `$WAYPOINT_SESSION_ID`; `{{repo_dir}}` =
+  your own working tree (cwd), where every lead builds and the tree rests on
+  `{{trunk}}` between tickets.
 
 ## Guardrails
 
@@ -120,6 +124,9 @@ Substitute these before sending a template; never hardcode a preset or channel.
 - **Own and reap only your subtree.** Every role carries `--spawner-session-id` and a
   `subagent:ticket-<id>:<role>` title; reap a ticket's whole subtree only after
   integration, and only what this manager spawned.
-- **Isolate every ticket; integrate serially.** Each ticket builds in its own
-  worktree + branch; trunk advances only through the manager behind the `integration`
-  lease.
+- **One tree, strictly serial; integrate as the sole integrator.** Every ticket
+  builds on its own branch in your one shared tree, one at a time — a ticket holds
+  the tree from `delegated` through a terminal state (parked `blocked`/
+  `review_requested` included), so the next delegate waits until it lands or is
+  abandoned. Trunk advances only through the manager behind the `integration` lease.
+  Read-only PRD/RFC writers are the one thing that runs in parallel.

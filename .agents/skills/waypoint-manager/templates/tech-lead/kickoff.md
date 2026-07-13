@@ -21,14 +21,18 @@ trade-off the human owns), stop and surface it as a `decision`/`attention` block
 so the manager escalates it through the inbox (the relay protocol below) — never
 invent the product call yourself.
 
-## Your isolated workspace
+## Your workspace
 
-You are running in your own git worktree at **{{worktree_path}}** on branch
-**{{branch}}**, cut from {{trunk}}. This is yours alone — no other session touches
-this tree. Commit freely here. If you fan the work out, your workers get
-**sub-worktrees off {{branch}}** and you integrate them into **one commit ref** on
-{{branch}} before you report up — reuse the `/waypoint-workqueue` or `/waypoint-crew`
-mechanics.
+You run in the manager's working tree at **{{repo_dir}}**, on branch **{{branch}}**
+(cut from {{trunk}}). This tree carries the project's real environment — its venv,
+secrets, and deployment config — which is why the build runs here rather than in a
+throwaway worktree. Execution is strictly serial: you are the only ticket building
+in this tree right now, so treat {{branch}} as yours and commit freely on it. The
+manager shares the tree but only checks branches out or rebases at the boundaries of
+your ticket, never while you build; a read-only PRD/RFC writer for another ticket
+may run alongside you but writes only to `.waypoint/specs/` and touches nothing you
+own. If you fan the work out, your workers get **sub-worktrees off {{branch}}** and
+you integrate them into **one commit ref** on {{branch}} before you report up.
 
 ## Your channel and the relay protocol
 

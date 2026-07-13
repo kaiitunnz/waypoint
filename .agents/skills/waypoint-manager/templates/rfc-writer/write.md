@@ -16,12 +16,20 @@ intent and acceptance criteria** and reduce it to a concrete technical design; d
 not re-litigate the product decision. Otherwise design from the request and the
 codebase.
 
+## Read-only in a shared tree
+
+You run in the manager's working tree, which may have another ticket's work checked
+out on a feature branch with uncommitted edits. **Ignore it** — do not switch
+branches, do not modify or stage any tracked file, do not run git. Read files for
+understanding, treating the committed trunk state as the baseline; a tech-lead is
+building in this tree in parallel, and your only write is your spec doc.
+
 ## Write the RFC
 
-Write the document as a single Markdown file in the repo's RFC/design location (e.g.
-`docs/rfc-{{ticket_id}}-<slug>.md`), untracked unless the repo convention tracks
-it. Investigate the codebase first — an RFC that misstates the current state is
-worse than none. Cover, in order:
+Write the document as a single Markdown file under **`.waypoint/specs/`** (e.g.
+`.waypoint/specs/rfc-{{ticket_id}}-<slug>.md`) — a gitignored scratch path, so it
+never lands in the parallel lead's commits. Investigate the codebase first — an RFC
+that misstates the current state is worse than none. Cover, in order:
 
 1. **Summary** — the change in a paragraph.
 2. **Motivation & current state** — the problem, and the load-bearing facts about
@@ -55,8 +63,8 @@ post is durable history the manager reads with `board log`:
 
 ```bash
 waypoint board post {{ticket_channel}} \
-  "RFC ready: docs/rfc-{{ticket_id}}-<slug>.md" \
-  --meta kind=spec_ready --meta spec_ref=docs/rfc-{{ticket_id}}-<slug>.md
+  "RFC ready: .waypoint/specs/rfc-{{ticket_id}}-<slug>.md" \
+  --meta kind=spec_ready --meta spec_ref=.waypoint/specs/rfc-{{ticket_id}}-<slug>.md
 waypoint board post {{ticket_channel}} \
   "footprint: <refined globs>; recommended strategy: <inline|/waypoint-subagents|/waypoint-workqueue|/waypoint-crew> because <reason>" \
   --meta kind=recommendation

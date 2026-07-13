@@ -8,15 +8,17 @@
 # template placeholders.
 
 project: waypoint                         # used in summaries and channel labels
-trunk: main                               # branch each ticket worktree is cut from; the sole integrator advances it
+trunk: main                               # branch each ticket is cut from; the sole integrator advances it
 
 board:
   tickets_channel: tickets                # intake channel + ticket:<id> registry cells ({{tickets_channel}})
-  org_channel: org                        # human-visible summaries + lock:integration cell ({{org_channel}})
+  org_channel: org                        # human-visible drain/outcome summaries ({{org_channel}})
   ticket_channel_prefix: ticket-          # per-ticket channel is <prefix><id>, e.g. ticket-42 ({{ticket_channel}})
 
 concurrency:
-  execution_slots: 2                      # max tickets in delegated|building|revising; parked leads do not count
+  execution_slots: 1                      # tickets that may occupy the shared working tree at once (delegated..merging).
+                                          # The tech-lead builds in the manager's own tree, so this is 1: strictly serial
+                                          # execution. Only read-only PRD/RFC writers run in parallel (off-tree).
 
 retry:
   max_delegate_attempts: 3                # initial-spawn retries before blocked-awaiting-human

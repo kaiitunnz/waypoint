@@ -4,9 +4,15 @@ The Waypoint Manager is a single long-running Waypoint session that owns one
 project's backlog. It drains a priority-ordered ticket board for its lifetime: for
 each ticket it assigns a scale and footprint, writes a PRD or RFC through an
 ephemeral writer when the work is substantial, delegates the ticket to an ephemeral
-tech-lead in its own git worktree, monitors the build over a typed board protocol,
-escalates blockers and every merge to the human through the inbox, and integrates
-the merged work as the sole integrator of trunk.
+tech-lead that builds in the manager's own working tree, monitors the build over a
+typed board protocol, escalates blockers and every merge to the human through the
+inbox, and integrates the merged work as the sole integrator of trunk.
+
+The tech-lead runs in the manager's tree rather than a throwaway sibling worktree
+because that tree carries the project's real environment — its virtualenv, secrets,
+and deployment config — that a fresh worktree lacks, so it is where a build can
+actually compile, test, and deploy. The tree is therefore a single serial resource:
+one ticket builds at a time.
 
 The agent-facing procedure lives in the `waypoint-manager` skill
 (`.agents/skills/waypoint-manager/`): `SKILL.md` and the per-step prompt templates
@@ -37,7 +43,9 @@ the work:
 ## Architecture
 
 The manager is a skill over the `waypoint` CLI plus two runtime primitives. Board,
-inbox, presets, sessions/subagents, and worktrees are used as they ship.
+inbox, presets, and sessions/subagents are used as they ship; the manager itself
+opens no worktree, though a tech-lead that fans work out may give its own workers
+sub-worktrees.
 
 ### The event wake
 
@@ -85,8 +93,8 @@ waypoint manager state [--json]                          # whole ticket set + sl
 waypoint manager next [--tried <id>]... [--json]         # re-anchor
 waypoint manager ticket add <title> [--id] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
 waypoint manager ticket show <id>
-waypoint manager ticket update <id> [--priority] [--kind] [--scale] [--footprint] [--dep] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--worktree-path] [--pr-url]
-waypoint manager ticket transition <id> --to <state> [--reason] [--scale] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--worktree-path] [--pr-url] [--is-partial | --not-partial]
+waypoint manager ticket update <id> [--priority] [--kind] [--scale] [--footprint] [--dep] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--pr-url]
+waypoint manager ticket transition <id> --to <state> [--reason] [--scale] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--pr-url] [--is-partial | --not-partial]
 waypoint manager lock acquire --owner <sid> [--ttl-seconds N]
 waypoint manager lock steal   --owner <sid> [--ttl-seconds N]
 waypoint manager lock release --owner <sid>
@@ -94,24 +102,35 @@ waypoint manager lock release --owner <sid>
 
 `transition` is keyed by target state; the backend checks the edge is legal from
 the ticket's current state, and metadata (`--intended-lead-title`, `--branch`,
-`--worktree-path`, `--pr-url`, `--spec-ref`, `--scale`, `--is-partial`) rides the
+`--pr-url`, `--spec-ref`, `--scale`, `--is-partial`) rides the
 same call so intent and its dedup key land atomically with the state change.
 `ticket update` refines `footprint`/`kind`/`deps` without a state change. Illegal
 edges, exhausted budgets, and violated invariants all return `409`.
 
 #### The 14 states
 
-Four groups by how they occupy resources:
+Groups by how they occupy resources:
 
-- **Compute states** — `delegated`, `building`, `revising`. Each holds one execution
-  slot (a running tech-lead compute session). Entry is gated on a free slot.
-- **Awaiting-human states** — `spec_review`, `blocked`, `review_requested`. They
-  release the slot (the parked lead stays alive but idle) and stamp `awaiting_since`
-  on entry, cleared on exit, so the latency timeout counts only genuine human waits.
-- **Integration gate** — `merging`. Holds the `integration` lease (not a compute
-  slot) while the manager lands the PR; at most one ticket occupies it.
-- **Non-occupying** — `intake`, `triaged`, `spec_pending`, `ready`; and the
-  terminals `merged`, `deferred`, `abandoned`.
+- **On-tree states** — `delegated`, `building`, `revising`, `blocked`,
+  `review_requested`, `merging`. A ticket holds the shared working tree across this
+  whole span: from the moment its branch is checked out at `delegated` until it
+  reaches a terminal state. `execution_slots` bounds how many tickets may be on the
+  tree at once — one for the single-tree model, so execution is strictly serial.
+  Entry to `delegated` is gated on the tree being free. A parked lead in `blocked`/
+  `review_requested` still holds the tree (its branch stays checked out and its
+  committed work lives there); it does not free the tree for another ticket.
+- **Awaiting-human states** — `spec_review`, `blocked`, `review_requested`. These
+  stamp `awaiting_since` on entry, cleared on exit, so the latency timeout counts
+  only genuine human waits. `blocked` and `review_requested` are on-tree as well;
+  `spec_review` is not (a writer produced its spec off-tree).
+- **Off-tree states** — `intake`, `triaged`, `ready`, and `spec_pending`. A ticket
+  in `spec_pending` has a read-only PRD/RFC writer running in the manager's tree that
+  touches no tracked file, so spec authoring runs in parallel with a build and does
+  not occupy the tree. The terminals `merged`, `deferred`, `abandoned` occupy
+  nothing.
+
+`merging` holds both the shared tree (to rebase the branch) and the `integration`
+lease; at most one ticket occupies it, which the single-tree cap already guarantees.
 
 | State | Meaning |
 |---|---|
@@ -121,7 +140,7 @@ Four groups by how they occupy resources:
 | `spec_review` | Spec posted; awaiting the human approval gate. |
 | `ready` | Approved (or trivial); awaiting a free slot to delegate. |
 | `delegated` | Intent recorded, lead spawned; awaiting lead-accepted + strategy chosen. |
-| `building` | Lead is executing the ticket in its worktree. |
+| `building` | Lead is executing the ticket on its branch in the shared tree. |
 | `blocked` | A blocker (error / decision / attention / infeasible / budget-exhausted) escalated to the human. |
 | `review_requested` | Lead reported `done`/`partial`, PR open; the per-PR review-until-merge loop is with the human. |
 | `revising` | Lead is addressing requested review changes. |
@@ -156,7 +175,7 @@ Target-state adjacency, as the backend enforces it:
 The lead-died resume is a self-transition: `ticket transition <id> --to <same-state>`
 on any of the six resumable states (`spec_pending`, `delegated`, `building`,
 `revising`, `blocked`, `review_requested`) consumes one `lead_restarts` budget unit
-and rebinds a fresh lead to the preserved worktree. At `max_lead_restarts` the
+and rebinds a fresh lead to the ticket branch preserved in the tree. At `max_lead_restarts` the
 self-loop is rejected and the manager escalates with `--to blocked`. `merging` has
 no self-loop: a lost integrator is recovered by reconciling against `gh pr view`,
 not by resuming a session.
@@ -165,7 +184,8 @@ not by resuming a session.
 
 `manager next` returns three things over the live ticket set:
 
-- **`slots`** — `{total, used, free}`, `used = count(delegated|building|revising)`.
+- **`slots`** — `{total, used, free}`; the slot is the shared tree, so
+  `used = count(on-tree tickets)` (`delegated` through `merging`).
 - **`tickets[]`** — each live ticket's current state and its `legal_transitions`.
 - **`recommended`** — at most one action: the highest-priority actionable ticket
   (priority order, then FIFO by `created_at`, then id), slot/invariant/budget-gated,
@@ -185,9 +205,15 @@ external signal during reconcile.
 `check_invariants` runs on every `transition`/`update` over the whole set and
 rejects the write with `409` if any fails:
 
-- **Slot cap** — at most `execution_slots` tickets in `{delegated, building,
-  revising}`.
-- **≤ 1 merging** — the serialized integration gate.
+- **Tree cap** — at most `execution_slots` tickets occupy the shared tree
+  (`delegated` through `merging`, parked `blocked`/`review_requested` included). One
+  for the single-tree model, so delegation of a second ticket is refused until the
+  current one terminates. The cap counts `blocked` uniformly, so a ticket blocked
+  from `spec_pending` (a writer deemed the work infeasible) or from a turn-1 spawn
+  death holds the slot even though its work never reached the tree; that is the
+  conservative choice, and the human decision or the latency timeout that clears the
+  block also frees the slot.
+- **≤ 1 merging** — the serialized integration gate (implied by a tree cap of 1).
 - **≤ 1 spec_pending** — one active writer.
 - **Unique `intended_lead_title`** across all live tickets — the spawn dedup key, so
   a re-fired delegate cannot create a second lead.
@@ -247,7 +273,7 @@ each iteration:
   A live child whose ticket is not recorded as spawned is adopted (not re-spawned). A
   dead child is recovered: a death in `building`/`revising`/`blocked`/
   `review_requested`/`spec_pending` (work exists on the branch) is a lead-died
-  self-loop that spends `lead_restarts` and resumes the preserved worktree; a death
+  self-loop that spends `lead_restarts` and resumes the ticket branch in the tree; a death
   in `delegated` with no committed work (a turn-1 spawn/startup failure) is a spawn
   failure → `delegated → ready` that spends `attempts`.
 - **Checks PR/CI reality.** For `review_requested`/`merging`, `gh pr view <pr-url>
@@ -320,62 +346,70 @@ subscriptions from the database. Two consequences:
 
 ## Git and integration
 
-Two guarantees are always on: per-ticket worktree isolation (no two sessions share a
-working tree) and a serialized single-integrator gate (trunk advances only through
-the manager, behind a lease). Conflicts surface only at that gate, never as a
-corrupted tree. Scheduling itself is priority + FIFO; a ticket's recorded `footprint`
-and `deps` are not yet read by the scheduler (footprint-based conflict-aware
-scheduling is a future addition), so overlapping tickets are caught at the
-integration rebase rather than pre-ordered.
+Two guarantees are always on: strictly serial execution on the manager's single
+shared tree (one ticket builds at a time, on its own branch) and a serialized
+single-integrator gate (trunk advances only through the manager, behind a lease).
+Conflicts surface only at that gate, never as a corrupted tree. Scheduling itself is
+priority + FIFO; a ticket's recorded `footprint` and `deps` are not yet read by the
+scheduler (footprint-based conflict-aware scheduling is a future addition), so a
+ready ticket simply waits for the tree rather than being pre-ordered against the one
+in flight.
 
-### Per-ticket worktree isolation
+### Serial execution on the shared tree
 
-Every ticket executes on its own branch in its own worktree, spawned when the manager
-delegates:
+The manager delegates by cutting the ticket branch in its own tree and spawning the
+lead there — with `--cwd` only, never `--worktree`:
 
 ```
+git -C <repo-dir> checkout <trunk>
+git -C <repo-dir> checkout -b ticket/<id> <trunk>
 sid=$(waypoint sessions start <role-launch> \
-  --cwd <repo-root> \
-  --worktree ticket/<id> --worktree-base <trunk> \
+  --cwd <repo-dir> \
   --title "subagent:ticket-<id>:tech-lead" \
   --spawner-session-id "$WAYPOINT_SESSION_ID" | jq -r .session.id)
 ```
 
-`--worktree ticket/<id>` names the branch; the runtime force-derives the worktree
-path as a repo sibling (`<repo>-ticket-<id>`), outside the tree, so nothing shows up
-as untracked in the main checkout. `--worktree-base <trunk>` cuts the branch from
-trunk. `--spawner-session-id` makes the lead owner-scoped, so the manager lists and
-reaps only its own subtree; the `subagent:ticket-<id>:tech-lead` title is the spawn
-dedup key reconcile matches on.
+`<repo-dir>` is the manager's own working tree. A `--cwd`-only session has no
+worktree of its own (`session.worktree_path` stays unset), so deleting or reaping the
+lead never removes the tree — the safety property behind sharing it. The branch
+stays checked out for the ticket's whole life; the manager does tree operations
+(checkout, rebase, merge) only at the boundaries of that one ticket, never while the
+lead is mid-edit, and the tree cap guarantees no second lead is building meanwhile.
+`--spawner-session-id` makes the lead owner-scoped, so the manager lists and reaps
+only its own subtree; the `subagent:ticket-<id>:tech-lead` title is the spawn dedup
+key reconcile matches on.
 
 A tech-lead that fans its ticket out (via `waypoint-workqueue` or `waypoint-crew`)
 gives its workers sub-worktrees off the ticket branch and integrates them into one
 commit ref before reporting up. The manager only ever sees the single ticket branch.
+A read-only PRD/RFC writer for another ticket may run in the tree in parallel; it
+writes only under `.waypoint/specs/` (gitignored) and touches no tracked file or
+branch, so it never collides with the building lead's commits.
 
 ### Spawn dedup and branch collisions
 
-`git worktree add -b <branch>` fails if the branch already exists, so reconcile
-picks between three spawn paths: a live same-title session is adopted, not spawned; an
-initial delegate that collides with a stale `ticket/<id>` branch from an incomplete
-reap deletes the branch (no committed work) and re-creates; a lead-died resume keeps
-the branch (it holds committed work) and reuses the preserved worktree.
+Reconcile picks between three spawn paths: a live same-title session is adopted, not
+spawned; an initial delegate that collides with a stale `ticket/<id>` branch from an
+incomplete reap returns the tree to trunk and deletes the branch (no committed work)
+before re-creating it; a lead-died resume keeps the branch (it holds committed work),
+checks it out, and re-spawns onto it.
 
 ### Terminate-not-delete resume
 
 A dead lead in a live-lead state is recovered without losing its branch:
 
-- `waypoint sessions terminate <sid>` stops the process but keeps the record and the
-  worktree — the branch and its commits survive.
-- `waypoint sessions delete <sid>` removes the record and the worktree — used only
-  after integration, when the work has landed on trunk.
+- `waypoint sessions terminate <sid>` stops the process but keeps the record; the
+  branch and its commits survive in the tree.
+- `waypoint sessions delete <sid>` removes the record — used only after integration,
+  when the work has landed on trunk.
 
-A lead-died resume terminates the dead session and spawns a fresh lead onto the
-preserved worktree with `--cwd <worktree_path>` and no `--worktree` flag (which would
-try to re-create the branch with `-b` and fail), re-registers that lead's wake on the
-ticket channel, and sends it the kickoff. The fresh lead re-reads the durable
-ticket-channel log — the `status` cell and every owed relay — so committed work and a
-human answer given while the old lead was alive are both preserved. The reap of a
-merged ticket's subtree happens after integration.
+A lead-died resume terminates the dead session, checks the ticket branch out in the
+tree, and spawns a fresh lead there (again `--cwd <repo-dir>`, no `--worktree`),
+re-registers that lead's wake on the ticket channel, and sends it the kickoff. The
+fresh lead re-reads the durable ticket-channel log — the `status` cell and every owed
+relay — so committed work and a human answer given while the old lead was alive are
+both preserved. The reap of a merged ticket's subtree happens after integration,
+which is also when the tree returns to trunk and the merged branch is dropped.
 
 ### The serialized integration lease
 
@@ -401,14 +435,15 @@ double-merges.
 With `integration.mode: pr`, the manager opens a PR for the ticket branch with `gh`
 and the human is the sole merge authority — autonomy runs up to the PR, never through
 it. The manager posts the PR to the human as an inbox approval item and moves the
-ticket to `review_requested` (the slot frees; the lead parks alive). On the human's
-answer, relayed via the durable log: request-changes → `revising` (relay the feedback
-to the lead); merge → acquire the lease, move to `merging`, land the PR;
+ticket to `review_requested`; the lead parks alive and idle, but the ticket keeps
+holding the tree (strict serial — a parked ticket does not free the tree). On the
+human's answer, relayed via the durable log: request-changes → `revising` (relay the
+feedback to the lead); merge → acquire the lease, move to `merging`, land the PR;
 abort/latency-timeout → `abandoned`. Each new PR head re-posts `done` while
 `revising`, looping review-until-merge until the human merges or aborts.
 
 Before landing, the branch is rebased onto the advanced trunk with `git rebase` in
-the ticket's worktree; only trivial lockfile/generated conflicts are resolved
+the shared tree; only trivial lockfile/generated conflicts are resolved
 in-place, and a semantic conflict bounces the ticket to `revising`. A partial
 completion spawns follow-up tickets for the unmet goals only at the `merging →
 deferred` edge, once the delivered subset has merged, with a deterministic dedup key.
@@ -429,11 +464,11 @@ the backend neither reads nor needs them.
 | Field | Consumed by | Meaning |
 |---|---|---|
 | `project` | skill | Project name, used in summaries and channel labels. |
-| `trunk` | backend | The integration branch every ticket worktree is cut from and the sole integrator advances. |
+| `trunk` | backend | The integration branch every ticket branch is cut from and the sole integrator advances. |
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
-| `board.org_channel` | skill | Human-visible summaries and the `lock:integration` cell. |
+| `board.org_channel` | skill | Human-visible drain and outcome summaries. |
 | `board.ticket_channel_prefix` | skill | Per-ticket channel is `<prefix><id>` (e.g. `ticket-42`). |
-| `concurrency.execution_slots` | backend | Max tickets in `{delegated, building, revising}`. Bounds concurrent compute, not liveness — parked leads do not count. |
+| `concurrency.execution_slots` | backend | Tickets that may occupy the shared working tree at once (`delegated` through `merging`, parked `blocked`/`review_requested` included). `1` for the single-tree model, so execution is strictly serial. |
 | `retry.max_delegate_attempts` | backend | Initial-spawn retry budget before `blocked`-awaiting-human. Enforced on `ready → delegated`. |
 | `retry.max_lead_restarts` | backend | Fresh-lead resumes after a lead death before `blocked`. Enforced on the lead-died self-loop. Independent of `attempts`. |
 | `priority.levels` | backend | Ordered high-to-low (`p0` highest); a ticket's `--priority` must be one of these. Ties break oldest-first (FIFO by `created_at`). |
@@ -458,17 +493,17 @@ Each role under `roles` is configured one of two ways, the choice being the user
   passed as the matching `sessions start` flags (`--backend`, `--model`,
   `--permission-mode`, …).
 
-`--cwd` and `--title` are always per-launch; the manager supplies `--cwd`,
-`--worktree`/`--worktree-base`, the `subagent:ticket-<id>:<role>` title, and
+`--cwd` and `--title` are always per-launch; the manager supplies `--cwd`
+(its own tree, `{{repo_dir}}`), the `subagent:ticket-<id>:<role>` title, and
 `--spawner-session-id` on top of either config path, and an explicit flag overrides a
-preset value.
+preset value. No role is ever spawned with `--worktree`.
 
 The `manager` and `tech_lead` roles run unattended, so their permission posture must
 auto-approve or their own `sessions start` / `gh` / `waypointctl` tool calls block on
 an absent approver. The per-backend auto-approve mode is `dontAsk` for `claude_code`,
 `full_access` for `codex`, `allow` for `opencode`. The blast radius is bounded by the
-human-owned merge gate on every PR, worktree isolation, and the ownership rule that a
-session acts only on what it spawned. Set each role's model id verbatim from
+human-owned merge gate on every PR, the one-ticket-at-a-time serial tree, and the
+ownership rule that a session acts only on what it spawned. Set each role's model id verbatim from
 `waypoint models <backend>` and confirm the permission mode from `waypoint backends`.
 
 The `manager` role launches on `claude_tty` — claude_code's default transport — so
@@ -485,10 +520,10 @@ value is a `{{placeholder}}` the manager substitutes from the loaded manifest, s
 changing a preset or a channel prefix flows through without editing a template.
 Alongside the ticket-scoped placeholders the manager fills per ticket (`{{ticket_id}}`,
 `{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
-`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}`, `{{worktree_path}}`,
-`{{pr_url}}`, `{{manager_session_id}}`), these come from the manifest. `{{branch}}` is
-the ticket's branch, `ticket/<id>` by convention, and `{{worktree_path}}` is the
-sibling path the runtime derives when the lead is spawned.
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}`, `{{pr_url}}`,
+`{{manager_session_id}}`, `{{repo_dir}}`), these come from the manifest. `{{branch}}`
+is the ticket's branch, `ticket/<id>` by convention, and `{{repo_dir}}` is the
+manager's own working tree, where every lead builds.
 
 | Placeholder | Source |
 |---|---|
@@ -499,6 +534,8 @@ sibling path the runtime derives when the lead is spawned.
 | `{{ticket_channel_prefix}}` | `board.ticket_channel_prefix` (bare, for other tickets' channels and the wake glob) |
 | `{{tech_lead_launch}}` | `roles.tech_lead` launch args (`--preset <name>` or the inline `launch:` flags) |
 | `{{writer_launch}}` | the matching writer role (`roles.prd_writer` / `roles.rfc_writer`) launch args |
+| `{{repo_dir}}` | the manager's own working tree (its cwd) |
+| `{{manager_session_id}}` | `$WAYPOINT_SESSION_ID` |
 
 ## Portability
 

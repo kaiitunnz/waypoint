@@ -19,8 +19,8 @@ while you were away, apply them in id order.
 
 ## 2. Address each finding
 
-Work the feedback finding by finding, in your worktree **{{worktree_path}}** on
-**{{branch}}**:
+Work the feedback finding by finding, in the manager's tree **{{repo_dir}}** on
+**{{branch}}** (the manager has this branch checked out for you again):
 
 - For each requested change, decide **accept** or **push back with reasoning** —
   do not silently ignore one. Implement the accepted ones.
@@ -30,8 +30,8 @@ Work the feedback finding by finding, in your worktree **{{worktree_path}}** on
   edits — a review fix that breaks a test is not done.
 
 ```bash
-git -C {{worktree_path}} add -A
-git -C {{worktree_path}} commit -m "<what the review round changed>"
+git -C {{repo_dir}} add -A
+git -C {{repo_dir}} commit -m "<what the review round changed>"
 ```
 
 ## 3. Rebase onto trunk if it moved
@@ -42,11 +42,11 @@ mergeable. Resolve only **trivial** conflicts (lockfiles, generated files); a
 guessing:
 
 ```bash
-git -C {{worktree_path}} fetch origin {{trunk}}
-git -C {{worktree_path}} rebase origin/{{trunk}}
+git -C {{repo_dir}} fetch origin {{trunk}}
+git -C {{repo_dir}} rebase origin/{{trunk}}
 # trivial conflict → resolve, `git add`, `git rebase --continue`
 # semantic conflict → `git rebase --abort`, post kind=decision, stop
-git -C {{worktree_path}} push --force-with-lease
+git -C {{repo_dir}} push --force-with-lease
 ```
 
 ## 4. Re-report done on the new head
@@ -55,7 +55,7 @@ Re-post `done` with the new PR head so the manager re-opens the review gate on t
 updated PR (`done` is re-posted on each new head during `revising`):
 
 ```bash
-head=$(git -C {{worktree_path}} rev-parse HEAD)
+head=$(git -C {{repo_dir}} rev-parse HEAD)
 waypoint board post {{ticket_channel}} "revised: <what changed>; ready for re-review" \
   --key status --meta kind=done --meta pr={{pr_url}} --meta commit=$head
 ```

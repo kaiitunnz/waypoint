@@ -18,7 +18,7 @@ a DCO sign-off, commit with `-s`; if PRs are squash-merged with a Conventional
 Commit title, make the PR title one (`feat:`/`fix:`/`docs:`/…):
 
 ```bash
-git -C {{worktree_path}} push -u origin {{branch}}
+git -C {{repo_dir}} push -u origin {{branch}}
 gh pr create --base {{trunk}} --head {{branch}} \
   --title "<conventional-commit title for {{ticket_title}}>" \
   --body "$(cat <<'BODY'
@@ -43,7 +43,7 @@ Post the terminal build signal to {{ticket_channel}} with the PR and head commit
 then park idle — the manager takes it from here to the human review gate:
 
 ```bash
-head=$(git -C {{worktree_path}} rev-parse HEAD)
+head=$(git -C {{repo_dir}} rev-parse HEAD)
 waypoint board post {{ticket_channel}} "PR open: <pr-url>" \
   --key status --meta kind=done --meta pr=<pr-url> --meta commit=$head
 ```
@@ -53,7 +53,8 @@ waypoint board post {{ticket_channel}} "PR open: <pr-url>" \
   text / a `detail=` meta; the manager spawns follow-up tickets only *after* the
   subset merges.
 
-Do **not** reap yourself or delete your worktree — you may be asked to revise. Stay
-parked (idle and alive); a review round wakes you via {{ticket_channel}} into
-`templates/tech-lead/address-review.md`. The manager reaps your subtree after the
-PR merges.
+Do **not** reap yourself — you may be asked to revise. Stay parked (idle and alive)
+and leave {{branch}} as is; a review round wakes you via {{ticket_channel}} into
+`templates/tech-lead/address-review.md`. While parked, do not run git in the shared
+tree — the manager may be rebasing or landing your PR. The manager reaps your
+subtree after the PR merges.

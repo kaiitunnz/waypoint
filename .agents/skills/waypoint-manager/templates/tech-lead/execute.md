@@ -1,7 +1,7 @@
 # Tech-lead — execute
 
 You have chosen and posted a strategy. Now build the ticket on **{{branch}}** in
-your worktree **{{worktree_path}}**. The manager moved you to `building`.
+the manager's tree **{{repo_dir}}**. The manager moved you to `building`.
 
 ## Build under your chosen strategy
 
@@ -15,8 +15,8 @@ your worktree **{{worktree_path}}**. The manager moved you to `building`.
   which you land on {{branch}}.
 
 Whatever the strategy, the invariant is the same: **everything converges to one
-branch, {{branch}}, in your worktree** — the manager only ever sees that branch.
-No worker shares a tree with another.
+branch, {{branch}}** — the manager only ever sees that branch. No worker shares a
+tree with another.
 
 ## Verify before you report
 
@@ -25,8 +25,8 @@ anything with a runtime surface, **exercise the actual behavior**, not just unit
 tests. Commit the working state:
 
 ```bash
-git -C {{worktree_path}} add -A
-git -C {{worktree_path}} commit -m "<imperative summary of the change>"
+git -C {{repo_dir}} add -A
+git -C {{repo_dir}} commit -m "<imperative summary of the change>"
 ```
 
 ## Handle relays and blockers while building

@@ -5,6 +5,10 @@ You are the **sole integrator** of {{trunk}} and the human is the **sole merge
 authority**. Run the review-until-merge loop, then land the PR behind the
 integration lease. Never merge on your own authority.
 
+Because execution is strictly serial on your shared tree, this ticket is the only
+one occupying it — no other lead is building while you rebase or merge, and
+`{{branch}}` is the branch checked out in {{repo_dir}}.
+
 ## Review-until-merge loop (human gated)
 
 1. Post the PR to the human as an **approval** inbox item (link, summary, CI
@@ -18,7 +22,9 @@ integration lease. Never merge on your own authority.
      move `revising → review_requested` and re-post the gate on the new head.
    - **merge** → go to "Land the PR" below.
    - **abort / latency-timeout** → `review_requested → abandoned`, note it on the
-     ticket, reap the subtree.
+     ticket, then reap the subtree and release the tree (the same steps as
+     "Finalize" below — abandoning an on-tree ticket must return the tree to
+     `{{trunk}}` and drop its branch, or the next delegate starts on a dead branch).
 3. Loop until the human merges or aborts.
 
 ## Land the PR (only on a human merge decision)
@@ -38,20 +44,19 @@ gh pr view {{pr_url}} --json state,mergeStateStatus,statusCheckRollup
 # state == "MERGED" → the merge already happened; skip to Finalize.
 ```
 
-**Rebase onto the advanced trunk, then merge.** Rebase in the ticket's worktree,
-where {{branch}} is checked out, so it never contends with your main checkout:
+**Rebase onto the advanced trunk, then merge**, in your tree where {{branch}} is
+checked out:
 
 ```bash
-git -C {{worktree_path}} fetch origin {{trunk}}
-git -C {{worktree_path}} rebase origin/{{trunk}}
+git -C {{repo_dir}} checkout {{branch}}
+git -C {{repo_dir}} fetch origin {{trunk}}
+git -C {{repo_dir}} rebase origin/{{trunk}}
 # Trivial conflicts only (lockfiles, generated files): resolve, `git add`, `git rebase --continue`.
 # A SEMANTIC conflict → `git rebase --abort` and release the lease (`manager lock
-#   release`) so the single merging lane frees at once. If a build slot is free,
-#   transition `merging → revising` and relay the conflict to the lead; if the slot
-#   cap is full, transition `merging → blocked` instead and re-delegate the
-#   rebase-and-resolve when a slot frees (never leave the ticket stuck in `merging`
-#   holding the lane). Do NOT hand-resolve logic yourself.
-git -C {{worktree_path}} push --force-with-lease
+#   release`). Transition `merging → revising` and relay the conflict to the lead,
+#   which resumes on the branch already checked out in your tree — no new slot is
+#   needed, this ticket already holds the tree. Do NOT hand-resolve logic yourself.
+git -C {{repo_dir}} push --force-with-lease
 ```
 
 Confirm CI is green if `require_ci_green`, then merge (only if not already
@@ -87,21 +92,30 @@ A dead owner's lease is recoverable only by `waypoint manager lock steal --owner
 - **CI red / needs human** → release lease, `merging → blocked`, escalate.
 - **Semantic conflict** → released lease, `merging → revising` (above).
 
-On a terminal merged/deferred, reap the ticket's whole subtree **after**
-integration (`terminate` preserves worktrees for resume; only `delete`/`reap`
-removes them). Scope to this ticket by its
-recorded lead sid — reap the lead's descendants, then delete the lead itself
-(`--spawned-by <lead>` reaps what the lead spawned, not the lead):
+On any terminal for a ticket that reached the tree (`merged`/`deferred` here, or
+`abandoned` from the abort path above), reap the ticket's whole subtree **after**
+integration and free the tree for the next ticket. Scope to this ticket by its
+recorded lead sid — reap the lead's descendants (their worker sub-worktrees prune
+with them), then delete the lead itself, then return your tree to `{{trunk}}` and
+drop the branch. Each step is guarded so it is a safe no-op for a ticket that never
+got a branch or lead — a writer-died `blocked` from `spec_pending`, or a turn-1
+spawn death that `delegate.md` already cleaned up:
 
 ```bash
-lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-# Delete the lead's whole subtree (descendants first), then the lead. The branch
-# has landed on {{trunk}}, so pruning branches is safe.
-for s in $(waypoint sessions list --spawned-by "$lead" --recursive | jq -r '.sessions[].id'); do
-  waypoint sessions delete "$s" --force --prune-branches
-done
-waypoint sessions delete "$lead" --force --prune-branches                   # removes the lead's worktree
+lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
+if [ -n "$lead" ]; then
+  for s in $(waypoint sessions list --spawned-by "$lead" --recursive | jq -r '.sessions[].id'); do
+    waypoint sessions delete "$s" --force --prune-branches    # workers had sub-worktrees; prune them
+  done
+  waypoint sessions delete "$lead" --force      # the lead had no worktree (it shared your tree)
+fi
+git -C {{repo_dir}} checkout {{trunk}}
+git -C {{repo_dir}} pull --ff-only origin {{trunk}}           # sync trunk (the just-merged commit, if any)
+git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
+  && git -C {{repo_dir}} branch -D {{branch}} || true         # no-op if the branch was never cut / already dropped
 ```
 
 Post a one-line outcome to your `{{org_channel}}` channel and return to
-`templates/manager/loop-cycle.md`.
+`templates/manager/loop-cycle.md`. The tree is back on `{{trunk}}`, so the next
+`delegate` can proceed — and this is where the manager may redeploy the stack if the
+project needs it, since the tree now reflects merged trunk.

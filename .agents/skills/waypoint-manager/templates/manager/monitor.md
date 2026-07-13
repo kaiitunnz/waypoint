@@ -61,7 +61,7 @@ prior turn's variable — the item's subject carries `{{ticket_channel}}`. Read 
 answer (never injected — pull it), then post it to the durable log and nudge:
 
 ```bash
-item=$(waypoint inbox list --q "{{ticket_channel}}" | jq -r '.items[0].id')   # newest inbox item for this ticket
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}" | jq -r '.items[0].id')   # newest unanswered item for this ticket
 answer=$(waypoint inbox get "$item")                   # {"item": {...}} — branch on the block's answer
 waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
@@ -79,8 +79,9 @@ re-applies — the accepted tradeoff, since transition-first would risk a lost r
 
 ## Done / partial
 
-On `done`/`partial`, record the PR and move to `review_requested` — this **frees
-the slot** (the lead parks alive):
+On `done`/`partial`, record the PR and move to `review_requested`. The lead parks
+alive and idle, and the ticket keeps holding the shared tree until it lands or is
+abandoned (strict serial — a parked ticket does not free the tree for another):
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to review_requested \

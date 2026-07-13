@@ -1,0 +1,63 @@
+# waypoint-manager.yaml — project-local, version-controlled.
+#
+# Machine-relevant fields (trunk, concurrency, retry, priority, integration,
+# timeouts) are persisted server-side by `waypoint manager init --manifest
+# <this file>`, so `manager next`/`transition` enforce them. The role, board,
+# scale, and escalation fields are skill-consumed: the manager reads this file
+# directly for spawn config and policy. See references/config.md.
+
+project: waypoint
+trunk: main
+
+board:
+  tickets_channel: tickets              # intake + ticket:<id> registry cells
+  org_channel: org                      # human-visible summaries + lock:integration cell
+  ticket_channel_prefix: ticket-        # per-ticket channel: ticket-<id>
+
+concurrency:
+  execution_slots: 2                    # max tickets in delegated|building|revising
+  max_parked_leads: null                # optional cap on live-but-idle leads (null = unbounded)
+
+retry:
+  max_delegate_attempts: 3              # initial-spawn retry budget before blocked-awaiting-human
+  max_lead_restarts: 3                  # fresh-lead resumes after a lead death before blocked
+  backoff_seconds: 60                   # base backoff between re-delegations
+
+priority:
+  levels: [p0, p1, p2, p3]              # p0 highest
+  tiebreak: fifo                        # ties break oldest-first by created_at
+
+scale:
+  substantial_when: >-
+    needs a schema/API/UX change, touches more than one module, or has
+    ambiguous intent; otherwise trivial
+
+integration:
+  mode: pr                              # pr | local (manager is sole integrator either way)
+  require_ci_green: true
+
+timeouts:
+  human_latency_hours: 72               # awaiting-human (spec_review/blocked/review_requested) → escalate then abandon
+  lock_ttl_seconds: 900                 # integration lease TTL
+
+escalation:
+  self_decide: [retryable-error, unambiguous-clarification]
+  always_escalate: [product-decision, scope-change, irreversible, spec-ambiguity]
+
+roles:
+  manager:
+    # Runs unattended → an auto-approving posture so its own `sessions start` /
+    # `gh pr merge` tool calls do not block on an absent approver (see the
+    # Security note in references/config.md). dontAsk is claude_code's
+    # auto-approve mode; codex uses full_access, opencode uses allow.
+    launch: { backend: claude_code, model: "opus[1m]", permission_mode: dontAsk }
+    templates: templates/manager
+  prd_writer:
+    preset: writer-opus                 # must pre-exist; verified at setup
+    templates: templates/prd-writer
+  rfc_writer:
+    preset: writer-opus
+    templates: templates/rfc-writer
+  tech_lead:
+    preset: lead-opus-1m                # OR: launch: { backend: …, model: …, permission_mode: … }
+    templates: templates/tech-lead

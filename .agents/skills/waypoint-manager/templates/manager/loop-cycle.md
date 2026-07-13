@@ -85,8 +85,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 
 ## Invariants you cannot violate (the server rejects them with 409)
 
-- ≤ `execution_slots` tickets occupy the shared tree (`delegated` through
-  `merging`, including parked `blocked`/`review_requested`).
+- ≤ 1 ticket occupies the shared tree (`delegated` through `merging`, including
+  parked `blocked`/`review_requested`).
 - ≤ 1 ticket in `merging`; ≤ 1 in `spec_pending`.
 - `intended_lead_title` unique across live tickets.
 - `attempts ≤ max_delegate_attempts`, `lead_restarts ≤ max_lead_restarts`.

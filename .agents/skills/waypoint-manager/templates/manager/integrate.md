@@ -3,11 +3,8 @@
 A ticket is in `review_requested` with a PR at {{pr_url}}, or already in `merging`.
 You are the **sole integrator** of {{trunk}} and the human is the **sole merge
 authority**. Run the review-until-merge loop, then land the PR behind the
-integration lease. Never merge on your own authority.
-
-Because execution is strictly serial on your shared tree, this ticket is the only
-one occupying it — no other lead is building while you rebase or merge, and
-`{{branch}}` is the branch checked out in {{repo_dir}}.
+integration lease. Never merge on your own authority. `{{branch}}` is checked out in
+{{repo_dir}}.
 
 ## Review-until-merge loop (human gated)
 
@@ -22,9 +19,7 @@ one occupying it — no other lead is building while you rebase or merge, and
      move `revising → review_requested` and re-post the gate on the new head.
    - **merge** → go to "Land the PR" below.
    - **abort / latency-timeout** → `review_requested → abandoned`, note it on the
-     ticket, then reap the subtree and release the tree (the same steps as
-     "Finalize" below — abandoning an on-tree ticket must return the tree to
-     `{{trunk}}` and drop its branch, or the next delegate starts on a dead branch).
+     ticket, then reap the subtree and release the tree (Finalize steps below).
 3. Loop until the human merges or aborts.
 
 ## Land the PR (only on a human merge decision)
@@ -53,9 +48,8 @@ git -C {{repo_dir}} fetch origin {{trunk}}
 git -C {{repo_dir}} rebase origin/{{trunk}}
 # Trivial conflicts only (lockfiles, generated files): resolve, `git add`, `git rebase --continue`.
 # A SEMANTIC conflict → `git rebase --abort` and release the lease (`manager lock
-#   release`). Transition `merging → revising` and relay the conflict to the lead,
-#   which resumes on the branch already checked out in your tree — no new slot is
-#   needed, this ticket already holds the tree. Do NOT hand-resolve logic yourself.
+#   release`), transition `merging → revising`, and relay the conflict to the lead.
+#   Do NOT hand-resolve logic yourself.
 git -C {{repo_dir}} push --force-with-lease
 ```
 
@@ -97,9 +91,8 @@ On any terminal for a ticket that reached the tree (`merged`/`deferred` here, or
 integration and free the tree for the next ticket. Scope to this ticket by its
 recorded lead sid — reap the lead's descendants (their worker sub-worktrees prune
 with them), then delete the lead itself, then return your tree to `{{trunk}}` and
-drop the branch. Each step is guarded so it is a safe no-op for a ticket that never
-got a branch or lead — a writer-died `blocked` from `spec_pending`, or a turn-1
-spawn death that `delegate.md` already cleaned up:
+drop the branch. Each step is guarded (no-op when the ticket never got a branch or
+lead):
 
 ```bash
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
@@ -116,6 +109,5 @@ git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
 ```
 
 Post a one-line outcome to your `{{org_channel}}` channel and return to
-`templates/manager/loop-cycle.md`. The tree is back on `{{trunk}}`, so the next
-`delegate` can proceed — and this is where the manager may redeploy the stack if the
-project needs it, since the tree now reflects merged trunk.
+`templates/manager/loop-cycle.md`; redeploy the stack here if the project needs it
+(the tree is back on `{{trunk}}`).

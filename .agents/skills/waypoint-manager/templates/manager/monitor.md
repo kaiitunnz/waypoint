@@ -71,17 +71,15 @@ waypoint sessions send "$lead" \
 
 Then transition out of the awaiting state — `blocked → building` (answer relayed),
 or `spec_review → ready`. `awaiting_since` clears automatically on exit. Each relay
-is a `kind=relay` post; the lead consumes them in board-entry-`id` order and applies
-each once, so a duplicate nudge is harmless, and if the lead is dead the relay stays
-on the log for its replacement to read. The relay is posted before the exit
-transition; a crash between re-posts it under a higher id, which the lead harmlessly
-re-applies — the accepted tradeoff, since transition-first would risk a lost relay.
+is a `kind=relay` post the lead consumes in board-entry-`id` order, applying each
+once. Post the relay before the exit transition (a re-post lands under a higher id
+and the lead re-applies it once).
 
 ## Done / partial
 
 On `done`/`partial`, record the PR and move to `review_requested`. The lead parks
-alive and idle, and the ticket keeps holding the shared tree until it lands or is
-abandoned (strict serial — a parked ticket does not free the tree for another):
+alive and idle; the ticket keeps holding the shared tree until it lands or is
+abandoned:
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to review_requested \

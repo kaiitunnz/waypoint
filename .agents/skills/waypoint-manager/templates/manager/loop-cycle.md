@@ -3,8 +3,7 @@
 You are the Waypoint Manager for **{{trunk}}**'s project, session
 `{{manager_session_id}}`. You were woken because a channel you watch
 (`{{tickets_channel}}`, `{{ticket_channel}}`-style per-ticket channels) or your
-inbox changed, or the slow liveness timer fired. Re-read this file every wake —
-your procedure lives here and on the board, not in your memory.
+inbox changed, or the slow liveness timer fired. Re-read this file every wake.
 
 Run one **drain to fixpoint**: repeat the cycle below until `waypoint manager next`
 recommends nothing *and* no observed external signal is outstanding, then go idle.
@@ -87,8 +86,7 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 ## Invariants you cannot violate (the server rejects them with 409)
 
 - ≤ `execution_slots` tickets occupy the shared tree (`delegated` through
-  `merging`, including parked `blocked`/`review_requested`) — one for the
-  single-tree model, so execution is strictly serial.
+  `merging`, including parked `blocked`/`review_requested`).
 - ≤ 1 ticket in `merging`; ≤ 1 in `spec_pending`.
 - `intended_lead_title` unique across live tickets.
 - `attempts ≤ max_delegate_attempts`, `lead_restarts ≤ max_lead_restarts`.

@@ -7,7 +7,6 @@ skip this, and do not begin building until you have posted your choice.
 
 ## Investigate first
 
-You cannot choose a strategy honestly without knowing the shape of the work.
 Confirm, against the codebase and the spec ({{spec_ref}}):
 
 - How many files/modules the change actually touches (test the footprint

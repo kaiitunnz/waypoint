@@ -18,18 +18,16 @@ codebase.
 
 ## Read-only in a shared tree
 
-You run in the manager's working tree, which may have another ticket's work checked
-out on a feature branch with uncommitted edits. **Ignore it** — do not switch
-branches, do not modify or stage any tracked file, do not run git. Read files for
-understanding, treating the committed trunk state as the baseline; a tech-lead is
-building in this tree in parallel, and your only write is your spec doc.
+The tree may have another ticket's work checked out with uncommitted edits.
+**Read-only**: do not switch branches, modify or stage any tracked file, or run git.
+Read files for understanding, treating committed trunk as the baseline. Your only
+write is your spec doc.
 
 ## Write the RFC
 
 Write the document as a single Markdown file under **`.waypoint/specs/`** (e.g.
-`.waypoint/specs/rfc-{{ticket_id}}-<slug>.md`) — a gitignored scratch path, so it
-never lands in the parallel lead's commits. Investigate the codebase first — an RFC
-that misstates the current state is worse than none. Cover, in order:
+`.waypoint/specs/rfc-{{ticket_id}}-<slug>.md`). Investigate the codebase first — an
+RFC that misstates the current state is worse than none. Cover, in order:
 
 1. **Summary** — the change in a paragraph.
 2. **Motivation & current state** — the problem, and the load-bearing facts about
@@ -57,9 +55,8 @@ Pick the **lightest** strategy that fits, and justify it:
 
 ## Post the result back and stop
 
-Post **keyless** (append-log) entries, not a `--key` cell — you are ephemeral and
-will be reaped, and a keyed cell is pruned with its author, whereas a keyless log
-post is durable history the manager reads with `board log`:
+Post **keyless** (append-log) entries, not a `--key` cell — a keyed cell is pruned
+with its author when you are reaped:
 
 ```bash
 waypoint board post {{ticket_channel}} \

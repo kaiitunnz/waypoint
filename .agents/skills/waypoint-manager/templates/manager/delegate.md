@@ -1,12 +1,9 @@
 # Manager — delegate
 
-A ticket is `ready` and `manager next` recommended `delegate` (so the shared
-working tree is free and the `attempts` budget is not exhausted). The tech-lead
-runs **in your own working tree {{repo_dir}}** on the ticket branch — there is no
-per-ticket worktree. Execution is strictly serial: one ticket holds the tree from
-here through a terminal state, so `manager next` will not recommend a second
-delegate until this one lands or is abandoned. **Record intent before spawning**
-so a crash resumes rather than double-spawns.
+A ticket is `ready` and `manager next` recommended `delegate`. The tech-lead runs
+**in your own working tree {{repo_dir}}** on the ticket branch — there is no
+per-ticket worktree. **Record intent before spawning** so a crash resumes rather
+than double-spawns.
 
 The ticket already carries the `spec_ref` triage set — a produced-and-approved
 PRD/RFC, a pass-through input PRD/RFC, or none (trivial direct-instruction). The
@@ -52,15 +49,14 @@ waypoint manager ticket transition {{ticket_id}} --to delegated \
   --branch {{branch}}
 ```
 
-This bumps `attempts` and reserves the unique title (the invariant now rejects any
-second ticket claiming it). If the turn dies here, the next drain sees a
-`delegated` ticket with no live lead and re-spawns into the reserved title —
-exactly once.
+Bumps `attempts` and reserves the unique title. If the turn dies here, the next
+drain sees a `delegated` ticket with no live lead and re-spawns into the reserved
+title exactly once.
 
 ## 3. Cut the branch in your tree, then spawn the lead
 
-The tree is on `{{trunk}}` (strict serial guarantees it is free). Cut the ticket
-branch, then spawn the lead into your tree with **no** `--worktree`:
+The tree is on `{{trunk}}`. Cut the ticket branch, then spawn the lead into your
+tree with **no** `--worktree`:
 
 ```bash
 git -C {{repo_dir}} checkout {{trunk}}

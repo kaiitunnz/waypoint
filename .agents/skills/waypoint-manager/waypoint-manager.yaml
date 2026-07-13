@@ -16,9 +16,8 @@ board:
   ticket_channel_prefix: ticket-          # per-ticket channel is <prefix><id>, e.g. ticket-42 ({{ticket_channel}})
 
 concurrency:
-  execution_slots: 1                      # tickets that may occupy the shared working tree at once (delegated..merging).
-                                          # The tech-lead builds in the manager's own tree, so this is 1: strictly serial
-                                          # execution. Only read-only PRD/RFC writers run in parallel (off-tree).
+  execution_slots: 1                      # tickets that may occupy the shared working tree at once (delegated..merging);
+                                          # 1 = strictly serial. Only read-only PRD/RFC writers run in parallel (off-tree).
 
 retry:
   max_delegate_attempts: 3                # initial-spawn retries before blocked-awaiting-human

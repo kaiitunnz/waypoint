@@ -2,9 +2,7 @@
 
 A ticket is in `intake` (a user posted it to `{{tickets_channel}}`, or you created
 it). Triage classifies its **input type**, assigns a **scale** and a coarse
-**footprint**, then routes it. Serial: only one ticket may be in `spec_pending` at
-a time, so `manager next` will not recommend a second spec-authoring route until
-the current one clears.
+**footprint**, then routes it.
 
 ## Read the ticket
 
@@ -40,13 +38,12 @@ and cannot skip a gate: every ticket routed to `spec_pending` to author a PRD/RF
 passes the `spec_review` human gate. What scale governs is the bug-report branch
 below (a trivial fix takes the direct-instruction `triaged → ready` path with no
 spec; a non-trivial one is specced) and, for a PRD input, whether it is small
-enough to reduce to an RFC. Estimate a **coarse footprint** — the path globs the work will likely touch — from
-the body and a quick look at the repo. It is recorded for observability; scheduling
-is priority + FIFO (conflict-aware use of the footprint is a future addition), so
-overlapping tickets are caught at the integration rebase rather than pre-ordered.
+enough to reduce to an RFC. Estimate a **coarse footprint** — the path globs the work
+will likely touch — from the body and a quick look at the repo. Recorded for
+observability; scheduling is priority + FIFO.
 
-Record the scale **on the `intake → triaged` transition** so it lands atomically — a
-crash can't strand a triaged ticket with no scale — then set the coarse footprint:
+Record the scale **on the `intake → triaged` transition**, then set the coarse
+footprint:
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to triaged --scale {{scale}}
@@ -81,8 +78,7 @@ artifact (still ≤ 1 ticket in `spec_pending` at a time — the server enforces
   waypoint manager ticket transition {{ticket_id}} --to spec_pending
   ```
 - **→ ready, pass-through** (input is already a usable spec) — record the input doc
-  as the spec and go straight to `ready`: no writer, no `spec_review` gate (the
-  human authored the doc, so there is nothing for them to re-approve).
+  as the spec and go straight to `ready`: no writer, no `spec_review` gate.
   `templates/manager/delegate.md` spawns the tech-lead with this `spec_ref`. Point
   `--spec-ref` at where the doc lives — a repo path if the user gave one, else the
   `ticket:{{ticket_id}}` cell on `{{tickets_channel}}` (the body *is* the spec).
@@ -116,12 +112,9 @@ waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
 ## Spawn the writer (spec_pending routes only)
 
 For a `prd-writer` or `rfc-writer` route, spawn the matching writer — ephemeral,
-owner-scoped, titled for reconcile. It runs in your tree ({{repo_dir}}) to read the
-codebase but is **read-only**: it writes only its spec doc under `.waypoint/specs/`
-and touches no tracked file or branch, so it runs safely in parallel with a
-tech-lead building another ticket. Spec authoring therefore does not occupy the tree
-and never blocks a delegate. The `role` (title suffix + template dir) is the
-`spec_route`:
+owner-scoped, titled for reconcile; read-only in your tree ({{repo_dir}}), writing
+only its spec doc under `.waypoint/specs/`. The `role` (title suffix + template dir)
+is the `spec_route`:
 
 ```bash
 role=<prd-writer|rfc-writer>          # from spec_route

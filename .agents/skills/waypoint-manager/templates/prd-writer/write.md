@@ -16,17 +16,15 @@ product definition first; technical design (an RFC) comes later, from your PRD.
 
 ## Read-only in a shared tree
 
-You run in the manager's working tree, which may have another ticket's work checked
-out on a feature branch with uncommitted edits. **Ignore it** — do not switch
-branches, do not modify or stage any tracked file, do not run git. Read files for
-understanding, treating the committed trunk state as the baseline; a tech-lead is
-building in this tree in parallel, and your only write is your spec doc.
+The tree may have another ticket's work checked out with uncommitted edits.
+**Read-only**: do not switch branches, modify or stage any tracked file, or run git.
+Read files for understanding, treating committed trunk as the baseline. Your only
+write is your spec doc.
 
 ## Write the PRD
 
 Write the document as a single Markdown file under **`.waypoint/specs/`** (e.g.
-`.waypoint/specs/prd-{{ticket_id}}-<slug>.md`) — a gitignored scratch path, so it
-never lands in the parallel lead's commits. Cover, in order:
+`.waypoint/specs/prd-{{ticket_id}}-<slug>.md`). Cover, in order:
 
 1. **Problem & context** — the user problem, who has it, why it matters now. Ground
    it in the request above and a quick look at the codebase, not speculation.
@@ -58,9 +56,8 @@ strategy gate. Pick the **lightest** strategy that fits, and say why:
 Post the spec ref, refined footprint, and recommendation to the ticket channel,
 then go idle:
 
-Post **keyless** (append-log) entries, not a `--key` cell — you are ephemeral and
-will be reaped, and a keyed cell is pruned with its author, whereas a keyless log
-post is durable history the manager reads with `board log`:
+Post **keyless** (append-log) entries, not a `--key` cell — a keyed cell is pruned
+with its author when you are reaped:
 
 ```bash
 waypoint board post {{ticket_channel}} \

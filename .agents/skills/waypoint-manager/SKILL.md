@@ -13,9 +13,6 @@ serial — monitor the build over the board, escalate blockers and every merge t
 human through the inbox, integrate merged work as the sole integrator of trunk, then
 loop.
 
-This file plus the per-step templates are the procedure to run; the manifest
-(`waypoint-manager.yaml`) documents every config field and placeholder inline.
-
 ## Setup
 
 You run in the project's working tree — your own cwd, `{{repo_dir}}`. Every
@@ -49,28 +46,11 @@ never a `create`/`install`.
 
 Every wake drains all currently-actionable work to a fixpoint, then idles — it does
 not take one action and stop. Keep a per-drain `tried` set of ticket ids that failed
-an action this drain. Each iteration:
-
-1. **Re-anchor.** `waypoint manager next --json` (add `--tried <id>` per id already
-   in `tried`) for `slots`, each ticket's `legal_transitions`, and the single
-   `recommended` action. Re-read `templates/manager/loop-cycle.md` so the procedure
-   is re-injected, not remembered. No recommendation and no outstanding external
-   signal → the drain is done; go idle.
-2. **Reconcile — adopt reality before acting.** Re-read the board (`{{tickets_channel}}`
-   and each in-flight ticket's `status` cell by key; relay logs by `--since`); list
-   spawned sessions (`--spawned-by "$WAYPOINT_SESSION_ID" --recursive`) and match
-   `subagent:ticket-<id>:<role>` titles; check `gh pr view` for already-merged PRs;
-   check lead liveness in every live-lead state.
-3. **Choose one action** — the highest-priority of the `recommended` pull move or an
-   external edge reconcile surfaced (spec posted, human answer, done/partial, human
-   merge, dead lead, merged PR).
-4. **Record intent before the side effect** — transition first, carrying the dedup
-   key (`--intended-lead-title` / `--branch` / `--pr-url`), then act.
-5. **Act idempotently** — spawn only if no live same-title session exists; relay via
-   a versioned board post + a content-free nudge; `gh pr merge` only if not already
-   `MERGED`. Route to the per-step template (below).
-6. **Confirm** — write resulting ids back onto the ticket. On a failed delegate, add
-   the id to `tried` and continue. Loop to step 1.
+an action this drain. Each iteration: re-anchor (`waypoint manager next --json`, with
+`--tried <id>` per tried id), reconcile observed reality, choose one action, record
+intent before the side effect, act idempotently, confirm. Re-read
+`templates/manager/loop-cycle.md` every wake for the step-by-step procedure. No
+recommendation and no outstanding external signal → go idle.
 
 A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
 Trust `manager next` and the board over memory; a `waypoint` CLI connection error
@@ -127,6 +107,6 @@ Substitute these before sending a template; never hardcode a preset or channel.
 - **One tree, strictly serial; integrate as the sole integrator.** Every ticket
   builds on its own branch in your one shared tree, one at a time — a ticket holds
   the tree from `delegated` through a terminal state (parked `blocked`/
-  `review_requested` included), so the next delegate waits until it lands or is
-  abandoned. Trunk advances only through the manager behind the `integration` lease.
-  Read-only PRD/RFC writers are the one thing that runs in parallel.
+  `review_requested` included). Trunk advances only through the manager behind the
+  `integration` lease. Read-only PRD/RFC writers are the one thing that runs in
+  parallel.

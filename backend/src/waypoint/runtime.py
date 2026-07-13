@@ -416,10 +416,15 @@ class SessionRuntime:
         # sessions owed a wake that were not deliverable when a matching mutation
         # arrived; the broadcast-loop observer fires them on the next deliverable
         # edge. Membership alone encodes "owed a wake" — no prior-status map.
-        # ``_wake_tasks`` tracks the non-blocking dispatch tasks so a poster's
-        # request latency never includes a subscriber's (possibly slow) send.
+        # ``_wake_tasks`` tracks the non-blocking dispatch/delivery tasks so a
+        # poster's request latency never includes a subscriber's (possibly slow)
+        # send, and neither does the broadcast-loop drain. ``_wake_in_flight``
+        # serializes delivery per session: while a wake is being sent, a second
+        # is deferred rather than concurrently injected (a double ``send_input``
+        # garbles a tty transport).
         self._pending_wakes: set[str] = set()
         self._wake_tasks: set[asyncio.Task[None]] = set()
+        self._wake_in_flight: set[str] = set()
         # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
         # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
         # loop below is the only thing that publishes onto the broadcast hub.
@@ -3473,7 +3478,8 @@ class SessionRuntime:
         )
         # Self-exclusion: the author is never woken by its own post; the
         # non-authored mutations (clear/delete/prune) pass ``None`` and wake
-        # every matching subscriber.
+        # every matching subscriber. Board wakes are glob-scoped, not owner-
+        # scoped, so no ``owner_session_id``.
         self._spawn_wake_dispatch(
             channel=channel, is_inbox=False, actor_session_id=author_session_id
         )
@@ -3618,9 +3624,14 @@ class SessionRuntime:
             ),
             inbox_id=item.id,
         )
-        # Wake inbox subscribers (self-excluding the mutating actor).
+        # Wake only the item's owner — the session that filed it and waits on a
+        # reply — self-excluding the mutating actor. ``from_session_id`` is ""
+        # for a human-posted item, which owns no session and so wakes nobody.
         self._spawn_wake_dispatch(
-            channel=None, is_inbox=True, actor_session_id=actor_session_id
+            channel=None,
+            is_inbox=True,
+            actor_session_id=actor_session_id,
+            owner_session_id=item.from_session_id or None,
         )
 
     async def _publish_inbox_deleted(self, item_id: str) -> None:
@@ -3664,26 +3675,35 @@ class SessionRuntime:
         return self.storage.delete_wake_subscription(sub_id)
 
     def _spawn_wake_dispatch(
-        self, *, channel: str | None, is_inbox: bool, actor_session_id: str | None
+        self,
+        *,
+        channel: str | None,
+        is_inbox: bool,
+        actor_session_id: str | None,
+        owner_session_id: str | None = None,
     ) -> None:
         # Non-blocking: a poster's request latency must not include a
-        # subscriber's ``send_input`` (slow for SSH transports). There is no
-        # debounce yet; two mutations landing while a subscriber is IDLE can each
-        # fire a wake before the first flips it to RUNNING. Low-impact — the wake
-        # is content-free and the woken drain is idempotent — but a per-session
-        # in-flight guard is a tracked follow-up.
+        # subscriber's ``send_input`` (slow for SSH transports). Delivery is
+        # serialized per session by ``_fire_wake``, so two mutations landing
+        # while a subscriber is IDLE cannot double-send to one tty.
         task = asyncio.create_task(
             self._dispatch_subscription_wakes(
                 channel=channel,
                 is_inbox=is_inbox,
                 actor_session_id=actor_session_id,
+                owner_session_id=owner_session_id,
             )
         )
         self._wake_tasks.add(task)
         task.add_done_callback(self._wake_tasks.discard)
 
     async def _dispatch_subscription_wakes(
-        self, *, channel: str | None, is_inbox: bool, actor_session_id: str | None
+        self,
+        *,
+        channel: str | None,
+        is_inbox: bool,
+        actor_session_id: str | None,
+        owner_session_id: str | None = None,
     ) -> None:
         for sub in self.storage.list_wake_subscriptions():
             if actor_session_id is not None and sub.session_id == actor_session_id:
@@ -3691,10 +3711,14 @@ class SessionRuntime:
             if is_inbox:
                 if not sub.wake_on_inbox:
                     continue
+                # Owner-scoped: only the session that filed the item is woken on
+                # a reply/read; a broad inbox mutation with no owner wakes nobody.
+                if owner_session_id is None or sub.session_id != owner_session_id:
+                    continue
             elif not self._board_glob_matches(channel, sub.channel_globs):
                 continue
             try:
-                await self._wake_or_defer(sub.session_id)
+                self._wake_or_defer(sub.session_id)
             except Exception:
                 log.exception("wake dispatch failed", extra={"session": sub.session_id})
 
@@ -3708,7 +3732,7 @@ class SessionRuntime:
             return True
         return any(fnmatch.fnmatch(channel, glob) for glob in globs)
 
-    async def _wake_or_defer(self, session_id: str) -> None:
+    def _wake_or_defer(self, session_id: str) -> None:
         session = self.storage.get_session(session_id)
         if session is None:
             return
@@ -3716,13 +3740,35 @@ class SessionRuntime:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             return
         if self._wake_eligible(session):
-            await self.handle_input(
-                session_id, SessionInputRequest(text=WAKE_INPUT_TEXT)
-            )
+            self._fire_wake(session_id)
         else:
             # RUNNING / STARTING / INTERRUPTED / WAITING_INPUT-awaiting-approval:
             # defer to the deliverable edge (the broadcast-loop observer).
             self._pending_wakes.add(session_id)
+
+    def _fire_wake(self, session_id: str) -> None:
+        # Serialize delivery per session: while a wake is in flight, defer a
+        # second to the next deliverable edge rather than concurrently inject it
+        # (two ``send_input`` calls garble a tty transport). Delivery runs in a
+        # tracked task so no caller — request path or broadcast loop — blocks on
+        # the send.
+        if session_id in self._wake_in_flight:
+            self._pending_wakes.add(session_id)
+            return
+        self._wake_in_flight.add(session_id)
+        task = asyncio.create_task(self._deliver_wake(session_id))
+        self._wake_tasks.add(task)
+        task.add_done_callback(self._wake_tasks.discard)
+
+    async def _deliver_wake(self, session_id: str) -> None:
+        try:
+            await self.handle_input(
+                session_id, SessionInputRequest(text=WAKE_INPUT_TEXT)
+            )
+        except Exception:
+            log.exception("wake delivery failed", extra={"session": session_id})
+        finally:
+            self._wake_in_flight.discard(session_id)
 
     def _wake_eligible(self, session: SessionRecord) -> bool:
         if session.status == SessionStatus.IDLE:
@@ -3736,10 +3782,12 @@ class SessionRuntime:
         except Exception:
             return False
 
-    async def _drain_pending_wakes(self, dirty_ids: set[str]) -> None:
+    def _drain_pending_wakes(self, dirty_ids: set[str]) -> None:
         # Called from the broadcast-loop drain: fire any owed wake whose session
-        # just reached a deliverable edge. Atomic within the single-threaded
-        # loop; a mutation during the woken turn re-adds to ``_pending_wakes``.
+        # just reached a deliverable edge. Synchronous and non-blocking — the
+        # send runs in a tracked task via ``_fire_wake`` so the broadcast loop
+        # is never held on it. A mutation during the woken turn re-adds to
+        # ``_pending_wakes``.
         for session_id in dirty_ids & self._pending_wakes:
             session = self.storage.get_session(session_id)
             if session is None or session.status in {
@@ -3751,14 +3799,7 @@ class SessionRuntime:
             if not self._wake_eligible(session):
                 continue  # still non-deliverable; wait for the next edge
             self._pending_wakes.discard(session_id)
-            try:
-                await self.handle_input(
-                    session_id, SessionInputRequest(text=WAKE_INPUT_TEXT)
-                )
-            except Exception:
-                log.exception(
-                    "pending wake delivery failed", extra={"session": session_id}
-                )
+            self._fire_wake(session_id)
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -4850,7 +4891,7 @@ class SessionRuntime:
                 await self._broadcast_session_list()
             # Deliver any owed wake whose session just reached a deliverable edge.
             if self._pending_wakes:
-                await self._drain_pending_wakes(dirty_ids)
+                self._drain_pending_wakes(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
         if not self.settings.write_structured_log:

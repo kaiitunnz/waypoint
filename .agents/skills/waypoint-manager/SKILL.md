@@ -67,10 +67,10 @@ resolve every path through the manifest, not the default literally. A
 `templates/<role>/<step>.md` reference (here or inside any template) means the
 `<step>` file in that role's `templates:` dir. Render one with `waypoint manager
 render <path> --ticket {{ticket_id}}`: it fills the file's `{{placeholders}}` from
-the manifest, the ticket record, and the ticket's board cell and prints the body,
-which you pipe into `sessions send`. It fails on an unknown placeholder; pass `--set
-key=value` for a runtime binding the ticket does not yet carry. `{{manager_session_id}}`
-is your own session id (`$WAYPOINT_SESSION_ID`).
+the environment (`{{repo_dir}}`, `{{manager_session_id}}`), the manifest, the ticket
+record, and the ticket's board cell, and prints the body, which you pipe into
+`sessions send`. It fails on an unknown placeholder; pass `--set key=value` for a
+runtime binding the ticket does not yet carry.
 
 - **manager** (`roles.manager.templates`) — `loop-cycle` (loop entry), `triage`
   (route by input type), `delegate` (spawn a lead for a `ready` ticket), `monitor`

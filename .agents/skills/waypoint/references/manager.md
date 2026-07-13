@@ -59,7 +59,8 @@ stdout (pipe it into `sessions send`). Resolves lowest precedence first: env
 (`repo_dir`, `manager_session_id`) < `--manifest` (trunk, channels) < the `--ticket`
 record < the ticket's board cell (`ticket_body`, `input_type`, `spec_route`) <
 `--set`. `--manifest` defaults to `$WAYPOINT_MANAGER_MANIFEST`. Fails on an unknown
-placeholder unless `--allow-unresolved`. Runs entirely CLI-side.
+placeholder unless `--allow-unresolved`. Substitution runs CLI-side over the manifest
+file and existing endpoints; the server has no knowledge of templates or placeholders.
 
 ## Notes
 

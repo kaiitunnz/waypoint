@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.2](https://github.com/kaiitunnz/waypoint/compare/v0.9.1...v0.9.2) (2026-07-12)
+
+
+### Features
+
+* add maintenance rebuild-telemetry command to re-run backfill ([#302](https://github.com/kaiitunnz/waypoint/issues/302)) ([14043e9](https://github.com/kaiitunnz/waypoint/commit/14043e95edad78dfeca352547ac7e15fecb91801))
+* durable, observable NL-insight regeneration status ([#303](https://github.com/kaiitunnz/waypoint/issues/303)) ([44788a4](https://github.com/kaiitunnz/waypoint/commit/44788a4761655e7a12d9e3e002bab967f5165b5f))
+
+
+### Bug Fixes
+
+* add instance health and capacity telemetry ([#301](https://github.com/kaiitunnz/waypoint/issues/301)) ([b236e22](https://github.com/kaiitunnz/waypoint/commit/b236e2292513a5258419c08563d5de75c030be32))
+* isolate /btw side-questions from built-in and MCP tools ([#298](https://github.com/kaiitunnz/waypoint/issues/298)) ([b661065](https://github.com/kaiitunnz/waypoint/commit/b661065c9a9ca361c4227719a69a10f1b15e4e0c))
+* keep light terminal white slot light for ANSI themes ([#300](https://github.com/kaiitunnz/waypoint/issues/300)) ([fdd600c](https://github.com/kaiitunnz/waypoint/commit/fdd600cb11b7192dcb052fea54104ba3cab19931))
+
+
+### Miscellaneous Chores
+
+* release 0.9.2 ([7472cd3](https://github.com/kaiitunnz/waypoint/commit/7472cd3fc017b1562e8bb821b5a8d8916ad8c3fa))
+
 ## [0.9.1](https://github.com/kaiitunnz/waypoint/compare/v0.9.0...v0.9.1) (2026-07-12)
 
 

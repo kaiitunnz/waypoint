@@ -3769,6 +3769,15 @@ class SessionRuntime:
             log.exception("wake delivery failed", extra={"session": session_id})
         finally:
             self._wake_in_flight.discard(session_id)
+            # A wake that arrived while this one was in flight was parked in
+            # ``_pending_wakes``. Re-drive it now instead of relying on a later
+            # broadcast-loop edge — a delivery that failed (or otherwise changed
+            # no status) never produces one, which would strand the parked wake.
+            # ``_drain_pending_wakes`` clears the entry before re-firing and
+            # re-checks eligibility, so this spends at most one retry per parked
+            # wake and a persistently failing send cannot spin.
+            if session_id in self._pending_wakes:
+                self._drain_pending_wakes({session_id})
 
     def _wake_eligible(self, session: SessionRecord) -> bool:
         if session.status == SessionStatus.IDLE:

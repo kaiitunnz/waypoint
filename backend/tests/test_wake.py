@@ -252,6 +252,50 @@ async def test_wake_in_flight_defers_concurrent_second(tmp_path, monkeypatch) ->
 
     release.set()
     await _flush_wakes(runtime)
+    # The deferred wake is delivered once the first completes — not stranded.
+    assert calls == ["codex-sub", "codex-sub"]
+    assert runtime._pending_wakes == set()
+    assert runtime._wake_in_flight == set()
+
+
+@pytest.mark.asyncio
+async def test_deferred_wake_survives_failed_in_flight_delivery(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "codex-sub"))
+    _register(runtime, "codex-sub", channel_globs=["tickets"])
+
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    calls: list[str] = []
+    attempt = {"n": 0}
+
+    async def flaky_handle_input(
+        session_id: str, request: SessionInputRequest
+    ) -> SessionRecord:
+        calls.append(session_id)
+        if attempt["n"] == 0:
+            attempt["n"] += 1
+            started.set()
+            await gate.wait()
+            raise RuntimeError("transient transport error")
+        return runtime.storage.get_session(session_id)  # type: ignore[return-value]
+
+    monkeypatch.setattr(runtime, "handle_input", flaky_handle_input)
+
+    runtime._fire_wake("codex-sub")  # first delivery — will fail
+    await started.wait()
+    runtime._fire_wake("codex-sub")  # deferred behind the in-flight failure
+    assert runtime._pending_wakes == {"codex-sub"}
+
+    # The in-flight delivery now raises without changing the session's status,
+    # so no broadcast edge is produced. The parked wake must not be stranded:
+    # it is re-driven from the failed delivery's ``finally``.
+    gate.set()
+    await _flush_wakes(runtime)
+    assert calls == ["codex-sub", "codex-sub"]
+    assert runtime._pending_wakes == set()
     assert runtime._wake_in_flight == set()
 
 

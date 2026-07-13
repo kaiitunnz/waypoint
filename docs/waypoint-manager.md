@@ -89,6 +89,7 @@ an illegal step — the backend rejects it with a `409`.
 
 ```
 waypoint manager init --manifest <path>                  # persist machine-relevant config
+waypoint manager render <template> [--manifest <path>] [--ticket <id>] [--set k=v]... [--allow-unresolved]
 waypoint manager state [--json]                          # whole ticket set + slots + lease
 waypoint manager next [--tried <id>]... [--json]         # re-anchor
 waypoint manager ticket add <title> [--id] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
@@ -536,6 +537,15 @@ manager's own working tree, where every lead builds.
 | `{{writer_launch}}` | the matching writer role (`roles.prd_writer` / `roles.rfc_writer`) launch args |
 | `{{repo_dir}}` | the manager's own working tree (its cwd) |
 | `{{manager_session_id}}` | `$WAYPOINT_SESSION_ID` |
+
+`waypoint manager render <template> --ticket <id>` performs the substitution and
+prints the body, which the templates pipe into `sessions send`. It resolves each
+placeholder lowest precedence first — env (`{{repo_dir}}`, `{{manager_session_id}}`)
+< manifest (`{{trunk}}` and the channels) < the ticket record < the ticket's board
+cell (`{{ticket_body}}`, `{{input_type}}`, `{{spec_route}}`) < a `--set key=value`
+override — and fails on an unknown placeholder unless `--allow-unresolved`, so a
+literal `{{…}}` never reaches a subagent. It runs entirely CLI-side over the manifest
+file and existing endpoints; the server has no knowledge of templates or placeholders.
 
 ## Portability
 

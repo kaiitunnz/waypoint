@@ -23,8 +23,9 @@ is present before entering the loop. A missing prerequisite is a halt-and-flag,
 never a `create`/`install`.
 
 1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
-   (idempotent). Read the manifest — its `board`, `roles`, `scale`, and `escalation`
-   drive the steps below.
+   (idempotent), and `export WAYPOINT_MANAGER_MANIFEST=<path-to>/waypoint-manager.yaml`
+   so `manager render` finds it without a repeated `--manifest`. Read the manifest —
+   its `board`, `roles`, `scale`, and `escalation` drive the steps below.
 2. **Register the wake** on the intake channel, all per-ticket channels, and inbox
    answers:
    ```bash
@@ -64,10 +65,12 @@ manifest**. The shipped defaults are `templates/manager/`, `templates/tech-lead/
 `templates/prd-writer/`, `templates/rfc-writer/`, but a manifest may relocate them —
 resolve every path through the manifest, not the default literally. A
 `templates/<role>/<step>.md` reference (here or inside any template) means the
-`<step>` file in that role's `templates:` dir. `$(render <path>)` is shorthand —
-substitute this ticket's `{{placeholders}}` into that file and send the text as the
-message body; it is not a shell command. `{{manager_session_id}}` is your own session
-id (`$WAYPOINT_SESSION_ID`).
+`<step>` file in that role's `templates:` dir. Render one with `waypoint manager
+render <path> --ticket {{ticket_id}}`: it fills the file's `{{placeholders}}` from
+the manifest, the ticket record, and the ticket's board cell and prints the body,
+which you pipe into `sessions send`. It fails on an unknown placeholder; pass `--set
+key=value` for a runtime binding the ticket does not yet carry. `{{manager_session_id}}`
+is your own session id (`$WAYPOINT_SESSION_ID`).
 
 - **manager** (`roles.manager.templates`) — `loop-cycle` (loop entry), `triage`
   (route by input type), `delegate` (spawn a lead for a `ready` ticket), `monitor`

@@ -32,7 +32,7 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
     --spawner-session-id {{manager_session_id}} | jq -r .session.id)   # never --worktree: the lead shares your tree
   waypoint manager ticket update {{ticket_id}} --lead-session-id "$new"
   waypoint sessions wake-on-board "$new" --channels {{ticket_channel}}   # relays wake it; the manager owns the inbox
-  waypoint sessions send "$new" "$(render templates/tech-lead/kickoff.md)"   # re-reads the log + owed relays
+  waypoint sessions send "$new" "$(waypoint manager render templates/tech-lead/kickoff.md --ticket {{ticket_id}})"
   ```
   Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate `--to blocked`.
 - A stale `{{branch}}` from an incomplete reap with **no** live session → delete it
@@ -88,7 +88,7 @@ git -C {{repo_dir}} checkout {{trunk}} && git -C {{repo_dir}} branch -D {{branch
 Render the tech-lead kickoff with this ticket's values and send it:
 
 ```bash
-waypoint sessions send "$sid" "$(render templates/tech-lead/kickoff.md)"
+waypoint sessions send "$sid" "$(waypoint manager render templates/tech-lead/kickoff.md --ticket {{ticket_id}})"
 ```
 
 The kickoff (`templates/tech-lead/kickoff.md`) tells the lead to investigate, then

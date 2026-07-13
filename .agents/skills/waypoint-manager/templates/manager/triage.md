@@ -125,7 +125,7 @@ sid=$(waypoint sessions start {{writer_launch}} \
   --title "subagent:ticket-{{ticket_id}}:$role" \
   --spawner-session-id {{manager_session_id}} | jq -r .session.id)
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
-waypoint sessions send "$sid" "$(render templates/$role/write.md)"
+waypoint sessions send "$sid" "$(waypoint manager render templates/$role/write.md --ticket {{ticket_id}})"
 ```
 
 To **resume** a writer that died mid-spec, re-run this same spawn after terminating

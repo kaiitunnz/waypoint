@@ -9,6 +9,13 @@ Request:
 
 > {{ticket_body}}
 
+You were routed here for one of: a concrete **feature request**, a **non-trivial
+bug report that needs technical design**, or a **small PRD to convert** into a
+design. If an input PRD is provided, it is your primary input — **preserve its
+intent and acceptance criteria** and reduce it to a concrete technical design; do
+not re-litigate the product decision. Otherwise design from the request and the
+codebase.
+
 ## Write the RFC (inline procedure — do not call a personal skill)
 
 Do not assume any `/write-rfc` skill is installed. Write the document yourself, as

@@ -12,6 +12,15 @@ Request:
 
 Spec (if any): **{{spec_ref}}** — read it. Expected footprint: {{footprint}}.
 
+The spec may be a **PRD**, an **RFC**, or a **pass-through PRD carrying open
+problems** deferred to implementation (a trivial ticket may carry **no** spec —
+then work from the request). When it is a pass-through PRD, resolving those open
+problems is part of the job: settle a purely **technical** one in-code, but the
+moment one turns on a **product decision** (scope, user-facing behavior, a
+trade-off the human owns), stop and surface it as a `decision`/`attention` blocker
+so the manager escalates it through the inbox (the relay protocol below) — never
+invent the product call yourself.
+
 ## Your isolated workspace
 
 You are running in your own git worktree at **{{worktree_path}}** on branch

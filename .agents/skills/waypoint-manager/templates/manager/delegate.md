@@ -5,6 +5,20 @@ and the `attempts` budget is not exhausted). Delegate it to an ephemeral tech-le
 in its own worktree. **Record intent before spawning** so a crash resumes rather
 than double-spawns (`references/loop.md`, `references/git-integration.md`).
 
+A `ready` ticket arrives by one of three routes set in triage
+(`templates/manager/triage.md`), which differ only in the `spec_ref` you carry
+into the kickoff — the spawn below is identical for all three:
+
+- **produced-and-approved** — a prd-writer/rfc-writer wrote the spec and it passed
+  the `spec_review` gate; `spec_ref` = the produced PRD/RFC.
+- **pass-through** — a large/well-defined or impl-open input PRD, or an input RFC,
+  used as-is (no writer, no gate); `spec_ref` = the input doc.
+- **trivial direct-instruction** — no spec; the lead works from the ticket body.
+
+The writer spawn (prd-writer / rfc-writer) lives in triage, not here; by the time
+a ticket is `ready`, any authoring is done. The ticket record already carries the
+right `spec_ref`, so the kickoff renders it unchanged.
+
 ## 1. Reconcile first
 
 Before anything, confirm no live lead already owns this ticket:

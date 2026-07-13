@@ -19,6 +19,7 @@ def _make_repo(
         "waypoint-comms",
         "waypoint-workqueue",
         "waypoint-crew",
+        "waypoint-manager",
         "waypoint-worktree",
         "waypoint-research",
     ),
@@ -151,6 +152,7 @@ def test_helper_default_installs_all_skills(tmp_path: Path) -> None:
         "waypoint-comms",
         "waypoint-workqueue",
         "waypoint-crew",
+        "waypoint-manager",
         "waypoint-worktree",
         "waypoint-research",
     ):

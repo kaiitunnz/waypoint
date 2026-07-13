@@ -18,6 +18,26 @@ self-scheduled wake — a minutes-scale backstop for duties with no event source
 and `gh`/CI advancement). It is a backstop, not the correctness mechanism; the
 drain is correct even if the timer never fires.
 
+## Surviving a backend restart
+
+The manager runs on `claude_tty` (claude_code's default transport), whose agent
+process lives under a persistent pty, so an in-flight turn keeps executing even
+while the Waypoint backend is restarting; boot-restore reattaches the session and
+re-reads the wake subscriptions from the DB. Two consequences for the loop:
+
+- **A `waypoint` CLI call that fails with a connection error is transient**, not a
+  failure of the work — the backend is down mid-restart. Retry it with backoff
+  until the backend answers; **never** count it against a ticket's `attempts` or
+  `lead_restarts` budget or move the ticket to `blocked` over it. Only a real
+  agent/spawn failure — the backend answered and the operation itself failed —
+  consumes a budget.
+- **Events that arrive while the backend is down do not wake the manager** (the
+  wake driver is the backend, and the pending-wake set is in-memory). They are not
+  lost — they sit durably on the board — but an idle manager only picks them up on
+  its next wake, so the slow liveness timer is the catch-up that guarantees
+  progress after a restart. If the manager is still mid-turn when the backend
+  returns, it simply keeps draining and re-reads the board itself.
+
 ## Drain to a fixpoint, not one action per wake
 
 Every wake **drains all currently-actionable work to a fixpoint**, then idles.

@@ -95,6 +95,16 @@ dies on turn 1 — and confirm the permission mode from `waypoint backends`. Whe
 posture or model is ambiguous for unattended work, ask the user rather than
 guessing.
 
+## The manager runs on claude_tty (durability)
+
+Launch the `manager` role on `claude_tty` — claude_code's default transport — not
+a structured one. Its agent process lives under a persistent pty, so the manager's
+in-flight turn survives a Waypoint backend restart (the process keeps running and
+the backend reattaches on boot) rather than being interrupted. The loop treats a
+`waypoint` CLI connection error during that window as transient, not a work failure
+(`references/loop.md`). The example manifest's `backend: claude_code` with no
+explicit `transport` already resolves to `claude_tty`.
+
 ## Templates
 
 Each role's `templates:` path points at a directory of per-step Markdown prompts

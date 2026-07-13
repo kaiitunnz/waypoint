@@ -1,11 +1,12 @@
 # waypoint-manager.yaml — project-local Waypoint Manager config.
 #
 # `waypoint manager init --manifest <this file>` persists the machine-relevant
-# fields (trunk, concurrency, retry, priority, timeouts) server-side, so
+# fields (trunk, retry, priority, timeouts) server-side, so
 # `manager next`/`transition` enforce them. board, scale, escalation, integration,
 # and roles are skill-consumed: the manager reads this file directly for spawn
 # config and policy. Every field is documented inline below; SKILL.md lists the
-# template placeholders.
+# template placeholders. Execution is always serial on the manager's single shared
+# tree — one ticket at a time — so there is no concurrency knob.
 
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket is cut from; the sole integrator advances it
@@ -14,10 +15,6 @@ board:
   tickets_channel: tickets                # intake channel + ticket:<id> registry cells ({{tickets_channel}})
   org_channel: org                        # human-visible drain/outcome summaries ({{org_channel}})
   ticket_channel_prefix: ticket-          # per-ticket channel is <prefix><id>, e.g. ticket-42 ({{ticket_channel}})
-
-concurrency:
-  execution_slots: 1                      # tickets that may occupy the shared working tree at once (delegated..merging);
-                                          # 1 = strictly serial. Only read-only PRD/RFC writers run in parallel (off-tree).
 
 retry:
   max_delegate_attempts: 3                # initial-spawn retries before blocked-awaiting-human

@@ -117,9 +117,9 @@ Groups by how they occupy resources:
 - **On-tree states** — `delegated`, `building`, `revising`, `blocked`,
   `review_requested`, `merging`. A ticket holds the shared working tree across this
   whole span: from the moment its branch is checked out at `delegated` until it
-  reaches a terminal state. `execution_slots` bounds how many tickets may be on the
-  tree at once — one for the single-tree model, so execution is strictly serial.
-  Entry to `delegated` is gated on the tree being free. A parked lead in `blocked`/
+  reaches a terminal state. There is one shared tree, so at most one ticket occupies
+  it at a time — execution is strictly serial, intrinsic to the model rather than a
+  tunable. Entry to `delegated` is gated on the tree being free. A parked lead in `blocked`/
   `review_requested` still holds the tree (its branch stays checked out and its
   committed work lives there); it does not free the tree for another ticket.
 - **Awaiting-human states** — `spec_review`, `blocked`, `review_requested`. These
@@ -208,10 +208,10 @@ external signal during reconcile.
 `check_invariants` runs on every `transition`/`update` over the whole set and
 rejects the write with `409` if any fails:
 
-- **Tree cap** — at most `execution_slots` tickets occupy the shared tree
-  (`delegated` through `merging`, parked `blocked`/`review_requested` included). One
-  for the single-tree model, so delegation of a second ticket is refused until the
-  current one terminates. The cap counts `blocked` uniformly, so a ticket blocked
+- **Tree cap** — at most one ticket occupies the shared tree (`delegated` through
+  `merging`, parked `blocked`/`review_requested` included), so delegation of a
+  second ticket is refused until the current one terminates. The cap counts
+  `blocked` uniformly, so a ticket blocked
   from `spec_pending` (a writer deemed the work infeasible) or from a turn-1 spawn
   death holds the slot even though its work never reached the tree; that is the
   conservative choice, and the human decision or the latency timeout that clears the
@@ -489,7 +489,6 @@ the backend neither reads nor needs them.
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
 | `board.org_channel` | skill | Human-visible drain and outcome summaries. |
 | `board.ticket_channel_prefix` | skill | Per-ticket channel is `<prefix><id>` (e.g. `ticket-42`). |
-| `concurrency.execution_slots` | backend | Tickets that may occupy the shared working tree at once (`delegated` through `merging`, parked `blocked`/`review_requested` included). `1` for the single-tree model, so execution is strictly serial. |
 | `retry.max_delegate_attempts` | backend | Initial-spawn retry budget before `blocked`-awaiting-human. Enforced on `ready → delegated`. |
 | `retry.max_lead_restarts` | backend | Fresh-lead resumes after a lead death before `blocked`. Enforced on the lead-died self-loop. Independent of `attempts`. |
 | `priority.levels` | backend | Ordered high-to-low (`p0` highest); a ticket's `--priority` must be one of these. Ties break oldest-first (FIFO by `created_at`). |

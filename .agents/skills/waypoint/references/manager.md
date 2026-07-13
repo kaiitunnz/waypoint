@@ -17,9 +17,9 @@ waypoint manager state [--json]                                    # whole ticke
 waypoint manager next [--tried <id>]... [--json]                   # slots, each ticket's legal transitions, one recommended pull move
 ```
 
-`init` persists only the machine-relevant manifest fields (concurrency, retry
-budgets, priority levels, trunk, timeouts); the board/roles/scale/escalation fields
-are consumed by the skill, not the server. `--owner` (default `$WAYPOINT_SESSION_ID`)
+`init` persists only the machine-relevant manifest fields (retry budgets, priority
+levels, trunk, timeouts); the board/roles/scale/escalation fields are consumed by
+the skill, not the server. `--owner` (default `$WAYPOINT_SESSION_ID`)
 records the manager's own session; deleting that session cascades a `deinit`.
 `next` recommends at most one manager-initiated move (triage / spec / delegate);
 human- and lead-driven edges are returned as legal transitions, not recommendations.

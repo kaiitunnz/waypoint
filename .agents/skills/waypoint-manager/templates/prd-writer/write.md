@@ -14,10 +14,9 @@ goal with no settled product shape — or a **bug report that surfaced an open
 product question** rather than a purely technical one. Your job is to settle that
 product definition first; technical design (an RFC) comes later, from your PRD.
 
-## Write the PRD (inline procedure — do not call a personal skill)
+## Write the PRD
 
-Do not assume any `/write-prd` skill is installed. Write the document yourself, as
-a single Markdown file in the repo's documentation location (e.g.
+Write the document as a single Markdown file in the repo's documentation location (e.g.
 `docs/prd-{{ticket_id}}-<slug>.md`), untracked unless the repo convention tracks
 it. Cover, in order:
 

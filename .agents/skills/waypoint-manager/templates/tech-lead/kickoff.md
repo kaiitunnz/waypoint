@@ -27,8 +27,8 @@ You are running in your own git worktree at **{{worktree_path}}** on branch
 **{{branch}}**, cut from {{trunk}}. This is yours alone — no other session touches
 this tree. Commit freely here. If you fan the work out, your workers get
 **sub-worktrees off {{branch}}** and you integrate them into **one commit ref** on
-{{branch}} before you report up (`references/git-integration.md` in the
-waypoint-manager skill; the mechanics are the workqueue/crew skills' — reuse them).
+{{branch}} before you report up — reuse the `/waypoint-workqueue` or `/waypoint-crew`
+mechanics.
 
 ## Your channel and the relay protocol
 
@@ -39,10 +39,12 @@ it, so a manager relay (a human answer, review feedback) wakes you.
 every wake:
 
 ```bash
-waypoint board log {{ticket_channel}} --grep relay --since <highest relay_version you've acted on>
+waypoint board log {{ticket_channel}} --grep relay
 ```
 
-Read posts whose `relay_version` exceeds the highest you have already acted on,
+Read posts whose `relay_version` meta exceeds the highest you have already acted on
+(compare the meta yourself — `relay_version` is the inbox answer's version, a
+different counter from the board post id `--since` filters on),
 apply each **once**, and remember that version. A duplicate nudge or a re-post
 changes nothing. A relay carries the authoritative payload; a bare `sessions send`
 nudge does not — always re-read the log. If you died and restarted, the log still

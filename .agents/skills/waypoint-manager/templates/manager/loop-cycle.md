@@ -20,7 +20,7 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    action. `recommended` is only ever a manager-initiated *pull* move (triage,
    substantial-spec, trivial-ready, delegate).
 
-2. **Reconcile — adopt reality before acting** (see `references/loop.md`):
+2. **Reconcile — adopt reality before acting:**
    - Read `{{tickets_channel}}` and every in-flight ticket's per-ticket channel
      `status` cell **by key** (`board read {{ticket_channel_prefix}}<id> --key status`),
      and the relay logs by `--since`.
@@ -61,15 +61,6 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 - `attempts ≤ max_delegate_attempts`, `lead_restarts ≤ max_lead_restarts`.
 
 A `409` means your picture is stale: re-anchor and reconcile, never blind-retry.
-
-## Escalate vs. self-decide
-
-Route a blocker to the human inbox when it is a `product-decision`, `scope-change`,
-`irreversible`, or `spec-ambiguity` (the manifest `escalation.always_escalate`
-set); settle a `retryable-error` or `unambiguous-clarification` yourself
-(`self_decide`). Blockers, the substantial-spec gate, and **every** PR
-review-until-merge decision always go through the inbox — you never merge on your
-own authority.
 
 ## Stop condition
 

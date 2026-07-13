@@ -1,9 +1,9 @@
 # Tech-lead — strategy gate
 
 Before you write any code you **must** make an explicit, recorded decision about
-*how* you will execute this ticket. This gate exists because leads systematically
-**under-reach** — they try to do batch or multi-role work inline and stall. Do not
-skip it, and do not begin building until you have posted your choice.
+*how* you will execute this ticket, and post it. Match the strategy to the work's
+real scale rather than defaulting to inline for batch or multi-role work. Do not
+skip this, and do not begin building until you have posted your choice.
 
 ## Investigate first
 
@@ -29,17 +29,16 @@ Waypoint-shipped skills — reference them by name:
 | **`/waypoint-workqueue`** | A wide batch of **independent** tasks (migration, codemod, per-file sweep) — workers each take one, you merge linearly. |
 | **`/waypoint-crew`** | A **role-specialized, multi-phase** build with coupled work (frontend against a backend contract, QA, release). |
 
-## The forced justification
+## Confirm or override the spec's recommendation
 
-The spec recommended a strategy. You may **confirm or override** it, but:
+The spec recommended a strategy. You may confirm or override it:
 
-- **Choosing lighter than the spec's recommendation requires a written rationale.**
-  If the PRD/RFC said `/waypoint-workqueue` or `/waypoint-crew` and you intend to go
-  lighter (inline or `/waypoint-subagents`), you must justify *why the work is
+- **Choosing lighter than the recommendation requires a written, evidence-based
+  rationale.** If the PRD/RFC said `/waypoint-workqueue` or `/waypoint-crew` and you
+  intend to go lighter (inline or `/waypoint-subagents`), justify *why the work is
   smaller or less coupled than the spec judged* — concretely, from your
-  investigation. "It seemed simpler" is not a rationale. This counters the
-  under-reach failure mode directly.
-- Choosing heavier than recommended is fine and needs only a one-line note.
+  investigation. "It seemed simpler" is not a rationale.
+- Choosing heavier than recommended needs only a one-line note.
 
 ## Post the decision, then build
 

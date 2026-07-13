@@ -4,11 +4,10 @@ The work on **{{branch}}** is green and complete (or a defined subset is). Open 
 PR and report back. You do **not** merge — the human is the sole merge authority
 and the manager is the sole integrator.
 
-## Push the branch and open the PR (inline — do not call a personal skill)
+## Push the branch and open the PR
 
-Do not assume any `/create-pr` skill is installed. Open the PR yourself with `gh`.
-First study the repo's PR conventions so yours matches (title prefix, body
-structure) — look at recent merged PRs:
+Open the PR with `gh`. First study the repo's PR conventions so yours matches (title
+prefix, body structure) — look at recent merged PRs:
 
 ```bash
 gh pr list --state merged --limit 5 --json title,body

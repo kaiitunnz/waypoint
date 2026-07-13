@@ -10,7 +10,7 @@ your worktree **{{worktree_path}}**. The manager moved you to `building`.
   diff, integrate it into {{branch}}.
 - **`/waypoint-workqueue`** — split into independent tasks; give each worker a
   **sub-worktree off {{branch}}**; rebase-and-ff each result into **one commit ref**
-  on {{branch}} (linear history, `references/git-integration.md`).
+  on {{branch}} (linear history).
 - **`/waypoint-crew`** — run the role org; the crew integrates to a single team ref,
   which you land on {{branch}}.
 

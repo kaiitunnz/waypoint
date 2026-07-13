@@ -16,10 +16,9 @@ intent and acceptance criteria** and reduce it to a concrete technical design; d
 not re-litigate the product decision. Otherwise design from the request and the
 codebase.
 
-## Write the RFC (inline procedure — do not call a personal skill)
+## Write the RFC
 
-Do not assume any `/write-rfc` skill is installed. Write the document yourself, as
-a single Markdown file in the repo's RFC/design location (e.g.
+Write the document as a single Markdown file in the repo's RFC/design location (e.g.
 `docs/rfc-{{ticket_id}}-<slug>.md`), untracked unless the repo convention tracks
 it. Investigate the codebase first — an RFC that misstates the current state is
 worse than none. Cover, in order:

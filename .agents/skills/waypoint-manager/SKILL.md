@@ -5,152 +5,103 @@ description: Use when a coding agent must run as an autonomous, long-running pro
 
 # Waypoint Manager
 
-Run one durable Waypoint session as the **product owner** of a single project. It
-drains a priority-ordered ticket board for its lifetime: for each ticket it
-triages a scale and footprint, writes a PRD/RFC through an ephemeral writer when
-the work is substantial, delegates the ticket to an ephemeral **tech-lead** in
-its own git worktree, monitors the build over a typed board protocol, escalates
-blockers and **every merge** to the human through the inbox, and integrates the
-merged work as the **sole integrator** of trunk. Then it loops.
+Run one durable Waypoint session as the product owner of a single project. Drain a
+priority-ordered ticket board for the session's lifetime: triage each ticket, spec
+the substantial ones through an ephemeral writer, delegate each to an ephemeral
+tech-lead in its own worktree, monitor the build over the board, escalate blockers
+and every merge to the human through the inbox, integrate merged work as the sole
+integrator of trunk, then loop.
 
-The manager is not a crew lead at the wheel of one product build — it is an
-*unattended, continuously running* backlog owner that pulls the human in only for
-judgment: the substantial-spec approval gate and the per-PR review-until-merge
-loop (the human is the sole merge authority for every PR).
+The design model and full config/placeholder reference are in
+[`docs/waypoint-manager.md`](../../../docs/waypoint-manager.md); this file is the
+procedure to run.
 
-## When to use this vs. the other orchestration skills
+## Setup
 
-Pick by the shape of the work, not its size:
+Confirm the CLI is reachable (`waypoint manager state` returns JSON) and everything
+below is present before entering the loop. A missing prerequisite is a
+halt-and-flag, never a `create`/`install`.
 
-- **Manager** (this skill) — an unattended orchestrator that owns a project's
-  **backlog over its lifetime**, intakes tickets continuously, and runs each
-  through a specify → delegate → review → merge lifecycle. One manager per
-  project. It *delegates* a crew-scale ticket to a tech-lead rather than being
-  that crew.
-- **Crew** (`waypoint-crew`) — a role-specialized org driving **one product build**
-  with a human lead sequencing coupled phases and checkpointing at boundaries. A
-  manager delegates to a lead that may itself run a crew.
-- **Work queue** (`waypoint-workqueue`) — a flat batch of **independent** tasks a
-  lead merges. A tech-lead picks this for a wide, uncoupled ticket.
-- **Delegate-and-review** (`waypoint-subagents`) — *one* child takes a coherent
-  coupled chunk and you review its diff. A tech-lead picks this for a single
-  coupled ticket.
+1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
+   (idempotent). Read the manifest — its `board`, `roles`, `scale`, and `escalation`
+   drive the steps below.
+2. **Register the wake** on the intake channel, all per-ticket channels, and inbox
+   answers:
+   ```bash
+   waypoint sessions wake-on-board "$WAYPOINT_SESSION_ID" \
+     --channels {{tickets_channel}} \
+     --channels '{{ticket_channel_prefix}}*' \
+     --wake-on-inbox
+   ```
+3. **Verify each role's preset.** For every `roles.<role>` configured with a
+   `preset:`, `waypoint presets show <name>`. If one is missing, halt and flag the
+   user. A role configured with an inline `launch:` block is a deliberate choice, not
+   a missing preset.
+4. **Preflight the shipped skills** each role's backend needs (`waypoint-subagents`,
+   `waypoint-workqueue`, `waypoint-crew`, `waypoint-comms`, `waypoint-worktree`) —
+   confirm they are installed (`waypointctl skills status`, or that they appear in
+   this session's available skills). If a required one is absent, halt and flag.
 
-If the deliverable is not a *continuously-owned backlog* — if it is one build, one
-batch, or one change — reach for crew, work queue, or subagents instead.
+## The loop
 
-## The two native primitives it stands on
+Every wake drains all currently-actionable work to a fixpoint, then idles — it does
+not take one action and stop. Keep a per-drain `tried` set of ticket ids that failed
+an action this drain. Each iteration:
 
-The manager is a **skill over the `waypoint` CLI** plus two runtime additions that
-already ship; everything else (board, inbox, presets, sessions/subagents,
-worktrees) is used as-is.
+1. **Re-anchor.** `waypoint manager next --json` (add `--tried <id>` per id already
+   in `tried`) for `slots`, each ticket's `legal_transitions`, and the single
+   `recommended` action. Re-read `templates/manager/loop-cycle.md` so the procedure
+   is re-injected, not remembered. No recommendation and no outstanding external
+   signal → the drain is done; go idle.
+2. **Reconcile — adopt reality before acting.** Re-read the board (`{{tickets_channel}}`
+   and each in-flight ticket's `status` cell by key; relay logs by `--since`); list
+   spawned sessions (`--spawned-by "$WAYPOINT_SESSION_ID" --recursive`) and match
+   `subagent:ticket-<id>:<role>` titles; check `gh pr view` for already-merged PRs;
+   check lead liveness in every live-lead state.
+3. **Choose one action** — the highest-priority of the `recommended` pull move or an
+   external edge reconcile surfaced (spec posted, human answer, done/partial, human
+   merge, dead lead, merged PR).
+4. **Record intent before the side effect** — transition first, carrying the dedup
+   key (`--intended-lead-title` / `--branch` / `--worktree-path` / `--pr-url`), then
+   act.
+5. **Act idempotently** — spawn only if no live same-title session exists; relay via
+   a versioned board post + a content-free nudge; `gh pr merge` only if not already
+   `MERGED`. Route to the per-step template (below).
+6. **Confirm** — write resulting ids back onto the ticket. On a failed delegate, add
+   the id to `tried` and continue. Loop to step 1.
 
-- **`waypoint sessions wake-on-board`** — an event-driven wake. The manager
-  registers a subscription and the runtime *starts a turn* on it whenever a
-  watched board channel or the inbox changes, so it is driven by events, not by
-  polling or a fragile self-timer. Content-free: a wake says only "something
-  changed — re-read." Self-mutations never wake the author. See `references/wake.md`.
-- **`waypoint manager`** — a durable, DB-backed **per-ticket state machine**. It
-  holds one record per ticket, validates every transition and scheduler invariant
-  server-side, and `waypoint manager next` returns the derived slot state, each
-  ticket's legal transitions, and the single highest-priority recommended action.
-  This externalizes the manager's procedure state so a growing context window
-  cannot make it forget a step or enact an illegal one. See
-  `references/state-machine.md`.
+A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
+Trust `manager next` and the board over memory; a `waypoint` CLI connection error
+during a backend restart is transient — retry with backoff, never charge it to a
+ticket's budget.
 
-## The crash-safe drain loop (the core idea)
+## Templates
 
-Every wake **drains all currently-actionable work to a fixpoint**, then idles — it
-does not take one action and stop. Draining is what lets a slot-freeing action (a
-merge, an abandon) immediately enable the next action *in the same turn* without
-relying on a self-wake. Each iteration:
+The manager renders each step template with the ticket's values and sends it; role
+templates come from each `roles.<role>.templates` dir. In a template, `$(render
+<path>)` is shorthand — substitute this ticket's `{{placeholders}}` into that file
+and send the text as the message body; it is not a shell command.
 
-1. **Re-anchor** — `waypoint manager next` for the legal transitions + the one
-   recommended action; re-read `templates/manager/loop-cycle.md`.
-2. **Reconcile** — adopt reality *before* acting: re-read the board, list spawned
-   sessions, check lead liveness in every live-lead state, check `gh pr view` for
-   already-merged PRs.
-3. **Choose** the recommended action for the highest-priority actionable ticket.
-4. **Record intent** with a dedup key *before* any side effect (the state
-   transition carrying `intended_lead_title` / `pr-url`; a relay's `relay_version`).
-5. **Act idempotently** — spawn only if no live same-title session exists; relay
-   as a durable versioned board post + a content-free nudge; `gh pr merge` only if
-   not already merged.
-6. **Confirm**, then loop; a failed delegate is added to this drain's `tried` set
-   and not re-selected.
-
-Because state is rebuilt from the machine + the board each iteration and every
-side effect is intent-guarded, reconcile-adopted, or idempotently consumed, a
-growing context or a mid-turn crash **resumes** the procedure rather than
-repeating it. The full protocol — the durable versioned relay log and its
-idempotent-by-version consumer — is in `references/loop.md`.
-
-## Non-mutating setup (verify, never create)
-
-On instantiation the manager sets up its own state but **changes nothing about the
-user's environment**:
-
-- **Create** its board channels, register its wake subscription (§ `wake.md`), and
-  `waypoint manager init --manifest waypoint-manager.yaml`.
-- **Verify** each role's `preset:` exists with `waypoint presets show <name>`; if
-  one is missing, **halt and flag the user** — never run `presets create`. A role
-  configured with an inline `launch:` block instead of `preset:` is a deliberate
-  config choice, not a missing-preset fallback.
-- **Preflight** the Waypoint orchestration skills each role's backend needs
-  (`waypoint-subagents`, `waypoint-workqueue`, `waypoint-crew`, `waypoint-comms`,
-  `waypoint-worktree`); if a required one is absent for that backend, **halt and
-  flag** — never install a skill.
-
-Setup runs no `presets create` and no skill install. This is the portability
-contract: the only hard dependency is the `waypoint` CLI; the shipped skills are a
-*checked* prerequisite the human provisions.
-
-## Portability principle
-
-The manager and every role must work as a Claude Code, Codex, or OpenCode session
-— nothing may depend on one harness's features. The Waypoint-shipped orchestration
-skills above are a checked prerequisite. Behaviors a user's **personal** skills
-might provide — PRD/RFC authoring, PR creation, rebasing, review-addressing,
-loop-revise — are **inlined as prose** in the shipped example templates, never
-invoked as personal-skill slash commands (which may be absent). The `/waypoint-*`
-orchestration skills *are* Waypoint-shipped, so the tech-lead templates reference
-them by name; nothing else is assumed installed.
-
-## Routing
-
-- The bounded drain-to-fixpoint cycle, write-ahead intent + reconcile-adopt, and
-  the durable versioned relay log: `references/loop.md`.
-- The state machine — transition table, what each state means, the server-enforced
-  invariants: `references/state-machine.md`.
-- Registering and reasoning about the event wake: `references/wake.md`.
-- Per-ticket worktree isolation, terminate-not-delete resume, the serialized
-  integration lease, PR-based integration: `references/git-integration.md`.
-- The `waypoint-manager.yaml` manifest fields and per-role launch config:
-  `references/config.md`.
-- Per-step prompt templates the manager renders and sends: `templates/`.
+- Manager loop entry — `templates/manager/loop-cycle.md`
+- Triage and route by input type — `templates/manager/triage.md`
+- Delegate a `ready` ticket — `templates/manager/delegate.md`
+- Monitor build / blocker / spec-gate / relay — `templates/manager/monitor.md`
+- Review-until-merge and land the PR — `templates/manager/integrate.md`
+- PRD / RFC writers — `templates/prd-writer/`, `templates/rfc-writer/`
+- Tech-lead (kickoff, strategy gate, execute, report, address-review) — `templates/tech-lead/`
 
 ## Guardrails
 
-- **Preflight first, then degrade by halting.** Confirm the CLI is reachable
-  (`waypoint manager state` returns JSON) and every preset/skill prerequisite is
-  present before entering the loop. A missing prerequisite is a **halt-and-flag**,
-  never a silent fallback and never a `create`/`install`.
-- **Trust `manager next`, not memory.** The server enumerates the legal
-  transitions and the recommended action; never hand-guess a `--to` target or
-  skip a slot/invariant gate. A drifting context is exactly what this defends.
-- **Reconcile before every side effect.** Adopt a live orphan by title rather than
-  re-spawning; check `gh pr view` before a merge; check lead liveness in every
-  live-lead state. A spawn or merge is never duplicated.
-- **Never self-wake into a livelock.** The manager writes the very channels and
-  files the inbox items it subscribes to; the wake excludes self-mutations, but
-  keep every board/inbox write authored as the manager (`--author-session-id` /
-  `--actor-session-id` default from `$WAYPOINT_SESSION_ID`) so the exclusion holds.
+- **Preflight, then halt to degrade.** A missing preset or skill halts and flags; it
+  is never a silent fallback, a `create`, or an `install`.
+- **Keep every board/inbox write authored as the manager** (`--author-session-id` /
+  `--actor-session-id` default from `$WAYPOINT_SESSION_ID`) so the wake's
+  self-exclusion holds and the manager does not livelock on its own writes.
 - **The human owns every merge.** Autonomy runs up to each PR; the substantial-spec
   gate and the per-PR review-until-merge loop always route through the inbox.
-- **Own and reap only your subtree.** Every role carries `--spawner-session-id`
-  and a `subagent:ticket-<id>:<role>` title; reap a ticket's whole subtree only
-  after integration, and only what this manager spawned.
+- **Own and reap only your subtree.** Every role carries `--spawner-session-id` and a
+  `subagent:ticket-<id>:<role>` title; reap a ticket's whole subtree only after
+  integration, and only what this manager spawned.
 - **Isolate every ticket; integrate serially.** Each ticket builds in its own
-  worktree + branch; trunk advances only through the manager behind the
-  `integration` lease. This is the zero-tree-conflict guarantee, not an
-  optimization.
+  worktree + branch; trunk advances only through the manager behind the `integration`
+  lease.

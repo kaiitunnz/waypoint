@@ -38,9 +38,8 @@ gh pr view {{pr_url}} --json state,mergeStateStatus,statusCheckRollup
 # state == "MERGED" → the merge already happened; skip to Finalize.
 ```
 
-**Rebase onto the advanced trunk, then merge** (inlined — do not call a personal
-`/rebase-main` skill). Rebase in the ticket's worktree, where {{branch}} is checked
-out, so it never contends with your main checkout:
+**Rebase onto the advanced trunk, then merge.** Rebase in the ticket's worktree,
+where {{branch}} is checked out, so it never contends with your main checkout:
 
 ```bash
 git -C {{worktree_path}} fetch origin {{trunk}}
@@ -89,7 +88,7 @@ A dead owner's lease is recoverable only by `waypoint manager lock steal --owner
 
 On a terminal merged/deferred, reap the ticket's whole subtree **after**
 integration (`terminate` preserves worktrees for resume; only `delete`/`reap`
-removes them — `references/git-integration.md`). Scope to this ticket by its
+removes them). Scope to this ticket by its
 recorded lead sid — reap the lead's descendants, then delete the lead itself
 (`--spawned-by <lead>` reaps what the lead spawned, not the lead):
 

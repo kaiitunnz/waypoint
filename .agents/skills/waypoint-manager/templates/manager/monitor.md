@@ -32,14 +32,13 @@ is now stamped (the server does it):
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
-id=$(waypoint inbox post --json - <<'JSON' | jq -r .item.id
+waypoint inbox post --json - <<'JSON'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "The lead reports: <blocker detail>." },
     { "type": "question", "question": "How should it proceed?",
       "options": [{"label": "…"}, {"label": "…"}], "multi": false, "required": true } ] }
 JSON
-)
 ```
 
 You are `--wake-on-inbox`-subscribed, so the human's answer wakes you.
@@ -57,11 +56,14 @@ waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{s
 
 ## Relay a human answer back to the lead — durably
 
-Read the answer (never injected — pull it), then post it to the durable versioned
-log and nudge:
+The answer lands on a later wake, so recover the item from the ticket rather than a
+prior turn's variable — the item's subject carries `{{ticket_channel}}`. Read the
+answer (never injected — pull it), then post it to the durable versioned log and
+nudge:
 
 ```bash
-answer=$(waypoint inbox get "$id")                     # emits {"item": {...}} — branch on the block's answer
+item=$(waypoint inbox list --q "{{ticket_channel}}" | jq -r '.items[0].id')   # newest inbox item for this ticket
+answer=$(waypoint inbox get "$item")                   # emits {"item": {...}} — branch on the block's answer
 ver=$(echo "$answer" | jq -r '.item.version')
 waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" \
   --meta relay_version="$ver" --meta kind=relay
@@ -73,8 +75,7 @@ waypoint sessions send "$lead" \
 Then transition out of the awaiting state — `blocked → building` (answer relayed),
 or `spec_review → ready`. `awaiting_since` clears automatically on exit. The lead
 consumes the relay by version and is idempotent, so a duplicate nudge is harmless;
-if the lead is dead, the relay is still on the log for its replacement to read
-(`references/loop.md`).
+if the lead is dead, the relay is still on the log for its replacement to read.
 
 ## Done / partial
 

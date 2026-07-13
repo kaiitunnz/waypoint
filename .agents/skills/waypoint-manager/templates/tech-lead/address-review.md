@@ -10,17 +10,17 @@ until the human merges or aborts.
 Read the owed relay from the durable log — do not act on the nudge alone:
 
 ```bash
-waypoint board log {{ticket_channel}} --grep relay --since <highest relay_version you've acted on>
+waypoint board log {{ticket_channel}} --grep relay
 ```
 
 Take the post whose `relay_version` exceeds the highest you have already handled,
 act on it **once**, and record that version. If several rounds queued while you
 were away, apply them in version order.
 
-## 2. Address each finding (inline — do not call a personal skill)
+## 2. Address each finding
 
-Do not assume any `/address-review` skill is installed. Work the feedback yourself,
-finding by finding, in your worktree **{{worktree_path}}** on **{{branch}}**:
+Work the feedback finding by finding, in your worktree **{{worktree_path}}** on
+**{{branch}}**:
 
 - For each requested change, decide **accept** or **push back with reasoning** —
   do not silently ignore one. Implement the accepted ones.
@@ -34,7 +34,7 @@ git -C {{worktree_path}} add -A
 git -C {{worktree_path}} commit -m "<what the review round changed>"
 ```
 
-## 3. Rebase onto trunk if it moved (inline — do not call a personal skill)
+## 3. Rebase onto trunk if it moved
 
 If {{trunk}} advanced under you, rebase before re-pushing so the PR stays
 mergeable. Resolve only **trivial** conflicts (lockfiles, generated files); a

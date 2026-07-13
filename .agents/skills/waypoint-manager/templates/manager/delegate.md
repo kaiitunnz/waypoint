@@ -3,7 +3,7 @@
 A ticket is `ready` and `manager next` recommended `delegate` (so a slot is free
 and the `attempts` budget is not exhausted). Delegate it to an ephemeral tech-lead
 in its own worktree. **Record intent before spawning** so a crash resumes rather
-than double-spawns (`references/loop.md`, `references/git-integration.md`).
+than double-spawns.
 
 A `ready` ticket arrives by one of three routes set in triage
 (`templates/manager/triage.md`), which differ only in the `spec_ref` you carry
@@ -30,11 +30,26 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
 
 - A **live** match → adopt it (record `--lead-session-id`); do **not** spawn.
 - A **dead** match with work on `{{branch}}` → this is a resume, not an initial
-  delegate; go to the lead-died path in `references/git-integration.md`.
+  delegate:
+  ```bash
+  waypoint sessions terminate <dead-sid>                       # keep the branch + worktree
+  waypoint manager ticket transition {{ticket_id}} --to <same-state> --reason lead-died   # self-loop, spends lead_restarts
+  new=$(waypoint sessions start {{tech_lead_launch}} \
+    --cwd {{worktree_path}} \
+    --title "subagent:ticket-{{ticket_id}}:tech-lead" \
+    --spawner-session-id {{manager_session_id}} | jq -r .session.id)   # no --worktree: reuse the preserved branch
+  waypoint manager ticket update {{ticket_id}} --lead-session-id "$new"
+  waypoint sessions wake-on-board "$new" --channels {{ticket_channel}} --wake-on-inbox
+  waypoint sessions send "$new" "$(render templates/tech-lead/kickoff.md)"   # re-reads the log + owed relays
+  ```
+  Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate `--to blocked`.
 - A stale `{{branch}}` from an incomplete reap with **no** live session → delete
   it before spawning: `git -C <repo-root> branch -D {{branch}}`.
 
 ## 2. Record intent (the dedup key) — transition first
+
+`{{branch}}` is this ticket's branch, `ticket/{{ticket_id}}` by convention; the
+runtime derives its sibling `{{worktree_path}}` when the lead is spawned (step 3).
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to delegated \

@@ -27,6 +27,7 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WAYPOINT_PORT",
         "WAYPOINT_PASSWORD",
         "WAYPOINT_TOKEN",
+        "WAYPOINT_SESSION_ID",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -488,3 +489,93 @@ def test_cli_manager_render_set_overrides_board_body(
     )
     assert result.exit_code == 0, result.stdout
     assert result.stdout == "body=override wins"
+
+
+# ── manager deinit / ticket delete ──────────────────────────────────────────
+
+
+def test_cli_manager_deinit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/api/manager"
+        captured["hit"] = True
+        return httpx.Response(200, json={"deinitialized": True, "tickets_deleted": 3})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "deinit", "--yes"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured.get("hit")
+    assert json.loads(result.stdout)["tickets_deleted"] == 3
+
+
+def test_cli_manager_deinit_aborts_without_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("must not reach the server when the prompt is declined")
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "deinit"],
+        input="n\n",
+    )
+    assert result.exit_code != 0  # aborted at the confirmation prompt
+
+
+def test_cli_manager_ticket_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/api/manager/tickets/ticket-1"
+        return httpx.Response(200, json={"deleted": True})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "ticket",
+            "delete",
+            "ticket-1",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+
+
+def test_cli_manager_init_sends_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/manager/init"
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"config": {}})
+
+    _mock_cli(monkeypatch, handler)
+    manifest = tmp_path / "m.yaml"
+    manifest.write_text("trunk: main\n", encoding="utf-8")
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "init",
+            "--manifest",
+            str(manifest),
+            "--owner",
+            "mgr-7",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured["body"]["config"]["owner_session_id"] == "mgr-7"

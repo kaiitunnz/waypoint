@@ -474,6 +474,32 @@ class ManagerManager:
                 detail=f"ticket {ticket_id!r} was modified concurrently; retry",
             ) from exc
 
+    def delete_ticket(self, ticket_id: str) -> None:
+        if not self._storage.delete_manager_ticket(ticket_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown ticket: {ticket_id!r}",
+            )
+
+    def deinit(self) -> int:
+        """Tear the manager state down: drop every ticket, the persisted config,
+        and the integration lease. Returns the ticket count removed. Clears state
+        records only — spawned sessions, branches, and board channels are reaped
+        separately."""
+        removed = self._storage.clear_manager_tickets()
+        self._storage.clear_manager_config()
+        self._storage.clear_integration_lock(INTEGRATION_LOCK_NAME)
+        return removed
+
+    def deinit_if_owner(self, session_id: str) -> bool:
+        """Cascade a deinit when the deleted session is the one that ran ``init``
+        (so a deleted manager never leaves orphaned backlog state)."""
+        config = self._storage.get_manager_config()
+        if config is None or config.owner_session_id != session_id:
+            return False
+        self.deinit()
+        return True
+
     def next(self, tried: Iterable[str] = ()) -> ManagerNextResponse:
         return compute_next(self._storage.list_manager_tickets(), self.config(), tried)
 

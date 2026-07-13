@@ -3335,6 +3335,9 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
+        # If this session ran `manager init`, it owns the manager state machine;
+        # tear that state down with it so no orphaned backlog lingers.
+        self.manager.deinit_if_owner(session_id)
         # Drop the per-session lock along with the record so the registry
         # doesn't grow unbounded over a long-lived server's session churn.
         self._session_locks.pop(session_id, None)

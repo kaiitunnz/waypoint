@@ -1846,6 +1846,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config = context.runtime.manager.init(request)
         return {"config": config.model_dump(mode="json")}
 
+    @app.delete("/api/manager")
+    async def manager_deinit(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        removed = context.runtime.manager.deinit()
+        return {"deinitialized": True, "tickets_deleted": removed}
+
     @app.get("/api/manager/state", response_model=ManagerStateResponse)
     async def manager_state(
         _: Annotated[str, Depends(token_dependency())],
@@ -1883,6 +1890,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         ticket = context.runtime.manager.update_ticket(ticket_id, request)
         return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.delete("/api/manager/tickets/{ticket_id}")
+    async def manager_delete_ticket(
+        ticket_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        context.runtime.manager.delete_ticket(ticket_id)
+        return {"deleted": True}
 
     @app.post("/api/manager/tickets/{ticket_id}/transition")
     async def manager_transition_ticket(

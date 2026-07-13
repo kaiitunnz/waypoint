@@ -547,3 +547,42 @@ def test_lock_steal_only_after_ttl_expiry(tmp_path: Path) -> None:
     )
     stolen = mgr.steal_lock(LockRequest(owner="m2"))
     assert stolen.owner == "m2"
+
+
+# ── deinit / delete / owner cascade ─────────────────────────────────────────
+
+
+def test_deinit_clears_tickets_config_and_lock(tmp_path: Path) -> None:
+    mgr = _manager(tmp_path)
+    mgr.create_ticket(TicketCreateRequest(title="a"))
+    mgr.create_ticket(TicketCreateRequest(title="b"))
+    mgr.acquire_lock(LockRequest(owner="m1"))
+    assert mgr.deinit() == 2
+    state = mgr.state()
+    assert state.tickets == []
+    assert state.config is None
+    assert state.lock is None
+
+
+def test_delete_ticket(tmp_path: Path) -> None:
+    mgr = _manager(tmp_path)
+    ticket = mgr.create_ticket(TicketCreateRequest(title="a"))
+    mgr.delete_ticket(ticket.id)
+    assert mgr.list_tickets() == []
+
+
+def test_delete_ticket_404(tmp_path: Path) -> None:
+    mgr = _manager(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        mgr.delete_ticket("nope")
+    assert exc.value.status_code == 404
+
+
+def test_deinit_if_owner_matches_only_the_owner(tmp_path: Path) -> None:
+    mgr = ManagerManager(_storage(tmp_path))
+    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr")))
+    mgr.create_ticket(TicketCreateRequest(title="a"))
+    assert mgr.deinit_if_owner("other") is False
+    assert len(mgr.list_tickets()) == 1
+    assert mgr.deinit_if_owner("mgr") is True
+    assert mgr.list_tickets() == []

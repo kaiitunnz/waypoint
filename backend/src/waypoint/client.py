@@ -988,6 +988,16 @@ class WaypointClient:
         ).json()["ticket"]
         return data
 
+    def manager_deinit(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("DELETE", "/api/manager").json()
+        return data
+
+    def manager_delete_ticket(self, ticket_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/manager/tickets/{ticket_id}"
+        ).json()
+        return data
+
     def manager_update_ticket(
         self, ticket_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:

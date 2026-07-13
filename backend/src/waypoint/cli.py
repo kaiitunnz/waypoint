@@ -3772,10 +3772,41 @@ def manager_init(
             help="Path to the project's waypoint-manager.yaml.",
         ),
     ],
+    owner: Annotated[
+        str | None,
+        typer.Option(
+            "--owner",
+            envvar="WAYPOINT_SESSION_ID",
+            help="The manager's own session id (defaults to $WAYPOINT_SESSION_ID). "
+            "Deleting this session cascades a manager deinit.",
+        ),
+    ] = None,
 ) -> None:
     """Persist the manifest's machine-relevant fields as the server ManagerConfig."""
     config = _manager_config_from_manifest(manifest)
+    if owner:
+        config["owner_session_id"] = owner
     _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
+
+
+@manager_app.command("deinit")
+def manager_deinit(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Skip the confirmation prompt.")
+    ] = False,
+) -> None:
+    """Clear the manager state: all tickets, the persisted config, and the lease.
+
+    Removes state records only — spawned sessions, branches, and board channels
+    are reaped separately (`sessions delete`, `board clear`).
+    """
+    if not yes:
+        typer.confirm(
+            "Clear all manager tickets, config, and the integration lease?",
+            abort=True,
+        )
+    _emit(_settings_from_ctx(ctx), lambda c: c.manager_deinit())
 
 
 @manager_app.command("render")
@@ -3983,6 +4014,18 @@ def manager_ticket_add(
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {"ticket": c.manager_create_ticket(body)},
+    )
+
+
+@manager_ticket_app.command("delete")
+def manager_ticket_delete(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+) -> None:
+    """Delete one ticket's state record (not its spawned sessions or branch)."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_delete_ticket(ticket_id),
     )
 
 

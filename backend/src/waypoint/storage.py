@@ -2105,6 +2105,24 @@ class Storage:
         return (cursor.rowcount or 0) > 0
 
     @_synchronized
+    def clear_manager_tickets(self) -> int:
+        cursor = self.connection.execute("DELETE FROM manager_tickets")
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
+    def clear_manager_config(self) -> None:
+        self.connection.execute("DELETE FROM manager_config WHERE id = 1")
+        self.connection.commit()
+
+    @_synchronized
+    def clear_integration_lock(self, name: str) -> None:
+        # Unconditional teardown drop (owner-agnostic), unlike the owner-gated
+        # release used during normal integration.
+        self.connection.execute("DELETE FROM integration_lock WHERE name = ?", (name,))
+        self.connection.commit()
+
+    @_synchronized
     def get_manager_config(self) -> ManagerConfig | None:
         row = self.connection.execute(
             "SELECT payload FROM manager_config WHERE id = 1"

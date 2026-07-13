@@ -322,3 +322,29 @@ async def test_wake_register_list_delete_round_trip(tmp_path: Path) -> None:
             "/api/sessions/codex-sub/wake-subscriptions", headers=_auth(token)
         )
     assert empty.json()["subscriptions"] == []
+
+
+async def test_deinit_endpoint_clears_state(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        await _create(client, token, title="a")
+        resp = await client.delete("/api/manager", headers=_auth(token))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["deinitialized"] is True
+        assert body["tickets_deleted"] == 1
+        state = await client.get("/api/manager/state", headers=_auth(token))
+    assert state.json()["tickets"] == []
+
+
+async def test_delete_ticket_endpoint_and_404(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        tid = await _create(client, token, title="a")
+        ok = await client.delete(f"/api/manager/tickets/{tid}", headers=_auth(token))
+        assert ok.status_code == 200
+        assert ok.json()["deleted"] is True
+        missing = await client.delete(
+            f"/api/manager/tickets/{tid}", headers=_auth(token)
+        )
+    assert missing.status_code == 404

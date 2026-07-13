@@ -728,6 +728,9 @@ class ManagerConfig(BaseModel):
     lock_ttl_seconds: int = Field(default=900, ge=0)
     priority_levels: list[str] = Field(default_factory=lambda: ["p0", "p1", "p2", "p3"])
     trunk: str = "main"
+    # The session that ran `manager init` (the manager itself). Deleting that
+    # session cascades a deinit so no orphaned backlog state lingers behind it.
+    owner_session_id: str | None = None
 
 
 class IntegrationLock(BaseModel):

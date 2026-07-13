@@ -358,11 +358,12 @@ their branches, and the board channels are reaped separately (`sessions delete`,
 Teardown is also wired to the manager's own session. `manager init` records the
 initiating session (its `$WAYPOINT_SESSION_ID`, or an explicit `--owner`) as the
 config's `owner_session_id`; deleting that session cascades a `deinit`, so a manager
-never leaves an orphaned backlog behind a session that no longer exists. Because the
-manager runs on `claude_tty` its session id is stable across backend restarts, so the
-cascade fires only on a deliberate `sessions delete` of the manager, not on a
-restart-and-reattach. `waypoint manager ticket delete <id>` removes a single ticket's
-record for one-off cleanup.
+never leaves an orphaned backlog behind a session that no longer exists. The
+manager's session id is its stable identity (the session's primary key, unchanged by
+a restart-and-reattach), so the cascade fires only on a deliberate `sessions delete`
+of the manager, not on a restart. Re-running `init` after a manifest edit preserves
+the recorded owner when no new `--owner` is passed. `waypoint manager ticket delete
+<id>` removes a single ticket's record for one-off cleanup.
 
 ## Git and integration
 

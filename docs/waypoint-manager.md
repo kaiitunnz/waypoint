@@ -88,12 +88,14 @@ state lives outside the context window, a drifting or compacted context cannot e
 an illegal step — the backend rejects it with a `409`.
 
 ```
-waypoint manager init --manifest <path>                  # persist machine-relevant config
+waypoint manager init --manifest <path> [--owner <sid>]  # persist machine-relevant config; record the owner session
+waypoint manager deinit [--yes]                          # clear all tickets, config, and the lease
 waypoint manager render <template> [--manifest <path>] [--ticket <id>] [--set k=v]... [--allow-unresolved]
 waypoint manager state [--json]                          # whole ticket set + slots + lease
 waypoint manager next [--tried <id>]... [--json]         # re-anchor
 waypoint manager ticket add <title> [--id] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
 waypoint manager ticket show <id>
+waypoint manager ticket delete <id>                      # remove one ticket's state record
 waypoint manager ticket update <id> [--priority] [--kind] [--scale] [--footprint] [--dep] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--pr-url]
 waypoint manager ticket transition <id> --to <state> [--reason] [--scale] [--spec-ref] [--intended-lead-title] [--lead-session-id] [--branch] [--pr-url] [--is-partial | --not-partial]
 waypoint manager lock acquire --owner <sid> [--ttl-seconds N]
@@ -344,6 +346,23 @@ subscriptions from the database. Two consequences:
   driver is the backend and the pending-wake set is in-memory). They sit durably on
   the board; the slow liveness timer is the catch-up that guarantees an idle manager
   picks them up.
+
+### Teardown
+
+`waypoint manager deinit` drops every ticket, the persisted config, and the
+integration lease in one call — the way to retire a manager or start a project's
+backlog fresh. It clears **state records only**: the sessions the manager spawned,
+their branches, and the board channels are reaped separately (`sessions delete`,
+`board clear`), the same way the manager reaps a merged ticket's subtree.
+
+Teardown is also wired to the manager's own session. `manager init` records the
+initiating session (its `$WAYPOINT_SESSION_ID`, or an explicit `--owner`) as the
+config's `owner_session_id`; deleting that session cascades a `deinit`, so a manager
+never leaves an orphaned backlog behind a session that no longer exists. Because the
+manager runs on `claude_tty` its session id is stable across backend restarts, so the
+cascade fires only on a deliberate `sessions delete` of the manager, not on a
+restart-and-reattach. `waypoint manager ticket delete <id>` removes a single ticket's
+record for one-off cleanup.
 
 ## Git and integration
 

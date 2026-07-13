@@ -11,22 +11,27 @@ board.
 ## Config and re-anchor
 
 ```bash
-waypoint manager init --manifest <path/to/waypoint-manager.yaml>   # persist machine-relevant config (idempotent)
+waypoint manager init --manifest <path/to/waypoint-manager.yaml> [--owner <sid>]   # persist machine-relevant config (idempotent)
+waypoint manager deinit [--yes]                                    # clear all tickets, config, and the lease
 waypoint manager state [--json]                                    # whole ticket set + slot usage + integration lease
 waypoint manager next [--tried <id>]... [--json]                   # slots, each ticket's legal transitions, one recommended pull move
 ```
 
 `init` persists only the machine-relevant manifest fields (concurrency, retry
 budgets, priority levels, trunk, timeouts); the board/roles/scale/escalation fields
-are consumed by the skill, not the server. `next` recommends at most one
-manager-initiated move (triage / spec / delegate); human- and lead-driven edges are
-returned as legal transitions, not recommendations.
+are consumed by the skill, not the server. `--owner` (default `$WAYPOINT_SESSION_ID`)
+records the manager's own session; deleting that session cascades a `deinit`.
+`next` recommends at most one manager-initiated move (triage / spec / delegate);
+human- and lead-driven edges are returned as legal transitions, not recommendations.
+`deinit` clears state records only — spawned sessions, branches, and board channels
+are reaped separately.
 
 ## Tickets
 
 ```bash
 waypoint manager ticket add <title> [--id <id>] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
 waypoint manager ticket show <id>
+waypoint manager ticket delete <id>                               # remove one ticket's state record
 waypoint manager ticket update <id> [--priority] [--scale] [--footprint] [--dep] [--spec-ref] [--lead-session-id] [--branch] [--pr-url] ...
 waypoint manager ticket transition <id> --to <state> [--reason] [--scale] [--spec-ref] [--intended-lead-title] [--branch] [--pr-url] [--is-partial | --not-partial]
 ```

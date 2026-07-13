@@ -12,9 +12,8 @@ tech-lead in its own worktree, monitor the build over the board, escalate blocke
 and every merge to the human through the inbox, integrate merged work as the sole
 integrator of trunk, then loop.
 
-The design model and full config/placeholder reference are in
-[`docs/waypoint-manager.md`](../../../docs/waypoint-manager.md); this file is the
-procedure to run.
+This file plus the per-step templates are the procedure to run; the manifest
+(`waypoint-manager.yaml`) documents every config field and placeholder inline.
 
 ## Setup
 
@@ -90,6 +89,21 @@ is your own session id (`$WAYPOINT_SESSION_ID`).
 - Review-until-merge and land the PR — `templates/manager/integrate.md`
 - PRD / RFC writers — `templates/prd-writer/`, `templates/rfc-writer/`
 - Tech-lead (kickoff, strategy gate, execute, report, address-review) — `templates/tech-lead/`
+
+## Placeholders
+
+Substitute these before sending a template; never hardcode a preset or channel.
+
+- **From the manifest:** `{{trunk}}`; `{{tickets_channel}}`, `{{org_channel}}`;
+  `{{ticket_channel}}` (`board.ticket_channel_prefix` + the ticket id, e.g.
+  `ticket-42`) and bare `{{ticket_channel_prefix}}`; `{{tech_lead_launch}}` /
+  `{{writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as
+  `--backend/--model/--permission-mode`).
+- **Per ticket:** `{{ticket_id}}`, `{{ticket_title}}`, `{{ticket_body}}`,
+  `{{priority}}`, `{{scale}}`, `{{footprint}}`, `{{input_type}}`, `{{spec_route}}`,
+  `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by convention), `{{worktree_path}}`
+  (runtime-derived), `{{pr_url}}`.
+- **Constant:** `{{manager_session_id}}` = `$WAYPOINT_SESSION_ID`.
 
 ## Guardrails
 

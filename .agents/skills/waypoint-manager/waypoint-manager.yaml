@@ -4,7 +4,8 @@
 # fields (trunk, concurrency, retry, priority, timeouts) server-side, so
 # `manager next`/`transition` enforce them. board, scale, escalation, integration,
 # and roles are skill-consumed: the manager reads this file directly for spawn
-# config and policy. Full field and `{{placeholder}}` reference: docs/waypoint-manager.md.
+# config and policy. Every field is documented inline below; SKILL.md lists the
+# template placeholders.
 
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket worktree is cut from; the sole integrator advances it
@@ -44,7 +45,7 @@ escalation:
 # Each role: `preset: <name>` (verified at setup, never created) or inline
 # `launch: { backend, model, permission_mode, ... }`. manager + tech_lead run
 # unattended → auto-approving permission_mode (claude_code: dontAsk). manager runs on
-# claude_tty so its turn survives a backend restart. Full reference: docs/waypoint-manager.md.
+# claude_tty so its turn survives a backend restart.
 roles:
   manager:
     launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: dontAsk }

@@ -23,8 +23,8 @@ write is your spec doc.
 
 ## Write the PRD
 
-Write the document as a single Markdown file under **`.waypoint/specs/`** (e.g.
-`.waypoint/specs/prd-{{ticket_id}}-<slug>.md`). Cover, in order:
+Write the document as a single Markdown file under **`{{spec_dir}}/`** (e.g.
+`{{spec_dir}}/prd-{{ticket_id}}-<slug>.md`). Cover, in order:
 
 1. **Problem & context** — the user problem, who has it, why it matters now. Ground
    it in the request above and a quick look at the codebase, not speculation.
@@ -61,8 +61,8 @@ with its author when you are reaped:
 
 ```bash
 waypoint board post {{ticket_channel}} \
-  "PRD ready: .waypoint/specs/prd-{{ticket_id}}-<slug>.md" \
-  --meta kind=spec_ready --meta spec_ref=.waypoint/specs/prd-{{ticket_id}}-<slug>.md
+  "PRD ready: {{spec_dir}}/prd-{{ticket_id}}-<slug>.md" \
+  --meta kind=spec_ready --meta spec_ref={{spec_dir}}/prd-{{ticket_id}}-<slug>.md
 waypoint board post {{ticket_channel}} \
   "footprint: <refined globs>; recommended strategy: <inline|/waypoint-subagents|/waypoint-workqueue|/waypoint-crew> because <reason>" \
   --meta kind=recommendation

@@ -339,7 +339,8 @@ def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
     # No --ticket, so no server call: manifest + --set resolve everything.
     tmpl = _template(
         tmp_path,
-        "Ticket {{ticket_id}} for {{project}} on {{trunk}} / {{tickets_channel}}: {{note}}",
+        "Ticket {{ticket_id}} for {{project}} on {{trunk}} / {{tickets_channel}}"
+        " in {{spec_dir}}: {{note}}",
     )
     result = runner.invoke(
         cli_app,
@@ -358,7 +359,30 @@ def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout
-    assert result.stdout == "Ticket ticket-9 for waypoint on main / tickets: hello"
+    # {{spec_dir}} defaults to .waypoint/specs when the manifest omits it.
+    assert result.stdout == (
+        "Ticket ticket-9 for waypoint on main / tickets in .waypoint/specs: hello"
+    )
+
+
+def test_cli_manager_render_spec_dir_override(tmp_path: Path) -> None:
+    manifest = tmp_path / "waypoint-manager.yaml"
+    manifest.write_text("spec_dir: custom/specs\n", encoding="utf-8")
+    tmpl = _template(tmp_path, "spec at {{spec_dir}}")
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            str(tmpl),
+            "--manifest",
+            str(manifest),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout == "spec at custom/specs"
 
 
 def test_cli_manager_render_strict_fails_on_unknown(tmp_path: Path) -> None:

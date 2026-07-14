@@ -10,6 +10,7 @@
 
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket is cut from; the sole integrator advances it
+spec_dir: .waypoint/specs                 # where PRD/RFC writers write specs; keep under gitignored .waypoint/ so writers touch no tracked file
 
 board:
   tickets_channel: tickets                # intake channel + ticket:<id> registry cells ({{tickets_channel}})

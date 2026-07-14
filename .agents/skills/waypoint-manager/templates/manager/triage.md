@@ -113,7 +113,7 @@ waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
 
 For a `prd-writer` or `rfc-writer` route, spawn the matching writer — ephemeral,
 owner-scoped, titled for reconcile; read-only in your tree ({{repo_dir}}), writing
-only its spec doc under `.waypoint/specs/`. The `role` (title suffix + template dir)
+only its spec doc under `{{spec_dir}}/`. The `role` (title suffix + template dir)
 is the `spec_route`:
 
 ```bash

@@ -61,7 +61,7 @@ waypoint manager render <template-file> [--manifest <path>] [--ticket <id>] [--s
 
 Reads a prompt template and substitutes its `{{placeholders}}`, printing the body to
 stdout (pipe it into `sessions send`). Resolves lowest precedence first: env
-(`repo_dir`, `manager_session_id`) < `--manifest` (project, trunk, channels) < the `--ticket`
+(`repo_dir`, `manager_session_id`) < `--manifest` (project, trunk, spec_dir, channels) < the `--ticket`
 record < the ticket's board cell (`ticket_body`, `input_type`, `spec_route`) <
 `--set`. `--manifest` defaults to `$WAYPOINT_MANAGER_MANIFEST`. Fails on an unknown
 placeholder unless `--allow-unresolved`. Substitution runs CLI-side over the manifest

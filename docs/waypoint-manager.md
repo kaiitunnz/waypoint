@@ -437,8 +437,9 @@ A tech-lead that fans its ticket out (via `waypoint-workqueue` or `waypoint-crew
 gives its workers sub-worktrees off the ticket branch and integrates them into one
 commit ref before reporting up. The manager only ever sees the single ticket branch.
 A read-only PRD/RFC writer for another ticket may run in the tree in parallel; it
-writes only under `.waypoint/specs/` (gitignored) and touches no tracked file or
-branch, so it never collides with the building lead's commits.
+writes only under the configured `spec_dir` (default `.waypoint/specs`, gitignored)
+and touches no tracked file or branch, so it never collides with the building lead's
+commits.
 
 ### Spawn dedup and branch collisions
 
@@ -519,6 +520,7 @@ the backend neither reads nor needs them.
 |---|---|---|
 | `project` | skill | Project name, used in summaries and channel labels. |
 | `trunk` | backend | The integration branch every ticket branch is cut from and the sole integrator advances. |
+| `spec_dir` | skill | Directory the PRD/RFC writers write specs into (default `.waypoint/specs`; keep it gitignored). |
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
 | `board.org_channel` | skill | Human-visible drain and outcome summaries. |
 | `board.ticket_channel_prefix` | skill | Per-ticket channel is `<prefix><id>` (e.g. `ticket-42`). |
@@ -584,6 +586,7 @@ manager's own working tree, where every lead builds.
 |---|---|
 | `{{project}}` | `project` |
 | `{{trunk}}` | `trunk` |
+| `{{spec_dir}}` | `spec_dir` (default `.waypoint/specs`) |
 | `{{tickets_channel}}` | `board.tickets_channel` |
 | `{{org_channel}}` | `board.org_channel` |
 | `{{ticket_channel}}` | `board.ticket_channel_prefix` + the current ticket id (e.g. `ticket-42`) |
@@ -596,7 +599,7 @@ manager's own working tree, where every lead builds.
 `waypoint manager render <template> --ticket <id>` performs the substitution and
 prints the body, which the templates pipe into `sessions send`. It resolves each
 placeholder lowest precedence first — env (`{{repo_dir}}`, `{{manager_session_id}}`)
-< manifest (`{{project}}`, `{{trunk}}`, and the channels) < the ticket record < the ticket's board
+< manifest (`{{project}}`, `{{trunk}}`, `{{spec_dir}}`, and the channels) < the ticket record < the ticket's board
 cell (`{{ticket_body}}`, `{{input_type}}`, `{{spec_route}}`) < a `--set key=value`
 override — and fails on an unknown placeholder unless `--allow-unresolved`, so a
 literal `{{…}}` never reaches a subagent. It runs entirely CLI-side over the manifest

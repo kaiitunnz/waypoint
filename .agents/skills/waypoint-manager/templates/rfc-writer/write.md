@@ -25,8 +25,8 @@ write is your spec doc.
 
 ## Write the RFC
 
-Write the document as a single Markdown file under **`.waypoint/specs/`** (e.g.
-`.waypoint/specs/rfc-{{ticket_id}}-<slug>.md`). Investigate the codebase first — an
+Write the document as a single Markdown file under **`{{spec_dir}}/`** (e.g.
+`{{spec_dir}}/rfc-{{ticket_id}}-<slug>.md`). Investigate the codebase first — an
 RFC that misstates the current state is worse than none. Cover, in order:
 
 1. **Summary** — the change in a paragraph.
@@ -60,8 +60,8 @@ with its author when you are reaped:
 
 ```bash
 waypoint board post {{ticket_channel}} \
-  "RFC ready: .waypoint/specs/rfc-{{ticket_id}}-<slug>.md" \
-  --meta kind=spec_ready --meta spec_ref=.waypoint/specs/rfc-{{ticket_id}}-<slug>.md
+  "RFC ready: {{spec_dir}}/rfc-{{ticket_id}}-<slug>.md" \
+  --meta kind=spec_ready --meta spec_ref={{spec_dir}}/rfc-{{ticket_id}}-<slug>.md
 waypoint board post {{ticket_channel}} \
   "footprint: <refined globs>; recommended strategy: <inline|/waypoint-subagents|/waypoint-workqueue|/waypoint-crew> because <reason>" \
   --meta kind=recommendation

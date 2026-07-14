@@ -3685,8 +3685,8 @@ def _manifest_render_bindings(path: Path) -> dict[str, str]:
     """The skill-owned placeholder values a manifest supplies to `manager render`.
 
     These are the manifest fields that appear in prompt-template bodies — the
-    project name, the trunk branch, and the board channel names. Role/preset/template
-    fields are not template-body placeholders and are skipped.
+    project name, the trunk branch, the board channel names, and the spec directory.
+    Role/preset/template fields are not template-body placeholders and are skipped.
     """
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -3703,6 +3703,7 @@ def _manifest_render_bindings(path: Path) -> dict[str, str]:
         bindings["project"] = str(raw["project"])
     if raw.get("trunk") is not None:
         bindings["trunk"] = str(raw["trunk"])
+    bindings["spec_dir"] = str(raw.get("spec_dir") or ".waypoint/specs")
     for field in ("tickets_channel", "org_channel", "ticket_channel_prefix"):
         if board.get(field) is not None:
             bindings[field] = str(board[field])

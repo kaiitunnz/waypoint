@@ -105,7 +105,7 @@ runtime binding the ticket does not yet carry.
 
 Substitute these before sending a template; never hardcode a preset or channel.
 
-- **From the manifest:** `{{project}}`; `{{trunk}}`; `{{tickets_channel}}`, `{{org_channel}}`;
+- **From the manifest:** `{{project}}`; `{{trunk}}`; `{{spec_dir}}`; `{{tickets_channel}}`, `{{org_channel}}`;
   `{{ticket_channel}}` (`board.ticket_channel_prefix` + the ticket id, e.g.
   `ticket-42`) and bare `{{ticket_channel_prefix}}`; `{{tech_lead_launch}}` /
   `{{writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as

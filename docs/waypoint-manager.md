@@ -40,6 +40,35 @@ the work:
 - **Delegate-and-review** (`waypoint-subagents`) — one coupled chunk done by one
   child and reviewed.
 
+## The human workflow
+
+The Waypoint web app is the human's primary surface: the **board** page for filing
+tickets and reading progress, and the **inbox** for the manager's approval requests
+and the blockers it escalates. Manager lifecycle actions are done by messaging the
+manager session through the `/waypoint-manager` (or `/waypoint`) skill. Each step also
+has a direct `waypoint` CLI equivalent. End to end, the human:
+
+1. **Sets up** — messages the manager session `/waypoint-manager init`; it loads the
+   manifest, registers its wake, verifies its roles, and records the owner session
+   (also `/waypoint manager init`, or directly `waypoint manager init --manifest
+   <path>`; manifest fields are detailed under Configuration).
+2. **Files a ticket** — posts the request to the intake channel from the board page
+   (or `waypoint board post <tickets_channel> "<request>"`); the manager registers and
+   triages it on its next wake.
+3. **Approves the spec**, for substantial tickets only — answers the manager's spec
+   approval item in the inbox: approve, request changes, or reject. Approval releases
+   the ticket to build; trivial tickets skip this gate.
+4. **Reviews and merges the PR** — answers the PR approval item in the inbox (it
+   carries a summary and CI status). The human is the sole merge authority: merge,
+   request changes (which loops the lead back), or abort. In `local` integration mode
+   the same review gate applies without a PR.
+5. **Follows progress** — reads the manager's drain and outcome summaries on the org
+   channel from the board page.
+6. **Retires or resets** — messages the manager session `/waypoint-manager deinit`,
+   which reaps the spawned subtree and clears the backlog, config, and lease (also
+   `/waypoint manager deinit`, or directly `waypoint manager deinit`). Deleting the
+   manager's own session cascades the state cleanup.
+
 ## Architecture
 
 The manager is a skill over the `waypoint` CLI plus two runtime primitives. Board,
@@ -355,7 +384,9 @@ transport:
 integration lease in one call — the way to retire a manager or start a project's
 backlog fresh. It clears **state records only**: the sessions the manager spawned,
 their branches, and the board channels are reaped separately (`sessions delete`,
-`board clear`), the same way the manager reaps a merged ticket's subtree.
+`board clear`), the same way the manager reaps a merged ticket's subtree. The
+`/waypoint-manager deinit` skill workflow runs both halves — the reap, then
+`manager deinit`.
 
 Teardown is also wired to the manager's own session. `manager init` records the
 initiating session (its `$WAYPOINT_SESSION_ID`, or an explicit `--owner`) as the

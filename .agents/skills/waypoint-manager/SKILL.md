@@ -15,6 +15,9 @@ loop.
 
 ## Setup
 
+Run Setup once to stand the manager up — a human triggers it by messaging the session
+`/waypoint-manager init`.
+
 You run in the project's working tree — your own cwd, `{{repo_dir}}`. Every
 tech-lead builds **here**, on its ticket branch, so the tree must be clean on
 `{{trunk}}` before you start and returns to `{{trunk}}` between tickets. Confirm the
@@ -57,6 +60,25 @@ A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
 Trust `manager next` and the board over memory; a `waypoint` CLI connection error
 during a backend restart is transient — retry with backoff, never charge it to a
 ticket's budget.
+
+## Teardown
+
+`/waypoint-manager deinit` retires the manager or resets the backlog. `manager deinit`
+drops the state records only, so reap what you own first:
+
+1. **Reap your subtree** — delete every session you spawned (worker sub-worktrees
+   prune with them):
+   ```bash
+   for s in $(waypoint sessions list --spawned-by "$WAYPOINT_SESSION_ID" --recursive | jq -r '.sessions[].id'); do
+     waypoint sessions delete "$s" --force --prune-branches
+   done
+   ```
+2. **Reset the tree** to `{{trunk}}` and drop any leftover `ticket/<id>` branches
+   (`git -C {{repo_dir}} checkout {{trunk}}`, then `git -C {{repo_dir}} branch -D` each).
+3. **Clear the board channels** you own — the intake, org, and per-ticket channels —
+   with `board clear`, when retiring the backlog rather than pausing it.
+4. **Deinit** — `waypoint manager deinit --yes` drops the tickets, config, and lease.
+   Deleting this manager session instead cascades the same record cleanup.
 
 ## Templates
 

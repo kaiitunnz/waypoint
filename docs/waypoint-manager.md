@@ -332,10 +332,12 @@ at-most-once; the ticket-channel log is authoritative.
 
 ### Backend restarts
 
-The manager runs on `claude_tty` (claude_code's default transport), whose agent
-process lives under a persistent pty, so an in-flight turn keeps executing while the
-Waypoint backend restarts; boot-restore reattaches the session and re-reads the wake
-subscriptions from the database. Two consequences:
+On `claude_tty` (claude_code's default transport) the agent process lives under a
+persistent pty, so an in-flight turn keeps executing while the Waypoint backend
+restarts; on any other transport the turn is interrupted and resumed by the durable
+state machine on the next wake. Either way boot-restore reattaches the session and
+re-reads the wake subscriptions from the database. Two consequences hold on every
+transport:
 
 - A `waypoint` CLI call that fails with a connection error is transient — the backend
   is down mid-restart. It is retried with backoff and never counted against a
@@ -520,15 +522,17 @@ preset value. No role is ever spawned with `--worktree`.
 
 The `manager` and `tech_lead` roles run unattended, so their permission posture must
 auto-approve or their own `sessions start` / `gh` / `waypointctl` tool calls block on
-an absent approver. The per-backend auto-approve mode is `dontAsk` for `claude_code`,
-`full_access` for `codex`, `allow` for `opencode`. The blast radius is bounded by the
+an absent approver. The per-backend auto-approve mode is `auto` for `claude_code`,
+`auto_review` for `codex`, `allow` for `opencode`. The blast radius is bounded by the
 human-owned merge gate on every PR, the one-ticket-at-a-time serial tree, and the
 ownership rule that a session acts only on what it spawned. Set each role's model id verbatim from
 `waypoint models <backend>` and confirm the permission mode from `waypoint backends`.
 
-The `manager` role launches on `claude_tty` — claude_code's default transport — so
-its in-flight turn survives a Waypoint backend restart. A `launch:` block with
-`backend: claude_code` and no explicit `transport` resolves to `claude_tty`.
+The `manager` role launches on `claude_tty` — claude_code's default transport —
+recommended because a pty-backed turn survives a Waypoint backend restart mid-turn,
+though not required: the durable state machine recovers the manager on any transport. A
+`launch:` block with `backend: claude_code` and no explicit `transport` resolves to
+`claude_tty`.
 
 Each role's `templates:` path points at a directory of per-step Markdown prompts
 (`templates/<role>/<step>.md`).
@@ -547,6 +551,7 @@ manager's own working tree, where every lead builds.
 
 | Placeholder | Source |
 |---|---|
+| `{{project}}` | `project` |
 | `{{trunk}}` | `trunk` |
 | `{{tickets_channel}}` | `board.tickets_channel` |
 | `{{org_channel}}` | `board.org_channel` |
@@ -560,7 +565,7 @@ manager's own working tree, where every lead builds.
 `waypoint manager render <template> --ticket <id>` performs the substitution and
 prints the body, which the templates pipe into `sessions send`. It resolves each
 placeholder lowest precedence first — env (`{{repo_dir}}`, `{{manager_session_id}}`)
-< manifest (`{{trunk}}` and the channels) < the ticket record < the ticket's board
+< manifest (`{{project}}`, `{{trunk}}`, and the channels) < the ticket record < the ticket's board
 cell (`{{ticket_body}}`, `{{input_type}}`, `{{spec_route}}`) < a `--set key=value`
 override — and fails on an unknown placeholder unless `--allow-unresolved`, so a
 literal `{{…}}` never reaches a subagent. It runs entirely CLI-side over the manifest

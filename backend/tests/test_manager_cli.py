@@ -318,6 +318,7 @@ def test_cli_board_wait_timeout(
 def _manifest(tmp_path: Path) -> Path:
     path = tmp_path / "waypoint-manager.yaml"
     path.write_text(
+        "project: waypoint\n"
         "trunk: main\n"
         "board:\n"
         "  tickets_channel: tickets\n"
@@ -337,7 +338,8 @@ def _template(tmp_path: Path, body: str) -> Path:
 def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
     # No --ticket, so no server call: manifest + --set resolve everything.
     tmpl = _template(
-        tmp_path, "Ticket {{ticket_id}} on {{trunk}} / {{tickets_channel}}: {{note}}"
+        tmp_path,
+        "Ticket {{ticket_id}} for {{project}} on {{trunk}} / {{tickets_channel}}: {{note}}",
     )
     result = runner.invoke(
         cli_app,
@@ -356,7 +358,7 @@ def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout
-    assert result.stdout == "Ticket ticket-9 on main / tickets: hello"
+    assert result.stdout == "Ticket ticket-9 for waypoint on main / tickets: hello"
 
 
 def test_cli_manager_render_strict_fails_on_unknown(tmp_path: Path) -> None:

@@ -42,11 +42,12 @@ escalation:
 
 # Each role: `preset: <name>` (verified at setup, never created) or inline
 # `launch: { backend, model, permission_mode, ... }`. manager + tech_lead run
-# unattended → auto-approving permission_mode (claude_code: dontAsk). manager runs on
-# claude_tty so its turn survives a backend restart.
+# unattended → auto-approving permission_mode (claude_code: auto). manager runs on
+# claude_tty (recommended) so a turn survives a backend restart; the durable state
+# machine keeps any transport correct either way.
 roles:
   manager:
-    launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: dontAsk }
+    launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: auto }
     templates: templates/manager
   prd_writer:
     preset: writer-opus                   # e.g. an opus claude_code preset; must pre-exist
@@ -55,5 +56,5 @@ roles:
     preset: writer-opus
     templates: templates/rfc-writer
   tech_lead:
-    preset: lead-opus-1m                  # OR: launch: { backend: claude_code, model: "opus[1m]", permission_mode: dontAsk }
+    preset: lead-opus-1m                  # OR: launch: { backend: claude_code, model: "opus[1m]", permission_mode: auto }
     templates: templates/tech-lead

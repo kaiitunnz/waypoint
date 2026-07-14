@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,6 @@ from waypoint.schemas import (
     InboxReply,
     InboxReplyInput,
     InboxStatus,
-    IntegrationLock,
     ManagerConfig,
     ManagerTicket,
     ManagerTicketState,
@@ -387,16 +386,6 @@ class Storage:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 payload TEXT NOT NULL DEFAULT '{}'
-            );
-
-            -- Serialized integration lease (single row per lock name, only
-            -- ``integration`` in the MVP). Acquire/steal are CAS upserts guarded
-            -- by expiry; the storage lock makes the read-modify-write atomic.
-            CREATE TABLE IF NOT EXISTS integration_lock (
-                name TEXT PRIMARY KEY,
-                owner TEXT NOT NULL,
-                acquired_at TEXT NOT NULL,
-                ttl_seconds INTEGER NOT NULL
             );
 
             -- Single-row persisted ManagerConfig (the machine-relevant subset of
@@ -2116,13 +2105,6 @@ class Storage:
         self.connection.commit()
 
     @_synchronized
-    def clear_integration_lock(self, name: str) -> None:
-        # Unconditional teardown drop (owner-agnostic), unlike the owner-gated
-        # release used during normal integration.
-        self.connection.execute("DELETE FROM integration_lock WHERE name = ?", (name,))
-        self.connection.commit()
-
-    @_synchronized
     def get_manager_config(self) -> ManagerConfig | None:
         row = self.connection.execute(
             "SELECT payload FROM manager_config WHERE id = 1"
@@ -2145,78 +2127,6 @@ class Storage:
         self.connection.commit()
         return config
 
-    @_synchronized
-    def get_integration_lock(self, name: str) -> IntegrationLock | None:
-        row = self.connection.execute(
-            "SELECT * FROM integration_lock WHERE name = ?", (name,)
-        ).fetchone()
-        return self._integration_lock_from_row(row) if row is not None else None
-
-    @_synchronized
-    def acquire_integration_lock(
-        self, name: str, owner: str, ttl_seconds: int, now: datetime
-    ) -> IntegrationLock | None:
-        # Take the lease when it is free or already ours (re-entrant refresh).
-        # A lease held by another owner — expired or not — is refused; reclaiming
-        # a dead owner's lease is the explicit ``steal`` path (after a liveness
-        # check), never a silent acquire.
-        row = self.connection.execute(
-            "SELECT * FROM integration_lock WHERE name = ?", (name,)
-        ).fetchone()
-        if row is not None and row["owner"] != owner:
-            return None
-        return self._write_integration_lock(name, owner, ttl_seconds, now)
-
-    @_synchronized
-    def steal_integration_lock(
-        self, name: str, owner: str, ttl_seconds: int, now: datetime
-    ) -> IntegrationLock | None:
-        # Reclaim only a free/ours/expired lease; a live foreign lease is never
-        # force-taken (steal-on-expiry, after the caller's owner-liveness check).
-        row = self.connection.execute(
-            "SELECT * FROM integration_lock WHERE name = ?", (name,)
-        ).fetchone()
-        if (
-            row is not None
-            and row["owner"] != owner
-            and not self._lock_row_expired(row, now)
-        ):
-            return None
-        return self._write_integration_lock(name, owner, ttl_seconds, now)
-
-    @_synchronized
-    def release_integration_lock(self, name: str, owner: str, now: datetime) -> bool:
-        row = self.connection.execute(
-            "SELECT * FROM integration_lock WHERE name = ?", (name,)
-        ).fetchone()
-        if row is None:
-            return True
-        if row["owner"] != owner and not self._lock_row_expired(row, now):
-            return False
-        self.connection.execute("DELETE FROM integration_lock WHERE name = ?", (name,))
-        self.connection.commit()
-        return True
-
-    def _write_integration_lock(
-        self, name: str, owner: str, ttl_seconds: int, now: datetime
-    ) -> IntegrationLock:
-        self.connection.execute(
-            "INSERT INTO integration_lock (name, owner, acquired_at, ttl_seconds) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
-            "owner = excluded.owner, acquired_at = excluded.acquired_at, "
-            "ttl_seconds = excluded.ttl_seconds",
-            (name, owner, now.isoformat(), ttl_seconds),
-        )
-        self.connection.commit()
-        return IntegrationLock(
-            name=name, owner=owner, acquired_at=now, ttl_seconds=ttl_seconds
-        )
-
-    @staticmethod
-    def _lock_row_expired(row: sqlite3.Row, now: datetime) -> bool:
-        acquired = datetime.fromisoformat(row["acquired_at"])
-        return acquired + timedelta(seconds=int(row["ttl_seconds"])) < now
-
     @staticmethod
     def _manager_ticket_columns(ticket: ManagerTicket) -> tuple[Any, ...]:
         return (
@@ -2238,14 +2148,6 @@ class Storage:
         except json.JSONDecodeError:
             parsed = {}
         return ManagerTicket.model_validate(parsed if isinstance(parsed, dict) else {})
-
-    def _integration_lock_from_row(self, row: sqlite3.Row) -> IntegrationLock:
-        return IntegrationLock(
-            name=row["name"],
-            owner=row["owner"],
-            acquired_at=datetime.fromisoformat(row["acquired_at"]),
-            ttl_seconds=int(row["ttl_seconds"]),
-        )
 
     @_synchronized
     def create_scheduled_message(

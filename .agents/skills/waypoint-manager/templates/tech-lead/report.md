@@ -1,8 +1,7 @@
 # Tech-lead — report
 
 The work on **{{branch}}** is green and complete (or a defined subset is). Open the
-PR and report back. You do **not** merge — the human is the sole merge authority
-and the manager is the sole integrator.
+PR and report back. You do **not** merge — the human is the sole merge authority.
 
 ## Push the branch and open the PR
 

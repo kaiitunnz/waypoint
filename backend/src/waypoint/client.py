@@ -1014,24 +1014,6 @@ class WaypointClient:
         ).json()["ticket"]
         return data
 
-    def manager_lock_acquire(self, body: dict[str, Any]) -> dict[str, Any]:
-        data: dict[str, Any] = self._request(
-            "POST", "/api/manager/lock", json=body
-        ).json()["lock"]
-        return data
-
-    def manager_lock_steal(self, body: dict[str, Any]) -> dict[str, Any]:
-        data: dict[str, Any] = self._request(
-            "POST", "/api/manager/lock/steal", json=body
-        ).json()["lock"]
-        return data
-
-    def manager_lock_release(self, body: dict[str, Any]) -> dict[str, Any]:
-        data: dict[str, Any] = self._request(
-            "DELETE", "/api/manager/lock", json=body
-        ).json()
-        return data
-
     # ── message schedules ────────────────────────────────────────────────
 
     def list_message_schedules(

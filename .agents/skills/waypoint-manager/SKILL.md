@@ -1,6 +1,6 @@
 ---
 name: waypoint-manager
-description: Use when a coding agent must run as an autonomous, long-running product owner for a single project — continuously draining a priority-ordered ticket board, specifying substantial tickets through an ephemeral PRD/RFC writer, delegating each ticket to an ephemeral tech-lead that builds in the manager's own working tree one ticket at a time, escalating blockers and every merge decision to the human through the inbox, and integrating merged work as the sole integrator of trunk. The manager is driven by board/inbox wake events and a durable `waypoint manager` state machine, so it survives its own context exhaustion and backend restarts without duplicating a spawn, a relay, or a merge. Not for a one-shot batch of independent tasks (use waypoint-workqueue), a single coupled change (use waypoint-subagents), or a fixed-scope product build a human lead is actively driving (use waypoint-crew).
+description: Use when a coding agent must run as an autonomous, long-running product owner for a single project — continuously draining a priority-ordered ticket board, specifying substantial tickets through an ephemeral PRD/RFC writer, delegating each ticket to an ephemeral tech-lead that builds in the manager's own working tree one ticket at a time, escalating blockers and every merge decision to the human through the inbox, and integrating each merge the human makes. The manager is driven by board/inbox wake events and a durable `waypoint manager` state machine, so it survives its own context exhaustion and backend restarts without duplicating a spawn, a relay, or a merge. Not for a one-shot batch of independent tasks (use waypoint-workqueue), a single coupled change (use waypoint-subagents), or a fixed-scope product build a human lead is actively driving (use waypoint-crew).
 ---
 
 # Waypoint Manager
@@ -10,8 +10,7 @@ priority-ordered ticket board for the session's lifetime: triage each ticket, sp
 the substantial ones through an ephemeral writer, delegate each to an ephemeral
 tech-lead that builds in your own working tree — one ticket at a time, strictly
 serial — monitor the build over the board, escalate blockers and every merge to the
-human through the inbox, integrate merged work as the sole integrator of trunk, then
-loop.
+human through the inbox, integrate each merge the human makes, then loop.
 
 ## Setup
 
@@ -77,7 +76,7 @@ drops the state records only, so reap what you own first:
    (`git -C {{repo_dir}} checkout {{trunk}}`, then `git -C {{repo_dir}} branch -D` each).
 3. **Clear the board channels** you own — the intake, org, and per-ticket channels —
    with `board clear`, when retiring the backlog rather than pausing it.
-4. **Deinit** — `waypoint manager deinit --yes` drops the tickets, config, and lease.
+4. **Deinit** — `waypoint manager deinit --yes` drops the tickets and config.
    Deleting this manager session instead cascades the same record cleanup.
 
 ## Templates
@@ -129,9 +128,9 @@ Substitute these before sending a template; never hardcode a preset or channel.
 - **Own and reap only your subtree.** Every role carries `--spawner-session-id` and a
   `subagent:ticket-<id>:<role>` title; reap a ticket's whole subtree only after
   integration, and only what this manager spawned.
-- **One tree, strictly serial; integrate as the sole integrator.** Every ticket
-  builds on its own branch in your one shared tree, one at a time — a ticket holds
-  the tree from `delegated` through a terminal state (parked `blocked`/
-  `review_requested` included). Trunk advances only through the manager behind the
-  `integration` lease. Read-only PRD/RFC writers are the one thing that runs in
-  parallel.
+- **One tree, strictly serial; the human owns the merge.** Every ticket builds on
+  its own branch in your one shared tree, one at a time — a ticket holds the tree from
+  `delegated` through a terminal state (parked `blocked`/`review_requested` included).
+  Trunk advances only when the human merges the PR (or, opt-in, one they ask you to
+  merge); the single tree serializes builds. Read-only PRD/RFC writers are the
+  one thing that runs in parallel.

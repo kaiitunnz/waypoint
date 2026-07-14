@@ -142,7 +142,6 @@ async def test_legal_transition_walk_to_merged(tmp_path: Path) -> None:
             "delegated",
             "building",
             "review_requested",
-            "merging",
             "merged",
         ]
         for to in walk:
@@ -155,8 +154,8 @@ async def test_illegal_transition_is_409(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:
         ticket_id = await _create(client, token, title="x")
-        # intake -> merging is not on the transition table.
-        resp = await _transition(client, token, ticket_id, "merging")
+        # intake -> merged is not on the transition table.
+        resp = await _transition(client, token, ticket_id, "merged")
     assert resp.status_code == 409
 
 
@@ -201,7 +200,7 @@ async def test_invariant_second_spec_pending_is_409(tmp_path: Path) -> None:
     # test_unique_intended_lead_title_across_live_tickets in test_manager.py.)
 
 
-async def test_state_reports_config_slots_tickets_lock(tmp_path: Path) -> None:
+async def test_state_reports_config_slots_tickets(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:
         await client.post(
@@ -216,39 +215,6 @@ async def test_state_reports_config_slots_tickets_lock(tmp_path: Path) -> None:
     assert body["config"]["trunk"] == "develop"
     assert set(body["slots"]) == {"total", "used", "free"}
     assert [t["id"] for t in body["tickets"]] == [ticket_id]
-    assert body["lock"] is None
-
-
-async def test_lock_acquire_conflict_steal_release(tmp_path: Path) -> None:
-    app, token = _build(tmp_path)
-    async with _client(app) as client:
-        acquire = await client.post(
-            "/api/manager/lock", headers=_auth(token), json={"owner": "m1"}
-        )
-        assert acquire.status_code == 200
-        assert acquire.json()["lock"]["owner"] == "m1"
-        # A different owner cannot acquire the held lease.
-        conflict = await client.post(
-            "/api/manager/lock", headers=_auth(token), json={"owner": "m2"}
-        )
-        assert conflict.status_code == 409
-        # Nor steal it before the TTL expires.
-        steal = await client.post(
-            "/api/manager/lock/steal", headers=_auth(token), json={"owner": "m2"}
-        )
-        assert steal.status_code == 409
-        # The current owner releases it (DELETE carries a body).
-        release = await client.request(
-            "DELETE", "/api/manager/lock", headers=_auth(token), json={"owner": "m1"}
-        )
-        assert release.status_code == 200
-        assert release.json() == {"released": True}
-        # Freed: another owner can now acquire.
-        reacquire = await client.post(
-            "/api/manager/lock", headers=_auth(token), json={"owner": "m2"}
-        )
-    assert reacquire.status_code == 200
-    assert reacquire.json()["lock"]["owner"] == "m2"
 
 
 # ── Wake subscriptions ──────────────────────────────────────────────────────

@@ -55,15 +55,15 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      a `spec_pending` writer, which reads the repo read-only and needs no branch
      (`templates/manager/triage.md`). Either role: past `max_lead_restarts` the
      self-loop 409s → escalate `--to blocked`.
-   - For `review_requested`/`merging` tickets, `gh pr view <pr-url> --json
+   - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup`.
 
 3. **Choose one action** — the highest-priority of: the `recommended` pull move, or
    an external edge reconcile surfaced (spec posted → `spec_review`; lead posted
    `accepted` + strategy → `delegated → building`; human answer →
-   relay + `building`/`ready`/`revising`/`merging`/`abandoned`; lead reported
-   done/partial → `review_requested`; human merge → `merging`; dead lead →
-   self-loop or `blocked`; merged PR → record it).
+   relay + `building`/`ready`/`revising`/`abandoned`; lead reported
+   done/partial → `review_requested`; human merge observed → `merged`/`deferred`;
+   dead lead → self-loop or `blocked`).
 
 4. **Record intent before the side effect.** Transition first (carrying the dedup
    key: `--intended-lead-title`, `--branch`, or `--pr-url`), then act. Never act
@@ -85,9 +85,9 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 
 ## Invariants you cannot violate (the server rejects them with 409)
 
-- ≤ 1 ticket occupies the shared tree (`delegated` through `merging`, including
-  parked `blocked`/`review_requested`).
-- ≤ 1 ticket in `merging`; ≤ 1 in `spec_pending`.
+- ≤ 1 ticket occupies the shared tree (`delegated` through `review_requested`,
+  including parked `blocked`/`review_requested`).
+- ≤ 1 ticket in `spec_pending`.
 - `intended_lead_title` unique across live tickets.
 - `attempts ≤ max_delegate_attempts`, `lead_restarts ≤ max_lead_restarts`.
 

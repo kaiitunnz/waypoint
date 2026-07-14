@@ -40,8 +40,8 @@ trusting any flag list reproduced in this skill.
 - Surface a file to the user — make an artifact outside a session's working
   directory visible in the UI: see `references/artifacts.md`.
 - Drive the per-project ticket state machine (`waypoint manager ...`) — config,
-  re-anchor, ticket transitions, the integration lease, and prompt-template
-  rendering: see `references/manager.md`.
+  re-anchor, ticket transitions, and prompt-template rendering: see
+  `references/manager.md`.
 
 ## Guardrails
 

@@ -60,7 +60,6 @@ from waypoint.schemas import (
     LaunchSettingsUpdateRequest,
     LaunchTargetConnectRequest,
     LaunchTargetConnectResponse,
-    LockRequest,
     LoginRequest,
     ManagerInitRequest,
     ManagerNextResponse,
@@ -1907,30 +1906,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         ticket = context.runtime.manager.transition(ticket_id, request)
         return {"ticket": ticket.model_dump(mode="json")}
-
-    @app.post("/api/manager/lock")
-    async def manager_acquire_lock(
-        request: LockRequest,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        lock = context.runtime.manager.acquire_lock(request)
-        return {"lock": lock.model_dump(mode="json")}
-
-    @app.post("/api/manager/lock/steal")
-    async def manager_steal_lock(
-        request: LockRequest,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        lock = context.runtime.manager.steal_lock(request)
-        return {"lock": lock.model_dump(mode="json")}
-
-    @app.delete("/api/manager/lock")
-    async def manager_release_lock(
-        request: LockRequest,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        context.runtime.manager.release_lock(request)
-        return {"released": True}
 
     @app.get("/api/message-schedules")
     async def list_message_schedules(

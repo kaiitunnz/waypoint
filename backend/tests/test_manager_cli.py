@@ -136,7 +136,6 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
                 "config": {"trunk": "main"},
                 "slots": {"total": 1, "used": 1, "free": 0},
                 "tickets": [{"id": "ticket-1", "priority": "p2", "state": "building"}],
-                "lock": None,
             },
         )
 

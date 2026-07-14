@@ -1,6 +1,6 @@
 """Tests for the Waypoint Manager state machine: the pure transition table /
 invariants / ``next`` policy, plus storage CRUD and ``ManagerManager`` HTTP
-mapping, the integration lease, and config init."""
+mapping, and config init."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -10,7 +10,6 @@ from fastapi import HTTPException
 
 from waypoint.manager import (
     _ADJACENCY,
-    INTEGRATION_LOCK_NAME,
     ManagerManager,
     ManagerStateError,
     apply_transition,
@@ -19,7 +18,6 @@ from waypoint.manager import (
     legal_targets,
 )
 from waypoint.schemas import (
-    LockRequest,
     ManagerConfig,
     ManagerInitRequest,
     ManagerTicket,
@@ -105,9 +103,9 @@ def test_terminal_states_have_no_edges() -> None:
 def test_illegal_transition_maps_to_409(tmp_path: Path) -> None:
     mgr = _manager(tmp_path)
     ticket = mgr.create_ticket(TicketCreateRequest(title="x"))
-    # intake -> merging is not on the table.
+    # intake -> merged is not on the table.
     with pytest.raises(HTTPException) as exc:
-        mgr.transition(ticket.id, TicketTransitionRequest(to=S.MERGING))
+        mgr.transition(ticket.id, TicketTransitionRequest(to=S.MERGED))
     assert exc.value.status_code == 409
 
 
@@ -122,7 +120,6 @@ def test_full_happy_path_walk(tmp_path: Path) -> None:
         (S.DELEGATED, {"intended_lead_title": "subagent:ticket-x:lead"}),
         (S.BUILDING, {"lead_session_id": "sess-1"}),
         (S.REVIEW_REQUESTED, {"pr_url": "http://pr/1"}),
-        (S.MERGING, {}),
         (S.MERGED, {}),
     ]
     for to, meta in walk:
@@ -230,7 +227,7 @@ def test_tree_cap_counts_every_on_tree_state() -> None:
     check_invariants([mk(S.BLOCKED, "a")], _CONFIG)
     for pair in (
         (mk(S.BUILDING, "a"), mk(S.REVIEW_REQUESTED, "b")),
-        (mk(S.BLOCKED, "a"), mk(S.MERGING, "b")),
+        (mk(S.BLOCKED, "a"), mk(S.REVISING, "b")),
         (mk(S.DELEGATED, "a"), mk(S.BUILDING, "b")),
     ):
         with pytest.raises(ManagerStateError):
@@ -259,12 +256,6 @@ def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
             b.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="b-lead")
         )
     assert exc.value.status_code == 409
-
-
-def test_at_most_one_merging() -> None:
-    check_invariants([mk(S.MERGING, "a")], _CONFIG)
-    with pytest.raises(ManagerStateError):
-        check_invariants([mk(S.MERGING, "a"), mk(S.MERGING, "b")], _CONFIG)
 
 
 def test_at_most_one_spec_pending() -> None:
@@ -396,7 +387,7 @@ def test_next_excludes_tried_set() -> None:
 def test_next_derives_slot_state() -> None:
     tickets = [mk(S.DELEGATED, "a"), mk(S.BUILDING, "b"), mk(S.BLOCKED, "c")]
     result = compute_next(tickets, _CONFIG)
-    # All three hold the shared tree (delegated..merging spans blocked too).
+    # All three hold the shared tree (delegated..review_requested spans blocked too).
     assert result.slots.used == 3
     assert result.slots.free == 0
 
@@ -484,73 +475,17 @@ def test_init_persists_config(tmp_path: Path) -> None:
     assert config.trunk == "develop"
 
 
-# ── Integration lease: acquire / release / steal-on-expiry ──────────────────
-
-
-def test_lock_acquire_and_reentrant_refresh(tmp_path: Path) -> None:
-    mgr = _manager(tmp_path)
-    lock = mgr.acquire_lock(LockRequest(owner="m1"))
-    assert lock.owner == "m1"
-    # The same owner may re-acquire (refresh) without contention.
-    again = mgr.acquire_lock(LockRequest(owner="m1"))
-    assert again.owner == "m1"
-
-
-def test_lock_acquire_conflict_when_held(tmp_path: Path) -> None:
-    mgr = _manager(tmp_path)
-    mgr.acquire_lock(LockRequest(owner="m1"))
-    with pytest.raises(HTTPException) as exc:
-        mgr.acquire_lock(LockRequest(owner="m2"))
-    assert exc.value.status_code == 409
-
-
-def test_lock_release_by_owner(tmp_path: Path) -> None:
-    mgr = _manager(tmp_path)
-    mgr.acquire_lock(LockRequest(owner="m1"))
-    mgr.release_lock(LockRequest(owner="m1"))
-    # After release the lock is free again.
-    assert mgr.acquire_lock(LockRequest(owner="m2")).owner == "m2"
-
-
-def test_lock_release_by_non_owner_conflicts(tmp_path: Path) -> None:
-    mgr = _manager(tmp_path)
-    mgr.acquire_lock(LockRequest(owner="m1"))
-    with pytest.raises(HTTPException) as exc:
-        mgr.release_lock(LockRequest(owner="m2"))
-    assert exc.value.status_code == 409
-
-
-def test_lock_steal_only_after_ttl_expiry(tmp_path: Path) -> None:
-    storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=ManagerConfig(lock_ttl_seconds=900)))
-    mgr.acquire_lock(LockRequest(owner="m1"))
-    # A live foreign lease cannot be stolen.
-    with pytest.raises(HTTPException) as exc:
-        mgr.steal_lock(LockRequest(owner="m2"))
-    assert exc.value.status_code == 409
-    # Force the lease past its TTL, then a steal (after the caller's liveness
-    # check) succeeds.
-    storage.acquire_integration_lock(
-        INTEGRATION_LOCK_NAME, "m1", 900, _now() - timedelta(seconds=1000)
-    )
-    stolen = mgr.steal_lock(LockRequest(owner="m2"))
-    assert stolen.owner == "m2"
-
-
 # ── deinit / delete / owner cascade ─────────────────────────────────────────
 
 
-def test_deinit_clears_tickets_config_and_lock(tmp_path: Path) -> None:
+def test_deinit_clears_tickets_and_config(tmp_path: Path) -> None:
     mgr = _manager(tmp_path)
     mgr.create_ticket(TicketCreateRequest(title="a"))
     mgr.create_ticket(TicketCreateRequest(title="b"))
-    mgr.acquire_lock(LockRequest(owner="m1"))
     assert mgr.deinit() == 2
     state = mgr.state()
     assert state.tickets == []
     assert state.config is None
-    assert state.lock is None
 
 
 def test_delete_ticket(tmp_path: Path) -> None:

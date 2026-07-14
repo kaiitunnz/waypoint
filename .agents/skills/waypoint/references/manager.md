@@ -12,8 +12,8 @@ board.
 
 ```bash
 waypoint manager init --manifest <path/to/waypoint-manager.yaml> [--owner <sid>]   # persist machine-relevant config (idempotent)
-waypoint manager deinit [--yes]                                    # clear all tickets, config, and the lease
-waypoint manager state [--json]                                    # whole ticket set + slot usage + integration lease
+waypoint manager deinit [--yes]                                    # clear all tickets and config
+waypoint manager state [--json]                                    # whole ticket set + slot usage
 waypoint manager next [--tried <id>]... [--json]                   # slots, each ticket's legal transitions, one recommended pull move
 ```
 
@@ -39,19 +39,8 @@ waypoint manager ticket transition <id> --to <state> [--reason] [--scale] [--spe
 `transition` is keyed by target state; the server rejects an illegal edge, an
 exhausted budget, or a violated invariant with `409`. States: `intake`, `triaged`,
 `spec_pending`, `spec_review`, `ready`, `delegated`, `building`, `blocked`,
-`review_requested`, `revising`, `merging`, and the terminals `merged`, `deferred`,
-`abandoned`. `update` edits metadata without a state change.
-
-## Integration lease
-
-```bash
-waypoint manager lock acquire --owner <sid> [--ttl-seconds N]      # $WAYPOINT_SESSION_ID by default
-waypoint manager lock release --owner <sid>
-waypoint manager lock steal   --owner <sid> [--ttl-seconds N]      # only after the current lease's TTL expires
-```
-
-A single implicit `integration` lease serializes trunk advancement; `acquire` fails
-`409` if a live owner holds it, and `steal` succeeds only past the TTL.
+`review_requested`, `revising`, and the terminals `merged`, `deferred`, `abandoned`.
+`update` edits metadata without a state change.
 
 ## Rendering prompt templates
 

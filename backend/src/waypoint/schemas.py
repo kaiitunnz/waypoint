@@ -650,7 +650,7 @@ class WakeSubscriptionListResponse(BaseModel):
 
 
 class ManagerTicketState(StrEnum):
-    # The 14 states of a ticket in the Waypoint Manager state machine. The three
+    # The 13 states of a ticket in the Waypoint Manager state machine. The three
     # terminals are ``MERGED``, ``DEFERRED``, ``ABANDONED``; every other state has
     # outgoing edges in the transition table (``waypoint.manager._ADJACENCY``).
     INTAKE = "intake"
@@ -663,7 +663,6 @@ class ManagerTicketState(StrEnum):
     BLOCKED = "blocked"
     REVIEW_REQUESTED = "review_requested"
     REVISING = "revising"
-    MERGING = "merging"
     MERGED = "merged"
     DEFERRED = "deferred"
     ABANDONED = "abandoned"
@@ -720,7 +719,6 @@ class ManagerConfig(BaseModel):
     max_lead_restarts: int = Field(default=3, ge=0)
     backoff_seconds: int = Field(default=60, ge=0)
     human_latency_hours: int = Field(default=72, ge=0)
-    lock_ttl_seconds: int = Field(default=900, ge=0)
     priority_levels: list[str] = Field(default_factory=lambda: ["p0", "p1", "p2", "p3"])
     trunk: str = "main"
     # The session that ran `manager init` (the manager itself). Deleting that
@@ -728,16 +726,9 @@ class ManagerConfig(BaseModel):
     owner_session_id: str | None = None
 
 
-class IntegrationLock(BaseModel):
-    name: str
-    owner: str
-    acquired_at: datetime
-    ttl_seconds: int
-
-
 class ManagerSlotState(BaseModel):
     # Derived, never stored: a slot is the shared working tree, held by a ticket
-    # from delegate through terminal (delegated..merging).
+    # from delegate through terminal (delegated..review_requested).
     total: int
     used: int
     free: int
@@ -819,12 +810,6 @@ class ManagerStateResponse(BaseModel):
     config: ManagerConfig | None = None
     slots: ManagerSlotState
     tickets: list[ManagerTicket] = Field(default_factory=list)
-    lock: IntegrationLock | None = None
-
-
-class LockRequest(BaseModel):
-    owner: str
-    ttl_seconds: int | None = None
 
 
 class MeResponse(BaseModel):

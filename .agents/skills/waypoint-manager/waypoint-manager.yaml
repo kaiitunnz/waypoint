@@ -6,10 +6,10 @@
 # and roles are skill-consumed: the manager reads this file directly for spawn
 # config and policy. Every field is documented inline below; SKILL.md lists the
 # template placeholders. Execution is always serial on the manager's single shared
-# tree — one ticket at a time — so there is no concurrency knob.
+# tree — one ticket at a time.
 
 project: waypoint                         # used in summaries and channel labels
-trunk: main                               # branch each ticket is cut from; the sole integrator advances it
+trunk: main                               # branch each ticket is cut from; the human's merge advances it
 spec_dir: .waypoint/specs                 # where PRD/RFC writers write specs; keep under gitignored .waypoint/ so writers touch no tracked file
 
 board:
@@ -30,12 +30,11 @@ scale:
     ambiguous intent; otherwise trivial
 
 integration:
-  mode: pr                                # pr (GitHub PR) | local (rebase-ff); manager is sole integrator either way
+  mode: pr                                # pr (GitHub PR) | local (rebase-ff); human-owned merge either way
   require_ci_green: true                  # gate the merge on green CI
 
 timeouts:
   human_latency_hours: 72                 # awaiting-human (spec_review/blocked/review_requested) → escalate then abandon
-  lock_ttl_seconds: 900                   # integration-lease TTL; also the steal-after window for a dead owner
 
 escalation:
   self_decide: [retryable-error, unambiguous-clarification]              # blockers the manager settles itself

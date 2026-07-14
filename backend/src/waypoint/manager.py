@@ -9,8 +9,8 @@ Two concerns live here:
   (:func:`compute_next`). These are functions over an in-memory ticket set with
   no I/O, so they are testable without a database.
 * :class:`ManagerManager` — CRUD orchestration over storage that wires the pure
-  logic to persistence (version-checked writes) and the integration lease, and
-  maps every rejection to ``HTTPException(409)`` (mirroring ``PresetManager``).
+  logic to persistence (version-checked writes) and maps every rejection to
+  ``HTTPException(409)`` (mirroring ``PresetManager``).
 
 The transition is keyed by *target state* (matching the RFC CLI
 ``ticket transition --to <state>``); the table is the ``from -> {to}`` adjacency
@@ -28,8 +28,6 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 
 from waypoint.schemas import (
-    IntegrationLock,
-    LockRequest,
     ManagerConfig,
     ManagerInitRequest,
     ManagerNextResponse,
@@ -48,8 +46,6 @@ from waypoint.storage import ManagerTicketConflict, Storage
 
 _S = ManagerTicketState
 
-INTEGRATION_LOCK_NAME = "integration"
-
 # Terminal states have no outgoing edges.
 _TERMINAL_STATES: frozenset[ManagerTicketState] = frozenset(
     {_S.MERGED, _S.DEFERRED, _S.ABANDONED}
@@ -67,7 +63,6 @@ _TREE_STATES: frozenset[ManagerTicketState] = frozenset(
         _S.REVISING,
         _S.BLOCKED,
         _S.REVIEW_REQUESTED,
-        _S.MERGING,
     }
 )
 # There is exactly one shared tree, so at most one ticket may occupy it at a time.
@@ -105,10 +100,16 @@ _ADJACENCY: dict[ManagerTicketState, frozenset[ManagerTicketState]] = {
     _S.BUILDING: frozenset({_S.REVIEW_REQUESTED, _S.BLOCKED, _S.BUILDING}),
     _S.BLOCKED: frozenset({_S.BUILDING, _S.ABANDONED, _S.BLOCKED}),
     _S.REVIEW_REQUESTED: frozenset(
-        {_S.REVISING, _S.MERGING, _S.ABANDONED, _S.BLOCKED, _S.REVIEW_REQUESTED}
+        {
+            _S.REVISING,
+            _S.MERGED,
+            _S.DEFERRED,
+            _S.ABANDONED,
+            _S.BLOCKED,
+            _S.REVIEW_REQUESTED,
+        }
     ),
     _S.REVISING: frozenset({_S.REVIEW_REQUESTED, _S.BLOCKED, _S.REVISING}),
-    _S.MERGING: frozenset({_S.MERGED, _S.DEFERRED, _S.REVISING, _S.BLOCKED}),
     _S.MERGED: frozenset(),
     _S.DEFERRED: frozenset(),
     _S.ABANDONED: frozenset(),
@@ -149,8 +150,8 @@ def apply_transition(
     Validates edge legality and the per-edge budget guards, applies the counter
     increments and provided meta, and maintains ``awaiting_since``. Raises
     :class:`ManagerStateError` for an illegal edge or an exhausted budget. Global
-    scheduler invariants (slot cap, ≤1 merging/spec_pending, unique lead title)
-    are enforced separately by :func:`check_invariants` over the whole set.
+    scheduler invariants (slot cap, ≤1 spec_pending, unique lead title) are
+    enforced separately by :func:`check_invariants` over the whole set.
     """
     frm = ticket.state
     to = request.to
@@ -226,10 +227,8 @@ def check_invariants(tickets: Sequence[ManagerTicket], config: ManagerConfig) ->
     if on_tree > _TREE_CAPACITY:
         raise ManagerStateError(
             f"working-tree cap exceeded: {on_tree} tickets occupy the shared "
-            f"tree (delegated..merging) > {_TREE_CAPACITY}"
+            f"tree (delegated..review_requested) > {_TREE_CAPACITY}"
         )
-    if sum(1 for t in tickets if t.state == _S.MERGING) > 1:
-        raise ManagerStateError("at most one ticket may be in 'merging'")
     if sum(1 for t in tickets if t.state == _S.SPEC_PENDING) > 1:
         raise ManagerStateError(
             "at most one ticket may be in 'spec_pending' (serial analysis)"
@@ -495,13 +494,11 @@ class ManagerManager:
             )
 
     def deinit(self) -> int:
-        """Tear the manager state down: drop every ticket, the persisted config,
-        and the integration lease. Returns the ticket count removed. Clears state
-        records only — spawned sessions, branches, and board channels are reaped
-        separately."""
+        """Tear the manager state down: drop every ticket and the persisted config.
+        Returns the ticket count removed. Clears state records only — spawned
+        sessions, branches, and board channels are reaped separately."""
         removed = self._storage.clear_manager_tickets()
         self._storage.clear_manager_config()
-        self._storage.clear_integration_lock(INTEGRATION_LOCK_NAME)
         return removed
 
     def deinit_if_owner(self, session_id: str) -> bool:
@@ -520,54 +517,4 @@ class ManagerManager:
         config = self._storage.get_manager_config()
         tickets = self._storage.list_manager_tickets()
         slots = slot_state(tickets)
-        lock = self._storage.get_integration_lock(INTEGRATION_LOCK_NAME)
-        return ManagerStateResponse(
-            config=config, slots=slots, tickets=tickets, lock=lock
-        )
-
-    def _lock_ttl(self, request: LockRequest) -> int:
-        if request.ttl_seconds is not None:
-            return request.ttl_seconds
-        return self.config().lock_ttl_seconds
-
-    def acquire_lock(self, request: LockRequest) -> IntegrationLock:
-        lock = self._storage.acquire_integration_lock(
-            INTEGRATION_LOCK_NAME,
-            request.owner,
-            self._lock_ttl(request),
-            datetime.now(UTC),
-        )
-        if lock is None:
-            held = self._storage.get_integration_lock(INTEGRATION_LOCK_NAME)
-            owner = held.owner if held else "another owner"
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"integration lock held by {owner!r}",
-            )
-        return lock
-
-    def steal_lock(self, request: LockRequest) -> IntegrationLock:
-        lock = self._storage.steal_integration_lock(
-            INTEGRATION_LOCK_NAME,
-            request.owner,
-            self._lock_ttl(request),
-            datetime.now(UTC),
-        )
-        if lock is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="integration lock is held by a live owner "
-                "(steal only after TTL expiry)",
-            )
-        return lock
-
-    def release_lock(self, request: LockRequest) -> IntegrationLock | None:
-        released = self._storage.release_integration_lock(
-            INTEGRATION_LOCK_NAME, request.owner, datetime.now(UTC)
-        )
-        if not released:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="integration lock is held by another live owner",
-            )
-        return None
+        return ManagerStateResponse(config=config, slots=slots, tickets=tickets)

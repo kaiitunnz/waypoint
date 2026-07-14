@@ -178,10 +178,6 @@ manager_ticket_app = typer.Typer(
     help="Add, inspect, update, and transition manager tickets.",
     no_args_is_help=True,
 )
-manager_lock_app = typer.Typer(
-    help="Acquire, release, or steal the serialized integration lease.",
-    no_args_is_help=True,
-)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -195,7 +191,6 @@ app.add_typer(presets_app, name="presets")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(manager_app, name="manager")
 manager_app.add_typer(manager_ticket_app, name="ticket")
-manager_app.add_typer(manager_lock_app, name="lock")
 
 
 def _version_callback(value: bool) -> None:
@@ -3668,7 +3663,6 @@ def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
         ("max_lead_restarts", retry, "max_lead_restarts"),
         ("backoff_seconds", retry, "backoff_seconds"),
         ("human_latency_hours", timeouts, "human_latency_hours"),
-        ("lock_ttl_seconds", timeouts, "lock_ttl_seconds"),
     ]
     for dest, source, name in sources:
         if source.get(name) is not None:
@@ -3797,14 +3791,14 @@ def manager_deinit(
         bool, typer.Option("--yes", help="Skip the confirmation prompt.")
     ] = False,
 ) -> None:
-    """Clear the manager state: all tickets, the persisted config, and the lease.
+    """Clear the manager state: all tickets and the persisted config.
 
     Removes state records only — spawned sessions, branches, and board channels
     are reaped separately (`sessions delete`, `board clear`).
     """
     if not yes:
         typer.confirm(
-            "Clear all manager tickets, config, and the integration lease?",
+            "Clear all manager tickets and config?",
             abort=True,
         )
     _emit(_settings_from_ctx(ctx), lambda c: c.manager_deinit())
@@ -3916,18 +3910,12 @@ def manager_state(
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
 ) -> None:
-    """Show the whole ticket set, derived slot state, and the integration lease."""
+    """Show the whole ticket set and the derived slot state."""
     state = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_state())
     if json_output:
         typer.echo(json.dumps(state, indent=2))
         return
     _render_manager_slots(state.get("slots") or {})
-    lock = state.get("lock")
-    if lock:
-        typer.echo(
-            f"integration lock: {lock.get('owner')} "
-            f"(acquired {lock.get('acquired_at')}, ttl {lock.get('ttl_seconds')}s)"
-        )
     tickets = state.get("tickets") or []
     if not tickets:
         typer.echo("(no tickets)")
@@ -4117,64 +4105,6 @@ def manager_ticket_transition(
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {"ticket": c.manager_transition_ticket(ticket_id, body)},
-    )
-
-
-_LockOwnerOption = Annotated[
-    str,
-    typer.Option(
-        "--owner",
-        envvar="WAYPOINT_SESSION_ID",
-        help="Lease owner (defaults to $WAYPOINT_SESSION_ID).",
-    ),
-]
-_LockTtlOption = Annotated[
-    int | None,
-    typer.Option("--ttl-seconds", help="Lease TTL (defaults to the manifest value)."),
-]
-
-
-@manager_lock_app.command("acquire")
-def manager_lock_acquire(
-    ctx: typer.Context,
-    owner: _LockOwnerOption,
-    ttl_seconds: _LockTtlOption = None,
-) -> None:
-    """Acquire the integration lease (fails if held by another owner)."""
-    body: dict[str, Any] = {"owner": owner}
-    if ttl_seconds is not None:
-        body["ttl_seconds"] = ttl_seconds
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {"lock": c.manager_lock_acquire(body)},
-    )
-
-
-@manager_lock_app.command("steal")
-def manager_lock_steal(
-    ctx: typer.Context,
-    owner: _LockOwnerOption,
-    ttl_seconds: _LockTtlOption = None,
-) -> None:
-    """Steal the integration lease (only succeeds once the current lease expired)."""
-    body: dict[str, Any] = {"owner": owner}
-    if ttl_seconds is not None:
-        body["ttl_seconds"] = ttl_seconds
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {"lock": c.manager_lock_steal(body)},
-    )
-
-
-@manager_lock_app.command("release")
-def manager_lock_release(
-    ctx: typer.Context,
-    owner: _LockOwnerOption,
-) -> None:
-    """Release the integration lease (must be the current owner)."""
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: c.manager_lock_release({"owner": owner}),
     )
 
 

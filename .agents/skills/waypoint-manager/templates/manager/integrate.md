@@ -1,15 +1,14 @@
 # Manager — integrate
 
-A ticket is in `review_requested` with a PR at {{pr_url}}, or already in `merging`.
-You are the **sole integrator** of {{trunk}} and the human is the **sole merge
-authority**. Run the review-until-merge loop, then land the PR behind the
-integration lease. Never merge on your own authority. `{{branch}}` is checked out in
+A ticket is in `review_requested` with a PR at {{pr_url}}. The human is the **sole
+merge authority**: you run the review-until-merge loop and **observe** the human's
+merge — you never merge on your own authority. `{{branch}}` is checked out in
 {{repo_dir}}.
 
 ## Review-until-merge loop (human gated)
 
-1. Post the PR to the human as an **approval** inbox item (link, summary, CI
-   state from `gh pr view {{pr_url}} --json state,statusCheckRollup`). You are
+1. Post the PR to the human as an **approval** inbox item (link, summary, CI state
+   from `gh pr view {{pr_url}} --json state,statusCheckRollup`). You are
    `--wake-on-inbox`-subscribed, so the answer wakes you.
 2. On the answer:
    - **request-changes** → transition `review_requested → revising`, then relay the
@@ -17,82 +16,50 @@ integration lease. Never merge on your own authority. `{{branch}}` is checked ou
      content-free nudge — see `templates/manager/monitor.md`). The lead addresses it
      (`templates/tech-lead/address-review.md`), re-pushes, and re-posts `done`; you
      move `revising → review_requested` and re-post the gate on the new head.
-   - **merge** → go to "Land the PR" below.
+   - **merge** → the human merges on GitHub; record it (below).
    - **abort / latency-timeout** → `review_requested → abandoned`, note it on the
-     ticket, then reap the subtree and release the tree (Finalize steps below).
-3. Loop until the human merges or aborts.
+     ticket, then reap the subtree and free the tree (Finalize).
+3. Loop until the PR is merged or the ticket is aborted.
 
-## Land the PR (only on a human merge decision)
+## Record the merge
 
-Acquire the lease first — you are the only session that advances {{trunk}}:
-
-```bash
-waypoint manager lock acquire --owner {{manager_session_id}}      # --ttl-seconds defaults to the manifest
-waypoint manager ticket transition {{ticket_id}} --to merging --pr-url {{pr_url}}
-```
-
-Reconcile against the PR before doing anything irreversible — a prior turn may have
-already merged it:
+Each drain, reconcile the PR against GitHub — the human may have merged it since your
+last turn:
 
 ```bash
 gh pr view {{pr_url}} --json state,mergeStateStatus,statusCheckRollup
-# state == "MERGED" → the merge already happened; skip to Finalize.
 ```
 
-**Rebase onto the advanced trunk, then merge**, in your tree where {{branch}} is
-checked out:
+- `state == "MERGED"` → record the terminal: full completion → `review_requested →
+  merged`; partial completion (`is_partial`) → `review_requested → deferred`.
+
+The single shared tree serializes builds, and trunk advances only on a merge the human
+performs (or, opt-in, one they ask you to perform).
+
+### Merge on the human's behalf (opt-in only)
+
+Only if the human explicitly asks you to merge for them: reconcile first (skip if
+already `MERGED`); if the branch needs it, rebase onto the advanced trunk in your tree
+— trivial lockfile/generated conflicts only (`git add`, `git rebase --continue`); a
+**semantic** conflict → `git rebase --abort`, transition `review_requested → revising`,
+and relay it to the lead (never hand-resolve logic yourself). Then, once CI is green if
+`require_ci_green`:
 
 ```bash
-git -C {{repo_dir}} checkout {{branch}}
-git -C {{repo_dir}} fetch origin {{trunk}}
-git -C {{repo_dir}} rebase origin/{{trunk}}
-# Trivial conflicts only (lockfiles, generated files): resolve, `git add`, `git rebase --continue`.
-# A SEMANTIC conflict → `git rebase --abort` and release the lease (`manager lock
-#   release`), transition `merging → revising`, and relay the conflict to the lead.
-#   Do NOT hand-resolve logic yourself.
-git -C {{repo_dir}} push --force-with-lease
+git -C {{repo_dir}} push --force-with-lease       # only if you rebased
+gh pr merge {{pr_url}} --squash --delete-branch    # or --auto so CI-gating never blocks a turn
 ```
 
-Confirm CI is green if `require_ci_green`, then merge (only if not already
-`MERGED`):
-
-```bash
-gh pr merge {{pr_url}} --squash --delete-branch   # or --auto so CI-gating never blocks a turn
-```
-
-## Release the lease on EVERY exit
-
-Release whether you merged, deferred, bounced to `revising`, or blocked — the lease
-must never leak:
-
-```bash
-waypoint manager lock release --owner {{manager_session_id}}
-```
-
-A dead owner's lease is recoverable only by `waypoint manager lock steal --owner
-… ` **after the TTL expires**.
+Record `review_requested → merged` (or `→ deferred`) in the same step.
 
 ## Finalize
 
-- **Full completion** → `merging → merged`. Terminal.
-- **Partial completion** (`is_partial` true) → `merging → deferred`. Terminal.
-  Spawn follow-up tickets for the unmet goals **only here**, once the subset has
-  merged, with a deterministic id/dedup key so a re-run does not double-create:
-  ```bash
-  waypoint board post {{tickets_channel}} "<goal>" --key ticket:{{ticket_id}}-f1   # registry cell, like intake
-  waypoint manager ticket add "follow-up: <goal>" --id {{ticket_id}}-f1 \
-    --priority {{priority}} --dep {{ticket_id}}
-  ```
-- **CI red / needs human** → release lease, `merging → blocked`, escalate.
-- **Semantic conflict** → released lease, `merging → revising` (above).
-
-On any terminal for a ticket that reached the tree (`merged`/`deferred` here, or
-`abandoned` from the abort path above), reap the ticket's whole subtree **after**
-integration and free the tree for the next ticket. Scope to this ticket by its
-recorded lead sid — reap the lead's descendants (their worker sub-worktrees prune
-with them), then delete the lead itself, then return your tree to `{{trunk}}` and
-drop the branch. Each step is guarded (no-op when the ticket never got a branch or
-lead):
+On any terminal for a ticket that reached the tree (`merged`/`deferred`/`abandoned`),
+reap the ticket's whole subtree **after** the merge and free the tree for the next
+ticket. Scope to this ticket by its recorded lead sid — reap the lead's descendants
+(their worker sub-worktrees prune with them), then delete the lead itself, then return
+your tree to `{{trunk}}` and drop the branch. Each step is guarded (no-op when the
+ticket never got a branch or lead):
 
 ```bash
 lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
@@ -106,6 +73,17 @@ git -C {{repo_dir}} checkout {{trunk}}
 git -C {{repo_dir}} pull --ff-only origin {{trunk}}           # sync trunk (the just-merged commit, if any)
 git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
   && git -C {{repo_dir}} branch -D {{branch}} || true         # no-op if the branch was never cut / already dropped
+```
+
+**Follow-ups on `deferred`** — a partial completion does **not** auto-create follow-up
+tickets. Post an inbox confirmation listing the proposed follow-ups and create them
+only on the human's approval, with a deterministic id/dedup key so a re-run does not
+double-create:
+
+```bash
+waypoint board post {{tickets_channel}} "<goal>" --key ticket:{{ticket_id}}-f1   # registry cell, like intake
+waypoint manager ticket add "follow-up: <goal>" --id {{ticket_id}}-f1 \
+  --priority {{priority}} --dep {{ticket_id}}
 ```
 
 Post a one-line outcome to your `{{org_channel}}` channel and return to

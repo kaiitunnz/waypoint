@@ -3747,6 +3747,7 @@ def _manager_static_bindings(
     board = _mapping(raw.get("board"))
     scale = _mapping(raw.get("scale"))
     escalation = _mapping(raw.get("escalation"))
+    integration = _mapping(raw.get("integration"))
     roles = _mapping(raw.get("roles"))
 
     def _join(value: Any) -> str:
@@ -3766,6 +3767,9 @@ def _manager_static_bindings(
         "substantial_when": _join(scale.get("substantial_when")).strip(),
         "self_decide": _join(escalation.get("self_decide")),
         "always_escalate": _join(escalation.get("always_escalate")),
+        "require_ci_green": (
+            "true" if integration.get("require_ci_green", True) else "false"
+        ),
         "tech_lead_launch": _role_launch_args(roles.get("tech_lead")),
         "prd_writer_launch": _role_launch_args(roles.get("prd_writer")),
         "rfc_writer_launch": _role_launch_args(roles.get("rfc_writer")),

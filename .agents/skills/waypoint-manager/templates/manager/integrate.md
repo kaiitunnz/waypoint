@@ -48,8 +48,8 @@ Only if the human explicitly asks you to merge for them: reconcile first (skip i
 already `MERGED`); if the branch needs it, rebase onto the advanced trunk in your tree
 — trivial lockfile/generated conflicts only (`git add`, `git rebase --continue`); a
 **semantic** conflict → `git rebase --abort`, transition `review_requested → revising`,
-and relay it to the lead (never hand-resolve logic yourself). Then, once CI is green if
-`require_ci_green`:
+and relay it to the lead (never hand-resolve logic yourself). Then merge; when
+`require_ci_green` is `true` (here `{{require_ci_green}}`), wait for green CI first:
 
 ```bash
 git -C {{repo_dir}} push --force-with-lease       # only if you rebased

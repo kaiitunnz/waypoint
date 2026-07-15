@@ -602,6 +602,7 @@ carries them as literals:
 | `{{prd_writer_launch}}` / `{{rfc_writer_launch}}` | the matching writer role (`roles.prd_writer` / `roles.rfc_writer`) launch args |
 | `{{substantial_when}}` | `scale.substantial_when` |
 | `{{self_decide}}` / `{{always_escalate}}` | the `escalation` lists (joined) |
+| `{{require_ci_green}}` | `integration.require_ci_green` (`true`/`false`; default `true`) |
 | `{{repo_dir}}` | the manager's own working tree (its cwd), where every lead builds |
 | `{{manager_session_id}}` | `$WAYPOINT_SESSION_ID` |
 | `{{templates_dir}}` | the compiled root, for a template naming its siblings |

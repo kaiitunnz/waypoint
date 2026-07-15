@@ -719,6 +719,7 @@ def test_cli_manager_init_compiles_templates(
         "launch: {{tech_lead_launch}}\n"
         "scale: {{substantial_when}}\n"
         "escalate: {{always_escalate}}\n"
+        "ci: {{require_ci_green}}\n"
         "ticket {{ticket_id}}\n",
         encoding="utf-8",
     )
@@ -736,6 +737,8 @@ def test_cli_manager_init_compiles_templates(
         "escalation:\n"
         "  self_decide: [retryable-error]\n"
         "  always_escalate: [product-decision, scope-change]\n"
+        "integration:\n"
+        "  require_ci_green: false\n"
         "roles:\n"
         "  tech_lead:\n"
         '    launch: { backend: claude_code, model: "opus[1m]", '
@@ -771,6 +774,7 @@ def test_cli_manager_init_compiles_templates(
     assert 'launch: --backend claude_code --model "opus[1m]" ' in body  # model quoted
     assert "scale: needs a schema change" in body  # scale.substantial_when
     assert "escalate: product-decision, scope-change" in body  # list joined
+    assert "ci: false" in body  # integration.require_ci_green baked
     assert "{{ticket_id}}" in body  # per-ticket left intact
 
     rc = captured["body"]["config"]["render_context"]

@@ -112,8 +112,8 @@ template never carries them as `{{…}}`: `{{project}}`, `{{trunk}}`, `{{spec_di
 builds); the launch args `{{tech_lead_launch}}`, `{{prd_writer_launch}}`,
 `{{rfc_writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as
 `--backend/--model/--permission-mode`); the policy `{{substantial_when}}`,
-`{{self_decide}}`, `{{always_escalate}}`; and `{{templates_dir}}` (the compiled root,
-for a template naming its siblings).
+`{{self_decide}}`, `{{always_escalate}}`, `{{require_ci_green}}`; and
+`{{templates_dir}}` (the compiled root, for a template naming its siblings).
 
 **Per-ticket** values remain in the compiled bodies and are filled at use — by you as
 you read your own steps, by `manager render` for a child: `{{ticket_id}}`,

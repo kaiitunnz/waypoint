@@ -7,10 +7,21 @@ merge — you never merge on your own authority. `{{branch}}` is checked out in
 
 ## Review-until-merge loop (human gated)
 
-1. Post the PR to the human as an **approval** inbox item (link, summary, CI state
-   from `gh pr view {{pr_url}} --json state,statusCheckRollup`). You are
-   `--wake-on-inbox`-subscribed, so the answer wakes you.
-2. On the answer:
+1. Post the PR to the human as an **approval** inbox item, subject
+   `{{ticket_channel}}: {{ticket_title}} — PR review`. You are `--wake-on-inbox`-
+   subscribed, so the answer wakes you.
+   ```bash
+   waypoint inbox post --json - <<'JSON'
+   { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
+     "blocks": [
+       { "type": "markdown", "text": "<PR link {{pr_url}}, summary, CI state from gh pr view>" },
+       { "type": "approval", "prompt": "Merge this PR?", "required": true } ] }
+   JSON
+   ```
+2. On a later wake, read the answer from the inbox by its `{{ticket_channel}}:` subject
+   (`item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" | jq -r
+   --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')`;
+   when `item` is non-empty, `waypoint inbox get "$item"`), then branch on the decision:
    - **request-changes** → transition `review_requested → revising`, then relay the
      round to the lead: post the human's requested changes to `{{ticket_channel}}`
      as the durable payload, and send the rendered address-review instructions:
@@ -23,9 +34,11 @@ merge — you never merge on your own authority. `{{branch}}` is checked out in
      The lead addresses the feedback, re-pushes, and re-posts `done`; you move
      `revising → review_requested` and re-post the gate on the new head.
    - **merge** → the human merges on GitHub; record it (below).
-   - **abort / latency-timeout** → `review_requested → abandoned`, note it on the
-     ticket, then reap the subtree and free the tree (Finalize).
-3. Loop until the PR is merged or the ticket is aborted.
+   - **abort** → `review_requested → abandoned`, note it on the ticket, then reap the
+     subtree and free the tree (Finalize).
+3. Loop until the PR is merged or the ticket is aborted. A silent latency-timeout is
+   abandoned by the `latency_timeouts` reconcile path in
+   `{{templates_dir}}/manager/loop-cycle.md`.
 
 ## Record the merge
 

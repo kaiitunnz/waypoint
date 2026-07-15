@@ -44,6 +44,9 @@ waypoint inbox post --json - <<'JSON'
 JSON
 ```
 
+Every gate item's subject leads with `{{ticket_channel}}:`; the answer read matches
+that prefix.
+
 Frame an open question when the lead left the decision open. You are
 `--wake-on-inbox`-subscribed, so the human's answer wakes you.
 
@@ -52,25 +55,36 @@ Frame an open question when the lead left the decision open. You are
 When the writer posts the spec ref, move `spec_pending → spec_review` (recording
 `{{spec_ref}}`) and post an **approval** inbox item with the spec. On the answer:
 **approve** → `ready`; **request-changes** → `spec_pending` (relay the notes to a
-fresh writer); **reject / latency-timeout** → `abandoned`.
+fresh writer); **reject** → `abandoned`. A silent latency-timeout is abandoned by the
+`latency_timeouts` reconcile path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
+waypoint inbox post --json - <<'JSON'
+{ "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
+  "blocks": [
+    { "type": "markdown", "text": "<spec summary; ref {{spec_ref}}>" },
+    { "type": "approval", "prompt": "Approve this spec?", "required": true } ] }
+JSON
 ```
 
 ## Relay a human answer back to the lead — durably
 
-The answer lands on a later wake, so recover the item from the ticket rather than a
-prior turn's variable — the item's subject carries `{{ticket_channel}}`. Read the
-answer (never injected — pull it), then post it to the durable log and nudge:
+The answer lands on a later wake, so recover the gate item from the inbox by its
+`{{ticket_channel}}:` subject. Act only when a resolved gate item exists — a board-post
+or liveness wake leaves `item` empty and carries no answer to relay. Read the answer
+(never injected — pull it), then post it to the durable log and nudge:
 
 ```bash
-item=$(waypoint inbox list --status open --q "{{ticket_channel}}" | jq -r '.items[0].id')   # newest unanswered item for this ticket
-answer=$(waypoint inbox get "$item")                   # {"item": {...}} — branch on the block's answer
-waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
-lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-waypoint sessions send "$lead" \
-  "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" \
+  | jq -r --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')  # newest answered gate; empty if this wake carried no answer
+if [ -n "$item" ] && [ "$item" != "null" ]; then
+  answer=$(waypoint inbox get "$item")                 # {"item": {...}} — branch on the block's answer
+  waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
+  lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
+  waypoint sessions send "$lead" \
+    "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+fi
 ```
 
 Then transition out of the awaiting state by the block's shape:

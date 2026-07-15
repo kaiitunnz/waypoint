@@ -137,6 +137,13 @@ same call so intent and its dedup key land atomically with the state change.
 `ticket update` refines `footprint`/`kind`/`deps` without a state change. Illegal
 edges, exhausted budgets, and violated invariants all return `409`.
 
+`ticket add` records the ticket's scheduler state only; the request text lives in the
+`ticket:<id>` cell on the tickets channel, which the manager's intake registration
+posts before adding the ticket. The writer and tech-lead prompts render `{{ticket_body}}`
+from that cell, so a ticket added directly with no cell (bypassing intake) has no body
+to spec or build from — file tickets through the intake channel (the human workflow
+above); a bare `ticket add` needs its cell posted alongside it.
+
 #### The 13 states
 
 Groups by how they occupy resources:

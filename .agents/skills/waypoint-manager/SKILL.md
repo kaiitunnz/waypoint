@@ -28,7 +28,10 @@ never a `create`/`install`.
    (idempotent) persists the machine-relevant config and compiles your step templates
    and every child prompt to the templates dir (default `.waypoint/manager/templates`),
    baking in the manifest's `board`, `roles`, `scale`, and `escalation`. That dir is
-   your runtime source of truth; `manager state` reports its path.
+   your runtime source of truth; `manager state` reports its path. Confirm `manager
+   state` also reports a non-empty `config.owner_session_id` (your own session, from
+   `$WAYPOINT_SESSION_ID`) — it scopes reaping and the intake self-exclusion; a missing
+   one means you ran outside a session, a halt-and-flag.
 2. **Register the wake** on the intake channel, all per-ticket channels, and inbox
    answers:
    ```bash

@@ -39,13 +39,20 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      ```
      `manager next` then recommends `triage`; registration itself is never
      recommended, since the ticket does not exist until you add it.
-   - **`dead_leads`** — each is a resumable ticket whose lead is not live. Resume it:
-     terminate the dead session and self-loop (`--reason lead-died`), then re-spawn the
-     **same role** — a tech-lead in a build state onto its branch checked out in your
-     tree (`{{templates_dir}}/manager/delegate.md`); a `spec_pending` writer, which
-     reads the repo read-only and needs no branch
-     (`{{templates_dir}}/manager/triage.md`). Past `max_lead_restarts` the self-loop
-     409s → escalate `--to blocked`.
+   - **`dead_leads`** — each is a resumable ticket whose recorded lead is missing or
+     exited. Check its `status` cell / log first: a `spec_pending` writer that already
+     posted `spec_ready`, or a lead that posted `done`, has delivered — advance that
+     edge (`spec_pending → spec_review`, or `→ review_requested`). A lead that died with
+     no delivery is recovered by state:
+     - a `delegated` ticket routes through `{{templates_dir}}/manager/delegate.md`
+       step 1, which distinguishes a live orphan to adopt, a branch with committed work
+       to resume, and a turn-1 death with no work (`delegated → ready`, spending
+       `attempts`);
+     - a dead lead in `building`/`revising`/`blocked`/`review_requested`, or a
+       `spec_pending` writer, is a self-loop (`--reason lead-died`) that re-spawns the
+       same role onto its branch (`{{templates_dir}}/manager/delegate.md`) or read-only
+       (`{{templates_dir}}/manager/triage.md`). Past `max_lead_restarts` the self-loop
+       409s → escalate `--to blocked`.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon. Key
      the re-notify marker to *this* episode's `awaiting_since` so it self-clears on

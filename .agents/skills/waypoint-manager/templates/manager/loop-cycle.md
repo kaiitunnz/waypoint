@@ -25,8 +25,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    ```bash
    waypoint manager reconcile --json
    ```
-   It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, and
-   `relay_cursors`. Alongside it, read each in-flight ticket's `status` cell **by key**
+   It reports `unregistered_intake`, `dead_leads`, and `latency_timeouts`. Alongside
+   it, read each in-flight ticket's `status` cell **by key**
    (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
    (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
    - **`unregistered_intake`** — each is a `{{tickets_channel}}` post not yet a ticket.
@@ -56,8 +56,6 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      current `awaiting_since` (re-notified, still unanswered) → transition to
      `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`),
      reap it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
-   - **`relay_cursors`** — the highest `kind=relay` id per ticket channel; a relay
-     re-post lands above it.
    - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup` (external CI/merge state).
 

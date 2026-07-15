@@ -15,7 +15,7 @@ waypoint manager init --manifest <path/to/waypoint-manager.yaml> [--owner <sid>]
 waypoint manager deinit [--yes]                                    # clear all tickets and config
 waypoint manager state [--json]                                    # whole ticket set + tree state
 waypoint manager next [--tried <id>]... [--json]                   # tree state, each ticket's legal transitions, one recommended pull move
-waypoint manager reconcile [--json]                                # server-derived reconcile signals (intake, dead leads, latency, relay cursors)
+waypoint manager reconcile [--json]                                # server-derived reconcile signals (intake, dead leads, latency)
 ```
 
 `init` persists the machine-relevant manifest fields (retry budgets, priority

@@ -4108,7 +4108,7 @@ def manager_reconcile(
     """Report the drain's server-derived reconcile signals in one snapshot.
 
     Aggregates unregistered intake posts, dead leads (resume candidates), latency
-    timeouts, and per-ticket relay cursors. Read-only: the manager acts on each.
+    timeouts. Read-only: the manager acts on each.
     """
     report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
     if json_output:

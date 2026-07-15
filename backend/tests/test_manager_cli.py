@@ -138,7 +138,6 @@ def test_cli_manager_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
                 ],
                 "dead_leads": [],
                 "latency_timeouts": [],
-                "relay_cursors": [],
             },
         )
 

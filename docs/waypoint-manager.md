@@ -230,7 +230,7 @@ observes the external signal during reconcile.
 `manager reconcile` returns the drain's server-derivable reconcile signals in one
 consistent snapshot, so the manager adopts observed reality without a sheaf of manual
 board and session queries. It is read-only — it reports; the manager decides and acts.
-Four signals:
+Three signals:
 
 - **`unregistered_intake`** — keyless posts on the tickets channel, authored by
   someone other than the manager, whose board-entry id is not yet a ticket.
@@ -239,8 +239,6 @@ Four signals:
 - **`latency_timeouts`** — awaiting-human tickets whose `awaiting_since` is older than
   `human_latency_hours` (raw candidates; the re-notify-then-abandon decision stays
   with the manager).
-- **`relay_cursors`** — per in-flight per-ticket channel, the highest `kind=relay`
-  board-entry id.
 
 External signals (a PR's CI and merge state) are not covered — they stay in the
 agent's shell (`gh pr view`).

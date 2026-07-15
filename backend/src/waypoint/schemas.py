@@ -767,17 +767,10 @@ class ReconcileLatencyTimeout(BaseModel):
     hours_elapsed: float
 
 
-class ReconcileRelayCursor(BaseModel):
-    ticket_id: str
-    ticket_channel: str
-    latest_relay_id: int | None = None
-
-
 class ManagerReconcileReport(BaseModel):
     unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
     dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
     latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
-    relay_cursors: list[ReconcileRelayCursor] = Field(default_factory=list)
 
 
 class ManagerTicketTransitions(BaseModel):

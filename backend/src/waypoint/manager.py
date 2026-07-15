@@ -42,7 +42,6 @@ from waypoint.schemas import (
     ReconcileDeadLead,
     ReconcileIntake,
     ReconcileLatencyTimeout,
-    ReconcileRelayCursor,
     SessionStatus,
     TicketCreateRequest,
     TicketTransitionRequest,
@@ -138,10 +137,6 @@ class ManagerStateError(Exception):
 
 def legal_targets(state: ManagerTicketState) -> list[ManagerTicketState]:
     return sorted(_ADJACENCY[state], key=lambda s: s.value)
-
-
-def is_terminal(state: ManagerTicketState) -> bool:
-    return state in _TERMINAL_STATES
 
 
 def _holds_tree(ticket: ManagerTicket) -> bool:
@@ -547,8 +542,8 @@ class ManagerManager:
         """Aggregate the drain's server-derivable reconcile signals in one snapshot.
 
         Read-only: it reports what the manager should adopt (unregistered intake,
-        dead leads, latency timeouts, relay cursors); the manager still decides and
-        acts. External signals (a PR's CI/merge state) stay in the agent's shell.
+        dead leads, latency timeouts); the manager still decides and acts. External
+        signals (a PR's CI/merge state) stay in the agent's shell.
         """
         config = self.config()
         tickets = self._storage.list_manager_tickets()
@@ -556,7 +551,6 @@ class ManagerManager:
         owner = config.owner_session_id
 
         intake: list[ReconcileIntake] = []
-        relay_cursors: list[ReconcileRelayCursor] = []
         if rc is not None and rc.tickets_channel:
             known = {t.id for t in tickets}
             for entry in self._storage.list_board_entries(rc.tickets_channel):
@@ -574,25 +568,6 @@ class ManagerManager:
                         id=entry.id,
                         author_session_id=entry.author_session_id,
                         text=entry.text,
-                    )
-                )
-            for ticket in tickets:
-                if is_terminal(ticket.state):
-                    continue
-                channel = f"{rc.ticket_channel_prefix}{ticket.id}"
-                latest = max(
-                    (
-                        e.id
-                        for e in self._storage.list_board_entries(channel)
-                        if (e.metadata or {}).get("kind") == "relay"
-                    ),
-                    default=None,
-                )
-                relay_cursors.append(
-                    ReconcileRelayCursor(
-                        ticket_id=ticket.id,
-                        ticket_channel=channel,
-                        latest_relay_id=latest,
                     )
                 )
 
@@ -636,5 +611,4 @@ class ManagerManager:
             unregistered_intake=intake,
             dead_leads=dead_leads,
             latency_timeouts=latency_timeouts,
-            relay_cursors=relay_cursors,
         )

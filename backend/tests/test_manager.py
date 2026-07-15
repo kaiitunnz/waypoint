@@ -454,7 +454,7 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     storage.add_board_entry("tickets", "please fix X", author_session_id="human")
     storage.add_board_entry("tickets", "req", key="ticket:zzz", author_session_id="mgr")
     # Drive one ticket onto the tree and into a blocked, awaiting-human state with a
-    # ghost lead — it exercises dead_leads, latency, and relay_cursors at once.
+    # ghost lead — it exercises dead_leads and latency at once.
     t = mgr.create_ticket(TicketCreateRequest(title="t", scale=Sc.TRIVIAL))
     mgr.transition(t.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(t.id, TicketTransitionRequest(to=S.READY))
@@ -464,7 +464,6 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     mgr.transition(t.id, TicketTransitionRequest(to=S.BUILDING))
     mgr.transition(t.id, TicketTransitionRequest(to=S.BLOCKED, reason="stuck"))
     mgr.update_ticket(t.id, TicketUpdateRequest(lead_session_id="ghost"))
-    storage.add_board_entry(f"ticket-{t.id}", "answer", metadata={"kind": "relay"})
 
     report = mgr.reconcile(datetime.now(UTC) + timedelta(hours=100))
 
@@ -473,8 +472,6 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     assert dead and dead[0].lead_session_id == "ghost" and dead[0].lead_status is None
     latency = [x for x in report.latency_timeouts if x.ticket_id == t.id]
     assert latency and latency[0].hours_elapsed >= 72
-    cursor = [c for c in report.relay_cursors if c.ticket_id == t.id]
-    assert cursor and cursor[0].latest_relay_id is not None
 
 
 # ── Storage CRUD ────────────────────────────────────────────────────────────

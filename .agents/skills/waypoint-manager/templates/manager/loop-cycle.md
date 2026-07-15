@@ -18,7 +18,10 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    Read `tree` (the shared working tree — `{free, held_by}`), each ticket's
    `legal_transitions`, and the single `recommended` action. `recommended` is only
    ever a manager-initiated *pull* move (triage, substantial-spec, trivial-ready,
-   delegate).
+   delegate). A `substantial` recommendation keys on scale alone; triage.md's
+   input-type routing picks the real edge — a pass-through PRD/RFC goes
+   `triaged → ready`, not to a writer — so follow triage.md, not
+   `recommended.to_state`, on that move.
 
 2. **Reconcile — adopt reality before acting.** Pull the server-derived signals in
    one snapshot, then act on each:
@@ -44,10 +47,9 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      posted `spec_ready`, or a lead that posted `done`, has delivered — advance that
      edge (`spec_pending → spec_review`, or `→ review_requested`). A lead that died with
      no delivery is recovered by state:
-     - a `delegated` ticket routes through `{{templates_dir}}/manager/delegate.md`
-       step 1, which distinguishes a live orphan to adopt, a branch with committed work
-       to resume, and a turn-1 death with no work (`delegated → ready`, spending
-       `attempts`);
+     - a `delegated` ticket routes through `{{templates_dir}}/manager/delegate.md`:
+       step 1 adopts a live orphan or resumes a branch with committed work; step 3
+       handles a turn-1 death with no work (`delegated → ready`, spending `attempts`);
      - a dead lead in `building`/`revising`/`blocked`/`review_requested`, or a
        `spec_pending` writer, is a self-loop (`--reason lead-died`) that re-spawns the
        same role onto its branch (`{{templates_dir}}/manager/delegate.md`) or read-only

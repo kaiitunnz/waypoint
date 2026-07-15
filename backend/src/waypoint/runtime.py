@@ -3468,7 +3468,9 @@ class SessionRuntime:
             unset=request.unset,
         )
         if entry is not None:
-            await self._publish_board_update(channel)
+            await self._publish_board_update(
+                channel, author_session_id=request.author_session_id
+            )
         return entry
 
     async def _publish_board_update(

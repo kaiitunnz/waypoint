@@ -2932,12 +2932,24 @@ def board_edit_entry(
         list[str] | None,
         typer.Option("--meta", help="Replace metadata with key=value. Repeatable."),
     ] = None,
+    author_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Editing session; defaults to this session's id so its own "
+            "board-update wake self-excludes.",
+        ),
+    ] = None,
 ) -> None:
     """Edit a post's text and metadata in place (the cell key is immutable)."""
     metadata = _parse_meta(meta)
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"entry": c.update_board_entry(channel, entry_id, text, metadata)},
+        lambda c: {
+            "entry": c.update_board_entry(
+                channel, entry_id, text, metadata, author_session_id=author_session_id
+            )
+        },
     )
 
 
@@ -2967,6 +2979,14 @@ def board_set_meta(
         list[str] | None,
         typer.Option("--unset", help="Remove metadata key(s). Repeatable."),
     ] = None,
+    author_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Editing session; defaults to this session's id so its own "
+            "board-update wake self-excludes.",
+        ),
+    ] = None,
 ) -> None:
     """Update a keyed cell's metadata without changing its text."""
     if key is None and entry_id is None:
@@ -2993,6 +3013,7 @@ def board_set_meta(
                 metadata=metadata,
                 merge=merge,
                 unset=unset,
+                author_session_id=author_session_id,
             )
         }
 

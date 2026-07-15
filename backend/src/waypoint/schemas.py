@@ -390,6 +390,9 @@ class BoardEntryUpdateRequest(BaseModel):
     # removed from the result in either mode.
     merge: bool = False
     unset: list[str] = Field(default_factory=list)
+    # The editing session, so its own board-update wake self-excludes (mirrors
+    # BoardPostRequest); ``None`` wakes every matching subscriber.
+    author_session_id: str | None = None
 
 
 class LoginRequest(BaseModel):

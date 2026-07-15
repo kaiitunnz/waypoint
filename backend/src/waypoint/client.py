@@ -679,6 +679,7 @@ class WaypointClient:
         metadata: dict[str, Any] | None = None,
         merge: bool = False,
         unset: list[str] | None = None,
+        author_session_id: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"metadata": metadata or {}}
         if text is not None:
@@ -687,6 +688,8 @@ class WaypointClient:
             body["merge"] = True
         if unset:
             body["unset"] = list(unset)
+        if author_session_id is not None:
+            body["author_session_id"] = author_session_id
         data: dict[str, Any] = self._request(
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]

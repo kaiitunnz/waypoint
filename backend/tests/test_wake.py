@@ -6,6 +6,7 @@ import pytest
 
 from waypoint.runtime import WAKE_INPUT_TEXT, SessionRuntime
 from waypoint.schemas import (
+    BoardEntryUpdateRequest,
     BoardPostRequest,
     SessionInputRequest,
     SessionRecord,
@@ -130,6 +131,35 @@ async def test_self_authored_board_post_does_not_wake_author(
     await _flush_wakes(runtime)
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_self_authored_board_edit_does_not_wake_author(
+    tmp_path, monkeypatch
+) -> None:
+    # A metadata edit (e.g. the manager stamping a classification / latency marker)
+    # self-excludes its author, exactly like a post, so the manager does not wake
+    # itself on its own set-meta. A second subscriber is still woken.
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "codex-author"))
+    runtime.storage.create_session(make_session(runtime.settings, "codex-other"))
+    _register(runtime, "codex-author", channel_globs=["tickets"])
+    _register(runtime, "codex-other", channel_globs=["tickets"])
+    entry = runtime.storage.add_board_entry("tickets", "req", key="ticket:1")
+    calls = _record_wakes(runtime, monkeypatch)
+
+    await runtime.update_board_entry(
+        "tickets",
+        entry.id,
+        BoardEntryUpdateRequest(
+            metadata={"input_type": "bug-report"},
+            merge=True,
+            author_session_id="codex-author",
+        ),
+    )
+    await _flush_wakes(runtime)
+
+    assert calls == [("codex-other", WAKE_INPUT_TEXT)]
 
 
 @pytest.mark.asyncio

@@ -25,9 +25,10 @@ is present before entering the loop. A missing prerequisite is a halt-and-flag,
 never a `create`/`install`.
 
 1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
-   (idempotent), and `export WAYPOINT_MANAGER_MANIFEST=<path-to>/waypoint-manager.yaml`
-   so `manager render` finds it without a repeated `--manifest`. Read the manifest —
-   its `board`, `roles`, `scale`, and `escalation` drive the steps below.
+   (idempotent) persists the machine-relevant config and compiles your step templates
+   and every child prompt to the templates dir (default `.waypoint/manager/templates`),
+   baking in the manifest's `board`, `roles`, `scale`, and `escalation`. That dir is
+   your runtime source of truth; `manager state` reports its path.
 2. **Register the wake** on the intake channel, all per-ticket channels, and inbox
    answers:
    ```bash
@@ -51,9 +52,10 @@ Every wake drains all currently-actionable work to a fixpoint, then idles — it
 not take one action and stop. Keep a per-drain `tried` set of ticket ids that failed
 an action this drain. Each iteration: re-anchor (`waypoint manager next --json`, with
 `--tried <id>` per tried id), reconcile observed reality, choose one action, record
-intent before the side effect, act idempotently, confirm. Re-read
-`templates/manager/loop-cycle.md` every wake for the step-by-step procedure. No
-recommendation and no outstanding external signal → go idle.
+intent before the side effect, act idempotently, confirm. Re-read your compiled
+`manager/loop-cycle.md` (under the templates dir `manager state` reports) every wake
+for the step-by-step procedure. No recommendation and no outstanding external signal
+→ go idle.
 
 A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
 Trust `manager next` and the board over memory; a `waypoint` CLI connection error
@@ -81,40 +83,41 @@ drops the state records only, so reap what you own first:
 
 ## Templates
 
-Each role's step templates live in **its `roles.<role>.templates` dir from the
-manifest**. The shipped defaults are `templates/manager/`, `templates/tech-lead/`,
-`templates/prd-writer/`, `templates/rfc-writer/`, but a manifest may relocate them —
-resolve every path through the manifest, not the default literally. A
-`templates/<role>/<step>.md` reference (here or inside any template) means the
-`<step>` file in that role's `templates:` dir. Render one with `waypoint manager
-render <path> --ticket {{ticket_id}}`: it fills the file's `{{placeholders}}` from
-the environment (`{{repo_dir}}`, `{{manager_session_id}}`), the manifest, the ticket
-record, and the ticket's board cell, and prints the body, which you pipe into
-`sessions send`. It fails on an unknown placeholder; pass `--set key=value` for a
-runtime binding the ticket does not yet carry.
+`manager init` compiles every template to the templates dir, baking the static
+values (channels, launch commands, policy, paths) into each body. You operate from
+that compiled dir (path from `manager state`): read your OWN compiled step templates
+directly — they carry the live per-ticket `{{placeholders}}` you fill each wake. A
+child's prompt you **render and send** as fully-substituted prose; a child never opens
+a template or calls render. Render with `waypoint manager render --role <role> --step
+<step> --ticket {{ticket_id}}`: it reads the compiled child template and fills its
+per-ticket `{{placeholders}}` from the ticket record and its board cell, printing the
+body you pipe into `sessions send`. It fails on an unknown placeholder; pass `--set
+key=value` for a runtime binding the ticket does not carry.
 
-- **manager** (`roles.manager.templates`) — `loop-cycle` (loop entry), `triage`
-  (route by input type), `delegate` (spawn a lead for a `ready` ticket), `monitor`
-  (build / blocker / spec-gate / relay), `integrate` (review-until-merge, land PR).
-- **prd_writer** / **rfc_writer** (`roles.<writer>.templates`) — `write`.
-- **tech_lead** (`roles.tech_lead.templates`) — `kickoff`, `strategy-gate`,
-  `execute`, `report`, `address-review`.
+- **manager** — `loop-cycle` (loop entry), `triage`, `delegate`, `monitor`,
+  `integrate`. You read these directly.
+- **prd_writer** / **rfc_writer** — `write`; render and send it to the writer.
+- **tech_lead** — `brief` (the whole autonomous run, sent at delegate/resume) and
+  `address-review` (sent each review round); render and send them to the lead.
 
 ## Placeholders
 
-Substitute these before sending a template; never hardcode a preset or channel.
+**Static** values are baked into the compiled bodies at `manager init`, so a compiled
+template never carries them as `{{…}}`: `{{project}}`, `{{trunk}}`, `{{spec_dir}}`,
+`{{tickets_channel}}`, `{{org_channel}}`, `{{ticket_channel_prefix}}`,
+`{{manager_session_id}}`, `{{repo_dir}}` (your own working tree, where every lead
+builds); the launch args `{{tech_lead_launch}}`, `{{prd_writer_launch}}`,
+`{{rfc_writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as
+`--backend/--model/--permission-mode`); the policy `{{substantial_when}}`,
+`{{self_decide}}`, `{{always_escalate}}`; and `{{templates_dir}}` (the compiled root,
+for a template naming its siblings).
 
-- **From the manifest:** `{{project}}`; `{{trunk}}`; `{{spec_dir}}`; `{{tickets_channel}}`, `{{org_channel}}`;
-  `{{ticket_channel}}` (`board.ticket_channel_prefix` + the ticket id, e.g.
-  `ticket-42`) and bare `{{ticket_channel_prefix}}`; `{{tech_lead_launch}}` /
-  `{{writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as
-  `--backend/--model/--permission-mode`).
-- **Per ticket:** `{{ticket_id}}`, `{{ticket_title}}`, `{{ticket_body}}`,
-  `{{priority}}`, `{{scale}}`, `{{footprint}}`, `{{input_type}}`, `{{spec_route}}`,
-  `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by convention), `{{pr_url}}`.
-- **Constant:** `{{manager_session_id}}` = `$WAYPOINT_SESSION_ID`; `{{repo_dir}}` =
-  your own working tree (cwd), where every lead builds and the tree rests on
-  `{{trunk}}` between tickets.
+**Per-ticket** values remain in the compiled bodies and are filled at use — by you as
+you read your own steps, by `manager render` for a child: `{{ticket_id}}`,
+`{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by
+convention), `{{pr_url}}`, and `{{ticket_channel}}` (`{{ticket_channel_prefix}}` + the
+ticket id, e.g. `ticket-42`).
 
 ## Guardrails
 

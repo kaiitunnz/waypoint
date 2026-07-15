@@ -3635,12 +3635,13 @@ def presets_clear_default(ctx: typer.Context) -> None:
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_default_session_preset())
 
 
-def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
-    """Extract the machine-relevant ManagerConfig fields from a manifest.
+def _mapping(value: Any) -> dict[str, Any]:
+    """A manifest section as a mapping, or an empty one when absent/malformed."""
+    return value if isinstance(value, dict) else {}
 
-    The role/preset/template/channel fields are skill-consumed and ignored here;
-    only the fields the server-side scheduler enforces are forwarded.
-    """
+
+def _load_manifest(path: Path) -> dict[str, Any]:
+    """Read and parse a manifest, requiring a top-level mapping."""
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except OSError as exc:
@@ -3649,6 +3650,15 @@ def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
         raise typer.BadParameter(f"manifest {path} is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise typer.BadParameter("manifest must be a top-level mapping")
+    return raw
+
+
+def _manager_config_from_manifest(raw: dict[str, Any]) -> dict[str, Any]:
+    """Extract the machine-relevant ManagerConfig fields from a manifest.
+
+    The role/preset/template/channel fields are skill-consumed and ignored here;
+    only the fields the server-side scheduler enforces are forwarded.
+    """
 
     def _section(name: str) -> dict[str, Any]:
         value = raw.get(name)
@@ -3675,33 +3685,110 @@ def _manager_config_from_manifest(path: Path) -> dict[str, Any]:
     return config
 
 
-def _manifest_render_bindings(path: Path) -> dict[str, str]:
-    """The skill-owned placeholder values a manifest supplies to `manager render`.
+def _role_launch_args(spec: Any) -> str:
+    """The `sessions start` launch flags for a manifest role — its `preset:` name,
+    else its inline `launch:` block (backend/model/permission_mode/transport)."""
+    if not isinstance(spec, dict):
+        return ""
+    if spec.get("preset") is not None:
+        return f"--preset {spec['preset']}"
+    launch = spec.get("launch")
+    if not isinstance(launch, dict):
+        return ""
+    parts: list[str] = []
+    for key, flag in (
+        ("backend", "--backend"),
+        ("model", "--model"),
+        ("permission_mode", "--permission-mode"),
+        ("transport", "--transport"),
+    ):
+        value = launch.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        # Quote a value carrying shell metacharacters (e.g. a model like `opus[1m]`)
+        # so the baked command line survives globbing when the manager runs it.
+        if any(ch in text for ch in "[]*? "):
+            text = f'"{text}"'
+        parts.append(f"{flag} {text}")
+    return " ".join(parts)
 
-    These are the manifest fields that appear in prompt-template bodies — the
-    project name, the trunk branch, the board channel names, and the spec directory.
-    Role/preset/template fields are not template-body placeholders and are skipped.
+
+def _manager_static_bindings(
+    raw: dict[str, Any], repo_dir: str, session_id: str, templates_dir: str
+) -> dict[str, str]:
+    """The static placeholder values `manager init` bakes into every template.
+
+    These resolve once at init and never change per ticket, so the compiled
+    templates carry literal channels, launch commands, and policy — the manager
+    reads no manifest at runtime.
     """
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except OSError as exc:
-        raise typer.BadParameter(f"could not read manifest {path}: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise typer.BadParameter(f"manifest {path} is not valid YAML: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise typer.BadParameter("manifest must be a top-level mapping")
-    board_raw = raw.get("board")
-    board = board_raw if isinstance(board_raw, dict) else {}
-    bindings: dict[str, str] = {}
-    if raw.get("project") is not None:
-        bindings["project"] = str(raw["project"])
-    if raw.get("trunk") is not None:
-        bindings["trunk"] = str(raw["trunk"])
-    bindings["spec_dir"] = str(raw.get("spec_dir") or ".waypoint/specs")
-    for field in ("tickets_channel", "org_channel", "ticket_channel_prefix"):
-        if board.get(field) is not None:
-            bindings[field] = str(board[field])
-    return bindings
+    board = _mapping(raw.get("board"))
+    scale = _mapping(raw.get("scale"))
+    escalation = _mapping(raw.get("escalation"))
+    roles = _mapping(raw.get("roles"))
+
+    def _join(value: Any) -> str:
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value)
+        return str(value or "")
+
+    return {
+        "project": str(raw.get("project") or ""),
+        "trunk": str(raw.get("trunk") or ""),
+        "spec_dir": str(raw.get("spec_dir") or ".waypoint/specs"),
+        "repo_dir": repo_dir,
+        "manager_session_id": session_id,
+        "tickets_channel": str(board.get("tickets_channel") or ""),
+        "org_channel": str(board.get("org_channel") or ""),
+        "ticket_channel_prefix": str(board.get("ticket_channel_prefix") or ""),
+        "substantial_when": _join(scale.get("substantial_when")).strip(),
+        "self_decide": _join(escalation.get("self_decide")),
+        "always_escalate": _join(escalation.get("always_escalate")),
+        "tech_lead_launch": _role_launch_args(roles.get("tech_lead")),
+        "prd_writer_launch": _role_launch_args(roles.get("prd_writer")),
+        "rfc_writer_launch": _role_launch_args(roles.get("rfc_writer")),
+        "templates_dir": templates_dir,
+    }
+
+
+def _compiled_templates_root(raw: dict[str, Any], repo_dir: str) -> str:
+    """The absolute directory `manager init` writes the compiled templates to —
+    the manifest's `templates_dir` (default `.waypoint/manager/templates`), resolved
+    under the repo when relative."""
+    configured = raw.get("templates_dir")
+    root = Path(str(configured) if configured else ".waypoint/manager/templates")
+    if not root.is_absolute():
+        root = Path(repo_dir) / root
+    return str(root.resolve())
+
+
+def _compile_manager_templates(
+    manifest: Path,
+    raw: dict[str, Any],
+    static: dict[str, str],
+    templates_dir: Path,
+) -> None:
+    """Bake the static bindings into every role's raw templates and write the
+    compiled copies under `<templates_dir>/<role>/<step>.md`, leaving the per-ticket
+    placeholders for the manager (its own steps) or `manager render` (children)."""
+    base = manifest.resolve().parent
+    roles = _mapping(raw.get("roles"))
+    for role, spec in roles.items():
+        if not isinstance(spec, dict) or spec.get("templates") is None:
+            continue
+        src_dir = (base / str(spec["templates"])).resolve()
+        if not src_dir.is_dir():
+            raise typer.BadParameter(
+                f"role {role!r} templates dir not found: {src_dir}"
+            )
+        dst_dir = templates_dir / str(role)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for src in sorted(src_dir.glob("*.md")):
+            compiled, _ = _substitute_placeholders(
+                src.read_text(encoding="utf-8"), static
+            )
+            (dst_dir / src.name).write_text(compiled, encoding="utf-8")
 
 
 def _ticket_render_bindings(ticket: dict[str, Any]) -> dict[str, str]:
@@ -3777,8 +3864,24 @@ def manager_init(
         ),
     ] = None,
 ) -> None:
-    """Persist the manifest's machine-relevant fields as the server ManagerConfig."""
-    config = _manager_config_from_manifest(manifest)
+    """Persist the machine-relevant config and compile the prompt templates.
+
+    Bakes the manifest's static placeholders (channels, launch commands, policy)
+    into every role's templates, writing the compiled copies to `templates_dir`
+    (default `.waypoint/manager/templates`) — the manager's runtime source of truth.
+    """
+    raw = _load_manifest(manifest)
+    config = _manager_config_from_manifest(raw)
+    session_id = owner or ""  # owner already resolves $WAYPOINT_SESSION_ID via typer
+    repo_dir = _git_toplevel()
+    templates_dir = _compiled_templates_root(raw, repo_dir)
+    static = _manager_static_bindings(raw, repo_dir, session_id, templates_dir)
+    _compile_manager_templates(manifest, raw, static, Path(templates_dir))
+    config["render_context"] = {
+        "templates_dir": templates_dir,
+        "tickets_channel": static["tickets_channel"],
+        "ticket_channel_prefix": static["ticket_channel_prefix"],
+    }
     if owner:
         config["owner_session_id"] = owner
     _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
@@ -3807,23 +3910,20 @@ def manager_deinit(
 @manager_app.command("render")
 def manager_render(
     ctx: typer.Context,
-    template: Annotated[
-        Path,
-        typer.Argument(
-            exists=True, dir_okay=False, help="Prompt-template file to render."
+    role: Annotated[
+        str,
+        typer.Option(
+            "--role",
+            help="Child role whose template to render (tech_lead, prd_writer, "
+            "rfc_writer).",
         ),
     ],
-    manifest: Annotated[
-        Path | None,
+    step: Annotated[
+        str,
         typer.Option(
-            "--manifest",
-            exists=True,
-            dir_okay=False,
-            envvar="WAYPOINT_MANAGER_MANIFEST",
-            help="waypoint-manager.yaml; resolves trunk and channel placeholders "
-            "(defaults to $WAYPOINT_MANAGER_MANIFEST).",
+            "--step", help="Compiled template step: <step>.md under the role."
         ),
-    ] = None,
+    ],
     ticket_id: Annotated[
         str | None,
         typer.Option(
@@ -3837,8 +3937,7 @@ def manager_render(
         typer.Option(
             "--set",
             help="Override or add a binding as key=value (repeatable; highest "
-            "precedence). For runtime values a template needs that the manifest "
-            "and ticket do not carry.",
+            "precedence). For a runtime value the ticket does not carry.",
         ),
     ] = None,
     allow_unresolved: Annotated[
@@ -3849,36 +3948,47 @@ def manager_render(
         ),
     ] = False,
 ) -> None:
-    """Render a prompt template: substitute {{placeholders}} and print the body.
+    """Render a child prompt from its compiled template and print the body.
 
-    Resolves placeholders, lowest precedence first: env (repo_dir,
-    manager_session_id) < manifest (trunk, channels) < ticket record < the
-    ticket's board cell (ticket_body, input_type, spec_route) < --set. Fails on an
-    unknown placeholder unless --allow-unresolved.
+    The manager renders every prompt it hands a child and sends the substituted
+    prose. `--role`/`--step` locate the compiled template under the `templates_dir`
+    persisted at `manager init` (its static placeholders already baked); this fills
+    the per-ticket placeholders from the --ticket record and its board cell, with
+    --set at the highest precedence. Fails on an unknown placeholder unless
+    --allow-unresolved.
     """
+
+    def _fetch(
+        c: WaypointClient,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]]]:
+        rc = (c.manager_state().get("config") or {}).get("render_context") or {}
+        ticket = c.manager_get_ticket(ticket_id) if ticket_id is not None else None
+        tickets_channel = rc.get("tickets_channel")
+        cell = (
+            c.read_board(tickets_channel, key=f"ticket:{ticket_id}")
+            if ticket_id is not None and tickets_channel
+            else []
+        )
+        return rc, ticket, cell
+
+    rc, ticket, cell = _run_client(_settings_from_ctx(ctx), _fetch)
+    templates_dir = rc.get("templates_dir")
+    if not templates_dir:
+        raise typer.BadParameter(
+            "no render context; run `waypoint manager init --manifest <path>` first"
+        )
+    template = Path(templates_dir) / role / f"{step}.md"
+    if not template.is_file():
+        raise typer.BadParameter(
+            f"no compiled template for role {role!r} step {step!r} at {template}"
+        )
     text = template.read_text(encoding="utf-8")
-    bindings: dict[str, str] = {"repo_dir": _git_toplevel()}
-    session_id = os.environ.get("WAYPOINT_SESSION_ID")
-    if session_id:
-        bindings["manager_session_id"] = session_id
-    if manifest is not None:
-        bindings.update(_manifest_render_bindings(manifest))
-    if ticket_id is not None:
-        tickets_channel = bindings.get("tickets_channel")
 
-        def _fetch(c: WaypointClient) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-            ticket = c.manager_get_ticket(ticket_id)
-            cell = (
-                c.read_board(tickets_channel, key=f"ticket:{ticket_id}")
-                if tickets_channel is not None
-                else []
-            )
-            return ticket, cell
-
-        ticket, cell = _run_client(_settings_from_ctx(ctx), _fetch)
+    bindings: dict[str, str] = {}
+    if ticket is not None:
         bindings.update(_ticket_render_bindings(ticket))
-        prefix = bindings.get("ticket_channel_prefix")
-        if prefix is not None:
+        prefix = str(rc.get("ticket_channel_prefix") or "")
+        if ticket_id is not None:
             bindings["ticket_channel"] = f"{prefix}{ticket_id}"
         if cell:
             entry = cell[-1]
@@ -3897,7 +4007,7 @@ def manager_render(
         raise typer.BadParameter(
             "unresolved placeholders: "
             + ", ".join(sorted(unresolved))
-            + " (supply --manifest/--ticket, a --set binding, or --allow-unresolved)"
+            + " (add a --set binding or --allow-unresolved)"
         )
     typer.echo(rendered, nl=False)
 

@@ -3,7 +3,7 @@
 A `{{ticket_channel}}` post or an inbox answer woke you. Read the lead's typed
 feedback, drive the state, and relay any human answer back **durably**. This step
 covers the substantial-spec gate, mid-build blockers, and the done/partial signal;
-the merge itself is `templates/manager/integrate.md`.
+the merge itself is `{{templates_dir}}/manager/integrate.md`.
 
 ## Read the feedback
 
@@ -25,10 +25,9 @@ The `status` cell's `kind=` is the feedback vocabulary:
 
 ## Blockers → the inbox (with escalation policy)
 
-Apply the manifest policy: settle a `retryable-error` / `unambiguous-clarification`
-yourself; escalate a `product-decision` / `scope-change` / `irreversible` /
-`spec-ambiguity`. Transition, then post an inbox item and record `awaiting_since`
-is now stamped (the server does it):
+Apply the escalation policy: settle blockers of kind {{self_decide}} yourself;
+escalate {{always_escalate}} to the human inbox. Transition, then post an inbox item
+and record `awaiting_since` is now stamped (the server does it):
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
@@ -86,4 +85,4 @@ waypoint manager ticket transition {{ticket_id}} --to review_requested \
   --pr-url {{pr_url}} --not-partial      # or --is-partial for a partial delivery
 ```
 
-Then open the per-PR review gate — see `templates/manager/integrate.md`.
+Then open the per-PR review gate — see `{{templates_dir}}/manager/integrate.md`.

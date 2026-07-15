@@ -2,15 +2,16 @@
 #
 # `waypoint manager init --manifest <this file>` persists the machine-relevant
 # fields (trunk, retry, priority, timeouts) server-side, so
-# `manager next`/`transition` enforce them. board, scale, escalation, integration,
-# and roles are skill-consumed: the manager reads this file directly for spawn
-# config and policy. Every field is documented inline below; SKILL.md lists the
-# template placeholders. Execution is always serial on the manager's single shared
-# tree — one ticket at a time.
+# `manager next`/`transition` enforce them. It also bakes board, scale, escalation,
+# and roles into the compiled templates under `templates_dir` — the manager's
+# runtime source of truth, so it reads no manifest per wake. Every field is
+# documented inline below; SKILL.md lists the template placeholders. Execution is
+# always serial on the manager's single shared tree — one ticket at a time.
 
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket is cut from; the human's merge advances it
 spec_dir: .waypoint/specs                 # where PRD/RFC writers write specs; keep under gitignored .waypoint/ so writers touch no tracked file
+templates_dir: .waypoint/manager/templates   # where init writes the compiled templates; under gitignored .waypoint/, resolved relative to the repo root
 
 board:
   tickets_channel: tickets                # intake channel + ticket:<id> registry cells ({{tickets_channel}})

@@ -17,9 +17,11 @@ waypoint manager state [--json]                                    # whole ticke
 waypoint manager next [--tried <id>]... [--json]                   # slots, each ticket's legal transitions, one recommended pull move
 ```
 
-`init` persists only the machine-relevant manifest fields (retry budgets, priority
-levels, trunk, timeouts); the board/roles/scale/escalation fields are consumed by
-the skill, not the server. `--owner` (default `$WAYPOINT_SESSION_ID`)
+`init` persists the machine-relevant manifest fields (retry budgets, priority
+levels, trunk, timeouts) and compiles the prompt templates: it bakes the
+board/roles/scale/escalation values into the templates under `templates_dir`
+(default `.waypoint/manager/templates`) and persists the render context render
+needs. `--owner` (default `$WAYPOINT_SESSION_ID`)
 records the manager's own session; deleting that session cascades a `deinit`.
 `next` recommends at most one manager-initiated move (triage / spec / delegate);
 human- and lead-driven edges are returned as legal transitions, not recommendations.
@@ -45,16 +47,16 @@ exhausted budget, or a violated invariant with `409`. States: `intake`, `triaged
 ## Rendering prompt templates
 
 ```bash
-waypoint manager render <template-file> [--manifest <path>] [--ticket <id>] [--set key=value]... [--allow-unresolved]
+waypoint manager render --role <role> --step <step> [--ticket <id>] [--set key=value]... [--allow-unresolved]
 ```
 
-Reads a prompt template and substitutes its `{{placeholders}}`, printing the body to
-stdout (pipe it into `sessions send`). Resolves lowest precedence first: env
-(`repo_dir`, `manager_session_id`) < `--manifest` (project, trunk, spec_dir, channels) < the `--ticket`
-record < the ticket's board cell (`ticket_body`, `input_type`, `spec_route`) <
-`--set`. `--manifest` defaults to `$WAYPOINT_MANAGER_MANIFEST`. Fails on an unknown
-placeholder unless `--allow-unresolved`. Substitution runs CLI-side over the manifest
-file and existing endpoints; the server has no knowledge of templates or placeholders.
+Renders a child prompt (the manager's job — a child never opens a template).
+`--role`/`--step` locate the compiled template under the `templates_dir` persisted at
+`init` (its static placeholders already baked); this fills the per-ticket
+placeholders and prints the body to stdout (pipe it into `sessions send`). Resolves
+lowest precedence first: the `--ticket` record < the ticket's board cell
+(`ticket_body`, `input_type`, `spec_route`) < `--set`. Fails on an unknown
+placeholder unless `--allow-unresolved`.
 
 ## Notes
 

@@ -314,33 +314,51 @@ def test_cli_board_wait_timeout(
 # ── manager render ──────────────────────────────────────────────────────────
 
 
-def _manifest(tmp_path: Path) -> Path:
-    path = tmp_path / "waypoint-manager.yaml"
-    path.write_text(
-        "project: waypoint\n"
-        "trunk: main\n"
-        "board:\n"
-        "  tickets_channel: tickets\n"
-        "  org_channel: org\n"
-        "  ticket_channel_prefix: ticket-\n",
-        encoding="utf-8",
+def _compiled_step(tmp_path: Path, role: str, step: str, body: str) -> str:
+    """Write a compiled `<root>/<role>/<step>.md`; return the compiled root."""
+    root = tmp_path / "compiled"
+    (root / role).mkdir(parents=True, exist_ok=True)
+    (root / role / f"{step}.md").write_text(body, encoding="utf-8")
+    return str(root.resolve())
+
+
+def _render_context(templates_dir: str) -> dict[str, Any]:
+    return {
+        "templates_dir": templates_dir,
+        "tickets_channel": "tickets",
+        "ticket_channel_prefix": "ticket-",
+    }
+
+
+def _state_response(render_context: dict[str, Any] | None) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "config": {"trunk": "main", "render_context": render_context},
+            "slots": {"total": 1, "used": 0, "free": 1},
+            "tickets": [],
+        },
     )
-    return path
 
 
-def _template(tmp_path: Path, body: str) -> Path:
-    path = tmp_path / "tmpl.md"
-    path.write_text(body, encoding="utf-8")
-    return path
-
-
-def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
-    # No --ticket, so no server call: manifest + --set resolve everything.
-    tmpl = _template(
+def test_cli_manager_render_per_ticket_and_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The compiled template carries the static values as literals (baked at init);
+    # render fills only the per-ticket placeholders, here via --set.
+    root = _compiled_step(
         tmp_path,
-        "Ticket {{ticket_id}} for {{project}} on {{trunk}} / {{tickets_channel}}"
-        " in {{spec_dir}}: {{note}}",
+        "tech_lead",
+        "brief",
+        "Ticket {{ticket_id}} for waypoint on main / tickets: {{note}}",
     )
+    rc = _render_context(root)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/manager/state"
+        return _state_response(rc)
+
+    _mock_cli(monkeypatch, handler)
     result = runner.invoke(
         cli_app,
         [
@@ -348,9 +366,10 @@ def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
             str(_cli_config(tmp_path)),
             "manager",
             "render",
-            str(tmpl),
-            "--manifest",
-            str(_manifest(tmp_path)),
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
             "--set",
             "ticket_id=ticket-9",
             "--set",
@@ -358,16 +377,14 @@ def test_cli_manager_render_manifest_and_set(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.stdout
-    # {{spec_dir}} defaults to .waypoint/specs when the manifest omits it.
-    assert result.stdout == (
-        "Ticket ticket-9 for waypoint on main / tickets in .waypoint/specs: hello"
-    )
+    assert result.stdout == "Ticket ticket-9 for waypoint on main / tickets: hello"
 
 
-def test_cli_manager_render_spec_dir_override(tmp_path: Path) -> None:
-    manifest = tmp_path / "waypoint-manager.yaml"
-    manifest.write_text("spec_dir: custom/specs\n", encoding="utf-8")
-    tmpl = _template(tmp_path, "spec at {{spec_dir}}")
+def test_cli_manager_render_unknown_step_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc = _render_context(_compiled_step(tmp_path, "tech_lead", "brief", "x"))
+    _mock_cli(monkeypatch, lambda request: _state_response(rc))
     result = runner.invoke(
         cli_app,
         [
@@ -375,27 +392,68 @@ def test_cli_manager_render_spec_dir_override(tmp_path: Path) -> None:
             str(_cli_config(tmp_path)),
             "manager",
             "render",
-            str(tmpl),
-            "--manifest",
-            str(manifest),
+            "--role",
+            "prd_writer",
+            "--step",
+            "write",
         ],
     )
-    assert result.exit_code == 0, result.stdout
-    assert result.stdout == "spec at custom/specs"
+    assert result.exit_code != 0
+    assert "no compiled template" in result.output
 
 
-def test_cli_manager_render_strict_fails_on_unknown(tmp_path: Path) -> None:
-    tmpl = _template(tmp_path, "Hi {{mystery}}")
+def test_cli_manager_render_requires_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mock_cli(monkeypatch, lambda request: _state_response(None))
     result = runner.invoke(
         cli_app,
-        ["--config", str(_cli_config(tmp_path)), "manager", "render", str(tmpl)],
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "no render context" in result.output
+
+
+def test_cli_manager_render_strict_fails_on_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc = _render_context(
+        _compiled_step(tmp_path, "tech_lead", "brief", "Hi {{mystery}}")
+    )
+    _mock_cli(monkeypatch, lambda request: _state_response(rc))
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "render",
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
+        ],
     )
     assert result.exit_code != 0
     assert "unresolved placeholders: mystery" in result.output
 
 
-def test_cli_manager_render_allow_unresolved(tmp_path: Path) -> None:
-    tmpl = _template(tmp_path, "Hi {{mystery}}")
+def test_cli_manager_render_allow_unresolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc = _render_context(
+        _compiled_step(tmp_path, "tech_lead", "brief", "Hi {{mystery}}")
+    )
+    _mock_cli(monkeypatch, lambda request: _state_response(rc))
     result = runner.invoke(
         cli_app,
         [
@@ -403,7 +461,10 @@ def test_cli_manager_render_allow_unresolved(tmp_path: Path) -> None:
             str(_cli_config(tmp_path)),
             "manager",
             "render",
-            str(tmpl),
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
             "--allow-unresolved",
         ],
     )
@@ -414,7 +475,17 @@ def test_cli_manager_render_allow_unresolved(tmp_path: Path) -> None:
 def test_cli_manager_render_ticket_pulls_record_and_board_cell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = _compiled_step(
+        tmp_path,
+        "tech_lead",
+        "brief",
+        "{{ticket_title}} [{{input_type}}] on {{ticket_channel}}: {{ticket_body}} (spec {{spec_ref}})",
+    )
+    rc = _render_context(root)
+
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/manager/state":
+            return _state_response(rc)
         if request.url.path == "/api/manager/tickets/42":
             return httpx.Response(
                 200,
@@ -446,10 +517,6 @@ def test_cli_manager_render_ticket_pulls_record_and_board_cell(
         )
 
     _mock_cli(monkeypatch, handler)
-    tmpl = _template(
-        tmp_path,
-        "{{ticket_title}} [{{input_type}}] on {{ticket_channel}}: {{ticket_body}} (spec {{spec_ref}})",
-    )
     result = runner.invoke(
         cli_app,
         [
@@ -457,9 +524,10 @@ def test_cli_manager_render_ticket_pulls_record_and_board_cell(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
-            str(tmpl),
-            "--manifest",
-            str(_manifest(tmp_path)),
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
             "--ticket",
             "42",
         ],
@@ -473,7 +541,13 @@ def test_cli_manager_render_ticket_pulls_record_and_board_cell(
 def test_cli_manager_render_set_overrides_board_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    rc = _render_context(
+        _compiled_step(tmp_path, "tech_lead", "brief", "body={{ticket_body}}")
+    )
+
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/manager/state":
+            return _state_response(rc)
         if request.url.path == "/api/manager/tickets/42":
             return httpx.Response(
                 200,
@@ -495,7 +569,6 @@ def test_cli_manager_render_set_overrides_board_body(
         )
 
     _mock_cli(monkeypatch, handler)
-    tmpl = _template(tmp_path, "body={{ticket_body}}")
     result = runner.invoke(
         cli_app,
         [
@@ -503,9 +576,10 @@ def test_cli_manager_render_set_overrides_board_body(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
-            str(tmpl),
-            "--manifest",
-            str(_manifest(tmp_path)),
+            "--role",
+            "tech_lead",
+            "--step",
+            "brief",
             "--ticket",
             "42",
             "--set",
@@ -608,3 +682,73 @@ def test_cli_manager_init_sends_owner(
     )
     assert result.exit_code == 0, result.stdout
     assert captured["body"]["config"]["owner_session_id"] == "mgr-7"
+
+
+def test_cli_manager_init_compiles_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_dir = tmp_path / "raw" / "tech-lead"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "brief.md").write_text(
+        "{{project}} on {{trunk}} / {{tickets_channel}}\n"
+        "launch: {{tech_lead_launch}}\n"
+        "scale: {{substantial_when}}\n"
+        "escalate: {{always_escalate}}\n"
+        "ticket {{ticket_id}}\n",
+        encoding="utf-8",
+    )
+    compiled = tmp_path / "compiled"
+    manifest = tmp_path / "waypoint-manager.yaml"
+    manifest.write_text(
+        "project: waypoint\n"
+        "trunk: main\n"
+        f"templates_dir: {compiled}\n"
+        "board:\n"
+        "  tickets_channel: tickets\n"
+        "  ticket_channel_prefix: ticket-\n"
+        "scale:\n"
+        "  substantial_when: needs a schema change\n"
+        "escalation:\n"
+        "  self_decide: [retryable-error]\n"
+        "  always_escalate: [product-decision, scope-change]\n"
+        "roles:\n"
+        "  tech_lead:\n"
+        '    launch: { backend: claude_code, model: "opus[1m]", '
+        "permission_mode: auto }\n"
+        f"    templates: {raw_dir}\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/manager/init"
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"config": {}})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "init",
+            "--manifest",
+            str(manifest),
+            "--owner",
+            "mgr",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+
+    body = (compiled / "tech_lead" / "brief.md").read_text(encoding="utf-8")
+    assert "waypoint on main / tickets" in body  # channels/project baked
+    assert 'launch: --backend claude_code --model "opus[1m]" ' in body  # model quoted
+    assert "scale: needs a schema change" in body  # scale.substantial_when
+    assert "escalate: product-decision, scope-change" in body  # list joined
+    assert "{{ticket_id}}" in body  # per-ticket left intact
+
+    rc = captured["body"]["config"]["render_context"]
+    assert rc["templates_dir"] == str(compiled.resolve())
+    assert rc["tickets_channel"] == "tickets"
+    assert rc["ticket_channel_prefix"] == "ticket-"

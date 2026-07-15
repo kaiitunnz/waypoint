@@ -12,10 +12,16 @@ merge — you never merge on your own authority. `{{branch}}` is checked out in
    `--wake-on-inbox`-subscribed, so the answer wakes you.
 2. On the answer:
    - **request-changes** → transition `review_requested → revising`, then relay the
-     feedback to the lead **durably** (versioned `{{ticket_channel}}` post + a
-     content-free nudge — see `templates/manager/monitor.md`). The lead addresses it
-     (`templates/tech-lead/address-review.md`), re-pushes, and re-posts `done`; you
-     move `revising → review_requested` and re-post the gate on the new head.
+     round to the lead: post the human's requested changes to `{{ticket_channel}}`
+     as the durable payload, and send the rendered address-review instructions:
+     ```bash
+     waypoint board post {{ticket_channel}} "<the human's requested changes>" --meta kind=relay
+     lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
+     waypoint sessions send "$lead" \
+       "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
+     ```
+     The lead addresses the feedback, re-pushes, and re-posts `done`; you move
+     `revising → review_requested` and re-post the gate on the new head.
    - **merge** → the human merges on GitHub; record it (below).
    - **abort / latency-timeout** → `review_requested → abandoned`, note it on the
      ticket, then reap the subtree and free the tree (Finalize).
@@ -87,5 +93,5 @@ waypoint manager ticket add "follow-up: <goal>" --id {{ticket_id}}-f1 \
 ```
 
 Post a one-line outcome to your `{{org_channel}}` channel and return to
-`templates/manager/loop-cycle.md`; redeploy the stack here if the project needs it
+`{{templates_dir}}/manager/loop-cycle.md`; redeploy the stack here if the project needs it
 (the tree is back on `{{trunk}}`).

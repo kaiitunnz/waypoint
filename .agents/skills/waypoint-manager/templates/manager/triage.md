@@ -31,9 +31,8 @@ scale. Classify from the content, not a label the user attached.
 
 ## Assign scale and footprint
 
-Apply the manifest `scale.substantial_when` rule. **Substantial** when the work
-needs a schema/API/UX change, touches more than one module, or has ambiguous
-intent; otherwise **trivial**. Scale does not pick the artifact (input-type does)
+Apply the scale rule — **substantial** when the work {{substantial_when}}. Scale
+does not pick the artifact (input-type does)
 and cannot skip a gate: every ticket routed to `spec_pending` to author a PRD/RFC
 passes the `spec_review` human gate. What scale governs is the bug-report branch
 below (a trivial fix takes the direct-instruction `triaged → ready` path with no
@@ -73,13 +72,13 @@ artifact (still ≤ 1 ticket in `spec_pending` at a time — the server enforces
 
 - **→ spec_pending** (write a new artifact) — transition, then spawn the matching
   writer (next section). Its posted spec goes through the `spec_review` human
-  approval gate (`templates/manager/monitor.md`) before `ready`.
+  approval gate (`{{templates_dir}}/manager/monitor.md`) before `ready`.
   ```bash
   waypoint manager ticket transition {{ticket_id}} --to spec_pending
   ```
 - **→ ready, pass-through** (input is already a usable spec) — record the input doc
   as the spec and go straight to `ready`: no writer, no `spec_review` gate.
-  `templates/manager/delegate.md` spawns the tech-lead with this `spec_ref`. Point
+  `{{templates_dir}}/manager/delegate.md` spawns the tech-lead with this `spec_ref`. Point
   `--spec-ref` at where the doc lives — a repo path if the user gave one, else the
   `ticket:{{ticket_id}}` cell on `{{tickets_channel}}` (the body *is* the spec).
   ```bash
@@ -113,19 +112,25 @@ waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
 
 For a `prd-writer` or `rfc-writer` route, spawn the matching writer — ephemeral,
 owner-scoped, titled for reconcile; read-only in your tree ({{repo_dir}}), writing
-only its spec doc under `{{spec_dir}}/`. The `role` (title suffix + template dir)
-is the `spec_route`:
+only its spec doc under `{{spec_dir}}/`. The `role` (the title suffix reconcile
+matches) is the `spec_route`; its `--role` render key is the underscore form:
 
 ```bash
-role=<prd-writer|rfc-writer>          # from spec_route
-# {{writer_launch}} expands from the matching writer role in the manifest
-# (roles.prd_writer / roles.rfc_writer) — never hardcode a preset/model here.
-sid=$(waypoint sessions start {{writer_launch}} \
-  --cwd {{repo_dir}} \
-  --title "subagent:ticket-{{ticket_id}}:$role" \
-  --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+role=<prd-writer|rfc-writer>          # from spec_route; the reconcile title suffix
+render_role=<prd_writer|rfc_writer>   # its manifest key (underscore) for --role
+# Launch args per route (baked from the manifest at init): prd-writer uses the
+# first, rfc-writer the second.
+if [ "$render_role" = prd_writer ]; then
+  sid=$(waypoint sessions start {{prd_writer_launch}} \
+    --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
+    --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+else
+  sid=$(waypoint sessions start {{rfc_writer_launch}} \
+    --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
+    --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+fi
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
-waypoint sessions send "$sid" "$(waypoint manager render templates/$role/write.md --ticket {{ticket_id}})"
+waypoint sessions send "$sid" "$(waypoint manager render --role $render_role --step write --ticket {{ticket_id}})"
 ```
 
 To **resume** a writer that died mid-spec, re-run this same spawn after terminating
@@ -134,9 +139,9 @@ lead-died`, spends `lead_restarts`); past `max_lead_restarts`, escalate `--to bl
 
 When the `rfc-writer` route is **converting an input PRD**, pass that PRD to the
 writer as its primary input — it preserves the PRD's intent and reduces it to a
-concrete technical design (`templates/rfc-writer/write.md`). The writer posts the
+concrete technical design. The writer posts the
 spec ref back and recommends an execution strategy; you then move the ticket
 `spec_pending → spec_review` and open the human approval gate
-(`templates/manager/monitor.md` covers the gate and the relay). Reap the writer
+(`{{templates_dir}}/manager/monitor.md` covers the gate and the relay). Reap the writer
 after the spec lands — it is ephemeral. Pass-through and trivial routes skip this
-section; `templates/manager/delegate.md` picks them up when the tree frees.
+section; `{{templates_dir}}/manager/delegate.md` picks them up when the tree frees.

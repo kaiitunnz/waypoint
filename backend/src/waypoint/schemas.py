@@ -710,11 +710,21 @@ class ManagerTicket(BaseModel):
     version: int = 0
 
 
+class ManagerRenderContext(BaseModel):
+    # Persisted at `manager init`, which bakes the static placeholder values into
+    # the compiled templates under `templates_dir`. These are what `manager render`
+    # still needs at use time: `templates_dir` to locate a compiled template, and
+    # the two channel fields to fetch a ticket's board cell and compute its channel.
+    templates_dir: str = ""
+    tickets_channel: str = ""
+    ticket_channel_prefix: str = ""
+
+
 class ManagerConfig(BaseModel):
-    # The machine-relevant subset of the project manifest (the role/preset/
-    # template/channel fields are skill-consumed, not persisted here). Drives the
+    # The machine-relevant subset of the project manifest that drives the
     # server-side scheduler invariants so a drifting manager context cannot enact
-    # an illegal step.
+    # an illegal step, plus the render context persisted at init for `manager
+    # render`.
     max_delegate_attempts: int = Field(default=3, ge=0)
     max_lead_restarts: int = Field(default=3, ge=0)
     backoff_seconds: int = Field(default=60, ge=0)
@@ -724,6 +734,7 @@ class ManagerConfig(BaseModel):
     # The session that ran `manager init` (the manager itself). Deleting that
     # session cascades a deinit so no orphaned backlog state lingers behind it.
     owner_session_id: str | None = None
+    render_context: ManagerRenderContext | None = None
 
 
 class ManagerSlotState(BaseModel):

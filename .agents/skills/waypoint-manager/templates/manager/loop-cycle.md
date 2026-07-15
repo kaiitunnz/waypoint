@@ -44,16 +44,16 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      latency_renotified=<awaiting_since>`); if it already equals the current
      `awaiting_since` (re-notified, still unanswered) → transition to `abandoned`.
      If the abandoned ticket was on-tree (`blocked`/`review_requested`), reap it and
-     release the tree (`templates/manager/integrate.md`, Finalize). Checked each wake
+     release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize). Checked each wake
      — on a silent board it fires on the next event.
    - `waypoint sessions list --spawned-by {{manager_session_id}} --recursive`;
      match `subagent:ticket-<id>:<role>` titles. Adopt a live orphan; resume a dead
      lead in any live-lead state (check liveness in **every** one, including parked
      `blocked`/`review_requested`). Resume terminates the dead session and self-loops
      (`--reason lead-died`), then re-spawns the **same role**: a tech-lead in a build
-     state onto its branch checked out in your tree (`templates/manager/delegate.md`);
+     state onto its branch checked out in your tree (`{{templates_dir}}/manager/delegate.md`);
      a `spec_pending` writer, which reads the repo read-only and needs no branch
-     (`templates/manager/triage.md`). Either role: past `max_lead_restarts` the
+     (`{{templates_dir}}/manager/triage.md`). Either role: past `max_lead_restarts` the
      self-loop 409s → escalate `--to blocked`.
    - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup`.
@@ -72,12 +72,12 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 5. **Act idempotently** — spawn only if no live same-title session exists; relay via
    the durable versioned log + a content-free nudge; `gh pr merge` only if not
    already `MERGED`. Route to the per-step template:
-   - triage / substantial / trivial → `templates/manager/triage.md` (it carries the
+   - triage / substantial / trivial → `{{templates_dir}}/manager/triage.md` (it carries the
      scale on the `intake → triaged` edge, then routes; a `substantial`/`trivial`
      recommendation re-enters it at the routing step)
-   - delegate a `ready` ticket → `templates/manager/delegate.md`
-   - a build/blocker/review signal → `templates/manager/monitor.md`
-   - a merge / conflict / finalize → `templates/manager/integrate.md`
+   - delegate a `ready` ticket → `{{templates_dir}}/manager/delegate.md`
+   - a build/blocker/review signal → `{{templates_dir}}/manager/monitor.md`
+   - a merge / conflict / finalize → `{{templates_dir}}/manager/integrate.md`
 
 6. **Confirm** — write resulting ids back onto the ticket (`--lead-session-id`,
    `--pr-url`). On a **failed delegate**, add the ticket id to `TRIED` and continue

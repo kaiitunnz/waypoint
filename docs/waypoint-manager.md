@@ -119,7 +119,7 @@ an illegal step — the backend rejects it with a `409`.
 ```
 waypoint manager init --manifest <path> [--owner <sid>]  # persist machine-relevant config; record the owner session
 waypoint manager deinit [--yes]                          # clear all tickets and config
-waypoint manager render <template> [--manifest <path>] [--ticket <id>] [--set k=v]... [--allow-unresolved]
+waypoint manager render --role <role> --step <step> [--ticket <id>] [--set k=v]... [--allow-unresolved]
 waypoint manager state [--json]                          # whole ticket set + slots
 waypoint manager next [--tried <id>]... [--json]         # re-anchor
 waypoint manager ticket add <title> [--id] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
@@ -389,9 +389,10 @@ config's `owner_session_id`; deleting that session cascades a `deinit`, so a man
 never leaves an orphaned backlog behind a session that no longer exists. The
 manager's session id is its stable identity (the session's primary key, unchanged by
 a restart-and-reattach), so the cascade fires only on a deliberate `sessions delete`
-of the manager, not on a restart. Re-running `init` after a manifest edit preserves
-the recorded owner when no new `--owner` is passed. `waypoint manager ticket delete
-<id>` removes a single ticket's record for one-off cleanup.
+of the manager, not on a restart. Re-running `init` after a manifest or template edit
+rewrites the compiled templates so the change propagates, and preserves the recorded
+owner when no new `--owner` is passed. `waypoint manager ticket
+delete <id>` removes a single ticket's record for one-off cleanup.
 
 ## Git and integration
 
@@ -456,7 +457,7 @@ A dead lead in a live-lead state is recovered without losing its branch:
 
 A lead-died resume terminates the dead session, checks the ticket branch out in the
 tree, and spawns a fresh lead there (again `--cwd <repo-dir>`, no `--worktree`),
-re-registers that lead's wake on the ticket channel, and sends it the kickoff. The
+re-registers that lead's wake on the ticket channel, and sends it the brief. The
 fresh lead re-reads the durable ticket-channel log — the `status` cell and every owed
 relay — so committed work and a human answer given while the old lead was alive are
 both preserved. The reap of a merged ticket's subtree happens after integration,
@@ -495,8 +496,8 @@ merge decision instead of opening a PR; the human merge gate still applies.
 Per-project config is `waypoint-manager.yaml`. `waypoint manager init --manifest
 <path>` persists the machine-relevant fields server-side (idempotent; re-run after
 editing one) so `manager next`/`transition` enforce them regardless of context. The
-skill-consumed fields are read directly by the manager for spawn config and policy;
-the backend neither reads nor needs them.
+skill-consumed fields (channels, roles, scale, escalation) are baked into the
+compiled templates at `init`, so the running manager reads no manifest per wake.
 
 ### Manifest fields
 
@@ -505,6 +506,7 @@ the backend neither reads nor needs them.
 | `project` | skill | Project name, used in summaries and channel labels. |
 | `trunk` | backend | The integration branch every ticket branch is cut from; the human's merge advances it. |
 | `spec_dir` | skill | Directory the PRD/RFC writers write specs into (default `.waypoint/specs`; keep it gitignored). |
+| `templates_dir` | skill | Directory `init` writes the compiled templates to (default `.waypoint/manager/templates`; relative paths resolve under the repo root; keep it gitignored). |
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
 | `board.org_channel` | skill | Human-visible drain and outcome summaries. |
 | `board.ticket_channel_prefix` | skill | Per-ticket channel is `<prefix><id>` (e.g. `ticket-42`). |
@@ -550,20 +552,17 @@ though not required: the durable state machine recovers the manager on any trans
 `launch:` block with `backend: claude_code` and no explicit `transport` resolves to
 `claude_tty`.
 
-Each role's `templates:` path points at a directory of per-step Markdown prompts
-(`templates/<role>/<step>.md`).
+Each role's `templates:` path points at a directory of per-step Markdown prompts.
+`manager init` compiles them — baking the static placeholders (below) into each body
+— and writes the compiled copies to `<templates_dir>/<role>/<step>.md`, the manager's
+runtime source of truth.
 
 ### Template placeholders
 
-A template never hardcodes a preset, model, or channel name; every manifest-owned
-value is a `{{placeholder}}` the manager substitutes from the loaded manifest, so
-changing a preset or a channel prefix flows through without editing a template.
-Alongside the ticket-scoped placeholders the manager fills per ticket (`{{ticket_id}}`,
-`{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
-`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}`, `{{pr_url}}`,
-`{{manager_session_id}}`, `{{repo_dir}}`), these come from the manifest. `{{branch}}`
-is the ticket's branch, `ticket/<id>` by convention, and `{{repo_dir}}` is the
-manager's own working tree, where every lead builds.
+A template never hardcodes a preset, model, or channel name; every value is a
+`{{placeholder}}`. Placeholders split into two classes. **Static** ones resolve once
+and are baked into the compiled bodies at `manager init`, so a compiled template
+carries them as literals:
 
 | Placeholder | Source |
 |---|---|
@@ -572,21 +571,30 @@ manager's own working tree, where every lead builds.
 | `{{spec_dir}}` | `spec_dir` (default `.waypoint/specs`) |
 | `{{tickets_channel}}` | `board.tickets_channel` |
 | `{{org_channel}}` | `board.org_channel` |
-| `{{ticket_channel}}` | `board.ticket_channel_prefix` + the current ticket id (e.g. `ticket-42`) |
 | `{{ticket_channel_prefix}}` | `board.ticket_channel_prefix` (bare, for other tickets' channels and the wake glob) |
 | `{{tech_lead_launch}}` | `roles.tech_lead` launch args (`--preset <name>` or the inline `launch:` flags) |
-| `{{writer_launch}}` | the matching writer role (`roles.prd_writer` / `roles.rfc_writer`) launch args |
-| `{{repo_dir}}` | the manager's own working tree (its cwd) |
+| `{{prd_writer_launch}}` / `{{rfc_writer_launch}}` | the matching writer role (`roles.prd_writer` / `roles.rfc_writer`) launch args |
+| `{{substantial_when}}` | `scale.substantial_when` |
+| `{{self_decide}}` / `{{always_escalate}}` | the `escalation` lists (joined) |
+| `{{repo_dir}}` | the manager's own working tree (its cwd), where every lead builds |
 | `{{manager_session_id}}` | `$WAYPOINT_SESSION_ID` |
+| `{{templates_dir}}` | the compiled root, for a template naming its siblings |
 
-`waypoint manager render <template> --ticket <id>` performs the substitution and
-prints the body, which the templates pipe into `sessions send`. It resolves each
-placeholder lowest precedence first — env (`{{repo_dir}}`, `{{manager_session_id}}`)
-< manifest (`{{project}}`, `{{trunk}}`, `{{spec_dir}}`, and the channels) < the ticket record < the ticket's board
-cell (`{{ticket_body}}`, `{{input_type}}`, `{{spec_route}}`) < a `--set key=value`
-override — and fails on an unknown placeholder unless `--allow-unresolved`, so a
-literal `{{…}}` never reaches a subagent. It runs entirely CLI-side over the manifest
-file and existing endpoints; the server has no knowledge of templates or placeholders.
+**Per-ticket** ones remain in the compiled bodies and are filled at use: `{{ticket_id}}`,
+`{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by
+convention), `{{pr_url}}`, and `{{ticket_channel}}` (`board.ticket_channel_prefix` + the
+ticket id, e.g. `ticket-42`). The manager fills these in its own compiled step
+templates as it reads them, and fills a child prompt's with `manager render`.
+
+`waypoint manager render --role <role> --step <step> [--ticket <id>]` reads the
+compiled child template and prints the body, which the manager pipes into `sessions
+send`. `--ticket` supplies the ticket record and its board cell; a `--set key=value`
+overrides. It resolves each per-ticket placeholder lowest precedence first — the
+ticket record < the ticket's board cell (`{{ticket_body}}`, `{{input_type}}`,
+`{{spec_route}}`) < `--set` — and fails on an unknown placeholder unless
+`--allow-unresolved`, so a literal `{{…}}` never reaches a subagent. Only the manager
+renders; a child receives fully-substituted prose and opens no template.
 
 ## Portability
 

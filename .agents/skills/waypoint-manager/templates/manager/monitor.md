@@ -26,21 +26,26 @@ The `status` cell's `kind=` is the feedback vocabulary:
 ## Blockers → the inbox (with escalation policy)
 
 Apply the escalation policy: settle blockers of kind {{self_decide}} yourself;
-escalate {{always_escalate}} to the human inbox. Transition, then post an inbox item
-and record `awaiting_since` is now stamped (the server does it):
+escalate {{always_escalate}} to the human inbox. The lead posted the full question and
+its options as a keyless `kind=<error|decision|attention>` log entry — read it (`board
+log {{ticket_channel}} --since <last-seen>`) and lift its question and options
+**verbatim** into the inbox item. Transition, then post an inbox item and record
+`awaiting_since` is now stamped (the server does it):
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
 waypoint inbox post --json - <<'JSON'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
-    { "type": "markdown", "text": "The lead reports: <blocker detail>." },
+    { "type": "markdown", "text": "<the lead's question, verbatim from its entry>" },
     { "type": "question", "question": "How should it proceed?",
-      "options": [{"label": "…"}, {"label": "…"}], "multi": false, "required": true } ] }
+      "options": [{"label": "<lead's option a>"}, {"label": "<lead's option b>"}],
+      "multi": false, "required": true } ] }
 JSON
 ```
 
-You are `--wake-on-inbox`-subscribed, so the human's answer wakes you.
+Frame an open question when the lead left the decision open. You are
+`--wake-on-inbox`-subscribed, so the human's answer wakes you.
 
 ## The substantial-spec gate
 

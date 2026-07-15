@@ -976,6 +976,10 @@ class WaypointClient:
         ).json()
         return data
 
+    def manager_reconcile(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/manager/reconcile").json()
+        return data
+
     def manager_create_ticket(self, body: dict[str, Any]) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST", "/api/manager/tickets", json=body

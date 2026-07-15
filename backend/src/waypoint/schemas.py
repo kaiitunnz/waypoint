@@ -737,12 +737,44 @@ class ManagerConfig(BaseModel):
     render_context: ManagerRenderContext | None = None
 
 
-class ManagerSlotState(BaseModel):
-    # Derived, never stored: a slot is the shared working tree, held by a ticket
-    # from delegate through terminal (delegated..review_requested).
-    total: int
-    used: int
-    free: int
+class ManagerTreeState(BaseModel):
+    # Derived, never stored: the single shared working tree, held by at most one
+    # ticket from delegate through terminal (delegated..review_requested).
+    free: bool
+    held_by: str | None = None  # the ticket holding the tree, when not free
+
+
+class ReconcileIntake(BaseModel):
+    id: int
+    author_session_id: str | None = None
+    text: str = ""
+
+
+class ReconcileDeadLead(BaseModel):
+    ticket_id: str
+    state: ManagerTicketState
+    lead_session_id: str | None = None
+    lead_status: str | None = None  # None = no such session, else its terminal status
+
+
+class ReconcileLatencyTimeout(BaseModel):
+    ticket_id: str
+    state: ManagerTicketState
+    awaiting_since: datetime
+    hours_elapsed: float
+
+
+class ReconcileRelayCursor(BaseModel):
+    ticket_id: str
+    ticket_channel: str
+    latest_relay_id: int | None = None
+
+
+class ManagerReconcileReport(BaseModel):
+    unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
+    dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
+    latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
+    relay_cursors: list[ReconcileRelayCursor] = Field(default_factory=list)
 
 
 class ManagerTicketTransitions(BaseModel):
@@ -812,14 +844,14 @@ class ManagerInitRequest(BaseModel):
 
 
 class ManagerNextResponse(BaseModel):
-    slots: ManagerSlotState
+    tree: ManagerTreeState
     tickets: list[ManagerTicketTransitions] = Field(default_factory=list)
     recommended: ManagerRecommendedAction | None = None
 
 
 class ManagerStateResponse(BaseModel):
     config: ManagerConfig | None = None
-    slots: ManagerSlotState
+    tree: ManagerTreeState
     tickets: list[ManagerTicket] = Field(default_factory=list)
 
 

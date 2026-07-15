@@ -118,10 +118,10 @@ async def test_next_recommends_triage_for_fresh_intake(tmp_path: Path) -> None:
         resp = await client.get("/api/manager/next", headers=_auth(token))
         assert resp.status_code == 200
         body = resp.json()
-    # Envelope shape the skill's re-anchor depends on: slots + per-ticket legal
+    # Envelope shape the skill's re-anchor depends on: tree state + per-ticket legal
     # transitions + a single recommended pull move.
-    assert set(body["slots"]) == {"total", "used", "free"}
-    assert body["slots"]["free"] == 1  # the single shared tree is free
+    assert set(body["tree"]) == {"free", "held_by"}
+    assert body["tree"]["free"] is True  # the single shared tree is free
     (entry,) = body["tickets"]
     assert entry["ticket_id"] == ticket_id
     assert entry["legal_transitions"] == ["triaged"]
@@ -200,7 +200,7 @@ async def test_invariant_second_spec_pending_is_409(tmp_path: Path) -> None:
     # test_unique_intended_lead_title_across_live_tickets in test_manager.py.)
 
 
-async def test_state_reports_config_slots_tickets(tmp_path: Path) -> None:
+async def test_state_reports_config_tree_tickets(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:
         await client.post(
@@ -213,8 +213,42 @@ async def test_state_reports_config_slots_tickets(tmp_path: Path) -> None:
         assert resp.status_code == 200
         body = resp.json()
     assert body["config"]["trunk"] == "develop"
-    assert set(body["slots"]) == {"total", "used", "free"}
+    assert set(body["tree"]) == {"free", "held_by"}
     assert [t["id"] for t in body["tickets"]] == [ticket_id]
+
+
+async def test_reconcile_endpoint_reports_intake(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        await client.post(
+            "/api/manager/init",
+            headers=_auth(token),
+            json={
+                "config": {
+                    "owner_session_id": "mgr",
+                    "render_context": {
+                        "templates_dir": "/x",
+                        "tickets_channel": "tickets",
+                        "ticket_channel_prefix": "ticket-",
+                    },
+                }
+            },
+        )
+        await client.post(
+            "/api/board/tickets",
+            headers=_auth(token),
+            json={"text": "please fix X", "author_session_id": "human"},
+        )
+        resp = await client.get("/api/manager/reconcile", headers=_auth(token))
+        assert resp.status_code == 200
+        body = resp.json()
+    assert set(body) == {
+        "unregistered_intake",
+        "dead_leads",
+        "latency_timeouts",
+        "relay_cursors",
+    }
+    assert [i["text"] for i in body["unregistered_intake"]] == ["please fix X"]
 
 
 # ── Wake subscriptions ──────────────────────────────────────────────────────

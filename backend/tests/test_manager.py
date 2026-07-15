@@ -20,6 +20,7 @@ from waypoint.manager import (
 from waypoint.schemas import (
     ManagerConfig,
     ManagerInitRequest,
+    ManagerRenderContext,
     ManagerTicket,
     ManagerTicketScale,
     ManagerTicketState,
@@ -247,7 +248,8 @@ def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
         TicketTransitionRequest(to=S.REVIEW_REQUESTED),
     ):
         mgr.transition(a.id, req)
-    assert mgr.next().slots.free == 0  # the parked ticket still occupies the tree
+    tree = mgr.next().tree
+    assert tree.free is False and tree.held_by == a.id  # parked ticket holds the tree
     b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.READY))
@@ -345,7 +347,7 @@ def test_next_slot_gating_skips_ready_but_still_triages() -> None:
         mk(S.INTAKE, "i", priority="p3"),
     ]
     result = compute_next(tickets, _CONFIG)
-    assert result.slots.free == 0
+    assert result.tree.free is False
     assert result.recommended is not None
     assert result.recommended.ticket_id == "i"
     assert result.recommended.to_state == S.TRIAGED
@@ -384,12 +386,55 @@ def test_next_excludes_tried_set() -> None:
     assert result.recommended.ticket_id == "b"
 
 
-def test_next_derives_slot_state() -> None:
-    tickets = [mk(S.DELEGATED, "a"), mk(S.BUILDING, "b"), mk(S.BLOCKED, "c")]
-    result = compute_next(tickets, _CONFIG)
-    # All three hold the shared tree (delegated..review_requested spans blocked too).
-    assert result.slots.used == 3
-    assert result.slots.free == 0
+def test_next_derives_tree_state() -> None:
+    # A ticket in any on-tree state (delegated..review_requested, blocked included)
+    # holds the single shared tree.
+    result = compute_next([mk(S.BLOCKED, "c"), mk(S.INTAKE, "i")], _CONFIG)
+    assert result.tree.free is False
+    assert result.tree.held_by == "c"
+    # With nothing on the tree, it is free.
+    assert compute_next([mk(S.TRIAGED, "t")], _CONFIG).tree.free is True
+
+
+def test_reconcile_reports_signals(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    rc = ManagerRenderContext(
+        templates_dir="/x", tickets_channel="tickets", ticket_channel_prefix="ticket-"
+    )
+    mgr.init(
+        ManagerInitRequest(
+            config=ManagerConfig(
+                owner_session_id="mgr", human_latency_hours=72, render_context=rc
+            )
+        )
+    )
+    # Intake: a keyless human post whose entry id is not a ticket. The manager's own
+    # keyed registry cell must be ignored.
+    storage.add_board_entry("tickets", "please fix X", author_session_id="human")
+    storage.add_board_entry("tickets", "req", key="ticket:zzz", author_session_id="mgr")
+    # Drive one ticket onto the tree and into a blocked, awaiting-human state with a
+    # ghost lead — it exercises dead_leads, latency, and relay_cursors at once.
+    t = mgr.create_ticket(TicketCreateRequest(title="t", scale=Sc.TRIVIAL))
+    mgr.transition(t.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
+    mgr.transition(t.id, TicketTransitionRequest(to=S.READY))
+    mgr.transition(
+        t.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="t-lead")
+    )
+    mgr.transition(t.id, TicketTransitionRequest(to=S.BUILDING))
+    mgr.transition(t.id, TicketTransitionRequest(to=S.BLOCKED, reason="stuck"))
+    mgr.update_ticket(t.id, TicketUpdateRequest(lead_session_id="ghost"))
+    storage.add_board_entry(f"ticket-{t.id}", "answer", metadata={"kind": "relay"})
+
+    report = mgr.reconcile(datetime.now(UTC) + timedelta(hours=100))
+
+    assert [i.text for i in report.unregistered_intake] == ["please fix X"]
+    dead = [d for d in report.dead_leads if d.ticket_id == t.id]
+    assert dead and dead[0].lead_session_id == "ghost" and dead[0].lead_status is None
+    latency = [x for x in report.latency_timeouts if x.ticket_id == t.id]
+    assert latency and latency[0].hours_elapsed >= 72
+    cursor = [c for c in report.relay_cursors if c.ticket_id == t.id]
+    assert cursor and cursor[0].latest_relay_id is not None
 
 
 # ── Storage CRUD ────────────────────────────────────────────────────────────

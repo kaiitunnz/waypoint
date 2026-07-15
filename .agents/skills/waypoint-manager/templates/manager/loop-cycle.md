@@ -15,48 +15,51 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    ```bash
    waypoint manager next --json $(for t in $TRIED; do printf ' --tried %s' "$t"; done)
    ```
-   Read `slots`, each ticket's `legal_transitions`, and the single `recommended`
-   action. `recommended` is only ever a manager-initiated *pull* move (triage,
-   substantial-spec, trivial-ready, delegate).
+   Read `tree` (the shared working tree — `{free, held_by}`), each ticket's
+   `legal_transitions`, and the single `recommended` action. `recommended` is only
+   ever a manager-initiated *pull* move (triage, substantial-spec, trivial-ready,
+   delegate).
 
-2. **Reconcile — adopt reality before acting:**
-   - Read `{{tickets_channel}}` and every in-flight ticket's per-ticket channel
-     `status` cell **by key** (`board read {{ticket_channel_prefix}}<id> --key status`),
-     and the relay logs by `--since`.
-   - **Register new intake.** For each `{{tickets_channel}}` post authored by someone
-     other than you whose id is not yet a ticket in `manager state`, register it under
-     that deterministic id — copy the request into its cell **first**, then add the
-     ticket, so triage always finds a populated cell:
+2. **Reconcile — adopt reality before acting.** Pull the server-derived signals in
+   one snapshot, then act on each:
+   ```bash
+   waypoint manager reconcile --json
+   ```
+   It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, and
+   `relay_cursors`. Alongside it, read each in-flight ticket's `status` cell **by key**
+   (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
+   (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
+   - **`unregistered_intake`** — each is a `{{tickets_channel}}` post not yet a ticket.
+     Register it under its deterministic board-entry id — copy the request into its
+     cell **first**, then add the ticket, so triage always finds a populated cell:
      ```bash
-     # for a not-yet-registered user post with board entry id <n>:
+     # for a reported intake post with board entry id <n>:
      waypoint board post {{tickets_channel}} "<the user's request text>" --key ticket:<n> --meta author=<poster>
      waypoint manager ticket add "<title from the post>" --id <n> --priority <p0..p3>
      ```
      `manager next` then recommends `triage`; registration itself is never
      recommended, since the ticket does not exist until you add it.
-   - **Latency check.** For each awaiting-human ticket (`spec_review`/`blocked`/
-     `review_requested`), read `awaiting_since` (from `ticket show`) and compare to
-     `timeouts.human_latency_hours`. Past it, key the re-notify marker to *this*
-     episode's `awaiting_since` so it self-clears on re-entry (the server re-stamps
-     `awaiting_since` on every entry): if the ticket cell's `latency_renotified` ≠ the
-     current `awaiting_since`, re-notify the human and stamp it (`board set-meta
-     {{tickets_channel}} --key ticket:{{ticket_id}} --merge --meta
-     latency_renotified=<awaiting_since>`); if it already equals the current
-     `awaiting_since` (re-notified, still unanswered) → transition to `abandoned`.
-     If the abandoned ticket was on-tree (`blocked`/`review_requested`), reap it and
-     release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize). Checked each wake
-     — on a silent board it fires on the next event.
-   - `waypoint sessions list --spawned-by {{manager_session_id}} --recursive`;
-     match `subagent:ticket-<id>:<role>` titles. Adopt a live orphan; resume a dead
-     lead in any live-lead state (check liveness in **every** one, including parked
-     `blocked`/`review_requested`). Resume terminates the dead session and self-loops
-     (`--reason lead-died`), then re-spawns the **same role**: a tech-lead in a build
-     state onto its branch checked out in your tree (`{{templates_dir}}/manager/delegate.md`);
-     a `spec_pending` writer, which reads the repo read-only and needs no branch
-     (`{{templates_dir}}/manager/triage.md`). Either role: past `max_lead_restarts` the
-     self-loop 409s → escalate `--to blocked`.
+   - **`dead_leads`** — each is a resumable ticket whose lead is not live. Resume it:
+     terminate the dead session and self-loop (`--reason lead-died`), then re-spawn the
+     **same role** — a tech-lead in a build state onto its branch checked out in your
+     tree (`{{templates_dir}}/manager/delegate.md`); a `spec_pending` writer, which
+     reads the repo read-only and needs no branch
+     (`{{templates_dir}}/manager/triage.md`). Past `max_lead_restarts` the self-loop
+     409s → escalate `--to blocked`.
+   - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
+     re-notify-then-abandon. Key
+     the re-notify marker to *this* episode's `awaiting_since` so it self-clears on
+     re-entry (the server re-stamps `awaiting_since` on every entry): if the ticket
+     cell's `latency_renotified` ≠ the current `awaiting_since`, re-notify the human
+     and stamp it (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}}
+     --merge --meta latency_renotified=<awaiting_since>`); if it already equals the
+     current `awaiting_since` (re-notified, still unanswered) → transition to
+     `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`),
+     reap it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+   - **`relay_cursors`** — the highest `kind=relay` id per ticket channel; a relay
+     re-post lands above it.
    - For `review_requested` tickets, `gh pr view <pr-url> --json
-     state,mergeStateStatus,statusCheckRollup`.
+     state,mergeStateStatus,statusCheckRollup` (external CI/merge state).
 
 3. **Choose one action** — the highest-priority of: the `recommended` pull move, or
    an external edge reconcile surfaced (spec posted → `spec_review`; lead posted

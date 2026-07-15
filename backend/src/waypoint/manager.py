@@ -32,12 +32,18 @@ from waypoint.schemas import (
     ManagerInitRequest,
     ManagerNextResponse,
     ManagerRecommendedAction,
-    ManagerSlotState,
+    ManagerReconcileReport,
     ManagerStateResponse,
     ManagerTicket,
     ManagerTicketScale,
     ManagerTicketState,
     ManagerTicketTransitions,
+    ManagerTreeState,
+    ReconcileDeadLead,
+    ReconcileIntake,
+    ReconcileLatencyTimeout,
+    ReconcileRelayCursor,
+    SessionStatus,
     TicketCreateRequest,
     TicketTransitionRequest,
     TicketUpdateRequest,
@@ -45,6 +51,12 @@ from waypoint.schemas import (
 from waypoint.storage import ManagerTicketConflict, Storage
 
 _S = ManagerTicketState
+
+# A lead session in one of these has settled without living work — reconcile flags
+# its ticket as a resume candidate (a missing session counts the same).
+_DEAD_SESSION_STATUSES: frozenset[SessionStatus] = frozenset(
+    {SessionStatus.EXITED, SessionStatus.ERROR}
+)
 
 # Terminal states have no outgoing edges.
 _TERMINAL_STATES: frozenset[ManagerTicketState] = frozenset(
@@ -132,11 +144,9 @@ def is_terminal(state: ManagerTicketState) -> bool:
     return state in _TERMINAL_STATES
 
 
-def slot_state(tickets: Iterable[ManagerTicket]) -> ManagerSlotState:
-    used = sum(1 for t in tickets if t.state in _TREE_STATES)
-    return ManagerSlotState(
-        total=_TREE_CAPACITY, used=used, free=max(0, _TREE_CAPACITY - used)
-    )
+def tree_state(tickets: Iterable[ManagerTicket]) -> ManagerTreeState:
+    held = next((t.id for t in tickets if t.state in _TREE_STATES), None)
+    return ManagerTreeState(free=held is None, held_by=held)
 
 
 def apply_transition(
@@ -267,7 +277,7 @@ def _priority_index(priority: str, config: ManagerConfig) -> int:
 def _recommended_action(
     ticket: ManagerTicket,
     config: ManagerConfig,
-    slots: ManagerSlotState,
+    tree: ManagerTreeState,
     spec_busy: bool,
 ) -> tuple[ManagerTicketState, str, str] | None:
     """The single autonomous forward move the manager should drive for a ticket.
@@ -288,7 +298,7 @@ def _recommended_action(
             return (_S.READY, "trivial", "trivial ticket is ready to delegate")
         return None
     if ticket.state == _S.READY:
-        if slots.free <= 0:
+        if not tree.free:
             return None
         if ticket.attempts >= config.max_delegate_attempts:
             return None
@@ -301,11 +311,11 @@ def compute_next(
     config: ManagerConfig,
     tried: Iterable[str] = (),
 ) -> ManagerNextResponse:
-    """Re-anchor: derived slots, per-ticket legal transitions, and the single
-    highest-priority recommended action (priority then FIFO, slot/invariant
+    """Re-anchor: derived tree state, per-ticket legal transitions, and the single
+    highest-priority recommended action (priority then FIFO, tree/invariant
     gated), excluding any ticket in this drain's ``tried`` set."""
     tried_set = set(tried)
-    slots = slot_state(tickets)
+    tree = tree_state(tickets)
     live = [t for t in tickets if t.state not in _TERMINAL_STATES]
     per_ticket = [
         ManagerTicketTransitions(
@@ -324,7 +334,7 @@ def compute_next(
     for ticket in ordered:
         if ticket.id in tried_set:
             continue
-        action = _recommended_action(ticket, config, slots, spec_busy)
+        action = _recommended_action(ticket, config, tree, spec_busy)
         if action is not None:
             to_state, event, reason = action
             recommended = ManagerRecommendedAction(
@@ -335,7 +345,7 @@ def compute_next(
                 reason=reason,
             )
             break
-    return ManagerNextResponse(slots=slots, tickets=per_ticket, recommended=recommended)
+    return ManagerNextResponse(tree=tree, tickets=per_ticket, recommended=recommended)
 
 
 class ManagerManager:
@@ -516,5 +526,102 @@ class ManagerManager:
     def state(self) -> ManagerStateResponse:
         config = self._storage.get_manager_config()
         tickets = self._storage.list_manager_tickets()
-        slots = slot_state(tickets)
-        return ManagerStateResponse(config=config, slots=slots, tickets=tickets)
+        return ManagerStateResponse(
+            config=config, tree=tree_state(tickets), tickets=tickets
+        )
+
+    def reconcile(self, now: datetime) -> ManagerReconcileReport:
+        """Aggregate the drain's server-derivable reconcile signals in one snapshot.
+
+        Read-only: it reports what the manager should adopt (unregistered intake,
+        dead leads, latency timeouts, relay cursors); the manager still decides and
+        acts. External signals (a PR's CI/merge state) stay in the agent's shell.
+        """
+        config = self.config()
+        tickets = self._storage.list_manager_tickets()
+        rc = config.render_context
+        owner = config.owner_session_id
+
+        intake: list[ReconcileIntake] = []
+        relay_cursors: list[ReconcileRelayCursor] = []
+        if rc is not None and rc.tickets_channel:
+            known = {t.id for t in tickets}
+            for entry in self._storage.list_board_entries(rc.tickets_channel):
+                # Keyless posts are the human's requests; the manager's own registry
+                # writes are keyed cells (`ticket:<id>`). A post whose board-entry id
+                # is not yet a ticket, by an author other than the manager, is intake.
+                if entry.key is not None:
+                    continue
+                if owner is not None and entry.author_session_id == owner:
+                    continue
+                if str(entry.id) in known:
+                    continue
+                intake.append(
+                    ReconcileIntake(
+                        id=entry.id,
+                        author_session_id=entry.author_session_id,
+                        text=entry.text,
+                    )
+                )
+            for ticket in tickets:
+                if is_terminal(ticket.state):
+                    continue
+                channel = f"{rc.ticket_channel_prefix}{ticket.id}"
+                latest = max(
+                    (
+                        e.id
+                        for e in self._storage.list_board_entries(channel)
+                        if (e.metadata or {}).get("kind") == "relay"
+                    ),
+                    default=None,
+                )
+                relay_cursors.append(
+                    ReconcileRelayCursor(
+                        ticket_id=ticket.id,
+                        ticket_channel=channel,
+                        latest_relay_id=latest,
+                    )
+                )
+
+        sessions = {s.id: s for s in self._storage.list_sessions()}
+        dead_leads: list[ReconcileDeadLead] = []
+        for ticket in tickets:
+            if ticket.state not in _RESUMABLE_STATES:
+                continue
+            session = (
+                sessions.get(ticket.lead_session_id)
+                if ticket.lead_session_id is not None
+                else None
+            )
+            if session is not None and session.status not in _DEAD_SESSION_STATUSES:
+                continue
+            dead_leads.append(
+                ReconcileDeadLead(
+                    ticket_id=ticket.id,
+                    state=ticket.state,
+                    lead_session_id=ticket.lead_session_id,
+                    lead_status=session.status.value if session is not None else None,
+                )
+            )
+
+        latency_timeouts: list[ReconcileLatencyTimeout] = []
+        for ticket in tickets:
+            if ticket.state not in _AWAITING_STATES or ticket.awaiting_since is None:
+                continue
+            elapsed = (now - ticket.awaiting_since).total_seconds() / 3600
+            if elapsed >= config.human_latency_hours:
+                latency_timeouts.append(
+                    ReconcileLatencyTimeout(
+                        ticket_id=ticket.id,
+                        state=ticket.state,
+                        awaiting_since=ticket.awaiting_since,
+                        hours_elapsed=elapsed,
+                    )
+                )
+
+        return ManagerReconcileReport(
+            unregistered_intake=intake,
+            dead_leads=dead_leads,
+            latency_timeouts=latency_timeouts,
+            relay_cursors=relay_cursors,
+        )

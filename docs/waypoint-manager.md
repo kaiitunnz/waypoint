@@ -120,8 +120,9 @@ an illegal step — the backend rejects it with a `409`.
 waypoint manager init --manifest <path> [--owner <sid>]  # persist machine-relevant config; record the owner session
 waypoint manager deinit [--yes]                          # clear all tickets and config
 waypoint manager render --role <role> --step <step> [--ticket <id>] [--set k=v]... [--allow-unresolved]
-waypoint manager state [--json]                          # whole ticket set + slots
+waypoint manager state [--json]                          # whole ticket set + tree state
 waypoint manager next [--tried <id>]... [--json]         # re-anchor
+waypoint manager reconcile [--json]                      # server-derived reconcile signals in one snapshot
 waypoint manager ticket add <title> [--id] [--priority p2] [--kind] [--scale] [--footprint <glob>]... [--dep <id>]...
 waypoint manager ticket show <id>
 waypoint manager ticket delete <id>                      # remove one ticket's state record
@@ -208,21 +209,41 @@ view`, so a lost turn simply re-observes it, never double-merges.
 
 `manager next` returns three things over the live ticket set:
 
-- **`slots`** — `{total, used, free}`; the slot is the shared tree, so
-  `used = count(on-tree tickets)` (`delegated` through `review_requested`).
+- **`tree`** — `{free, held_by}`; the single shared tree, held by the one ticket in an
+  on-tree state (`delegated` through `review_requested`) or free when none is.
 - **`tickets[]`** — each live ticket's current state and its `legal_transitions`.
 - **`recommended`** — at most one action: the highest-priority actionable ticket
-  (priority order, then FIFO by `created_at`, then id), slot/invariant/budget-gated,
+  (priority order, then FIFO by `created_at`, then id), tree/invariant/budget-gated,
   excluding every id passed via `--tried`.
 
 `recommended` is only ever a manager-initiated pull move: `triage` (`intake →
 triaged`), `substantial` (`triaged → spec_pending`, gated on no other ticket in
 `spec_pending`), `trivial` (`triaged → ready`), and `delegate` (`ready →
-delegated`, gated on a free slot and the `attempts` budget). Every human- or
+delegated`, gated on a free tree and the `attempts` budget). Every human- or
 lead-driven edge — spec posted, human approve, lead-accepted, done/partial, the
 observed human merge, request-changes, the lead-died self-loops — is returned as a
 legal transition but never as the recommendation. The manager enacts those when it
 observes the external signal during reconcile.
+
+#### `manager reconcile`
+
+`manager reconcile` returns the drain's server-derivable reconcile signals in one
+consistent snapshot, so the manager adopts observed reality without a sheaf of manual
+board and session queries. It is read-only — it reports; the manager decides and acts.
+Four signals:
+
+- **`unregistered_intake`** — keyless posts on the tickets channel, authored by
+  someone other than the manager, whose board-entry id is not yet a ticket.
+- **`dead_leads`** — tickets in a resumable state whose recorded lead session is
+  missing or terminal (`exited`/`error`) — the resume candidates.
+- **`latency_timeouts`** — awaiting-human tickets whose `awaiting_since` is older than
+  `human_latency_hours` (raw candidates; the re-notify-then-abandon decision stays
+  with the manager).
+- **`relay_cursors`** — per in-flight per-ticket channel, the highest `kind=relay`
+  board-entry id.
+
+External signals (a PR's CI and merge state) are not covered — they stay in the
+agent's shell (`gh pr view`).
 
 #### Server-enforced invariants
 
@@ -264,7 +285,7 @@ the same turn without a self-wake. The manager keeps a per-drain `tried` set (ti
 ids that failed an action this drain) and repeats:
 
 1. **Re-anchor.** `waypoint manager next --json` (passing `--tried <id>` for each id
-   already tried this drain) → slots, per-ticket legal transitions, the one
+   already tried this drain) → tree state, per-ticket legal transitions, the one
    recommended action. If there is no recommendation and no outstanding external
    signal, the drain is done — go idle.
 2. **Reconcile — adopt reality before acting** (below).

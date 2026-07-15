@@ -96,7 +96,7 @@ def test_cli_manager_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         return httpx.Response(
             200,
             json={
-                "slots": {"total": 2, "used": 0, "free": 2},
+                "tree": {"free": True, "held_by": None},
                 "tickets": [
                     {
                         "ticket_id": "ticket-1",
@@ -126,6 +126,32 @@ def test_cli_manager_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert body["tickets"][0]["legal_transitions"] == ["triaged"]
 
 
+def test_cli_manager_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/manager/reconcile"
+        return httpx.Response(
+            200,
+            json={
+                "unregistered_intake": [
+                    {"id": 7, "author_session_id": "human", "text": "fix X"}
+                ],
+                "dead_leads": [],
+                "latency_timeouts": [],
+                "relay_cursors": [],
+            },
+        )
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "reconcile", "--json"],
+    )
+    assert result.exit_code == 0, result.stdout
+    body = json.loads(result.stdout)
+    assert body["unregistered_intake"][0]["id"] == 7
+
+
 def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
@@ -134,7 +160,7 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
             200,
             json={
                 "config": {"trunk": "main"},
-                "slots": {"total": 1, "used": 1, "free": 0},
+                "tree": {"free": False, "held_by": "ticket-1"},
                 "tickets": [{"id": "ticket-1", "priority": "p2", "state": "building"}],
             },
         )
@@ -146,7 +172,7 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert result.exit_code == 0, result.stdout
     body = json.loads(result.stdout)
-    assert body["slots"]["free"] == 0
+    assert body["tree"]["held_by"] == "ticket-1"
     assert body["tickets"][0]["id"] == "ticket-1"
 
 
@@ -335,7 +361,7 @@ def _state_response(render_context: dict[str, Any] | None) -> httpx.Response:
         200,
         json={
             "config": {"trunk": "main", "render_context": render_context},
-            "slots": {"total": 1, "used": 0, "free": 1},
+            "tree": {"free": True, "held_by": None},
             "tickets": [],
         },
     )

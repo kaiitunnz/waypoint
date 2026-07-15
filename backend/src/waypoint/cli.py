@@ -3835,11 +3835,11 @@ def _substitute_placeholders(
     return _PLACEHOLDER_RE.sub(_repl, text), unresolved
 
 
-def _render_manager_slots(slots: dict[str, Any]) -> None:
-    typer.echo(
-        f"slots: {slots.get('used')}/{slots.get('total')} used "
-        f"({slots.get('free')} free)"
-    )
+def _render_manager_tree(tree: dict[str, Any]) -> None:
+    if tree.get("free"):
+        typer.echo("tree: free")
+    else:
+        typer.echo(f"tree: held by {tree.get('held_by')}")
 
 
 @manager_app.command("init")
@@ -4020,12 +4020,12 @@ def manager_state(
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
 ) -> None:
-    """Show the whole ticket set and the derived slot state."""
+    """Show the whole ticket set and the derived tree state."""
     state = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_state())
     if json_output:
         typer.echo(json.dumps(state, indent=2))
         return
-    _render_manager_slots(state.get("slots") or {})
+    _render_manager_tree(state.get("tree") or {})
     tickets = state.get("tickets") or []
     if not tickets:
         typer.echo("(no tickets)")
@@ -4053,12 +4053,12 @@ def manager_next(
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
 ) -> None:
-    """Re-anchor: derived slots, per-ticket legal transitions, one recommendation."""
+    """Re-anchor: derived tree state, per-ticket legal transitions, one recommendation."""
     result = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_next(tried))
     if json_output:
         typer.echo(json.dumps(result, indent=2))
         return
-    _render_manager_slots(result.get("slots") or {})
+    _render_manager_tree(result.get("tree") or {})
     recommended = result.get("recommended")
     if recommended:
         typer.echo(
@@ -4073,6 +4073,44 @@ def manager_next(
         typer.echo(
             f"  {ticket.get('ticket_id')} [{ticket.get('priority')}] "
             f"{ticket.get('state')} -> {{{legal}}}"
+        )
+
+
+@manager_app.command("reconcile")
+def manager_reconcile(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Report the drain's server-derived reconcile signals in one snapshot.
+
+    Aggregates unregistered intake posts, dead leads (resume candidates), latency
+    timeouts, and per-ticket relay cursors. Read-only: the manager acts on each.
+    """
+    report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+    intake = report.get("unregistered_intake") or []
+    dead = report.get("dead_leads") or []
+    latency = report.get("latency_timeouts") or []
+    typer.echo(
+        f"intake: {len(intake)}  dead-leads: {len(dead)}  "
+        f"latency-timeouts: {len(latency)}"
+    )
+    for item in intake:
+        typer.echo(f"  intake {item.get('id')}: {item.get('text')}")
+    for lead in dead:
+        typer.echo(
+            f"  dead-lead {lead.get('ticket_id')} ({lead.get('state')}): "
+            f"lead {lead.get('lead_session_id')} {lead.get('lead_status') or 'missing'}"
+        )
+    for item in latency:
+        typer.echo(
+            f"  latency {item.get('ticket_id')} ({item.get('state')}): "
+            f"{item.get('hours_elapsed'):.1f}h waiting"
         )
 
 

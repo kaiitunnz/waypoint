@@ -63,6 +63,7 @@ from waypoint.schemas import (
     LoginRequest,
     ManagerInitRequest,
     ManagerNextResponse,
+    ManagerReconcileReport,
     ManagerStateResponse,
     MeResponse,
     ProfileDoctorReport,
@@ -1864,6 +1865,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tried: Annotated[list[str] | None, Query()] = None,
     ) -> ManagerNextResponse:
         return context.runtime.manager.next(tried or [])
+
+    @app.get("/api/manager/reconcile", response_model=ManagerReconcileReport)
+    async def manager_reconcile(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> ManagerReconcileReport:
+        return context.runtime.manager.reconcile(datetime.now(UTC))
 
     @app.post("/api/manager/tickets")
     async def manager_create_ticket(

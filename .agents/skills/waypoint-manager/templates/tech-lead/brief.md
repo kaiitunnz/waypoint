@@ -62,6 +62,18 @@ waypoint board post {{ticket_channel}} "<one-line status>" --key status --meta k
 (`error`/`decision`/`attention`) stops you until the manager relays an answer; never
 fake progress or invent a decision the human should make.
 
+For a blocker, post the **full question and the options you see** as a keyless log
+entry, then the one-line `status` cell:
+
+```bash
+waypoint board post {{ticket_channel}} \
+  "<the decision/question in full>. Options: (a) <…>; (b) <…>. Recommendation: <…>." \
+  --meta kind=decision
+waypoint board post {{ticket_channel}} "<one-line blocker summary>" --key status --meta kind=decision
+```
+
+If the decision is genuinely open, say so and give the trade-offs.
+
 Post `kind=progress "accepted"` now, then run the strategy gate.
 
 ## 1. Strategy gate — decide, then post, before any code
@@ -115,9 +127,9 @@ Whatever the strategy, the invariant holds: **everything converges to one branch
 another.
 
 Consume owed relays by version (above) on every wake while building. If you hit a
-genuine blocker, post it (`--key status --meta kind=<error|decision|attention>`) and
-**stop** until the manager relays an answer. A stop here is correct; a fake `done` is
-the failure.
+genuine blocker, post the full question + options as a keyless `kind=<error|decision|
+attention>` entry and the one-line `status` cell (above), then **stop** until the
+manager relays an answer. A stop here is correct; a fake `done` is the failure.
 
 ## 3. Verify, then open the PR and report
 

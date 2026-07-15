@@ -44,9 +44,11 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      recommended, since the ticket does not exist until you add it.
    - **`dead_leads`** — each is a resumable ticket whose recorded lead is missing or
      exited. Check its `status` cell / log first: a `spec_pending` writer that already
-     posted `spec_ready`, or a lead that posted `done`, has delivered — advance that
-     edge (`spec_pending → spec_review`, or `→ review_requested`). A lead that died with
-     no delivery is recovered by state:
+     posted `spec_ready` or `infeasible`, or a lead that posted `done`, has delivered —
+     open its gate per `{{templates_dir}}/manager/monitor.md`, which co-locates each
+     transition with its human gate item (`spec_ready → spec_review` + approval;
+     `infeasible → blocked` + decision; `done → review_requested`). A lead that died
+     with no delivery is recovered by state:
      - a `delegated` ticket routes through `{{templates_dir}}/manager/delegate.md`:
        step 1 adopts a live orphan or resumes a branch with committed work; step 3
        handles a turn-1 death with no work (`delegated → ready`, spending `attempts`);
@@ -69,7 +71,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      state,mergeStateStatus,statusCheckRollup` (external CI/merge state).
 
 3. **Choose one action** — the highest-priority of: the `recommended` pull move, or
-   an external edge reconcile surfaced (spec posted → `spec_review`; lead posted
+   an external edge reconcile surfaced (spec posted → `spec_review`, or infeasible →
+   `blocked`; lead posted
    `accepted` + strategy → `delegated → building`; human answer →
    relay + `building`/`ready`/`revising`/`abandoned`; lead reported
    done/partial → `review_requested`; human merge observed → `merged`/`deferred`;

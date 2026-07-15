@@ -53,6 +53,19 @@ Pick the **lightest** strategy that fits, and justify it:
 - **`/waypoint-workqueue`** — a wide batch of **independent** tasks.
 - **`/waypoint-crew`** — a role-specialized, multi-phase build with coupled work.
 
+## When the request cannot be specced
+
+A genuinely un-designable request — self-contradictory, or resting on information no
+investigation can supply — gets an `infeasible` verdict. This is a high bar: exhaust
+the codebase and the request first. Post the reason and stop; the manager escalates to
+the human, who decides whether to proceed on a supplied spec, re-spec, or abandon.
+
+```bash
+waypoint board post {{ticket_channel}} \
+  "infeasible: <what blocks an RFC, concretely>" \
+  --meta kind=infeasible
+```
+
 ## Post the result back and stop
 
 Post **keyless** (append-log) entries, not a `--key` cell — a keyed cell is pruned

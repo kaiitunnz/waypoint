@@ -51,6 +51,19 @@ strategy gate. Pick the **lightest** strategy that fits, and say why:
   codemod, per-file sweep).
 - **`/waypoint-crew`** — a role-specialized, multi-phase build with coupled work.
 
+## When the request cannot be specced
+
+A genuinely un-spec-able request — self-contradictory, or resting on information no
+investigation can supply — gets an `infeasible` verdict. This is a high bar: exhaust
+the codebase and the request first. Post the reason and stop; the manager escalates to
+the human, who decides whether to proceed on a supplied spec, re-spec, or abandon.
+
+```bash
+waypoint board post {{ticket_channel}} \
+  "infeasible: <what blocks a PRD, concretely>" \
+  --meta kind=infeasible
+```
+
 ## Post the result back and stop
 
 Post the spec ref, refined footprint, and recommendation to the ticket channel,

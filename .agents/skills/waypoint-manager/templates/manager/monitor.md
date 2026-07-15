@@ -52,11 +52,13 @@ Frame an open question when the lead left the decision open. You are
 
 ## The substantial-spec gate
 
-When the writer posts the spec ref, move `spec_pending → spec_review` (recording
-`{{spec_ref}}`) and post an **approval** inbox item with the spec. On the answer:
-**approve** → `ready`; **request-changes** → `spec_pending` (relay the notes to a
-fresh writer); **reject** → `abandoned`. A silent latency-timeout is abandoned by the
-`latency_timeouts` reconcile path in `{{templates_dir}}/manager/loop-cycle.md`.
+When the writer posts back, branch on its `kind`.
+
+**`spec_ready`** — move `spec_pending → spec_review` (recording `{{spec_ref}}`) and
+post an **approval** inbox item with the spec. On the answer: **approve** → `ready`;
+**request-changes** → `spec_pending` (relay the notes to a fresh writer); **reject** →
+`abandoned`. A silent latency-timeout is abandoned by the `latency_timeouts` reconcile
+path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
@@ -68,22 +70,46 @@ waypoint inbox post --json - <<'JSON'
 JSON
 ```
 
+**`infeasible`** — the writer determined the request cannot be specced. Move
+`spec_pending → blocked` and post a **decision** inbox item carrying the writer's
+reason; the branch-less-blocker relay below drives the human's answer (`blocked →
+ready` to proceed on a human-supplied spec, `blocked → spec_pending` to re-spec,
+`blocked → abandoned`).
+
+```bash
+waypoint manager ticket transition {{ticket_id}} --to blocked --reason "infeasible spec: <writer's reason>"
+waypoint inbox post --json - <<'JSON'
+{ "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
+  "blocks": [
+    { "type": "markdown", "text": "<the writer's infeasibility reason, verbatim>" },
+    { "type": "question", "question": "How should it proceed?",
+      "options": [{"label": "proceed on a human-supplied spec"},
+                  {"label": "re-spec"}, {"label": "abandon"}],
+      "multi": false, "required": true } ] }
+JSON
+```
+
 ## Relay a human answer back to the lead — durably
 
 The answer lands on a later wake, so recover the gate item from the inbox by its
 `{{ticket_channel}}:` subject. Act only when a resolved gate item exists — a board-post
 or liveness wake leaves `item` empty and carries no answer to relay. Read the answer
-(never injected — pull it), then post it to the durable log and nudge:
+(never injected — pull it); when a lead holds the branch, post it to the durable log
+and nudge:
 
 ```bash
 item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" \
   | jq -r --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')  # newest answered gate; empty if this wake carried no answer
 if [ -n "$item" ] && [ "$item" != "null" ]; then
   answer=$(waypoint inbox get "$item")                 # {"item": {...}} — branch on the block's answer
-  waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
-  lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-  waypoint sessions send "$lead" \
-    "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+  info=$(waypoint manager ticket show {{ticket_id}})
+  branch=$(echo "$info" | jq -r '.ticket.branch // empty')       # set only for a mid-build blocker; null for a branch-less block or the spec gate
+  lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
+  if [ -n "$branch" ]; then                            # a lead holds a real branch — relay durably and nudge
+    waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
+    waypoint sessions send "$lead" \
+      "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+  fi
 fi
 ```
 
@@ -93,8 +119,9 @@ Then transition out of the awaiting state by the block's shape:
   (above), then resume `blocked → building`;
 - **branch-less blocker** (an infeasible `spec_pending → blocked`, with no lead to
   relay to) — the human's answer is your transition directly: `blocked → ready`
-  (proceed — build from a human-supplied spec or as direct-instruction),
-  `blocked → spec_pending` (re-spec via a fresh writer), or `blocked → abandoned`;
+  (proceed — as direct-instruction, or against a human-supplied spec recorded with
+  `--spec-ref <ref>`), `blocked → spec_pending` (re-spec via a fresh writer), or
+  `blocked → abandoned`;
 - **spec gate** — `spec_review → ready` on approve.
 
 `awaiting_since` clears automatically on exit. For the relayed cases, each relay is a

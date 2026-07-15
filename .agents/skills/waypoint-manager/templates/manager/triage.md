@@ -140,8 +140,9 @@ lead-died`, spends `lead_restarts`); past `max_lead_restarts`, escalate `--to bl
 When the `rfc-writer` route is **converting an input PRD**, pass that PRD to the
 writer as its primary input — it preserves the PRD's intent and reduces it to a
 concrete technical design. The writer posts the
-spec ref back and recommends an execution strategy; you then move the ticket
-`spec_pending → spec_review` and open the human approval gate
-(`{{templates_dir}}/manager/monitor.md` covers the gate and the relay). Reap the writer
-after the spec lands — it is ephemeral. Pass-through and trivial routes skip this
+spec ref back and recommends an execution strategy, or posts `infeasible` when the
+request cannot be specced; you then drive the matching edge (`spec_pending →
+spec_review` for a spec, `→ blocked` for infeasible) per
+`{{templates_dir}}/manager/monitor.md`, which covers both branches and the relay. Reap
+the writer after it posts — it is ephemeral. Pass-through and trivial routes skip this
 section; `{{templates_dir}}/manager/delegate.md` picks them up when the tree frees.

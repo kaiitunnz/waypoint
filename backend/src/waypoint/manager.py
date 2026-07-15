@@ -144,8 +144,21 @@ def is_terminal(state: ManagerTicketState) -> bool:
     return state in _TERMINAL_STATES
 
 
+def _holds_tree(ticket: ManagerTicket) -> bool:
+    """Whether a ticket occupies the shared working tree.
+
+    A tree-state ticket holds the tree, except a ``blocked`` one with no branch: a
+    writer that deems a ``spec_pending`` ticket infeasible escalates it
+    ``spec_pending → blocked`` without ever cutting a branch, so that ticket occupies
+    no tree and must not block a build from being delegated.
+    """
+    return ticket.state in _TREE_STATES and not (
+        ticket.state == _S.BLOCKED and ticket.branch is None
+    )
+
+
 def tree_state(tickets: Iterable[ManagerTicket]) -> ManagerTreeState:
-    held = next((t.id for t in tickets if t.state in _TREE_STATES), None)
+    held = next((t.id for t in tickets if _holds_tree(t)), None)
     return ManagerTreeState(free=held is None, held_by=held)
 
 
@@ -233,7 +246,7 @@ def apply_transition(
 
 def check_invariants(tickets: Sequence[ManagerTicket], config: ManagerConfig) -> None:
     """Enforce the server-side scheduler invariants over the whole ticket set."""
-    on_tree = sum(1 for t in tickets if t.state in _TREE_STATES)
+    on_tree = sum(1 for t in tickets if _holds_tree(t))
     if on_tree > _TREE_CAPACITY:
         raise ManagerStateError(
             f"working-tree cap exceeded: {on_tree} tickets occupy the shared "

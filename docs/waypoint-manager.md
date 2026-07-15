@@ -251,13 +251,13 @@ agent's shell (`gh pr view`).
 rejects the write with `409` if any fails:
 
 - **Tree cap** — at most one ticket occupies the shared tree (`delegated` through
-  `review_requested`, parked `blocked`/`review_requested` included), so delegation of
-  a second ticket is refused until the current one terminates. The cap counts
-  `blocked` uniformly, so a ticket blocked
-  from `spec_pending` (a writer deemed the work infeasible) or from a turn-1 spawn
-  death holds the slot even though its work never reached the tree; that is the
-  conservative choice, and the human decision or the latency timeout that clears the
-  block also frees the slot.
+  `review_requested`, a parked `review_requested` or a branch-bearing `blocked`
+  included), so delegation of a second ticket is refused until the current one
+  terminates. A ticket holds the tree once it has cut its branch; a `blocked` ticket
+  that never cut one — a writer that deemed a `spec_pending` ticket infeasible and
+  escalated `spec_pending → blocked` — occupies no tree and does not count against the
+  cap, so it escalates to the human and can be abandoned while an in-flight build
+  continues.
 - **≤ 1 spec_pending** — one active writer.
 - **Unique `intended_lead_title`** across all live tickets — the spawn dedup key, so
   a re-fired delegate cannot create a second lead.

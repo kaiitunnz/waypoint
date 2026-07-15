@@ -16,6 +16,7 @@ from waypoint.manager import (
     check_invariants,
     compute_next,
     legal_targets,
+    tree_state,
 )
 from waypoint.schemas import (
     ManagerConfig,
@@ -50,6 +51,7 @@ def mk(
     attempts: int = 0,
     lead_restarts: int = 0,
     intended_lead_title: str | None = None,
+    branch: str | None = None,
     created_at: datetime | None = None,
 ) -> ManagerTicket:
     now = created_at or _now()
@@ -62,6 +64,7 @@ def mk(
         attempts=attempts,
         lead_restarts=lead_restarts,
         intended_lead_title=intended_lead_title,
+        branch=branch,
         created_at=now,
         updated_at=now,
     )
@@ -221,18 +224,29 @@ def test_lead_death_does_not_consume_spawn_budget() -> None:
 
 
 def test_tree_cap_counts_every_on_tree_state() -> None:
-    # One shared tree: at most one ticket occupies it. The awaiting-human states
-    # blocked/review_requested count too, not just the active compute states.
+    # One shared tree: at most one ticket occupies it. review_requested and a
+    # branch-bearing blocked (a real build that stalled) count too, not just the
+    # active compute states.
     check_invariants([mk(S.BUILDING, "a")], _CONFIG)
     check_invariants([mk(S.REVIEW_REQUESTED, "a")], _CONFIG)
-    check_invariants([mk(S.BLOCKED, "a")], _CONFIG)
+    check_invariants([mk(S.BLOCKED, "a", branch="ticket/a")], _CONFIG)
     for pair in (
         (mk(S.BUILDING, "a"), mk(S.REVIEW_REQUESTED, "b")),
-        (mk(S.BLOCKED, "a"), mk(S.REVISING, "b")),
+        (mk(S.BLOCKED, "a", branch="ticket/a"), mk(S.REVISING, "b")),
         (mk(S.DELEGATED, "a"), mk(S.BUILDING, "b")),
     ):
         with pytest.raises(ManagerStateError):
             check_invariants(list(pair), _CONFIG)
+
+
+def test_branchless_blocked_does_not_hold_the_tree() -> None:
+    # A spec_pending ticket found infeasible escalates to blocked without ever
+    # cutting a branch, so it occupies no tree and does not block a build.
+    check_invariants([mk(S.BLOCKED, "a"), mk(S.BUILDING, "b")], _CONFIG)
+    assert tree_state([mk(S.BLOCKED, "a")]).free is True
+    # A concurrent build holds the tree; the branch-less blocked ticket does not.
+    tree = tree_state([mk(S.BUILDING, "b"), mk(S.BLOCKED, "a")])
+    assert tree.free is False and tree.held_by == "b"
 
 
 def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
@@ -250,6 +264,30 @@ def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
         mgr.transition(a.id, req)
     tree = mgr.next().tree
     assert tree.free is False and tree.held_by == a.id  # parked ticket holds the tree
+
+
+def test_infeasible_spec_can_block_while_a_build_holds_the_tree(tmp_path: Path) -> None:
+    # A substantial ticket is specced in parallel with a build (writers are
+    # off-tree); when the writer reports infeasible, spec_pending → blocked must
+    # succeed even though another ticket holds the tree — the branch-less blocked
+    # ticket occupies no tree.
+    mgr = _manager(tmp_path)
+    a = mgr.create_ticket(TicketCreateRequest(title="a", scale=Sc.TRIVIAL))
+    for req in (
+        TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL),
+        TicketTransitionRequest(to=S.READY),
+        TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="a-lead"),
+        TicketTransitionRequest(to=S.BUILDING),
+    ):
+        mgr.transition(a.id, req)
+    b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.SUBSTANTIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.SUBSTANTIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.SPEC_PENDING))
+    blocked = mgr.transition(
+        b.id, TicketTransitionRequest(to=S.BLOCKED, reason="infeasible")
+    )
+    assert blocked.state == S.BLOCKED
+    assert mgr.next().tree.held_by == a.id  # the build still holds the tree, not b
     b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(b.id, TicketTransitionRequest(to=S.READY))
@@ -387,9 +425,11 @@ def test_next_excludes_tried_set() -> None:
 
 
 def test_next_derives_tree_state() -> None:
-    # A ticket in any on-tree state (delegated..review_requested, blocked included)
-    # holds the single shared tree.
-    result = compute_next([mk(S.BLOCKED, "c"), mk(S.INTAKE, "i")], _CONFIG)
+    # A ticket in any on-tree state (delegated..review_requested, a branch-bearing
+    # blocked included) holds the single shared tree.
+    result = compute_next(
+        [mk(S.BLOCKED, "c", branch="ticket/c"), mk(S.INTAKE, "i")], _CONFIG
+    )
     assert result.tree.free is False
     assert result.tree.held_by == "c"
     # With nothing on the tree, it is free.

@@ -199,7 +199,7 @@ Target-state adjacency, as the backend enforces it:
 | `ready` | `delegated` | consumes an `attempts` budget unit; slot-gated |
 | `delegated` | `building`, `ready`, `blocked`, `delegated` | lead-accepted; spawn-fail retry; spawn-fail exhausted/infeasible; self = lead-died resume |
 | `building` | `review_requested`, `blocked`, `building` | done/partial; error/decision/attention; self = lead-died resume |
-| `blocked` | `building`, `abandoned`, `blocked` | human answer relayed; abort/latency-timeout; self = parked-lead-died resume |
+| `blocked` | `building`, `ready`, `spec_pending`, `abandoned`, `blocked` | mid-build answer relayed → resume; revive a branch-less block → proceed (`ready`) / re-spec (`spec_pending`); abort/latency-timeout; self = parked-lead-died resume |
 | `review_requested` | `revising`, `merged`, `deferred`, `abandoned`, `blocked`, `review_requested` | request-changes; human merge observed (full → merged, partial → deferred); abort/latency; blocker found; self = parked-lead-died resume |
 | `revising` | `review_requested`, `blocked`, `revising` | re-pushed (kind=done); needs a decision; self = lead-died resume |
 | `merged` / `deferred` / `abandoned` | *(terminal)* | |

@@ -295,7 +295,45 @@ def test_infeasible_spec_can_block_while_a_build_holds_the_tree(tmp_path: Path) 
         mgr.transition(
             b.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="b-lead")
         )
+    assert exc.value.status_code == 409  # a genuine second build is still refused
+
+
+def test_blocked_revive_edges_spend_no_budget_and_clear_awaiting() -> None:
+    # The human can revive a branch-less blocked ticket in place — proceed
+    # (`ready`) or re-spec (`spec_pending`) — mirroring the spec gate, with no
+    # budget spend, and `awaiting_since` clears on exit.
+    blocked = mk(S.BLOCKED).model_copy(update={"awaiting_since": _now()})
+    for target in (S.READY, S.SPEC_PENDING):
+        revived = apply_transition(
+            blocked, TicketTransitionRequest(to=target), _CONFIG, _now()
+        )
+        assert revived.state == target
+        assert revived.awaiting_since is None
+        assert revived.attempts == 0 and revived.lead_restarts == 0
+
+
+def test_blocked_respec_succeeds_free_and_respects_the_spec_pending_cap(
+    tmp_path: Path,
+) -> None:
+    mgr = _manager(tmp_path)
+    b = mgr.create_ticket(TicketCreateRequest(title="b", scale=Sc.SUBSTANTIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.SUBSTANTIAL))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.SPEC_PENDING))
+    mgr.transition(b.id, TicketTransitionRequest(to=S.BLOCKED, reason="infeasible"))
+    # With the spec slot free, reviving the blocked ticket to spec_pending succeeds
+    # (the new edge; illegal on the pre-change table).
+    revived = mgr.transition(b.id, TicketTransitionRequest(to=S.SPEC_PENDING))
+    assert revived.state == S.SPEC_PENDING
+    # Block it again, occupy the sole spec slot with another ticket, and the re-spec
+    # is now rejected by the ≤1-spec_pending cap — not as an illegal edge.
+    mgr.transition(b.id, TicketTransitionRequest(to=S.BLOCKED, reason="again"))
+    a = mgr.create_ticket(TicketCreateRequest(title="a", scale=Sc.SUBSTANTIAL))
+    mgr.transition(a.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.SUBSTANTIAL))
+    mgr.transition(a.id, TicketTransitionRequest(to=S.SPEC_PENDING))
+    with pytest.raises(HTTPException) as exc:
+        mgr.transition(b.id, TicketTransitionRequest(to=S.SPEC_PENDING))
     assert exc.value.status_code == 409
+    assert "at most one ticket may be in 'spec_pending'" in exc.value.detail
 
 
 def test_at_most_one_spec_pending() -> None:

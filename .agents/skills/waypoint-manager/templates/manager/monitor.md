@@ -73,11 +73,20 @@ waypoint sessions send "$lead" \
   "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
 ```
 
-Then transition out of the awaiting state — `blocked → building` (answer relayed),
-or `spec_review → ready`. `awaiting_since` clears automatically on exit. Each relay
-is a `kind=relay` post the lead consumes in board-entry-`id` order, applying each
-once. Post the relay before the exit transition (a re-post lands under a higher id
-and the lead re-applies it once).
+Then transition out of the awaiting state by the block's shape:
+
+- **mid-build blocker** (a live lead on its branch) — relay the answer to the lead
+  (above), then resume `blocked → building`;
+- **branch-less blocker** (an infeasible `spec_pending → blocked`, with no lead to
+  relay to) — the human's answer is your transition directly: `blocked → ready`
+  (proceed — build from a human-supplied spec or as direct-instruction),
+  `blocked → spec_pending` (re-spec via a fresh writer), or `blocked → abandoned`;
+- **spec gate** — `spec_review → ready` on approve.
+
+`awaiting_since` clears automatically on exit. For the relayed cases, each relay is a
+`kind=relay` post the lead consumes in board-entry-`id` order, applying each once;
+post the relay before the exit transition (a re-post lands under a higher id and the
+lead re-applies it once).
 
 ## Done / partial
 

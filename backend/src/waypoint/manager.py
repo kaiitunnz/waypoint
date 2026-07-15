@@ -109,7 +109,9 @@ _ADJACENCY: dict[ManagerTicketState, frozenset[ManagerTicketState]] = {
     _S.READY: frozenset({_S.DELEGATED}),
     _S.DELEGATED: frozenset({_S.BUILDING, _S.READY, _S.BLOCKED, _S.DELEGATED}),
     _S.BUILDING: frozenset({_S.REVIEW_REQUESTED, _S.BLOCKED, _S.BUILDING}),
-    _S.BLOCKED: frozenset({_S.BUILDING, _S.ABANDONED, _S.BLOCKED}),
+    _S.BLOCKED: frozenset(
+        {_S.BUILDING, _S.READY, _S.SPEC_PENDING, _S.ABANDONED, _S.BLOCKED}
+    ),
     _S.REVIEW_REQUESTED: frozenset(
         {
             _S.REVISING,

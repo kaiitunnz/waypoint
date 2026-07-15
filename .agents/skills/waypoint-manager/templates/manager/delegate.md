@@ -39,6 +39,10 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
   before spawning. It cannot be checked out, so return the tree to `{{trunk}}` first:
   `git -C {{repo_dir}} checkout {{trunk}} && git -C {{repo_dir}} branch -D {{branch}}`.
 
+An already-`delegated` ticket with no live lead is an interrupted delegate: the state
+and dedup key are recorded, so skip step 2 and resume at step 3, where the idempotent
+cut checks out a branch a prior pass left behind.
+
 ## 2. Record intent (the dedup key) — transition first
 
 `{{branch}}` is this ticket's branch, `ticket/{{ticket_id}}` by convention.
@@ -55,12 +59,17 @@ title exactly once.
 
 ## 3. Cut the branch in your tree, then spawn the lead
 
-The tree is on `{{trunk}}`. Cut the ticket branch, then spawn the lead into your
-tree with **no** `--worktree`:
+Cut the ticket branch, then spawn the lead into your tree with **no** `--worktree`.
+The cut is idempotent: a prior delegate pass may have already cut `{{branch}}`, so check
+it out when it exists and create it from `{{trunk}}` otherwise.
 
 ```bash
 git -C {{repo_dir}} checkout {{trunk}}
-git -C {{repo_dir}} checkout -b {{branch}} {{trunk}}
+if git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} >/dev/null; then
+  git -C {{repo_dir}} checkout {{branch}}                 # resume the branch a prior pass cut
+else
+  git -C {{repo_dir}} checkout -b {{branch}} {{trunk}}
+fi
 # {{tech_lead_launch}} is the tech-lead's launch args, baked from roles.tech_lead.
 sid=$(waypoint sessions start {{tech_lead_launch}} \
   --cwd {{repo_dir}} \

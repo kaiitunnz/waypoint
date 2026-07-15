@@ -3750,6 +3750,12 @@ def _manager_static_bindings(
     integration = _mapping(raw.get("integration"))
     roles = _mapping(raw.get("roles"))
 
+    mode = str(integration.get("mode", "pr"))
+    if mode not in ("pr", "local"):
+        raise typer.BadParameter(
+            f"integration.mode must be 'pr' or 'local', got {mode!r}"
+        )
+
     def _join(value: Any) -> str:
         if isinstance(value, list):
             return ", ".join(str(item) for item in value)
@@ -3774,6 +3780,7 @@ def _manager_static_bindings(
         "prd_writer_launch": _role_launch_args(roles.get("prd_writer")),
         "rfc_writer_launch": _role_launch_args(roles.get("rfc_writer")),
         "templates_dir": templates_dir,
+        "integration_mode": mode,
     }
 
 
@@ -3810,9 +3817,8 @@ def _compile_manager_templates(
         dst_dir = templates_dir / str(role)
         dst_dir.mkdir(parents=True, exist_ok=True)
         for src in sorted(src_dir.glob("*.md")):
-            compiled, _ = _substitute_placeholders(
-                src.read_text(encoding="utf-8"), static
-            )
+            resolved = _resolve_conditionals(src.read_text(encoding="utf-8"), static)
+            compiled, _ = _substitute_placeholders(resolved, static)
             (dst_dir / src.name).write_text(compiled, encoding="utf-8")
 
 
@@ -3843,6 +3849,48 @@ def _git_toplevel() -> str:
 
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+_IF_RE = re.compile(r"^\s*\{\{#if (\w+) == (\w+)\}\}\s*$")
+_ENDIF_RE = re.compile(r"^\s*\{\{/if\}\}\s*$")
+
+
+def _resolve_conditionals(text: str, bindings: dict[str, str]) -> str:
+    """Strip `{{#if <key> == <value>}}`…`{{/if}}` blocks that the baked bindings
+    do not select, keeping the body of the matching blocks verbatim.
+
+    Markers occupy their own lines; a marker line is dropped and a body line is
+    kept or dropped whole, so a kept fenced code block survives byte-for-byte.
+    `manager init` resolves these once, before `_substitute_placeholders`, so a
+    compiled template carries only its mode's instructions and `manager render`
+    sees no conditionals.
+    """
+    out: list[str] = []
+    keep_stack: list[bool] = []
+    for line in text.splitlines(keepends=True):
+        opener = _IF_RE.match(line)
+        if opener is not None:
+            key, value = opener.group(1), opener.group(2)
+            if key not in bindings:
+                raise typer.BadParameter(
+                    f"unknown conditional key {{{{#if {key} == ...}}}} "
+                    "in a manager template"
+                )
+            keep_stack.append(bindings[key] == value)
+            continue
+        if _ENDIF_RE.match(line) is not None:
+            if not keep_stack:
+                raise typer.BadParameter("unmatched {{/if}} in a manager template")
+            keep_stack.pop()
+            continue
+        if all(keep_stack):
+            out.append(line)
+    if keep_stack:
+        raise typer.BadParameter("unclosed {{#if}} in a manager template")
+    result = "".join(out)
+    if "{{#if" in result or "{{/if" in result:
+        raise typer.BadParameter(
+            "manager-template conditional marker must occupy its own line"
+        )
+    return result
 
 
 def _substitute_placeholders(

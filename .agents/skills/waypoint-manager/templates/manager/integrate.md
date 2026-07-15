@@ -1,15 +1,22 @@
 # Manager — integrate
 
+{{#if integration_mode == pr}}
 A ticket is in `review_requested` with a PR at {{pr_url}}. The human is the **sole
 merge authority**: you run the review-until-merge loop and **observe** the human's
-merge — you never merge on your own authority. `{{branch}}` is checked out in
-{{repo_dir}}.
+merge — you never merge on your own authority.
+{{/if}}
+{{#if integration_mode == local}}
+A ticket is in `review_requested` with its work committed on {{branch}}. The human is
+the **sole merge authority**: you run the review-until-merge loop, and on the human's
+approval fast-forward {{trunk}} onto {{branch}} — you never merge without that approval.
+{{/if}}
+`{{branch}}` is checked out in {{repo_dir}}.
 
 ## Review-until-merge loop (human gated)
 
-1. Post the PR to the human as an **approval** inbox item, subject
-   `{{ticket_channel}}: {{ticket_title}} — PR review`. You are `--wake-on-inbox`-
+1. Post the work to the human as an **approval** inbox item. You are `--wake-on-inbox`-
    subscribed, so the answer wakes you.
+{{#if integration_mode == pr}}
    ```bash
    waypoint inbox post --json - <<'JSON'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
@@ -18,6 +25,17 @@ merge — you never merge on your own authority. `{{branch}}` is checked out in
        { "type": "approval", "prompt": "Merge this PR?", "required": true } ] }
    JSON
    ```
+{{/if}}
+{{#if integration_mode == local}}
+   ```bash
+   waypoint inbox post --json - <<'JSON'
+   { "subject": "{{ticket_channel}}: {{ticket_title}} — merge review",
+     "blocks": [
+       { "type": "markdown", "text": "<branch {{branch}}: git log --oneline and git diff --stat vs {{trunk}}>" },
+       { "type": "approval", "prompt": "Fast-forward {{trunk}} onto {{branch}}?", "required": true } ] }
+   JSON
+   ```
+{{/if}}
 2. On a later wake, read the answer from the inbox by its `{{ticket_channel}}:` subject
    (`item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" | jq -r
    --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')`;
@@ -33,15 +51,20 @@ merge — you never merge on your own authority. `{{branch}}` is checked out in
      ```
      The lead addresses the feedback, re-pushes, and re-posts `done`; you move
      `revising → review_requested` and re-post the gate on the new head.
+{{#if integration_mode == pr}}
    - **merge** → the human merges on GitHub; record it (below).
+{{/if}}
+{{#if integration_mode == local}}
+   - **approve** → fast-forward {{trunk}} onto {{branch}} in the tree; record it (below).
+{{/if}}
    - **abort** → `review_requested → abandoned`, note it on the ticket, then reap the
      subtree and free the tree (Finalize).
-3. Loop until the PR is merged or the ticket is aborted. A silent latency-timeout is
-   abandoned by the `latency_timeouts` reconcile path in
-   `{{templates_dir}}/manager/loop-cycle.md`.
+3. Loop until the ticket is merged or aborted. A silent latency-timeout is abandoned by
+   the `latency_timeouts` reconcile path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ## Record the merge
 
+{{#if integration_mode == pr}}
 Each drain, reconcile the PR against GitHub — the human may have merged it since your
 last turn:
 
@@ -70,6 +93,23 @@ gh pr merge {{pr_url}} --squash --delete-branch    # or --auto so CI-gating neve
 ```
 
 Record `review_requested → merged` (or `→ deferred`) in the same step.
+{{/if}}
+{{#if integration_mode == local}}
+On the human's **approve**, fast-forward {{trunk}} onto {{branch}} in the shared tree,
+then record the terminal. The branch is your durable witness: check its ancestry first,
+so a resumed turn re-derives the merge and never repeats it.
+
+```bash
+git -C {{repo_dir}} checkout {{trunk}}
+git -C {{repo_dir}} merge-base --is-ancestor {{branch}} {{trunk}} \
+  || git -C {{repo_dir}} merge --ff-only {{branch}}   # ff only when the branch is not already merged
+```
+
+When `require_ci_green` is `true` (here `{{require_ci_green}}`), confirm the lead
+reported green local checks before the fast-forward. Record `review_requested → merged`
+(full) or `→ deferred` (partial) **after** the fast-forward lands, so a crash between the
+merge and the record re-derives the merge from the branch's ancestry on the next drain.
+{{/if}}
 
 ## Finalize
 
@@ -89,7 +129,9 @@ if [ -n "$lead" ]; then
   waypoint sessions delete "$lead" --force      # the lead had no worktree (it shared your tree)
 fi
 git -C {{repo_dir}} checkout {{trunk}}
+{{#if integration_mode == pr}}
 git -C {{repo_dir}} pull --ff-only origin {{trunk}}           # sync trunk (the just-merged commit, if any)
+{{/if}}
 git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
   && git -C {{repo_dir}} branch -D {{branch}} || true         # no-op if the branch was never cut / already dropped
 ```

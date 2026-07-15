@@ -20,7 +20,7 @@ The `status` cell's `kind=` is the feedback vocabulary:
 | `error` | A failure the lead can't resolve | → `blocked`, escalate to inbox |
 | `decision` | Needs a product/scope call | → `blocked`, escalate to inbox |
 | `attention` | Ambiguity — needs a look | → `blocked`, escalate to inbox |
-| `done` | Work complete, PR open (`pr=`/`commit=`) | → `review_requested` (`--not-partial`) |
+| `done` | Work complete, delivered | → `review_requested` (`--not-partial`) |
 | `partial` | A subset delivered (`detail` lists deferred goals) | → `review_requested` (`--is-partial`) |
 
 ## Blockers → the inbox (with escalation policy)
@@ -131,13 +131,20 @@ lead re-applies it once).
 
 ## Done / partial
 
-On `done`/`partial`, record the PR and move to `review_requested`. The lead parks
-alive and idle; the ticket keeps holding the shared tree until it lands or is
-abandoned:
+On `done`/`partial`, move to `review_requested`. The lead parks alive and idle; the
+ticket keeps holding the shared tree until it lands or is abandoned:
 
+{{#if integration_mode == pr}}
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to review_requested \
   --pr-url {{pr_url}} --not-partial      # or --is-partial for a partial delivery
 ```
+{{/if}}
+{{#if integration_mode == local}}
+```bash
+waypoint manager ticket transition {{ticket_id}} --to review_requested \
+  --not-partial      # or --is-partial for a partial delivery
+```
+{{/if}}
 
-Then open the per-PR review gate — see `{{templates_dir}}/manager/integrate.md`.
+Then open the review gate — see `{{templates_dir}}/manager/integrate.md`.

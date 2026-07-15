@@ -67,8 +67,10 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      current `awaiting_since` (re-notified, still unanswered) → transition to
      `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`),
      reap it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+{{#if integration_mode == pr}}
    - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup` (external CI/merge state).
+{{/if}}
 
 3. **Choose one action** — the highest-priority of: the `recommended` pull move, or
    an external edge reconcile surfaced (spec posted → `spec_review`, or infeasible →
@@ -81,10 +83,15 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 4. **Record intent before the side effect.** Transition first (carrying the dedup
    key: `--intended-lead-title`, `--branch`, or `--pr-url`), then act. Never act
    before the transition commits.
+{{#if integration_mode == local}}
+   The local ff-merge is the exception: fast-forward {{trunk}}, then record `merged` —
+   the branch's ancestry is the durable witness, so a crash between the two re-derives
+   the merge on the next drain.
+{{/if}}
 
 5. **Act idempotently** — spawn only if no live same-title session exists; relay via
-   the durable versioned log + a content-free nudge; `gh pr merge` only if not
-   already `MERGED`. Route to the per-step template:
+   the durable versioned log + a content-free nudge; the merge only if it has not
+   already landed. Route to the per-step template:
    - triage / substantial / trivial → `{{templates_dir}}/manager/triage.md` (it carries the
      scale on the `intake → triaged` edge, then routes; a `substantial`/`trivial`
      recommendation re-enters it at the routing step)

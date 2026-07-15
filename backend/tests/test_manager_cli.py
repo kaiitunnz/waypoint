@@ -9,8 +9,10 @@ from typing import Any
 
 import httpx
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from waypoint.cli import _resolve_conditionals
 from waypoint.cli import app as cli_app
 from waypoint.client import WaypointClient
 from waypoint.settings import Settings
@@ -781,3 +783,121 @@ def test_cli_manager_init_compiles_templates(
     assert rc["templates_dir"] == str(compiled.resolve())
     assert rc["tickets_channel"] == "tickets"
     assert rc["ticket_channel_prefix"] == "ticket-"
+
+
+def _resolve(text: str, mode: str) -> str:
+    return _resolve_conditionals(text, {"integration_mode": mode})
+
+
+_COND_TEMPLATE = (
+    "intro\n"
+    "{{#if integration_mode == pr}}\n"
+    "PR-ONLY\n"
+    "```bash\n"
+    "gh pr create\n"
+    "```\n"
+    "{{/if}}\n"
+    "{{#if integration_mode == local}}\n"
+    "LOCAL-ONLY\n"
+    "```bash\n"
+    "git merge --ff-only x\n"
+    "```\n"
+    "{{/if}}\n"
+    "outro\n"
+)
+
+
+def test_resolve_conditionals_keeps_only_the_matching_block() -> None:
+    pr = _resolve(_COND_TEMPLATE, "pr")
+    assert "PR-ONLY" in pr and "gh pr create" in pr
+    assert "LOCAL-ONLY" not in pr and "merge --ff-only" not in pr
+    # No marker residue, and the kept fence stays intact and separated from prose.
+    assert "{{#if" not in pr and "{{/if" not in pr
+    assert "```\noutro\n" in pr
+
+    local = _resolve(_COND_TEMPLATE, "local")
+    assert "LOCAL-ONLY" in local and "merge --ff-only x" in local
+    assert "PR-ONLY" not in local and "gh pr create" not in local
+    assert "{{#if" not in local and "{{/if" not in local
+
+
+def test_resolve_conditionals_rejects_malformed_markers() -> None:
+    for bad in (
+        "{{#if integration_mode == pr}}\nx\n",  # unclosed
+        "{{/if}}\n",  # unmatched
+        "a {{#if integration_mode == pr}}x{{/if}} b\n",  # marker not on its own line
+        "{{#if unknown_key == pr}}\nx\n{{/if}}\n",  # unknown key
+    ):
+        with pytest.raises(typer.BadParameter):
+            _resolve(bad, "pr")
+
+
+def _init_with_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> str:
+    raw_dir = tmp_path / "raw" / "tech-lead"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "brief.md").write_text(_COND_TEMPLATE, encoding="utf-8")
+    compiled = tmp_path / "compiled"
+    manifest = tmp_path / "waypoint-manager.yaml"
+    manifest.write_text(
+        "project: waypoint\n"
+        "trunk: main\n"
+        f"templates_dir: {compiled}\n"
+        "board:\n"
+        "  tickets_channel: tickets\n"
+        "  ticket_channel_prefix: ticket-\n"
+        "integration:\n"
+        f"  mode: {mode}\n"
+        "roles:\n"
+        "  tech_lead:\n"
+        '    launch: { backend: claude_code, model: "opus[1m]", '
+        "permission_mode: auto }\n"
+        f"    templates: {raw_dir}\n",
+        encoding="utf-8",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"config": {}})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "init",
+            "--manifest",
+            str(manifest),
+            "--owner",
+            "mgr",
+        ],
+    )
+    if result.exit_code != 0:
+        return f"__EXIT_{result.exit_code}__{result.stdout}"
+    return (compiled / "tech_lead" / "brief.md").read_text(encoding="utf-8")
+
+
+def test_cli_manager_init_compiles_pr_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _init_with_mode(tmp_path, monkeypatch, "pr")
+    assert "PR-ONLY" in body and "gh pr create" in body
+    assert "LOCAL-ONLY" not in body and "merge --ff-only" not in body
+    assert "{{#if" not in body and "{{/if" not in body
+
+
+def test_cli_manager_init_compiles_local_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _init_with_mode(tmp_path, monkeypatch, "local")
+    assert "LOCAL-ONLY" in body and "merge --ff-only x" in body
+    assert "PR-ONLY" not in body and "gh pr create" not in body
+    assert "{{#if" not in body and "{{/if" not in body
+
+
+def test_cli_manager_init_rejects_unknown_integration_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _init_with_mode(tmp_path, monkeypatch, "bogus")
+    assert result.startswith("__EXIT_")
+    assert "__EXIT_0__" not in result

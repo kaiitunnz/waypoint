@@ -2,8 +2,8 @@
 
 A review round arrived. The manager relayed the human's requested changes to
 {{ticket_channel}} and moved the ticket to `revising`, and you were woken. Address
-the feedback, re-push, and re-report — then park again for the next round. Repeat
-until the human merges or aborts.
+the feedback and re-report — then park again for the next round. Repeat until the
+human merges or aborts.
 
 ## 1. Consume the relayed feedback (by version)
 
@@ -34,6 +34,7 @@ git -C {{repo_dir}} add -A
 git -C {{repo_dir}} commit -s -m "<what the review round changed>"
 ```
 
+{{#if integration_mode == pr}}
 ## 3. Rebase onto trunk if it moved
 
 If {{trunk}} advanced under you, rebase before re-pushing so the PR stays
@@ -48,16 +49,28 @@ git -C {{repo_dir}} rebase origin/{{trunk}}
 # semantic conflict → `git rebase --abort`, post kind=decision, stop
 git -C {{repo_dir}} push --force-with-lease
 ```
+{{/if}}
 
+{{#if integration_mode == pr}}
 ## 4. Re-report done on the new head
+{{/if}}
+{{#if integration_mode == local}}
+## 3. Re-report done on the new head
+{{/if}}
 
-Re-post `done` with the new PR head so the manager re-opens the review gate on the
-updated PR (`done` is re-posted on each new head during `revising`):
+Re-post `done` on the new head so the manager re-opens the review gate on the updated
+head (`done` is re-posted on each new head during `revising`):
 
 ```bash
 head=$(git -C {{repo_dir}} rev-parse HEAD)
+{{#if integration_mode == pr}}
 waypoint board post {{ticket_channel}} "revised: <what changed>; ready for re-review" \
   --key status --meta kind=done --meta pr={{pr_url}} --meta commit=$head
+{{/if}}
+{{#if integration_mode == local}}
+waypoint board post {{ticket_channel}} "revised: <what changed>; ready for re-review" \
+  --key status --meta kind=done --meta commit=$head
+{{/if}}
 ```
 
 Add a short note of anything you pushed back on. Then park idle. The manager moves

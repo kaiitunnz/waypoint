@@ -514,8 +514,13 @@ A partial completion does not spawn follow-up tickets automatically; the manager
 an inbox confirmation and creates them only on the human's approval, with a
 deterministic dedup key.
 
-With `integration.mode: local`, the manager fast-forwards trunk locally on the human's
-merge decision instead of opening a PR; the human merge gate still applies.
+With `integration.mode: local`, the tech-lead commits on the ticket branch and reports
+`done` with the head commit; no PR is opened. The manager posts an approval inbox item
+carrying the branch diff and, on the human's approval, fast-forwards trunk onto the
+branch in the shared tree, then records `merged`. The branch's ancestry of trunk is the
+durable witness a resumed turn re-derives an already-applied merge from, so a crash
+between the fast-forward and the record repeats neither. `require_ci_green` gates on the
+lead's local check pass.
 
 ## Configuration
 
@@ -540,7 +545,7 @@ compiled templates at `init`, so the running manager reads no manifest per wake.
 | `retry.max_lead_restarts` | backend | Fresh-lead resumes after a lead death before `blocked`. Enforced on the lead-died self-loop. Independent of `attempts`. |
 | `priority.levels` | backend | Ordered high-to-low (`p0` highest); a ticket's `--priority` must be one of these. Ties break oldest-first (FIFO by `created_at`). |
 | `scale.substantial_when` | skill | Natural-language rule triage applies to label a ticket `substantial` (→ spec) vs `trivial` (→ direct). |
-| `integration.mode` | skill | `pr` (GitHub PR) or `local` (rebase-ff). Human-owned merge either way. |
+| `integration.mode` | skill | `pr` (GitHub PR) or `local` (local fast-forward). Human-owned merge either way. |
 | `integration.require_ci_green` | skill | Gate the merge on green CI. |
 | `timeouts.human_latency_hours` | skill | How long an awaiting-human ticket waits before the manager escalates then abandons. Measured from `awaiting_since`. |
 | `escalation.self_decide` | skill | Blocker classes the manager settles itself. |

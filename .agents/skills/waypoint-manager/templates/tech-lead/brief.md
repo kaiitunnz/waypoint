@@ -139,7 +139,7 @@ the working state:
 
 ```bash
 git -C {{repo_dir}} add -A
-git -C {{repo_dir}} commit -m "<imperative summary of the change>"
+git -C {{repo_dir}} commit -s -m "<imperative summary of the change>"
 ```
 
 When {{branch}} is green and the acceptance criteria are met, push and open the PR,

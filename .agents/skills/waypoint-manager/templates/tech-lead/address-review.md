@@ -31,7 +31,7 @@ Work the feedback finding by finding, in the manager's tree **{{repo_dir}}** on
 
 ```bash
 git -C {{repo_dir}} add -A
-git -C {{repo_dir}} commit -m "<what the review round changed>"
+git -C {{repo_dir}} commit -s -m "<what the review round changed>"
 ```
 
 ## 3. Rebase onto trunk if it moved

@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 
 from waypoint.schemas import (
+    InboxStatus,
     ManagerConfig,
     ManagerInitRequest,
     ManagerNextResponse,
@@ -625,6 +626,11 @@ class ManagerManager:
                 if ticket.inbox_item_id is not None
                 else None
             )
+            # A resolved gate means the human has answered; the wait now falls to the
+            # manager's transition or an external merge, and a latency timeout does not
+            # apply.
+            if item is not None and item.status == InboxStatus.RESOLVED:
+                continue
             # Measure from when a live gate item last existed, so a re-opened gate
             # (or one the human deleted) earns a fresh wait rather than abandoning
             # against a stale entry time.

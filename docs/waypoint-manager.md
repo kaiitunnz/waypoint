@@ -237,7 +237,7 @@ observes the external signal during reconcile.
 `manager reconcile` returns the drain's server-derivable reconcile signals in one
 consistent snapshot, so the manager adopts observed reality without a sheaf of manual
 board and session queries. It is read-only — it reports; the manager decides and acts.
-Three signals:
+Four signals:
 
 - **`unregistered_intake`** — keyless posts on the tickets channel, authored by
   someone other than the manager, whose board-entry id is not yet a ticket.
@@ -245,8 +245,8 @@ Three signals:
   missing or terminal (`exited`/`error`) — the resume candidates.
 - **`latency_timeouts`** — awaiting-human tickets whose wait exceeds
   `human_latency_hours`, measured from the live gate item's post (or `awaiting_since`
-  when no item exists), so a re-opened gate earns a fresh wait (raw candidates; the
-  re-notify-then-abandon decision stays with the manager).
+  when no item exists), so a re-opened gate earns a fresh wait and a resolved gate is
+  exempt (raw candidates; the re-notify-then-abandon decision stays with the manager).
 - **`stale_gates`** — awaiting-human tickets whose gate inbox item is absent (a crash
   between the awaiting transition and the inbox post, or a human-deleted item); the
   manager re-opens the gate.

@@ -20,6 +20,7 @@ from waypoint.manager import (
 )
 from waypoint.schemas import (
     InboxMarkdownBlockInput,
+    InboxStatus,
     ManagerConfig,
     ManagerInitRequest,
     ManagerRenderContext,
@@ -659,6 +660,38 @@ def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:
     late = mgr.reconcile(item.created_at + timedelta(hours=100)).latency_timeouts
     assert [t.ticket_id for t in late] == ["g"]
     assert late[0].waiting_since == item.created_at
+
+
+def test_reconcile_latency_skips_resolved_gate(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # A merge gate the human already answered: the item is resolved, so the wait falls
+    # to the external merge and no latency timeout applies.
+    answered = storage.create_inbox_item(
+        "mgr", None, "ticket-a: t — PR review", [InboxMarkdownBlockInput(text="x")]
+    )
+    resolved = storage.mark_inbox_read(answered.id)  # a no-action item resolves on read
+    assert resolved is not None and resolved[0].status == InboxStatus.RESOLVED
+    storage.create_manager_ticket(
+        mk(S.REVIEW_REQUESTED, "a").model_copy(
+            update={
+                "awaiting_since": answered.created_at - timedelta(hours=500),
+                "inbox_item_id": answered.id,
+            }
+        )
+    )
+    # A control ticket whose gate is still open, equally old.
+    open_item = storage.create_inbox_item(
+        "mgr", None, "ticket-b: t — PR review", [InboxMarkdownBlockInput(text="x")]
+    )
+    storage.create_manager_ticket(
+        mk(S.REVIEW_REQUESTED, "b").model_copy(update={"inbox_item_id": open_item.id})
+    )
+
+    late = mgr.reconcile(open_item.created_at + timedelta(hours=100)).latency_timeouts
+
+    assert [t.ticket_id for t in late] == ["b"]
 
 
 # ── Storage CRUD ────────────────────────────────────────────────────────────

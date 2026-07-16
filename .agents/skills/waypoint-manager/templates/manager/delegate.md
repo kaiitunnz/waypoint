@@ -81,12 +81,15 @@ waypoint sessions wake-on-board "$sid" --channels {{ticket_channel}}   # relays 
 
 If the model/permission were wrong the lead dies on turn 1; confirm it actually
 started (`waypoint sessions show "$sid"` → `starting`/`idle`/`running`, not
-`exited`/`error`). A turn-1 death is a spawn failure with no committed work — return
-the tree to `{{trunk}}`, drop the empty branch, then move `delegated → ready` (still
-under budget) or `→ blocked` (budget exhausted) and add the ticket to this drain's
-`tried` set:
+`exited`/`error`). A turn-1 death is a spawn failure with no committed work — reap the
+failed session so its reserved title frees for the retry, clear the dead lead ref off
+the ticket, return the tree to `{{trunk}}`, drop the empty branch, then move `delegated
+→ ready` (still under budget) or `→ blocked` (budget exhausted) and add the ticket to
+this drain's `tried` set:
 
 ```bash
+waypoint sessions delete "$sid" --force                       # free the reserved title
+waypoint manager ticket update {{ticket_id}} --lead-session-id ""   # drop the dead lead ref
 git -C {{repo_dir}} checkout {{trunk}} && git -C {{repo_dir}} branch -D {{branch}}
 ```
 

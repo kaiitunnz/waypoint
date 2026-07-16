@@ -34,7 +34,7 @@ log {{ticket_channel}} --since <last-seen>`) and lift its question and options
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
-waypoint inbox post --json - <<'JSON'
+item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "<the lead's question, verbatim from its entry>" },
@@ -42,10 +42,13 @@ waypoint inbox post --json - <<'JSON'
       "options": [{"label": "<lead's option a>"}, {"label": "<lead's option b>"}],
       "multi": false, "required": true } ] }
 JSON
+)
+waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
-Every gate item's subject leads with `{{ticket_channel}}:`; the answer read matches
-that prefix.
+Each gate post records its item id on the ticket (`--inbox-item`); the answer read
+looks that id up and acts once it resolves. The server clears the id on the next
+non-self transition, so a later gate never resolves this one's answer.
 
 Frame an open question when the lead left the decision open. You are
 `--wake-on-inbox`-subscribed, so the human's answer wakes you.
@@ -62,12 +65,14 @@ path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
-waypoint inbox post --json - <<'JSON'
+item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
   "blocks": [
     { "type": "markdown", "text": "<spec summary; ref {{spec_ref}}>" },
     { "type": "approval", "prompt": "Approve this spec?", "required": true } ] }
 JSON
+)
+waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
 **`infeasible`** — the writer determined the request cannot be specced. Move
@@ -78,7 +83,7 @@ ready` to proceed on a human-supplied spec, `blocked → spec_pending` to re-spe
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "infeasible spec: <writer's reason>"
-waypoint inbox post --json - <<'JSON'
+item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "<the writer's infeasibility reason, verbatim>" },
@@ -87,33 +92,36 @@ waypoint inbox post --json - <<'JSON'
                   {"label": "re-spec"}, {"label": "abandon"}],
       "multi": false, "required": true } ] }
 JSON
+)
+waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
 ## Relay a human answer back to the lead — durably
 
-The answer lands on a later wake, so recover the gate item from the inbox by its
-`{{ticket_channel}}:` subject. Act only when a resolved gate item exists — a board-post
-or liveness wake leaves `item` empty and carries no answer to relay. Read the answer
-(never injected — pull it); when a lead holds the branch, post it to the durable log
-and nudge:
+The answer lands on a later wake, so recover the gate item from the ticket's recorded
+`inbox_item_id`. Act only when that item has resolved — an empty id or an open item
+means this wake carried no answer for the current gate. Read the answer (never injected
+— pull it); when a lead holds the branch, post it to the durable log and nudge:
 
 ```bash
-item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" \
-  | jq -r --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')  # newest answered gate; empty if this wake carried no answer
-if [ -n "$item" ] && [ "$item" != "null" ]; then
+info=$(waypoint manager ticket show {{ticket_id}})
+item=$(echo "$info" | jq -r '.ticket.inbox_item_id // empty')
+if [ -n "$item" ]; then
   answer=$(waypoint inbox get "$item")                 # {"item": {...}} — branch on the block's answer
-  info=$(waypoint manager ticket show {{ticket_id}})
-  branch=$(echo "$info" | jq -r '.ticket.branch // empty')       # set only for a mid-build blocker; null for a branch-less block or the spec gate
-  lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
-  if [ -n "$branch" ]; then                            # a lead holds a real branch — relay durably and nudge
-    waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
-    waypoint sessions send "$lead" \
-      "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+  if [ "$(echo "$answer" | jq -r '.item.status')" = resolved ]; then
+    branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build blocker; empty for a branch-less block or the spec gate
+    lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
+    if [ -n "$branch" ]; then                          # a lead holds a real branch — relay durably and nudge
+      waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
+      waypoint sessions send "$lead" \
+        "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+    fi
   fi
 fi
 ```
 
-Then transition out of the awaiting state by the block's shape:
+Then, once the gate item has resolved (the same `.item.status` check above gates every
+shape), transition out of the awaiting state by the block's shape:
 
 - **mid-build blocker** (a live lead on its branch) — relay the answer to the lead
   (above), then resume `blocked → building`;

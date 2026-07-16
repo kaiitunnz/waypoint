@@ -573,6 +573,95 @@ def test_update_ticket_metadata_only(tmp_path: Path) -> None:
     assert updated.state == S.INTAKE  # unchanged
 
 
+# ── Gate inbox-item id: recorded, cleared per episode ───────────────────────
+
+
+def test_update_records_inbox_item_id(tmp_path: Path) -> None:
+    mgr = _manager(tmp_path)
+    ticket = mgr.create_ticket(TicketCreateRequest(title="x"))
+    updated = mgr.update_ticket(ticket.id, TicketUpdateRequest(inbox_item_id="itm-a"))
+    assert updated.inbox_item_id == "itm-a"
+    assert mgr.get_ticket(ticket.id).inbox_item_id == "itm-a"
+
+
+def test_transition_clears_inbox_item_id_on_episode_change() -> None:
+    # A non-self transition ends the gate episode, so the recorded item clears.
+    blocked = mk(S.BLOCKED, branch="ticket/t").model_copy(
+        update={"inbox_item_id": "itm-a"}
+    )
+    resumed = apply_transition(
+        blocked, TicketTransitionRequest(to=S.BUILDING), _CONFIG, _now()
+    )
+    assert resumed.inbox_item_id is None
+
+
+def test_review_requested_to_blocked_clears_inbox_item_id() -> None:
+    # The one awaiting -> awaiting non-self edge: the review-gate item clears so a
+    # subsequent blocker gate records its own.
+    review = mk(S.REVIEW_REQUESTED, branch="ticket/t").model_copy(
+        update={"inbox_item_id": "itm-pr"}
+    )
+    blocked = apply_transition(
+        review, TicketTransitionRequest(to=S.BLOCKED), _CONFIG, _now()
+    )
+    assert blocked.inbox_item_id is None
+
+
+def test_self_loop_preserves_inbox_item_id() -> None:
+    # The lead-died resume self-loop keeps the still-open gate item.
+    blocked = mk(S.BLOCKED, branch="ticket/t").model_copy(
+        update={"inbox_item_id": "itm-a"}
+    )
+    resumed = apply_transition(
+        blocked,
+        TicketTransitionRequest(to=S.BLOCKED, reason="lead-died"),
+        _CONFIG,
+        _now(),
+    )
+    assert resumed.inbox_item_id == "itm-a"
+    assert resumed.lead_restarts == 1
+
+
+def test_multi_gate_episode_id_is_current_not_stale() -> None:
+    # The stale-prior-gate scenario at the state-machine layer: an id recorded at
+    # the spec gate does not survive into a later blocker gate.
+    spec = mk(S.SPEC_REVIEW, scale=Sc.SUBSTANTIAL).model_copy(
+        update={"inbox_item_id": "itm-A"}
+    )
+    ready = apply_transition(spec, TicketTransitionRequest(to=S.READY), _CONFIG, _now())
+    assert ready.inbox_item_id is None  # spec-gate exit cleared it
+    delegated = apply_transition(
+        ready,
+        TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="l"),
+        _CONFIG,
+        _now(),
+    )
+    building = apply_transition(
+        delegated, TicketTransitionRequest(to=S.BUILDING), _CONFIG, _now()
+    )
+    blocked = apply_transition(
+        building, TicketTransitionRequest(to=S.BLOCKED), _CONFIG, _now()
+    )
+    # Reaching the blocker gate, the stale spec-gate id is gone; only the blocker's
+    # own post (not modeled here) would record a fresh one.
+    assert blocked.inbox_item_id is None
+
+
+def test_budget_exhausted_self_loop_preserves_id() -> None:
+    # A past-budget self-loop raises before returning, so the id is never cleared.
+    blocked = mk(
+        S.BLOCKED, lead_restarts=_CONFIG.max_lead_restarts, branch="ticket/t"
+    ).model_copy(update={"inbox_item_id": "itm-a"})
+    with pytest.raises(ManagerStateError):
+        apply_transition(
+            blocked,
+            TicketTransitionRequest(to=S.BLOCKED, reason="lead-died"),
+            _CONFIG,
+            _now(),
+        )
+    assert blocked.inbox_item_id == "itm-a"  # unchanged — apply_transition raised
+
+
 # ── Config init ─────────────────────────────────────────────────────────────
 
 

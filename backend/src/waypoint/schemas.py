@@ -698,6 +698,10 @@ class ManagerTicket(BaseModel):
     # the ticket occupies it (there is no per-ticket sibling worktree).
     branch: str | None = None
     pr_url: str | None = None
+    # The inbox item id of the ticket's current human gate, recorded when the gate
+    # posts and cleared on any non-self transition, so the answer read scopes to the
+    # current episode and never resolves an earlier gate's answer.
+    inbox_item_id: str | None = None
     # Initial-delegate spawn-failure budget (distinct from ``lead_restarts``).
     attempts: int = 0
     # Post-work lead-death resume budget (distinct from ``attempts``).
@@ -831,6 +835,7 @@ class TicketUpdateRequest(BaseModel):
     lead_session_id: str | None = None
     branch: str | None = None
     pr_url: str | None = None
+    inbox_item_id: str | None = None
     is_partial: bool | None = None
     last_relayed_version: int | None = None
 

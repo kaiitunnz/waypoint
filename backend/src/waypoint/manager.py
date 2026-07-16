@@ -238,6 +238,13 @@ def apply_transition(
     elif to not in _AWAITING_STATES:
         updates["awaiting_since"] = None
 
+    # A non-self transition ends the current gate episode: clear the recorded gate
+    # item so the next gate's post records a fresh one and the answer read never
+    # resolves this ticket's earlier gate. A self-loop (lead-died resume) keeps it —
+    # the gate item is still the live, unanswered one.
+    if not is_self:
+        updates["inbox_item_id"] = None
+
     return ticket.model_copy(update=updates)
 
 
@@ -462,6 +469,8 @@ class ManagerManager:
             updates["branch"] = request.branch
         if request.pr_url is not None:
             updates["pr_url"] = request.pr_url
+        if request.inbox_item_id is not None:
+            updates["inbox_item_id"] = request.inbox_item_id
         if request.is_partial is not None:
             updates["is_partial"] = request.is_partial
         if request.last_relayed_version is not None:

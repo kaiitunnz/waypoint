@@ -18,28 +18,32 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    subscribed, so the answer wakes you.
 {{#if integration_mode == pr}}
    ```bash
-   waypoint inbox post --json - <<'JSON'
+   item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
      "blocks": [
        { "type": "markdown", "text": "<PR link {{pr_url}}, summary, CI state from gh pr view>" },
        { "type": "approval", "prompt": "Merge this PR?", "required": true } ] }
    JSON
+   )
+   waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
    ```
 {{/if}}
 {{#if integration_mode == local}}
    ```bash
-   waypoint inbox post --json - <<'JSON'
+   item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — merge review",
      "blocks": [
        { "type": "markdown", "text": "<branch {{branch}}: git log --oneline and git diff --stat vs {{trunk}}>" },
        { "type": "approval", "prompt": "Fast-forward {{trunk}} onto {{branch}}?", "required": true } ] }
    JSON
+   )
+   waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
    ```
 {{/if}}
-2. On a later wake, read the answer from the inbox by its `{{ticket_channel}}:` subject
-   (`item=$(waypoint inbox list --status resolved --q "{{ticket_channel}}:" | jq -r
-   --arg p "{{ticket_channel}}:" '[.items[] | select(.subject | startswith($p))][0].id')`;
-   when `item` is non-empty, `waypoint inbox get "$item"`), then branch on the decision:
+2. On a later wake, read the answer from the ticket's recorded `inbox_item_id`
+   (`item=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.inbox_item_id // empty')`;
+   when `item` is non-empty and `waypoint inbox get "$item"` reports `.item.status` as
+   `resolved`), then branch on the decision:
    - **request-changes** → transition `review_requested → revising`, then relay the
      round to the lead: post the human's requested changes to `{{ticket_channel}}`
      as the durable payload, and send the rendered address-review instructions:

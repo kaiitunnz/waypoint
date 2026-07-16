@@ -4265,6 +4265,7 @@ def manager_ticket_update(
     lead_session_id: Annotated[str | None, typer.Option()] = None,
     branch: Annotated[str | None, typer.Option()] = None,
     pr_url: Annotated[str | None, typer.Option()] = None,
+    inbox_item_id: Annotated[str | None, typer.Option("--inbox-item")] = None,
 ) -> None:
     """Edit ticket metadata (no state change; use 'transition' for that)."""
     body: dict[str, Any] = {}
@@ -4277,6 +4278,7 @@ def manager_ticket_update(
         ("lead_session_id", lead_session_id),
         ("branch", branch),
         ("pr_url", pr_url),
+        ("inbox_item_id", inbox_item_id),
     ):
         if value is not None:
             body[name] = value

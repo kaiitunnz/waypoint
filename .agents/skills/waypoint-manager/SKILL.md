@@ -58,7 +58,11 @@ an action this drain. Each iteration: re-anchor (`waypoint manager next --json`,
 intent before the side effect, act idempotently, confirm. Re-read your compiled
 `manager/loop-cycle.md` (under the templates dir `manager state` reports) every wake
 for the step-by-step procedure. No recommendation and no outstanding external signal
-→ go idle.
+→ go idle. While a ticket is in flight the drain arms a minutes-scale liveness
+self-wake (a `schedule message` to your own session) — a re-drain for duties with no
+event source: a merge or CI advance to observe, a gate that will latency-timeout, a
+lead that can die while you idle; it re-arms each drain and stops once the board is
+fully terminal.
 
 A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
 Trust `manager next` and the board over memory; a `waypoint` CLI connection error
@@ -81,7 +85,13 @@ drops the state records only, so reap what you own first:
    (`git -C {{repo_dir}} checkout {{trunk}}`, then `git -C {{repo_dir}} branch -D` each).
 3. **Clear the board channels** you own — the intake, org, and per-ticket channels —
    with `board clear`, when retiring the backlog rather than pausing it.
-4. **Deinit** — `waypoint manager deinit --yes` drops the tickets and config.
+4. **Cancel any pending liveness self-wake** so a retired manager leaves nothing firing:
+   ```bash
+   for s in $(waypoint schedule message list --session-id "$WAYPOINT_SESSION_ID" | jq -r '.message_schedules[] | select(.status == "pending" and (.text | contains("[wp-manager-liveness]"))) | .id'); do
+     waypoint schedule message delete "$s"
+   done
+   ```
+5. **Deinit** — `waypoint manager deinit --yes` drops the tickets and config.
    Deleting this manager session instead cascades the same record cleanup.
 
 ## Templates

@@ -102,8 +102,8 @@ the turn immediately. A wake arriving during `running`, `starting`, `interrupted
 or approval-pending `waiting_input` is marked pending and fires on the next
 transition into a deliverable state, so it never interrupts an active turn or
 injects while an approval is pending. A wake into `exited` or `error` is dropped — a
-stopped session is not resurrected by a board post; only a liveness reconcile or an
-explicit resume recovers it.
+stopped session is not resurrected by a board post; an explicit resume, or a pending
+liveness self-wake (which delivers through the input path), recovers it.
 
 `waypoint board wait` blocks until a watched channel changes and is an interactive
 convenience for a human or a one-off script. It is not the manager's loop driver;
@@ -285,11 +285,12 @@ plus the board), every wake rebuilds position from that state, and every side ef
 is guarded so a mid-turn crash or a growing context resumes the procedure rather
 than repeating it.
 
-Nothing polls. The manager's registered wake drives its turns. A slow liveness timer
-is the only self-scheduled wake — a minutes-scale backstop for duties with no event
-source (dead/parked-lead detection, latency-timeout abandonment, `gh`/CI
-advancement). The drain is correct even if the timer never
-fires.
+The manager is wake-driven: registered board and inbox wakes drive its turns. While a
+ticket is in flight the drain arms a minutes-scale self-wake (a `schedule message` to
+its own session) — the backstop for duties with no event source (dead/parked-lead
+detection, latency-timeout abandonment, `gh`/CI advancement). It re-arms each drain and
+stops once no ticket is in flight; every side effect is guarded, and a self-wake firing
+against already-adopted state drains as a no-op.
 
 Each wake drains all currently-actionable work to a fixpoint, then idles — draining
 is what lets a slot-freeing action (a merge, an abandon) enable the next action in
@@ -403,8 +404,10 @@ transport:
   consumes a budget.
 - Events that arrive while the backend is down do not wake the manager (the wake
   driver is the backend and the pending-wake set is in-memory). They sit durably on
-  the board; the slow liveness timer is the catch-up that guarantees an idle manager
-  picks them up.
+  the board. While a ticket is in flight, the pending liveness self-wake (durable,
+  re-fired on restart) re-drains and picks them up; a fully-idle manager arms no
+  self-wake, so an event posted during downtime waits for the next live board or inbox
+  change.
 
 ### Teardown
 

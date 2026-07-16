@@ -187,6 +187,7 @@ git -C {{repo_dir}} pull --ff-only origin {{trunk}}           # sync trunk (the 
 {{/if}}
 git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
   && git -C {{repo_dir}} branch -D {{branch}} || true         # no-op if the branch was never cut / already dropped
+waypoint manager ticket update {{ticket_id}} --branch "" --lead-session-id ""   # mark the ticket finalized (clears the reconcile finalize_pending signal)
 ```
 
 **Follow-ups on `deferred`** — a partial completion does **not** auto-create follow-up

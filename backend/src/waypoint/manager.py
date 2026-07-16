@@ -41,6 +41,7 @@ from waypoint.schemas import (
     ManagerTicketTransitions,
     ManagerTreeState,
     ReconcileDeadLead,
+    ReconcileFinalizePending,
     ReconcileIntake,
     ReconcileLatencyTimeout,
     ReconcileStaleGate,
@@ -667,9 +668,24 @@ class ManagerManager:
                 )
             )
 
+        finalize_pending: list[ReconcileFinalizePending] = []
+        for ticket in tickets:
+            # A terminal ticket that still carries its branch reached the tree and was
+            # not finalized — a crash between recording the terminal and the reap.
+            if ticket.state in _TERMINAL_STATES and ticket.branch:
+                finalize_pending.append(
+                    ReconcileFinalizePending(
+                        ticket_id=ticket.id,
+                        state=ticket.state,
+                        branch=ticket.branch,
+                        lead_session_id=ticket.lead_session_id,
+                    )
+                )
+
         return ManagerReconcileReport(
             unregistered_intake=intake,
             dead_leads=dead_leads,
             latency_timeouts=latency_timeouts,
             stale_gates=stale_gates,
+            finalize_pending=finalize_pending,
         )

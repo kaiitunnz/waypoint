@@ -29,8 +29,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    ```bash
    waypoint manager reconcile --json
    ```
-   It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, and
-   `stale_gates`. Alongside
+   It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, `stale_gates`,
+   and `finalize_pending`. Alongside
    it, read each in-flight ticket's `status` cell **by key**
    (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
    (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
@@ -81,6 +81,11 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      → the Blockers gate that lifts its options; a writer `kind=infeasible` post → the
      infeasible gate.
      Skip the `latency_timeouts` entry for a ticket re-opened here this drain.
+   - **`finalize_pending`** — each is a terminal ticket (`merged`/`deferred`/`abandoned`)
+     that reached the tree and still carries its branch: a crash between recording the
+     terminal and the reap. Run Finalize (`{{templates_dir}}/manager/integrate.md`) to reap
+     the subtree, return the tree to `{{trunk}}`, drop the branch, and clear the ticket's
+     tree fields.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon. Each entry reports `waiting_since` (the live gate item's
      post, or the awaiting entry when no item exists), so a re-posted gate resets the

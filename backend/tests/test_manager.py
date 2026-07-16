@@ -546,6 +546,28 @@ def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
     assert {g.ticket_id for g in report.stale_gates} == {"g1", "g3"}
 
 
+def test_reconcile_reports_finalize_pending(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # On-tree terminals still holding a branch — a crash between the terminal record
+    # and the reap. `abandoned` covers the restart-exhaustion path that keeps its branch.
+    storage.create_manager_ticket(mk(S.MERGED, "m", branch="ticket/m"))
+    storage.create_manager_ticket(mk(S.ABANDONED, "a", branch="ticket/a"))
+    # A finalized terminal (branch cleared) and an off-tree terminal (never delegated):
+    # nothing to reap.
+    storage.create_manager_ticket(mk(S.MERGED, "done", branch=""))
+    storage.create_manager_ticket(mk(S.ABANDONED, "reject"))
+
+    report = mgr.reconcile(_now())
+
+    assert {f.ticket_id for f in report.finalize_pending} == {"m", "a"}
+    # Terminals never surface in the resume or awaiting signals.
+    assert not report.dead_leads
+    assert not report.latency_timeouts
+    assert not report.stale_gates
+
+
 def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     mgr = ManagerManager(storage)

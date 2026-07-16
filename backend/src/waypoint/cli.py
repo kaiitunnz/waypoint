@@ -4160,7 +4160,8 @@ def manager_reconcile(
     """Report the drain's server-derived reconcile signals in one snapshot.
 
     Aggregates unregistered intake posts, dead leads (resume candidates), latency
-    timeouts, and stale gates (awaiting tickets whose gate item is absent).
+    timeouts, stale gates (awaiting tickets whose gate item is absent), and
+    finalize-pending (terminal tickets still holding a branch to reap).
     Read-only: the manager acts on each.
     """
     report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
@@ -4171,9 +4172,11 @@ def manager_reconcile(
     dead = report.get("dead_leads") or []
     latency = report.get("latency_timeouts") or []
     stale = report.get("stale_gates") or []
+    finalize = report.get("finalize_pending") or []
     typer.echo(
         f"intake: {len(intake)}  dead-leads: {len(dead)}  "
-        f"latency-timeouts: {len(latency)}  stale-gates: {len(stale)}"
+        f"latency-timeouts: {len(latency)}  stale-gates: {len(stale)}  "
+        f"finalize-pending: {len(finalize)}"
     )
     for item in intake:
         typer.echo(f"  intake {item.get('id')}: {item.get('text')}")
@@ -4189,6 +4192,11 @@ def manager_reconcile(
         )
     for gate in stale:
         typer.echo(f"  stale-gate {gate.get('ticket_id')} ({gate.get('state')})")
+    for pending in finalize:
+        typer.echo(
+            f"  finalize-pending {pending.get('ticket_id')} ({pending.get('state')}): "
+            f"branch {pending.get('branch')}"
+        )
 
 
 @manager_ticket_app.command("add")

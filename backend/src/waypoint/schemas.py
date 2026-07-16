@@ -780,11 +780,21 @@ class ReconcileStaleGate(BaseModel):
     awaiting_since: datetime | None = None
 
 
+class ReconcileFinalizePending(BaseModel):
+    # A terminal ticket that reached the tree (still carries its branch) but was not
+    # finalized — a crash between recording the terminal and reaping the subtree.
+    ticket_id: str
+    state: ManagerTicketState
+    branch: str | None = None
+    lead_session_id: str | None = None
+
+
 class ManagerReconcileReport(BaseModel):
     unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
     dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
     latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
     stale_gates: list[ReconcileStaleGate] = Field(default_factory=list)
+    finalize_pending: list[ReconcileFinalizePending] = Field(default_factory=list)
 
 
 class ManagerTicketTransitions(BaseModel):

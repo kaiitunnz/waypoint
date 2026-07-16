@@ -37,7 +37,7 @@ so a manager relay (a human answer, review feedback) wakes you.
 **Consume relays idempotently by version** — mandatory, on every entry and every wake:
 
 ```bash
-waypoint board log {{ticket_channel}} --json | jq -c '.[] | select(.metadata.kind == "relay")'
+waypoint board log {{ticket_channel}} --json | jq -c '[.[] | select(.metadata.kind == "relay")] | sort_by(.id) | .[]'   # oldest-first
 ```
 
 Act on relays whose board-entry `id` exceeds the highest relay `id` you have already
@@ -57,8 +57,8 @@ waypoint board post {{ticket_channel}} "<one-line status>" --key status --meta k
 
 `kind=` is one of: `progress` (working), `error` (a failure you can't resolve),
 `decision` (a product/scope call needed), `attention` (ambiguity — needs a look), `done`
-(work complete), `partial` (a subset delivered — `detail` lists deferred goals). A
-genuine blocker
+(work complete), `partial` (a subset delivered — the status text lists the deferred
+goals). A genuine blocker
 (`error`/`decision`/`attention`) stops you until the manager relays an answer; never
 fake progress or invent a decision the human should make.
 
@@ -155,7 +155,7 @@ gh pr create --base {{trunk}} --head {{branch}} \
 ```
 
 Report `done` (or `partial` if you deliver only a subset — list the deferred goals in
-the status `detail`), carrying the PR url and head commit:
+the status text), carrying the PR url and head commit:
 
 ```bash
 waypoint board post {{ticket_channel}} "done: <summary>" --key status \
@@ -166,12 +166,14 @@ waypoint board post {{ticket_channel}} "done: <summary>" --key status \
 When {{branch}} is green and the acceptance criteria are met, leave it committed on
 {{branch}} in the shared tree with a DCO sign-off (`git commit -s`); the manager
 fast-forwards {{trunk}} onto it after the human's review. Report `done` (or `partial`
-if you deliver only a subset — list the deferred goals in the status `detail`),
-carrying the head commit:
+if you deliver only a subset — list the deferred goals in the status text). Both carry
+the head commit and `checks=green` (the local checks passed; the manager's merge gate
+reads it before the fast-forward, which a `partial` also takes):
 
 ```bash
 waypoint board post {{ticket_channel}} "done: <summary>" --key status \
-  --meta kind=done --meta commit=$(git -C {{repo_dir}} rev-parse HEAD)
+  --meta kind=done --meta commit=$(git -C {{repo_dir}} rev-parse HEAD) --meta checks=green
+# a partial swaps --meta kind=partial, keeping --meta commit=… --meta checks=green
 ```
 {{/if}}
 

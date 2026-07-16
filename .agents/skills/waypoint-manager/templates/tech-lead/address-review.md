@@ -10,7 +10,7 @@ human merges or aborts.
 Read the owed relay from the durable log — do not act on the nudge alone:
 
 ```bash
-waypoint board log {{ticket_channel}} --json | jq -c '.[] | select(.metadata.kind == "relay")'
+waypoint board log {{ticket_channel}} --json | jq -c '[.[] | select(.metadata.kind == "relay")] | sort_by(.id) | .[]'   # oldest-first
 ```
 
 Take the relay posts whose board-entry `id` exceeds the highest relay `id` you have

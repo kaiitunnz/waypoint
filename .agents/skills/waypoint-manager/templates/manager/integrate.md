@@ -109,10 +109,18 @@ git -C {{repo_dir}} merge-base --is-ancestor {{branch}} {{trunk}} \
   || git -C {{repo_dir}} merge --ff-only {{branch}}   # ff only when the branch is not already merged
 ```
 
-When `require_ci_green` is `true` (here `{{require_ci_green}}`), confirm the lead
-reported green local checks before the fast-forward. Record `review_requested → merged`
-(full) or `→ deferred` (partial) **after** the fast-forward lands, so a crash between the
-merge and the record re-derives the merge from the branch's ancestry on the next drain.
+When `require_ci_green` is `true` (here `{{require_ci_green}}`), gate the fast-forward on
+the lead's reported checks: fast-forward only when the status cell's `checks` reads
+`green`; a missing or non-`green` value blocks the merge — escalate to the inbox rather
+than fast-forward.
+
+```bash
+waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.checks'   # must be "green"
+```
+
+Record `review_requested → merged` (full) or `→ deferred` (partial) **after** the
+fast-forward lands, so a crash between the merge and the record re-derives the merge
+from the branch's ancestry on the next drain.
 {{/if}}
 
 ## Finalize

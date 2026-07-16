@@ -21,7 +21,7 @@ The `status` cell's `kind=` is the feedback vocabulary:
 | `decision` | Needs a product/scope call | → `blocked`, escalate to inbox |
 | `attention` | Ambiguity — needs a look | → `blocked`, escalate to inbox |
 | `done` | Work complete, delivered | → `review_requested` (`--not-partial`) |
-| `partial` | A subset delivered (`detail` lists deferred goals) | → `review_requested` (`--is-partial`) |
+| `partial` | A subset delivered (status text lists the deferred goals) | → `review_requested` (`--is-partial`) |
 
 ## Blockers → the inbox (with escalation policy)
 

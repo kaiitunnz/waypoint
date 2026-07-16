@@ -771,10 +771,20 @@ class ReconcileLatencyTimeout(BaseModel):
     hours_elapsed: float
 
 
+class ReconcileStaleGate(BaseModel):
+    # An awaiting-human ticket whose gate inbox item is absent — the recorded
+    # ``inbox_item_id`` is empty (a crash between the awaiting transition and the
+    # inbox post) or names an item that no longer exists.
+    ticket_id: str
+    state: ManagerTicketState
+    awaiting_since: datetime | None = None
+
+
 class ManagerReconcileReport(BaseModel):
     unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
     dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
     latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
+    stale_gates: list[ReconcileStaleGate] = Field(default_factory=list)
 
 
 class ManagerTicketTransitions(BaseModel):

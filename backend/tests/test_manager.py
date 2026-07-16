@@ -19,6 +19,7 @@ from waypoint.manager import (
     tree_state,
 )
 from waypoint.schemas import (
+    InboxMarkdownBlockInput,
     ManagerConfig,
     ManagerInitRequest,
     ManagerRenderContext,
@@ -510,6 +511,32 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     assert dead and dead[0].lead_session_id == "ghost" and dead[0].lead_status is None
     latency = [x for x in report.latency_timeouts if x.ticket_id == t.id]
     assert latency and latency[0].hours_elapsed >= 72
+
+
+def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # An awaiting ticket with no recorded gate item — a crash between the awaiting
+    # transition and the inbox post.
+    storage.create_manager_ticket(mk(S.SPEC_REVIEW, "g1"))
+    # An awaiting ticket whose recorded item exists — a live gate, not stale.
+    item = storage.create_inbox_item(
+        "mgr", None, "ticket-g2: t — spec review", [InboxMarkdownBlockInput(text="x")]
+    )
+    storage.create_manager_ticket(
+        mk(S.SPEC_REVIEW, "g2").model_copy(update={"inbox_item_id": item.id})
+    )
+    # An awaiting ticket whose recorded item is gone.
+    storage.create_manager_ticket(
+        mk(S.BLOCKED, "g3").model_copy(update={"inbox_item_id": "missing"})
+    )
+    # A non-awaiting ticket with no item — never a gate.
+    storage.create_manager_ticket(mk(S.BUILDING, "g4"))
+
+    report = mgr.reconcile(_now())
+
+    assert {g.ticket_id for g in report.stale_gates} == {"g1", "g3"}
 
 
 # ── Storage CRUD ────────────────────────────────────────────────────────────

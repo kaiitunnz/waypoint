@@ -4160,7 +4160,8 @@ def manager_reconcile(
     """Report the drain's server-derived reconcile signals in one snapshot.
 
     Aggregates unregistered intake posts, dead leads (resume candidates), latency
-    timeouts. Read-only: the manager acts on each.
+    timeouts, and stale gates (awaiting tickets whose gate item is absent).
+    Read-only: the manager acts on each.
     """
     report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
     if json_output:
@@ -4169,9 +4170,10 @@ def manager_reconcile(
     intake = report.get("unregistered_intake") or []
     dead = report.get("dead_leads") or []
     latency = report.get("latency_timeouts") or []
+    stale = report.get("stale_gates") or []
     typer.echo(
         f"intake: {len(intake)}  dead-leads: {len(dead)}  "
-        f"latency-timeouts: {len(latency)}"
+        f"latency-timeouts: {len(latency)}  stale-gates: {len(stale)}"
     )
     for item in intake:
         typer.echo(f"  intake {item.get('id')}: {item.get('text')}")
@@ -4185,6 +4187,8 @@ def manager_reconcile(
             f"  latency {item.get('ticket_id')} ({item.get('state')}): "
             f"{item.get('hours_elapsed'):.1f}h waiting"
         )
+    for gate in stale:
+        typer.echo(f"  stale-gate {gate.get('ticket_id')} ({gate.get('state')})")
 
 
 @manager_ticket_app.command("add")

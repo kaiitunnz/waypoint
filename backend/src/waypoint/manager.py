@@ -42,6 +42,7 @@ from waypoint.schemas import (
     ReconcileDeadLead,
     ReconcileIntake,
     ReconcileLatencyTimeout,
+    ReconcileStaleGate,
     SessionStatus,
     TicketCreateRequest,
     TicketTransitionRequest,
@@ -553,8 +554,8 @@ class ManagerManager:
         """Aggregate the drain's server-derivable reconcile signals in one snapshot.
 
         Read-only: it reports what the manager should adopt (unregistered intake,
-        dead leads, latency timeouts); the manager still decides and acts. External
-        signals (a PR's CI/merge state) stay in the agent's shell.
+        dead leads, latency timeouts, stale gates); the manager still decides and
+        acts. External signals (a PR's CI/merge state) stay in the agent's shell.
         """
         config = self.config()
         tickets = self._storage.list_manager_tickets()
@@ -618,8 +619,26 @@ class ManagerManager:
                     )
                 )
 
+        stale_gates: list[ReconcileStaleGate] = []
+        for ticket in tickets:
+            if ticket.state not in _AWAITING_STATES:
+                continue
+            if (
+                ticket.inbox_item_id is not None
+                and self._storage.get_inbox_item(ticket.inbox_item_id) is not None
+            ):
+                continue
+            stale_gates.append(
+                ReconcileStaleGate(
+                    ticket_id=ticket.id,
+                    state=ticket.state,
+                    awaiting_since=ticket.awaiting_since,
+                )
+            )
+
         return ManagerReconcileReport(
             unregistered_intake=intake,
             dead_leads=dead_leads,
             latency_timeouts=latency_timeouts,
+            stale_gates=stale_gates,
         )

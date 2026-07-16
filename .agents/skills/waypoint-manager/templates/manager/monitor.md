@@ -34,7 +34,9 @@ log {{ticket_channel}} --since <last-seen>`) and lift its question and options
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
-item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+  | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— decision needed"))) | .id] | first // empty')   # adopt an open gate a crash left behind
+[ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "<the lead's question, verbatim from its entry>" },
@@ -46,9 +48,13 @@ JSON
 waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
-Each gate post records its item id on the ticket (`--inbox-item`); the answer read
-looks that id up and acts once it resolves. The server clears the id on the next
-non-self transition, so a later gate never resolves this one's answer.
+Each gate post is idempotent: it first adopts an existing open item for this
+ticket+phase (matched by subject) and posts fresh only when none exists, so a crash
+between the transition and the post re-opens the same gate rather than double-posting
+or stranding the ticket (the `stale_gates` reconcile signal surfaces one to re-open).
+It records the item id on the ticket (`--inbox-item`); the answer read looks that id up
+and acts once it resolves. The server clears the id on the next non-self transition, so
+a later gate never resolves this one's answer.
 
 Frame an open question when the lead left the decision open. You are
 `--wake-on-inbox`-subscribed, so the human's answer wakes you.
@@ -65,7 +71,9 @@ path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
-item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+  | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— spec review"))) | .id] | first // empty')   # adopt an open gate a crash left behind
+[ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
   "blocks": [
     { "type": "markdown", "text": "<spec summary; ref {{spec_ref}}>" },
@@ -84,7 +92,9 @@ ready` to proceed on a human-supplied spec, `blocked → spec_pending` to re-spe
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to blocked --reason "infeasible spec: <writer's reason>"
-item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+  | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— decision needed"))) | .id] | first // empty')   # adopt an open gate a crash left behind
+[ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
     { "type": "markdown", "text": "<the writer's infeasibility reason, verbatim>" },

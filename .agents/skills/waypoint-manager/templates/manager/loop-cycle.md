@@ -28,7 +28,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    ```bash
    waypoint manager reconcile --json
    ```
-   It reports `unregistered_intake`, `dead_leads`, and `latency_timeouts`. Alongside
+   It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, and
+   `stale_gates`. Alongside
    it, read each in-flight ticket's `status` cell **by key**
    (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
    (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
@@ -61,6 +62,14 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
        same role onto its branch (`{{templates_dir}}/manager/delegate.md`) or read-only
        (`{{templates_dir}}/manager/triage.md`). Past `max_lead_restarts` the self-loop
        409s → escalate `--to blocked`.
+   - **`stale_gates`** — each is an awaiting ticket (`spec_review`/`blocked`/
+     `review_requested`) whose gate item is absent: a crash between the awaiting
+     transition and the inbox post, or a pruned item. Re-open its gate through the gate
+     post in `{{templates_dir}}/manager/monitor.md` (spec/blocker) or
+     `{{templates_dir}}/manager/integrate.md` (review), which adopts an existing open
+     item or posts fresh with no transition, so `awaiting_since` is preserved. The
+     `latency_timeouts` handler skips a ticket re-opened here this drain, giving the
+     freshly posted gate a full wait before it can time out.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon. Key
      the re-notify marker to *this* episode's `awaiting_since` so it self-clears on

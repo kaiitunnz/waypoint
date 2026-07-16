@@ -137,6 +137,14 @@ To **resume** a writer that died mid-spec, re-run this same spawn after terminat
 the dead session and self-looping `spec_pending → spec_pending` (`--reason
 lead-died`, spends `lead_restarts`); past `max_lead_restarts`, escalate `--to blocked`.
 
+The same spawn serves a **re-spec** routed here from
+`{{templates_dir}}/manager/monitor.md` (a request-changes or a blocked re-spec):
+re-derive `role`/`render_role` from the ticket cell's `spec_route`, and the writer
+revises from the newest `kind=respec` note on the channel. A `spec_route` of
+`direct`/`passthrough` carries no writer; choose a writer route, stamp it
+(`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge --meta
+spec_route=<prd-writer|rfc-writer>`), then spawn the matching writer.
+
 When the `rfc-writer` route is **converting an input PRD**, pass that PRD to the
 writer as its primary input — it preserves the PRD's intent and reduces it to a
 concrete technical design. The writer posts the

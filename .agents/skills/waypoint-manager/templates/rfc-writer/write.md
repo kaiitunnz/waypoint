@@ -23,6 +23,19 @@ The tree may have another ticket's work checked out with uncommitted edits.
 Read files for understanding, treating committed trunk as the baseline. Your only
 write is your spec doc.
 
+## On a re-spec, revise the prior doc
+
+If the channel carries a `kind=respec` note, the manager sent this ticket back with the
+human's requested changes. Read the newest note and fold it in:
+
+```bash
+waypoint board log {{ticket_channel}} --json | jq -r '[.[] | select(.metadata.kind=="respec")][0].text'
+```
+
+With `{{spec_ref}}` set, revise that document to address the note, preserving its intent.
+With `{{spec_ref}}` empty (a re-spec of a ticket first found infeasible), author a fresh
+RFC guided by the note. With no `kind=respec` note, author fresh from the request above.
+
 ## Write the RFC
 
 Write the document as a single Markdown file under **`{{spec_dir}}/`** (e.g.

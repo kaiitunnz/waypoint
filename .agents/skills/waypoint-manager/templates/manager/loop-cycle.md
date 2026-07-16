@@ -43,12 +43,16 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      `manager next` then recommends `triage`; registration itself is never
      recommended, since the ticket does not exist until you add it.
    - **`dead_leads`** — each is a resumable ticket whose recorded lead is missing or
-     exited. Check its `status` cell / log first: a `spec_pending` writer that already
-     posted `spec_ready` or `infeasible`, or a lead that posted `done`, has delivered —
-     open its gate per `{{templates_dir}}/manager/monitor.md`, which co-locates each
-     transition with its human gate item (`spec_ready → spec_review` + approval;
-     `infeasible → blocked` + decision; `done → review_requested`). A lead that died
-     with no delivery is recovered by state:
+     exited. Check its `status` cell / log first: a `spec_pending` writer that posted
+     `spec_ready` or `infeasible` **with no newer `kind=respec` note in the log**, or a
+     lead that posted `done`, has delivered — open its gate per
+     `{{templates_dir}}/manager/monitor.md`, which co-locates each transition with its
+     human gate item (`spec_ready → spec_review` + approval; `infeasible → blocked` +
+     decision; `done → review_requested`). A `spec_pending` writer whose newest log post
+     is a `kind=respec` note (newer than its last `spec_ready`/`infeasible`) owes a
+     revision — re-spawn it per `{{templates_dir}}/manager/triage.md` (re-sends the
+     `write` prompt), so the writer folds in the note and the gate opens on the revised
+     spec. A lead that died with no delivery is recovered by state:
      - a `delegated` ticket routes through `{{templates_dir}}/manager/delegate.md`:
        step 1 adopts a live orphan or resumes a branch with committed work; step 3
        handles a turn-1 death with no work (`delegated → ready`, spending `attempts`);

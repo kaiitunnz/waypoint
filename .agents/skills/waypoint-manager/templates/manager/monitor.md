@@ -59,7 +59,7 @@ When the writer posts back, branch on its `kind`.
 
 **`spec_ready`** — move `spec_pending → spec_review` (recording `{{spec_ref}}`) and
 post an **approval** inbox item with the spec. On the answer: **approve** → `ready`;
-**request-changes** → `spec_pending` (relay the notes to a fresh writer); **reject** →
+**request-changes** → `spec_pending` (re-spec — see **Re-spec** below); **reject** →
 `abandoned`. A silent latency-timeout is abandoned by the `latency_timeouts` reconcile
 path in `{{templates_dir}}/manager/loop-cycle.md`.
 
@@ -128,7 +128,7 @@ shape), transition out of the awaiting state by the block's shape:
 - **branch-less blocker** (an infeasible `spec_pending → blocked`, with no lead to
   relay to) — the human's answer is your transition directly: `blocked → ready`
   (proceed — as direct-instruction, or against a human-supplied spec recorded with
-  `--spec-ref <ref>`), `blocked → spec_pending` (re-spec via a fresh writer), or
+  `--spec-ref <ref>`), `blocked → spec_pending` (re-spec — see **Re-spec** below), or
   `blocked → abandoned`;
 - **spec gate** — `spec_review → ready` on approve.
 
@@ -136,6 +136,26 @@ shape), transition out of the awaiting state by the block's shape:
 `kind=relay` post the lead consumes in board-entry-`id` order, applying each once;
 post the relay before the exit transition (a re-post lands under a higher id and the
 lead re-applies it once).
+
+## Re-spec — a request-changes or a blocked re-spec
+
+`spec_review → spec_pending` (request-changes) and `blocked → spec_pending` both send
+the ticket back for a fresh spec. Lift the human's requested changes from the resolved
+gate item's `reply.notes` into a durable `kind=respec` note **before** the transition,
+then re-spawn the writer per `{{templates_dir}}/manager/triage.md` (Spawn the writer),
+which re-derives the writer role from the ticket cell's `spec_route`:
+
+```bash
+notes=$(waypoint inbox get "$item" | jq -r '[.item.blocks[].reply.notes // empty] | join("\n")')
+waypoint board post {{ticket_channel}} "${notes:-revise per the review}" --meta kind=respec
+waypoint manager ticket transition {{ticket_id}} --to spec_pending --reason respec
+# then re-spawn the writer: {{templates_dir}}/manager/triage.md, "Spawn the writer"
+```
+
+The re-spawned writer reads the newest `kind=respec` note and revises the prior
+`{{spec_ref}}`. A crash before the re-spawn leaves a `spec_pending` ticket whose reaped
+writer the `dead_leads` reconcile re-spawns; the note is durable, so the revision still
+runs.
 
 ## Done / partial
 

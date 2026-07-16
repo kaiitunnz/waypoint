@@ -475,6 +475,8 @@ class ManagerManager:
             updates["is_partial"] = request.is_partial
         if request.reset_attempts:
             updates["attempts"] = 0
+        if request.reset_lead_restarts:
+            updates["lead_restarts"] = 0
         updated = ticket.model_copy(update=updates)
         others = [t for t in self._storage.list_manager_tickets() if t.id != ticket_id]
         try:
@@ -590,6 +592,13 @@ class ManagerManager:
             # A branch-less blocked ticket is an infeasible spec or a budget-exhausted
             # delegate awaiting a human decision, not a build to resume onto a branch.
             if ticket.state == _S.BLOCKED and not ticket.branch:
+                continue
+            # A blocked ticket whose lead-restart budget is spent waits on the human's
+            # retry/abandon gate; the retry resets the budget and revives it.
+            if (
+                ticket.state == _S.BLOCKED
+                and ticket.lead_restarts >= config.max_lead_restarts
+            ):
                 continue
             session = (
                 sessions.get(ticket.lead_session_id)

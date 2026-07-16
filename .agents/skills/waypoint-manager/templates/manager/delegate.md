@@ -34,7 +34,18 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
   waypoint sessions wake-on-board "$new" --channels {{ticket_channel}}   # relays wake it; the manager owns the inbox
   waypoint sessions send "$new" "$(waypoint manager render --role tech_lead --step brief --ticket {{ticket_id}})"
   ```
-  Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate `--to blocked`.
+  Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate to the human,
+  keeping the branch (the committed work is the retry's starting point):
+  ```bash
+  waypoint board post {{ticket_channel}} \
+    "the tech-lead keeps dying on this branch (restart budget spent); fix the cause then retry, or abandon. Options: retry; abandon." \
+    --meta kind=decision
+  waypoint manager ticket transition {{ticket_id}} --to blocked --reason "lead-restart budget exhausted"
+  ```
+  The next drain sees a `blocked` ticket with a `kind=decision` entry and no gate item,
+  and re-opens the retry/abandon gate from that entry
+  (`{{templates_dir}}/manager/monitor.md`); on **retry** the gate resets the restart
+  budget and resumes the build, on **abandon** it ends.
 - A stale `{{branch}}` from an incomplete reap with **no** live session → delete it
   before spawning. It cannot be checked out, so return the tree to `{{trunk}}` first:
   `git -C {{repo_dir}} checkout {{trunk}} && git -C {{repo_dir}} branch -D {{branch}}`.

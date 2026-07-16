@@ -4277,6 +4277,13 @@ def manager_ticket_update(
             help="Zero the delegate attempts budget (retry after a config fix).",
         ),
     ] = False,
+    reset_lead_restarts: Annotated[
+        bool,
+        typer.Option(
+            "--reset-lead-restarts",
+            help="Zero the lead-restart budget (retry after fixing a dying lead).",
+        ),
+    ] = False,
 ) -> None:
     """Edit ticket metadata (no state change; use 'transition' for that)."""
     body: dict[str, Any] = {}
@@ -4299,6 +4306,8 @@ def manager_ticket_update(
         body["deps"] = deps
     if reset_attempts:
         body["reset_attempts"] = True
+    if reset_lead_restarts:
+        body["reset_lead_restarts"] = True
     if not body:
         raise typer.BadParameter("provide at least one field to update")
     _emit(

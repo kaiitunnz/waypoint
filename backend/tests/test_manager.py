@@ -589,6 +589,52 @@ def test_reset_attempts_zeroes_the_delegate_budget(tmp_path: Path) -> None:
     assert t.lead_restarts == 2  # the in-build resume budget is untouched
 
 
+def test_reconcile_skips_restart_exhausted_blocked_dead_lead(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # A blocked ticket whose lead kept dying until the restart budget was spent keeps its
+    # branch (committed work) and waits on the human's retry/abandon gate.
+    storage.create_manager_ticket(
+        mk(
+            S.BLOCKED,
+            "exh",
+            branch="ticket/exh",
+            lead_restarts=_CONFIG.max_lead_restarts,
+        ).model_copy(update={"lead_session_id": "dead-lead"})
+    )
+    # A blocked ticket with budget remaining is a genuine dead-lead resume.
+    storage.create_manager_ticket(
+        mk(
+            S.BLOCKED,
+            "mid",
+            branch="ticket/mid",
+            lead_restarts=_CONFIG.max_lead_restarts - 1,
+        ).model_copy(update={"lead_session_id": "dead-lead"})
+    )
+
+    dead = {d.ticket_id for d in mgr.reconcile(_now()).dead_leads}
+
+    assert dead == {"mid"}
+
+
+def test_reset_lead_restarts_zeroes_the_restart_budget(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # A ticket blocked after its lead kept dying; a human fixes the cause and retries.
+    storage.create_manager_ticket(
+        mk(S.BLOCKED, "b", attempts=1, lead_restarts=3, branch="ticket/b")
+    )
+
+    mgr.update_ticket("b", TicketUpdateRequest(reset_lead_restarts=True))
+
+    t = storage.get_manager_ticket("b")
+    assert t is not None
+    assert t.lead_restarts == 0
+    assert t.attempts == 1  # the delegate spawn budget is untouched
+
+
 def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     mgr = ManagerManager(storage)

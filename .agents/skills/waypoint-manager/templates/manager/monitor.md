@@ -129,7 +129,9 @@ waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 The answer lands on a later wake, so recover the gate item from the ticket's recorded
 `inbox_item_id`. Act only when that item has resolved — an empty id or an open item
 means this wake carried no answer for the current gate. Read the answer (never injected
-— pull it); when a lead holds the branch, post it to the durable log and nudge:
+— pull it), then drive the state by the gate's shape. A branch-present ticket is a
+mid-build blocker (a resumable lead) or a restart-exhausted block (its `lead_restarts`
+budget is spent); the two split on that budget:
 
 ```bash
 info=$(waypoint manager ticket show {{ticket_id}})
@@ -140,22 +142,29 @@ if [ -n "$item" ]; then
     decision=$(echo "$answer" | jq -r '.item.blocks[] | select(.type=="approval") | .answer.decision // empty')                                        # spec gate: approve|request-changes|reject
     selected=$(echo "$answer" | jq -r '[.item.blocks[] | select(.type=="question").answer | .selected[]?, (.other // empty)] | map(select(. != "")) | join("; ")')   # blocker: the chosen option(s) + free-text
     notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("; ")')   # any block-level comment the human added
-    branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build blocker; empty for a branch-less block or the spec gate
+    branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build or restart-exhausted block; empty for a branch-less block or the spec gate
     lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
-    if [ -n "$branch" ]; then                          # a lead holds a real branch — relay durably and nudge
+    restarts=$(echo "$info" | jq -r '.ticket.lead_restarts')
+    maxr=$(waypoint manager state --json | jq -r '.config.max_lead_restarts')
+    if [ -n "$branch" ] && [ "$restarts" -ge "$maxr" ] && [ "$selected" = retry ]; then      # restart-exhausted: fresh budget, resume the branch
+      waypoint manager ticket update {{ticket_id}} --reset-lead-restarts
+      waypoint manager ticket transition {{ticket_id}} --to building --reason "retry after restart exhaustion"
+    elif [ -n "$branch" ] && [ "$restarts" -ge "$maxr" ] && [ "$selected" = abandon ]; then
+      waypoint manager ticket transition {{ticket_id}} --to abandoned --reason "abandoned after restart exhaustion"   # then Finalize ({{templates_dir}}/manager/integrate.md)
+    elif [ -n "$branch" ]; then                        # mid-build blocker: relay durably, nudge, resume
       waypoint board post {{ticket_channel}} "${selected}${notes:+ (notes: $notes)}" --meta kind=relay
       waypoint sessions send "$lead" \
         "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
+      waypoint manager ticket transition {{ticket_id}} --to building --reason "resume after blocker"
     fi
   fi
 fi
 ```
 
 Then, once the gate item has resolved (the same `.item.status` check above gates every
-shape), transition out of the awaiting state by the block's shape:
+shape), a branch-less blocker or the spec gate transitions out of the awaiting state by
+the block's shape:
 
-- **mid-build blocker** (a live lead on its branch) — relay `$selected` to the lead
-  (above), then resume `blocked → building`;
 - **branch-less blocker** (an infeasible `spec_pending → blocked`, or a budget-exhausted
   `delegated → blocked`, with no lead to relay to) — `$selected` is your transition
   directly: `proceed on a human-supplied spec` → `blocked → ready` (record a supplied

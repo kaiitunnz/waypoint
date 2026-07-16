@@ -24,7 +24,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    `recommended.to_state`, on that move.
 
 2. **Reconcile — adopt reality before acting.** Pull the server-derived signals in
-   one snapshot, then act on each:
+   one snapshot. Each iteration acts on one ticket and re-runs `reconcile`; a handled
+   signal is absent from the next snapshot. The bullets below cover each signal type:
    ```bash
    waypoint manager reconcile --json
    ```
@@ -64,17 +65,21 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
        `spec_pending` writer, is a self-loop (`--reason lead-died`) that re-spawns the
        same role onto its branch (`{{templates_dir}}/manager/delegate.md`) or read-only
        (`{{templates_dir}}/manager/triage.md`). Past `max_lead_restarts` the self-loop
-       409s → escalate `--to blocked`.
+       409s: an on-tree lead posts a `kind=decision` retry/abandon entry and escalates
+       `--to blocked`, keeping the branch (the committed work is the retry's starting
+       point), and `reconcile` treats it as human-gated once its restart budget is spent;
+       a `spec_pending` writer escalates `--to blocked` (branch-less).
    - **`stale_gates`** — each is an awaiting ticket (`spec_review`/`blocked`/
      `review_requested`) whose gate item is absent: a crash between the awaiting
      transition and the inbox post, or a human-deleted item. Re-open its gate through
      the gate post in `{{templates_dir}}/manager/monitor.md` (spec/blocker) or
      `{{templates_dir}}/manager/integrate.md` (review): each gate section's leading
      transition is guarded on the ticket state, so re-running it re-opens the gate
-     (adopt-or-post) without re-transitioning. For a branch-less `blocked` ticket, pick
-     the gate from the newest keyless blocker entry: a `kind=decision`/`error`/
-     `attention` entry (a lead's blocker or a budget-exhausted delegate) → the Blockers
-     gate that lifts its options; a writer `kind=infeasible` post → the infeasible gate.
+     (adopt-or-post) without re-transitioning. For a `blocked` ticket, pick the gate from
+     the newest keyless blocker entry: a `kind=decision`/`error`/`attention` entry (a
+     lead's blocker, a budget-exhausted delegate, or a lead whose restart budget is spent)
+     → the Blockers gate that lifts its options; a writer `kind=infeasible` post → the
+     infeasible gate.
      Skip the `latency_timeouts` entry for a ticket re-opened here this drain.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon. Each entry reports `waiting_since` (the live gate item's
@@ -97,7 +102,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    `accepted` + strategy → `delegated → building`; human answer →
    relay + `building`/`ready`/`revising`/`abandoned`; lead reported
    done/partial → `review_requested`; human merge observed → `merged`/`deferred`;
-   dead lead → self-loop or `blocked`).
+   dead lead → self-loop or `blocked`). Act on one ticket; a ticket acted on this
+   iteration is skipped for its other reconcile signals until the next snapshot.
 
 4. **Record intent before the side effect.** Transition first (carrying the dedup
    key: `--intended-lead-title`, `--branch`, or `--pr-url`), then act. Never act
@@ -119,8 +125,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    - a merge / conflict / finalize → `{{templates_dir}}/manager/integrate.md`
 
 6. **Confirm** — write resulting ids back onto the ticket (`--lead-session-id`,
-   `--pr-url`). On a **failed delegate**, add the ticket id to `TRIED` and continue
-   — do not retry it this drain.
+   `--pr-url`). On a **failed delegate** or any reconcile action a `409` rejected, add
+   the ticket id to `TRIED` and continue — do not retry it this drain.
 
 ## Invariants you cannot violate (the server rejects them with 409)
 

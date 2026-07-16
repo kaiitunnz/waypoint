@@ -849,6 +849,9 @@ class TicketUpdateRequest(BaseModel):
     # Human-gated override: zero the delegate ``attempts`` budget so a ticket
     # blocked on repeated spawn failures can be retried after a config fix.
     reset_attempts: bool = False
+    # Human-gated override: zero the ``lead_restarts`` budget so a ticket blocked
+    # on a lead that kept dying can be retried after the cause is fixed.
+    reset_lead_restarts: bool = False
 
 
 class ManagerInitRequest(BaseModel):

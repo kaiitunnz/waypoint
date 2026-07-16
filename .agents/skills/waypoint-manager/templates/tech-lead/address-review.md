@@ -7,6 +7,14 @@ human merges or aborts.
 
 ## 1. Consume the relayed feedback (by version)
 
+On entry, overwrite the `status` cell to `kind=progress` — a manager drain reads the
+status cell, and a lingering `done` there re-opens the review gate on the un-revised
+head:
+
+```bash
+waypoint board post {{ticket_channel}} "revising: addressing the review" --key status --meta kind=progress
+```
+
 Read the owed relay from the durable log — do not act on the nudge alone:
 
 ```bash

@@ -139,10 +139,11 @@ if [ -n "$item" ]; then
   if [ "$(echo "$answer" | jq -r '.item.status')" = resolved ]; then
     decision=$(echo "$answer" | jq -r '.item.blocks[] | select(.type=="approval") | .answer.decision // empty')                                        # spec gate: approve|request-changes|reject
     selected=$(echo "$answer" | jq -r '[.item.blocks[] | select(.type=="question").answer | .selected[]?, (.other // empty)] | map(select(. != "")) | join("; ")')   # blocker: the chosen option(s) + free-text
+    notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("; ")')   # any block-level comment the human added
     branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build blocker; empty for a branch-less block or the spec gate
     lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
     if [ -n "$branch" ]; then                          # a lead holds a real branch — relay durably and nudge
-      waypoint board post {{ticket_channel}} "$selected" --meta kind=relay
+      waypoint board post {{ticket_channel}} "${selected}${notes:+ (notes: $notes)}" --meta kind=relay
       waypoint sessions send "$lead" \
         "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
     fi

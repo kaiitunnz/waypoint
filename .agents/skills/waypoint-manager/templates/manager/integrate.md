@@ -22,7 +22,8 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
      "blocks": [
        { "type": "markdown", "text": "<PR link {{pr_url}}, summary, CI state from gh pr view>" },
-       { "type": "approval", "prompt": "Merge this PR?", "required": true } ] }
+       { "type": "approval", "prompt": "Merge this PR?",
+         "options": ["merge", "request-changes", "abort"], "required": true } ] }
    JSON
    )
    waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
@@ -34,21 +35,30 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    { "subject": "{{ticket_channel}}: {{ticket_title}} — merge review",
      "blocks": [
        { "type": "markdown", "text": "<branch {{branch}}: git log --oneline and git diff --stat vs {{trunk}}>" },
-       { "type": "approval", "prompt": "Fast-forward {{trunk}} onto {{branch}}?", "required": true } ] }
+       { "type": "approval", "prompt": "Fast-forward {{trunk}} onto {{branch}}?",
+         "options": ["approve", "request-changes", "abort"], "required": true } ] }
    JSON
    )
    waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
    ```
 {{/if}}
-2. On a later wake, read the answer from the ticket's recorded `inbox_item_id`
-   (`item=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.inbox_item_id // empty')`;
-   when `item` is non-empty and `waypoint inbox get "$item"` reports `.item.status` as
-   `resolved`), then branch on the decision:
+2. On a later wake, read the gate answer from the ticket's recorded `inbox_item_id`.
+   Act only once the item has resolved, then branch on the approval decision:
+   ```bash
+   item=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.inbox_item_id // empty')
+   [ -n "$item" ] && answer=$(waypoint inbox get "$item")
+   if [ "$(echo "$answer" | jq -r '.item.status')" = resolved ]; then
+     decision=$(echo "$answer" | jq -r '.item.blocks[] | select(.type=="approval") | .answer.decision // empty')
+   fi
+   ```
+   Branch on `$decision`:
    - **request-changes** → transition `review_requested → revising`, then relay the
-     round to the lead: post the human's requested changes to `{{ticket_channel}}`
-     as the durable payload, and send the rendered address-review instructions:
+     round to the lead: post the human's requested changes (their `reply.notes`) to
+     `{{ticket_channel}}` as the durable payload, and send the rendered address-review
+     instructions:
      ```bash
-     waypoint board post {{ticket_channel}} "<the human's requested changes>" --meta kind=relay
+     notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("\n")')
+     waypoint board post {{ticket_channel}} "${notes:-address the review}" --meta kind=relay
      lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
      waypoint sessions send "$lead" \
        "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"

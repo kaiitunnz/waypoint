@@ -69,7 +69,8 @@ item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
   "blocks": [
     { "type": "markdown", "text": "<spec summary; ref {{spec_ref}}>" },
-    { "type": "approval", "prompt": "Approve this spec?", "required": true } ] }
+    { "type": "approval", "prompt": "Approve this spec?",
+      "options": ["approve", "request-changes", "reject"], "required": true } ] }
 JSON
 )
 waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
@@ -107,12 +108,14 @@ means this wake carried no answer for the current gate. Read the answer (never i
 info=$(waypoint manager ticket show {{ticket_id}})
 item=$(echo "$info" | jq -r '.ticket.inbox_item_id // empty')
 if [ -n "$item" ]; then
-  answer=$(waypoint inbox get "$item")                 # {"item": {...}} — branch on the block's answer
+  answer=$(waypoint inbox get "$item")                 # {"item": {...}}
   if [ "$(echo "$answer" | jq -r '.item.status')" = resolved ]; then
+    decision=$(echo "$answer" | jq -r '.item.blocks[] | select(.type=="approval") | .answer.decision // empty')                                        # spec gate: approve|request-changes|reject
+    selected=$(echo "$answer" | jq -r '[.item.blocks[] | select(.type=="question").answer | .selected[]?, (.other // empty)] | map(select(. != "")) | join("; ")')   # blocker: the chosen option(s) + free-text
     branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build blocker; empty for a branch-less block or the spec gate
     lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
     if [ -n "$branch" ]; then                          # a lead holds a real branch — relay durably and nudge
-      waypoint board post {{ticket_channel}} "<the human's decision, verbatim enough to act on>" --meta kind=relay
+      waypoint board post {{ticket_channel}} "$selected" --meta kind=relay
       waypoint sessions send "$lead" \
         "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
     fi
@@ -123,14 +126,15 @@ fi
 Then, once the gate item has resolved (the same `.item.status` check above gates every
 shape), transition out of the awaiting state by the block's shape:
 
-- **mid-build blocker** (a live lead on its branch) — relay the answer to the lead
+- **mid-build blocker** (a live lead on its branch) — relay `$selected` to the lead
   (above), then resume `blocked → building`;
 - **branch-less blocker** (an infeasible `spec_pending → blocked`, with no lead to
-  relay to) — the human's answer is your transition directly: `blocked → ready`
-  (proceed — as direct-instruction, or against a human-supplied spec recorded with
-  `--spec-ref <ref>`), `blocked → spec_pending` (re-spec — see **Re-spec** below), or
-  `blocked → abandoned`;
-- **spec gate** — `spec_review → ready` on approve.
+  relay to) — `$selected` is your transition directly: `proceed on a human-supplied
+  spec` → `blocked → ready` (record a supplied spec with `--spec-ref <ref>`), `re-spec`
+  → `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`;
+- **spec gate** — branch on `$decision`: `approve` → `spec_review → ready`;
+  `request-changes` → `spec_review → spec_pending` (see **Re-spec**); `reject` →
+  `spec_review → abandoned`.
 
 `awaiting_since` clears automatically on exit. For the relayed cases, each relay is a
 `kind=relay` post the lead consumes in board-entry-`id` order, applying each once;

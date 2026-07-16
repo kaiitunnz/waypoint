@@ -248,6 +248,9 @@ def test_branchless_blocked_does_not_hold_the_tree() -> None:
     # A concurrent build holds the tree; the branch-less blocked ticket does not.
     tree = tree_state([mk(S.BUILDING, "b"), mk(S.BLOCKED, "a")])
     assert tree.free is False and tree.held_by == "b"
+    # A budget-exhausted delegate clears its dropped branch to "", which is also
+    # branch-less and holds no tree.
+    assert tree_state([mk(S.BLOCKED, "c", branch="")]).free is True
 
 
 def test_review_requested_holds_the_tree_serially(tmp_path: Path) -> None:
@@ -551,6 +554,13 @@ def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
     storage.create_manager_ticket(
         mk(S.BLOCKED, "inf").model_copy(update={"lead_session_id": "dead-writer"})
     )
+    # A budget-exhausted delegate parked in blocked with its dropped branch cleared
+    # to "" — also branch-less, also not a resume candidate.
+    storage.create_manager_ticket(
+        mk(S.BLOCKED, "exh", branch="").model_copy(
+            update={"lead_session_id": "dead-lead"}
+        )
+    )
     # A mid-build blocked ticket does hold a branch — a genuine dead-lead resume.
     storage.create_manager_ticket(
         mk(S.BLOCKED, "mid", branch="ticket/mid").model_copy(
@@ -561,6 +571,22 @@ def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
     dead = {d.ticket_id for d in mgr.reconcile(_now()).dead_leads}
 
     assert dead == {"mid"}
+
+
+def test_reset_attempts_zeroes_the_delegate_budget(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # A ticket blocked after exhausting the delegate budget; a human fixes the
+    # launch config and retries.
+    storage.create_manager_ticket(mk(S.BLOCKED, "b", attempts=3, lead_restarts=2))
+
+    mgr.update_ticket("b", TicketUpdateRequest(reset_attempts=True))
+
+    t = storage.get_manager_ticket("b")
+    assert t is not None
+    assert t.attempts == 0
+    assert t.lead_restarts == 2  # the in-build resume budget is untouched
 
 
 def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:

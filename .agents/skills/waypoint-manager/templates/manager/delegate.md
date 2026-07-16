@@ -83,15 +83,36 @@ If the model/permission were wrong the lead dies on turn 1; confirm it actually
 started (`waypoint sessions show "$sid"` → `starting`/`idle`/`running`, not
 `exited`/`error`). A turn-1 death is a spawn failure with no committed work — reap the
 failed session so its reserved title frees for the retry, clear the dead lead ref off
-the ticket, return the tree to `{{trunk}}`, drop the empty branch, then move `delegated
-→ ready` (still under budget) or `→ blocked` (budget exhausted) and add the ticket to
-this drain's `tried` set:
+the ticket, and return the tree to `{{trunk}}`, dropping the empty branch:
 
 ```bash
 waypoint sessions delete "$sid" --force                       # free the reserved title
 waypoint manager ticket update {{ticket_id}} --lead-session-id ""   # drop the dead lead ref
 git -C {{repo_dir}} checkout {{trunk}} && git -C {{repo_dir}} branch -D {{branch}}
 ```
+
+Then retry the delegate while budget remains: move `delegated → ready` and add the
+ticket to this drain's `tried` set (a later drain re-delegates). When the delegate
+budget is exhausted that move is rejected (`409`) — escalate to the human instead. Post
+the failure as a keyless `kind=decision` log entry (the durable source the gate is built
+from), clear the stale `branch` field (the git branch is already dropped), then move
+`delegated → blocked`:
+
+```bash
+waypoint manager ticket transition {{ticket_id}} --to ready --reason "retry after spawn failure" \
+  || {
+    waypoint board post {{ticket_channel}} \
+      "delegation failed (a misconfigured launch?); fix the launch config then retry, or abandon. Options: retry; abandon." \
+      --meta kind=decision
+    waypoint manager ticket update {{ticket_id}} --branch ""
+    waypoint manager ticket transition {{ticket_id}} --to blocked --reason "delegate budget exhausted"
+  }
+```
+
+On the escalation, the next drain sees a branch-less `blocked` ticket with no gate item
+and re-opens the decision gate from that entry
+(`{{templates_dir}}/manager/monitor.md`); on the human's **retry** the gate resets the
+delegate budget and revives the ticket, on **abandon** it ends.
 
 ## 4. Send the brief
 

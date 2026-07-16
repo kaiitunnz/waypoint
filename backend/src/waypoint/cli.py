@@ -4270,6 +4270,13 @@ def manager_ticket_update(
     branch: Annotated[str | None, typer.Option()] = None,
     pr_url: Annotated[str | None, typer.Option()] = None,
     inbox_item_id: Annotated[str | None, typer.Option("--inbox-item")] = None,
+    reset_attempts: Annotated[
+        bool,
+        typer.Option(
+            "--reset-attempts",
+            help="Zero the delegate attempts budget (retry after a config fix).",
+        ),
+    ] = False,
 ) -> None:
     """Edit ticket metadata (no state change; use 'transition' for that)."""
     body: dict[str, Any] = {}
@@ -4290,6 +4297,8 @@ def manager_ticket_update(
         body["footprint"] = footprint
     if deps is not None:
         body["deps"] = deps
+    if reset_attempts:
+        body["reset_attempts"] = True
     if not body:
         raise typer.BadParameter("provide at least one field to update")
     _emit(

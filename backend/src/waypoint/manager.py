@@ -147,11 +147,12 @@ def _holds_tree(ticket: ManagerTicket) -> bool:
 
     A tree-state ticket holds the tree, except a ``blocked`` one with no branch: a
     writer that deems a ``spec_pending`` ticket infeasible escalates it
-    ``spec_pending → blocked`` without ever cutting a branch, so that ticket occupies
-    no tree and must not block a build from being delegated.
+    ``spec_pending → blocked`` without ever cutting a branch, and a budget-exhausted
+    delegate clears the dropped branch on ``delegated → blocked``, so that ticket
+    occupies no tree and must not block a build from being delegated.
     """
     return ticket.state in _TREE_STATES and not (
-        ticket.state == _S.BLOCKED and ticket.branch is None
+        ticket.state == _S.BLOCKED and not ticket.branch
     )
 
 
@@ -472,6 +473,8 @@ class ManagerManager:
             updates["inbox_item_id"] = request.inbox_item_id
         if request.is_partial is not None:
             updates["is_partial"] = request.is_partial
+        if request.reset_attempts:
+            updates["attempts"] = 0
         updated = ticket.model_copy(update=updates)
         others = [t for t in self._storage.list_manager_tickets() if t.id != ticket_id]
         try:
@@ -584,9 +587,9 @@ class ManagerManager:
         for ticket in tickets:
             if ticket.state not in _RESUMABLE_STATES:
                 continue
-            # A branch-less blocked ticket is an infeasible spec awaiting a human
-            # decision, not a build to resume onto a branch.
-            if ticket.state == _S.BLOCKED and ticket.branch is None:
+            # A branch-less blocked ticket is an infeasible spec or a budget-exhausted
+            # delegate awaiting a human decision, not a build to resume onto a branch.
+            if ticket.state == _S.BLOCKED and not ticket.branch:
                 continue
             session = (
                 sessions.get(ticket.lead_session_id)

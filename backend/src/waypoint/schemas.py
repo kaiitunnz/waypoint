@@ -846,6 +846,9 @@ class TicketUpdateRequest(BaseModel):
     pr_url: str | None = None
     inbox_item_id: str | None = None
     is_partial: bool | None = None
+    # Human-gated override: zero the delegate ``attempts`` budget so a ticket
+    # blocked on repeated spawn failures can be retried after a config fix.
+    reset_attempts: bool = False
 
 
 class ManagerInitRequest(BaseModel):

@@ -71,8 +71,11 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      the gate post in `{{templates_dir}}/manager/monitor.md` (spec/blocker) or
      `{{templates_dir}}/manager/integrate.md` (review): each gate section's leading
      transition is guarded on the ticket state, so re-running it re-opens the gate
-     (adopt-or-post) without re-transitioning. Skip the `latency_timeouts` entry for a
-     ticket re-opened here this drain.
+     (adopt-or-post) without re-transitioning. For a branch-less `blocked` ticket, pick
+     the gate from the newest keyless blocker entry: a `kind=decision`/`error`/
+     `attention` entry (a lead's blocker or a budget-exhausted delegate) → the Blockers
+     gate that lifts its options; a writer `kind=infeasible` post → the infeasible gate.
+     Skip the `latency_timeouts` entry for a ticket re-opened here this drain.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon. Each entry reports `waiting_since` (the live gate item's
      post, or the awaiting entry when no item exists), so a re-posted gate resets the

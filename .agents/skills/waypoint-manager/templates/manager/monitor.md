@@ -155,10 +155,13 @@ shape), transition out of the awaiting state by the block's shape:
 
 - **mid-build blocker** (a live lead on its branch) — relay `$selected` to the lead
   (above), then resume `blocked → building`;
-- **branch-less blocker** (an infeasible `spec_pending → blocked`, with no lead to
-  relay to) — `$selected` is your transition directly: `proceed on a human-supplied
-  spec` → `blocked → ready` (record a supplied spec with `--spec-ref <ref>`), `re-spec`
-  → `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`;
+- **branch-less blocker** (an infeasible `spec_pending → blocked`, or a budget-exhausted
+  `delegated → blocked`, with no lead to relay to) — `$selected` is your transition
+  directly: `proceed on a human-supplied spec` → `blocked → ready` (record a supplied
+  spec with `--spec-ref <ref>`), `re-spec` → `blocked → spec_pending` (see **Re-spec**
+  below), `retry` → reset the delegate budget then `blocked → ready`
+  (`waypoint manager ticket update {{ticket_id}} --reset-attempts`), `abandon` →
+  `blocked → abandoned`;
 - **spec gate** — branch on `$decision`: `approve` → `spec_review → ready`;
   `request-changes` → `spec_review → spec_pending` (see **Re-spec**); `reject` →
   `spec_review → abandoned`.

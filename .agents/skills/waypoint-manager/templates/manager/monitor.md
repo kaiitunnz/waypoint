@@ -163,8 +163,17 @@ runs.
 
 ## Done / partial
 
-On `done`/`partial`, move to `review_requested`. The lead parks alive and idle; the
-ticket keeps holding the shared tree until it lands or is abandoned:
+On `done`/`partial`, move to `review_requested`. `review_requested` is reachable only
+from `building`, so a coalesced wake that finds the ticket still `delegated` (the
+strategy post and the `done` arrived together) hops `delegated → building` first:
+
+```bash
+[ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = delegated ] \
+  && waypoint manager ticket transition {{ticket_id}} --to building --reason "build observed with done"
+```
+
+The lead parks alive and idle; the ticket keeps holding the shared tree until it lands
+or is abandoned:
 
 {{#if integration_mode == pr}}
 ```bash

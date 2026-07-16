@@ -103,8 +103,12 @@ waypoint sessions send "$sid" "$(waypoint manager render --role tech_lead --step
 
 The brief tells the lead to post `accepted`, run the **strategy gate** — an explicit,
 justified choice among `/waypoint-subagents`, `/waypoint-workqueue`, and
-`/waypoint-crew` — post its chosen strategy to `{{ticket_channel}}`, and build. When
-you observe the strategy post, move `delegated → building`.
+`/waypoint-crew` — post its chosen strategy to `{{ticket_channel}}`, and build. On the
+strategy post, move `delegated → building`:
+
+```bash
+waypoint manager ticket transition {{ticket_id}} --to building --reason "strategy: <chosen>"
+```
 
 Then return to `{{templates_dir}}/manager/loop-cycle.md` and continue the drain — do not
 block waiting for the lead; its progress wakes you via `{{ticket_channel}}`.

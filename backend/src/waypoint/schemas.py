@@ -765,7 +765,9 @@ class ReconcileDeadLead(BaseModel):
 class ReconcileLatencyTimeout(BaseModel):
     ticket_id: str
     state: ManagerTicketState
-    awaiting_since: datetime
+    # The wait is measured from the current gate item's post (falling back to the
+    # awaiting entry when no item exists), so a re-opened gate earns a fresh wait.
+    waiting_since: datetime
     hours_elapsed: float
 
 

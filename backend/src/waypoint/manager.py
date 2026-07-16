@@ -602,15 +602,28 @@ class ManagerManager:
 
         latency_timeouts: list[ReconcileLatencyTimeout] = []
         for ticket in tickets:
-            if ticket.state not in _AWAITING_STATES or ticket.awaiting_since is None:
+            if ticket.state not in _AWAITING_STATES:
                 continue
-            elapsed = (now - ticket.awaiting_since).total_seconds() / 3600
+            item = (
+                self._storage.get_inbox_item(ticket.inbox_item_id)
+                if ticket.inbox_item_id is not None
+                else None
+            )
+            # Measure from when a live gate item last existed, so a re-opened gate
+            # (or one the human deleted) earns a fresh wait rather than abandoning
+            # against a stale entry time.
+            waiting_since = (
+                item.created_at if item is not None else ticket.awaiting_since
+            )
+            if waiting_since is None:
+                continue
+            elapsed = (now - waiting_since).total_seconds() / 3600
             if elapsed >= config.human_latency_hours:
                 latency_timeouts.append(
                     ReconcileLatencyTimeout(
                         ticket_id=ticket.id,
                         state=ticket.state,
-                        awaiting_since=ticket.awaiting_since,
+                        waiting_since=waiting_since,
                         hours_elapsed=elapsed,
                     )
                 )

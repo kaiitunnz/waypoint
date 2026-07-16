@@ -67,22 +67,22 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
        409s → escalate `--to blocked`.
    - **`stale_gates`** — each is an awaiting ticket (`spec_review`/`blocked`/
      `review_requested`) whose gate item is absent: a crash between the awaiting
-     transition and the inbox post, or a pruned item. Re-open its gate through the gate
-     post in `{{templates_dir}}/manager/monitor.md` (spec/blocker) or
-     `{{templates_dir}}/manager/integrate.md` (review), which adopts an existing open
-     item or posts fresh with no transition, so `awaiting_since` is preserved. The
-     `latency_timeouts` handler skips a ticket re-opened here this drain, giving the
-     freshly posted gate a full wait before it can time out.
+     transition and the inbox post, or a human-deleted item. Re-open its gate through
+     the gate post in `{{templates_dir}}/manager/monitor.md` (spec/blocker) or
+     `{{templates_dir}}/manager/integrate.md` (review): each gate section's leading
+     transition is guarded on the ticket state, so re-running it re-opens the gate
+     (adopt-or-post) without re-transitioning. Skip the `latency_timeouts` entry for a
+     ticket re-opened here this drain.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
-     re-notify-then-abandon. Key
-     the re-notify marker to *this* episode's `awaiting_since` so it self-clears on
-     re-entry (the server re-stamps `awaiting_since` on every entry): if the ticket
-     cell's `latency_renotified` ≠ the current `awaiting_since`, re-notify the human
-     and stamp it (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}}
-     --merge --meta latency_renotified=<awaiting_since>`); if it already equals the
-     current `awaiting_since` (re-notified, still unanswered) → transition to
-     `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`),
-     reap it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+     re-notify-then-abandon. Each entry reports `waiting_since` (the live gate item's
+     post, or the awaiting entry when no item exists), so a re-posted gate resets the
+     wait. Key the re-notify marker to *this* entry's `waiting_since`: if the ticket
+     cell's `latency_renotified` ≠ the entry's `waiting_since`, re-notify the human and
+     stamp it (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge
+     --meta latency_renotified=<waiting_since>`); if it already equals the entry's
+     `waiting_since` (re-notified, still unanswered) → transition to `abandoned`. If the
+     abandoned ticket was on-tree (`blocked`/`review_requested`), reap it and release
+     the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
 {{#if integration_mode == pr}}
    - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup` (external CI/merge state).

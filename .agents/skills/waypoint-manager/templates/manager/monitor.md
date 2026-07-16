@@ -33,8 +33,9 @@ log {{ticket_channel}} --since <last-seen>`) and lift its question and options
 `awaiting_since` is now stamped (the server does it):
 
 ```bash
-waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
-item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+[ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = blocked ] \
+  || waypoint manager ticket transition {{ticket_id}} --to blocked --reason "<the blocker>"
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
   | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— decision needed"))) | .id] | first // empty')   # adopt an open gate a crash left behind
 [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
@@ -48,13 +49,14 @@ JSON
 waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
-Each gate post is idempotent: it first adopts an existing open item for this
-ticket+phase (matched by subject) and posts fresh only when none exists, so a crash
-between the transition and the post re-opens the same gate rather than double-posting
-or stranding the ticket (the `stale_gates` reconcile signal surfaces one to re-open).
-It records the item id on the ticket (`--inbox-item`); the answer read looks that id up
-and acts once it resolves. The server clears the id on the next non-self transition, so
-a later gate never resolves this one's answer.
+Each gate section is idempotent: the leading transition is guarded on the ticket's
+state (skipped when already in the awaiting state), and the post first adopts an
+existing open item for this ticket+phase (matched by subject), posting fresh only when
+none exists. So re-running the whole section — a `stale_gates` re-open after a crash
+between the transition and the post — re-opens the same gate without re-transitioning
+or double-posting. It records the item id on the ticket (`--inbox-item`); the answer
+read looks that id up and acts once it resolves. The server clears the id on the next
+non-self transition, so a later gate never resolves this one's answer.
 
 Frame an open question when the lead left the decision open. You are
 `--wake-on-inbox`-subscribed, so the human's answer wakes you.
@@ -70,8 +72,9 @@ post an **approval** inbox item with the spec. On the answer: **approve** → `r
 path in `{{templates_dir}}/manager/loop-cycle.md`.
 
 ```bash
-waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
-item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+[ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = spec_review ] \
+  || waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
   | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— spec review"))) | .id] | first // empty')   # adopt an open gate a crash left behind
 [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
@@ -91,8 +94,9 @@ ready` to proceed on a human-supplied spec, `blocked → spec_pending` to re-spe
 `blocked → abandoned`).
 
 ```bash
-waypoint manager ticket transition {{ticket_id}} --to blocked --reason "infeasible spec: <writer's reason>"
-item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+[ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = blocked ] \
+  || waypoint manager ticket transition {{ticket_id}} --to blocked --reason "infeasible spec: <writer's reason>"
+item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
   | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— decision needed"))) | .id] | first // empty')   # adopt an open gate a crash left behind
 [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",

@@ -539,6 +539,32 @@ def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
     assert {g.ticket_id for g in report.stale_gates} == {"g1", "g3"}
 
 
+def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # The ticket entered the awaiting state long ago, but its gate item was posted
+    # recently (a re-opened or human-deleted-then-reposted gate).
+    item = storage.create_inbox_item(
+        "mgr", None, "ticket-g: t — spec review", [InboxMarkdownBlockInput(text="x")]
+    )
+    storage.create_manager_ticket(
+        mk(S.SPEC_REVIEW, "g").model_copy(
+            update={
+                "awaiting_since": item.created_at - timedelta(hours=500),
+                "inbox_item_id": item.id,
+            }
+        )
+    )
+
+    # Within the wait measured from the item — not a timeout despite the old entry.
+    assert not mgr.reconcile(item.created_at + timedelta(hours=1)).latency_timeouts
+    # Past the threshold from the item — a timeout, measured from the item.
+    late = mgr.reconcile(item.created_at + timedelta(hours=100)).latency_timeouts
+    assert [t.ticket_id for t in late] == ["g"]
+    assert late[0].waiting_since == item.created_at
+
+
 # ── Storage CRUD ────────────────────────────────────────────────────────────
 
 

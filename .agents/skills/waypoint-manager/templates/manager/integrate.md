@@ -18,7 +18,7 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    subscribed, so the answer wakes you.
 {{#if integration_mode == pr}}
    ```bash
-   item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+   item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
      | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— PR review"))) | .id] | first // empty')   # adopt an open gate a crash left behind
    [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
@@ -33,7 +33,7 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
 {{/if}}
 {{#if integration_mode == local}}
    ```bash
-   item=$(waypoint inbox list --status open --q "{{ticket_channel}}" \
+   item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
      | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— merge review"))) | .id] | first // empty')   # adopt an open gate a crash left behind
    [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — merge review",

@@ -243,9 +243,13 @@ Three signals:
   someone other than the manager, whose board-entry id is not yet a ticket.
 - **`dead_leads`** — tickets in a resumable state whose recorded lead session is
   missing or terminal (`exited`/`error`) — the resume candidates.
-- **`latency_timeouts`** — awaiting-human tickets whose `awaiting_since` is older than
-  `human_latency_hours` (raw candidates; the re-notify-then-abandon decision stays
-  with the manager).
+- **`latency_timeouts`** — awaiting-human tickets whose wait exceeds
+  `human_latency_hours`, measured from the live gate item's post (or `awaiting_since`
+  when no item exists), so a re-opened gate earns a fresh wait (raw candidates; the
+  re-notify-then-abandon decision stays with the manager).
+- **`stale_gates`** — awaiting-human tickets whose gate inbox item is absent (a crash
+  between the awaiting transition and the inbox post, or a human-deleted item); the
+  manager re-opens the gate.
 
 External signals (a PR's CI and merge state) are not covered — they stay in the
 agent's shell (`gh pr view`).
@@ -547,7 +551,7 @@ compiled templates at `init`, so the running manager reads no manifest per wake.
 | `scale.substantial_when` | skill | Natural-language rule triage applies to label a ticket `substantial` (→ spec) vs `trivial` (→ direct). |
 | `integration.mode` | skill | `pr` (GitHub PR) or `local` (local fast-forward). Human-owned merge either way. |
 | `integration.require_ci_green` | skill | Gate the merge on green CI. |
-| `timeouts.human_latency_hours` | skill | How long an awaiting-human ticket waits before the manager escalates then abandons. Measured from `awaiting_since`. |
+| `timeouts.human_latency_hours` | skill | How long an awaiting-human ticket waits before the manager escalates then abandons. Measured from when the human last had a live gate item. |
 | `escalation.self_decide` | skill | Blocker classes the manager settles itself. |
 | `escalation.always_escalate` | skill | Blocker classes routed to the human inbox. |
 

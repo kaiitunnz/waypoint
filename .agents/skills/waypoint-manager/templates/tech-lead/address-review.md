@@ -69,7 +69,7 @@ waypoint board post {{ticket_channel}} "revised: <what changed>; ready for re-re
 {{/if}}
 {{#if integration_mode == local}}
 waypoint board post {{ticket_channel}} "revised: <what changed>; ready for re-review" \
-  --key status --meta kind=done --meta commit=$head
+  --key status --meta kind=done --meta commit=$head --meta checks=green
 {{/if}}
 ```
 

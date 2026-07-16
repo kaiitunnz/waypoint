@@ -114,23 +114,31 @@ Record `review_requested → merged` (or `→ deferred`) in the same step.
 {{/if}}
 {{#if integration_mode == local}}
 On the human's **approve**, fast-forward {{trunk}} onto {{branch}} in the shared tree,
-then record the terminal. The branch is your durable witness: check its ancestry first,
-so a resumed turn re-derives the merge and never repeats it.
+then record the terminal. Two guards precede the fast-forward: the branch's ancestry
+(the branch is your durable witness, so a resumed turn re-derives the merge and never
+repeats it), and — when `require_ci_green` is `true` (here `{{require_ci_green}}`) — the
+lead's reported `checks` on the status cell. Fast-forward only when `checks` reads
+`green`; a missing or non-`green` value sends the ticket back to the lead to fix, keeping
+the tree on `{{branch}}` for the lead to build on (only the fast-forward path checks out
+`{{trunk}}`).
 
 ```bash
-git -C {{repo_dir}} checkout {{trunk}}
-git -C {{repo_dir}} merge-base --is-ancestor {{branch}} {{trunk}} \
-  || git -C {{repo_dir}} merge --ff-only {{branch}}   # ff only when the branch is not already merged
+checks=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.checks // "missing"')
+if [ "{{require_ci_green}}" = true ] && [ "$checks" != green ]; then
+  waypoint manager ticket transition {{ticket_id}} --to revising --reason "checks not green: $checks"
+  waypoint board post {{ticket_channel}} "local checks are not green (checks=$checks); fix and re-report done" --meta kind=relay
+  lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
+  waypoint sessions send "$lead" "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
+else
+  git -C {{repo_dir}} checkout {{trunk}}
+  git -C {{repo_dir}} merge-base --is-ancestor {{branch}} {{trunk}} \
+    || git -C {{repo_dir}} merge --ff-only {{branch}}   # ff only when the branch is not already merged
+fi
 ```
 
-When `require_ci_green` is `true` (here `{{require_ci_green}}`), gate the fast-forward on
-the lead's reported checks: fast-forward only when the status cell's `checks` reads
-`green`; a missing or non-`green` value blocks the merge — escalate to the inbox rather
-than fast-forward.
-
-```bash
-waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.checks'   # must be "green"
-```
+On the send-back, the lead fixes and re-reports `done`; you move `revising →
+review_requested` and re-open the merge gate on the new head. On the fast-forward, record
+the terminal (below).
 
 Record `review_requested → merged` (full) or `→ deferred` (partial) **after** the
 fast-forward lands, so a crash between the merge and the record re-derives the merge

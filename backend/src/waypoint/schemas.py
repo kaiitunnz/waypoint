@@ -710,8 +710,6 @@ class ManagerTicket(BaseModel):
     # Set on entry to a genuinely awaiting-human state; cleared when the ticket
     # leaves it (so a latency timeout only counts real human waits).
     awaiting_since: datetime | None = None
-    # Hint only; the ``ticket-<id>`` relay log is the authoritative cursor.
-    last_relayed_version: int = 0
     created_at: datetime
     updated_at: datetime
     version: int = 0
@@ -829,7 +827,6 @@ class TicketTransitionRequest(BaseModel):
     pr_url: str | None = None
     is_partial: bool | None = None
     deps: list[str] | None = None
-    last_relayed_version: int | None = None
 
 
 class TicketUpdateRequest(BaseModel):
@@ -847,7 +844,6 @@ class TicketUpdateRequest(BaseModel):
     pr_url: str | None = None
     inbox_item_id: str | None = None
     is_partial: bool | None = None
-    last_relayed_version: int | None = None
 
 
 class ManagerInitRequest(BaseModel):

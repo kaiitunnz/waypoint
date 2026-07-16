@@ -186,9 +186,13 @@ The lead parks alive and idle; the ticket keeps holding the shared tree until it
 or is abandoned:
 
 {{#if integration_mode == pr}}
+The lead's `done` cell carries the PR url in its `pr=` meta; the ticket record's
+`{{pr_url}}` is set by this transition, so read the url from the cell here:
+
 ```bash
+pr=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.pr')
 waypoint manager ticket transition {{ticket_id}} --to review_requested \
-  --pr-url {{pr_url}} --not-partial      # or --is-partial for a partial delivery
+  --pr-url "$pr" --not-partial      # or --is-partial for a partial delivery
 ```
 {{/if}}
 {{#if integration_mode == local}}

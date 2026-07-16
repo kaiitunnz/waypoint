@@ -33,6 +33,9 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    it, read each in-flight ticket's `status` cell **by key**
    (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
    (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
+   A `spec_pending` writer delivers `spec_ready`/`infeasible`/`recommendation` as keyless
+   **log** posts, read with `board log {{ticket_channel_prefix}}<id>` — the `status`
+   cell carries only the tech-lead's build feedback.
    - **`unregistered_intake`** — each is a `{{tickets_channel}}` post not yet a ticket.
      Register it under its deterministic board-entry id — copy the request into its
      cell **first**, then add the ticket, so triage always finds a populated cell:

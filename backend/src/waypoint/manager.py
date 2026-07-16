@@ -227,8 +227,6 @@ def apply_transition(
         updates["pr_url"] = request.pr_url
     if request.is_partial is not None:
         updates["is_partial"] = request.is_partial
-    if request.last_relayed_version is not None:
-        updates["last_relayed_version"] = request.last_relayed_version
     if request.footprint is not None:
         updates["footprint"] = list(request.footprint)
     if request.deps is not None:
@@ -474,8 +472,6 @@ class ManagerManager:
             updates["inbox_item_id"] = request.inbox_item_id
         if request.is_partial is not None:
             updates["is_partial"] = request.is_partial
-        if request.last_relayed_version is not None:
-            updates["last_relayed_version"] = request.last_relayed_version
         updated = ticket.model_copy(update=updates)
         others = [t for t in self._storage.list_manager_tickets() if t.id != ticket_id]
         try:

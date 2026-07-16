@@ -124,6 +124,26 @@ JSON
 waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
+## Reap the delivered writer
+
+A `spec_review` ticket (from `spec_ready`) or a branch-less `blocked` ticket (from
+`infeasible`) still carries the ephemeral writer as its `lead_session_id`. Reap it
+(read-only in your tree, no worktree) and clear the ref before
+`{{templates_dir}}/manager/delegate.md` records the tech-lead. The guard on the two
+post-writer states keeps a tech-lead — carried on a `delegated`/`building`/`revising`/
+`review_requested` or blocked-with-branch ticket — from being reaped:
+
+```bash
+info=$(waypoint manager ticket show {{ticket_id}})
+state=$(echo "$info" | jq -r '.ticket.state')
+branch=$(echo "$info" | jq -r '.ticket.branch // empty')
+writer=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
+if { [ "$state" = spec_review ] || { [ "$state" = blocked ] && [ -z "$branch" ]; }; } && [ -n "$writer" ]; then
+  waypoint sessions delete "$writer" --force
+  waypoint manager ticket update {{ticket_id}} --lead-session-id ""
+fi
+```
+
 ## Relay a human answer back to the lead — durably
 
 The answer lands on a later wake, so recover the gate item from the ticket's recorded

@@ -151,6 +151,6 @@ concrete technical design. The writer posts the
 spec ref back and recommends an execution strategy, or posts `infeasible` when the
 request cannot be specced; you then drive the matching edge (`spec_pending →
 spec_review` for a spec, `→ blocked` for infeasible) per
-`{{templates_dir}}/manager/monitor.md`, which covers both branches and the relay. Reap
-the writer after it posts — it is ephemeral. Pass-through and trivial routes skip this
+`{{templates_dir}}/manager/monitor.md`, which covers both branches, reaps the ephemeral
+writer, and drives the relay. Pass-through and trivial routes skip this
 section; `{{templates_dir}}/manager/delegate.md` picks them up when the tree frees.

@@ -23,6 +23,19 @@ The `status` cell's `kind=` is the feedback vocabulary:
 | `done` | Work complete, delivered | → `review_requested` (`--not-partial`) |
 | `partial` | A subset delivered (status text lists the deferred goals) | → `review_requested` (`--is-partial`) |
 
+## Observe the strategy post
+
+The lead posts its chosen strategy to the `strategy` cell before it starts building. On
+a wake where the ticket is still `delegated` and that cell is present, the build has
+started — move `delegated → building`:
+
+```bash
+strategy=$(waypoint board read {{ticket_channel}} --key strategy --json | jq -r '.cells[0].text // empty')
+state=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')
+[ -n "$strategy" ] && [ "$state" = delegated ] \
+  && waypoint manager ticket transition {{ticket_id}} --to building --reason "strategy: $strategy"
+```
+
 ## Blockers → the inbox (with escalation policy)
 
 Apply the escalation policy: settle blockers of kind {{self_decide}} yourself;

@@ -584,6 +584,10 @@ class ManagerManager:
         for ticket in tickets:
             if ticket.state not in _RESUMABLE_STATES:
                 continue
+            # A branch-less blocked ticket is an infeasible spec awaiting a human
+            # decision, not a build to resume onto a branch.
+            if ticket.state == _S.BLOCKED and ticket.branch is None:
+                continue
             session = (
                 sessions.get(ticket.lead_session_id)
                 if ticket.lead_session_id is not None

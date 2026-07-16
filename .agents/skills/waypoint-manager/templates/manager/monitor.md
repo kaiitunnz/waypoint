@@ -158,16 +158,21 @@ lead re-applies it once).
 ## Re-spec — a request-changes or a blocked re-spec
 
 `spec_review → spec_pending` (request-changes) and `blocked → spec_pending` both send
-the ticket back for a fresh spec. Lift the human's requested changes from the resolved
+the ticket back for a fresh spec. `spec_pending` holds the single spec slot (≤1 at a
+time), so re-spec only when the slot is free; another ticket holding it defers this one
+to a later drain — the resolved gate item keeps the human's notes until then, so nothing
+is lost. When the slot is free, lift the human's requested changes from the resolved
 gate item's `reply.notes` into a durable `kind=respec` note **before** the transition,
 then re-spawn the writer per `{{templates_dir}}/manager/triage.md` (Spawn the writer),
 which re-derives the writer role from the ticket cell's `spec_route`:
 
 ```bash
-notes=$(waypoint inbox get "$item" | jq -r '[.item.blocks[].reply.notes // empty] | join("\n")')
-waypoint board post {{ticket_channel}} "${notes:-revise per the review}" --meta kind=respec
-waypoint manager ticket transition {{ticket_id}} --to spec_pending --reason respec
-# then re-spawn the writer: {{templates_dir}}/manager/triage.md, "Spawn the writer"
+if [ "$(waypoint manager state --json | jq '[.tickets[] | select(.state == "spec_pending")] | length')" = 0 ]; then
+  notes=$(waypoint inbox get "$item" | jq -r '[.item.blocks[].reply.notes // empty] | join("\n")')
+  waypoint board post {{ticket_channel}} "${notes:-revise per the review}" --meta kind=respec
+  waypoint manager ticket transition {{ticket_id}} --to spec_pending --reason respec
+  # then re-spawn the writer: {{templates_dir}}/manager/triage.md, "Spawn the writer"
+fi
 ```
 
 The re-spawned writer reads the newest `kind=respec` note and revises the prior

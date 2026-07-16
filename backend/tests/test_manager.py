@@ -498,7 +498,10 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     mgr.transition(t.id, TicketTransitionRequest(to=S.TRIAGED, scale=Sc.TRIVIAL))
     mgr.transition(t.id, TicketTransitionRequest(to=S.READY))
     mgr.transition(
-        t.id, TicketTransitionRequest(to=S.DELEGATED, intended_lead_title="t-lead")
+        t.id,
+        TicketTransitionRequest(
+            to=S.DELEGATED, intended_lead_title="t-lead", branch="ticket/t"
+        ),
     )
     mgr.transition(t.id, TicketTransitionRequest(to=S.BUILDING))
     mgr.transition(t.id, TicketTransitionRequest(to=S.BLOCKED, reason="stuck"))
@@ -537,6 +540,27 @@ def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
     report = mgr.reconcile(_now())
 
     assert {g.ticket_id for g in report.stale_gates} == {"g1", "g3"}
+
+
+def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # An infeasible spec parked in blocked: no branch, and its reaped writer's id
+    # lingers. It awaits a human decision, so it is not a lead to resume.
+    storage.create_manager_ticket(
+        mk(S.BLOCKED, "inf").model_copy(update={"lead_session_id": "dead-writer"})
+    )
+    # A mid-build blocked ticket does hold a branch — a genuine dead-lead resume.
+    storage.create_manager_ticket(
+        mk(S.BLOCKED, "mid", branch="ticket/mid").model_copy(
+            update={"lead_session_id": "dead-lead"}
+        )
+    )
+
+    dead = {d.ticket_id for d in mgr.reconcile(_now()).dead_leads}
+
+    assert dead == {"mid"}
 
 
 def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:

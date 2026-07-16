@@ -285,12 +285,13 @@ plus the board), every wake rebuilds position from that state, and every side ef
 is guarded so a mid-turn crash or a growing context resumes the procedure rather
 than repeating it.
 
-The manager is wake-driven: registered board and inbox wakes drive its turns. While a
-ticket is in flight the drain arms a minutes-scale self-wake (a `schedule message` to
-its own session) — the backstop for duties with no event source (dead/parked-lead
-detection, latency-timeout abandonment, `gh`/CI advancement). It re-arms each drain and
-stops once no ticket is in flight; every side effect is guarded, and a self-wake firing
-against already-adopted state drains as a no-op.
+The manager is wake-driven: registered board and inbox wakes drive its turns. A merge is
+observed primarily when the human answers the merge gate (an inbox wake). While a ticket
+is in flight the drain also arms a self-wake at the human-latency window (a `schedule
+message` to its own session) — a coarse backstop for duties with no event source
+(dead/parked-lead detection, latency-timeout abandonment, `gh`/CI advancement, a ghosted
+merge). It re-arms each drain and stops once no ticket is in flight; every side effect is
+guarded, and a self-wake firing against already-adopted state drains as a no-op.
 
 Each wake drains all currently-actionable work to a fixpoint, then idles — draining
 is what lets a slot-freeing action (a merge, an abandon) enable the next action in

@@ -58,11 +58,12 @@ an action this drain. Each iteration: re-anchor (`waypoint manager next --json`,
 intent before the side effect, act idempotently, confirm. Re-read your compiled
 `manager/loop-cycle.md` (under the templates dir `manager state` reports) every wake
 for the step-by-step procedure. No recommendation and no outstanding external signal
-→ go idle. While a ticket is in flight the drain arms a minutes-scale liveness
-self-wake (a `schedule message` to your own session) — a re-drain for duties with no
-event source: a merge or CI advance to observe, a gate that will latency-timeout, a
-lead that can die while you idle; it re-arms each drain and stops once the board is
-fully terminal.
+→ go idle. While a ticket is in flight the drain arms a liveness self-wake at the
+human-latency window (a `schedule message` to your own session) — a re-drain for duties
+with no event source: a merge or CI advance to observe, a gate that will latency-timeout,
+a lead that can die while you idle; it re-arms each drain and stops once the board is
+fully terminal. A merge is observed primarily when the human answers the merge gate; the
+self-wake is the backstop that re-checks it.
 
 A `409` means the picture is stale: re-anchor and reconcile, never blind-retry.
 Trust `manager next` and the board over memory; a `waypoint` CLI connection error

@@ -199,32 +199,40 @@ runs.
 
 ## Done / partial
 
-On `done`/`partial`, move to `review_requested`. `review_requested` is reachable only
-from `building`, so a coalesced wake that finds the ticket still `delegated` (the
-strategy post and the `done` arrived together) hops `delegated → building` first:
+On `done`/`partial`, move to `review_requested` — from `building` on the first done, or
+from `revising` on a re-report. Read the state once: a coalesced wake that finds the
+ticket still `delegated` (the strategy post and the `done` arrived together) hops
+`delegated → building` first, and a re-read `done` while already `review_requested` is a
+no-op:
 
 ```bash
-[ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = delegated ] \
-  && waypoint manager ticket transition {{ticket_id}} --to building --reason "build observed with done"
+state=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')
+[ "$state" = delegated ] \
+  && waypoint manager ticket transition {{ticket_id}} --to building --reason "build observed with done" \
+  && state=building
 ```
 
 The lead parks alive and idle; the ticket keeps holding the shared tree until it lands
-or is abandoned:
+or is abandoned. Transition to `review_requested` only from `building` or `revising`:
 
 {{#if integration_mode == pr}}
-The lead's `done` cell carries the PR url in its `pr=` meta; the ticket record's
-`{{pr_url}}` is set by this transition, so read the url from the cell here:
+The lead's `done` cell carries the PR url in its `pr=` meta; read it and pass it as
+`--pr-url` on this transition:
 
 ```bash
-pr=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.pr')
-waypoint manager ticket transition {{ticket_id}} --to review_requested \
-  --pr-url "$pr" --not-partial      # or --is-partial for a partial delivery
+if [ "$state" = building ] || [ "$state" = revising ]; then
+  pr=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.pr')
+  waypoint manager ticket transition {{ticket_id}} --to review_requested \
+    --pr-url "$pr" --not-partial      # or --is-partial for a partial delivery
+fi
 ```
 {{/if}}
 {{#if integration_mode == local}}
 ```bash
-waypoint manager ticket transition {{ticket_id}} --to review_requested \
-  --not-partial      # or --is-partial for a partial delivery
+if [ "$state" = building ] || [ "$state" = revising ]; then
+  waypoint manager ticket transition {{ticket_id}} --to review_requested \
+    --not-partial      # or --is-partial for a partial delivery
+fi
 ```
 {{/if}}
 

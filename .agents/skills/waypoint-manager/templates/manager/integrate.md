@@ -56,13 +56,16 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    fi
    ```
    Branch on `$decision`:
-   - **request-changes** → transition `review_requested → revising`, then relay the
-     round to the lead: post the human's requested changes (their `reply.notes`) to
-     `{{ticket_channel}}` as the durable payload, and send the rendered address-review
-     instructions:
+   - **request-changes** → relay the round to the lead, overwrite the consumed `done`
+     cell, and move to `revising`: post the human's requested changes (their
+     `reply.notes`) to `{{ticket_channel}}` as the durable payload, overwrite the
+     `status` cell to `kind=progress`, transition `review_requested → revising`, then
+     send the rendered address-review instructions:
      ```bash
      notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("\n")')
      waypoint board post {{ticket_channel}} "${notes:-address the review}" --meta kind=relay
+     waypoint board post {{ticket_channel}} "revising: addressing the review round" --key status --meta kind=progress
+     waypoint manager ticket transition {{ticket_id}} --to revising --reason request-changes
      lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
      waypoint sessions send "$lead" \
        "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
@@ -100,17 +103,32 @@ performs (or, opt-in, one they ask you to perform).
 
 Only if the human explicitly asks you to merge for them: reconcile first (skip if
 already `MERGED`); if the branch needs it, rebase onto the advanced trunk in your tree
-— trivial lockfile/generated conflicts only (`git add`, `git rebase --continue`); a
-**semantic** conflict → `git rebase --abort`, transition `review_requested → revising`,
-and relay it to the lead (never hand-resolve logic yourself). Then merge; when
-`require_ci_green` is `true` (here `{{require_ci_green}}`), wait for green CI first:
+— trivial lockfile/generated conflicts only (`git add`, `git rebase --continue`). A
+**semantic** conflict is the lead's to resolve: abort the rebase, relay it, overwrite
+the consumed `done` cell, and move to `revising` (never hand-resolve logic yourself):
 
 ```bash
-git -C {{repo_dir}} push --force-with-lease       # only if you rebased
-gh pr merge {{pr_url}} --squash --delete-branch    # or --auto so CI-gating never blocks a turn
+git -C {{repo_dir}} rebase --abort
+waypoint board post {{ticket_channel}} "rebase hit a semantic conflict on {{trunk}}; resolve it and re-report done" --meta kind=relay
+waypoint board post {{ticket_channel}} "revising: resolving a rebase conflict" --key status --meta kind=progress
+waypoint manager ticket transition {{ticket_id}} --to revising --reason "semantic rebase conflict"
+lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
+waypoint sessions send "$lead" "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
 ```
 
-Record `review_requested → merged` (or `→ deferred`) in the same step.
+On a clean rebase the ticket stays `review_requested`. Merge it and record the terminal
+in the same step; when `require_ci_green` is `true` (here `{{require_ci_green}}`), wait
+for green CI first. The semantic-conflict path leaves the ticket in `revising`; the
+guard below then skips both the merge and its record, and the `state == MERGED`
+reconcile above records the terminal on a later drain once the re-reviewed work merges:
+
+```bash
+if [ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = review_requested ]; then
+  git -C {{repo_dir}} push --force-with-lease       # only if you rebased
+  gh pr merge {{pr_url}} --squash --delete-branch    # or --auto so CI-gating never blocks a turn
+  waypoint manager ticket transition {{ticket_id}} --to merged    # or --to deferred for a partial delivery
+fi
+```
 {{/if}}
 {{#if integration_mode == local}}
 On the human's **approve**, fast-forward {{trunk}} onto {{branch}} in the shared tree,
@@ -125,8 +143,9 @@ the tree on `{{branch}}` for the lead to build on (only the fast-forward path ch
 ```bash
 checks=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.checks // "missing"')
 if [ "{{require_ci_green}}" = true ] && [ "$checks" != green ]; then
-  waypoint manager ticket transition {{ticket_id}} --to revising --reason "checks not green: $checks"
   waypoint board post {{ticket_channel}} "local checks are not green (checks=$checks); fix and re-report done" --meta kind=relay
+  waypoint board post {{ticket_channel}} "revising: fixing checks" --key status --meta kind=progress
+  waypoint manager ticket transition {{ticket_id}} --to revising --reason "checks not green: $checks"
   lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
   waypoint sessions send "$lead" "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
 else

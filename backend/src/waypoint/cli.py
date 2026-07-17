@@ -2902,6 +2902,14 @@ def board_clear(
             min=1,
         ),
     ] = None,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Clearing session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board clear.",
+        ),
+    ] = None,
 ) -> None:
     """Remove all posts from a channel, keeping the (now empty) channel.
 
@@ -2909,7 +2917,10 @@ def board_clear(
     are always deleted.
     """
     _emit(
-        _settings_from_ctx(ctx), lambda c: c.clear_board(channel, keep_last=keep_last)
+        _settings_from_ctx(ctx),
+        lambda c: c.clear_board(
+            channel, keep_last=keep_last, actor_session_id=actor_session_id
+        ),
     )
 
 
@@ -2917,9 +2928,20 @@ def board_clear(
 def board_delete(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board delete.",
+        ),
+    ] = None,
 ) -> None:
     """Delete a channel entirely, posts and all."""
-    _emit(_settings_from_ctx(ctx), lambda c: c.delete_board(channel))
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.delete_board(channel, actor_session_id=actor_session_id),
+    )
 
 
 @board_app.command("delete-entry")
@@ -2927,11 +2949,21 @@ def board_delete_entry(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
     entry_id: Annotated[int, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board-entry delete.",
+        ),
+    ] = None,
 ) -> None:
     """Delete a single post (log entry or cell) by its id."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.delete_board_entry(channel, entry_id),
+        lambda c: c.delete_board_entry(
+            channel, entry_id, actor_session_id=actor_session_id
+        ),
     )
 
 

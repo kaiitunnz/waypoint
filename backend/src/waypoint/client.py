@@ -659,22 +659,38 @@ class WaypointClient:
         ).json()["entry"]
         return data
 
-    def clear_board(self, channel: str, keep_last: int | None = None) -> dict[str, Any]:
+    def clear_board(
+        self,
+        channel: str,
+        keep_last: int | None = None,
+        *,
+        actor_session_id: str | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if keep_last is not None:
             params["keep_last"] = keep_last
+        if actor_session_id:
+            params["actor_session_id"] = actor_session_id
         data: dict[str, Any] = self._request(
             "POST", f"/api/board/{channel}/clear", params=params or None
         ).json()
         return data
 
-    def delete_board(self, channel: str) -> dict[str, Any]:
-        data: dict[str, Any] = self._request("DELETE", f"/api/board/{channel}").json()
+    def delete_board(
+        self, channel: str, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = {"actor_session_id": actor_session_id} if actor_session_id else None
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/board/{channel}", params=params
+        ).json()
         return data
 
-    def delete_board_entry(self, channel: str, entry_id: int) -> dict[str, Any]:
+    def delete_board_entry(
+        self, channel: str, entry_id: int, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = {"actor_session_id": actor_session_id} if actor_session_id else None
         data: dict[str, Any] = self._request(
-            "DELETE", f"/api/board/{channel}/entries/{entry_id}"
+            "DELETE", f"/api/board/{channel}/entries/{entry_id}", params=params
         ).json()
         return data
 

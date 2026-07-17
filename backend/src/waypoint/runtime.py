@@ -3448,21 +3448,31 @@ class SessionRuntime:
         return self.storage.list_board_channels()
 
     async def clear_board_channel(
-        self, channel: str, keep_last: int | None = None
+        self,
+        channel: str,
+        keep_last: int | None = None,
+        *,
+        actor_session_id: str | None = None,
     ) -> int:
         removed = self.storage.clear_board_channel(channel, keep_last=keep_last)
-        await self._publish_board_update(channel)
+        await self._publish_board_update(channel, author_session_id=actor_session_id)
         return removed
 
-    async def delete_board_channel(self, channel: str) -> int:
+    async def delete_board_channel(
+        self, channel: str, *, actor_session_id: str | None = None
+    ) -> int:
         removed = self.storage.delete_board_channel(channel)
-        await self._publish_board_update(None)
+        await self._publish_board_update(None, author_session_id=actor_session_id)
         return removed
 
-    async def delete_board_entry(self, channel: str, entry_id: int) -> bool:
+    async def delete_board_entry(
+        self, channel: str, entry_id: int, *, actor_session_id: str | None = None
+    ) -> bool:
         deleted = self.storage.delete_board_entry(channel, entry_id)
         if deleted:
-            await self._publish_board_update(channel)
+            await self._publish_board_update(
+                channel, author_session_id=actor_session_id
+            )
         return deleted
 
     async def update_board_entry(
@@ -3496,11 +3506,12 @@ class SessionRuntime:
         await self.broadcast.publish(
             SessionEnvelope(type="board_update", payload={"channel": channel})
         )
-        # Self-exclusion: the author is never woken by its own post; the
-        # non-authored mutations (clear/delete/prune) pass ``None`` and wake
-        # every matching subscriber. Board wakes are glob-scoped, not owner-
-        # scoped, so no ``owner_session_id``. ``kind`` (the post's ``kind=``
-        # meta) lets a kind-filtered subscriber skip a post it does not watch.
+        # Self-exclusion: a caller that identifies itself via ``author_session_id``
+        # (a post's author, or a manager clearing/deleting/pruning its own board) is
+        # never woken; an unattributed mutation (``author_session_id`` None) wakes
+        # every matching subscriber. Board wakes are glob-scoped, not owner-scoped, so
+        # no ``owner_session_id``. ``kind`` (the post's ``kind=`` meta) lets a
+        # kind-filtered subscriber skip a post it does not watch.
         self._spawn_wake_dispatch(
             channel=channel,
             is_inbox=False,

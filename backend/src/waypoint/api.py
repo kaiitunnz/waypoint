@@ -1419,12 +1419,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
         keep_last: Annotated[int | None, Query(ge=1)] = None,
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         # Remove the channel's posts but keep the (now empty) channel.
         # With keep_last, the N most-recent log posts are retained; cells are
-        # always dropped.
+        # always dropped. `actor_session_id` self-excludes the clearer from the wake.
         removed = await context.runtime.clear_board_channel(
-            channel, keep_last=keep_last
+            channel, keep_last=keep_last, actor_session_id=actor_session_id
         )
         return {"channel": channel, "cleared": removed}
 
@@ -1432,9 +1433,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def board_delete(
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         # Remove the channel entirely, posts and all.
-        removed = await context.runtime.delete_board_channel(channel)
+        removed = await context.runtime.delete_board_channel(
+            channel, actor_session_id=actor_session_id
+        )
         return {"channel": channel, "deleted": removed}
 
     @app.delete("/api/board/{channel}/entries/{entry_id}")
@@ -1442,8 +1446,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         channel: str,
         entry_id: int,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
-        deleted = await context.runtime.delete_board_entry(channel, entry_id)
+        deleted = await context.runtime.delete_board_entry(
+            channel, entry_id, actor_session_id=actor_session_id
+        )
         if not deleted:
             raise HTTPException(status_code=404, detail="board entry not found")
         return {"channel": channel, "entry_id": entry_id, "deleted": True}

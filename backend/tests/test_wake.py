@@ -601,6 +601,69 @@ async def test_session_delete_prune_wakes_a_non_deleter_subscriber(
     assert calls == [("mgr", WAKE_INPUT_TEXT)]
 
 
+@pytest.mark.asyncio
+async def test_board_clear_self_excludes_the_actor(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-1"])
+    runtime.storage.add_board_entry("ticket-1", "work", author_session_id="child")
+    calls = _record_wakes(runtime, monkeypatch)
+
+    await runtime.clear_board_channel("ticket-1", actor_session_id="mgr")
+    await _flush_wakes(runtime)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_board_clear_wakes_a_non_actor_subscriber(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-1"])
+    runtime.storage.add_board_entry("ticket-1", "work", author_session_id="child")
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # No actor → the clear wakes the subscriber, so the exclusion above is load-bearing.
+    await runtime.clear_board_channel("ticket-1")
+    await _flush_wakes(runtime)
+
+    assert calls == [("mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_board_delete_channel_self_excludes_the_actor(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-1"])
+    runtime.storage.add_board_entry("ticket-1", "work", author_session_id="child")
+    calls = _record_wakes(runtime, monkeypatch)
+
+    await runtime.delete_board_channel("ticket-1", actor_session_id="mgr")
+    await _flush_wakes(runtime)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_board_delete_entry_self_excludes_the_actor(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-1"])
+    entry = runtime.storage.add_board_entry(
+        "ticket-1", "work", author_session_id="child"
+    )
+    calls = _record_wakes(runtime, monkeypatch)
+
+    await runtime.delete_board_entry("ticket-1", entry.id, actor_session_id="mgr")
+    await _flush_wakes(runtime)
+
+    assert calls == []
+
+
 def test_register_list_unregister_roundtrip(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(make_session(runtime.settings, "codex-sub"))

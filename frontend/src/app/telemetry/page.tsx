@@ -105,6 +105,12 @@ export default function TelemetryPage() {
   const [healthLoading, setHealthLoading] = useState(true);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
+  // Whether the deterministic-insights query has settled at least once for this
+  // mount. Distinguishes initial discovery (show the skeleton) from background
+  // revalidation of a known-empty region (render nothing). Never reset for
+  // range/filter changes: an optional, conditionally-present region revalidates
+  // stale-while-revalidate, and the settled response stays authoritative.
+  const [insightsHasSettled, setInsightsHasSettled] = useState(false);
   const [dismissingSignature, setDismissingSignature] = useState<string | null>(null);
   const [settings, setSettings] = useState<TelemetrySettingsResponse | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -202,6 +208,9 @@ export default function TelemetryPage() {
       setActivityLoading(false);
       setHealthLoading(false);
       setInsightsLoading(false);
+      // No request fires for an incomplete range; treat the region as settled
+      // so a mid-edit custom range never shows a phantom insight skeleton.
+      setInsightsHasSettled(true);
       return;
     }
     setOverviewLoading(true);
@@ -220,6 +229,7 @@ export default function TelemetryPage() {
       setActivity(activityRes);
       setHealth(healthRes);
       setInsights(insightsRes);
+      setInsightsHasSettled(true);
       setState("ready");
       setError("");
     } catch (err) {
@@ -772,6 +782,7 @@ export default function TelemetryPage() {
           <InsightCards
             insights={insights}
             loading={insightsLoading}
+            hasSettled={insightsHasSettled}
             dismissingSignature={dismissingSignature}
             onDismiss={(insight) => void handleDismissInsight(insight)}
             onClickThrough={handleInsightClickThrough}

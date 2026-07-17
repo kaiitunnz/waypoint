@@ -3610,13 +3610,24 @@ class SessionRuntime:
     async def mark_inbox_read(
         self, item_id: str, *, actor_session_id: str | None = None
     ) -> InboxItem | None:
+        prior = self.storage.get_inbox_item(item_id)
         result = self.storage.mark_inbox_read(item_id)
         if result is None:
             return None
         item, changed = result
         # A repeat read is a no-op; don't re-broadcast to every client.
         if changed:
-            await self._publish_inbox_update(item, actor_session_id=actor_session_id)
+            # A no-action item resolves on first read (OPEN → RESOLVED): an
+            # actionable change that wakes the owner. A plain read only stamps
+            # read_at (refreshes the badge) and must not wake the owner.
+            resolved_on_read = (
+                prior is not None
+                and prior.status == InboxStatus.OPEN
+                and item.status == InboxStatus.RESOLVED
+            )
+            await self._publish_inbox_update(
+                item, actor_session_id=actor_session_id, wake=resolved_on_read
+            )
         return item
 
     async def delete_inbox_item(self, item_id: str) -> bool:
@@ -3641,11 +3652,12 @@ class SessionRuntime:
         return self.storage.unresolved_inbox_count()
 
     async def _publish_inbox_update(
-        self, item: InboxItem, *, actor_session_id: str | None = None
+        self, item: InboxItem, *, actor_session_id: str | None = None, wake: bool = True
     ) -> None:
         # Two channels: a global ``inbox_update`` carrying the fresh unresolved
         # count (drives the cross-session badge) plus the full item on the
-        # per-item stream so a connected ``inbox wait`` resumes.
+        # per-item stream so a connected ``inbox wait`` resumes. ``wake=False``
+        # publishes the refresh without waking the owner (a plain read).
         count = self.storage.unresolved_inbox_count()
         await self.broadcast.publish(
             SessionEnvelope(
@@ -3662,12 +3674,13 @@ class SessionRuntime:
         # Wake only the item's owner — the session that filed it and waits on a
         # reply — self-excluding the mutating actor. ``from_session_id`` is ""
         # for a human-posted item, which owns no session and so wakes nobody.
-        self._spawn_wake_dispatch(
-            channel=None,
-            is_inbox=True,
-            actor_session_id=actor_session_id,
-            owner_session_id=item.from_session_id or None,
-        )
+        if wake:
+            self._spawn_wake_dispatch(
+                channel=None,
+                is_inbox=True,
+                actor_session_id=actor_session_id,
+                owner_session_id=item.from_session_id or None,
+            )
 
     async def _publish_inbox_deleted(self, item_id: str) -> None:
         # Deletion is a terminal outcome for a waiter (``gone``); publish on both

@@ -8,6 +8,10 @@ from waypoint.runtime import WAKE_INPUT_TEXT, SessionRuntime
 from waypoint.schemas import (
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    InboxApprovalBlockInput,
+    InboxBlockType,
+    InboxMarkdownBlockInput,
+    InboxStatus,
     SessionInputRequest,
     SessionRecord,
     SessionSource,
@@ -324,6 +328,120 @@ async def test_ownerless_inbox_mutation_wakes_nobody(tmp_path, monkeypatch) -> N
     )
     await _flush_wakes(runtime)
     assert calls == []
+
+
+def _approval_id(item) -> str:
+    return next(b.id for b in item.blocks if b.type == InboxBlockType.APPROVAL)
+
+
+@pytest.mark.asyncio
+async def test_plain_inbox_read_refreshes_without_waking_owner(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "codex-mgr"))
+    _register(runtime, "codex-mgr", wake_on_inbox=True)
+    calls = _record_wakes(runtime, monkeypatch)
+
+    published: list[str] = []
+    orig_publish = runtime.broadcast.publish
+
+    async def recording_publish(envelope, **kwargs):
+        published.append(envelope.type)
+        return await orig_publish(envelope, **kwargs)
+
+    monkeypatch.setattr(runtime.broadcast, "publish", recording_publish)
+
+    item = runtime.storage.create_inbox_item(
+        from_session_id="codex-mgr",
+        from_label=None,
+        subject="ticket-x — PR review",
+        blocks=[
+            InboxMarkdownBlockInput(text="pr summary"),
+            InboxApprovalBlockInput(
+                prompt="Merge?", options=["merge", "abort"], required=True
+            ),
+        ],
+    )
+
+    # A plain read of the open interactive item refreshes the badge but does
+    # not wake the owner.
+    await runtime.mark_inbox_read(item.id, actor_session_id=None)
+    await _flush_wakes(runtime)
+    assert calls == []
+    reread = runtime.storage.get_inbox_item(item.id)
+    assert reread is not None and reread.status is InboxStatus.OPEN
+    assert reread.read_at is not None
+    assert "inbox_update" in published
+
+    # A human answer on the same item does wake the owner.
+    await runtime.submit_inbox_block(
+        item.id, _approval_id(item), answer={"decision": "merge"}, actor_session_id=None
+    )
+    await _flush_wakes(runtime)
+    assert calls == [("codex-mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_no_action_inbox_resolve_on_read_wakes_owner(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "codex-mgr"))
+    _register(runtime, "codex-mgr", wake_on_inbox=True)
+    calls = _record_wakes(runtime, monkeypatch)
+
+    item = runtime.storage.create_inbox_item(
+        from_session_id="codex-mgr",
+        from_label=None,
+        subject="fyi",
+        blocks=[InboxMarkdownBlockInput(text="done")],
+    )
+
+    # A no-action item resolves on first read — an actionable transition that
+    # wakes the owner.
+    await runtime.mark_inbox_read(item.id, actor_session_id=None)
+    await _flush_wakes(runtime)
+    resolved = runtime.storage.get_inbox_item(item.id)
+    assert resolved is not None and resolved.status is InboxStatus.RESOLVED
+    assert calls == [("codex-mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_read_of_answered_item_does_not_rewake_owner(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "codex-mgr"))
+    _register(runtime, "codex-mgr", wake_on_inbox=True)
+    calls = _record_wakes(runtime, monkeypatch)
+
+    item = runtime.storage.create_inbox_item(
+        from_session_id="codex-mgr",
+        from_label=None,
+        subject="ticket-y — PR review",
+        blocks=[
+            InboxApprovalBlockInput(
+                prompt="Merge?", options=["merge", "abort"], required=True
+            )
+        ],
+    )
+
+    # Answered before ever being read: the answer wakes the owner once.
+    await runtime.submit_inbox_block(
+        item.id, _approval_id(item), answer={"decision": "merge"}, actor_session_id=None
+    )
+    await _flush_wakes(runtime)
+    assert calls == [("codex-mgr", WAKE_INPUT_TEXT)]
+
+    # Reading the now-resolved-but-unread item stamps read_at without a second
+    # wake — the read is not itself an actionable transition.
+    calls.clear()
+    await runtime.mark_inbox_read(item.id, actor_session_id=None)
+    await _flush_wakes(runtime)
+    assert calls == []
+    reread = runtime.storage.get_inbox_item(item.id)
+    assert reread is not None and reread.read_at is not None
 
 
 @pytest.mark.asyncio

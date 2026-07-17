@@ -101,15 +101,35 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      the subtree, return the tree to `{{trunk}}`, drop the branch, and clear the ticket's
      tree fields.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
-     re-notify-then-abandon. Each entry reports `waiting_since` (the live gate item's
-     post, or the awaiting entry when no item exists), so a re-posted gate resets the
-     wait. Key the re-notify marker to *this* entry's `waiting_since`: if the ticket
-     cell's `latency_renotified` ≠ the entry's `waiting_since`, re-notify the human and
-     stamp it (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge
-     --meta latency_renotified=<waiting_since>`); if it already equals the entry's
-     `waiting_since` (re-notified, still unanswered) → transition to `abandoned`. If the
-     abandoned ticket was on-tree (`blocked`/`review_requested`), reap it and release
-     the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+     re-notify-then-abandon across successive wakes, keyed to durable ticket-cell meta.
+     Skip an entry whose ticket you already handled this drain (re-opened, re-notified, or
+     confirmed within its window). Each entry reports `waiting_since` (the live gate item's
+     post, or the awaiting entry when no item exists); a re-posted gate resets the wait.
+     Read the markers and the clock:
+     ```bash
+     hlh=$(waypoint manager state --json | jq -r '.config.human_latency_hours // 72')
+     [ "$hlh" -lt 1 ] && hlh=1
+     cell=$(waypoint board read {{tickets_channel}} --key ticket:{{ticket_id}} --json)
+     renotified=$(echo "$cell" | jq -r '.cells[0].metadata.latency_renotified // empty')
+     renotified_at=$(echo "$cell" | jq -r '.cells[0].metadata.latency_renotified_at // 0')
+     now=$(date +%s)
+     ```
+     - **First timeout, a re-posted gate, or an unstamped re-notify** (`latency_renotified`
+       ≠ the entry's `waiting_since`, or `latency_renotified_at` is `0`) — re-notify the
+       human and stamp both markers; the ticket is handled for the rest of this drain:
+       ```bash
+       waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
+         --meta latency_renotified=<waiting_since> --meta latency_renotified_at=$now
+       ```
+     - **Re-notified, window elapsed** (`latency_renotified` == `waiting_since`,
+       `latency_renotified_at` > 0, and `now - renotified_at ≥ hlh * 3600`) → transition to
+       `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`), reap
+       it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+     - **Re-notified, still within the window** — handled this drain; the stamp and the
+       armed liveness self-wake carry the abandon to a later wake.
+
+     Handling a latency entry any of these three ways resolves it for this drain; the
+     fixpoint check does not treat a re-notified ticket's persisting entry as outstanding.
 {{#if integration_mode == pr}}
    - For `review_requested` tickets, `gh pr view <pr-url> --json
      state,mergeStateStatus,statusCheckRollup` (external CI/merge state).

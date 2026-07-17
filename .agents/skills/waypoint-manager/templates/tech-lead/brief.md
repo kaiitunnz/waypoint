@@ -42,9 +42,9 @@ waypoint board log {{ticket_channel}} --json | jq -c '[.[] | select(.metadata.ki
 
 Act on relays whose board-entry `id` exceeds the highest relay `id` you have already
 acted on, apply each **once**, and remember that id (a monotonic per-channel cursor). A
-relay carries the authoritative payload; a bare `sessions send` nudge does not — always
-re-read the log. If you died and restarted, the log still holds every owed relay:
-re-read from the top and reapply what you hadn't recorded.
+relay is a `kind=relay` entry on the board; read it from the log and apply it by id. If
+you died and restarted, the log still holds every owed relay: re-read from the top and
+reapply what you hadn't recorded.
 
 ## Report status with the typed vocabulary
 
@@ -183,6 +183,7 @@ operations at the ticket's boundaries.
 
 ## 4. Review rounds
 
-Each review round, the manager sends you the instructions for addressing it along with
-the human's requested changes (relayed on {{ticket_channel}}). Act on the relayed
-feedback and re-post `done` on the new head; repeat until the human merges or aborts.
+Each review round, the manager posts the instructions for addressing it, with the
+human's requested changes, as a `kind=relay` entry on {{ticket_channel}}. Act on the
+relayed feedback and re-post `done` on the new head; repeat until the human merges or
+aborts.

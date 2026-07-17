@@ -15,15 +15,15 @@ head:
 waypoint board post {{ticket_channel}} "revising: addressing the review" --key status --meta kind=progress
 ```
 
-Read the owed relay from the durable log — do not act on the nudge alone:
+The requested changes are folded into this `kind=relay` post on `{{ticket_channel}}`,
+under **Requested changes** below. The relay is durable: take the `kind=relay` posts
+whose board-entry `id` exceeds the highest you have handled, act on each **once**, and
+record that id. If you restarted, or several rounds queued while you were away, re-read
+them from the log in id order:
 
 ```bash
 waypoint board log {{ticket_channel}} --json | jq -c '[.[] | select(.metadata.kind == "relay")] | sort_by(.id) | .[]'   # oldest-first
 ```
-
-Take the relay posts whose board-entry `id` exceeds the highest relay `id` you have
-already handled, act on each **once**, and record that id. If several rounds queued
-while you were away, apply them in id order.
 
 ## 2. Address each finding
 

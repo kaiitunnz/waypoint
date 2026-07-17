@@ -32,7 +32,7 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
     --title "subagent:ticket-{{ticket_id}}:tech-lead" \
     --spawner-session-id {{manager_session_id}} | jq -r .session.id)   # never --worktree: the lead shares your tree
   waypoint manager ticket update {{ticket_id}} --lead-session-id "$new"
-  waypoint sessions wake-on-board "$new" --channels {{ticket_channel}}   # relays wake it; the manager owns the inbox
+  waypoint sessions wake-on-board "$new" --channels {{ticket_channel}} --kinds relay   # relays wake it; the manager owns the inbox
   # Match the resume prompt to the state: `brief` for a build in progress
   # (`building`/`blocked`), `address-review` for a delivered ticket
   # (`revising`/`review_requested`) whose PR/commit already exists.
@@ -99,7 +99,7 @@ sid=$(waypoint sessions start {{tech_lead_launch}} \
   --title "subagent:ticket-{{ticket_id}}:tech-lead" \
   --spawner-session-id {{manager_session_id}} | jq -r .session.id)
 waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
-waypoint sessions wake-on-board "$sid" --channels {{ticket_channel}}   # relays wake it; the manager owns the inbox
+waypoint sessions wake-on-board "$sid" --channels {{ticket_channel}} --kinds relay   # relays wake it; the manager owns the inbox
 ```
 
 If the model/permission were wrong the lead dies on turn 1; confirm it actually

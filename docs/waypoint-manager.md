@@ -371,7 +371,7 @@ and "do" is recoverable by reconcile:
   after observing `gh pr view` report `MERGED`, so a turn that dies mid-observation
   just re-observes on the next drain. An opt-in merge-on-behalf reconciles against `gh
   pr view` first, so it never double-merges.
-- **Relay** — append the versioned relay post before the nudge (below).
+- **Relay** — append the versioned relay post before the exit transition (below).
 
 Actions are idempotent: spawn only if no live session with the intended title exists;
 relay via the durable versioned log, never a bare `sessions send` carrying the
@@ -382,19 +382,16 @@ report `MERGED`.
 
 A `waypoint sessions send` is a fire-and-forget, non-observable sink — it starts a
 turn but leaves no durable record, so a lead that dies mid-processing loses the
-message. Every manager→lead relay (a human answer to a blocker, review feedback, a
-re-delegate briefing) is a `kind=relay` append-log post to the ticket channel,
-followed by a content-free nudge:
+message. Every manager→lead relay (a human answer to a blocker, the rendered
+review-round instructions) is a `kind=relay` append-log post to the ticket channel:
 
 ```
-# Durable payload on the log:
-waypoint board post <ticket-channel> "<the human answer / review feedback>" --meta kind=relay
-# Content-free nudge — carries no payload, just wakes the lead:
-waypoint sessions send <lead-sid> "[wp-msg from=<manager-sid>] Relay posted; read owed relays and act."
+waypoint board post <ticket-channel> "<the human answer / rendered review instructions>" --meta kind=relay
 ```
 
-The lead is wake-subscribed to its own ticket channel, so the post wakes it; the
-`sessions send` is a fallback. The lead consumes `kind=relay` posts in board-entry
+The lead's wake subscription filters its ticket channel to `kind=relay`: a relay post
+wakes it once, and the manager's status overwrites do not. The lead consumes
+`kind=relay` posts in board-entry
 `id` order — the id is a monotonic per-channel cursor — acting on those past the
 highest id it has processed. This makes relays complete (re-derivable from the log
 on every lead re-entry, so a fresh lead after a death still sees every owed relay),

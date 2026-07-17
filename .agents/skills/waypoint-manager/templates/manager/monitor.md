@@ -165,7 +165,6 @@ if [ -n "$item" ]; then
     selected=$(echo "$answer" | jq -r '[.item.blocks[] | select(.type=="question").answer | .selected[]?, (.other // empty)] | map(select(. != "")) | join("; ")')   # blocker: the chosen option(s) + free-text
     notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("; ")')   # any block-level comment the human added
     branch=$(echo "$info" | jq -r '.ticket.branch // empty')     # set for a mid-build or restart-exhausted block; empty for a branch-less block or the spec gate
-    lead=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
     restarts=$(echo "$info" | jq -r '.ticket.lead_restarts')
     maxr=$(waypoint manager state --json | jq -r '.config.max_lead_restarts')
     if [ -n "$branch" ] && [ "$restarts" -ge "$maxr" ] && [ "$selected" = retry ]; then      # restart-exhausted: fresh budget, resume the branch
@@ -173,10 +172,8 @@ if [ -n "$item" ]; then
       waypoint manager ticket transition {{ticket_id}} --to building --reason "retry after restart exhaustion"
     elif [ -n "$branch" ] && [ "$restarts" -ge "$maxr" ] && [ "$selected" = abandon ]; then
       waypoint manager ticket transition {{ticket_id}} --to abandoned --reason "abandoned after restart exhaustion"   # then Finalize ({{templates_dir}}/manager/integrate.md)
-    elif [ -n "$branch" ]; then                        # mid-build blocker: relay durably, nudge, resume
+    elif [ -n "$branch" ]; then                        # mid-build blocker: relay durably, resume
       waypoint board post {{ticket_channel}} "${selected}${notes:+ (notes: $notes)}" --meta kind=relay
-      waypoint sessions send "$lead" \
-        "[wp-msg from={{manager_session_id}}] Relay posted on {{ticket_channel}}; read owed relays and act."
       waypoint manager ticket transition {{ticket_id}} --to building --reason "resume after blocker"
     fi
   fi

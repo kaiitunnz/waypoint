@@ -57,18 +57,17 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    ```
    Branch on `$decision`:
    - **request-changes** → relay the round to the lead, overwrite the consumed `done`
-     cell, and move to `revising`: post the human's requested changes (their
-     `reply.notes`) to `{{ticket_channel}}` as the durable payload, overwrite the
-     `status` cell to `kind=progress`, transition `review_requested → revising`, then
-     send the rendered address-review instructions:
+     cell, and move to `revising`: post the rendered address-review with the human's
+     requested changes (their `reply.notes`) folded in to `{{ticket_channel}}` as the
+     durable `kind=relay` payload, overwrite the `status` cell to `kind=progress`, and
+     transition `review_requested → revising` (the relay lands before the exit
+     transition — a re-post after a crash re-applies once by id):
      ```bash
      notes=$(echo "$answer" | jq -r '[.item.blocks[].reply.notes // empty] | map(select(. != "")) | join("\n")')
-     waypoint board post {{ticket_channel}} "${notes:-address the review}" --meta kind=relay
+     relay=$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})
+     waypoint board post {{ticket_channel}} "$(printf '%s\n\nRequested changes:\n%s' "$relay" "${notes:-address the review}")" --meta kind=relay
      waypoint board post {{ticket_channel}} "revising: addressing the review round" --key status --meta kind=progress
      waypoint manager ticket transition {{ticket_id}} --to revising --reason request-changes
-     lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-     waypoint sessions send "$lead" \
-       "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
      ```
      The lead addresses the feedback, re-pushes, and re-posts `done`; you move
      `revising → review_requested` and re-post the gate on the new head.
@@ -116,11 +115,10 @@ the consumed `done` cell, and move to `revising` (never hand-resolve logic yours
 
 ```bash
 git -C {{repo_dir}} rebase --abort
-waypoint board post {{ticket_channel}} "rebase hit a semantic conflict on {{trunk}}; resolve it and re-report done" --meta kind=relay
+relay=$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})
+waypoint board post {{ticket_channel}} "$(printf '%s\n\nRequested changes:\n%s' "$relay" "rebase hit a semantic conflict on {{trunk}}; resolve it and re-report done")" --meta kind=relay
 waypoint board post {{ticket_channel}} "revising: resolving a rebase conflict" --key status --meta kind=progress
 waypoint manager ticket transition {{ticket_id}} --to revising --reason "semantic rebase conflict"
-lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-waypoint sessions send "$lead" "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
 ```
 
 On a clean rebase the ticket stays `review_requested`. Merge it and record the terminal
@@ -150,11 +148,10 @@ the tree on `{{branch}}` for the lead to build on (only the fast-forward path ch
 ```bash
 checks=$(waypoint board read {{ticket_channel}} --key status --json | jq -r '.cells[0].metadata.checks // "missing"')
 if [ "{{require_ci_green}}" = true ] && [ "$checks" != green ]; then
-  waypoint board post {{ticket_channel}} "local checks are not green (checks=$checks); fix and re-report done" --meta kind=relay
+  relay=$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})
+  waypoint board post {{ticket_channel}} "$(printf '%s\n\nRequested changes:\nlocal checks are not green (checks=%s); fix and re-report done' "$relay" "$checks")" --meta kind=relay
   waypoint board post {{ticket_channel}} "revising: fixing checks" --key status --meta kind=progress
   waypoint manager ticket transition {{ticket_id}} --to revising --reason "checks not green: $checks"
-  lead=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id')
-  waypoint sessions send "$lead" "$(waypoint manager render --role tech_lead --step address-review --ticket {{ticket_id}})"
 else
   git -C {{repo_dir}} checkout {{trunk}}
   git -C {{repo_dir}} merge-base --is-ancestor {{branch}} {{trunk}} \

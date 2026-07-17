@@ -350,7 +350,7 @@ function CategoryTable({
                     >
                       Details
                       <span className="tm-inst-db-caret" aria-hidden="true">
-                        {detailsExpanded ? "▾" : "›"}
+                        {detailsExpanded ? "▾" : "▸"}
                       </span>
                     </button>
                   ) : null}
@@ -529,8 +529,7 @@ export function InstanceHealthPanel({
   const [eventMixExpanded, setEventMixExpanded] = useState(false);
 
   // A database-vacuum maintenance card focuses "database"; open the details so
-  // the reclaimability metric is visible without a second click, then let the
-  // parent perform its existing scroll.
+  // the reclaimability metric is visible without a second click.
   const handleInsightFocus = useCallback(
     (focus: string | undefined) => {
       if (focus === "database") setDatabaseDetailsExpanded(true);

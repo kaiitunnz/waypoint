@@ -346,12 +346,11 @@ export function instanceCategoryColor(category: string): string {
 
 // ── Database content breakdown ───────────────────────────────────────────
 //
-// The instance snapshot already carries `counts.table_rows` (a per-table
-// COUNT(*)) and `counts.events_by_kind`. These derive a bounded,
-// presentation-only view of what the SQLite file holds. Record counts are NOT
-// bytes — they explain database contents without dividing the file size. Only
-// the allowlisted user-facing tables are named; every other returned table
-// folds into a single generic remainder so schema additions stay aggregate.
+// Derives a bounded, presentation-only view of the SQLite file's contents from
+// the snapshot's per-table row counts (`counts.table_rows`), measured page
+// usage (`counts.table_bytes`), and event-kind counts. Only allowlisted
+// user-facing tables are named; every other returned table folds into a single
+// remainder so schema additions stay aggregate.
 
 const DATABASE_CONTENT_GROUPS = {
   session: ["sessions", "events", "session_token_usage_records"],
@@ -462,17 +461,21 @@ export function deriveDatabaseContent(
   ]);
   let otherSum = 0;
   let otherSeen = false;
-  let otherByteSum = 0;
-  let otherByteSeen = false;
   for (const [key, count] of Object.entries(tableRows)) {
     if (claimed.has(key) || !isValidCount(count)) continue;
     otherSum += count;
     otherSeen = true;
-    const bytes = rowBytes(tableBytes, key);
-    if (bytes !== null) {
-      otherByteSum += bytes;
-      otherByteSeen = true;
-    }
+  }
+
+  // Byte remainder spans every unclaimed table in table_bytes, including btrees
+  // with no counted rows (sqlite internals), so the three group subtotals sum to
+  // the used pages.
+  let otherByteSum = 0;
+  let otherByteSeen = false;
+  for (const [key, bytes] of Object.entries(tableBytes)) {
+    if (claimed.has(key) || !isValidCount(bytes)) continue;
+    otherByteSum += bytes;
+    otherByteSeen = true;
   }
 
   const eventMix: DatabaseEventKind[] = Object.entries(eventsByKind)

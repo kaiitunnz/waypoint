@@ -19,7 +19,7 @@ dependencies = [
   "PyYAML>=6.0.0",
   "typer>=0.26.8",
   "uvicorn>=0.51.0",
-  "websockets>=15.0.0",
+  "websockets>=16.1",
 ]
 
 [dependency-groups]

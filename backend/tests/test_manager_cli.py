@@ -785,6 +785,60 @@ def test_cli_manager_init_compiles_templates(
     assert rc["ticket_channel_prefix"] == "ticket-"
 
 
+def test_cli_manager_init_resolves_relative_templates_under_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A relative `templates:` path resolves under the repo root (like templates_dir),
+    # not the manifest's directory. The manifest sits in a subdir, so manifest-dir
+    # resolution would look in the wrong place.
+    monkeypatch.setattr("waypoint.cli._git_toplevel", lambda: str(tmp_path))
+    raw_dir = tmp_path / "raw" / "tech-lead"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "brief.md").write_text(
+        "{{project}} ticket {{ticket_id}}\n", encoding="utf-8"
+    )
+    manifest_dir = tmp_path / "cfg"
+    manifest_dir.mkdir()
+    manifest = manifest_dir / "waypoint-manager.yaml"
+    manifest.write_text(
+        "project: waypoint\n"
+        "trunk: main\n"
+        "templates_dir: compiled\n"
+        "board:\n"
+        "  tickets_channel: tickets\n"
+        "  ticket_channel_prefix: ticket-\n"
+        "roles:\n"
+        "  tech_lead:\n"
+        '    launch: { backend: claude_code, model: "opus[1m]", '
+        "permission_mode: auto }\n"
+        "    templates: raw/tech-lead\n",
+        encoding="utf-8",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"config": {}})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "init",
+            "--manifest",
+            str(manifest),
+            "--owner",
+            "mgr",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    body = (tmp_path / "compiled" / "tech_lead" / "brief.md").read_text(
+        encoding="utf-8"
+    )
+    assert "waypoint ticket {{ticket_id}}" in body  # per-repo-root source compiled
+
+
 def _resolve(text: str, mode: str) -> str:
     return _resolve_conditionals(text, {"integration_mode": mode})
 

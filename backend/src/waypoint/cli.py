@@ -3841,15 +3841,16 @@ def _compiled_templates_root(raw: dict[str, Any], repo_dir: str) -> str:
 
 
 def _compile_manager_templates(
-    manifest: Path,
     raw: dict[str, Any],
     static: dict[str, str],
     templates_dir: Path,
 ) -> None:
     """Bake the static bindings into every role's raw templates and write the
     compiled copies under `<templates_dir>/<role>/<step>.md`, leaving the per-ticket
-    placeholders for the manager (its own steps) or `manager render` (children)."""
-    base = manifest.resolve().parent
+    placeholders for the manager (its own steps) or `manager render` (children). A
+    role's relative `templates:` path resolves under the repo root, like
+    `templates_dir` and `spec_dir`."""
+    base = Path(static["repo_dir"])
     roles = _mapping(raw.get("roles"))
     for role, spec in roles.items():
         if not isinstance(spec, dict) or spec.get("templates") is None:
@@ -3994,7 +3995,7 @@ def manager_init(
     repo_dir = _git_toplevel()
     templates_dir = _compiled_templates_root(raw, repo_dir)
     static = _manager_static_bindings(raw, repo_dir, session_id, templates_dir)
-    _compile_manager_templates(manifest, raw, static, Path(templates_dir))
+    _compile_manager_templates(raw, static, Path(templates_dir))
     config["render_context"] = {
         "templates_dir": templates_dir,
         "tickets_channel": static["tickets_channel"],

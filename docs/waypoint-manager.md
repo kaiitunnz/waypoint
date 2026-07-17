@@ -605,10 +605,13 @@ though not required: the durable state machine recovers the manager on any trans
 `launch:` block with `backend: claude_code` and no explicit `transport` resolves to
 `claude_tty`.
 
-Each role's `templates:` path points at a directory of per-step Markdown prompts.
-`manager init` compiles them — baking the static placeholders (below) into each body
-— and writes the compiled copies to `<templates_dir>/<role>/<step>.md`, the manager's
-runtime source of truth.
+Each role's `templates:` path points at a directory of per-step Markdown prompts; a
+relative path resolves under the repo root, like `templates_dir` and `spec_dir`. The
+skill ships each role's raw templates under its own `templates/<role>` directory; copy
+them to the `templates:` location (e.g. a gitignored `.waypoint/templates/<role>`) and
+customize before `init`. `manager init` compiles them — baking the static placeholders
+(below) into each body — and writes the compiled copies to
+`<templates_dir>/<role>/<step>.md`, the manager's runtime source of truth.
 
 ### Template placeholders
 

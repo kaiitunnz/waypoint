@@ -45,17 +45,18 @@ escalation:
 # `launch: { backend, model, permission_mode, ... }`. manager + tech_lead run
 # unattended → auto-approving permission_mode (claude_code: auto). manager runs on
 # claude_tty (recommended) so a turn survives a backend restart; the durable state
-# machine keeps any transport correct either way.
+# machine keeps any transport correct either way. Each `templates:` is the role's raw
+# prompt dir; a relative path resolves under the repo root, like templates_dir/spec_dir.
 roles:
   manager:
     launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: auto }
-    templates: templates/manager
+    templates: .waypoint/templates/manager
   prd_writer:
     preset: writer-opus                   # e.g. an opus claude_code preset; must pre-exist
-    templates: templates/prd-writer
+    templates: .waypoint/templates/prd-writer
   rfc_writer:
     preset: writer-opus
-    templates: templates/rfc-writer
+    templates: .waypoint/templates/rfc-writer
   tech_lead:
     preset: lead-opus-1m                  # OR: launch: { backend: claude_code, model: "opus[1m]", permission_mode: auto }
-    templates: templates/tech-lead
+    templates: .waypoint/templates/tech-lead

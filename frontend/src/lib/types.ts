@@ -1155,6 +1155,7 @@ export interface FilesystemSignal {
 
 export interface InstanceCounts {
   table_rows: Record<string, number>;
+  table_bytes: Record<string, number>;
   events_by_kind: Record<string, number>;
   session_dir_count: number;
   orphan_dir_count: number;

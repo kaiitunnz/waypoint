@@ -119,6 +119,9 @@ class InstanceCounts(BaseModel):
     """Privacy-safe counts that make the footprint interpretable (PRD FR-1)."""
 
     table_rows: dict[str, int] = Field(default_factory=dict)
+    # Measured page usage (btree + indexes) per table, from dbstat; keyed by the
+    # owning table. Empty when dbstat is unavailable or the read budget is spent.
+    table_bytes: dict[str, int] = Field(default_factory=dict)
     events_by_kind: dict[str, int] = Field(default_factory=dict)
     session_dir_count: int = 0
     orphan_dir_count: int = 0

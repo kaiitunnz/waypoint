@@ -1,6 +1,13 @@
 "use client";
 
-import { Dispatch, MutableRefObject, SetStateAction, useCallback, useState } from "react";
+import {
+  CSSProperties,
+  Dispatch,
+  MutableRefObject,
+  SetStateAction,
+  useCallback,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { SessionUsagePill } from "@/components/SessionUsagePill";
@@ -151,7 +158,16 @@ export function SessionTerminalView({
   // usage panel — it drops out of the term-bar, and ``.session-terminal``'s
   // ``overflow: hidden`` would clip an in-pane absolute menu. Right-anchored
   // to match the trigger's top-right home.
-  const overflowMenuStyle = usePopoverAnchor(termMenuWrapRef, termMenuOpen, "right");
+  const { style: overflowMenuAnchor, bounds: overflowMenuBounds } = usePopoverAnchor(
+    termMenuWrapRef,
+    termMenuOpen,
+    "right",
+  );
+  // The hook now returns positioning and bounds separately; keep the menu's
+  // prior tall-menu scrolling by capping height to the available space.
+  const overflowMenuStyle: CSSProperties | undefined = overflowMenuAnchor
+    ? { ...overflowMenuAnchor, maxHeight: overflowMenuBounds?.maxHeight, overflowY: "auto" }
+    : undefined;
 
   return (
     <section

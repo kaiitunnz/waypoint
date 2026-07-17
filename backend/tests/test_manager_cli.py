@@ -839,6 +839,62 @@ def test_cli_manager_init_resolves_relative_templates_under_repo_root(
     assert "waypoint ticket {{ticket_id}}" in body  # per-repo-root source compiled
 
 
+def test_cli_manager_init_bakes_branch_pattern(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # branch_pattern bakes into the manager's compiled templates. Its single-brace
+    # value ({type}/{slug}) is not a `{{…}}` placeholder and lands verbatim; absent,
+    # it defaults to {type}/{slug}.
+    monkeypatch.setattr("waypoint.cli._git_toplevel", lambda: str(tmp_path))
+    raw_dir = tmp_path / "raw" / "manager"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "delegate.md").write_text(
+        "branch: {{branch_pattern}}\n", encoding="utf-8"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"config": {}})
+
+    _mock_cli(monkeypatch, handler)
+
+    def _init(compiled: str, branch_pattern_line: str) -> str:
+        manifest = tmp_path / f"{compiled}.yaml"
+        manifest.write_text(
+            "project: waypoint\n"
+            "trunk: main\n"
+            f"templates_dir: {compiled}\n"
+            f"{branch_pattern_line}"
+            "roles:\n"
+            "  manager:\n"
+            '    launch: { backend: claude_code, model: "opus[1m]", '
+            "permission_mode: auto }\n"
+            "    templates: raw/manager\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            cli_app,
+            [
+                "--config",
+                str(_cli_config(tmp_path)),
+                "manager",
+                "init",
+                "--manifest",
+                str(manifest),
+                "--owner",
+                "mgr",
+            ],
+        )
+        assert result.exit_code == 0, result.stdout
+        return (tmp_path / compiled / "manager" / "delegate.md").read_text(
+            encoding="utf-8"
+        )
+
+    assert "branch: {type}/{slug}" in _init("default", "")
+    assert "branch: {user}/{type}/{slug}" in _init(
+        "custom", 'branch_pattern: "{user}/{type}/{slug}"\n'
+    )
+
+
 def _resolve(text: str, mode: str) -> str:
     return _resolve_conditionals(text, {"integration_mode": mode})
 

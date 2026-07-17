@@ -11,6 +11,7 @@
 project: waypoint                         # used in summaries and channel labels
 trunk: main                               # branch each ticket is cut from; the human's merge advances it
 spec_dir: .waypoint/specs                 # where PRD/RFC writers write specs; keep under gitignored .waypoint/ so writers touch no tracked file
+branch_pattern: "{type}/{slug}"           # ticket branch name; placeholders {slug} (from the title), {type} (conventional-commit type), {id}, {user}
 templates_dir: .waypoint/manager/templates   # where init writes the compiled templates; under gitignored .waypoint/, resolved relative to the repo root
 
 board:

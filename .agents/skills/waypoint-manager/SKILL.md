@@ -95,7 +95,7 @@ drops the state records only, so reap what you own first:
      waypoint sessions delete "$s" --force --prune-branches
    done
    ```
-2. **Reset the tree** to `{{trunk}}` and drop any leftover `ticket/<id>` branches
+2. **Reset the tree** to `{{trunk}}` and drop any leftover ticket branches
    (`git -C {{repo_dir}} checkout {{trunk}}`, then `git -C {{repo_dir}} branch -D` each).
 3. **Clear the board channels** you own — the intake, org, and per-ticket channels —
    with `board clear`, when retiring the backlog rather than pausing it.
@@ -136,15 +136,16 @@ template never carries them as `{{…}}`: `{{project}}`, `{{trunk}}`, `{{spec_di
 builds); the launch args `{{tech_lead_launch}}`, `{{prd_writer_launch}}`,
 `{{rfc_writer_launch}}` (a role's `--preset <name>`, or its inline `launch:` as
 `--backend/--model/--permission-mode`); the policy `{{substantial_when}}`,
-`{{self_decide}}`, `{{always_escalate}}`, `{{require_ci_green}}`; and
+`{{self_decide}}`, `{{always_escalate}}`, `{{require_ci_green}}`; the ticket branch-name
+pattern `{{branch_pattern}}` (placeholders `{slug}`/`{type}`/`{id}`/`{user}`); and
 `{{templates_dir}}` (the compiled root, for a template naming its siblings).
 
 **Per-ticket** values remain in the compiled bodies and are filled at use — by you as
 you read your own steps, by `manager render` for a child: `{{ticket_id}}`,
 `{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
-`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by
-convention), `{{pr_url}}`, and `{{ticket_channel}}` (`{{ticket_channel_prefix}}` + the
-ticket id, e.g. `ticket-42`).
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (derived from
+`{{branch_pattern}}` at delegate), `{{pr_url}}`, and `{{ticket_channel}}`
+(`{{ticket_channel_prefix}}` + the ticket id, e.g. `ticket-42`).
 
 ## Guardrails
 

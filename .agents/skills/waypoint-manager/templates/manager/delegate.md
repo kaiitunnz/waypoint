@@ -61,7 +61,14 @@ cut checks out a branch a prior pass left behind.
 
 ## 2. Record intent (the dedup key) — transition first
 
-`{{branch}}` is this ticket's branch, `ticket/{{ticket_id}}` by convention.
+`{{branch}}` is this ticket's branch. On the first delegate, fill the pattern
+`{{branch_pattern}}`: `{slug}` a short kebab-case slug of the ticket title
+({{ticket_title}}), `{type}` the Conventional-Commit type fitting the ticket (`feat` for
+new work, `fix` for a defect, `docs`/`refactor`/`perf`/… as it fits — the request and the
+ticket's `{{input_type}}`/`{{scale}}` are your signals), `{id}` {{ticket_id}}, `{user}`
+your git user (`git -C {{repo_dir}} config user.name`, kebab-cased; drop the segment when
+it is empty). Record the filled name with the transition's `--branch` below; on a resume
+the branch is already recorded — reuse it.
 
 ```bash
 waypoint manager ticket transition {{ticket_id}} --to delegated \

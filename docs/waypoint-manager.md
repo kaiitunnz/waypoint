@@ -458,12 +458,13 @@ in flight.
 
 ### Serial execution on the shared tree
 
-The manager delegates by cutting the ticket branch in its own tree and spawning the
-lead there — with `--cwd` only, never `--worktree`:
+The manager delegates by cutting the ticket branch in its own tree — named from
+`branch_pattern` (below) — and spawning the lead there, with `--cwd` only, never
+`--worktree`:
 
 ```
 git -C <repo-dir> checkout <trunk>
-git -C <repo-dir> checkout -b ticket/<id> <trunk>
+git -C <repo-dir> checkout -b <branch> <trunk>
 sid=$(waypoint sessions start <role-launch> \
   --cwd <repo-dir> \
   --title "subagent:ticket-<id>:tech-lead" \
@@ -491,7 +492,7 @@ commits.
 ### Spawn dedup and branch collisions
 
 Reconcile picks between three spawn paths: a live same-title session is adopted, not
-spawned; an initial delegate that collides with a stale `ticket/<id>` branch from an
+spawned; an initial delegate that collides with a stale ticket branch from an
 incomplete reap returns the tree to trunk and deletes the branch (no committed work)
 before re-creating it; a lead-died resume keeps the branch (it holds committed work),
 checks it out, and re-spawns onto it.
@@ -561,6 +562,7 @@ compiled templates at `init`, so the running manager reads no manifest per wake.
 | `project` | skill | Project name, used in summaries and channel labels. |
 | `trunk` | backend | The integration branch every ticket branch is cut from; the human's merge advances it. |
 | `spec_dir` | skill | Directory the PRD/RFC writers write specs into (default `.waypoint/specs`; keep it gitignored). |
+| `branch_pattern` | skill | Ticket branch-name pattern (default `{type}/{slug}`); the manager fills `{slug}` (from the title), `{type}` (conventional-commit type), `{id}`, and `{user}` at delegate. |
 | `templates_dir` | skill | Directory `init` writes the compiled templates to (default `.waypoint/manager/templates`; relative paths resolve under the repo root; keep it gitignored). |
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
 | `board.org_channel` | skill | Human-visible drain and outcome summaries. |
@@ -627,6 +629,7 @@ carries them as literals:
 | `{{project}}` | `project` |
 | `{{trunk}}` | `trunk` |
 | `{{spec_dir}}` | `spec_dir` (default `.waypoint/specs`) |
+| `{{branch_pattern}}` | `branch_pattern` (default `{type}/{slug}`) |
 | `{{tickets_channel}}` | `board.tickets_channel` |
 | `{{org_channel}}` | `board.org_channel` |
 | `{{ticket_channel_prefix}}` | `board.ticket_channel_prefix` (bare, for other tickets' channels and the wake glob) |
@@ -641,9 +644,9 @@ carries them as literals:
 
 **Per-ticket** ones remain in the compiled bodies and are filled at use: `{{ticket_id}}`,
 `{{ticket_title}}`, `{{ticket_body}}`, `{{priority}}`, `{{scale}}`, `{{footprint}}`,
-`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (`ticket/<id>` by
-convention), `{{pr_url}}`, and `{{ticket_channel}}` (`board.ticket_channel_prefix` + the
-ticket id, e.g. `ticket-42`). The manager fills these in its own compiled step
+`{{input_type}}`, `{{spec_route}}`, `{{spec_ref}}`, `{{branch}}` (derived from
+`{{branch_pattern}}` at delegate), `{{pr_url}}`, and `{{ticket_channel}}`
+(`board.ticket_channel_prefix` + the ticket id, e.g. `ticket-42`). The manager fills these in its own compiled step
 templates as it reads them, and fills a child prompt's with `manager render`.
 
 `waypoint manager render --role <role> --step <step> [--ticket <id>]` reads the

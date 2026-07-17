@@ -3810,6 +3810,7 @@ def _manager_static_bindings(
         "project": str(raw.get("project") or ""),
         "trunk": str(raw.get("trunk") or ""),
         "spec_dir": str(raw.get("spec_dir") or ".waypoint/specs"),
+        "branch_pattern": str(raw.get("branch_pattern") or "{type}/{slug}"),
         "repo_dir": repo_dir,
         "manager_session_id": session_id,
         "tickets_channel": str(board.get("tickets_channel") or ""),

@@ -24,7 +24,8 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
   delegate. Check the branch out in your tree, then re-spawn onto it:
   ```bash
   waypoint sessions terminate <dead-sid>                       # keep the branch + its commits
-  waypoint manager ticket transition {{ticket_id}} --to <same-state> --reason lead-died   # self-loop, spends lead_restarts
+  state=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')
+  waypoint manager ticket transition {{ticket_id}} --to "$state" --reason lead-died   # self-loop, spends lead_restarts
   git -C {{repo_dir}} checkout {{branch}}                       # the branch holds the committed work
   new=$(waypoint sessions start {{tech_lead_launch}} \
     --cwd {{repo_dir}} \
@@ -35,7 +36,7 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
   # Match the resume prompt to the state: `brief` for a build in progress
   # (`building`/`blocked`), `address-review` for a delivered ticket
   # (`revising`/`review_requested`) whose PR/commit already exists.
-  step=brief; case "<same-state>" in revising|review_requested) step=address-review;; esac
+  step=brief; case "$state" in revising|review_requested) step=address-review;; esac
   waypoint sessions send "$new" "$(waypoint manager render --role tech_lead --step $step --ticket {{ticket_id}})"
   ```
   Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate to the human,

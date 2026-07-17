@@ -116,7 +116,7 @@ item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
 [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — decision needed",
   "blocks": [
-    { "type": "markdown", "text": "<the writer's infeasibility reason, verbatim>" },
+    { "type": "markdown", "text": "<the writer's infeasibility reason, verbatim>. To proceed on your own spec, add its path or ref as a comment." },
     { "type": "question", "question": "How should it proceed?",
       "options": [{"label": "proceed on a human-supplied spec"},
                   {"label": "re-spec"}, {"label": "abandon"}],
@@ -190,12 +190,14 @@ the block's shape:
 - **branch-less blocker** (an infeasible or writer-restart-exhausted `spec_pending →
   blocked`, or a delegate-budget-exhausted `delegated → blocked`, with no lead to relay
   to) — for these, `$selected` is your transition directly: `proceed on a human-supplied
-  spec` → `blocked → ready`, recording the spec ref the human gave in `reply.notes`
-  (`--spec-ref <ref>`), `re-spec` → `blocked → spec_pending` (see **Re-spec** below),
-  `abandon` → `blocked → abandoned`.
+  spec` → `blocked → ready`, recording `--spec-ref` from the ref the human gave in
+  `reply.notes`, else the `ticket:{{ticket_id}}` cell (the body as the spec), `re-spec` →
+  `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`.
   `retry` splits on `attempts` (a writer/spec ticket never delegated, `attempts == 0`; a
   delegate-exhaustion block has `attempts >= 1`): for `attempts == 0` (writer-restart
-  exhaustion), when the spec slot is free reset the writer budget
+  exhaustion), when the spec slot is free
+  (`waypoint manager state --json | jq '[.tickets[]|select(.state=="spec_pending")]|length'`
+  is `0`) reset the writer budget
   (`waypoint manager ticket update {{ticket_id}} --reset-lead-restarts`) and return
   `blocked → spec_pending` with no respec note — the next drain's `dead_leads` re-spawns
   the writer, and a busy slot defers to a later drain; for `attempts >=

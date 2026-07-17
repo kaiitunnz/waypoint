@@ -13380,11 +13380,9 @@ html[data-theme="light"] .session-switcher-row.selected {
   display: none;
 }
 
-/* Full-screen sheet: the dock fills the viewport (no push, no side border or
-   shadow, no resize seam) and clears the notch/home indicator on all edges.
-   The single source of truth for both the phone regime and the overflow
-   fallback — SessionDetail applies this class whenever the viewport is ≤640px
-   or the saved dock width exceeds the current viewport. */
+/* Full-screen sheet shared by the phone regime and the overflow fallback;
+   SessionDetail adds this class when the viewport is ≤640px or the saved width
+   overflows it. */
 .wp-dock-sheet {
   width: 100%;
   border-right: none;
@@ -14962,8 +14960,8 @@ html[data-theme="light"] .wp-hl {
   }
 }
 
-/* On phones SessionDetail always renders the dock as a sheet (see
-   .wp-dock-sheet); this only bumps the close control to a touch-sized target. */
+/* Phones always get .wp-dock-sheet from SessionDetail; this only enlarges the
+   close control to a touch target. */
 @media (max-width: 640px) {
   .wp-panel-close {
     width: 38px;

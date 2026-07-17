@@ -360,10 +360,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     const stored = Number(window.localStorage.getItem("waypoint.workspaceDockWidth"));
     return Number.isFinite(stored) && stored >= 300 ? stored : 400;
   });
-  // Current layout-viewport width, tracked so the dock can fall back to a
-  // full-screen sheet whenever its persisted width no longer fits (a desktop
-  // window shrunk below the saved dock width, or a phone). window.innerWidth
-  // matches CSS width media-query behavior during a desktop resize.
+  // innerWidth matches the CSS width media queries during a desktop resize.
   const [viewportWidth, setViewportWidth] = useState<number>(() =>
     typeof window === "undefined" ? Infinity : window.innerWidth,
   );
@@ -373,9 +370,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  // Present the dock as a sheet on phones or whenever the saved width overflows
-  // the viewport. Equality stays side-dock above the phone breakpoint: a dock
-  // exactly as wide as the viewport still contains its right-inset close button.
+  // Equality stays side-dock: a dock exactly viewport-wide still contains its
+  // right-inset close button.
   const dockSheet = viewportWidth <= 640 || dockWidth > viewportWidth;
   // The todo-event sequence the user last dismissed from the progress dock.
   // `undefined` means we haven't read the persisted value yet — the dock stays
@@ -1793,10 +1789,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
   // Drive the layout from the document root: when the dock is open on a wide
   // viewport, `.page-shell` pads left by --wp-dock-width so the session column
-  // slides clear of the dock instead of sitting under it. In sheet mode the
-  // dock fills the viewport, so the body-padding selector must exclude it —
-  // flag the mode with data-wp-dock-mode. useLayoutEffect keeps the padding and
-  // dock class in sync before paint, so a resize doesn't flash a stale layout.
+  // slides clear of the dock instead of sitting under it. Sheet mode excludes
+  // that push via data-wp-dock-mode; useLayoutEffect applies it before paint.
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (workspacePreviewEnabled && workspaceOpen) {

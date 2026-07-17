@@ -74,11 +74,9 @@ export function WorkspaceFilesPanel({
     if (open) setHasOpened(true);
   }, [open]);
 
-  // In sheet mode the dock covers the viewport but focus may still sit outside
-  // its portal (on the opener or an underlying control), so a dock-local
-  // keydown never fires. Bridge Escape with a bubbling window handler installed
-  // only while the sheet is open. Honor defaultPrevented so a higher-priority
-  // modal or the explorer filter can consume Escape first.
+  // In sheet mode focus may sit outside the portal, where the dock-local keydown
+  // never fires; a window handler makes Escape reach it. defaultPrevented yields
+  // to a higher-priority modal or the explorer filter.
   useEffect(() => {
     if (!open || !sheet) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -100,9 +98,8 @@ export function WorkspaceFilesPanel({
       aria-label="Workspace files"
       aria-hidden={!open}
       onKeyDown={(e) => {
-        // Only close when nothing inside the explorer already handled Escape
-        // (e.g. the filter clears itself first). preventDefault stops the
-        // window-level sheet handler from closing a second time.
+        // defaultPrevented lets the explorer consume Escape first; preventDefault
+        // keeps the window-level sheet handler from closing a second time.
         if (e.key === "Escape" && !e.defaultPrevented) {
           e.preventDefault();
           onClose();

@@ -4017,7 +4017,7 @@ def manager_deinit(
     """Clear the manager state: all tickets and the persisted config.
 
     Removes state records only — spawned sessions, branches, and board channels
-    are reaped separately (`sessions delete`, `board clear`).
+    are reaped separately (`sessions delete`, `board delete`).
     """
     if not yes:
         typer.confirm(

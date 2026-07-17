@@ -248,6 +248,7 @@ async def test_reconcile_endpoint_reports_intake(tmp_path: Path) -> None:
         "latency_timeouts",
         "stale_gates",
         "finalize_pending",
+        "resolved_gates",
     }
     assert [i["text"] for i in body["unregistered_intake"]] == ["please fix X"]
 

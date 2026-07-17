@@ -46,7 +46,7 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
    waypoint manager reconcile --json
    ```
    It reports `unregistered_intake`, `dead_leads`, `latency_timeouts`, `stale_gates`,
-   and `finalize_pending`. Alongside
+   `finalize_pending`, and `resolved_gates`. Alongside
    it, read each in-flight ticket's `status` cell **by key**
    (`board read {{ticket_channel_prefix}}<id> --key status`) for the lead's feedback
    (progress/error/decision/attention/done/partial — `{{templates_dir}}/manager/monitor.md`).
@@ -103,6 +103,17 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      terminal and the reap. Run Finalize (`{{templates_dir}}/manager/integrate.md`) to reap
      the subtree, return the tree to `{{trunk}}`, drop the branch, and clear the ticket's
      tree fields.
+   - **`resolved_gates`** — each is an awaiting ticket whose gate the human answered while
+     its transition stayed deferred: a re-spec (or a restart-exhaustion retry) waiting on the
+     single `spec_pending` slot, or a crash between the answer and the transition. Read the
+     resolved answer and re-drive the gate-answer handler for the ticket's state —
+     `spec_review`/`blocked` through `{{templates_dir}}/manager/monitor.md`, `review_requested`
+     through `{{templates_dir}}/manager/integrate.md` — never re-posting the gate; a deferred
+     transition re-fires once the slot frees. A transition still deferred (slot busy) and a
+     `review_requested` merge answered but not yet on GitHub persist across this drain's
+     snapshots; handle each for this drain (skip it after) and do not count its persisting
+     entry toward the outstanding-signal check — the drain still reaches a fixpoint and it
+     re-fires on a later drain.
    - **`latency_timeouts`** — raw past-threshold candidates; apply the two-phase
      re-notify-then-abandon across successive wakes, keyed to durable ticket-cell meta.
      Skip an entry whose ticket you already handled this drain (re-opened, re-notified, or

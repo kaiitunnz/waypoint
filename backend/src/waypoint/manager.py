@@ -44,6 +44,7 @@ from waypoint.schemas import (
     ReconcileFinalizePending,
     ReconcileIntake,
     ReconcileLatencyTimeout,
+    ReconcileResolvedGate,
     ReconcileStaleGate,
     SessionStatus,
     TicketCreateRequest,
@@ -684,10 +685,30 @@ class ManagerManager:
                     )
                 )
 
+        resolved_gates: list[ReconcileResolvedGate] = []
+        for ticket in tickets:
+            # An awaiting ticket whose gate the human answered but whose transition
+            # has not happened — a re-spec deferred by the busy spec_pending slot, or
+            # a crash between the answer and the transition. Re-driving the gate
+            # handler re-fires it; a normal answer transitions out the same drain and
+            # so never lingers here.
+            if ticket.state not in _AWAITING_STATES or ticket.inbox_item_id is None:
+                continue
+            item = self._storage.get_inbox_item(ticket.inbox_item_id)
+            if item is not None and item.status == InboxStatus.RESOLVED:
+                resolved_gates.append(
+                    ReconcileResolvedGate(
+                        ticket_id=ticket.id,
+                        state=ticket.state,
+                        inbox_item_id=ticket.inbox_item_id,
+                    )
+                )
+
         return ManagerReconcileReport(
             unregistered_intake=intake,
             dead_leads=dead_leads,
             latency_timeouts=latency_timeouts,
             stale_gates=stale_gates,
             finalize_pending=finalize_pending,
+            resolved_gates=resolved_gates,
         )

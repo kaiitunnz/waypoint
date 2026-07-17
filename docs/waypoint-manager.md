@@ -244,7 +244,7 @@ observes the external signal during reconcile.
 `manager reconcile` returns the drain's server-derivable reconcile signals in one
 consistent snapshot, so the manager adopts observed reality without a sheaf of manual
 board and session queries. It is read-only — it reports; the manager decides and acts.
-Five signals:
+Six signals:
 
 - **`unregistered_intake`** — keyless posts on the tickets channel, authored by
   someone other than the manager, whose board-entry id is not yet a ticket.
@@ -260,6 +260,10 @@ Five signals:
 - **`finalize_pending`** — terminal tickets (`merged`/`deferred`/`abandoned`) that
   reached the tree and still carry a branch (a crash between recording the terminal and
   the reap); the manager runs Finalize to reap the subtree and release the tree.
+- **`resolved_gates`** — awaiting-human tickets whose gate the human answered but whose
+  transition has not happened (a re-spec deferred by the busy `spec_pending` slot, or a
+  crash between the answer and the transition); the manager re-drives the gate handler so
+  the deferred transition re-fires once the slot frees.
 
 External signals (a PR's CI and merge state) are not covered — they stay in the
 agent's shell (`gh pr view`).

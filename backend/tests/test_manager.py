@@ -716,6 +716,34 @@ def test_reconcile_latency_skips_resolved_gate(tmp_path: Path) -> None:
     assert [t.ticket_id for t in late] == ["b"]
 
 
+def test_reconcile_reports_resolved_gate_for_a_deferred_transition(
+    tmp_path: Path,
+) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=_CONFIG))
+    # An awaiting ticket whose gate the human answered (resolved) but whose transition
+    # is deferred — surfaced so the drain re-drives the gate handler.
+    answered = storage.create_inbox_item(
+        "mgr", None, "ticket-r: t — spec review", [InboxMarkdownBlockInput(text="x")]
+    )
+    resolved = storage.mark_inbox_read(answered.id)  # a no-action item resolves on read
+    assert resolved is not None and resolved[0].status == InboxStatus.RESOLVED
+    storage.create_manager_ticket(
+        mk(S.SPEC_REVIEW, "r").model_copy(update={"inbox_item_id": answered.id})
+    )
+    # An awaiting ticket with an OPEN gate is not a resolved_gate (nothing to re-drive).
+    open_item = storage.create_inbox_item(
+        "mgr", None, "ticket-o: t — spec review", [InboxMarkdownBlockInput(text="x")]
+    )
+    storage.create_manager_ticket(
+        mk(S.SPEC_REVIEW, "o").model_copy(update={"inbox_item_id": open_item.id})
+    )
+
+    report = mgr.reconcile(_now())
+    assert [g.ticket_id for g in report.resolved_gates] == ["r"]
+
+
 def test_reconcile_latency_floors_zero_hour_config(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     mgr = ManagerManager(storage)

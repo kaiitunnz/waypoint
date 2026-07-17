@@ -788,12 +788,23 @@ class ReconcileFinalizePending(BaseModel):
     lead_session_id: str | None = None
 
 
+class ReconcileResolvedGate(BaseModel):
+    # An awaiting-human ticket whose recorded gate item is resolved (the human
+    # answered) but whose transition has not happened — a re-spec deferred by the
+    # busy single ``spec_pending`` slot, or a crash between the answer and the
+    # transition. Re-driving the gate handler re-fires the deferred transition.
+    ticket_id: str
+    state: ManagerTicketState
+    inbox_item_id: str | None = None
+
+
 class ManagerReconcileReport(BaseModel):
     unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
     dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
     latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
     stale_gates: list[ReconcileStaleGate] = Field(default_factory=list)
     finalize_pending: list[ReconcileFinalizePending] = Field(default_factory=list)
+    resolved_gates: list[ReconcileResolvedGate] = Field(default_factory=list)
 
 
 class ManagerTicketTransitions(BaseModel):

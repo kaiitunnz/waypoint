@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/kaiitunnz/waypoint/compare/v0.9.3...v0.10.0) (2026-07-17)
+
+
+### Features
+
+* autonomous Waypoint Manager MVP — wake, state machine, skill ([#304](https://github.com/kaiitunnz/waypoint/issues/304)) ([6b6ee1b](https://github.com/kaiitunnz/waypoint/commit/6b6ee1b29f2646f5e08d3b7153ef1602c238ab98))
+
 ## [0.9.3](https://github.com/kaiitunnz/waypoint/compare/v0.9.2...v0.9.3) (2026-07-17)
 
 

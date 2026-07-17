@@ -1,7 +1,17 @@
 # Waypoint Manager
 
-The Waypoint Manager is a single long-running Waypoint session that owns one
-project's backlog. It drains a priority-ordered ticket board for its lifetime: for
+The Waypoint Manager is a long-running Waypoint session that owns one project's
+backlog. One instance runs several managers concurrently, one per repository: each
+is keyed by a server-minted opaque id (`mgr-<hex>`), carries a human-facing project
+label, and owns its own config, ticket set, working tree, owner session, and board
+channels. `manager init` mints the id on a repo's first init and reuses it on every
+later init from the same repo; the CLI resolves the target manager from the current
+git toplevel, so a manager's own commands need no id. Board channels
+(`tickets_channel`, `org_channel`, `ticket_channel_prefix`) must be unique across the
+managers on one instance; `manager init` rejects a channel that collides with another
+manager's.
+
+It drains a priority-ordered ticket board for its lifetime: for
 each ticket it assigns a scale and footprint, writes a PRD or RFC through an
 ephemeral writer when the work is substantial, delegates the ticket to an ephemeral
 tech-lead that builds in the manager's own working tree, monitors the build over a

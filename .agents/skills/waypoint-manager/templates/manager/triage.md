@@ -70,6 +70,18 @@ artifact (still ≤ 1 ticket in `spec_pending` at a time — the server enforces
 | rfc | — | tech-lead (pass-through) | input RFC as `spec_ref` | `ready` |
 | any | reject / duplicate | — | — | `abandoned` |
 
+Record the classification onto the ticket cell before taking the edge, without clobbering
+the user's post; an interrupted `spec_pending` route then reads its writer route from
+`spec_route` on recovery:
+
+```bash
+waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
+  --meta input_type={{input_type}} --meta spec_route={{spec_route}}
+```
+
+`input_type` is one of `bug-report|feature-request|open-ended|prd|rfc`; `spec_route` is
+one of `prd-writer|rfc-writer|passthrough|direct`. Take the matching edge:
+
 - **→ spec_pending** (write a new artifact) — transition, then spawn the matching
   writer (next section). Its posted spec goes through the `spec_review` human
   approval gate (`{{templates_dir}}/manager/monitor.md`) before `ready`.
@@ -94,19 +106,6 @@ artifact (still ≤ 1 ticket in `spec_pending` at a time — the server enforces
   ```bash
   waypoint manager ticket transition {{ticket_id}} --to abandoned --reason "duplicate of ticket-…"
   ```
-
-## Record the classification (observability)
-
-Stamp the chosen input-type and route onto the ticket cell — without clobbering
-the user's post — so the decision is visible on the board:
-
-```bash
-waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
-  --meta input_type={{input_type}} --meta spec_route={{spec_route}}
-```
-
-`input_type` is one of `bug-report|feature-request|open-ended|prd|rfc`;
-`spec_route` is one of `prd-writer|rfc-writer|passthrough|direct`.
 
 ## Spawn the writer (spec_pending routes only)
 

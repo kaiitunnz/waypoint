@@ -2323,11 +2323,24 @@ def sessions_delete(
             "pruned).",
         ),
     ] = False,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board-prune on delete.",
+        ),
+    ] = None,
 ) -> None:
     """Terminate (if needed) and remove a session record."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.delete(session_id, force=force, prune_branches=prune_branches),
+        lambda c: c.delete(
+            session_id,
+            force=force,
+            prune_branches=prune_branches,
+            actor_session_id=actor_session_id,
+        ),
     )
 
 

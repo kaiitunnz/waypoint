@@ -555,6 +555,52 @@ def test_subscriptions_removed_on_delete_session(tmp_path) -> None:
     assert runtime.storage.list_wake_subscriptions() == []
 
 
+@pytest.mark.asyncio
+async def test_session_delete_prune_self_excludes_the_deleter(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    runtime.storage.create_session(
+        make_session(runtime.settings, "child", status=SessionStatus.EXITED)
+    )
+    _register(runtime, "mgr", channel_globs=["ticket-*"])
+    # A keyed cell authored by the child is pruned on delete → a broad board wake.
+    runtime.storage.add_board_entry(
+        "ticket-1", "work", key="status", author_session_id="child"
+    )
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # The manager reaps the child as the actor → self-excluded from its own prune wake.
+    await runtime.delete("child", actor_session_id="mgr")
+    await _flush_wakes(runtime)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_session_delete_prune_wakes_a_non_deleter_subscriber(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    runtime.storage.create_session(
+        make_session(runtime.settings, "child", status=SessionStatus.EXITED)
+    )
+    _register(runtime, "mgr", channel_globs=["ticket-*"])
+    runtime.storage.add_board_entry(
+        "ticket-1", "work", key="status", author_session_id="child"
+    )
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # Without an actor the broad prune wake reaches the board subscriber, so the
+    # exclusion above is load-bearing.
+    await runtime.delete("child")
+    await _flush_wakes(runtime)
+
+    assert calls == [("mgr", WAKE_INPUT_TEXT)]
+
+
 def test_register_list_unregister_roundtrip(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(make_session(runtime.settings, "codex-sub"))

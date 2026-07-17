@@ -3304,7 +3304,12 @@ class SessionRuntime:
         return self.get_session(session.id)
 
     async def delete(
-        self, session_id: str, *, force: bool = False, prune_branches: bool = False
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+        prune_branches: bool = False,
+        actor_session_id: str | None = None,
     ) -> None:
         session = self.get_session(session_id)
         if session.source == SessionSource.ASSISTANT:
@@ -3345,7 +3350,9 @@ class SessionRuntime:
             self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
         # Reclaim the session's uploaded blobs, which can be large.
         self.attachments.discard(session_id)
-        # Drop this session's blackboard posts along with its record.
+        # Drop this session's blackboard posts along with its record. The prune's
+        # broadcast carries the deleting actor so the reaping session (a manager
+        # reaping a child) is self-excluded from its own broad board wake.
         pruned = self.storage.prune_board_for_session(session_id)
         # Drop any scheduled messages queued for the now-deleted session; the
         # scheduled_messages FK is declarative only (foreign_keys pragma is off).
@@ -3353,7 +3360,7 @@ class SessionRuntime:
         plugin.on_session_deleted(self, session)
         await self._broadcast_session_list()
         if pruned:
-            await self._publish_board_update(None)
+            await self._publish_board_update(None, author_session_id=actor_session_id)
 
     @staticmethod
     def _git_capture(cwd: str, *args: str) -> str | None:

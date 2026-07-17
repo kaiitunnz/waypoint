@@ -82,7 +82,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
        409s: an on-tree lead posts a `kind=decision` retry/abandon entry and escalates
        `--to blocked`, keeping the branch (the committed work is the retry's starting
        point), and `reconcile` treats it as human-gated once its restart budget is spent;
-       a `spec_pending` writer escalates `--to blocked` (branch-less).
+       a `spec_pending` writer posts a `kind=decision` retry/abandon entry and escalates
+       `--to blocked` (branch-less).
    - **`stale_gates`** — each is an awaiting ticket (`spec_review`/`blocked`/
      `review_requested`) whose gate item is absent: a crash between the awaiting
      transition and the inbox post, or a human-deleted item. Re-open its gate through

@@ -135,7 +135,19 @@ waypoint sessions send "$sid" "$(waypoint manager render --role $render_role --s
 
 To **resume** a writer that died mid-spec, re-run this same spawn after terminating
 the dead session and self-looping `spec_pending → spec_pending` (`--reason
-lead-died`, spends `lead_restarts`); past `max_lead_restarts`, escalate `--to blocked`.
+lead-died`, spends `lead_restarts`). Past `max_lead_restarts` the self-loop 409s: post a
+keyless `kind=decision` retry/abandon entry, then escalate `--to blocked` (branch-less):
+
+```bash
+waypoint board post {{ticket_channel}} \
+  "the spec writer keeps dying on this ticket (restart budget spent); fix the cause then retry, or abandon. Options: retry; abandon." \
+  --meta kind=decision
+waypoint manager ticket transition {{ticket_id}} --to blocked --reason "writer-restart budget exhausted"
+```
+
+The next drain reconstructs the retry/abandon gate from that entry
+(`{{templates_dir}}/manager/monitor.md`); on **retry** the gate resets the writer budget
+and re-specs, on **abandon** it ends.
 
 The same spawn serves a **re-spec** routed here from
 `{{templates_dir}}/manager/monitor.md` (a request-changes or a blocked re-spec):

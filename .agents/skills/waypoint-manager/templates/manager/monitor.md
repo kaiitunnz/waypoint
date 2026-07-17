@@ -185,13 +185,20 @@ Then, once the gate item has resolved (the same `.item.status` check above gates
 shape), a branch-less blocker or the spec gate transitions out of the awaiting state by
 the block's shape:
 
-- **branch-less blocker** (an infeasible `spec_pending → blocked`, or a budget-exhausted
-  `delegated → blocked`, with no lead to relay to) — `$selected` is your transition
-  directly: `proceed on a human-supplied spec` → `blocked → ready` (record a supplied
-  spec with `--spec-ref <ref>`), `re-spec` → `blocked → spec_pending` (see **Re-spec**
-  below), `retry` → reset the delegate budget then `blocked → ready`
-  (`waypoint manager ticket update {{ticket_id}} --reset-attempts`), `abandon` →
-  `blocked → abandoned`;
+- **branch-less blocker** (an infeasible or writer-restart-exhausted `spec_pending →
+  blocked`, or a delegate-budget-exhausted `delegated → blocked`, with no lead to relay
+  to) — for these, `$selected` is your transition directly: `proceed on a human-supplied
+  spec` → `blocked → ready` (record a supplied spec with `--spec-ref <ref>`), `re-spec` →
+  `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`.
+  `retry` splits on `attempts` (a writer/spec ticket never delegated, `attempts == 0`; a
+  delegate-exhaustion block has `attempts >= 1`): for `attempts == 0` (writer-restart
+  exhaustion), when the spec slot is free reset the writer budget
+  (`waypoint manager ticket update {{ticket_id}} --reset-lead-restarts`) and return
+  `blocked → spec_pending` with no respec note — the next drain's `dead_leads` re-spawns
+  the writer, and a busy slot defers to a later drain; for `attempts >=
+  1` (delegate exhaustion), reset the delegate budget
+  (`waypoint manager ticket update {{ticket_id}} --reset-attempts`) and return
+  `blocked → ready`;
 - **spec gate** — branch on `$decision`: `approve` → `spec_review → ready`;
   `request-changes` → `spec_review → spec_pending` (see **Re-spec**); `reject` →
   `spec_review → abandoned`.

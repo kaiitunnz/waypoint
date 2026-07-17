@@ -716,6 +716,23 @@ def test_reconcile_latency_skips_resolved_gate(tmp_path: Path) -> None:
     assert [t.ticket_id for t in late] == ["b"]
 
 
+def test_reconcile_latency_floors_zero_hour_config(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    mgr.init(ManagerInitRequest(config=ManagerConfig(human_latency_hours=0)))
+    item = storage.create_inbox_item(
+        "mgr", None, "ticket-z: t — spec review", [InboxMarkdownBlockInput(text="x")]
+    )
+    storage.create_manager_ticket(
+        mk(S.SPEC_REVIEW, "z").model_copy(update={"inbox_item_id": item.id})
+    )
+    # A 0-hour config floors to 1 hour: a fresh gate is not an instant timeout.
+    assert not mgr.reconcile(item.created_at + timedelta(minutes=30)).latency_timeouts
+    # Past the 1-hour floor it times out.
+    late = mgr.reconcile(item.created_at + timedelta(hours=2)).latency_timeouts
+    assert [t.ticket_id for t in late] == ["z"]
+
+
 # ── Storage CRUD ────────────────────────────────────────────────────────────
 
 

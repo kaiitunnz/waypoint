@@ -641,7 +641,9 @@ class ManagerManager:
             if waiting_since is None:
                 continue
             elapsed = (now - waiting_since).total_seconds() / 3600
-            if elapsed >= config.human_latency_hours:
+            # Floor the threshold at 1 hour: a 0-hour config would make every gate an
+            # instant timeout, matching the skill's self-wake floor.
+            if elapsed >= max(config.human_latency_hours, 1):
                 latency_timeouts.append(
                     ReconcileLatencyTimeout(
                         ticket_id=ticket.id,

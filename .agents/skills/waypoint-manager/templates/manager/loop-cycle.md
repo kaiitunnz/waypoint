@@ -117,9 +117,10 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      renotified_at=$(echo "$cell" | jq -r '.cells[0].metadata.latency_renotified_at // 0')
      now=$(date +%s)
      ```
-     - **First timeout, a re-posted gate, or an unstamped re-notify** (`latency_renotified`
-       ≠ the entry's `waiting_since`, or `latency_renotified_at` is `0`) — re-notify the
-       human and stamp both markers; the ticket is handled for the rest of this drain:
+     - **First timeout, a re-posted gate, or an unstamped prior window** (`latency_renotified`
+       ≠ the entry's `waiting_since`, or `latency_renotified_at` is `0`) — stamp both markers,
+       opening the final window before abandonment (the standing gate item is the human's
+       signal); the ticket is handled for the rest of this drain:
        ```bash
        waypoint board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge \
          --meta latency_renotified=<waiting_since> --meta latency_renotified_at=$now

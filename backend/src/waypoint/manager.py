@@ -579,11 +579,19 @@ class ManagerManager:
                     continue
                 if str(entry.id) in known:
                     continue
+                raw_priority = entry.metadata.get("priority")
+                priority = (
+                    raw_priority
+                    if isinstance(raw_priority, str)
+                    and raw_priority in config.priority_levels
+                    else None
+                )
                 intake.append(
                     ReconcileIntake(
                         id=entry.id,
                         author_session_id=entry.author_session_id,
                         text=entry.text,
+                        priority=priority,
                     )
                 )
 

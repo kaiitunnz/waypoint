@@ -58,7 +58,8 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
      cell **first**, then add the ticket, so triage always finds a populated cell:
      ```bash
      # for a reported intake post with board entry id <n>:
-     waypoint board post {{tickets_channel}} "<the user's request text>" --key ticket:<n> --meta author=<poster>
+     waypoint board post {{tickets_channel}} "<the request text>" --key ticket:<n> --meta author=<poster>
+     # --priority takes the entry's reported priority (a human's --meta priority=) when present, else your judgment:
      waypoint manager ticket add "<title from the post>" --id <n> --priority <p0..p3>
      ```
      `manager next` then recommends `triage`; registration itself is never

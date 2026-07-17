@@ -248,7 +248,8 @@ board and session queries. It is read-only — it reports; the manager decides a
 Six signals:
 
 - **`unregistered_intake`** — keyless posts on the tickets channel, authored by
-  someone other than the manager, whose board-entry id is not yet a ticket.
+  someone other than the manager, whose board-entry id is not yet a ticket. A post's
+  `priority` meta naming a configured level sets the registered ticket's priority.
 - **`dead_leads`** — tickets in a resumable state whose recorded lead session is
   missing or terminal (`exited`/`error`) — the resume candidates.
 - **`latency_timeouts`** — awaiting-human tickets whose wait exceeds

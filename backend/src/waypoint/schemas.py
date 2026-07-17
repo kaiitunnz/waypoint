@@ -752,6 +752,8 @@ class ReconcileIntake(BaseModel):
     id: int
     author_session_id: str | None = None
     text: str = ""
+    # The intake post's `priority` meta, surfaced when it names a configured level.
+    priority: str | None = None
 
 
 class ReconcileDeadLead(BaseModel):

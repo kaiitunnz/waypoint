@@ -520,6 +520,33 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
     assert latency and latency[0].hours_elapsed >= 72
 
 
+def test_reconcile_surfaces_intake_priority(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr = ManagerManager(storage)
+    rc = ManagerRenderContext(
+        templates_dir="/x", tickets_channel="tickets", ticket_channel_prefix="ticket-"
+    )
+    mgr.init(
+        ManagerInitRequest(
+            config=ManagerConfig(owner_session_id="mgr", render_context=rc)
+        )
+    )
+    storage.add_board_entry(
+        "tickets", "high one", author_session_id="human", metadata={"priority": "p1"}
+    )
+    storage.add_board_entry("tickets", "plain one", author_session_id="human")
+    storage.add_board_entry(
+        "tickets",
+        "bogus one",
+        author_session_id="human",
+        metadata={"priority": "urgent"},
+    )
+
+    intake = {i.text: i.priority for i in mgr.reconcile(_now()).unregistered_intake}
+
+    assert intake == {"high one": "p1", "plain one": None, "bogus one": None}
+
+
 def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     mgr = ManagerManager(storage)

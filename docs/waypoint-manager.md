@@ -559,7 +559,7 @@ compiled templates at `init`, so the running manager reads no manifest per wake.
 | `project` | skill | Project name, used in summaries and channel labels. |
 | `trunk` | backend | The integration branch every ticket branch is cut from; the human's merge advances it. |
 | `spec_dir` | skill | Directory the PRD/RFC writers write specs into (default `.waypoint/specs`; keep it gitignored). |
-| `branch_pattern` | skill | Ticket branch-name pattern (default `{type}/{slug}`); the manager fills `{slug}` (from the title), `{type}` (conventional-commit type), `{id}`, and `{user}` at delegate. |
+| `branch_pattern` | skill | Ticket branch-name pattern (default `{type}/{slug}`); the manager fills the placeholders the pattern contains at delegate — `{slug}` (from the title), `{type}` (conventional-commit type), `{id}`, `{user}`. |
 | `templates_dir` | skill | Directory `init` writes the compiled templates to (default `.waypoint/manager/templates`; relative paths resolve under the repo root; keep it gitignored). |
 | `board.tickets_channel` | skill | Intake channel; also holds `ticket:<id>` registry cells. |
 | `board.org_channel` | skill | Human-visible drain and outcome summaries. |

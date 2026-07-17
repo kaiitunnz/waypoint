@@ -49,6 +49,31 @@ from waypoint.telemetry.store import TelemetryStore
 
 log = logging.getLogger("waypoint.storage")
 
+# The default compiled-templates layout `manager init` writes under a repo, used
+# to recover the legacy manager's repo binding at migration time.
+_MANAGER_TEMPLATES_SUFFIX = "/.waypoint/manager/templates"
+
+
+def _repo_dir_from_templates_dir(payload: dict[str, Any]) -> str | None:
+    """Recover a legacy manager's ``repo_dir`` from its compiled ``templates_dir``.
+
+    The legacy config never persisted ``repo_dir``, but `manager init` compiled
+    templates to ``<repo_dir>/.waypoint/manager/templates`` by default, so the repo
+    is the ancestor of that path. Returns None when the templates dir is absent or
+    was customized off the default layout (the manager then migrates unbound and is
+    adopted on the next init).
+    """
+    render_context = payload.get("render_context")
+    if not isinstance(render_context, dict):
+        return None
+    templates_dir = render_context.get("templates_dir")
+    if isinstance(templates_dir, str) and templates_dir.endswith(
+        _MANAGER_TEMPLATES_SUFFIX
+    ):
+        return templates_dir[: -len(_MANAGER_TEMPLATES_SUFFIX)]
+    return None
+
+
 # ``UPDATE ... RETURNING`` landed in SQLite 3.35 (2021). When present it lets
 # ``update_session`` fetch the post-update row in the same statement, avoiding
 # the extra existence-check and re-read round-trips on a hot path.
@@ -2100,14 +2125,16 @@ class Storage:
         expected = ticket.version
         bumped = ticket.model_copy(update={"version": expected + 1})
         columns = self._manager_ticket_columns(bumped)
+        # Scope the write by manager_id as well as the version CAS: callers already
+        # fetch scoped, so this is defense-in-depth against a cross-manager write.
         cursor = self.connection.execute(
             """
             UPDATE manager_tickets SET
                 manager_id = ?, title = ?, priority = ?, state = ?, scale = ?,
                 version = ?, created_at = ?, updated_at = ?, payload = ?
-            WHERE id = ? AND version = ?
+            WHERE id = ? AND version = ? AND manager_id = ?
             """,
-            (*columns[1:], ticket.id, expected),
+            (*columns[1:], ticket.id, expected, ticket.manager_id),
         )
         if (cursor.rowcount or 0) == 0:
             self.connection.rollback()
@@ -2767,53 +2794,71 @@ class Storage:
 
         No-op on a fresh DB (the ``CREATE TABLE`` already made the new shape) and
         on an already-migrated DB (the ``repo_dir`` column marks it done). The
-        legacy row never persisted ``repo_dir``, so the migrated manager gets a
-        NULL one; the next idempotent ``manager init`` repopulates it.
+        legacy row never persisted ``repo_dir`` directly, so it is derived from the
+        compiled ``templates_dir`` (default ``<repo>/.waypoint/manager/templates``);
+        when that fails the migrated manager keeps a NULL ``repo_dir`` and the next
+        ``manager init`` adopts it as the lone unbound manager. The whole rebuild
+        runs in one transaction so a mid-rebuild failure rolls back cleanly rather
+        than leaving a half-migrated schema.
         """
         if self._has_column("manager_config", "repo_dir"):
             return
         old = self.connection.execute(
             "SELECT payload FROM manager_config WHERE id = 1"
         ).fetchone()
-        self.connection.execute(
-            "ALTER TABLE manager_config RENAME TO manager_config_legacy"
-        )
-        self.connection.execute("""
-            CREATE TABLE manager_config (
-                id TEXT PRIMARY KEY,
-                project TEXT NOT NULL DEFAULT '',
-                repo_dir TEXT UNIQUE,
-                owner_session_id TEXT,
-                payload TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL DEFAULT ''
-            )
-            """)
-        if old is not None:
-            try:
-                payload = json.loads(old["payload"] or "{}")
-            except json.JSONDecodeError:
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            new_id = f"mgr-{secrets.token_hex(4)}"
-            payload["id"] = new_id
+        try:
+            # A SAVEPOINT nests inside _init_db's in-progress transaction, so the
+            # whole rebuild is atomic: a mid-rebuild failure rolls back to here
+            # rather than leaving a half-migrated schema. The final commit is
+            # _init_db's.
+            self.connection.execute("SAVEPOINT manager_migration")
             self.connection.execute(
-                """
-                INSERT INTO manager_config
-                    (id, project, repo_dir, owner_session_id, payload, created_at)
-                VALUES (?, ?, NULL, ?, ?, ?)
-                """,
-                (
-                    new_id,
-                    str(payload.get("project") or ""),
-                    payload.get("owner_session_id"),
-                    json.dumps(payload),
-                    datetime.now(UTC).isoformat(),
-                ),
+                "ALTER TABLE manager_config RENAME TO manager_config_legacy"
             )
-            self.connection.execute(
-                "UPDATE manager_tickets SET manager_id = ? "
-                "WHERE manager_id IS NULL OR manager_id = ''",
-                (new_id,),
-            )
-        self.connection.execute("DROP TABLE manager_config_legacy")
+            self.connection.execute("""
+                CREATE TABLE manager_config (
+                    id TEXT PRIMARY KEY,
+                    project TEXT NOT NULL DEFAULT '',
+                    repo_dir TEXT UNIQUE,
+                    owner_session_id TEXT,
+                    payload TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT ''
+                )
+                """)
+            if old is not None:
+                try:
+                    payload = json.loads(old["payload"] or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                new_id = f"mgr-{secrets.token_hex(4)}"
+                payload["id"] = new_id
+                repo_dir = _repo_dir_from_templates_dir(payload)
+                payload["repo_dir"] = repo_dir or ""
+                self.connection.execute(
+                    """
+                    INSERT INTO manager_config
+                        (id, project, repo_dir, owner_session_id, payload, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id,
+                        str(payload.get("project") or ""),
+                        repo_dir or None,
+                        payload.get("owner_session_id"),
+                        json.dumps(payload),
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+                self.connection.execute(
+                    "UPDATE manager_tickets SET manager_id = ? "
+                    "WHERE manager_id IS NULL OR manager_id = ''",
+                    (new_id,),
+                )
+            self.connection.execute("DROP TABLE manager_config_legacy")
+            self.connection.execute("RELEASE manager_migration")
+        except Exception:
+            self.connection.execute("ROLLBACK TO manager_migration")
+            self.connection.execute("RELEASE manager_migration")
+            raise

@@ -4078,7 +4078,7 @@ def manager_deinit(
     """
     if not yes:
         typer.confirm(
-            "Clear all manager tickets and config?",
+            "Clear this manager's tickets and config?",
             abort=True,
         )
     _emit(

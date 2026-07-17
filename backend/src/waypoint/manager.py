@@ -790,6 +790,16 @@ class ManagerRegistry:
             if config.repo_dir
             else None
         )
+        # No repo match: adopt a migrated legacy manager that carries no repo binding
+        # yet (its templates_dir was customized off the default layout, so migration
+        # could not recover its repo). A legacy DB migrates to exactly one manager, so
+        # a lone unbound manager is unambiguous; more than one means a genuine new repo.
+        if existing is None and config.repo_dir:
+            unbound = [
+                c for c in self._storage.list_manager_configs() if not c.repo_dir
+            ]
+            if len(unbound) == 1:
+                existing = unbound[0]
         if existing is not None:
             owner = config.owner_session_id or existing.owner_session_id
             config = config.model_copy(

@@ -805,11 +805,9 @@ def test_storage_scopes_tickets_by_manager(tmp_path: Path) -> None:
     assert storage.get_manager_ticket("a", manager_id="mgr-1") is not None
 
 
-def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
-    # Build a pre-multi-manager DB by hand: the old pinned-id config table and a
-    # tickets table with no manager_id column, then open it through Storage and
-    # assert the migration adopts the one manager under a minted id.
-    db = tmp_path / "waypoint.db"
+def _seed_legacy_db(db: Path, config_payload: dict[str, object]) -> None:
+    """Write a pre-multi-manager DB: the old pinned-id config table and a tickets
+    table with no manager_id column, one config row and two tickets."""
     conn = sqlite3.connect(db)
     conn.executescript("""
         CREATE TABLE manager_tickets (
@@ -826,11 +824,7 @@ def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
     now = datetime.now(UTC).isoformat()
     conn.execute(
         "INSERT INTO manager_config (id, payload) VALUES (1, ?)",
-        (
-            json.dumps(
-                {"trunk": "develop", "project": "legacy", "owner_session_id": "o"}
-            ),
-        ),
+        (json.dumps(config_payload),),
     )
     for tid in ("t1", "t2"):
         payload = {
@@ -849,6 +843,25 @@ def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
 
+
+def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
+    # A legacy manager whose compiled templates sit at the default layout has its
+    # repo_dir recovered from templates_dir, and its tickets backfilled.
+    db = tmp_path / "waypoint.db"
+    _seed_legacy_db(
+        db,
+        {
+            "trunk": "develop",
+            "project": "legacy",
+            "owner_session_id": "o",
+            "render_context": {
+                "templates_dir": "/home/me/proj/.waypoint/manager/templates",
+                "tickets_channel": "tickets",
+                "ticket_channel_prefix": "ticket-",
+            },
+        },
+    )
+
     storage = Storage(db)
     configs = storage.list_manager_configs()
     assert len(configs) == 1
@@ -856,11 +869,69 @@ def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
     assert migrated.id.startswith("mgr-")
     assert migrated.trunk == "develop"
     assert migrated.project == "legacy"
-    assert migrated.repo_dir == ""  # unknown until the next init
-    # Every legacy ticket is backfilled onto the migrated manager and visible.
+    assert migrated.repo_dir == "/home/me/proj"  # recovered from templates_dir
     tickets = storage.list_manager_tickets(manager_id=migrated.id)
     assert {t.id for t in tickets} == {"t1", "t2"}
     assert all(t.manager_id == migrated.id for t in tickets)
+
+
+def test_migrated_manager_reinit_reuses_id_without_collision(tmp_path: Path) -> None:
+    # The zero-intervention upgrade: after migration, the manager's own re-init
+    # (same repo, same channels) must re-bind the migrated manager — reusing its id
+    # and tickets — not mint a second manager or 409 on its own channels.
+    db = tmp_path / "waypoint.db"
+    _seed_legacy_db(
+        db,
+        {
+            "project": "legacy",
+            "render_context": {
+                "templates_dir": "/home/me/proj/.waypoint/manager/templates",
+                "tickets_channel": "tickets",
+                "ticket_channel_prefix": "ticket-",
+            },
+        },
+    )
+    storage = Storage(db)
+    migrated = storage.list_manager_configs()[0]
+
+    reg = ManagerRegistry(storage)
+    rc = ManagerRenderContext(
+        templates_dir="/home/me/proj/.waypoint/manager/templates",
+        tickets_channel="tickets",
+        ticket_channel_prefix="ticket-",
+    )
+    reinit = reg.init(
+        ManagerInitRequest(
+            config=ManagerConfig(
+                repo_dir="/home/me/proj", project="legacy", render_context=rc
+            )
+        )
+    )
+    assert reinit.id == migrated.id  # same manager, not a second one
+    assert len(storage.list_manager_configs()) == 1
+    assert {t.id for t in reg.get(reinit.id).list_tickets()} == {"t1", "t2"}
+
+
+def test_migrated_manager_without_templates_is_adopted_on_reinit(
+    tmp_path: Path,
+) -> None:
+    # A legacy manager whose templates_dir was customized off the default layout
+    # migrates unbound (repo_dir empty); the next init adopts the lone unbound
+    # manager rather than minting a second one.
+    db = tmp_path / "waypoint.db"
+    _seed_legacy_db(db, {"project": "legacy"})  # no render_context → no repo recovery
+    storage = Storage(db)
+    migrated = storage.list_manager_configs()[0]
+    assert migrated.repo_dir == ""
+
+    reg = ManagerRegistry(storage)
+    reinit = reg.init(
+        ManagerInitRequest(config=ManagerConfig(repo_dir="/home/me/proj"))
+    )
+    assert reinit.id == migrated.id
+    assert reinit.repo_dir == "/home/me/proj"
+    assert len(storage.list_manager_configs()) == 1
+    assert {t.id for t in reg.get(reinit.id).list_tickets()} == {"t1", "t2"}
 
 
 def test_storage_ticket_round_trip(tmp_path: Path) -> None:

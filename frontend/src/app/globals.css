@@ -4344,9 +4344,11 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
 }
 
 /* Owns vertical scrolling so the seams and reset affordance stay fixed outside
-   it when a chosen or viewport-clamped height is shorter than the content. */
+   it when a chosen or viewport-clamped height is shorter than the content. It
+   shrinks-and-scrolls but never grows past its content (``flex-grow: 0``), so
+   ``scrollHeight`` always reports the true content height for the snap detent. */
 .usage-panel-body {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: grid;

@@ -190,37 +190,36 @@ export function SessionUsagePill({
     widthSeamRef.current?.focus();
   }, []);
 
-  // Snap a resized dimension to its default detent: 440px for width, the
-  // content-driven natural height for height. Returns whether to clear the axis
-  // (restoring the default) or store the explicit value.
-  const snapValue = useCallback(
-    (
-      axis: "width" | "height",
-      value: number,
-    ): { value: number; clear: boolean } => {
-      if (!bounds) return { value, clear: false };
+  // The default detent a resize snaps to: 440px for width, the content-driven
+  // natural height for height. The height is derived from the content plus the
+  // panel's vertical chrome, independent of the panel's current height, so the
+  // target never chases a panel that has grown past its content (which would
+  // otherwise oscillate the snap and flicker). Computed once per gesture.
+  const snapTarget = useCallback(
+    (axis: "width" | "height"): number | null => {
+      if (!bounds) return null;
       if (axis === "width") {
-        const def = clampSize(
+        return clampSize(
           Math.min(DEFAULT_PANEL_WIDTH, bounds.maxWidth),
           bounds.minWidth,
           bounds.maxWidth,
         );
-        if (Math.abs(value - def) <= SNAP_THRESHOLD)
-          return { value: def, clear: true };
-        return { value, clear: false };
       }
       const panel = panelRef.current;
       const body = panel?.querySelector<HTMLElement>(".usage-panel-body");
-      if (panel && body) {
-        const natural = clampSize(
-          panel.offsetHeight - body.clientHeight + body.scrollHeight,
-          bounds.minHeight,
-          bounds.maxHeight,
-        );
-        if (Math.abs(value - natural) <= SNAP_THRESHOLD)
-          return { value: natural, clear: true };
-      }
-      return { value, clear: false };
+      if (!panel || !body) return null;
+      const cs = window.getComputedStyle(panel);
+      // ``offsetTop`` covers the top border + padding above the body (the sole
+      // flow child); the bottom chrome is read from the computed style.
+      const chrome =
+        body.offsetTop +
+        parseFloat(cs.paddingBottom) +
+        parseFloat(cs.borderBottomWidth);
+      return clampSize(
+        chrome + body.scrollHeight,
+        bounds.minHeight,
+        bounds.maxHeight,
+      );
     },
     [bounds],
   );
@@ -285,6 +284,8 @@ export function SessionUsagePill({
       const bodyClass =
         axis === "width" ? "usage-resizing-x" : "usage-resizing-y";
       document.body.classList.add(bodyClass);
+      // Captured once so the snap detent is a fixed target for the whole drag.
+      const target = snapTarget(axis);
       const onMove = (ev: PointerEvent) => {
         if (axis === "width") {
           const raw = clampSize(
@@ -292,16 +293,18 @@ export function SessionUsagePill({
             bounds.minWidth,
             bounds.maxWidth,
           );
-          const snap = snapValue("width", raw);
-          applyResize({ width: snap.clear ? undefined : snap.value });
+          const snap =
+            target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
+          applyResize({ width: snap ? undefined : raw });
         } else {
           const raw = clampSize(
             startHeight + sign * (ev.clientY - startY),
             bounds.minHeight,
             bounds.maxHeight,
           );
-          const snap = snapValue("height", raw);
-          applyResize({ height: snap.clear ? undefined : snap.value });
+          const snap =
+            target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
+          applyResize({ height: snap ? undefined : raw });
         }
       };
       const onUp = () => {
@@ -312,7 +315,7 @@ export function SessionUsagePill({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [bounds, anchored, applyResize, snapValue],
+    [bounds, anchored, applyResize, snapTarget],
   );
 
   const onResizeKey = useCallback(
@@ -337,8 +340,10 @@ export function SessionUsagePill({
           bounds.minWidth,
           bounds.maxWidth,
         );
-        const snap = snapValue("width", raw);
-        applyResize({ width: snap.clear ? undefined : snap.value });
+        const target = snapTarget("width");
+        const snap =
+          target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
+        applyResize({ width: snap ? undefined : raw });
       } else {
         let dir = 0;
         if (event.key === "ArrowDown") dir = 1;
@@ -352,11 +357,13 @@ export function SessionUsagePill({
           bounds.minHeight,
           bounds.maxHeight,
         );
-        const snap = snapValue("height", raw);
-        applyResize({ height: snap.clear ? undefined : snap.value });
+        const target = snapTarget("height");
+        const snap =
+          target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
+        applyResize({ height: snap ? undefined : raw });
       }
     },
-    [bounds, anchored, applyResize, snapValue],
+    [bounds, anchored, applyResize, snapTarget],
   );
 
   const showResizeControls = isDesktop && bounds !== null;

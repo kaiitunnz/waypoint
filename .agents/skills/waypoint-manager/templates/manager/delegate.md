@@ -32,7 +32,11 @@ waypoint sessions list --spawned-by {{manager_session_id}} --recursive \
     --spawner-session-id {{manager_session_id}} | jq -r .session.id)   # never --worktree: the lead shares your tree
   waypoint manager ticket update {{ticket_id}} --lead-session-id "$new"
   waypoint sessions wake-on-board "$new" --channels {{ticket_channel}}   # relays wake it; the manager owns the inbox
-  waypoint sessions send "$new" "$(waypoint manager render --role tech_lead --step brief --ticket {{ticket_id}})"
+  # Match the resume prompt to the state: `brief` for a build in progress
+  # (`building`/`blocked`), `address-review` for a delivered ticket
+  # (`revising`/`review_requested`) whose PR/commit already exists.
+  step=brief; case "<same-state>" in revising|review_requested) step=address-review;; esac
+  waypoint sessions send "$new" "$(waypoint manager render --role tech_lead --step $step --ticket {{ticket_id}})"
   ```
   Past `max_lead_restarts` the self-loop is rejected (`409`) — escalate to the human,
   keeping the branch (the committed work is the retry's starting point):

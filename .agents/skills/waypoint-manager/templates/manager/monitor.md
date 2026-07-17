@@ -76,7 +76,9 @@ Frame an open question when the lead left the decision open. You are
 
 ## The substantial-spec gate
 
-When the writer posts back, branch on its `kind`.
+When the writer posts back, branch on its `kind`. Act on the newest `spec_ready`/
+`infeasible` post above the newest `respec` note — a re-spec round accumulates older
+posts in the log.
 
 **`spec_ready`** — move `spec_pending → spec_review` (recording `{{spec_ref}}`) and
 post an **approval** inbox item with the spec. On the answer: **approve** → `ready`;
@@ -188,8 +190,9 @@ the block's shape:
 - **branch-less blocker** (an infeasible or writer-restart-exhausted `spec_pending →
   blocked`, or a delegate-budget-exhausted `delegated → blocked`, with no lead to relay
   to) — for these, `$selected` is your transition directly: `proceed on a human-supplied
-  spec` → `blocked → ready` (record a supplied spec with `--spec-ref <ref>`), `re-spec` →
-  `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`.
+  spec` → `blocked → ready`, recording the spec ref the human gave in `reply.notes`
+  (`--spec-ref <ref>`), `re-spec` → `blocked → spec_pending` (see **Re-spec** below),
+  `abandon` → `blocked → abandoned`.
   `retry` splits on `attempts` (a writer/spec ticket never delegated, `attempts == 0`; a
   delegate-exhaustion block has `attempts >= 1`): for `attempts == 0` (writer-restart
   exhaustion), when the spec slot is free reset the writer budget

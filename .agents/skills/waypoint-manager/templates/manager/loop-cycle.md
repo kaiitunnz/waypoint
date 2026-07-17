@@ -126,8 +126,11 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
        ```
      - **Re-notified, window elapsed** (`latency_renotified` == `waiting_since`,
        `latency_renotified_at` > 0, and `now - renotified_at ≥ hlh * 3600`) → transition to
-       `abandoned`. If the abandoned ticket was on-tree (`blocked`/`review_requested`), reap
-       it and release the tree (`{{templates_dir}}/manager/integrate.md`, Finalize).
+       `abandoned`. For a `review_requested` ticket, record an observed merge first
+       (`{{templates_dir}}/manager/integrate.md`, Record the merge) — a merge observed on
+       GitHub is `merged`, not `abandoned`. If the abandoned ticket was on-tree
+       (`blocked`/`review_requested`), reap it and release the tree
+       (`{{templates_dir}}/manager/integrate.md`, Finalize).
      - **Re-notified, still within the window** — handled this drain; the stamp and the
        armed liveness self-wake carry the abandon to a later wake.
 

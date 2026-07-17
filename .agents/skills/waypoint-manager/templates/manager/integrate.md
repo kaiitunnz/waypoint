@@ -93,8 +93,15 @@ last turn:
 gh pr view {{pr_url}} --json state,mergeStateStatus,statusCheckRollup
 ```
 
-- `state == "MERGED"` → record the terminal: full completion → `review_requested →
-  merged`; partial completion (`is_partial`) → `review_requested → deferred`.
+- `state == "MERGED"` → close a ghosted-merge gate (the human merged on GitHub without
+  answering the `— PR review` item, leaving it open) and record the terminal:
+  ```bash
+  item=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.inbox_item_id // empty')
+  [ -n "$item" ] && [ "$(waypoint inbox get "$item" | jq -r '.item.status')" = open ] \
+    && waypoint inbox delete "$item"
+  ```
+  Full completion → `review_requested → merged`; partial completion (`is_partial`) →
+  `review_requested → deferred`.
 
 The single shared tree serializes builds, and trunk advances only on a merge the human
 performs (or, opt-in, one they ask you to perform).

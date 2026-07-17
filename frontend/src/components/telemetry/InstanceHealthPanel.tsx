@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 
 import {
+  DatabaseContentModel,
+  DatabaseCountRow,
+  deriveDatabaseContent,
   formatBytes,
   formatExactBytes,
   INSTANCE_CATEGORY_ORDER,
@@ -12,11 +15,24 @@ import {
 } from "@/lib/telemetry";
 import {
   CategoryFootprint,
+  DatabaseReclaim,
   Insight,
   InstanceDataQuality,
   InstanceHistoryPoint,
+  InstanceSnapshot,
   TelemetryInstance,
 } from "@/lib/types";
+
+const DB_DETAILS_REGION_ID = "tm-inst-db-details";
+const DB_DETAILS_HEADING_ID = "tm-inst-db-details-heading";
+const DB_DETAILS_TOGGLE_ID = "tm-inst-db-details-toggle";
+const DB_EVENT_MIX_ID = "tm-inst-db-event-mix";
+const DB_EVENT_MIX_COLLAPSED_LIMIT = 4;
+
+const DB_CONTENT_UNAVAILABLE =
+  "Database content details are unavailable because the database could not be queried read-only.";
+const DB_RECORD_COUNT_NOTE =
+  "Record counts explain database contents; they do not divide the database file size.";
 
 interface InstanceHealthPanelProps {
   instance: TelemetryInstance | null;
@@ -87,10 +103,177 @@ function ProportionBar({ categories, total }: { categories: CategoryFootprint[];
   );
 }
 
-function CategoryTable({ categories }: { categories: CategoryFootprint[] }) {
+function CountRows({ rows }: { rows: DatabaseCountRow[] }) {
+  return (
+    <dl className="tm-inst-db-dl">
+      {rows.map((row) => (
+        <div key={row.key} className="tm-inst-db-item">
+          <dt>{row.label}</dt>
+          <dd>{row.count.toLocaleString("en-US")}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function EventMix({
+  content,
+  expanded,
+  onToggle,
+}: {
+  content: DatabaseContentModel;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (content.eventMix.length === 0) return null;
+  const collapsible = content.eventMix.length > DB_EVENT_MIX_COLLAPSED_LIMIT;
+  const visible =
+    collapsible && !expanded
+      ? content.eventMix.slice(0, DB_EVENT_MIX_COLLAPSED_LIMIT)
+      : content.eventMix;
+  return (
+    <div className="tm-inst-db-eventmix">
+      <div className="tm-inst-db-eventmix-head">
+        <span className="tm-inst-db-subheading">Event mix</span>
+        {collapsible ? (
+          <button
+            type="button"
+            className="tm-inst-db-toggle tm-inst-db-toggle-sm"
+            aria-expanded={expanded}
+            aria-controls={DB_EVENT_MIX_ID}
+            onClick={onToggle}
+          >
+            <span className="tm-inst-db-caret" aria-hidden="true">
+              {expanded ? "▾" : "▸"}
+            </span>
+            {expanded ? "Show fewer" : `Show all ${content.eventMix.length}`}
+          </button>
+        ) : null}
+      </div>
+      <ul id={DB_EVENT_MIX_ID} className="tm-inst-db-kinds">
+        {visible.map((kind) => (
+          <li key={kind.kind} className="tm-inst-db-kind">
+            <span className="tm-inst-db-kind-label">{kind.label}</span>
+            <span className="tm-inst-db-kind-count">{kind.count.toLocaleString("en-US")}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DatabaseDetails({
+  bytes,
+  categoryUnavailable,
+  database,
+  content,
+  tableRowsEmpty,
+  eventMixExpanded,
+  onToggleEventMix,
+}: {
+  bytes: number;
+  categoryUnavailable: boolean;
+  database: DatabaseReclaim;
+  content: DatabaseContentModel;
+  tableRowsEmpty: boolean;
+  eventMixExpanded: boolean;
+  onToggleEventMix: () => void;
+}) {
+  const contentUnavailable = tableRowsEmpty && !database.measured;
+  return (
+    <section id={DB_DETAILS_REGION_ID} className="tm-inst-db" aria-labelledby={DB_DETAILS_HEADING_ID}>
+      <h4 id={DB_DETAILS_HEADING_ID} className="tm-inst-db-title">
+        Database details
+      </h4>
+      {categoryUnavailable ? (
+        <p className="tm-inst-db-unavail muted">{DB_CONTENT_UNAVAILABLE}</p>
+      ) : (
+        <>
+          <p className="tm-inst-db-note muted">{DB_RECORD_COUNT_NOTE}</p>
+          <div className="tm-inst-db-groups">
+            <div className="tm-inst-db-group">
+              <h5 className="tm-inst-db-heading">Storage</h5>
+              <dl className="tm-inst-db-dl">
+                <div className="tm-inst-db-item">
+                  <dt>Database file</dt>
+                  <dd>
+                    <ByteValue bytes={bytes} />
+                  </dd>
+                </div>
+                {database.measured ? (
+                  <div className="tm-inst-db-item">
+                    <dt>Reclaimable free pages</dt>
+                    <dd>
+                      <ByteValue bytes={database.free_bytes} /> (
+                      {(database.free_percent * 100).toFixed(0)}%)
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </div>
+
+            {content.hasContent ? (
+              <>
+                {content.session.length > 0 ? (
+                  <div className="tm-inst-db-group">
+                    <h5 className="tm-inst-db-heading">Session data</h5>
+                    <CountRows rows={content.session} />
+                    <EventMix
+                      content={content}
+                      expanded={eventMixExpanded}
+                      onToggle={onToggleEventMix}
+                    />
+                  </div>
+                ) : null}
+
+                {content.telemetry.length > 0 ? (
+                  <div className="tm-inst-db-group">
+                    <h5 className="tm-inst-db-heading">Telemetry data</h5>
+                    <CountRows rows={content.telemetry} />
+                  </div>
+                ) : null}
+
+                {content.otherManagedRecords !== null ? (
+                  <div className="tm-inst-db-group">
+                    <h5 className="tm-inst-db-heading">Other managed records</h5>
+                    <p className="tm-inst-db-other">
+                      {content.otherManagedRecords.toLocaleString("en-US")}{" "}
+                      {content.otherManagedRecords === 1 ? "record" : "records"}
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            ) : contentUnavailable ? (
+              <p className="tm-inst-db-unavail muted">{DB_CONTENT_UNAVAILABLE}</p>
+            ) : null}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CategoryTable({
+  snapshot,
+  detailsExpanded,
+  onToggleDetails,
+  eventMixExpanded,
+  onToggleEventMix,
+}: {
+  snapshot: InstanceSnapshot;
+  detailsExpanded: boolean;
+  onToggleDetails: () => void;
+  eventMixExpanded: boolean;
+  onToggleEventMix: () => void;
+}) {
   const ordered = INSTANCE_CATEGORY_ORDER.map((cat) =>
-    categories.find((c) => c.category === cat),
+    snapshot.categories.find((c) => c.category === cat),
   ).filter((c): c is CategoryFootprint => c !== undefined);
+  const content = useMemo(
+    () => deriveDatabaseContent(snapshot.counts.table_rows, snapshot.counts.events_by_kind),
+    [snapshot.counts.table_rows, snapshot.counts.events_by_kind],
+  );
+  const tableRowsEmpty = Object.keys(snapshot.counts.table_rows).length === 0;
   return (
     <table className="tm-inst-table">
       <thead>
@@ -103,27 +286,62 @@ function CategoryTable({ categories }: { categories: CategoryFootprint[] }) {
         </tr>
       </thead>
       <tbody>
-        {ordered.map((cat) => (
-          <tr key={cat.category}>
-            <th scope="row">
-              <span
-                className="tm-inst-swatch"
-                aria-hidden="true"
-                style={{ background: instanceCategoryColor(cat.category) }}
-              />
-              {instanceCategoryLabel(cat.category)}
-              {cat.unavailable ? (
-                <span className="tm-inst-tag">unavailable</span>
-              ) : cat.partial ? (
-                <span className="tm-inst-tag">partial</span>
+        {ordered.map((cat) => {
+          const isDatabase = cat.category === "database";
+          return (
+            <Fragment key={cat.category}>
+              <tr>
+                <th scope="row">
+                  <span
+                    className="tm-inst-swatch"
+                    aria-hidden="true"
+                    style={{ background: instanceCategoryColor(cat.category) }}
+                  />
+                  {instanceCategoryLabel(cat.category)}
+                  {cat.unavailable ? (
+                    <span className="tm-inst-tag">unavailable</span>
+                  ) : cat.partial ? (
+                    <span className="tm-inst-tag">partial</span>
+                  ) : null}
+                  {isDatabase ? (
+                    <button
+                      type="button"
+                      id={DB_DETAILS_TOGGLE_ID}
+                      className="tm-inst-db-toggle"
+                      aria-expanded={detailsExpanded}
+                      aria-controls={DB_DETAILS_REGION_ID}
+                      onClick={onToggleDetails}
+                    >
+                      Details
+                      <span className="tm-inst-db-caret" aria-hidden="true">
+                        {detailsExpanded ? "▾" : "›"}
+                      </span>
+                    </button>
+                  ) : null}
+                </th>
+                <td>
+                  <ByteValue bytes={cat.bytes} />
+                </td>
+                <td className="tm-inst-num">{cat.entry_count.toLocaleString("en-US")}</td>
+              </tr>
+              {isDatabase && detailsExpanded ? (
+                <tr className="tm-inst-db-row">
+                  <td colSpan={3} className="tm-inst-db-cell">
+                    <DatabaseDetails
+                      bytes={cat.bytes}
+                      categoryUnavailable={cat.unavailable}
+                      database={snapshot.database}
+                      content={content}
+                      tableRowsEmpty={tableRowsEmpty}
+                      eventMixExpanded={eventMixExpanded}
+                      onToggleEventMix={onToggleEventMix}
+                    />
+                  </td>
+                </tr>
               ) : null}
-            </th>
-            <td>
-              <ByteValue bytes={cat.bytes} />
-            </td>
-            <td className="tm-inst-num">{cat.entry_count.toLocaleString("en-US")}</td>
-          </tr>
-        ))}
+            </Fragment>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -271,6 +489,20 @@ export function InstanceHealthPanel({
     : (snapshot?.data_quality ?? "unavailable");
   const meta = QUALITY_META[quality];
 
+  const [databaseDetailsExpanded, setDatabaseDetailsExpanded] = useState(false);
+  const [eventMixExpanded, setEventMixExpanded] = useState(false);
+
+  // A database-vacuum maintenance card focuses "database"; open the details so
+  // the reclaimability metric is visible without a second click, then let the
+  // parent perform its existing scroll.
+  const handleInsightFocus = useCallback(
+    (focus: string | undefined) => {
+      if (focus === "database") setDatabaseDetailsExpanded(true);
+      onInsightFocus(focus);
+    },
+    [onInsightFocus],
+  );
+
   const totalCount = useMemo(() => {
     if (!snapshot) return 0;
     return snapshot.categories.reduce((sum, c) => sum + c.entry_count, 0);
@@ -332,7 +564,13 @@ export function InstanceHealthPanel({
           </div>
 
           <ProportionBar categories={snapshot.categories} total={snapshot.total_bytes} />
-          <CategoryTable categories={snapshot.categories} />
+          <CategoryTable
+            snapshot={snapshot}
+            detailsExpanded={databaseDetailsExpanded}
+            onToggleDetails={() => setDatabaseDetailsExpanded((prev) => !prev)}
+            eventMixExpanded={eventMixExpanded}
+            onToggleEventMix={() => setEventMixExpanded((prev) => !prev)}
+          />
 
           {snapshot.structured_logs.length > 0 || snapshot.redundant_logs.count > 0 ? (
             <div className="tm-inst-overlays">
@@ -431,7 +669,7 @@ export function InstanceHealthPanel({
             insights={instance?.insights ?? []}
             dismissingSignature={dismissingSignature}
             onDismiss={onDismiss}
-            onFocus={onInsightFocus}
+            onFocus={handleInsightFocus}
           />
 
           <HistoryTrend history={instance?.history ?? []} />

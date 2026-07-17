@@ -344,6 +344,117 @@ export function instanceCategoryColor(category: string): string {
   return INSTANCE_CATEGORY_COLORS[category as InstanceStorageCategory] ?? "var(--tm-series-6)";
 }
 
+// ── Database content breakdown ───────────────────────────────────────────
+//
+// The instance snapshot already carries `counts.table_rows` (a per-table
+// COUNT(*)) and `counts.events_by_kind`. These derive a bounded,
+// presentation-only view of what the SQLite file holds. Record counts are NOT
+// bytes — they explain database contents without dividing the file size. Only
+// the allowlisted user-facing tables are named; every other returned table
+// folds into a single generic remainder so schema additions stay aggregate.
+
+const DATABASE_CONTENT_GROUPS = {
+  session: ["sessions", "events", "session_token_usage_records"],
+  telemetry: [
+    "telemetry_facts",
+    "telemetry_fact_tag",
+    "telemetry_daily_rollup",
+    "telemetry_insight_dismissal",
+    "telemetry_instance_snapshot",
+  ],
+} as const;
+
+const DATABASE_CONTENT_LABELS: Record<string, string> = {
+  sessions: "Session records",
+  events: "Session events",
+  session_token_usage_records: "Usage records",
+  telemetry_facts: "Telemetry facts",
+  telemetry_fact_tag: "Tag records",
+  telemetry_daily_rollup: "Daily rollups",
+  telemetry_insight_dismissal: "Dismissed insights",
+  telemetry_instance_snapshot: "Saved instance snapshots",
+};
+
+export interface DatabaseCountRow {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface DatabaseEventKind {
+  kind: string;
+  label: string;
+  count: number;
+}
+
+export interface DatabaseContentModel {
+  session: DatabaseCountRow[];
+  telemetry: DatabaseCountRow[];
+  otherManagedRecords: number | null;
+  eventMix: DatabaseEventKind[];
+  hasContent: boolean;
+}
+
+function isValidCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function collectGroup(
+  tableRows: Record<string, number>,
+  keys: readonly string[],
+): DatabaseCountRow[] {
+  const rows: DatabaseCountRow[] = [];
+  for (const key of keys) {
+    if (!(key in tableRows)) continue;
+    const count = tableRows[key];
+    if (!isValidCount(count)) continue;
+    rows.push({ key, label: DATABASE_CONTENT_LABELS[key] ?? key, count });
+  }
+  return rows;
+}
+
+function titleCaseKind(kind: string): string {
+  const words = kind
+    .split(/[^A-Za-z0-9]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
+  return words.length > 0 ? words.join(" ") : kind;
+}
+
+export function deriveDatabaseContent(
+  tableRows: Record<string, number>,
+  eventsByKind: Record<string, number>,
+): DatabaseContentModel {
+  const session = collectGroup(tableRows, DATABASE_CONTENT_GROUPS.session);
+  const telemetry = collectGroup(tableRows, DATABASE_CONTENT_GROUPS.telemetry);
+
+  const claimed = new Set<string>([
+    ...DATABASE_CONTENT_GROUPS.session,
+    ...DATABASE_CONTENT_GROUPS.telemetry,
+  ]);
+  let otherSum = 0;
+  let otherSeen = false;
+  for (const [key, count] of Object.entries(tableRows)) {
+    if (claimed.has(key) || !isValidCount(count)) continue;
+    otherSum += count;
+    otherSeen = true;
+  }
+
+  const eventMix: DatabaseEventKind[] = Object.entries(eventsByKind)
+    .filter(([, count]) => isValidCount(count))
+    .map(([kind, count]) => ({ kind, label: titleCaseKind(kind), count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  return {
+    session,
+    telemetry,
+    otherManagedRecords: otherSeen ? otherSum : null,
+    eventMix,
+    hasContent:
+      session.length > 0 || telemetry.length > 0 || otherSeen || eventMix.length > 0,
+  };
+}
+
 export interface TokenTierSplit {
   newWork: number;
   reread: number;

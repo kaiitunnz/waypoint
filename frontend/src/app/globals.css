@@ -17765,6 +17765,162 @@ html[data-theme="light"] .wp-hl {
   padding: 0 4px;
 }
 
+/* Database content disclosure */
+.tm-inst-db-toggle {
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 1px 3px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tm-inst-db-toggle:hover {
+  color: var(--text);
+}
+.tm-inst-db-caret {
+  font-size: 0.72em;
+  line-height: 1;
+}
+
+.tm-inst-db-row > .tm-inst-db-cell {
+  text-align: left;
+  font-family: var(--font);
+  padding: 0 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+.tm-inst-db {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card-soft);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.tm-inst-db-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  font-weight: 500;
+}
+.tm-inst-db-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.tm-inst-db-groups {
+  display: grid;
+  gap: 10px;
+}
+.tm-inst-db-group {
+  display: grid;
+  gap: 4px;
+}
+.tm-inst-db-heading {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.tm-inst-db-dl {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.tm-inst-db-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0;
+}
+.tm-inst-db-item dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.tm-inst-db-item dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-size: 0.82rem;
+  text-align: right;
+}
+.tm-inst-db-other {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.tm-inst-db-eventmix {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  display: grid;
+  gap: 5px;
+}
+.tm-inst-db-eventmix-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tm-inst-db-subheading {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+.tm-inst-db-toggle-sm {
+  margin-left: 0;
+  font-size: 0.66rem;
+}
+.tm-inst-db-kinds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.tm-inst-db-kind {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 0.76rem;
+}
+.tm-inst-db-kind-label {
+  color: var(--muted);
+}
+.tm-inst-db-kind-count {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+.tm-inst-db-unavail {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+@media (max-width: 640px) {
+  .tm-inst-db-item {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+  .tm-inst-db-item dd {
+    text-align: left;
+  }
+}
+
 .tm-inst-overlays {
   display: flex;
   flex-direction: column;

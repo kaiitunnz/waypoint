@@ -49,9 +49,10 @@ manager session through the `/waypoint-manager` (or `/waypoint`) skill. Each ste
 has a direct `waypoint` CLI equivalent. End to end, the human:
 
 1. **Sets up** — messages the manager session `/waypoint-manager init`; it loads the
-   manifest, registers its wake, verifies its roles, and records the owner session
-   (also `/waypoint manager init`, or directly `waypoint manager init --manifest
-   <path>`; manifest fields are detailed under Configuration).
+   manifest, registers its wake, verifies its roles, records the owner session, and seeds
+   the intake channel with a marker that appears on the board page (also `/waypoint
+   manager init`, or directly `waypoint manager init --manifest <path>`; manifest fields
+   are detailed under Configuration).
 2. **Files a ticket** — posts the request to the intake channel from the board page
    (or `waypoint board post <tickets_channel> "<request>"`); the manager registers and
    triages it on its next wake.

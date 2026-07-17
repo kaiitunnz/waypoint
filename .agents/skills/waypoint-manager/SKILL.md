@@ -45,11 +45,19 @@ never a `create`/`install`.
      --kinds strategy --kinds error --kinds decision --kinds attention \
      --kinds done --kinds partial --kinds spec_ready --kinds infeasible
    ```
-3. **Verify each role's preset.** For every `roles.<role>` configured with a
+3. **Seed the intake channel.** Post a keyless marker to `{{tickets_channel}}`, authored
+   by your session (reconcile excludes your own posts from intake). The board page shows
+   the channel once it holds this marker:
+   ```bash
+   waypoint board post {{tickets_channel}} \
+     "Waypoint manager intake channel. Post a ticket here and the manager triages it on its next wake." \
+     --meta kind=intake_open
+   ```
+4. **Verify each role's preset.** For every `roles.<role>` configured with a
    `preset:`, `waypoint presets show <name>`. If one is missing, halt and flag the
    user. A role configured with an inline `launch:` block is a deliberate choice, not
    a missing preset.
-4. **Preflight the shipped skills** each role's backend needs (`waypoint-subagents`,
+5. **Preflight the shipped skills** each role's backend needs (`waypoint-subagents`,
    `waypoint-workqueue`, `waypoint-crew`, `waypoint-comms`, `waypoint-worktree`) —
    confirm they are installed (`waypointctl skills status`, or that they appear in
    this session's available skills). If a required one is absent, halt and flag.

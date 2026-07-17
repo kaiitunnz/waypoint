@@ -11,6 +11,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -359,6 +360,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     const stored = Number(window.localStorage.getItem("waypoint.workspaceDockWidth"));
     return Number.isFinite(stored) && stored >= 300 ? stored : 400;
   });
+  // innerWidth matches the CSS width media queries during a desktop resize.
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window === "undefined" ? Infinity : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  // Equality stays side-dock: a dock exactly viewport-wide still contains its
+  // right-inset close button.
+  const dockSheet = viewportWidth <= 640 || dockWidth > viewportWidth;
   // The todo-event sequence the user last dismissed from the progress dock.
   // `undefined` means we haven't read the persisted value yet — the dock stays
   // hidden until then so a dismissed dock doesn't flash on load (and to avoid
@@ -1775,19 +1789,27 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
   // Drive the layout from the document root: when the dock is open on a wide
   // viewport, `.page-shell` pads left by --wp-dock-width so the session column
-  // slides clear of the dock instead of sitting under it.
-  useEffect(() => {
+  // slides clear of the dock instead of sitting under it. Sheet mode excludes
+  // that push via data-wp-dock-mode; useLayoutEffect applies it before paint.
+  useLayoutEffect(() => {
     const root = document.documentElement;
     if (workspacePreviewEnabled && workspaceOpen) {
       root.style.setProperty("--wp-dock-width", `${dockWidth}px`);
       root.setAttribute("data-wp-dock", "open");
+      if (dockSheet) {
+        root.setAttribute("data-wp-dock-mode", "sheet");
+      } else {
+        root.removeAttribute("data-wp-dock-mode");
+      }
     } else {
       root.removeAttribute("data-wp-dock");
+      root.removeAttribute("data-wp-dock-mode");
     }
     return () => {
       root.removeAttribute("data-wp-dock");
+      root.removeAttribute("data-wp-dock-mode");
     };
-  }, [workspacePreviewEnabled, workspaceOpen, dockWidth]);
+  }, [workspacePreviewEnabled, workspaceOpen, dockWidth, dockSheet]);
 
   return (
     <WorkspaceFileLinkProvider value={workspaceLink}>
@@ -2352,6 +2374,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           initialDir={workspaceInitialDir}
           revealSeq={workspaceRevealSeq}
           width={dockWidth}
+          sheet={dockSheet}
           onResize={setDockWidth}
           onClose={() => setWorkspaceOpen(false)}
         />

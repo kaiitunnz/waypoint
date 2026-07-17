@@ -14,6 +14,7 @@ interface WorkspaceFilesPanelProps {
   initialDir?: string;
   revealSeq?: number;
   width: number;
+  sheet?: boolean;
   onResize: (width: number) => void;
   onClose: () => void;
 }
@@ -27,6 +28,7 @@ export function WorkspaceFilesPanel({
   initialDir,
   revealSeq,
   width,
+  sheet = false,
   onResize,
   onClose,
 }: WorkspaceFilesPanelProps) {
@@ -72,16 +74,36 @@ export function WorkspaceFilesPanel({
     if (open) setHasOpened(true);
   }, [open]);
 
+  // In sheet mode focus may sit outside the portal, where the dock-local keydown
+  // never fires; a window handler makes Escape reach it. defaultPrevented yields
+  // to a higher-priority modal or the explorer filter.
+  useEffect(() => {
+    if (!open || !sheet) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, sheet, onClose]);
+
   if (typeof document === "undefined" || !hasOpened) return null;
 
   return createPortal(
     <aside
-      className={`wp-dock${open ? "" : " wp-dock-closed"}`}
+      className={`wp-dock${open ? "" : " wp-dock-closed"}${sheet ? " wp-dock-sheet" : ""}`}
       role="complementary"
       aria-label="Workspace files"
       aria-hidden={!open}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
+        // defaultPrevented lets the explorer consume Escape first; preventDefault
+        // keeps the window-level sheet handler from closing a second time.
+        if (e.key === "Escape" && !e.defaultPrevented) {
+          e.preventDefault();
+          onClose();
+        }
       }}
     >
       <WorkspaceExplorer

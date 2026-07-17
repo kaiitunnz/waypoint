@@ -108,7 +108,7 @@ Post the decision to {{ticket_channel}} (the manager observes it and moves you
 ```bash
 waypoint board post {{ticket_channel}} \
   "strategy: <inline|/waypoint-subagents|/waypoint-workqueue|/waypoint-crew>; observed scale: <what you found>; spec recommended: <X>; justification: <why — REQUIRED if lighter than recommended>" \
-  --key strategy --meta kind=progress
+  --key strategy --meta kind=strategy
 ```
 
 ## 2. Build under the chosen strategy

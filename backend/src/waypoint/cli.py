@@ -2346,8 +2346,8 @@ def sessions_wake_on_board(
         list[str] | None,
         typer.Option(
             "--kinds",
-            help="Optional status kinds to record on the subscription. Repeatable. "
-            "Stored for reference; not enforced by the content-free wake.",
+            help="Board post kinds to wake on. Repeatable. A non-empty list wakes "
+            "only on a post whose kind= meta matches; empty wakes on all.",
         ),
     ] = None,
     wake_on_inbox: Annotated[

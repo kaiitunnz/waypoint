@@ -32,13 +32,18 @@ never a `create`/`install`.
    state` also reports a non-empty `config.owner_session_id` (your own session, from
    `$WAYPOINT_SESSION_ID`) — it scopes reaping and the intake self-exclusion; a missing
    one means you ran outside a session, a halt-and-flag.
-2. **Register the wake** on the intake channel, all per-ticket channels, and inbox
-   answers:
+2. **Register the wake** in two subscriptions: the intake channel and inbox answers
+   unfiltered (a human's ticket post carries no `kind`), and the per-ticket channels
+   filtered to the actionable child kinds (routine `progress` and the writer's
+   `recommendation` do not wake you):
    ```bash
    waypoint sessions wake-on-board "$WAYPOINT_SESSION_ID" \
      --channels {{tickets_channel}} \
-     --channels '{{ticket_channel_prefix}}*' \
      --wake-on-inbox
+   waypoint sessions wake-on-board "$WAYPOINT_SESSION_ID" \
+     --channels '{{ticket_channel_prefix}}*' \
+     --kinds strategy --kinds error --kinds decision --kinds attention \
+     --kinds done --kinds partial --kinds spec_ready --kinds infeasible
    ```
 3. **Verify each role's preset.** For every `roles.<role>` configured with a
    `preset:`, `waypoint presets show <name>`. If one is missing, halt and flag the

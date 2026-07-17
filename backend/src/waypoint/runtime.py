@@ -3419,7 +3419,9 @@ class SessionRuntime:
             metadata=request.metadata,
         )
         await self._publish_board_update(
-            channel, author_session_id=request.author_session_id
+            channel,
+            author_session_id=request.author_session_id,
+            kind=entry.metadata.get("kind"),
         )
         return entry
 
@@ -3469,12 +3471,18 @@ class SessionRuntime:
         )
         if entry is not None:
             await self._publish_board_update(
-                channel, author_session_id=request.author_session_id
+                channel,
+                author_session_id=request.author_session_id,
+                kind=entry.metadata.get("kind"),
             )
         return entry
 
     async def _publish_board_update(
-        self, channel: str | None, *, author_session_id: str | None = None
+        self,
+        channel: str | None,
+        *,
+        author_session_id: str | None = None,
+        kind: str | None = None,
     ) -> None:
         # ``channel=None`` means "the board changed broadly" (e.g. a session
         # delete pruned posts across channels); clients refetch what they show.
@@ -3484,9 +3492,13 @@ class SessionRuntime:
         # Self-exclusion: the author is never woken by its own post; the
         # non-authored mutations (clear/delete/prune) pass ``None`` and wake
         # every matching subscriber. Board wakes are glob-scoped, not owner-
-        # scoped, so no ``owner_session_id``.
+        # scoped, so no ``owner_session_id``. ``kind`` (the post's ``kind=``
+        # meta) lets a kind-filtered subscriber skip a post it does not watch.
         self._spawn_wake_dispatch(
-            channel=channel, is_inbox=False, actor_session_id=author_session_id
+            channel=channel,
+            is_inbox=False,
+            actor_session_id=author_session_id,
+            kind=kind,
         )
 
     # ───────────────────────────── Inbox ─────────────────────────────
@@ -3686,6 +3698,7 @@ class SessionRuntime:
         is_inbox: bool,
         actor_session_id: str | None,
         owner_session_id: str | None = None,
+        kind: str | None = None,
     ) -> None:
         # Non-blocking: a poster's request latency must not include a
         # subscriber's ``send_input`` (slow for SSH transports). Delivery is
@@ -3697,6 +3710,7 @@ class SessionRuntime:
                 is_inbox=is_inbox,
                 actor_session_id=actor_session_id,
                 owner_session_id=owner_session_id,
+                kind=kind,
             )
         )
         self._wake_tasks.add(task)
@@ -3709,6 +3723,7 @@ class SessionRuntime:
         is_inbox: bool,
         actor_session_id: str | None,
         owner_session_id: str | None = None,
+        kind: str | None = None,
     ) -> None:
         for sub in self.storage.list_wake_subscriptions():
             if actor_session_id is not None and sub.session_id == actor_session_id:
@@ -3721,6 +3736,11 @@ class SessionRuntime:
                 if owner_session_id is None or sub.session_id != owner_session_id:
                     continue
             elif not self._board_glob_matches(channel, sub.channel_globs):
+                continue
+            # Kind-filtered subscription: skip only a definite mismatch. Empty
+            # kinds wake on all; a broad change or an unkinded post (kind None)
+            # wakes on the channel match.
+            elif sub.kinds and kind is not None and kind not in sub.kinds:
                 continue
             try:
                 self._wake_or_defer(sub.session_id)

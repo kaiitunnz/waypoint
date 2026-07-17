@@ -182,6 +182,83 @@ async def test_broad_change_wakes_board_subscribers(tmp_path, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_kind_filter_wakes_only_on_listed_kind(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-*"], kinds=["done", "strategy"])
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # A listed kind wakes; an unlisted kind (a routine progress heartbeat) does not.
+    await runtime._dispatch_subscription_wakes(
+        channel="ticket-1", is_inbox=False, actor_session_id=None, kind="done"
+    )
+    await runtime._dispatch_subscription_wakes(
+        channel="ticket-1", is_inbox=False, actor_session_id=None, kind="progress"
+    )
+    await _flush_wakes(runtime)
+
+    assert calls == [("mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_empty_kinds_wakes_on_any_kind(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "lead"))
+    _register(runtime, "lead", channel_globs=["ticket-*"])  # no kind filter
+    calls = _record_wakes(runtime, monkeypatch)
+
+    await runtime._dispatch_subscription_wakes(
+        channel="ticket-1", is_inbox=False, actor_session_id=None, kind="progress"
+    )
+    await _flush_wakes(runtime)
+
+    assert calls == [("lead", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_kind_filtered_subscriber_wakes_on_broad_change(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-*"], kinds=["done"])
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # A broad change (channel and kind both None) is fail-open: the kind filter
+    # does not suppress it.
+    await runtime._dispatch_subscription_wakes(
+        channel=None, is_inbox=False, actor_session_id=None, kind=None
+    )
+    await _flush_wakes(runtime)
+
+    assert calls == [("mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_post_board_entry_threads_kind_to_filter(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "mgr"))
+    _register(runtime, "mgr", channel_globs=["ticket-*"], kinds=["strategy"])
+    calls = _record_wakes(runtime, monkeypatch)
+
+    # The post's kind= meta threads through to the filter: a progress heartbeat is
+    # skipped, the strategy post wakes the manager.
+    await runtime.post_board_entry(
+        "ticket-1",
+        BoardPostRequest(text="working", key="status", metadata={"kind": "progress"}),
+    )
+    await runtime.post_board_entry(
+        "ticket-1",
+        BoardPostRequest(
+            text="strategy: inline", key="strategy", metadata={"kind": "strategy"}
+        ),
+    )
+    await _flush_wakes(runtime)
+
+    assert calls == [("mgr", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
 async def test_self_inbox_mutation_does_not_wake_but_human_does(
     tmp_path, monkeypatch
 ) -> None:

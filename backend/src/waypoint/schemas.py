@@ -631,9 +631,8 @@ class SessionPresetListResponse(BaseModel):
 class WakeSubscription(BaseModel):
     # A session's standing request to be woken (a content-free ``handle_input``)
     # when a matching board channel or the inbox mutates. ``channel_globs`` are
-    # fnmatch patterns over channel names; ``kinds`` is stored for future use but
-    # not enforced by dispatch (the ``board_update`` envelope carries only the
-    # channel name).
+    # fnmatch patterns over channel names; a non-empty ``kinds`` wakes only on a
+    # board post whose ``kind=`` meta is listed (empty ``kinds`` wakes on all).
     id: str
     session_id: str
     channel_globs: list[str] = Field(default_factory=list)

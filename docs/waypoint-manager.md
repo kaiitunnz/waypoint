@@ -84,6 +84,13 @@ changes. This is the same input path the scheduler uses, so it is backend-agnost
 the manager and its leads behave identically as Claude Code, Codex, or OpenCode
 sessions.
 
+A subscription may filter by post `kind`: a non-empty `--kinds` list wakes only on a
+board post whose `kind=` meta is listed (empty wakes on all). The manager watches the
+per-ticket channels for the actionable child kinds (`strategy`, `error`, `decision`,
+`attention`, `done`, `partial`, `spec_ready`, `infeasible`) and keeps the intake channel
+unfiltered; a lead's routine `progress` heartbeat and the writer's `recommendation` post
+do not wake it.
+
 A wake carries no payload — it means "a channel or the inbox you watch changed;
 re-read and reconcile." A burst of posts may coalesce into one wake, and two posts
 may double-fire; both are absorbed because the payload is always re-read and the

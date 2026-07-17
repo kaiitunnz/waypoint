@@ -426,7 +426,7 @@ transport:
 the way to retire a manager or start a project's backlog fresh. It clears **state
 records only**: the sessions the manager spawned,
 their branches, and the board channels are reaped separately (`sessions delete`,
-`board clear`), the same way the manager reaps a merged ticket's subtree. The
+`board delete`), the same way the manager reaps a merged ticket's subtree. The
 `/waypoint-manager deinit` skill workflow runs both halves — the reap, then
 `manager deinit`.
 
@@ -509,7 +509,9 @@ re-registers that lead's wake on the ticket channel, and sends it the brief. The
 fresh lead re-reads the durable ticket-channel log — the `status` cell and every owed
 relay — so committed work and a human answer given while the old lead was alive are
 both preserved. The reap of a merged ticket's subtree happens after integration,
-which is also when the tree returns to trunk and the merged branch is dropped.
+which is also when the tree returns to trunk, the merged branch is dropped, and the
+ticket's channel is deleted. A ticket abandoned before it reaches the tree keeps its
+channel until teardown deletes it.
 
 ### PR-based integration and human review
 

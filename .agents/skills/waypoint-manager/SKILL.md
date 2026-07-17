@@ -97,8 +97,8 @@ drops the state records only, so reap what you own first:
    ```
 2. **Reset the tree** to `{{trunk}}` and drop any leftover ticket branches
    (`git -C {{repo_dir}} checkout {{trunk}}`, then `git -C {{repo_dir}} branch -D` each).
-3. **Clear the board channels** you own — the intake, org, and per-ticket channels —
-   with `board clear`, when retiring the backlog rather than pausing it.
+3. **Delete the board channels** you own — the intake, org, and per-ticket channels —
+   with `board delete` when retiring the backlog; pausing keeps them.
 4. **Cancel any pending liveness self-wake** so a retired manager leaves nothing firing:
    ```bash
    for s in $(waypoint schedule message list --session-id "$WAYPOINT_SESSION_ID" | jq -r '.message_schedules[] | select(.status == "pending" and (.text | contains("[wp-manager-liveness]"))) | .id'); do

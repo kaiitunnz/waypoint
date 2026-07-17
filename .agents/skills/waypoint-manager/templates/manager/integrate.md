@@ -191,6 +191,7 @@ git -C {{repo_dir}} pull --ff-only origin {{trunk}}           # sync trunk (the 
 {{/if}}
 git -C {{repo_dir}} rev-parse --verify --quiet {{branch}} \
   && git -C {{repo_dir}} branch -D {{branch}} || true         # no-op if the branch was never cut / already dropped
+waypoint board delete {{ticket_channel}}                       # the ticket's channel is dead once terminal; delete is idempotent (deleted:0 if already gone)
 waypoint manager ticket update {{ticket_id}} --branch "" --lead-session-id ""   # mark the ticket finalized (clears the reconcile finalize_pending signal)
 ```
 

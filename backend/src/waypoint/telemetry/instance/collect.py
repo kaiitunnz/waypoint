@@ -46,8 +46,16 @@ class _DbReadout:
     valid_ids: set[str] | None = None  # None => classification unknown
     running_ids: set[str] = field(default_factory=set)
     table_rows: dict[str, int] = field(default_factory=dict)
+    table_bytes: dict[str, int] = field(default_factory=dict)
     events_by_kind: dict[str, int] = field(default_factory=dict)
     reclaim: DatabaseReclaim = field(default_factory=DatabaseReclaim)
+
+
+# dbstat scans every page, so it runs well past the per-query lock budget; the
+# whole collection is already an off-request-path, multi-second walk, so this
+# one measurement gets a wider ceiling and degrades to empty (sizes hidden)
+# rather than blocking when it cannot finish.
+_DBSTAT_BUDGET_MS = 4000
 
 
 def _read_database(db_path: Path) -> _DbReadout:
@@ -78,8 +86,38 @@ def _read_database(db_path: Path) -> _DbReadout:
         )
         for row in kinds or ():
             out.events_by_kind[row["kind"]] = int(row["n"])
+        out.table_bytes = _read_table_bytes(conn)
         out.reclaim = _read_reclaim(conn)
     return out
+
+
+def _read_table_bytes(conn: sqlite3.Connection) -> dict[str, int]:
+    """Measured page usage per table (its btree plus its indexes), via dbstat.
+
+    Attributes every index's pages to its owning table so a table's size is its
+    whole on-disk footprint. Returns an empty mapping when dbstat is absent from
+    the SQLite build or the scan exceeds its budget — the caller then reports
+    record counts without sizes rather than a fabricated breakdown.
+    """
+    schema = budgeted_query(
+        conn,
+        "SELECT name, tbl_name, type FROM sqlite_schema WHERE type IN ('table', 'index')",
+    )
+    owner = {
+        row["name"]: row["tbl_name"] for row in schema or () if row["type"] == "index"
+    }
+    pages = budgeted_query(
+        conn,
+        "SELECT name, SUM(pgsize) AS b FROM dbstat GROUP BY name",
+        budget_ms=_DBSTAT_BUDGET_MS,
+    )
+    if pages is None:
+        return {}
+    table_bytes: dict[str, int] = {}
+    for row in pages:
+        table = owner.get(row["name"], row["name"])
+        table_bytes[table] = table_bytes.get(table, 0) + int(row["b"])
+    return table_bytes
 
 
 def _read_reclaim(conn: sqlite3.Connection) -> DatabaseReclaim:
@@ -283,6 +321,7 @@ def collect_snapshot(
         filesystem=filesystem,
         counts=InstanceCounts(
             table_rows=db.table_rows,
+            table_bytes=db.table_bytes,
             events_by_kind=db.events_by_kind,
             session_dir_count=session_dir_count,
             orphan_dir_count=orphan_dir_count,

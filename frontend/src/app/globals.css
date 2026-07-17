@@ -4343,17 +4343,8 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
   animation: usage-panel-enter 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-/* Composer placement is anchored bottom/right and grows up/left, so its
-   control row sits at the bottom (near the anchor) and its free-edge seams
-   sit on the top and left; reversing the flow puts the controls below the
-   scroll body without reordering the DOM. Terminal placement keeps controls
-   on top. */
-.usage-panel--composer {
-  flex-direction: column-reverse;
-}
-
-/* Owns vertical scrolling so the seams and control row stay fixed outside it
-   when a chosen or viewport-clamped height is shorter than the content. */
+/* Owns vertical scrolling so the seams and reset affordance stay fixed outside
+   it when a chosen or viewport-clamped height is shorter than the content. */
 .usage-panel-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -4362,58 +4353,46 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
   gap: 18px;
 }
 
-.usage-panel-controls {
-  flex: 0 0 auto;
+/* Bare glyph pinned in the free corner where the two seams meet (top-left for
+   composer, bottom-right for terminal); shown only once a custom size exists
+   and consuming no layout height. */
+.usage-resize-reset {
+  position: absolute;
+  z-index: 4;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.usage-panel-reset {
-  appearance: none;
-  cursor: pointer;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  border-radius: var(--radius-sm);
-  padding: 3px 9px;
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-
-.usage-panel-reset:hover {
-  color: var(--fg);
-  border-color: var(--line-strong);
-}
-
-.usage-panel-reset:focus-visible {
-  outline: 2px solid var(--accent-cool);
-  outline-offset: 2px;
-}
-
-.usage-panel-close {
-  appearance: none;
-  cursor: pointer;
+  justify-content: center;
+  padding: 0;
   border: none;
   background: transparent;
-  color: var(--muted);
-  font-size: 1.1rem;
+  color: var(--muted-soft);
+  font-size: 0.8rem;
   line-height: 1;
-  padding: 2px 5px;
+  cursor: pointer;
   border-radius: var(--radius-sm);
   transition: color 120ms ease;
 }
 
-.usage-panel-close:hover {
-  color: var(--fg);
+.usage-resize-reset:hover {
+  color: var(--accent-strong);
 }
 
-.usage-panel-close:focus-visible {
+.usage-resize-reset:focus-visible {
   outline: 2px solid var(--accent-cool);
-  outline-offset: 2px;
+  outline-offset: 1px;
+  color: var(--accent-strong);
+}
+
+.usage-panel--composer .usage-resize-reset {
+  top: 5px;
+  left: 5px;
+}
+
+.usage-panel--terminal .usage-resize-reset {
+  bottom: 5px;
+  right: 5px;
 }
 
 /* Thin, subtle resize seams on the two free edges opposite the trigger-facing

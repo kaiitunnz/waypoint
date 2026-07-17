@@ -39,6 +39,11 @@ const DESKTOP_MIN_WIDTH = 541;
 // Pixel steps for keyboard resize; Shift takes the larger stride.
 const KEY_STEP = 24;
 const KEY_STEP_LARGE = 72;
+// The 440px CSS default width and the content-driven natural height act as snap
+// detents: a resize landing within this many pixels returns that axis to its
+// default (clearing the stored dimension).
+const DEFAULT_PANEL_WIDTH = 440;
+const SNAP_THRESHOLD = 14;
 
 interface UsagePopoverSize {
   width?: number;
@@ -121,11 +126,7 @@ export function SessionUsagePill({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  const resetRef = useRef<HTMLButtonElement | null>(null);
-  // Whether the most recent open was keyboard-activated, so focus moves into
-  // the panel only then (a pointer open leaves focus on the trigger).
-  const openedViaKeyboardRef = useRef(false);
+  const widthSeamRef = useRef<HTMLDivElement | null>(null);
 
   // Desktop drives resize controls and saved dimensions; the mobile sheet is
   // left untouched. Tracked reactively so a viewport crossing 540px re-renders.
@@ -173,11 +174,6 @@ export function SessionUsagePill({
     height: number;
   } | null>(null);
 
-  const closePopover = useCallback(() => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }, []);
-
   const applyResize = useCallback((patch: UsagePopoverSize) => {
     const next = { ...prefRef.current, ...patch };
     prefRef.current = next;
@@ -190,9 +186,44 @@ export function SessionUsagePill({
     setPref({});
     writeStoredSize({});
     // Reset auto-hides once no preference remains; keep focus in the panel by
-    // moving it to Close rather than dropping it to the body.
-    closeRef.current?.focus();
+    // moving it to a resize seam rather than dropping it to the body.
+    widthSeamRef.current?.focus();
   }, []);
+
+  // Snap a resized dimension to its default detent: 440px for width, the
+  // content-driven natural height for height. Returns whether to clear the axis
+  // (restoring the default) or store the explicit value.
+  const snapValue = useCallback(
+    (
+      axis: "width" | "height",
+      value: number,
+    ): { value: number; clear: boolean } => {
+      if (!bounds) return { value, clear: false };
+      if (axis === "width") {
+        const def = clampSize(
+          Math.min(DEFAULT_PANEL_WIDTH, bounds.maxWidth),
+          bounds.minWidth,
+          bounds.maxWidth,
+        );
+        if (Math.abs(value - def) <= SNAP_THRESHOLD)
+          return { value: def, clear: true };
+        return { value, clear: false };
+      }
+      const panel = panelRef.current;
+      const body = panel?.querySelector<HTMLElement>(".usage-panel-body");
+      if (panel && body) {
+        const natural = clampSize(
+          panel.offsetHeight - body.clientHeight + body.scrollHeight,
+          bounds.minHeight,
+          bounds.maxHeight,
+        );
+        if (Math.abs(value - natural) <= SNAP_THRESHOLD)
+          return { value: natural, clear: true };
+      }
+      return { value, clear: false };
+    },
+    [bounds],
+  );
 
   // Re-read storage on open so a resize made in the other placement is picked
   // up, then apply within current bounds.
@@ -234,14 +265,6 @@ export function SessionUsagePill({
     };
   }, [open]);
 
-  // A keyboard open moves focus to the in-panel Close button.
-  useEffect(() => {
-    if (open && isDesktop && openedViaKeyboardRef.current) {
-      closeRef.current?.focus();
-    }
-    if (!open) openedViaKeyboardRef.current = false;
-  }, [open, isDesktop]);
-
   useEffect(() => {
     if (!open) setTotalTipOpen(false);
   }, [open]);
@@ -264,21 +287,21 @@ export function SessionUsagePill({
       document.body.classList.add(bodyClass);
       const onMove = (ev: PointerEvent) => {
         if (axis === "width") {
-          applyResize({
-            width: clampSize(
-              startWidth + sign * (ev.clientX - startX),
-              bounds.minWidth,
-              bounds.maxWidth,
-            ),
-          });
+          const raw = clampSize(
+            startWidth + sign * (ev.clientX - startX),
+            bounds.minWidth,
+            bounds.maxWidth,
+          );
+          const snap = snapValue("width", raw);
+          applyResize({ width: snap.clear ? undefined : snap.value });
         } else {
-          applyResize({
-            height: clampSize(
-              startHeight + sign * (ev.clientY - startY),
-              bounds.minHeight,
-              bounds.maxHeight,
-            ),
-          });
+          const raw = clampSize(
+            startHeight + sign * (ev.clientY - startY),
+            bounds.minHeight,
+            bounds.maxHeight,
+          );
+          const snap = snapValue("height", raw);
+          applyResize({ height: snap.clear ? undefined : snap.value });
         }
       };
       const onUp = () => {
@@ -289,7 +312,7 @@ export function SessionUsagePill({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [bounds, anchored, applyResize],
+    [bounds, anchored, applyResize, snapValue],
   );
 
   const onResizeKey = useCallback(
@@ -309,13 +332,13 @@ export function SessionUsagePill({
         event.preventDefault();
         const current =
           prefRef.current.width ?? panel?.offsetWidth ?? bounds.minWidth;
-        applyResize({
-          width: clampSize(
-            current + dir * sign * step,
-            bounds.minWidth,
-            bounds.maxWidth,
-          ),
-        });
+        const raw = clampSize(
+          current + dir * sign * step,
+          bounds.minWidth,
+          bounds.maxWidth,
+        );
+        const snap = snapValue("width", raw);
+        applyResize({ width: snap.clear ? undefined : snap.value });
       } else {
         let dir = 0;
         if (event.key === "ArrowDown") dir = 1;
@@ -324,16 +347,16 @@ export function SessionUsagePill({
         event.preventDefault();
         const current =
           prefRef.current.height ?? panel?.offsetHeight ?? bounds.minHeight;
-        applyResize({
-          height: clampSize(
-            current + dir * sign * step,
-            bounds.minHeight,
-            bounds.maxHeight,
-          ),
-        });
+        const raw = clampSize(
+          current + dir * sign * step,
+          bounds.minHeight,
+          bounds.maxHeight,
+        );
+        const snap = snapValue("height", raw);
+        applyResize({ height: snap.clear ? undefined : snap.value });
       }
     },
-    [bounds, anchored, applyResize],
+    [bounds, anchored, applyResize, snapValue],
   );
 
   const showResizeControls = isDesktop && bounds !== null;
@@ -486,12 +509,7 @@ export function SessionUsagePill({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Backend socket ${connection}. Usage details`}
-        onClick={(event) => {
-          // A keyboard-activated click reports detail 0; use it to route focus
-          // into the panel only when opening by keyboard.
-          openedViaKeyboardRef.current = !open && event.detail === 0;
-          setOpen((value) => !value);
-        }}
+        onClick={() => setOpen((value) => !value)}
       >
         {connection === "open"
           ? "live"
@@ -511,6 +529,7 @@ export function SessionUsagePill({
               {showResizeControls && bounds ? (
                 <>
                   <div
+                    ref={widthSeamRef}
                     className="usage-resize usage-resize-width"
                     role="separator"
                     aria-orientation="vertical"
@@ -538,30 +557,18 @@ export function SessionUsagePill({
                     onPointerDown={startResize("height")}
                     onKeyDown={onResizeKey("height")}
                   />
-                </>
-              ) : null}
-              {showResizeControls ? (
-                <div className="usage-panel-controls">
                   {hasCustomSize ? (
                     <button
-                      ref={resetRef}
                       type="button"
-                      className="usage-panel-reset"
+                      className="usage-resize-reset"
+                      aria-label="Reset popover size"
+                      title="Reset size"
                       onClick={resetSize}
                     >
-                      Reset size
+                      ↺
                     </button>
                   ) : null}
-                  <button
-                    ref={closeRef}
-                    type="button"
-                    className="usage-panel-close"
-                    aria-label="Close usage details"
-                    onClick={closePopover}
-                  >
-                    ×
-                  </button>
-                </div>
+                </>
               ) : null}
               <div className="usage-panel-body">
                 {rateLimitUsage ? (

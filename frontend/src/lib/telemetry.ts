@@ -492,7 +492,11 @@ export function deriveDatabaseContent(
     otherManagedBytes: otherByteSeen ? otherByteSum : null,
     eventMix,
     hasContent:
-      session.length > 0 || telemetry.length > 0 || otherSeen || eventMix.length > 0,
+      session.length > 0 ||
+      telemetry.length > 0 ||
+      otherSeen ||
+      otherByteSeen ||
+      eventMix.length > 0,
     hasBytes: Object.keys(tableBytes).length > 0,
   };
 }

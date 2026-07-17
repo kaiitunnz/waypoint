@@ -261,16 +261,18 @@ function DatabaseDetails({
                   </div>
                 ) : null}
 
-                {content.otherManagedRecords !== null ? (
+                {content.otherManagedRecords !== null || content.otherManagedBytes !== null ? (
                   <div className="tm-inst-db-group">
                     <GroupHeading
                       title="Other managed records"
                       bytes={content.otherManagedBytes}
                     />
-                    <p className="tm-inst-db-other">
-                      {content.otherManagedRecords.toLocaleString("en-US")}{" "}
-                      {content.otherManagedRecords === 1 ? "record" : "records"}
-                    </p>
+                    {content.otherManagedRecords !== null ? (
+                      <p className="tm-inst-db-other">
+                        {content.otherManagedRecords.toLocaleString("en-US")}{" "}
+                        {content.otherManagedRecords === 1 ? "record" : "records"}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
               </>

@@ -31,8 +31,10 @@ const DB_EVENT_MIX_COLLAPSED_LIMIT = 4;
 
 const DB_CONTENT_UNAVAILABLE =
   "Database content details are unavailable because the database could not be queried read-only.";
-const DB_RECORD_COUNT_NOTE =
-  "Record counts explain database contents; they do not divide the database file size.";
+const DB_NOTE_WITH_BYTES =
+  "Sizes are measured page usage — each table plus its indexes; free pages are listed under Storage.";
+const DB_NOTE_COUNTS_ONLY =
+  "Record counts explain database contents; per-table sizes could not be measured on this database.";
 
 interface InstanceHealthPanelProps {
   instance: TelemetryInstance | null;
@@ -109,10 +111,30 @@ function CountRows({ rows }: { rows: DatabaseCountRow[] }) {
       {rows.map((row) => (
         <div key={row.key} className="tm-inst-db-item">
           <dt>{row.label}</dt>
-          <dd>{row.count.toLocaleString("en-US")}</dd>
+          <dd>
+            <span className="tm-inst-db-count">{row.count.toLocaleString("en-US")}</span>
+            {row.bytes !== null ? (
+              <span className="tm-inst-db-size">
+                <ByteValue bytes={row.bytes} />
+              </span>
+            ) : null}
+          </dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+function GroupHeading({ title, bytes }: { title: string; bytes: number | null }) {
+  return (
+    <div className="tm-inst-db-heading-row">
+      <h5 className="tm-inst-db-heading">{title}</h5>
+      {bytes !== null ? (
+        <span className="tm-inst-db-group-size">
+          <ByteValue bytes={bytes} />
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -189,23 +211,29 @@ function DatabaseDetails({
         <p className="tm-inst-db-unavail muted">{DB_CONTENT_UNAVAILABLE}</p>
       ) : (
         <>
-          <p className="tm-inst-db-note muted">{DB_RECORD_COUNT_NOTE}</p>
+          <p className="tm-inst-db-note muted">
+            {content.hasBytes ? DB_NOTE_WITH_BYTES : DB_NOTE_COUNTS_ONLY}
+          </p>
           <div className="tm-inst-db-groups">
             <div className="tm-inst-db-group">
-              <h5 className="tm-inst-db-heading">Storage</h5>
+              <GroupHeading title="Storage" bytes={null} />
               <dl className="tm-inst-db-dl">
                 <div className="tm-inst-db-item">
                   <dt>Database file</dt>
                   <dd>
-                    <ByteValue bytes={bytes} />
+                    <span className="tm-inst-db-size">
+                      <ByteValue bytes={bytes} />
+                    </span>
                   </dd>
                 </div>
                 {database.measured ? (
                   <div className="tm-inst-db-item">
                     <dt>Reclaimable free pages</dt>
                     <dd>
-                      <ByteValue bytes={database.free_bytes} /> (
-                      {(database.free_percent * 100).toFixed(0)}%)
+                      <span className="tm-inst-db-size">
+                        <ByteValue bytes={database.free_bytes} /> (
+                        {(database.free_percent * 100).toFixed(0)}%)
+                      </span>
                     </dd>
                   </div>
                 ) : null}
@@ -216,7 +244,7 @@ function DatabaseDetails({
               <>
                 {content.session.length > 0 ? (
                   <div className="tm-inst-db-group">
-                    <h5 className="tm-inst-db-heading">Session data</h5>
+                    <GroupHeading title="Session data" bytes={content.sessionBytes} />
                     <CountRows rows={content.session} />
                     <EventMix
                       content={content}
@@ -228,14 +256,17 @@ function DatabaseDetails({
 
                 {content.telemetry.length > 0 ? (
                   <div className="tm-inst-db-group">
-                    <h5 className="tm-inst-db-heading">Telemetry data</h5>
+                    <GroupHeading title="Telemetry data" bytes={content.telemetryBytes} />
                     <CountRows rows={content.telemetry} />
                   </div>
                 ) : null}
 
                 {content.otherManagedRecords !== null ? (
                   <div className="tm-inst-db-group">
-                    <h5 className="tm-inst-db-heading">Other managed records</h5>
+                    <GroupHeading
+                      title="Other managed records"
+                      bytes={content.otherManagedBytes}
+                    />
                     <p className="tm-inst-db-other">
                       {content.otherManagedRecords.toLocaleString("en-US")}{" "}
                       {content.otherManagedRecords === 1 ? "record" : "records"}
@@ -270,8 +301,13 @@ function CategoryTable({
     snapshot.categories.find((c) => c.category === cat),
   ).filter((c): c is CategoryFootprint => c !== undefined);
   const content = useMemo(
-    () => deriveDatabaseContent(snapshot.counts.table_rows, snapshot.counts.events_by_kind),
-    [snapshot.counts.table_rows, snapshot.counts.events_by_kind],
+    () =>
+      deriveDatabaseContent(
+        snapshot.counts.table_rows,
+        snapshot.counts.table_bytes,
+        snapshot.counts.events_by_kind,
+      ),
+    [snapshot.counts.table_rows, snapshot.counts.table_bytes, snapshot.counts.events_by_kind],
   );
   const tableRowsEmpty = Object.keys(snapshot.counts.table_rows).length === 0;
   return (

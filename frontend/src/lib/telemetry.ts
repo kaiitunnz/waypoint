@@ -379,6 +379,7 @@ export interface DatabaseCountRow {
   key: string;
   label: string;
   count: number;
+  bytes: number | null;
 }
 
 export interface DatabaseEventKind {
@@ -390,17 +391,27 @@ export interface DatabaseEventKind {
 export interface DatabaseContentModel {
   session: DatabaseCountRow[];
   telemetry: DatabaseCountRow[];
+  sessionBytes: number | null;
+  telemetryBytes: number | null;
   otherManagedRecords: number | null;
+  otherManagedBytes: number | null;
   eventMix: DatabaseEventKind[];
   hasContent: boolean;
+  hasBytes: boolean;
 }
 
 function isValidCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function rowBytes(tableBytes: Record<string, number>, key: string): number | null {
+  const value = tableBytes[key];
+  return isValidCount(value) ? value : null;
+}
+
 function collectGroup(
   tableRows: Record<string, number>,
+  tableBytes: Record<string, number>,
   keys: readonly string[],
 ): DatabaseCountRow[] {
   const rows: DatabaseCountRow[] = [];
@@ -408,9 +419,25 @@ function collectGroup(
     if (!(key in tableRows)) continue;
     const count = tableRows[key];
     if (!isValidCount(count)) continue;
-    rows.push({ key, label: DATABASE_CONTENT_LABELS[key] ?? key, count });
+    rows.push({
+      key,
+      label: DATABASE_CONTENT_LABELS[key] ?? key,
+      count,
+      bytes: rowBytes(tableBytes, key),
+    });
   }
   return rows;
+}
+
+function sumRowBytes(rows: DatabaseCountRow[]): number | null {
+  let sum = 0;
+  let seen = false;
+  for (const row of rows) {
+    if (row.bytes === null) continue;
+    sum += row.bytes;
+    seen = true;
+  }
+  return seen ? sum : null;
 }
 
 function titleCaseKind(kind: string): string {
@@ -423,10 +450,11 @@ function titleCaseKind(kind: string): string {
 
 export function deriveDatabaseContent(
   tableRows: Record<string, number>,
+  tableBytes: Record<string, number>,
   eventsByKind: Record<string, number>,
 ): DatabaseContentModel {
-  const session = collectGroup(tableRows, DATABASE_CONTENT_GROUPS.session);
-  const telemetry = collectGroup(tableRows, DATABASE_CONTENT_GROUPS.telemetry);
+  const session = collectGroup(tableRows, tableBytes, DATABASE_CONTENT_GROUPS.session);
+  const telemetry = collectGroup(tableRows, tableBytes, DATABASE_CONTENT_GROUPS.telemetry);
 
   const claimed = new Set<string>([
     ...DATABASE_CONTENT_GROUPS.session,
@@ -434,10 +462,17 @@ export function deriveDatabaseContent(
   ]);
   let otherSum = 0;
   let otherSeen = false;
+  let otherByteSum = 0;
+  let otherByteSeen = false;
   for (const [key, count] of Object.entries(tableRows)) {
     if (claimed.has(key) || !isValidCount(count)) continue;
     otherSum += count;
     otherSeen = true;
+    const bytes = rowBytes(tableBytes, key);
+    if (bytes !== null) {
+      otherByteSum += bytes;
+      otherByteSeen = true;
+    }
   }
 
   const eventMix: DatabaseEventKind[] = Object.entries(eventsByKind)
@@ -448,10 +483,14 @@ export function deriveDatabaseContent(
   return {
     session,
     telemetry,
+    sessionBytes: sumRowBytes(session),
+    telemetryBytes: sumRowBytes(telemetry),
     otherManagedRecords: otherSeen ? otherSum : null,
+    otherManagedBytes: otherByteSeen ? otherByteSum : null,
     eventMix,
     hasContent:
       session.length > 0 || telemetry.length > 0 || otherSeen || eventMix.length > 0,
+    hasBytes: Object.keys(tableBytes).length > 0,
   };
 }
 

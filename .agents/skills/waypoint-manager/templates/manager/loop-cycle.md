@@ -137,10 +137,13 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
          --meta latency_renotified=<waiting_since> --meta latency_renotified_at=$now
        ```
      - **Re-notified, window elapsed** (`latency_renotified` == `waiting_since`,
-       `latency_renotified_at` > 0, and `now - renotified_at ≥ hlh * 3600`) → transition to
-       `abandoned`. For a `review_requested` ticket, record an observed merge first
+       `latency_renotified_at` > 0, and `now - renotified_at ≥ hlh * 3600`) → for a
+       `review_requested` ticket, record an observed merge first
        (`{{templates_dir}}/manager/integrate.md`, Record the merge) — a merge observed on
-       GitHub is `merged`, not `abandoned`. If the abandoned ticket was on-tree
+       GitHub is `merged`, not `abandoned`. Otherwise close the still-open gate item (delete
+       the ticket's `inbox_item_id` when `inbox get` reads `open`, as in
+       `{{templates_dir}}/manager/integrate.md`'s ghosted-merge close) before the transition
+       clears its id, then transition to `abandoned`. If the abandoned ticket was on-tree
        (`blocked`/`review_requested`), reap it and release the tree
        (`{{templates_dir}}/manager/integrate.md`, Finalize).
      - **Re-notified, still within the window** — handled this drain; the stamp and the

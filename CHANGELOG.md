@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.3](https://github.com/kaiitunnz/waypoint/compare/v0.9.2...v0.9.3) (2026-07-17)
+
+
+### Features
+
+* add a resizable desktop context-usage popover ([#311](https://github.com/kaiitunnz/waypoint/issues/311)) ([850a008](https://github.com/kaiitunnz/waypoint/commit/850a008426c34c9f414e0b6f32ee3ed89657aed1))
+* break down the Database metric in telemetry instance health ([#315](https://github.com/kaiitunnz/waypoint/issues/315)) ([1ed879f](https://github.com/kaiitunnz/waypoint/commit/1ed879f4b00a2deb3294d3e4ff02880519ff91d4))
+
+
+### Bug Fixes
+
+* eliminate empty-insights refresh flash on the telemetry page ([#313](https://github.com/kaiitunnz/waypoint/issues/313)) ([2501038](https://github.com/kaiitunnz/waypoint/commit/250103808d6375d87f5e7a828c8bfa7f7c28cd8f))
+* render the workspace dock as a full-screen sheet when it overflows the viewport ([#314](https://github.com/kaiitunnz/waypoint/issues/314)) ([78a0b9e](https://github.com/kaiitunnz/waypoint/commit/78a0b9e94e99b8b919e13f601b2ba34a46643085))
+
+
+### Miscellaneous Chores
+
+* release 0.9.3 ([d58fa01](https://github.com/kaiitunnz/waypoint/commit/d58fa01f8b94c061abe248c10c919156a3a5dd05))
+
 ## [0.9.2](https://github.com/kaiitunnz/waypoint/compare/v0.9.1...v0.9.2) (2026-07-12)
 
 

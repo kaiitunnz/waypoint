@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 import uuid
@@ -378,6 +379,7 @@ class Storage:
             -- updated in place via a version-checked read-modify-write.
             CREATE TABLE IF NOT EXISTS manager_tickets (
                 id TEXT PRIMARY KEY,
+                manager_id TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL,
                 priority TEXT NOT NULL DEFAULT 'p2',
                 state TEXT NOT NULL DEFAULT 'intake',
@@ -388,11 +390,18 @@ class Storage:
                 payload TEXT NOT NULL DEFAULT '{}'
             );
 
-            -- Single-row persisted ManagerConfig (the machine-relevant subset of
-            -- the project manifest). ``id`` is pinned to 1.
+            -- One row per initialized manager (one manager per repository). The
+            -- whole ManagerConfig is the JSON ``payload``; ``project``/``repo_dir``/
+            -- ``owner_session_id`` are denormalized for cross-manager queries
+            -- (enumeration, repo/owner lookup). ``repo_dir`` is UNIQUE (NULL when
+            -- unknown, e.g. a migrated legacy manager awaiting re-init).
             CREATE TABLE IF NOT EXISTS manager_config (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                payload TEXT NOT NULL DEFAULT '{}'
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL DEFAULT '',
+                repo_dir TEXT UNIQUE,
+                owner_session_id TEXT,
+                payload TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT ''
             );
             """)
         # Register any channels that predate the board_channels table.
@@ -448,6 +457,11 @@ class Storage:
         self._ensure_column("inbox_items", "from_label", "TEXT")
         self._ensure_column("inbox_items", "read_at", "TEXT")
         self._ensure_column("inbox_items", "version", "INTEGER NOT NULL DEFAULT 0")
+        # Multi-manager migration: partition tickets by manager, then rebuild the
+        # old single-row ``manager_config`` (pinned ``id = 1``) into the per-manager
+        # shape and adopt the one legacy manager under a minted id.
+        self._ensure_column("manager_tickets", "manager_id", "TEXT NOT NULL DEFAULT ''")
+        self._migrate_manager_config_to_multi()
         # Indexes for columns filtered on by the runtime/scheduler. Created
         # after the ALTER TABLE block above so ``spawner_session_id`` exists on
         # databases that predate it.
@@ -468,6 +482,8 @@ class Storage:
                 ON sessions(last_event_at);
             CREATE INDEX IF NOT EXISTS idx_wake_subs_session
                 ON wake_subscriptions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_manager
+                ON manager_tickets(manager_id, state);
             CREATE INDEX IF NOT EXISTS idx_manager_tickets_state
                 ON manager_tickets(state);
             CREATE INDEX IF NOT EXISTS idx_manager_tickets_priority
@@ -2031,9 +2047,9 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO manager_tickets (
-                id, title, priority, state, scale, version, created_at,
-                updated_at, payload
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, manager_id, title, priority, state, scale, version,
+                created_at, updated_at, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             self._manager_ticket_columns(ticket),
         )
@@ -2041,22 +2057,36 @@ class Storage:
         return ticket
 
     @_synchronized
-    def get_manager_ticket(self, ticket_id: str) -> ManagerTicket | None:
-        row = self.connection.execute(
-            "SELECT * FROM manager_tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+    def get_manager_ticket(
+        self, ticket_id: str, *, manager_id: str | None = None
+    ) -> ManagerTicket | None:
+        sql = "SELECT * FROM manager_tickets WHERE id = ?"
+        params: list[Any] = [ticket_id]
+        if manager_id is not None:
+            sql += " AND manager_id = ?"
+            params.append(manager_id)
+        row = self.connection.execute(sql, params).fetchone()
         return self._manager_ticket_from_row(row) if row is not None else None
 
     @_synchronized
     def list_manager_tickets(
-        self, *, states: list[ManagerTicketState] | None = None
+        self,
+        *,
+        manager_id: str | None = None,
+        states: list[ManagerTicketState] | None = None,
     ) -> list[ManagerTicket]:
         sql = "SELECT * FROM manager_tickets"
         params: list[Any] = []
+        conditions: list[str] = []
+        if manager_id is not None:
+            conditions.append("manager_id = ?")
+            params.append(manager_id)
         if states:
             placeholders = ",".join("?" for _ in states)
-            sql += f" WHERE state IN ({placeholders})"
+            conditions.append(f"state IN ({placeholders})")
             params.extend(str(state) for state in states)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY created_at ASC, id ASC"
         rows = self.connection.execute(sql, params).fetchall()
         return [self._manager_ticket_from_row(row) for row in rows]
@@ -2073,8 +2103,8 @@ class Storage:
         cursor = self.connection.execute(
             """
             UPDATE manager_tickets SET
-                title = ?, priority = ?, state = ?, scale = ?, version = ?,
-                created_at = ?, updated_at = ?, payload = ?
+                manager_id = ?, title = ?, priority = ?, state = ?, scale = ?,
+                version = ?, created_at = ?, updated_at = ?, payload = ?
             WHERE id = ? AND version = ?
             """,
             (*columns[1:], ticket.id, expected),
@@ -2086,29 +2116,96 @@ class Storage:
         return bumped
 
     @_synchronized
-    def delete_manager_ticket(self, ticket_id: str) -> bool:
-        cursor = self.connection.execute(
-            "DELETE FROM manager_tickets WHERE id = ?", (ticket_id,)
-        )
+    def delete_manager_ticket(
+        self, ticket_id: str, *, manager_id: str | None = None
+    ) -> bool:
+        sql = "DELETE FROM manager_tickets WHERE id = ?"
+        params: list[Any] = [ticket_id]
+        if manager_id is not None:
+            sql += " AND manager_id = ?"
+            params.append(manager_id)
+        cursor = self.connection.execute(sql, params)
         self.connection.commit()
         return (cursor.rowcount or 0) > 0
 
     @_synchronized
-    def clear_manager_tickets(self) -> int:
-        cursor = self.connection.execute("DELETE FROM manager_tickets")
+    def clear_manager_tickets(self, manager_id: str | None = None) -> int:
+        sql = "DELETE FROM manager_tickets"
+        params: list[Any] = []
+        if manager_id is not None:
+            sql += " WHERE manager_id = ?"
+            params.append(manager_id)
+        cursor = self.connection.execute(sql, params)
         self.connection.commit()
         return cursor.rowcount or 0
 
     @_synchronized
-    def clear_manager_config(self) -> None:
-        self.connection.execute("DELETE FROM manager_config WHERE id = 1")
+    def clear_manager_config(self, manager_id: str) -> None:
+        self.connection.execute(
+            "DELETE FROM manager_config WHERE id = ?", (manager_id,)
+        )
         self.connection.commit()
 
     @_synchronized
-    def get_manager_config(self) -> ManagerConfig | None:
+    def get_manager_config(self, manager_id: str) -> ManagerConfig | None:
         row = self.connection.execute(
-            "SELECT payload FROM manager_config WHERE id = 1"
+            "SELECT payload FROM manager_config WHERE id = ?", (manager_id,)
         ).fetchone()
+        return self._manager_config_from_row(row)
+
+    @_synchronized
+    def get_manager_config_by_repo(self, repo_dir: str) -> ManagerConfig | None:
+        if not repo_dir:
+            return None
+        row = self.connection.execute(
+            "SELECT payload FROM manager_config WHERE repo_dir = ?", (repo_dir,)
+        ).fetchone()
+        return self._manager_config_from_row(row)
+
+    @_synchronized
+    def get_manager_config_by_owner(self, session_id: str) -> list[ManagerConfig]:
+        rows = self.connection.execute(
+            "SELECT payload FROM manager_config WHERE owner_session_id = ?",
+            (session_id,),
+        ).fetchall()
+        configs = [self._manager_config_from_row(row) for row in rows]
+        return [c for c in configs if c is not None]
+
+    @_synchronized
+    def list_manager_configs(self) -> list[ManagerConfig]:
+        rows = self.connection.execute(
+            "SELECT payload FROM manager_config ORDER BY created_at ASC, id ASC"
+        ).fetchall()
+        configs = [self._manager_config_from_row(row) for row in rows]
+        return [c for c in configs if c is not None]
+
+    @_synchronized
+    def set_manager_config(self, config: ManagerConfig) -> ManagerConfig:
+        self.connection.execute(
+            """
+            INSERT INTO manager_config
+                (id, project, repo_dir, owner_session_id, payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                project = excluded.project,
+                repo_dir = excluded.repo_dir,
+                owner_session_id = excluded.owner_session_id,
+                payload = excluded.payload
+            """,
+            (
+                config.id,
+                config.project,
+                config.repo_dir or None,
+                config.owner_session_id,
+                json.dumps(config.model_dump(mode="json")),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return config
+
+    @staticmethod
+    def _manager_config_from_row(row: sqlite3.Row | None) -> ManagerConfig | None:
         if row is None:
             return None
         try:
@@ -2117,20 +2214,11 @@ class Storage:
             return None
         return ManagerConfig.model_validate(parsed if isinstance(parsed, dict) else {})
 
-    @_synchronized
-    def set_manager_config(self, config: ManagerConfig) -> ManagerConfig:
-        self.connection.execute(
-            "INSERT INTO manager_config (id, payload) VALUES (1, ?) "
-            "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
-            (json.dumps(config.model_dump(mode="json")),),
-        )
-        self.connection.commit()
-        return config
-
     @staticmethod
     def _manager_ticket_columns(ticket: ManagerTicket) -> tuple[Any, ...]:
         return (
             ticket.id,
+            ticket.manager_id,
             ticket.title,
             ticket.priority,
             str(ticket.state),
@@ -2147,7 +2235,13 @@ class Storage:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             parsed = {}
-        return ManagerTicket.model_validate(parsed if isinstance(parsed, dict) else {})
+        if not isinstance(parsed, dict):
+            parsed = {}
+        # The column is authoritative for manager_id (a migrated legacy ticket's
+        # payload predates the field; the backfilled column carries the id).
+        if row["manager_id"]:
+            parsed["manager_id"] = row["manager_id"]
+        return ManagerTicket.model_validate(parsed)
 
     @_synchronized
     def create_scheduled_message(
@@ -2666,3 +2760,60 @@ class Storage:
         if any(row["name"] == column for row in rows):
             return
         self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    def _migrate_manager_config_to_multi(self) -> None:
+        """Rebuild the legacy single-row ``manager_config`` (``id = 1``) into the
+        per-manager shape and adopt its one manager under a minted id.
+
+        No-op on a fresh DB (the ``CREATE TABLE`` already made the new shape) and
+        on an already-migrated DB (the ``repo_dir`` column marks it done). The
+        legacy row never persisted ``repo_dir``, so the migrated manager gets a
+        NULL one; the next idempotent ``manager init`` repopulates it.
+        """
+        if self._has_column("manager_config", "repo_dir"):
+            return
+        old = self.connection.execute(
+            "SELECT payload FROM manager_config WHERE id = 1"
+        ).fetchone()
+        self.connection.execute(
+            "ALTER TABLE manager_config RENAME TO manager_config_legacy"
+        )
+        self.connection.execute("""
+            CREATE TABLE manager_config (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL DEFAULT '',
+                repo_dir TEXT UNIQUE,
+                owner_session_id TEXT,
+                payload TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT ''
+            )
+            """)
+        if old is not None:
+            try:
+                payload = json.loads(old["payload"] or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            new_id = f"mgr-{secrets.token_hex(4)}"
+            payload["id"] = new_id
+            self.connection.execute(
+                """
+                INSERT INTO manager_config
+                    (id, project, repo_dir, owner_session_id, payload, created_at)
+                VALUES (?, ?, NULL, ?, ?, ?)
+                """,
+                (
+                    new_id,
+                    str(payload.get("project") or ""),
+                    payload.get("owner_session_id"),
+                    json.dumps(payload),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            self.connection.execute(
+                "UPDATE manager_tickets SET manager_id = ? "
+                "WHERE manager_id IS NULL OR manager_id = ''",
+                (new_id,),
+            )
+        self.connection.execute("DROP TABLE manager_config_legacy")

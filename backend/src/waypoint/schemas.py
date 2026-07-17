@@ -676,10 +676,12 @@ class ManagerTicketScale(StrEnum):
 
 
 class ManagerTicket(BaseModel):
-    # One record per ticket. Filterable columns (id/title/priority/state/scale/
-    # version/timestamps) are denormalized in storage; the whole model is the
-    # source of truth (persisted as a JSON payload blob).
+    # One record per ticket. Filterable columns (id/manager_id/priority/state/
+    # scale/version/timestamps) are denormalized in storage; the whole model is
+    # the source of truth (persisted as a JSON payload blob).
     id: str
+    # The manager this ticket belongs to (partition key); one manager per repo.
+    manager_id: str = ""
     title: str
     priority: str = "p2"
     kind: str | None = None
@@ -729,6 +731,14 @@ class ManagerConfig(BaseModel):
     # server-side scheduler invariants so a drifting manager context cannot enact
     # an illegal step, plus the render context persisted at init for `manager
     # render`.
+    # Server-minted opaque manager id (``mgr-<hex>``). Empty until `init` mints or
+    # resolves it; the DB/API key that partitions every manager's state.
+    id: str = ""
+    # Human-facing project label (display only; not unique).
+    project: str = ""
+    # The manager's git toplevel. Unique across managers (one manager per repo);
+    # the CLI resolves the target manager from the current repo via this field.
+    repo_dir: str = ""
     max_delegate_attempts: int = Field(default=3, ge=0)
     max_lead_restarts: int = Field(default=3, ge=0)
     backoff_seconds: int = Field(default=60, ge=0)
@@ -890,6 +900,23 @@ class ManagerStateResponse(BaseModel):
     config: ManagerConfig | None = None
     tree: ManagerTreeState
     tickets: list[ManagerTicket] = Field(default_factory=list)
+
+
+class ManagerSummary(BaseModel):
+    # One entry per initialized manager, for the instance-wide manager list
+    # (the board's per-project switcher). Counts are derived, never stored.
+    id: str
+    project: str = ""
+    repo_dir: str = ""
+    owner_session_id: str | None = None
+    ticket_count: int = 0
+    # Tickets in a genuinely awaiting-human state (spec_review/blocked/
+    # review_requested) — the switcher's per-project attention dot.
+    attention_count: int = 0
+
+
+class ManagerListResponse(BaseModel):
+    managers: list[ManagerSummary] = Field(default_factory=list)
 
 
 class MeResponse(BaseModel):

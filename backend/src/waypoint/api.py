@@ -62,6 +62,7 @@ from waypoint.schemas import (
     LaunchTargetConnectResponse,
     LoginRequest,
     ManagerInitRequest,
+    ManagerListResponse,
     ManagerNextResponse,
     ManagerReconcileReport,
     ManagerStateResponse,
@@ -1850,80 +1851,102 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"deleted": True}
 
     # ── Waypoint Manager ─────────────────────────────────────────────────
+    @app.get("/api/manager", response_model=ManagerListResponse)
+    async def manager_list(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> ManagerListResponse:
+        return ManagerListResponse(managers=context.runtime.managers.list_summaries())
+
     @app.post("/api/manager/init")
     async def manager_init(
         request: ManagerInitRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        config = context.runtime.manager.init(request)
+        config = context.runtime.managers.init(request)
         return {"config": config.model_dump(mode="json")}
 
-    @app.delete("/api/manager")
+    @app.delete("/api/manager/{manager_id}")
     async def manager_deinit(
+        manager_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        removed = context.runtime.manager.deinit()
+        removed = context.runtime.managers.require(manager_id).deinit()
         return {"deinitialized": True, "tickets_deleted": removed}
 
-    @app.get("/api/manager/state", response_model=ManagerStateResponse)
+    @app.get("/api/manager/{manager_id}/state", response_model=ManagerStateResponse)
     async def manager_state(
+        manager_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> ManagerStateResponse:
-        return context.runtime.manager.state()
+        return context.runtime.managers.require(manager_id).state()
 
-    @app.get("/api/manager/next", response_model=ManagerNextResponse)
+    @app.get("/api/manager/{manager_id}/next", response_model=ManagerNextResponse)
     async def manager_next(
+        manager_id: str,
         _: Annotated[str, Depends(token_dependency())],
         tried: Annotated[list[str] | None, Query()] = None,
     ) -> ManagerNextResponse:
-        return context.runtime.manager.next(tried or [])
+        return context.runtime.managers.require(manager_id).next(tried or [])
 
-    @app.get("/api/manager/reconcile", response_model=ManagerReconcileReport)
+    @app.get(
+        "/api/manager/{manager_id}/reconcile",
+        response_model=ManagerReconcileReport,
+    )
     async def manager_reconcile(
+        manager_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> ManagerReconcileReport:
-        return context.runtime.manager.reconcile(datetime.now(UTC))
+        return context.runtime.managers.require(manager_id).reconcile(datetime.now(UTC))
 
-    @app.post("/api/manager/tickets")
+    @app.post("/api/manager/{manager_id}/tickets")
     async def manager_create_ticket(
+        manager_id: str,
         request: TicketCreateRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        ticket = context.runtime.manager.create_ticket(request)
+        ticket = context.runtime.managers.require(manager_id).create_ticket(request)
         return {"ticket": ticket.model_dump(mode="json")}
 
-    @app.get("/api/manager/tickets/{ticket_id}")
+    @app.get("/api/manager/{manager_id}/tickets/{ticket_id}")
     async def manager_get_ticket(
+        manager_id: str,
         ticket_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        ticket = context.runtime.manager.get_ticket(ticket_id)
+        ticket = context.runtime.managers.require(manager_id).get_ticket(ticket_id)
         return {"ticket": ticket.model_dump(mode="json")}
 
-    @app.patch("/api/manager/tickets/{ticket_id}")
+    @app.patch("/api/manager/{manager_id}/tickets/{ticket_id}")
     async def manager_update_ticket(
+        manager_id: str,
         ticket_id: str,
         request: TicketUpdateRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        ticket = context.runtime.manager.update_ticket(ticket_id, request)
+        ticket = context.runtime.managers.require(manager_id).update_ticket(
+            ticket_id, request
+        )
         return {"ticket": ticket.model_dump(mode="json")}
 
-    @app.delete("/api/manager/tickets/{ticket_id}")
+    @app.delete("/api/manager/{manager_id}/tickets/{ticket_id}")
     async def manager_delete_ticket(
+        manager_id: str,
         ticket_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        context.runtime.manager.delete_ticket(ticket_id)
+        context.runtime.managers.require(manager_id).delete_ticket(ticket_id)
         return {"deleted": True}
 
-    @app.post("/api/manager/tickets/{ticket_id}/transition")
+    @app.post("/api/manager/{manager_id}/tickets/{ticket_id}/transition")
     async def manager_transition_ticket(
+        manager_id: str,
         ticket_id: str,
         request: TicketTransitionRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        ticket = context.runtime.manager.transition(ticket_id, request)
+        ticket = context.runtime.managers.require(manager_id).transition(
+            ticket_id, request
+        )
         return {"ticket": ticket.model_dump(mode="json")}
 
     @app.get("/api/message-schedules")

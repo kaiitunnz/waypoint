@@ -2,6 +2,8 @@
 invariants / ``next`` policy, plus storage CRUD and ``ManagerManager`` HTTP
 mapping, and config init."""
 
+import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from fastapi import HTTPException
 from waypoint.manager import (
     _ADJACENCY,
     ManagerManager,
+    ManagerRegistry,
     ManagerStateError,
     apply_transition,
     check_invariants,
@@ -38,6 +41,9 @@ Sc = ManagerTicketScale
 
 _TERMINALS = {S.MERGED, S.DEFERRED, S.ABANDONED}
 _CONFIG = ManagerConfig(max_delegate_attempts=3, max_lead_restarts=3)
+# The test manager id; ``mk`` stamps it so storage-seeded tickets are visible to a
+# manager scoped to this id.
+MID = "mgr-test"
 
 
 def _now() -> datetime:
@@ -55,10 +61,12 @@ def mk(
     intended_lead_title: str | None = None,
     branch: str | None = None,
     created_at: datetime | None = None,
+    manager_id: str = MID,
 ) -> ManagerTicket:
     now = created_at or _now()
     return ManagerTicket(
         id=ticket_id,
+        manager_id=manager_id,
         title=ticket_id,
         state=state,
         priority=priority,
@@ -76,10 +84,21 @@ def _storage(tmp_path: Path) -> Storage:
     return Storage(tmp_path / "waypoint.db")
 
 
+def _init(
+    storage: Storage, config: ManagerConfig = _CONFIG, mid: str = MID
+) -> ManagerManager:
+    """Init a manager on ``storage`` under a fixed id and return it scoped."""
+    reg = ManagerRegistry(storage)
+    reg.init(
+        ManagerInitRequest(
+            config=config.model_copy(update={"id": mid, "repo_dir": f"/repo/{mid}"})
+        )
+    )
+    return reg.get(mid)
+
+
 def _manager(tmp_path: Path) -> ManagerManager:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=_CONFIG))
-    return mgr
+    return _init(_storage(tmp_path))
 
 
 # ── Transition table: every on-table edge legal, every off-table edge rejected ──
@@ -481,16 +500,14 @@ def test_next_derives_tree_state() -> None:
 
 def test_reconcile_reports_signals(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
     rc = ManagerRenderContext(
         templates_dir="/x", tickets_channel="tickets", ticket_channel_prefix="ticket-"
     )
-    mgr.init(
-        ManagerInitRequest(
-            config=ManagerConfig(
-                owner_session_id="mgr", human_latency_hours=72, render_context=rc
-            )
-        )
+    mgr = _init(
+        storage,
+        ManagerConfig(
+            owner_session_id="mgr", human_latency_hours=72, render_context=rc
+        ),
     )
     # Intake: a keyless human post whose entry id is not a ticket. The manager's own
     # keyed registry cell must be ignored.
@@ -522,15 +539,10 @@ def test_reconcile_reports_signals(tmp_path: Path) -> None:
 
 def test_reconcile_surfaces_intake_priority(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
     rc = ManagerRenderContext(
         templates_dir="/x", tickets_channel="tickets", ticket_channel_prefix="ticket-"
     )
-    mgr.init(
-        ManagerInitRequest(
-            config=ManagerConfig(owner_session_id="mgr", render_context=rc)
-        )
-    )
+    mgr = _init(storage, ManagerConfig(owner_session_id="mgr", render_context=rc))
     storage.add_board_entry(
         "tickets", "high one", author_session_id="human", metadata={"priority": "p1"}
     )
@@ -549,8 +561,7 @@ def test_reconcile_surfaces_intake_priority(tmp_path: Path) -> None:
 
 def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # An awaiting ticket with no recorded gate item — a crash between the awaiting
     # transition and the inbox post.
     storage.create_manager_ticket(mk(S.SPEC_REVIEW, "g1"))
@@ -575,8 +586,7 @@ def test_reconcile_reports_stale_gates(tmp_path: Path) -> None:
 
 def test_reconcile_reports_finalize_pending(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # On-tree terminals still holding a branch — a crash between the terminal record
     # and the reap. `abandoned` covers the restart-exhaustion path that keeps its branch.
     storage.create_manager_ticket(mk(S.MERGED, "m", branch="ticket/m"))
@@ -597,8 +607,7 @@ def test_reconcile_reports_finalize_pending(tmp_path: Path) -> None:
 
 def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # An infeasible spec parked in blocked: no branch, and its reaped writer's id
     # lingers. It awaits a human decision, so it is not a lead to resume.
     storage.create_manager_ticket(
@@ -625,8 +634,7 @@ def test_reconcile_skips_branchless_blocked_dead_lead(tmp_path: Path) -> None:
 
 def test_reset_attempts_zeroes_the_delegate_budget(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # A ticket blocked after exhausting the delegate budget; a human fixes the
     # launch config and retries.
     storage.create_manager_ticket(mk(S.BLOCKED, "b", attempts=3, lead_restarts=2))
@@ -641,8 +649,7 @@ def test_reset_attempts_zeroes_the_delegate_budget(tmp_path: Path) -> None:
 
 def test_reconcile_skips_restart_exhausted_blocked_dead_lead(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # A blocked ticket whose lead kept dying until the restart budget was spent keeps its
     # branch (committed work) and waits on the human's retry/abandon gate.
     storage.create_manager_ticket(
@@ -670,8 +677,7 @@ def test_reconcile_skips_restart_exhausted_blocked_dead_lead(tmp_path: Path) -> 
 
 def test_reset_lead_restarts_zeroes_the_restart_budget(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # A ticket blocked after its lead kept dying; a human fixes the cause and retries.
     storage.create_manager_ticket(
         mk(S.BLOCKED, "b", attempts=1, lead_restarts=3, branch="ticket/b")
@@ -687,8 +693,7 @@ def test_reset_lead_restarts_zeroes_the_restart_budget(tmp_path: Path) -> None:
 
 def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # The ticket entered the awaiting state long ago, but its gate item was posted
     # recently (a re-opened or human-deleted-then-reposted gate).
     item = storage.create_inbox_item(
@@ -713,8 +718,7 @@ def test_reconcile_latency_measured_from_gate_item(tmp_path: Path) -> None:
 
 def test_reconcile_latency_skips_resolved_gate(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # A merge gate the human already answered: the item is resolved, so the wait falls
     # to the external merge and no latency timeout applies.
     answered = storage.create_inbox_item(
@@ -747,8 +751,7 @@ def test_reconcile_reports_resolved_gate_for_a_deferred_transition(
     tmp_path: Path,
 ) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=_CONFIG))
+    mgr = _init(storage)
     # An awaiting ticket whose gate the human answered (resolved) but whose transition
     # is deferred — surfaced so the drain re-drives the gate handler.
     answered = storage.create_inbox_item(
@@ -773,8 +776,7 @@ def test_reconcile_reports_resolved_gate_for_a_deferred_transition(
 
 def test_reconcile_latency_floors_zero_hour_config(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
-    mgr = ManagerManager(storage)
-    mgr.init(ManagerInitRequest(config=ManagerConfig(human_latency_hours=0)))
+    mgr = _init(storage, ManagerConfig(human_latency_hours=0))
     item = storage.create_inbox_item(
         "mgr", None, "ticket-z: t — spec review", [InboxMarkdownBlockInput(text="x")]
     )
@@ -789,6 +791,76 @@ def test_reconcile_latency_floors_zero_hour_config(tmp_path: Path) -> None:
 
 
 # ── Storage CRUD ────────────────────────────────────────────────────────────
+
+
+def test_storage_scopes_tickets_by_manager(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    storage.create_manager_ticket(mk(S.INTAKE, "a", manager_id="mgr-1"))
+    storage.create_manager_ticket(mk(S.INTAKE, "b", manager_id="mgr-2"))
+    assert [t.id for t in storage.list_manager_tickets(manager_id="mgr-1")] == ["a"]
+    assert [t.id for t in storage.list_manager_tickets(manager_id="mgr-2")] == ["b"]
+    # A cross-manager fetch/delete does not reach the other manager's ticket.
+    assert storage.get_manager_ticket("a", manager_id="mgr-2") is None
+    assert storage.delete_manager_ticket("a", manager_id="mgr-2") is False
+    assert storage.get_manager_ticket("a", manager_id="mgr-1") is not None
+
+
+def test_storage_migrates_legacy_singleton(tmp_path: Path) -> None:
+    # Build a pre-multi-manager DB by hand: the old pinned-id config table and a
+    # tickets table with no manager_id column, then open it through Storage and
+    # assert the migration adopts the one manager under a minted id.
+    db = tmp_path / "waypoint.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        CREATE TABLE manager_tickets (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, priority TEXT NOT NULL,
+            state TEXT NOT NULL, scale TEXT, version INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE manager_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload TEXT NOT NULL DEFAULT '{}'
+        );
+        """)
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT INTO manager_config (id, payload) VALUES (1, ?)",
+        (
+            json.dumps(
+                {"trunk": "develop", "project": "legacy", "owner_session_id": "o"}
+            ),
+        ),
+    )
+    for tid in ("t1", "t2"):
+        payload = {
+            "id": tid,
+            "title": tid,
+            "state": "intake",
+            "priority": "p2",
+            "created_at": now,
+            "updated_at": now,
+        }
+        conn.execute(
+            "INSERT INTO manager_tickets (id, title, priority, state, created_at, "
+            "updated_at, payload) VALUES (?, ?, 'p2', 'intake', ?, ?, ?)",
+            (tid, tid, now, now, json.dumps(payload)),
+        )
+    conn.commit()
+    conn.close()
+
+    storage = Storage(db)
+    configs = storage.list_manager_configs()
+    assert len(configs) == 1
+    migrated = configs[0]
+    assert migrated.id.startswith("mgr-")
+    assert migrated.trunk == "develop"
+    assert migrated.project == "legacy"
+    assert migrated.repo_dir == ""  # unknown until the next init
+    # Every legacy ticket is backfilled onto the migrated manager and visible.
+    tickets = storage.list_manager_tickets(manager_id=migrated.id)
+    assert {t.id for t in tickets} == {"t1", "t2"}
+    assert all(t.manager_id == migrated.id for t in tickets)
 
 
 def test_storage_ticket_round_trip(tmp_path: Path) -> None:
@@ -942,22 +1014,48 @@ def test_budget_exhausted_self_loop_preserves_id() -> None:
 
 
 def test_config_defaults_when_uninitialized(tmp_path: Path) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
+    mgr = ManagerManager(_storage(tmp_path), "nope")
     config = mgr.config()
     assert config.trunk == "main"  # ManagerConfig default
     assert config.max_delegate_attempts == 3
 
 
 def test_init_persists_config(tmp_path: Path) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(
-        ManagerInitRequest(
-            config=ManagerConfig(max_delegate_attempts=5, trunk="develop")
-        )
+    mgr = _init(
+        _storage(tmp_path),
+        ManagerConfig(max_delegate_attempts=5, trunk="develop"),
     )
     config = mgr.config()
     assert config.max_delegate_attempts == 5
     assert config.trunk == "develop"
+
+
+def test_init_mints_id_and_keys_by_repo(tmp_path: Path) -> None:
+    reg = ManagerRegistry(_storage(tmp_path))
+    a = reg.init(ManagerInitRequest(config=ManagerConfig(repo_dir="/repo/a")))
+    assert a.id.startswith("mgr-")
+    # Re-init from the same repo reuses the id (idempotent).
+    a2 = reg.init(ManagerInitRequest(config=ManagerConfig(repo_dir="/repo/a")))
+    assert a2.id == a.id
+    # A different repo mints a distinct manager.
+    b = reg.init(ManagerInitRequest(config=ManagerConfig(repo_dir="/repo/b")))
+    assert b.id != a.id
+    assert {m.id for m in reg.list_summaries()} == {a.id, b.id}
+
+
+def test_init_rejects_channel_collision(tmp_path: Path) -> None:
+    reg = ManagerRegistry(_storage(tmp_path))
+    rc = ManagerRenderContext(tickets_channel="tickets", ticket_channel_prefix="tk-")
+    reg.init(
+        ManagerInitRequest(config=ManagerConfig(repo_dir="/repo/a", render_context=rc))
+    )
+    with pytest.raises(HTTPException) as exc:
+        reg.init(
+            ManagerInitRequest(
+                config=ManagerConfig(repo_dir="/repo/b", render_context=rc)
+            )
+        )
+    assert exc.value.status_code == 409
 
 
 # ── deinit / delete / owner cascade ─────────────────────────────────────────
@@ -987,24 +1085,49 @@ def test_delete_ticket_404(tmp_path: Path) -> None:
     assert exc.value.status_code == 404
 
 
-def test_deinit_if_owner_matches_only_the_owner(tmp_path: Path) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr")))
-    mgr.create_ticket(TicketCreateRequest(title="a"))
-    assert mgr.deinit_if_owner("other") is False
-    assert len(mgr.list_tickets()) == 1
-    assert mgr.deinit_if_owner("mgr") is True
-    assert mgr.list_tickets() == []
+def test_deinit_owned_by_cascades_only_the_owned_managers(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    reg = ManagerRegistry(storage)
+    a = reg.init(
+        ManagerInitRequest(
+            config=ManagerConfig(repo_dir="/repo/a", owner_session_id="mgr")
+        )
+    )
+    b = reg.init(
+        ManagerInitRequest(
+            config=ManagerConfig(repo_dir="/repo/b", owner_session_id="other")
+        )
+    )
+    reg.get(a.id).create_ticket(TicketCreateRequest(title="a"))
+    reg.get(b.id).create_ticket(TicketCreateRequest(title="b"))
+    # Deleting a non-owner session cascades nothing.
+    assert reg.deinit_owned_by("stranger") == 0
+    # Deleting the owner tears down only its manager; the other survives.
+    assert reg.deinit_owned_by("mgr") == 1
+    assert reg.get(a.id).list_tickets() == []
+    assert reg.exists(a.id) is False
+    assert len(reg.get(b.id).list_tickets()) == 1
+    assert reg.exists(b.id) is True
 
 
 def test_init_preserves_owner_when_not_resupplied(tmp_path: Path) -> None:
-    mgr = ManagerManager(_storage(tmp_path))
-    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr")))
+    reg = ManagerRegistry(_storage(tmp_path))
+    first = reg.init(
+        ManagerInitRequest(
+            config=ManagerConfig(repo_dir="/repo/a", owner_session_id="mgr")
+        )
+    )
     # Re-init from a manifest (which carries no owner) keeps the recorded owner.
-    mgr.init(ManagerInitRequest(config=ManagerConfig(trunk="develop")))
-    config = mgr.config()
+    reg.init(
+        ManagerInitRequest(config=ManagerConfig(repo_dir="/repo/a", trunk="develop"))
+    )
+    config = reg.get(first.id).config()
     assert config.owner_session_id == "mgr"
     assert config.trunk == "develop"
     # An explicit new owner overrides.
-    mgr.init(ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr2")))
-    assert mgr.config().owner_session_id == "mgr2"
+    reg.init(
+        ManagerInitRequest(
+            config=ManagerConfig(repo_dir="/repo/a", owner_session_id="mgr2")
+        )
+    )
+    assert reg.get(first.id).config().owner_session_id == "mgr2"

@@ -985,62 +985,78 @@ class WaypointClient:
 
     # ── manager state machine ────────────────────────────────────────────
 
+    def manager_list(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/manager").json()
+        return data
+
     def manager_init(self, config: dict[str, Any]) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST", "/api/manager/init", json={"config": config}
         ).json()["config"]
         return data
 
-    def manager_state(self) -> dict[str, Any]:
-        data: dict[str, Any] = self._request("GET", "/api/manager/state").json()
-        return data
-
-    def manager_next(self, tried: list[str] | None = None) -> dict[str, Any]:
-        params = {"tried": tried} if tried else None
+    def manager_state(self, manager_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "GET", "/api/manager/next", params=params
+            "GET", f"/api/manager/{manager_id}/state"
         ).json()
         return data
 
-    def manager_reconcile(self) -> dict[str, Any]:
-        data: dict[str, Any] = self._request("GET", "/api/manager/reconcile").json()
+    def manager_next(
+        self, manager_id: str, tried: list[str] | None = None
+    ) -> dict[str, Any]:
+        params = {"tried": tried} if tried else None
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/manager/{manager_id}/next", params=params
+        ).json()
         return data
 
-    def manager_create_ticket(self, body: dict[str, Any]) -> dict[str, Any]:
+    def manager_reconcile(self, manager_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "POST", "/api/manager/tickets", json=body
+            "GET", f"/api/manager/{manager_id}/reconcile"
+        ).json()
+        return data
+
+    def manager_create_ticket(
+        self, manager_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/manager/{manager_id}/tickets", json=body
         ).json()["ticket"]
         return data
 
-    def manager_get_ticket(self, ticket_id: str) -> dict[str, Any]:
+    def manager_get_ticket(self, manager_id: str, ticket_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "GET", f"/api/manager/tickets/{ticket_id}"
+            "GET", f"/api/manager/{manager_id}/tickets/{ticket_id}"
         ).json()["ticket"]
         return data
 
-    def manager_deinit(self) -> dict[str, Any]:
-        data: dict[str, Any] = self._request("DELETE", "/api/manager").json()
+    def manager_deinit(self, manager_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/manager/{manager_id}"
+        ).json()
         return data
 
-    def manager_delete_ticket(self, ticket_id: str) -> dict[str, Any]:
+    def manager_delete_ticket(self, manager_id: str, ticket_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "DELETE", f"/api/manager/tickets/{ticket_id}"
+            "DELETE", f"/api/manager/{manager_id}/tickets/{ticket_id}"
         ).json()
         return data
 
     def manager_update_ticket(
-        self, ticket_id: str, body: dict[str, Any]
+        self, manager_id: str, ticket_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "PATCH", f"/api/manager/tickets/{ticket_id}", json=body
+            "PATCH", f"/api/manager/{manager_id}/tickets/{ticket_id}", json=body
         ).json()["ticket"]
         return data
 
     def manager_transition_ticket(
-        self, ticket_id: str, body: dict[str, Any]
+        self, manager_id: str, ticket_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
-            "POST", f"/api/manager/tickets/{ticket_id}/transition", json=body
+            "POST",
+            f"/api/manager/{manager_id}/tickets/{ticket_id}/transition",
+            json=body,
         ).json()["ticket"]
         return data
 

@@ -105,6 +105,9 @@ export default function TelemetryPage() {
   const [healthLoading, setHealthLoading] = useState(true);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
+  // Never reset across range/filter changes: a known-empty insights region
+  // revalidates stale-while-revalidate instead of flashing the first-load skeleton.
+  const [insightsHasSettled, setInsightsHasSettled] = useState(false);
   const [dismissingSignature, setDismissingSignature] = useState<string | null>(null);
   const [settings, setSettings] = useState<TelemetrySettingsResponse | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -202,6 +205,8 @@ export default function TelemetryPage() {
       setActivityLoading(false);
       setHealthLoading(false);
       setInsightsLoading(false);
+      // No request fires here, so mark settled to avoid a phantom skeleton.
+      setInsightsHasSettled(true);
       return;
     }
     setOverviewLoading(true);
@@ -220,6 +225,7 @@ export default function TelemetryPage() {
       setActivity(activityRes);
       setHealth(healthRes);
       setInsights(insightsRes);
+      setInsightsHasSettled(true);
       setState("ready");
       setError("");
     } catch (err) {
@@ -772,6 +778,7 @@ export default function TelemetryPage() {
           <InsightCards
             insights={insights}
             loading={insightsLoading}
+            hasSettled={insightsHasSettled}
             dismissingSignature={dismissingSignature}
             onDismiss={(insight) => void handleDismissInsight(insight)}
             onClickThrough={handleInsightClickThrough}

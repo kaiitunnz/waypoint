@@ -6,6 +6,7 @@ import { Insight } from "@/lib/types";
 interface InsightCardsProps {
   insights: Insight[];
   loading: boolean;
+  hasSettled: boolean;
   dismissingSignature: string | null;
   onDismiss: (insight: Insight) => void;
   onClickThrough: (insight: Insight) => void;
@@ -20,11 +21,14 @@ function severityGlyph(severity: Insight["severity"]): string {
 export function InsightCards({
   insights,
   loading,
+  hasSettled,
   dismissingSignature,
   onDismiss,
   onClickThrough,
 }: InsightCardsProps) {
-  if (loading && insights.length === 0) {
+  // First load only: a settled-empty region stays absent through later
+  // refreshes instead of flashing the skeleton.
+  if (loading && !hasSettled && insights.length === 0) {
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }
   if (insights.length === 0) {

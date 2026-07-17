@@ -14,18 +14,20 @@ Maintain a `tried` set of ticket ids that failed an action this drain.
 1. **Re-anchor.** First arm the liveness self-wake: while any ticket is in flight, keep
    one pending self-wake at the human-latency window — an idle-manager re-drain for
    duties with no event source (a merge or CI advance to observe, a gate that will
-   latency-timeout, a lead that can die while you idle). It re-arms each drain and stops
-   once the board is fully terminal. Then re-anchor:
+   latency-timeout, a lead that can die while you idle). It re-arms each drain and cancels
+   the pending self-wake once the board is fully terminal. Then re-anchor:
    ```bash
    state=$(waypoint manager state --json)
    inflight=$(echo "$state" | jq '[.tickets[] | select(.state != "merged" and .state != "deferred" and .state != "abandoned")] | length')
    hlh=$(echo "$state" | jq -r '.config.human_latency_hours // 72')
    [ "$hlh" -lt 1 ] && hlh=1   # a 0-hour latency (jq's // keeps 0) would schedule an immediate-refire loop
-   armed=$(waypoint schedule message list --session-id {{manager_session_id}} \
-     | jq '[.message_schedules[] | select(.status == "pending" and (.text | contains("[wp-manager-liveness]")))] | length')
-   if [ "$inflight" -gt 0 ] && [ "$armed" -eq 0 ]; then
+   pending=$(waypoint schedule message list --session-id {{manager_session_id}} \
+     | jq -r '.message_schedules[] | select(.status == "pending" and (.text | contains("[wp-manager-liveness]"))) | .id')
+   if [ "$inflight" -gt 0 ] && [ -z "$pending" ]; then
      waypoint schedule message create {{manager_session_id}} \
        "[wp-manager-liveness] latency-window backstop re-drain" --delay-seconds $((hlh * 3600))
+   elif [ "$inflight" -eq 0 ] && [ -n "$pending" ]; then
+     for s in $pending; do waypoint schedule message delete "$s"; done   # a settled board leaves nothing firing
    fi
    waypoint manager next --json $(for t in $TRIED; do printf ' --tried %s' "$t"; done)
    ```
@@ -183,4 +185,5 @@ A `409` means your picture is stale: re-anchor and reconcile, never blind-retry.
 `manager next` recommends nothing, no external edge is outstanding, and no relay is
 owed. Post a one-line drain summary to your `{{org_channel}}` channel and go idle.
 A board or inbox change, or the liveness self-wake armed while a ticket is in flight,
-resumes you; a fully-terminal board arms no self-wake and sleeps until a real event.
+resumes you; a fully-terminal board has its self-wake cleared (re-anchor) and sleeps until
+a real event.

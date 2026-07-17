@@ -390,6 +390,9 @@ class BoardEntryUpdateRequest(BaseModel):
     # removed from the result in either mode.
     merge: bool = False
     unset: list[str] = Field(default_factory=list)
+    # The editing session, so its own board-update wake self-excludes (mirrors
+    # BoardPostRequest); ``None`` wakes every matching subscriber.
+    author_session_id: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -623,6 +626,270 @@ class SessionPresetUpdateRequest(BaseModel):
 class SessionPresetListResponse(BaseModel):
     presets: list[SessionPresetSummary] = Field(default_factory=list)
     default_preset_id: str | None = None
+
+
+class WakeSubscription(BaseModel):
+    # A session's standing request to be woken (a content-free ``handle_input``)
+    # when a matching board channel or the inbox mutates. ``channel_globs`` are
+    # fnmatch patterns over channel names; a non-empty ``kinds`` wakes only on a
+    # board post whose ``kind=`` meta is listed (empty ``kinds`` wakes on all).
+    id: str
+    session_id: str
+    channel_globs: list[str] = Field(default_factory=list)
+    kinds: list[str] = Field(default_factory=list)
+    wake_on_inbox: bool = False
+    created_at: datetime
+
+
+class WakeRegisterRequest(BaseModel):
+    channel_globs: list[str] = Field(default_factory=list)
+    kinds: list[str] = Field(default_factory=list)
+    wake_on_inbox: bool = False
+
+
+class WakeSubscriptionListResponse(BaseModel):
+    subscriptions: list[WakeSubscription] = Field(default_factory=list)
+
+
+class ManagerTicketState(StrEnum):
+    # The 13 states of a ticket in the Waypoint Manager state machine. The three
+    # terminals are ``MERGED``, ``DEFERRED``, ``ABANDONED``; every other state has
+    # outgoing edges in the transition table (``waypoint.manager._ADJACENCY``).
+    INTAKE = "intake"
+    TRIAGED = "triaged"
+    SPEC_PENDING = "spec_pending"
+    SPEC_REVIEW = "spec_review"
+    READY = "ready"
+    DELEGATED = "delegated"
+    BUILDING = "building"
+    BLOCKED = "blocked"
+    REVIEW_REQUESTED = "review_requested"
+    REVISING = "revising"
+    MERGED = "merged"
+    DEFERRED = "deferred"
+    ABANDONED = "abandoned"
+
+
+class ManagerTicketScale(StrEnum):
+    TRIVIAL = "trivial"
+    SUBSTANTIAL = "substantial"
+
+
+class ManagerTicket(BaseModel):
+    # One record per ticket. Filterable columns (id/title/priority/state/scale/
+    # version/timestamps) are denormalized in storage; the whole model is the
+    # source of truth (persisted as a JSON payload blob).
+    id: str
+    title: str
+    priority: str = "p2"
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    state: ManagerTicketState = ManagerTicketState.INTAKE
+    # Coarse code paths the ticket is expected to touch (globs); refined by a spec.
+    footprint: list[str] = Field(default_factory=list)
+    is_partial: bool = False
+    spec_ref: str | None = None
+    # Deterministic per-ticket lead title; the spawn dedup key. Unique across all
+    # non-terminal tickets (server-enforced invariant).
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    # The ticket's branch, checked out in the manager's shared working tree while
+    # the ticket occupies it (there is no per-ticket sibling worktree).
+    branch: str | None = None
+    pr_url: str | None = None
+    # The inbox item id of the ticket's current human gate, recorded when the gate
+    # posts and cleared on any non-self transition, so the answer read scopes to the
+    # current episode and never resolves an earlier gate's answer.
+    inbox_item_id: str | None = None
+    # Initial-delegate spawn-failure budget (distinct from ``lead_restarts``).
+    attempts: int = 0
+    # Post-work lead-death resume budget (distinct from ``attempts``).
+    lead_restarts: int = 0
+    deps: list[str] = Field(default_factory=list)
+    # Set on entry to a genuinely awaiting-human state; cleared when the ticket
+    # leaves it (so a latency timeout only counts real human waits).
+    awaiting_since: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    version: int = 0
+
+
+class ManagerRenderContext(BaseModel):
+    # Persisted at `manager init`, which bakes the static placeholder values into
+    # the compiled templates under `templates_dir`. These are what `manager render`
+    # still needs at use time: `templates_dir` to locate a compiled template, and
+    # the two channel fields to fetch a ticket's board cell and compute its channel.
+    templates_dir: str = ""
+    tickets_channel: str = ""
+    ticket_channel_prefix: str = ""
+
+
+class ManagerConfig(BaseModel):
+    # The machine-relevant subset of the project manifest that drives the
+    # server-side scheduler invariants so a drifting manager context cannot enact
+    # an illegal step, plus the render context persisted at init for `manager
+    # render`.
+    max_delegate_attempts: int = Field(default=3, ge=0)
+    max_lead_restarts: int = Field(default=3, ge=0)
+    backoff_seconds: int = Field(default=60, ge=0)
+    human_latency_hours: int = Field(default=72, ge=0)
+    priority_levels: list[str] = Field(default_factory=lambda: ["p0", "p1", "p2", "p3"])
+    trunk: str = "main"
+    # The session that ran `manager init` (the manager itself). Deleting that
+    # session cascades a deinit so no orphaned backlog state lingers behind it.
+    owner_session_id: str | None = None
+    render_context: ManagerRenderContext | None = None
+
+
+class ManagerTreeState(BaseModel):
+    # Derived, never stored: the single shared working tree, held by at most one
+    # ticket from delegate through terminal (delegated..review_requested).
+    free: bool
+    held_by: str | None = None  # the ticket holding the tree, when not free
+
+
+class ReconcileIntake(BaseModel):
+    id: int
+    author_session_id: str | None = None
+    text: str = ""
+    # The intake post's `priority` meta, surfaced when it names a configured level.
+    priority: str | None = None
+
+
+class ReconcileDeadLead(BaseModel):
+    ticket_id: str
+    state: ManagerTicketState
+    lead_session_id: str | None = None
+    lead_status: str | None = None  # None = no such session, else its terminal status
+
+
+class ReconcileLatencyTimeout(BaseModel):
+    ticket_id: str
+    state: ManagerTicketState
+    # The wait is measured from the current gate item's post (falling back to the
+    # awaiting entry when no item exists), so a re-opened gate earns a fresh wait.
+    waiting_since: datetime
+    hours_elapsed: float
+
+
+class ReconcileStaleGate(BaseModel):
+    # An awaiting-human ticket whose gate inbox item is absent — the recorded
+    # ``inbox_item_id`` is empty (a crash between the awaiting transition and the
+    # inbox post) or names an item that no longer exists.
+    ticket_id: str
+    state: ManagerTicketState
+    awaiting_since: datetime | None = None
+
+
+class ReconcileFinalizePending(BaseModel):
+    # A terminal ticket that reached the tree (still carries its branch) but was not
+    # finalized — a crash between recording the terminal and reaping the subtree.
+    ticket_id: str
+    state: ManagerTicketState
+    branch: str | None = None
+    lead_session_id: str | None = None
+
+
+class ReconcileResolvedGate(BaseModel):
+    # An awaiting-human ticket whose recorded gate item is resolved (the human
+    # answered) but whose transition has not happened — a re-spec deferred by the
+    # busy single ``spec_pending`` slot, or a crash between the answer and the
+    # transition. Re-driving the gate handler re-fires the deferred transition.
+    ticket_id: str
+    state: ManagerTicketState
+    inbox_item_id: str | None = None
+
+
+class ManagerReconcileReport(BaseModel):
+    unregistered_intake: list[ReconcileIntake] = Field(default_factory=list)
+    dead_leads: list[ReconcileDeadLead] = Field(default_factory=list)
+    latency_timeouts: list[ReconcileLatencyTimeout] = Field(default_factory=list)
+    stale_gates: list[ReconcileStaleGate] = Field(default_factory=list)
+    finalize_pending: list[ReconcileFinalizePending] = Field(default_factory=list)
+    resolved_gates: list[ReconcileResolvedGate] = Field(default_factory=list)
+
+
+class ManagerTicketTransitions(BaseModel):
+    ticket_id: str
+    priority: str
+    state: ManagerTicketState
+    legal_transitions: list[ManagerTicketState] = Field(default_factory=list)
+
+
+class ManagerRecommendedAction(BaseModel):
+    ticket_id: str
+    from_state: ManagerTicketState
+    to_state: ManagerTicketState
+    event: str
+    reason: str
+
+
+class TicketCreateRequest(BaseModel):
+    title: str
+    id: str | None = None
+    priority: str = "p2"
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    footprint: list[str] = Field(default_factory=list)
+    deps: list[str] = Field(default_factory=list)
+
+
+class TicketTransitionRequest(BaseModel):
+    # Transition by target state (matching the RFC CLI ``--to <state>``); the
+    # transition table is the from→{to} adjacency and per-edge guards/meta encode
+    # the events. ``reason`` distinguishes edges the RFC labels with two events
+    # sharing one (from, to) — e.g. reject vs latency-timeout, done vs partial.
+    to: ManagerTicketState
+    reason: str | None = None
+    scale: ManagerTicketScale | None = None
+    kind: str | None = None
+    footprint: list[str] | None = None
+    spec_ref: str | None = None
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    branch: str | None = None
+    pr_url: str | None = None
+    is_partial: bool | None = None
+    deps: list[str] | None = None
+
+
+class TicketUpdateRequest(BaseModel):
+    # Edit ticket metadata without a state transition (priority, footprint,
+    # spec/lead refs). State changes go through ``TicketTransitionRequest``.
+    priority: str | None = None
+    kind: str | None = None
+    scale: ManagerTicketScale | None = None
+    footprint: list[str] | None = None
+    deps: list[str] | None = None
+    spec_ref: str | None = None
+    intended_lead_title: str | None = None
+    lead_session_id: str | None = None
+    branch: str | None = None
+    pr_url: str | None = None
+    inbox_item_id: str | None = None
+    is_partial: bool | None = None
+    # Human-gated override: zero the delegate ``attempts`` budget so a ticket
+    # blocked on repeated spawn failures can be retried after a config fix.
+    reset_attempts: bool = False
+    # Human-gated override: zero the ``lead_restarts`` budget so a ticket blocked
+    # on a lead that kept dying can be retried after the cause is fixed.
+    reset_lead_restarts: bool = False
+
+
+class ManagerInitRequest(BaseModel):
+    config: ManagerConfig = Field(default_factory=ManagerConfig)
+
+
+class ManagerNextResponse(BaseModel):
+    tree: ManagerTreeState
+    tickets: list[ManagerTicketTransitions] = Field(default_factory=list)
+    recommended: ManagerRecommendedAction | None = None
+
+
+class ManagerStateResponse(BaseModel):
+    config: ManagerConfig | None = None
+    tree: ManagerTreeState
+    tickets: list[ManagerTicket] = Field(default_factory=list)
 
 
 class MeResponse(BaseModel):
@@ -1193,6 +1460,9 @@ class InboxBlockSubmitRequest(BaseModel):
     # ``answer`` is validated against the target block's type server-side.
     answer: dict[str, Any] | None = None
     reply: InboxReplyInput | None = None
+    # The session performing the submit, so a wake subscriber is not woken by its
+    # own mutation. ``None`` for human/UI answers (which do wake a subscriber).
+    actor_session_id: str | None = None
 
 
 class InboxListResponse(BaseModel):

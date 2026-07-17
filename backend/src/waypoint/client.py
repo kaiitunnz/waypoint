@@ -582,13 +582,20 @@ class WaypointClient:
         return data
 
     def delete(
-        self, session_id: str, *, force: bool = False, prune_branches: bool = False
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+        prune_branches: bool = False,
+        actor_session_id: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if force:
             params["force"] = force
         if prune_branches:
             params["prune_branches"] = prune_branches
+        if actor_session_id:
+            params["actor_session_id"] = actor_session_id
         data: dict[str, Any] = self._request(
             "DELETE",
             f"/api/sessions/{session_id}",
@@ -652,22 +659,38 @@ class WaypointClient:
         ).json()["entry"]
         return data
 
-    def clear_board(self, channel: str, keep_last: int | None = None) -> dict[str, Any]:
+    def clear_board(
+        self,
+        channel: str,
+        keep_last: int | None = None,
+        *,
+        actor_session_id: str | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if keep_last is not None:
             params["keep_last"] = keep_last
+        if actor_session_id:
+            params["actor_session_id"] = actor_session_id
         data: dict[str, Any] = self._request(
             "POST", f"/api/board/{channel}/clear", params=params or None
         ).json()
         return data
 
-    def delete_board(self, channel: str) -> dict[str, Any]:
-        data: dict[str, Any] = self._request("DELETE", f"/api/board/{channel}").json()
+    def delete_board(
+        self, channel: str, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = {"actor_session_id": actor_session_id} if actor_session_id else None
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/board/{channel}", params=params
+        ).json()
         return data
 
-    def delete_board_entry(self, channel: str, entry_id: int) -> dict[str, Any]:
+    def delete_board_entry(
+        self, channel: str, entry_id: int, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = {"actor_session_id": actor_session_id} if actor_session_id else None
         data: dict[str, Any] = self._request(
-            "DELETE", f"/api/board/{channel}/entries/{entry_id}"
+            "DELETE", f"/api/board/{channel}/entries/{entry_id}", params=params
         ).json()
         return data
 
@@ -679,6 +702,7 @@ class WaypointClient:
         metadata: dict[str, Any] | None = None,
         merge: bool = False,
         unset: list[str] | None = None,
+        author_session_id: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"metadata": metadata or {}}
         if text is not None:
@@ -687,6 +711,8 @@ class WaypointClient:
             body["merge"] = True
         if unset:
             body["unset"] = list(unset)
+        if author_session_id is not None:
+            body["author_session_id"] = author_session_id
         data: dict[str, Any] = self._request(
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]
@@ -746,16 +772,28 @@ class WaypointClient:
         *,
         answer: dict[str, Any] | None = None,
         reply: dict[str, Any] | None = None,
+        actor_session_id: str | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"answer": answer, "reply": reply}
+        body: dict[str, Any] = {
+            "answer": answer,
+            "reply": reply,
+            "actor_session_id": actor_session_id,
+        }
         data: dict[str, Any] = self._request(
             "POST", f"/api/inbox/{item_id}/blocks/{block_id}", json=body
         ).json()["item"]
         return data
 
-    def mark_inbox_read(self, item_id: str) -> dict[str, Any]:
+    def mark_inbox_read(
+        self, item_id: str, *, actor_session_id: str | None = None
+    ) -> dict[str, Any]:
+        params = (
+            {"actor_session_id": actor_session_id}
+            if actor_session_id is not None
+            else None
+        )
         data: dict[str, Any] = self._request(
-            "POST", f"/api/inbox/{item_id}/read"
+            "POST", f"/api/inbox/{item_id}/read", params=params
         ).json()["item"]
         return data
 
@@ -786,6 +824,40 @@ class WaypointClient:
         async with ws_connect(url) as connection:
             async for message in connection:
                 yield json.loads(message)
+
+    async def stream_global_envelopes(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield decoded envelopes from the global ``/ws/sessions`` WebSocket.
+
+        Carries ``session_list_update``/``session_state`` frames plus the
+        content-free ``board_update`` frame (payload ``{"channel": ...}``, or
+        ``{"channel": null}`` for a broad change). Decoding only; callers filter.
+        """
+        url = websocket_url(
+            str(self._client.base_url), "/ws/sessions", token=self.token()
+        )
+        async with ws_connect(url) as connection:
+            async for message in connection:
+                yield json.loads(message)
+
+    # ── wake subscriptions ────────────────────────────────────────────────
+
+    def register_wake(self, session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/wake-subscriptions", json=body
+        ).json()["subscription"]
+        return data
+
+    def list_wakes(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/sessions/{session_id}/wake-subscriptions"
+        ).json()
+        return data
+
+    def unregister_wake(self, session_id: str, sub_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/sessions/{session_id}/wake-subscriptions/{sub_id}"
+        ).json()
+        return data
 
     # ── schedules ───────────────────────────────────────────────────────
 
@@ -909,6 +981,67 @@ class WaypointClient:
         data: dict[str, Any] = self._request(
             "DELETE", "/api/session-presets/default"
         ).json()
+        return data
+
+    # ── manager state machine ────────────────────────────────────────────
+
+    def manager_init(self, config: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/init", json={"config": config}
+        ).json()["config"]
+        return data
+
+    def manager_state(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/manager/state").json()
+        return data
+
+    def manager_next(self, tried: list[str] | None = None) -> dict[str, Any]:
+        params = {"tried": tried} if tried else None
+        data: dict[str, Any] = self._request(
+            "GET", "/api/manager/next", params=params
+        ).json()
+        return data
+
+    def manager_reconcile(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/manager/reconcile").json()
+        return data
+
+    def manager_create_ticket(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/manager/tickets", json=body
+        ).json()["ticket"]
+        return data
+
+    def manager_get_ticket(self, ticket_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/manager/tickets/{ticket_id}"
+        ).json()["ticket"]
+        return data
+
+    def manager_deinit(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("DELETE", "/api/manager").json()
+        return data
+
+    def manager_delete_ticket(self, ticket_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/manager/tickets/{ticket_id}"
+        ).json()
+        return data
+
+    def manager_update_ticket(
+        self, ticket_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/manager/tickets/{ticket_id}", json=body
+        ).json()["ticket"]
+        return data
+
+    def manager_transition_ticket(
+        self, ticket_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/manager/tickets/{ticket_id}/transition", json=body
+        ).json()["ticket"]
         return data
 
     # ── message schedules ────────────────────────────────────────────────

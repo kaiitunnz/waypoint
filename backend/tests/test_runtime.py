@@ -33,6 +33,8 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     LaunchMode,
+    ManagerConfig,
+    ManagerInitRequest,
     SessionApprovalRequest,
     SessionContextUsage,
     SessionCreateRequest,
@@ -41,6 +43,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
+    TicketCreateRequest,
 )
 from waypoint.settings import AssistantConfig, Settings
 from waypoint.storage import Storage
@@ -525,6 +528,37 @@ async def test_post_board_entry_stamps_author_label_from_session_title(
     assert entry.author_label == "My Worker"
     loaded = storage.list_board_entries("job:test")
     assert loaded[0].author_label == "My Worker"
+
+
+@pytest.mark.asyncio
+async def test_delete_owner_session_cascades_manager_deinit(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.manager.init(
+        ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr"))
+    )
+    runtime.manager.create_ticket(TicketCreateRequest(title="t"))
+    storage.create_session(
+        make_session(settings, id="mgr", status=SessionStatus.EXITED)
+    )
+    await runtime.delete("mgr")
+    # The manager state machine is torn down with its owner session.
+    assert storage.list_manager_tickets() == []
+    assert storage.get_manager_config() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_non_owner_session_leaves_manager_state(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.manager.init(
+        ManagerInitRequest(config=ManagerConfig(owner_session_id="mgr"))
+    )
+    runtime.manager.create_ticket(TicketCreateRequest(title="t"))
+    storage.create_session(
+        make_session(settings, id="worker", status=SessionStatus.EXITED)
+    )
+    await runtime.delete("worker")
+    assert len(storage.list_manager_tickets()) == 1
+    assert storage.get_manager_config() is not None
 
 
 @pytest.mark.asyncio

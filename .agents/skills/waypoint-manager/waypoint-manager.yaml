@@ -1,0 +1,63 @@
+# waypoint-manager.yaml — project-local Waypoint Manager config.
+#
+# `waypoint manager init --manifest <this file>` persists the machine-relevant
+# fields (trunk, retry, priority, timeouts) server-side, so
+# `manager next`/`transition` enforce them. It also bakes board, scale, escalation,
+# and roles into the compiled templates under `templates_dir` — the manager's
+# runtime source of truth, so it reads no manifest per wake. Every field is
+# documented inline below; SKILL.md lists the template placeholders. Execution is
+# always serial on the manager's single shared tree — one ticket at a time.
+
+project: waypoint                         # used in summaries and channel labels
+trunk: main                               # branch each ticket is cut from; the human's merge advances it
+spec_dir: .waypoint/specs                 # where PRD/RFC writers write specs; keep under gitignored .waypoint/ so writers touch no tracked file
+branch_pattern: "{type}/{slug}"           # ticket branch name; placeholders {slug} (from the title), {type} (conventional-commit type), {id}, {user}
+templates_dir: .waypoint/manager/templates   # where init writes the compiled templates; under gitignored .waypoint/, resolved relative to the repo root
+
+board:
+  tickets_channel: tickets                # intake channel + ticket:<id> registry cells ({{tickets_channel}})
+  org_channel: org                        # human-visible drain/outcome summaries ({{org_channel}})
+  ticket_channel_prefix: ticket-          # per-ticket channel is <prefix><id>, e.g. ticket-42 ({{ticket_channel}})
+
+retry:
+  max_delegate_attempts: 3                # initial-spawn retries before blocked-awaiting-human
+  max_lead_restarts: 3                    # fresh-lead resumes after a lead death before blocked (independent of attempts)
+
+priority:
+  levels: [p0, p1, p2, p3]                # ordered high-to-low; ties break oldest-first (FIFO by created_at)
+
+scale:
+  substantial_when: >-                    # triage's rule for substantial (→ spec) vs trivial (→ direct)
+    needs a schema/API/UX change, touches more than one module, or has
+    ambiguous intent; otherwise trivial
+
+integration:
+  mode: pr                                # pr (GitHub PR) | local (rebase-ff); human-owned merge either way
+  require_ci_green: true                  # gate the merge on green CI
+
+timeouts:
+  human_latency_hours: 72                 # awaiting-human (spec_review/blocked/review_requested) → escalate then abandon
+
+escalation:
+  self_decide: [retryable-error, unambiguous-clarification]              # blockers the manager settles itself
+  always_escalate: [product-decision, scope-change, irreversible, spec-ambiguity]   # blockers routed to the human inbox
+
+# Each role: `preset: <name>` (verified at setup, never created) or inline
+# `launch: { backend, model, permission_mode, ... }`. manager + tech_lead run
+# unattended → auto-approving permission_mode (claude_code: auto). manager runs on
+# claude_tty (recommended) so a turn survives a backend restart; the durable state
+# machine keeps any transport correct either way. Each `templates:` is the role's raw
+# prompt dir; a relative path resolves under the repo root, like templates_dir/spec_dir.
+roles:
+  manager:
+    launch: { backend: claude_code, transport: claude_tty, model: "opus[1m]", permission_mode: auto }
+    templates: .waypoint/templates/manager
+  prd_writer:
+    preset: writer-opus                   # e.g. an opus claude_code preset; must pre-exist
+    templates: .waypoint/templates/prd-writer
+  rfc_writer:
+    preset: writer-opus
+    templates: .waypoint/templates/rfc-writer
+  tech_lead:
+    preset: lead-opus-1m                  # OR: launch: { backend: claude_code, model: "opus[1m]", permission_mode: auto }
+    templates: .waypoint/templates/tech-lead

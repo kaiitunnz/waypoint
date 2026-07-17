@@ -27,6 +27,9 @@ from waypoint.schemas import (
     InboxReply,
     InboxReplyInput,
     InboxStatus,
+    ManagerConfig,
+    ManagerTicket,
+    ManagerTicketState,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
     ScheduledSessionRecord,
@@ -39,6 +42,7 @@ from waypoint.schemas import (
     SessionTokenUsage,
     TokenUsageInit,
     TokenUsageRecord,
+    WakeSubscription,
 )
 from waypoint.telemetry.store import TelemetryStore
 
@@ -131,6 +135,10 @@ class InboxBlockNotFoundError(InboxError):
 
 class InboxBlockTypeError(InboxError):
     """The submitted answer does not fit the target block's type (→ 422)."""
+
+
+class ManagerTicketConflict(Exception):
+    """A version-checked manager-ticket update lost the CAS race (→ 409)."""
 
 
 def _materialize_blocks(blocks: list[InboxBlockInput]) -> list[InboxBlock]:
@@ -350,6 +358,42 @@ class Storage:
                 WHERE is_default = 1;
             CREATE UNIQUE INDEX IF NOT EXISTS idx_session_presets_name_nocase
                 ON session_presets(LOWER(name));
+
+            -- A session's standing wake subscriptions. ``channel_globs``/``kinds``
+            -- are JSON lists; ``wake_on_inbox`` is a 0/1 flag. Read fresh on every
+            -- board/inbox mutation, so no in-memory re-registration on boot.
+            CREATE TABLE IF NOT EXISTS wake_subscriptions (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                channel_globs TEXT NOT NULL DEFAULT '[]',
+                kinds TEXT NOT NULL DEFAULT '[]',
+                wake_on_inbox INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            -- Waypoint Manager state machine. Filterable columns
+            -- (state/priority/scale) + timestamps are denormalized for
+            -- querying/ordering; the whole ticket is the JSON ``payload`` blob,
+            -- updated in place via a version-checked read-modify-write.
+            CREATE TABLE IF NOT EXISTS manager_tickets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'p2',
+                state TEXT NOT NULL DEFAULT 'intake',
+                scale TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
+
+            -- Single-row persisted ManagerConfig (the machine-relevant subset of
+            -- the project manifest). ``id`` is pinned to 1.
+            CREATE TABLE IF NOT EXISTS manager_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
             """)
         # Register any channels that predate the board_channels table.
         self.connection.execute(
@@ -422,6 +466,12 @@ class Storage:
                 ON sessions(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_last_event
                 ON sessions(last_event_at);
+            CREATE INDEX IF NOT EXISTS idx_wake_subs_session
+                ON wake_subscriptions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_state
+                ON manager_tickets(state);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_priority
+                ON manager_tickets(priority);
             """)
         self.telemetry.init_schema()
         if token_usage_column_is_new:
@@ -577,6 +627,10 @@ class Storage:
         # per-turn token ledger explicitly in the same synchronized transaction.
         self.connection.execute(
             "DELETE FROM session_token_usage_records WHERE session_id = ?",
+            (session_id,),
+        )
+        self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE session_id = ?",
             (session_id,),
         )
         self.telemetry.delete_session(session_id)
@@ -1904,6 +1958,196 @@ class Storage:
             parsed_spec = {}
         payload["spec"] = parsed_spec if isinstance(parsed_spec, dict) else {}
         return SessionPresetRecord.model_validate(payload)
+
+    @_synchronized
+    def create_wake_subscription(self, sub: WakeSubscription) -> WakeSubscription:
+        self.connection.execute(
+            """
+            INSERT INTO wake_subscriptions (
+                id, session_id, channel_globs, kinds, wake_on_inbox, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sub.id,
+                sub.session_id,
+                json.dumps(list(sub.channel_globs)),
+                json.dumps(list(sub.kinds)),
+                1 if sub.wake_on_inbox else 0,
+                sub.created_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return sub
+
+    @_synchronized
+    def list_wake_subscriptions(self) -> list[WakeSubscription]:
+        rows = self.connection.execute(
+            "SELECT * FROM wake_subscriptions ORDER BY created_at ASC"
+        ).fetchall()
+        return [self._wake_subscription_from_row(row) for row in rows]
+
+    @_synchronized
+    def list_wake_subscriptions_for_session(
+        self, session_id: str
+    ) -> list[WakeSubscription]:
+        rows = self.connection.execute(
+            "SELECT * FROM wake_subscriptions WHERE session_id = ? "
+            "ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+        return [self._wake_subscription_from_row(row) for row in rows]
+
+    @_synchronized
+    def delete_wake_subscription(self, sub_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE id = ?", (sub_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def delete_wake_subscriptions_for_session(self, session_id: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM wake_subscriptions WHERE session_id = ?", (session_id,)
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    def _wake_subscription_from_row(self, row: sqlite3.Row) -> WakeSubscription:
+        payload = dict(row)
+        payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+        payload["wake_on_inbox"] = bool(payload.get("wake_on_inbox", 0))
+        for field_name in ("channel_globs", "kinds"):
+            raw = payload.get(field_name) or "[]"
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = []
+            payload[field_name] = parsed if isinstance(parsed, list) else []
+        return WakeSubscription.model_validate(payload)
+
+    @_synchronized
+    def create_manager_ticket(self, ticket: ManagerTicket) -> ManagerTicket:
+        self.connection.execute(
+            """
+            INSERT INTO manager_tickets (
+                id, title, priority, state, scale, version, created_at,
+                updated_at, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            self._manager_ticket_columns(ticket),
+        )
+        self.connection.commit()
+        return ticket
+
+    @_synchronized
+    def get_manager_ticket(self, ticket_id: str) -> ManagerTicket | None:
+        row = self.connection.execute(
+            "SELECT * FROM manager_tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        return self._manager_ticket_from_row(row) if row is not None else None
+
+    @_synchronized
+    def list_manager_tickets(
+        self, *, states: list[ManagerTicketState] | None = None
+    ) -> list[ManagerTicket]:
+        sql = "SELECT * FROM manager_tickets"
+        params: list[Any] = []
+        if states:
+            placeholders = ",".join("?" for _ in states)
+            sql += f" WHERE state IN ({placeholders})"
+            params.extend(str(state) for state in states)
+        sql += " ORDER BY created_at ASC, id ASC"
+        rows = self.connection.execute(sql, params).fetchall()
+        return [self._manager_ticket_from_row(row) for row in rows]
+
+    @_synchronized
+    def update_manager_ticket(self, ticket: ManagerTicket) -> ManagerTicket:
+        # Version-checked read-modify-write: the caller passes the ticket it read
+        # (``ticket.version`` is the expected current version); the row is bumped
+        # to ``version + 1`` only when it still matches. A mismatch (concurrent
+        # write or a vanished row) raises ManagerTicketConflict, mapped to 409.
+        expected = ticket.version
+        bumped = ticket.model_copy(update={"version": expected + 1})
+        columns = self._manager_ticket_columns(bumped)
+        cursor = self.connection.execute(
+            """
+            UPDATE manager_tickets SET
+                title = ?, priority = ?, state = ?, scale = ?, version = ?,
+                created_at = ?, updated_at = ?, payload = ?
+            WHERE id = ? AND version = ?
+            """,
+            (*columns[1:], ticket.id, expected),
+        )
+        if (cursor.rowcount or 0) == 0:
+            self.connection.rollback()
+            raise ManagerTicketConflict(ticket.id)
+        self.connection.commit()
+        return bumped
+
+    @_synchronized
+    def delete_manager_ticket(self, ticket_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM manager_tickets WHERE id = ?", (ticket_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def clear_manager_tickets(self) -> int:
+        cursor = self.connection.execute("DELETE FROM manager_tickets")
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
+    def clear_manager_config(self) -> None:
+        self.connection.execute("DELETE FROM manager_config WHERE id = 1")
+        self.connection.commit()
+
+    @_synchronized
+    def get_manager_config(self) -> ManagerConfig | None:
+        row = self.connection.execute(
+            "SELECT payload FROM manager_config WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            parsed = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            return None
+        return ManagerConfig.model_validate(parsed if isinstance(parsed, dict) else {})
+
+    @_synchronized
+    def set_manager_config(self, config: ManagerConfig) -> ManagerConfig:
+        self.connection.execute(
+            "INSERT INTO manager_config (id, payload) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
+            (json.dumps(config.model_dump(mode="json")),),
+        )
+        self.connection.commit()
+        return config
+
+    @staticmethod
+    def _manager_ticket_columns(ticket: ManagerTicket) -> tuple[Any, ...]:
+        return (
+            ticket.id,
+            ticket.title,
+            ticket.priority,
+            str(ticket.state),
+            str(ticket.scale) if ticket.scale is not None else None,
+            ticket.version,
+            ticket.created_at.isoformat(),
+            ticket.updated_at.isoformat(),
+            json.dumps(ticket.model_dump(mode="json")),
+        )
+
+    def _manager_ticket_from_row(self, row: sqlite3.Row) -> ManagerTicket:
+        raw = row["payload"] or "{}"
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = {}
+        return ManagerTicket.model_validate(parsed if isinstance(parsed, dict) else {})
 
     @_synchronized
     def create_scheduled_message(

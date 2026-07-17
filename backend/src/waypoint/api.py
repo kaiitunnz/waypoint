@@ -61,6 +61,10 @@ from waypoint.schemas import (
     LaunchTargetConnectRequest,
     LaunchTargetConnectResponse,
     LoginRequest,
+    ManagerInitRequest,
+    ManagerNextResponse,
+    ManagerReconcileReport,
+    ManagerStateResponse,
     MeResponse,
     ProfileDoctorReport,
     ScheduledMessageCreateRequest,
@@ -83,6 +87,11 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTagsUpdateRequest,
     SessionTitleRequest,
+    TicketCreateRequest,
+    TicketTransitionRequest,
+    TicketUpdateRequest,
+    WakeRegisterRequest,
+    WakeSubscriptionListResponse,
 )
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import (
@@ -1344,13 +1353,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         force: Annotated[bool, Query()] = False,
         prune_branches: Annotated[bool, Query()] = False,
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         # `force=true` skips terminate failures entirely — last-resort escape
         # hatch when the adapter is wedged (SSH stuck, etc.) and the
         # graceful path won't complete. `prune_branches=true` force-deletes a
         # worktree session's branch even when unmerged (crew teardown).
+        # `actor_session_id` self-excludes the deleter from the board-prune wake.
         await context.runtime.delete(
-            session_id, force=force, prune_branches=prune_branches
+            session_id,
+            force=force,
+            prune_branches=prune_branches,
+            actor_session_id=actor_session_id,
         )
         return {"deleted": session_id}
 
@@ -1405,12 +1419,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
         keep_last: Annotated[int | None, Query(ge=1)] = None,
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         # Remove the channel's posts but keep the (now empty) channel.
         # With keep_last, the N most-recent log posts are retained; cells are
-        # always dropped.
+        # always dropped. `actor_session_id` self-excludes the clearer from the wake.
         removed = await context.runtime.clear_board_channel(
-            channel, keep_last=keep_last
+            channel, keep_last=keep_last, actor_session_id=actor_session_id
         )
         return {"channel": channel, "cleared": removed}
 
@@ -1418,9 +1433,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def board_delete(
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         # Remove the channel entirely, posts and all.
-        removed = await context.runtime.delete_board_channel(channel)
+        removed = await context.runtime.delete_board_channel(
+            channel, actor_session_id=actor_session_id
+        )
         return {"channel": channel, "deleted": removed}
 
     @app.delete("/api/board/{channel}/entries/{entry_id}")
@@ -1428,8 +1446,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         channel: str,
         entry_id: int,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
-        deleted = await context.runtime.delete_board_entry(channel, entry_id)
+        deleted = await context.runtime.delete_board_entry(
+            channel, entry_id, actor_session_id=actor_session_id
+        )
         if not deleted:
             raise HTTPException(status_code=404, detail="board entry not found")
         return {"channel": channel, "entry_id": entry_id, "deleted": True}
@@ -1517,7 +1538,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # validated against the target block's type in the storage layer.
         try:
             item = await context.runtime.submit_inbox_block(
-                item_id, block_id, answer=body.answer, reply=body.reply
+                item_id,
+                block_id,
+                answer=body.answer,
+                reply=body.reply,
+                actor_session_id=body.actor_session_id,
             )
         except InboxBlockNotFoundError as exc:
             raise HTTPException(
@@ -1533,8 +1558,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def inbox_read(
         item_id: str,
         _: Annotated[str, Depends(token_dependency())],
+        actor_session_id: Annotated[str | None, Query()] = None,
     ) -> Any:
-        item = await context.runtime.mark_inbox_read(item_id)
+        item = await context.runtime.mark_inbox_read(
+            item_id, actor_session_id=actor_session_id
+        )
         if item is None:
             raise HTTPException(status_code=404, detail="inbox item not found")
         return {"item": item.model_dump(mode="json")}
@@ -1788,6 +1816,115 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "preset": redact_preset(preset).model_dump(mode="json") if preset else None
         }
+
+    # ── Wake subscriptions ───────────────────────────────────────────────
+    @app.post("/api/sessions/{session_id}/wake-subscriptions")
+    async def register_wake_subscription(
+        session_id: str,
+        body: WakeRegisterRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        sub = context.runtime.register_wake(session_id, body)
+        return {"subscription": sub.model_dump(mode="json")}
+
+    @app.get("/api/sessions/{session_id}/wake-subscriptions")
+    async def list_wake_subscriptions(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        subs = context.runtime.list_wakes(session_id)
+        return WakeSubscriptionListResponse(subscriptions=subs).model_dump(mode="json")
+
+    @app.delete("/api/sessions/{session_id}/wake-subscriptions/{sub_id}")
+    async def delete_wake_subscription(
+        session_id: str,
+        sub_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = context.runtime.unregister_wake(session_id, sub_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="wake subscription not found",
+            )
+        return {"deleted": True}
+
+    # ── Waypoint Manager ─────────────────────────────────────────────────
+    @app.post("/api/manager/init")
+    async def manager_init(
+        request: ManagerInitRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        config = context.runtime.manager.init(request)
+        return {"config": config.model_dump(mode="json")}
+
+    @app.delete("/api/manager")
+    async def manager_deinit(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        removed = context.runtime.manager.deinit()
+        return {"deinitialized": True, "tickets_deleted": removed}
+
+    @app.get("/api/manager/state", response_model=ManagerStateResponse)
+    async def manager_state(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> ManagerStateResponse:
+        return context.runtime.manager.state()
+
+    @app.get("/api/manager/next", response_model=ManagerNextResponse)
+    async def manager_next(
+        _: Annotated[str, Depends(token_dependency())],
+        tried: Annotated[list[str] | None, Query()] = None,
+    ) -> ManagerNextResponse:
+        return context.runtime.manager.next(tried or [])
+
+    @app.get("/api/manager/reconcile", response_model=ManagerReconcileReport)
+    async def manager_reconcile(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> ManagerReconcileReport:
+        return context.runtime.manager.reconcile(datetime.now(UTC))
+
+    @app.post("/api/manager/tickets")
+    async def manager_create_ticket(
+        request: TicketCreateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.create_ticket(request)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.get("/api/manager/tickets/{ticket_id}")
+    async def manager_get_ticket(
+        ticket_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.get_ticket(ticket_id)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.patch("/api/manager/tickets/{ticket_id}")
+    async def manager_update_ticket(
+        ticket_id: str,
+        request: TicketUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.update_ticket(ticket_id, request)
+        return {"ticket": ticket.model_dump(mode="json")}
+
+    @app.delete("/api/manager/tickets/{ticket_id}")
+    async def manager_delete_ticket(
+        ticket_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        context.runtime.manager.delete_ticket(ticket_id)
+        return {"deleted": True}
+
+    @app.post("/api/manager/tickets/{ticket_id}/transition")
+    async def manager_transition_ticket(
+        ticket_id: str,
+        request: TicketTransitionRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        ticket = context.runtime.manager.transition(ticket_id, request)
+        return {"ticket": ticket.model_dump(mode="json")}
 
     @app.get("/api/message-schedules")
     async def list_message_schedules(

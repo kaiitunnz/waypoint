@@ -1,7 +1,9 @@
 import asyncio
+import fnmatch
 import importlib.metadata
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -16,6 +18,7 @@ import click
 import httpx
 import typer
 import uvicorn
+import yaml
 from fastapi import HTTPException
 from websockets.exceptions import WebSocketException
 
@@ -167,6 +170,14 @@ accounts_app = typer.Typer(
     help="Inspect configured account/config-profile switching options.",
     no_args_is_help=True,
 )
+manager_app = typer.Typer(
+    help="Drive the Waypoint Manager per-project ticket state machine.",
+    no_args_is_help=True,
+)
+manager_ticket_app = typer.Typer(
+    help="Add, inspect, update, and transition manager tickets.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -178,6 +189,8 @@ schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
 app.add_typer(presets_app, name="presets")
 app.add_typer(accounts_app, name="accounts")
+app.add_typer(manager_app, name="manager")
+manager_app.add_typer(manager_ticket_app, name="ticket")
 
 
 def _version_callback(value: bool) -> None:
@@ -1016,6 +1029,128 @@ async def _wait_for_inbox(
         except WaypointError:
             item = None
         return _InboxWaitResult("timeout", item)
+
+
+class _BoardWaitClient(Protocol):
+    """The slice of ``WaypointClient`` the board-wait engine needs."""
+
+    def stream_global_envelopes(self) -> AsyncIterator[dict[str, Any]]: ...
+
+    def list_board_channels(self) -> list[dict[str, Any]]: ...
+
+    def read_board(
+        self, channel: str, *, since: int | None = ..., key: str | None = ...
+    ) -> list[dict[str, Any]]: ...
+
+
+class _BoardWaitResult(NamedTuple):
+    outcome: str  # changed | timeout
+    channel: str | None
+    entries: list[dict[str, Any]]
+
+
+def _board_channel_matches(channel: str, globs: list[str]) -> bool:
+    return any(fnmatch.fnmatch(channel, glob) for glob in globs)
+
+
+async def _resolve_board_since(
+    client: _BoardWaitClient, globs: list[str], since: int | None
+) -> int:
+    # Fix the baseline at the highest current entry id across watched channels
+    # so an already-present post never self-triggers the wait (board ids are
+    # globally monotonic, so one cursor spans channels).
+    if since is not None:
+        return since
+    channels = await asyncio.to_thread(client.list_board_channels)
+    highest = 0
+    for channel in channels:
+        name = channel.get("channel")
+        if not isinstance(name, str) or not _board_channel_matches(name, globs):
+            continue
+        for entry in await asyncio.to_thread(client.read_board, name):
+            eid = entry.get("id")
+            if isinstance(eid, int) and eid > highest:
+                highest = eid
+    return highest
+
+
+async def _board_scan(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult | None:
+    """Return the first watched channel with an entry past ``since``, else None."""
+    channels = await asyncio.to_thread(client.list_board_channels)
+    for channel in channels:
+        name = channel.get("channel")
+        if not isinstance(name, str) or not _board_channel_matches(name, globs):
+            continue
+        entries = await asyncio.to_thread(client.read_board, name, since=since)
+        if entries:
+            return _BoardWaitResult("changed", name, entries)
+    return None
+
+
+async def _await_board_via_ws(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult | None:
+    """Block on the global stream until a matching change confirms via re-read.
+
+    Returns ``None`` if the stream cannot connect (caller polls). The frame is
+    content-free, so every candidate is confirmed by an explicit re-read."""
+    try:
+        async for envelope in client.stream_global_envelopes():
+            if envelope.get("type") != "board_update":
+                continue
+            channel = envelope.get("payload", {}).get("channel")
+            # A concrete channel must match a glob; a broad change (``None``)
+            # always triggers a re-scan.
+            if isinstance(channel, str) and not _board_channel_matches(channel, globs):
+                continue
+            result = await _board_scan(client, globs, since)
+            if result is not None:
+                return result
+    except (OSError, WebSocketException):
+        return None
+    return None
+
+
+async def _await_board_via_poll(
+    client: _BoardWaitClient, globs: list[str], since: int
+) -> _BoardWaitResult:
+    while True:
+        try:
+            result = await _board_scan(client, globs, since)
+        except WaypointError as exc:
+            if exc.status_code is not None and 400 <= exc.status_code < 500:
+                raise  # a genuine client error (e.g. 401) — don't spin on it
+            result = None  # transient (server restarting) — keep polling
+        if result is not None:
+            return result
+        await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+
+
+async def _wait_for_board(
+    client: _BoardWaitClient,
+    globs: list[str],
+    since: int | None,
+    timeout: float | None,
+) -> _BoardWaitResult:
+    """Block until a watched channel gets a new entry, or ``timeout`` elapses.
+
+    Prefers the global WS stream, falling back to polling. An already-present
+    change (relative to an explicit ``--since``) returns immediately.
+    """
+    try:
+        async with asyncio.timeout(timeout):
+            effective_since = await _resolve_board_since(client, globs, since)
+            initial = await _board_scan(client, globs, effective_since)
+            if initial is not None:
+                return initial
+            streamed = await _await_board_via_ws(client, globs, effective_since)
+            if streamed is not None:
+                return streamed
+            return await _await_board_via_poll(client, globs, effective_since)
+    except TimeoutError:
+        return _BoardWaitResult("timeout", None, [])
 
 
 async def _await_status_via_ws(
@@ -2188,12 +2323,101 @@ def sessions_delete(
             "pruned).",
         ),
     ] = False,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board-prune on delete.",
+        ),
+    ] = None,
 ) -> None:
     """Terminate (if needed) and remove a session record."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.delete(session_id, force=force, prune_branches=prune_branches),
+        lambda c: c.delete(
+            session_id,
+            force=force,
+            prune_branches=prune_branches,
+            actor_session_id=actor_session_id,
+        ),
     )
+
+
+@sessions_app.command("wake-on-board")
+def sessions_wake_on_board(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    channels: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--channels",
+            help="Channel glob to wake on (fnmatch, e.g. 'ticket-*'). Repeatable.",
+        ),
+    ] = None,
+    kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--kinds",
+            help="Board post kinds to wake on. Repeatable. A non-empty list wakes "
+            "only on a post whose kind= meta matches; empty wakes on all.",
+        ),
+    ] = None,
+    wake_on_inbox: Annotated[
+        bool,
+        typer.Option(
+            "--wake-on-inbox",
+            help="Also wake on any non-self inbox mutation (a human answer to an "
+            "owned item).",
+        ),
+    ] = False,
+) -> None:
+    """Register a board/inbox wake subscription for a session."""
+    if not channels and not wake_on_inbox:
+        raise typer.BadParameter("provide --channels and/or --wake-on-inbox")
+    body = {
+        "channel_globs": channels or [],
+        "kinds": kinds or [],
+        "wake_on_inbox": wake_on_inbox,
+    }
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"subscription": c.register_wake(session_id, body)},
+    )
+
+
+@sessions_app.command("wake-off")
+def sessions_wake_off(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    sub_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Subscription id to remove."),
+    ] = None,
+    all_subs: Annotated[
+        bool,
+        typer.Option("--all", help="Remove every subscription for the session."),
+    ] = False,
+) -> None:
+    """Remove one or all wake subscriptions for a session."""
+    if sub_id is None and not all_subs:
+        raise typer.BadParameter("provide --id or --all")
+    if sub_id is not None and all_subs:
+        raise typer.BadParameter("--id and --all are mutually exclusive")
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        if all_subs:
+            listed = c.list_wakes(session_id)
+            removed = [
+                sub["id"]
+                for sub in listed.get("subscriptions", [])
+                if c.unregister_wake(session_id, sub["id"]).get("deleted")
+            ]
+            return {"removed": removed}
+        assert sub_id is not None
+        return c.unregister_wake(session_id, sub_id)
+
+    _emit(_settings_from_ctx(ctx), run)
 
 
 @sessions_app.command("reap")
@@ -2678,6 +2902,14 @@ def board_clear(
             min=1,
         ),
     ] = None,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Clearing session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board clear.",
+        ),
+    ] = None,
 ) -> None:
     """Remove all posts from a channel, keeping the (now empty) channel.
 
@@ -2685,7 +2917,10 @@ def board_clear(
     are always deleted.
     """
     _emit(
-        _settings_from_ctx(ctx), lambda c: c.clear_board(channel, keep_last=keep_last)
+        _settings_from_ctx(ctx),
+        lambda c: c.clear_board(
+            channel, keep_last=keep_last, actor_session_id=actor_session_id
+        ),
     )
 
 
@@ -2693,9 +2928,20 @@ def board_clear(
 def board_delete(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board delete.",
+        ),
+    ] = None,
 ) -> None:
     """Delete a channel entirely, posts and all."""
-    _emit(_settings_from_ctx(ctx), lambda c: c.delete_board(channel))
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.delete_board(channel, actor_session_id=actor_session_id),
+    )
 
 
 @board_app.command("delete-entry")
@@ -2703,11 +2949,21 @@ def board_delete_entry(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
     entry_id: Annotated[int, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Deleting session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own board-entry delete.",
+        ),
+    ] = None,
 ) -> None:
     """Delete a single post (log entry or cell) by its id."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.delete_board_entry(channel, entry_id),
+        lambda c: c.delete_board_entry(
+            channel, entry_id, actor_session_id=actor_session_id
+        ),
     )
 
 
@@ -2721,12 +2977,24 @@ def board_edit_entry(
         list[str] | None,
         typer.Option("--meta", help="Replace metadata with key=value. Repeatable."),
     ] = None,
+    author_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Editing session; defaults to this session's id so its own "
+            "board-update wake self-excludes.",
+        ),
+    ] = None,
 ) -> None:
     """Edit a post's text and metadata in place (the cell key is immutable)."""
     metadata = _parse_meta(meta)
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"entry": c.update_board_entry(channel, entry_id, text, metadata)},
+        lambda c: {
+            "entry": c.update_board_entry(
+                channel, entry_id, text, metadata, author_session_id=author_session_id
+            )
+        },
     )
 
 
@@ -2756,6 +3024,14 @@ def board_set_meta(
         list[str] | None,
         typer.Option("--unset", help="Remove metadata key(s). Repeatable."),
     ] = None,
+    author_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Editing session; defaults to this session's id so its own "
+            "board-update wake self-excludes.",
+        ),
+    ] = None,
 ) -> None:
     """Update a keyed cell's metadata without changing its text."""
     if key is None and entry_id is None:
@@ -2782,10 +3058,63 @@ def board_set_meta(
                 metadata=metadata,
                 merge=merge,
                 unset=unset,
+                author_session_id=author_session_id,
             )
         }
 
     _emit(_settings_from_ctx(ctx), _run)
+
+
+@board_app.command("wait")
+def board_wait(
+    ctx: typer.Context,
+    channels: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--channels",
+            help="Channel glob to wait on (fnmatch, e.g. 'ticket-*'). Repeatable.",
+        ),
+    ] = None,
+    since: Annotated[
+        int | None,
+        typer.Option(
+            "--since",
+            help="Only entries with an id greater than this; defaults to the "
+            "highest id present at connect.",
+        ),
+    ] = None,
+    timeout: Annotated[
+        str | None,
+        typer.Option(
+            "--timeout",
+            help="Give up after this duration (e.g. 5m, 2h); exit 124 on timeout.",
+        ),
+    ] = None,
+) -> None:
+    """Block until a watched board channel gets a new entry, or time out.
+
+    Emits ``{"outcome": ..., "channel": ..., "entries": [...]}`` where outcome is
+    ``changed`` or ``timeout``. Exit codes: 0 on changed, 124 on timeout. Prefers
+    the global WS stream, falling back to polling. An interactive convenience —
+    not the manager's loop driver.
+    """
+    if not channels:
+        raise typer.BadParameter("provide at least one --channels glob")
+    timeout_seconds = _parse_duration(timeout) if timeout is not None else None
+    outcomes: list[str] = []
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        result = asyncio.run(_wait_for_board(c, channels, since, timeout_seconds))
+        outcomes.append(result.outcome)
+        return {
+            "outcome": result.outcome,
+            "channel": result.channel,
+            "entries": result.entries,
+        }
+
+    _emit(_settings_from_ctx(ctx), run)
+    if outcomes and outcomes[0] == "timeout":
+        raise typer.Exit(code=WAIT_TIMEOUT_EXIT_CODE)
 
 
 @inbox_app.command("post")
@@ -2881,6 +3210,15 @@ def inbox_answer(
             help="Attach an existing blob as session_id:attachment_id. Repeatable.",
         ),
     ] = None,
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Answering session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own answer (a human answer, with no "
+            "session, does wake it).",
+        ),
+    ] = None,
 ) -> None:
     """Answer and/or reply to one block (scripting path; the UI is primary)."""
     answer: dict[str, Any] | None = None
@@ -2910,15 +3248,37 @@ def inbox_answer(
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
-            "item": c.submit_inbox_block(item_id, block_id, answer=answer, reply=reply)
+            "item": c.submit_inbox_block(
+                item_id,
+                block_id,
+                answer=answer,
+                reply=reply,
+                actor_session_id=actor_session_id,
+            )
         },
     )
 
 
 @inbox_app.command("read")
-def inbox_read(ctx: typer.Context, item_id: Annotated[str, typer.Argument()]) -> None:
+def inbox_read(
+    ctx: typer.Context,
+    item_id: Annotated[str, typer.Argument()],
+    actor_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Reading session; defaults to this session's id. A wake "
+            "subscriber is not woken by its own mark-read.",
+        ),
+    ] = None,
+) -> None:
     """Mark an item read (resolves a no-action FYI item)."""
-    _emit(_settings_from_ctx(ctx), lambda c: {"item": c.mark_inbox_read(item_id)})
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "item": c.mark_inbox_read(item_id, actor_session_id=actor_session_id)
+        },
+    )
 
 
 @inbox_app.command("delete")
@@ -3339,6 +3699,717 @@ def presets_default(
 def presets_clear_default(ctx: typer.Context) -> None:
     """Clear the default preset (leaves all presets in place)."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_default_session_preset())
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    """A manifest section as a mapping, or an empty one when absent/malformed."""
+    return value if isinstance(value, dict) else {}
+
+
+def _load_manifest(path: Path) -> dict[str, Any]:
+    """Read and parse a manifest, requiring a top-level mapping."""
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        raise typer.BadParameter(f"could not read manifest {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise typer.BadParameter(f"manifest {path} is not valid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise typer.BadParameter("manifest must be a top-level mapping")
+    return raw
+
+
+def _manager_config_from_manifest(raw: dict[str, Any]) -> dict[str, Any]:
+    """Extract the machine-relevant ManagerConfig fields from a manifest.
+
+    The role/preset/template/channel fields are skill-consumed and ignored here;
+    only the fields the server-side scheduler enforces are forwarded.
+    """
+
+    def _section(name: str) -> dict[str, Any]:
+        value = raw.get(name)
+        return value if isinstance(value, dict) else {}
+
+    retry = _section("retry")
+    priority = _section("priority")
+    timeouts = _section("timeouts")
+    config: dict[str, Any] = {}
+    sources: list[tuple[str, dict[str, Any], str]] = [
+        ("max_delegate_attempts", retry, "max_delegate_attempts"),
+        ("max_lead_restarts", retry, "max_lead_restarts"),
+        ("backoff_seconds", retry, "backoff_seconds"),
+        ("human_latency_hours", timeouts, "human_latency_hours"),
+    ]
+    for dest, source, name in sources:
+        if source.get(name) is not None:
+            config[dest] = source[name]
+    if raw.get("trunk") is not None:
+        config["trunk"] = raw["trunk"]
+    levels = priority.get("levels")
+    if isinstance(levels, list) and levels:
+        config["priority_levels"] = list(levels)
+    return config
+
+
+def _role_launch_args(spec: Any) -> str:
+    """The `sessions start` launch flags for a manifest role — its `preset:` name,
+    else its inline `launch:` block (backend/model/permission_mode/transport)."""
+    if not isinstance(spec, dict):
+        return ""
+    if spec.get("preset") is not None:
+        return f"--preset {spec['preset']}"
+    launch = spec.get("launch")
+    if not isinstance(launch, dict):
+        return ""
+    parts: list[str] = []
+    for key, flag in (
+        ("backend", "--backend"),
+        ("model", "--model"),
+        ("permission_mode", "--permission-mode"),
+        ("transport", "--transport"),
+    ):
+        value = launch.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        # Quote a value carrying shell metacharacters (e.g. a model like `opus[1m]`)
+        # so the baked command line survives globbing when the manager runs it.
+        if any(ch in text for ch in "[]*? "):
+            text = f'"{text}"'
+        parts.append(f"{flag} {text}")
+    return " ".join(parts)
+
+
+def _manager_static_bindings(
+    raw: dict[str, Any], repo_dir: str, session_id: str, templates_dir: str
+) -> dict[str, str]:
+    """The static placeholder values `manager init` bakes into every template.
+
+    These resolve once at init and never change per ticket, so the compiled
+    templates carry literal channels, launch commands, and policy — the manager
+    reads no manifest at runtime.
+    """
+    board = _mapping(raw.get("board"))
+    scale = _mapping(raw.get("scale"))
+    escalation = _mapping(raw.get("escalation"))
+    integration = _mapping(raw.get("integration"))
+    roles = _mapping(raw.get("roles"))
+
+    mode = str(integration.get("mode", "pr"))
+    if mode not in ("pr", "local"):
+        raise typer.BadParameter(
+            f"integration.mode must be 'pr' or 'local', got {mode!r}"
+        )
+
+    def _join(value: Any) -> str:
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value)
+        return str(value or "")
+
+    return {
+        "project": str(raw.get("project") or ""),
+        "trunk": str(raw.get("trunk") or ""),
+        "spec_dir": str(raw.get("spec_dir") or ".waypoint/specs"),
+        "branch_pattern": str(raw.get("branch_pattern") or "{type}/{slug}"),
+        "repo_dir": repo_dir,
+        "manager_session_id": session_id,
+        "tickets_channel": str(board.get("tickets_channel") or ""),
+        "org_channel": str(board.get("org_channel") or ""),
+        "ticket_channel_prefix": str(board.get("ticket_channel_prefix") or ""),
+        "substantial_when": _join(scale.get("substantial_when")).strip(),
+        "self_decide": _join(escalation.get("self_decide")),
+        "always_escalate": _join(escalation.get("always_escalate")),
+        "require_ci_green": (
+            "true" if integration.get("require_ci_green", True) else "false"
+        ),
+        "tech_lead_launch": _role_launch_args(roles.get("tech_lead")),
+        "prd_writer_launch": _role_launch_args(roles.get("prd_writer")),
+        "rfc_writer_launch": _role_launch_args(roles.get("rfc_writer")),
+        "templates_dir": templates_dir,
+        "integration_mode": mode,
+    }
+
+
+def _compiled_templates_root(raw: dict[str, Any], repo_dir: str) -> str:
+    """The absolute directory `manager init` writes the compiled templates to —
+    the manifest's `templates_dir` (default `.waypoint/manager/templates`), resolved
+    under the repo when relative."""
+    configured = raw.get("templates_dir")
+    root = Path(str(configured) if configured else ".waypoint/manager/templates")
+    if not root.is_absolute():
+        root = Path(repo_dir) / root
+    return str(root.resolve())
+
+
+def _compile_manager_templates(
+    raw: dict[str, Any],
+    static: dict[str, str],
+    templates_dir: Path,
+) -> None:
+    """Bake the static bindings into every role's raw templates and write the
+    compiled copies under `<templates_dir>/<role>/<step>.md`, leaving the per-ticket
+    placeholders for the manager (its own steps) or `manager render` (children). A
+    role's relative `templates:` path resolves under the repo root, like
+    `templates_dir` and `spec_dir`."""
+    base = Path(static["repo_dir"])
+    roles = _mapping(raw.get("roles"))
+    for role, spec in roles.items():
+        if not isinstance(spec, dict) or spec.get("templates") is None:
+            continue
+        src_dir = (base / str(spec["templates"])).resolve()
+        if not src_dir.is_dir():
+            raise typer.BadParameter(
+                f"role {role!r} templates dir not found: {src_dir}"
+            )
+        dst_dir = templates_dir / str(role)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for src in sorted(src_dir.glob("*.md")):
+            resolved = _resolve_conditionals(src.read_text(encoding="utf-8"), static)
+            compiled, _ = _substitute_placeholders(resolved, static)
+            (dst_dir / src.name).write_text(compiled, encoding="utf-8")
+
+
+def _ticket_render_bindings(ticket: dict[str, Any]) -> dict[str, str]:
+    """Ticket-record placeholder values (a null field renders as empty, not left
+    unresolved — e.g. a trivial ticket legitimately has no `spec_ref`)."""
+    return {
+        "ticket_id": str(ticket.get("id", "")),
+        "ticket_title": str(ticket.get("title", "")),
+        "priority": str(ticket.get("priority", "")),
+        "scale": str(ticket.get("scale") or ""),
+        "footprint": ", ".join(ticket.get("footprint") or []),
+        "spec_ref": str(ticket.get("spec_ref") or ""),
+        "branch": str(ticket.get("branch") or ""),
+        "pr_url": str(ticket.get("pr_url") or ""),
+    }
+
+
+def _git_toplevel() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    top = result.stdout.strip()
+    return top or str(Path.cwd())
+
+
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+_IF_RE = re.compile(r"^\s*\{\{#if (\w+) == (\w+)\}\}\s*$")
+_ENDIF_RE = re.compile(r"^\s*\{\{/if\}\}\s*$")
+
+
+def _resolve_conditionals(text: str, bindings: dict[str, str]) -> str:
+    """Strip `{{#if <key> == <value>}}`…`{{/if}}` blocks that the baked bindings
+    do not select, keeping the body of the matching blocks verbatim.
+
+    Markers occupy their own lines; a marker line is dropped and a body line is
+    kept or dropped whole, so a kept fenced code block survives byte-for-byte.
+    `manager init` resolves these once, before `_substitute_placeholders`, so a
+    compiled template carries only its mode's instructions and `manager render`
+    sees no conditionals.
+    """
+    out: list[str] = []
+    keep_stack: list[bool] = []
+    for line in text.splitlines(keepends=True):
+        opener = _IF_RE.match(line)
+        if opener is not None:
+            key, value = opener.group(1), opener.group(2)
+            if key not in bindings:
+                raise typer.BadParameter(
+                    f"unknown conditional key {{{{#if {key} == ...}}}} "
+                    "in a manager template"
+                )
+            keep_stack.append(bindings[key] == value)
+            continue
+        if _ENDIF_RE.match(line) is not None:
+            if not keep_stack:
+                raise typer.BadParameter("unmatched {{/if}} in a manager template")
+            keep_stack.pop()
+            continue
+        if all(keep_stack):
+            out.append(line)
+    if keep_stack:
+        raise typer.BadParameter("unclosed {{#if}} in a manager template")
+    result = "".join(out)
+    if "{{#if" in result or "{{/if" in result:
+        raise typer.BadParameter(
+            "manager-template conditional marker must occupy its own line"
+        )
+    return result
+
+
+def _substitute_placeholders(
+    text: str, bindings: dict[str, str]
+) -> tuple[str, set[str]]:
+    unresolved: set[str] = set()
+
+    def _repl(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in bindings:
+            return bindings[name]
+        unresolved.add(name)
+        return match.group(0)
+
+    return _PLACEHOLDER_RE.sub(_repl, text), unresolved
+
+
+def _render_manager_tree(tree: dict[str, Any]) -> None:
+    if tree.get("free"):
+        typer.echo("tree: free")
+    else:
+        typer.echo(f"tree: held by {tree.get('held_by')}")
+
+
+@manager_app.command("init")
+def manager_init(
+    ctx: typer.Context,
+    manifest: Annotated[
+        Path,
+        typer.Option(
+            "--manifest",
+            exists=True,
+            dir_okay=False,
+            help="Path to the project's waypoint-manager.yaml.",
+        ),
+    ],
+    owner: Annotated[
+        str | None,
+        typer.Option(
+            "--owner",
+            envvar="WAYPOINT_SESSION_ID",
+            help="The manager's own session id (defaults to $WAYPOINT_SESSION_ID). "
+            "Deleting this session cascades a manager deinit.",
+        ),
+    ] = None,
+) -> None:
+    """Persist the machine-relevant config and compile the prompt templates.
+
+    Bakes the manifest's static placeholders (channels, launch commands, policy)
+    into every role's templates, writing the compiled copies to `templates_dir`
+    (default `.waypoint/manager/templates`) — the manager's runtime source of truth.
+    """
+    raw = _load_manifest(manifest)
+    config = _manager_config_from_manifest(raw)
+    session_id = owner or ""  # owner already resolves $WAYPOINT_SESSION_ID via typer
+    repo_dir = _git_toplevel()
+    templates_dir = _compiled_templates_root(raw, repo_dir)
+    static = _manager_static_bindings(raw, repo_dir, session_id, templates_dir)
+    _compile_manager_templates(raw, static, Path(templates_dir))
+    config["render_context"] = {
+        "templates_dir": templates_dir,
+        "tickets_channel": static["tickets_channel"],
+        "ticket_channel_prefix": static["ticket_channel_prefix"],
+    }
+    if owner:
+        config["owner_session_id"] = owner
+    _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
+
+
+@manager_app.command("deinit")
+def manager_deinit(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Skip the confirmation prompt.")
+    ] = False,
+) -> None:
+    """Clear the manager state: all tickets and the persisted config.
+
+    Removes state records only — spawned sessions, branches, and board channels
+    are reaped separately (`sessions delete`, `board delete`).
+    """
+    if not yes:
+        typer.confirm(
+            "Clear all manager tickets and config?",
+            abort=True,
+        )
+    _emit(_settings_from_ctx(ctx), lambda c: c.manager_deinit())
+
+
+@manager_app.command("render")
+def manager_render(
+    ctx: typer.Context,
+    role: Annotated[
+        str,
+        typer.Option(
+            "--role",
+            help="Child role whose template to render (tech_lead, prd_writer, "
+            "rfc_writer).",
+        ),
+    ],
+    step: Annotated[
+        str,
+        typer.Option(
+            "--step", help="Compiled template step: <step>.md under the role."
+        ),
+    ],
+    ticket_id: Annotated[
+        str | None,
+        typer.Option(
+            "--ticket",
+            help="Ticket id; resolves ticket-scoped placeholders from the server "
+            "and the ticket's board cell.",
+        ),
+    ] = None,
+    overrides: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--set",
+            help="Override or add a binding as key=value (repeatable; highest "
+            "precedence). For a runtime value the ticket does not carry.",
+        ),
+    ] = None,
+    allow_unresolved: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unresolved",
+            help="Leave unknown {{placeholders}} in place instead of failing.",
+        ),
+    ] = False,
+) -> None:
+    """Render a child prompt from its compiled template and print the body.
+
+    The manager renders every prompt it hands a child and sends the substituted
+    prose. `--role`/`--step` locate the compiled template under the `templates_dir`
+    persisted at `manager init` (its static placeholders already baked); this fills
+    the per-ticket placeholders from the --ticket record and its board cell, with
+    --set at the highest precedence. Fails on an unknown placeholder unless
+    --allow-unresolved.
+    """
+
+    def _fetch(
+        c: WaypointClient,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]]]:
+        rc = (c.manager_state().get("config") or {}).get("render_context") or {}
+        ticket = c.manager_get_ticket(ticket_id) if ticket_id is not None else None
+        tickets_channel = rc.get("tickets_channel")
+        cell = (
+            c.read_board(tickets_channel, key=f"ticket:{ticket_id}")
+            if ticket_id is not None and tickets_channel
+            else []
+        )
+        return rc, ticket, cell
+
+    rc, ticket, cell = _run_client(_settings_from_ctx(ctx), _fetch)
+    templates_dir = rc.get("templates_dir")
+    if not templates_dir:
+        raise typer.BadParameter(
+            "no render context; run `waypoint manager init --manifest <path>` first"
+        )
+    template = Path(templates_dir) / role / f"{step}.md"
+    if not template.is_file():
+        raise typer.BadParameter(
+            f"no compiled template for role {role!r} step {step!r} at {template}"
+        )
+    text = template.read_text(encoding="utf-8")
+
+    bindings: dict[str, str] = {}
+    if ticket is not None:
+        bindings.update(_ticket_render_bindings(ticket))
+        prefix = str(rc.get("ticket_channel_prefix") or "")
+        if ticket_id is not None:
+            bindings["ticket_channel"] = f"{prefix}{ticket_id}"
+        if cell:
+            entry = cell[-1]
+            bindings["ticket_body"] = entry.get("text") or ""
+            meta = entry.get("metadata") or {}
+            for field in ("input_type", "spec_route"):
+                if meta.get(field) is not None:
+                    bindings[field] = str(meta[field])
+    for item in overrides or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--set expects key=value, got {item!r}")
+        bindings[key.strip()] = value
+    rendered, unresolved = _substitute_placeholders(text, bindings)
+    if unresolved and not allow_unresolved:
+        raise typer.BadParameter(
+            "unresolved placeholders: "
+            + ", ".join(sorted(unresolved))
+            + " (add a --set binding or --allow-unresolved)"
+        )
+    typer.echo(rendered, nl=False)
+
+
+@manager_app.command("state")
+def manager_state(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Show the whole ticket set and the derived tree state."""
+    state = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_state())
+    if json_output:
+        typer.echo(json.dumps(state, indent=2))
+        return
+    _render_manager_tree(state.get("tree") or {})
+    tickets = state.get("tickets") or []
+    if not tickets:
+        typer.echo("(no tickets)")
+        return
+    for ticket in tickets:
+        typer.echo(
+            f"  {ticket.get('id')}  [{ticket.get('priority')}]  "
+            f"{ticket.get('state')}  {ticket.get('title')}"
+        )
+
+
+@manager_app.command("next")
+def manager_next(
+    ctx: typer.Context,
+    tried: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tried",
+            help="Ticket id to exclude from the recommendation (this drain's "
+            "tried set). Repeatable.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Re-anchor: derived tree state, per-ticket legal transitions, one recommendation."""
+    result = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_next(tried))
+    if json_output:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    _render_manager_tree(result.get("tree") or {})
+    recommended = result.get("recommended")
+    if recommended:
+        typer.echo(
+            f"recommended: {recommended.get('ticket_id')} "
+            f"{recommended.get('from_state')} -> {recommended.get('to_state')} "
+            f"({recommended.get('event')}: {recommended.get('reason')})"
+        )
+    else:
+        typer.echo("recommended: (none — drained to fixpoint)")
+    for ticket in result.get("tickets") or []:
+        legal = ", ".join(ticket.get("legal_transitions") or [])
+        typer.echo(
+            f"  {ticket.get('ticket_id')} [{ticket.get('priority')}] "
+            f"{ticket.get('state')} -> {{{legal}}}"
+        )
+
+
+@manager_app.command("reconcile")
+def manager_reconcile(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """Report the drain's server-derived reconcile signals in one snapshot.
+
+    Aggregates unregistered intake posts, dead leads (resume candidates), latency
+    timeouts, stale gates (awaiting tickets whose gate item is absent),
+    finalize-pending (terminal tickets still holding a branch to reap), and
+    resolved gates (awaiting tickets whose answered gate has a deferred transition).
+    Read-only: the manager acts on each.
+    """
+    report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
+    if json_output:
+        typer.echo(json.dumps(report, indent=2))
+        return
+    intake = report.get("unregistered_intake") or []
+    dead = report.get("dead_leads") or []
+    latency = report.get("latency_timeouts") or []
+    stale = report.get("stale_gates") or []
+    finalize = report.get("finalize_pending") or []
+    resolved = report.get("resolved_gates") or []
+    typer.echo(
+        f"intake: {len(intake)}  dead-leads: {len(dead)}  "
+        f"latency-timeouts: {len(latency)}  stale-gates: {len(stale)}  "
+        f"finalize-pending: {len(finalize)}  resolved-gates: {len(resolved)}"
+    )
+    for item in intake:
+        typer.echo(f"  intake {item.get('id')}: {item.get('text')}")
+    for lead in dead:
+        typer.echo(
+            f"  dead-lead {lead.get('ticket_id')} ({lead.get('state')}): "
+            f"lead {lead.get('lead_session_id')} {lead.get('lead_status') or 'missing'}"
+        )
+    for item in latency:
+        typer.echo(
+            f"  latency {item.get('ticket_id')} ({item.get('state')}): "
+            f"{item.get('hours_elapsed'):.1f}h waiting"
+        )
+    for gate in stale:
+        typer.echo(f"  stale-gate {gate.get('ticket_id')} ({gate.get('state')})")
+    for pending in finalize:
+        typer.echo(
+            f"  finalize-pending {pending.get('ticket_id')} ({pending.get('state')}): "
+            f"branch {pending.get('branch')}"
+        )
+    for gate in resolved:
+        typer.echo(f"  resolved-gate {gate.get('ticket_id')} ({gate.get('state')})")
+
+
+@manager_ticket_app.command("add")
+def manager_ticket_add(
+    ctx: typer.Context,
+    title: Annotated[str, typer.Argument(help="Human-readable ticket title.")],
+    ticket_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Explicit ticket id (else server-generated)."),
+    ] = None,
+    priority: Annotated[str, typer.Option(help="Priority level, e.g. p0..p3.")] = "p2",
+    kind: Annotated[str | None, typer.Option()] = None,
+    scale: Annotated[
+        str | None, typer.Option(help="'trivial' or 'substantial'.")
+    ] = None,
+    footprint: Annotated[
+        list[str] | None,
+        typer.Option("--footprint", help="Coarse path glob. Repeatable."),
+    ] = None,
+    deps: Annotated[
+        list[str] | None,
+        typer.Option("--dep", help="Dependency ticket id. Repeatable."),
+    ] = None,
+) -> None:
+    """Create an intake ticket."""
+    body: dict[str, Any] = {"title": title, "priority": priority}
+    if ticket_id is not None:
+        body["id"] = ticket_id
+    if kind is not None:
+        body["kind"] = kind
+    if scale is not None:
+        body["scale"] = scale
+    if footprint:
+        body["footprint"] = footprint
+    if deps:
+        body["deps"] = deps
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_create_ticket(body)},
+    )
+
+
+@manager_ticket_app.command("delete")
+def manager_ticket_delete(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+) -> None:
+    """Delete one ticket's state record (not its spawned sessions or branch)."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_delete_ticket(ticket_id),
+    )
+
+
+@manager_ticket_app.command("show")
+def manager_ticket_show(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+) -> None:
+    """Show a single ticket."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_get_ticket(ticket_id)},
+    )
+
+
+@manager_ticket_app.command("update")
+def manager_ticket_update(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    priority: Annotated[str | None, typer.Option()] = None,
+    kind: Annotated[str | None, typer.Option()] = None,
+    scale: Annotated[str | None, typer.Option()] = None,
+    footprint: Annotated[list[str] | None, typer.Option("--footprint")] = None,
+    deps: Annotated[list[str] | None, typer.Option("--dep")] = None,
+    spec_ref: Annotated[str | None, typer.Option()] = None,
+    intended_lead_title: Annotated[str | None, typer.Option()] = None,
+    lead_session_id: Annotated[str | None, typer.Option()] = None,
+    branch: Annotated[str | None, typer.Option()] = None,
+    pr_url: Annotated[str | None, typer.Option()] = None,
+    inbox_item_id: Annotated[str | None, typer.Option("--inbox-item")] = None,
+    reset_attempts: Annotated[
+        bool,
+        typer.Option(
+            "--reset-attempts",
+            help="Zero the delegate attempts budget (retry after a config fix).",
+        ),
+    ] = False,
+    reset_lead_restarts: Annotated[
+        bool,
+        typer.Option(
+            "--reset-lead-restarts",
+            help="Zero the lead-restart budget (retry after fixing a dying lead).",
+        ),
+    ] = False,
+) -> None:
+    """Edit ticket metadata (no state change; use 'transition' for that)."""
+    body: dict[str, Any] = {}
+    for name, value in (
+        ("priority", priority),
+        ("kind", kind),
+        ("scale", scale),
+        ("spec_ref", spec_ref),
+        ("intended_lead_title", intended_lead_title),
+        ("lead_session_id", lead_session_id),
+        ("branch", branch),
+        ("pr_url", pr_url),
+        ("inbox_item_id", inbox_item_id),
+    ):
+        if value is not None:
+            body[name] = value
+    if footprint is not None:
+        body["footprint"] = footprint
+    if deps is not None:
+        body["deps"] = deps
+    if reset_attempts:
+        body["reset_attempts"] = True
+    if reset_lead_restarts:
+        body["reset_lead_restarts"] = True
+    if not body:
+        raise typer.BadParameter("provide at least one field to update")
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_update_ticket(ticket_id, body)},
+    )
+
+
+@manager_ticket_app.command("transition")
+def manager_ticket_transition(
+    ctx: typer.Context,
+    ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    to: Annotated[str, typer.Option("--to", help="Target state.")],
+    reason: Annotated[str | None, typer.Option("--reason")] = None,
+    scale: Annotated[str | None, typer.Option()] = None,
+    spec_ref: Annotated[str | None, typer.Option()] = None,
+    intended_lead_title: Annotated[str | None, typer.Option()] = None,
+    lead_session_id: Annotated[str | None, typer.Option()] = None,
+    branch: Annotated[str | None, typer.Option()] = None,
+    pr_url: Annotated[str | None, typer.Option()] = None,
+    is_partial: Annotated[
+        bool | None, typer.Option("--is-partial/--not-partial")
+    ] = None,
+) -> None:
+    """Transition a ticket to a target state (server validates legality)."""
+    body: dict[str, Any] = {"to": to}
+    for name, value in (
+        ("reason", reason),
+        ("scale", scale),
+        ("spec_ref", spec_ref),
+        ("intended_lead_title", intended_lead_title),
+        ("lead_session_id", lead_session_id),
+        ("branch", branch),
+        ("pr_url", pr_url),
+    ):
+        if value is not None:
+            body[name] = value
+    if is_partial is not None:
+        body["is_partial"] = is_partial
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"ticket": c.manager_transition_ticket(ticket_id, body)},
+    )
 
 
 @accounts_app.command("list")

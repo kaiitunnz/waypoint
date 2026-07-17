@@ -66,8 +66,9 @@ metadata (the cell key is immutable — to rename a cell, delete it and repost);
 stamps an `edited_at` the UI shows as "edited" while preserving `created_at`, so
 the log keeps its order.
 
-`post` stamps the author from `WAYPOINT_SESSION_ID` automatically (the same id as
-`addressing.md`); you don't pass it. When a session is deleted, only its **keyed
+`post`, `edit-entry`, and `set-meta` stamp the author from `WAYPOINT_SESSION_ID`
+automatically (the same id as `addressing.md`); you don't pass it. Authoring an edit
+keeps the writer from waking itself on its own board update. When a session is deleted, only its **keyed
 cells** are pruned — keyless log posts are durable history and survive the session
 row being removed. Read the log with `board log <channel>`. Durable shared state
 (keyed cells) should live on a long-lived session; append-log posts are safe to

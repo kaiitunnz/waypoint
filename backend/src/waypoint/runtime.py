@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import json
 import logging
 import os
@@ -60,6 +61,7 @@ from waypoint.backends.transcripts import (
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.manager import ManagerManager
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
@@ -101,6 +103,8 @@ from waypoint.schemas import (
     TokenUsageInit,
     TokenUsageRecord,
     TransportSettingsOption,
+    WakeRegisterRequest,
+    WakeSubscription,
 )
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
@@ -160,6 +164,9 @@ STRUCTURED_LOG_FLUSH_EVERY = 16
 # The frontend matches it (like ``ssh-master-required``) to surface an inline
 # error on the working-directory field instead of the generic banner.
 CWD_NOT_FOUND_DETAIL = "cwd-not-found"
+# Content-free line delivered to a woken subscriber. The wake carries no
+# authoritative payload — the woken session re-reads the board/inbox itself.
+WAKE_INPUT_TEXT = "Board/inbox changed — run your cycle."
 
 
 log = logging.getLogger("waypoint.runtime")
@@ -405,6 +412,19 @@ class SessionRuntime:
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
         self._broadcast_flusher: asyncio.Task[None] | None = None
+        # Board/inbox-triggered wake (native addition 1). ``_pending_wakes`` holds
+        # sessions owed a wake that were not deliverable when a matching mutation
+        # arrived; the broadcast-loop observer fires them on the next deliverable
+        # edge. Membership alone encodes "owed a wake" — no prior-status map.
+        # ``_wake_tasks`` tracks the non-blocking dispatch/delivery tasks so a
+        # poster's request latency never includes a subscriber's (possibly slow)
+        # send, and neither does the broadcast-loop drain. ``_wake_in_flight``
+        # serializes delivery per session: while a wake is being sent, a second
+        # is deferred rather than concurrently injected (a double ``send_input``
+        # garbles a tty transport).
+        self._pending_wakes: set[str] = set()
+        self._wake_tasks: set[asyncio.Task[None]] = set()
+        self._wake_in_flight: set[str] = set()
         # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
         # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
         # loop below is the only thing that publishes onto the broadcast hub.
@@ -452,6 +472,7 @@ class SessionRuntime:
         for plugin in self.registry.all():
             plugin.setup(self)
         self.presets = PresetManager(storage)
+        self.manager = ManagerManager(storage)
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
@@ -591,6 +612,13 @@ class SessionRuntime:
         for probe_task in account_probe_tasks:
             with suppress(asyncio.CancelledError):
                 await probe_task
+        wake_tasks = list(self._wake_tasks)
+        self._wake_tasks.clear()
+        for wake_task in wake_tasks:
+            wake_task.cancel()
+        for wake_task in wake_tasks:
+            with suppress(asyncio.CancelledError):
+                await wake_task
         if self._broadcast_flusher is not None:
             self._broadcast_flusher.cancel()
             with suppress(asyncio.CancelledError):
@@ -3276,7 +3304,12 @@ class SessionRuntime:
         return self.get_session(session.id)
 
     async def delete(
-        self, session_id: str, *, force: bool = False, prune_branches: bool = False
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+        prune_branches: bool = False,
+        actor_session_id: str | None = None,
     ) -> None:
         session = self.get_session(session_id)
         if session.source == SessionSource.ASSISTANT:
@@ -3307,6 +3340,9 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
+        # If this session ran `manager init`, it owns the manager state machine;
+        # tear that state down with it so no orphaned backlog lingers.
+        self.manager.deinit_if_owner(session_id)
         # Drop the per-session lock along with the record so the registry
         # doesn't grow unbounded over a long-lived server's session churn.
         self._session_locks.pop(session_id, None)
@@ -3314,7 +3350,9 @@ class SessionRuntime:
             self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
         # Reclaim the session's uploaded blobs, which can be large.
         self.attachments.discard(session_id)
-        # Drop this session's blackboard posts along with its record.
+        # Drop this session's blackboard posts along with its record. The prune's
+        # broadcast carries the deleting actor so the reaping session (a manager
+        # reaping a child) is self-excluded from its own broad board wake.
         pruned = self.storage.prune_board_for_session(session_id)
         # Drop any scheduled messages queued for the now-deleted session; the
         # scheduled_messages FK is declarative only (foreign_keys pragma is off).
@@ -3322,7 +3360,7 @@ class SessionRuntime:
         plugin.on_session_deleted(self, session)
         await self._broadcast_session_list()
         if pruned:
-            await self._publish_board_update(None)
+            await self._publish_board_update(None, author_session_id=actor_session_id)
 
     @staticmethod
     def _git_capture(cwd: str, *args: str) -> str | None:
@@ -3387,7 +3425,11 @@ class SessionRuntime:
             author_label=author_label,
             metadata=request.metadata,
         )
-        await self._publish_board_update(channel)
+        await self._publish_board_update(
+            channel,
+            author_session_id=request.author_session_id,
+            kind=entry.metadata.get("kind"),
+        )
         return entry
 
     def list_board_entries(
@@ -3406,21 +3448,31 @@ class SessionRuntime:
         return self.storage.list_board_channels()
 
     async def clear_board_channel(
-        self, channel: str, keep_last: int | None = None
+        self,
+        channel: str,
+        keep_last: int | None = None,
+        *,
+        actor_session_id: str | None = None,
     ) -> int:
         removed = self.storage.clear_board_channel(channel, keep_last=keep_last)
-        await self._publish_board_update(channel)
+        await self._publish_board_update(channel, author_session_id=actor_session_id)
         return removed
 
-    async def delete_board_channel(self, channel: str) -> int:
+    async def delete_board_channel(
+        self, channel: str, *, actor_session_id: str | None = None
+    ) -> int:
         removed = self.storage.delete_board_channel(channel)
-        await self._publish_board_update(None)
+        await self._publish_board_update(None, author_session_id=actor_session_id)
         return removed
 
-    async def delete_board_entry(self, channel: str, entry_id: int) -> bool:
+    async def delete_board_entry(
+        self, channel: str, entry_id: int, *, actor_session_id: str | None = None
+    ) -> bool:
         deleted = self.storage.delete_board_entry(channel, entry_id)
         if deleted:
-            await self._publish_board_update(channel)
+            await self._publish_board_update(
+                channel, author_session_id=actor_session_id
+            )
         return deleted
 
     async def update_board_entry(
@@ -3435,14 +3487,36 @@ class SessionRuntime:
             unset=request.unset,
         )
         if entry is not None:
-            await self._publish_board_update(channel)
+            await self._publish_board_update(
+                channel,
+                author_session_id=request.author_session_id,
+                kind=entry.metadata.get("kind"),
+            )
         return entry
 
-    async def _publish_board_update(self, channel: str | None) -> None:
+    async def _publish_board_update(
+        self,
+        channel: str | None,
+        *,
+        author_session_id: str | None = None,
+        kind: str | None = None,
+    ) -> None:
         # ``channel=None`` means "the board changed broadly" (e.g. a session
         # delete pruned posts across channels); clients refetch what they show.
         await self.broadcast.publish(
             SessionEnvelope(type="board_update", payload={"channel": channel})
+        )
+        # Self-exclusion: a caller that identifies itself via ``author_session_id``
+        # (a post's author, or a manager clearing/deleting/pruning its own board) is
+        # never woken; an unattributed mutation (``author_session_id`` None) wakes
+        # every matching subscriber. Board wakes are glob-scoped, not owner-scoped, so
+        # no ``owner_session_id``. ``kind`` (the post's ``kind=`` meta) lets a
+        # kind-filtered subscriber skip a post it does not watch.
+        self._spawn_wake_dispatch(
+            channel=channel,
+            is_inbox=False,
+            actor_session_id=author_session_id,
+            kind=kind,
         )
 
     # ───────────────────────────── Inbox ─────────────────────────────
@@ -3481,7 +3555,11 @@ class SessionRuntime:
             subject=request.subject,
             blocks=blocks,
         )
-        await self._publish_inbox_update(item)
+        # The author (a session filing its own item) is not woken; a human/UI
+        # post carries no session id, so its subscribers are woken.
+        await self._publish_inbox_update(
+            item, actor_session_id=request.from_session_id or None
+        )
         return item
 
     def get_inbox_item(self, item_id: str) -> InboxItem | None:
@@ -3507,6 +3585,7 @@ class SessionRuntime:
         *,
         answer: dict[str, Any] | None = None,
         reply: InboxReplyInput | None = None,
+        actor_session_id: str | None = None,
     ) -> InboxItem | None:
         if reply is not None:
             reply = reply.model_copy(
@@ -3525,17 +3604,30 @@ class SessionRuntime:
         # A no-op submit (neither answer nor reply) leaves the item untouched;
         # don't re-broadcast to every client.
         if changed:
-            await self._publish_inbox_update(item)
+            await self._publish_inbox_update(item, actor_session_id=actor_session_id)
         return item
 
-    async def mark_inbox_read(self, item_id: str) -> InboxItem | None:
+    async def mark_inbox_read(
+        self, item_id: str, *, actor_session_id: str | None = None
+    ) -> InboxItem | None:
+        prior = self.storage.get_inbox_item(item_id)
         result = self.storage.mark_inbox_read(item_id)
         if result is None:
             return None
         item, changed = result
         # A repeat read is a no-op; don't re-broadcast to every client.
         if changed:
-            await self._publish_inbox_update(item)
+            # A no-action item resolves on first read (OPEN → RESOLVED): an
+            # actionable change that wakes the owner. A plain read only stamps
+            # read_at (refreshes the badge) and must not wake the owner.
+            resolved_on_read = (
+                prior is not None
+                and prior.status == InboxStatus.OPEN
+                and item.status == InboxStatus.RESOLVED
+            )
+            await self._publish_inbox_update(
+                item, actor_session_id=actor_session_id, wake=resolved_on_read
+            )
         return item
 
     async def delete_inbox_item(self, item_id: str) -> bool:
@@ -3559,10 +3651,13 @@ class SessionRuntime:
     def unresolved_inbox_count(self) -> int:
         return self.storage.unresolved_inbox_count()
 
-    async def _publish_inbox_update(self, item: InboxItem) -> None:
+    async def _publish_inbox_update(
+        self, item: InboxItem, *, actor_session_id: str | None = None, wake: bool = True
+    ) -> None:
         # Two channels: a global ``inbox_update`` carrying the fresh unresolved
         # count (drives the cross-session badge) plus the full item on the
-        # per-item stream so a connected ``inbox wait`` resumes.
+        # per-item stream so a connected ``inbox wait`` resumes. ``wake=False``
+        # publishes the refresh without waking the owner (a plain read).
         count = self.storage.unresolved_inbox_count()
         await self.broadcast.publish(
             SessionEnvelope(
@@ -3576,6 +3671,16 @@ class SessionRuntime:
             ),
             inbox_id=item.id,
         )
+        # Wake only the item's owner — the session that filed it and waits on a
+        # reply — self-excluding the mutating actor. ``from_session_id`` is ""
+        # for a human-posted item, which owns no session and so wakes nobody.
+        if wake:
+            self._spawn_wake_dispatch(
+                channel=None,
+                is_inbox=True,
+                actor_session_id=actor_session_id,
+                owner_session_id=item.from_session_id or None,
+            )
 
     async def _publish_inbox_deleted(self, item_id: str) -> None:
         # Deletion is a terminal outcome for a waiter (``gone``); publish on both
@@ -3593,6 +3698,173 @@ class SessionRuntime:
             ),
             inbox_id=item_id,
         )
+
+    # ────────────────────── Board/inbox-triggered wake ──────────────────────
+
+    def register_wake(
+        self, session_id: str, request: WakeRegisterRequest
+    ) -> WakeSubscription:
+        self.get_session(session_id)  # 404 on an unknown session
+        sub = WakeSubscription(
+            id=f"wake-{secrets.token_hex(4)}",
+            session_id=session_id,
+            channel_globs=list(request.channel_globs),
+            kinds=list(request.kinds),
+            wake_on_inbox=request.wake_on_inbox,
+            created_at=datetime.now(UTC),
+        )
+        return self.storage.create_wake_subscription(sub)
+
+    def list_wakes(self, session_id: str) -> list[WakeSubscription]:
+        self.get_session(session_id)
+        return self.storage.list_wake_subscriptions_for_session(session_id)
+
+    def unregister_wake(self, session_id: str, sub_id: str) -> bool:
+        return self.storage.delete_wake_subscription(sub_id)
+
+    def _spawn_wake_dispatch(
+        self,
+        *,
+        channel: str | None,
+        is_inbox: bool,
+        actor_session_id: str | None,
+        owner_session_id: str | None = None,
+        kind: str | None = None,
+    ) -> None:
+        # Non-blocking: a poster's request latency must not include a
+        # subscriber's ``send_input`` (slow for SSH transports). Delivery is
+        # serialized per session by ``_fire_wake``, so two mutations landing
+        # while a subscriber is IDLE cannot double-send to one tty.
+        task = asyncio.create_task(
+            self._dispatch_subscription_wakes(
+                channel=channel,
+                is_inbox=is_inbox,
+                actor_session_id=actor_session_id,
+                owner_session_id=owner_session_id,
+                kind=kind,
+            )
+        )
+        self._wake_tasks.add(task)
+        task.add_done_callback(self._wake_tasks.discard)
+
+    async def _dispatch_subscription_wakes(
+        self,
+        *,
+        channel: str | None,
+        is_inbox: bool,
+        actor_session_id: str | None,
+        owner_session_id: str | None = None,
+        kind: str | None = None,
+    ) -> None:
+        for sub in self.storage.list_wake_subscriptions():
+            if actor_session_id is not None and sub.session_id == actor_session_id:
+                continue  # self-exclusion (both axes)
+            if is_inbox:
+                if not sub.wake_on_inbox:
+                    continue
+                # Owner-scoped: only the session that filed the item is woken on
+                # a reply/read; a broad inbox mutation with no owner wakes nobody.
+                if owner_session_id is None or sub.session_id != owner_session_id:
+                    continue
+            elif not self._board_glob_matches(channel, sub.channel_globs):
+                continue
+            # Kind-filtered subscription: skip only a definite mismatch. Empty
+            # kinds wake on all; a broad change or an unkinded post (kind None)
+            # wakes on the channel match.
+            elif sub.kinds and kind is not None and kind not in sub.kinds:
+                continue
+            try:
+                self._wake_or_defer(sub.session_id)
+            except Exception:
+                log.exception("wake dispatch failed", extra={"session": sub.session_id})
+
+    @staticmethod
+    def _board_glob_matches(channel: str | None, globs: list[str]) -> bool:
+        # A broad change (``channel is None``) wakes every board subscriber; a
+        # concrete channel is fnmatched against the subscriber's globs.
+        if not globs:
+            return False
+        if channel is None:
+            return True
+        return any(fnmatch.fnmatch(channel, glob) for glob in globs)
+
+    def _wake_or_defer(self, session_id: str) -> None:
+        session = self.storage.get_session(session_id)
+        if session is None:
+            return
+        # Never resurrect a stopped session.
+        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            return
+        if self._wake_eligible(session):
+            self._fire_wake(session_id)
+        else:
+            # RUNNING / STARTING / INTERRUPTED / WAITING_INPUT-awaiting-approval:
+            # defer to the deliverable edge (the broadcast-loop observer).
+            self._pending_wakes.add(session_id)
+
+    def _fire_wake(self, session_id: str) -> None:
+        # Serialize delivery per session: while a wake is in flight, defer a
+        # second to the next deliverable edge rather than concurrently inject it
+        # (two ``send_input`` calls garble a tty transport). Delivery runs in a
+        # tracked task so no caller — request path or broadcast loop — blocks on
+        # the send.
+        if session_id in self._wake_in_flight:
+            self._pending_wakes.add(session_id)
+            return
+        self._wake_in_flight.add(session_id)
+        task = asyncio.create_task(self._deliver_wake(session_id))
+        self._wake_tasks.add(task)
+        task.add_done_callback(self._wake_tasks.discard)
+
+    async def _deliver_wake(self, session_id: str) -> None:
+        try:
+            await self.handle_input(
+                session_id, SessionInputRequest(text=WAKE_INPUT_TEXT)
+            )
+        except Exception:
+            log.exception("wake delivery failed", extra={"session": session_id})
+        finally:
+            self._wake_in_flight.discard(session_id)
+            # A wake that arrived while this one was in flight was parked in
+            # ``_pending_wakes``. Re-drive it now instead of relying on a later
+            # broadcast-loop edge — a delivery that failed (or otherwise changed
+            # no status) never produces one, which would strand the parked wake.
+            # ``_drain_pending_wakes`` clears the entry before re-firing and
+            # re-checks eligibility, so this spends at most one retry per parked
+            # wake and a persistently failing send cannot spin.
+            if session_id in self._pending_wakes:
+                self._drain_pending_wakes({session_id})
+
+    def _wake_eligible(self, session: SessionRecord) -> bool:
+        if session.status == SessionStatus.IDLE:
+            return True
+        if session.status != SessionStatus.WAITING_INPUT:
+            return False
+        # WAITING_INPUT is overloaded: finished-turn vs. mid-turn awaiting an
+        # approval. Deliver only when no approval is outstanding.
+        try:
+            return not self.transport_for(session).has_pending_approval(session)
+        except Exception:
+            return False
+
+    def _drain_pending_wakes(self, dirty_ids: set[str]) -> None:
+        # Called from the broadcast-loop drain: fire any owed wake whose session
+        # just reached a deliverable edge. Synchronous and non-blocking — the
+        # send runs in a tracked task via ``_fire_wake`` so the broadcast loop
+        # is never held on it. A mutation during the woken turn re-adds to
+        # ``_pending_wakes``.
+        for session_id in dirty_ids & self._pending_wakes:
+            session = self.storage.get_session(session_id)
+            if session is None or session.status in {
+                SessionStatus.EXITED,
+                SessionStatus.ERROR,
+            }:
+                self._pending_wakes.discard(session_id)
+                continue
+            if not self._wake_eligible(session):
+                continue  # still non-deliverable; wait for the next edge
+            self._pending_wakes.discard(session_id)
+            self._fire_wake(session_id)
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -4682,6 +4954,9 @@ class SessionRuntime:
                 await self._broadcast_session_state(session_id)
             if list_dirty:
                 await self._broadcast_session_list()
+            # Deliver any owed wake whose session just reached a deliverable edge.
+            if self._pending_wakes:
+                self._drain_pending_wakes(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
         if not self.settings.write_structured_log:

@@ -8,12 +8,13 @@ unavailable labeling on failure.
 """
 
 import os
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from waypoint.settings import Settings
 from waypoint.storage import Storage
-from waypoint.telemetry.instance.collect import collect_snapshot
+from waypoint.telemetry.instance.collect import _read_table_bytes, collect_snapshot
 from waypoint.telemetry.instance.model import DataQuality, StorageCategory
 from waypoint.telemetry.instance.roconn import budgeted_query, open_readonly
 from waypoint.telemetry.instance.walk import FootprintWalker
@@ -70,6 +71,26 @@ def test_open_readonly_live_wal_pragmas(tmp_path: Path) -> None:
                 assert rows is not None and int(rows[0][0]) >= 0
     finally:
         storage.close()
+
+
+def test_read_table_bytes_folds_indexes_into_owning_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "widgets.db"
+    con = sqlite3.connect(db_path)
+    con.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)")
+    con.execute("CREATE INDEX idx_widgets_name ON widgets (name)")
+    con.executemany(
+        "INSERT INTO widgets (name) VALUES (?)", [(f"w{i}",) for i in range(2000)]
+    )
+    con.commit()
+    con.close()
+
+    with open_readonly(db_path) as conn:
+        assert conn is not None
+        table_bytes = _read_table_bytes(conn)
+
+    assert table_bytes.get("widgets", 0) > 0
+    assert "idx_widgets_name" not in table_bytes
+    assert not any(key.startswith(("idx_", "sqlite_autoindex_")) for key in table_bytes)
 
 
 # ── walker (symlink skip, hard-link dedup, budget truncation) ──────────────

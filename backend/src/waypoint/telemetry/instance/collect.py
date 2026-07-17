@@ -51,10 +51,8 @@ class _DbReadout:
     reclaim: DatabaseReclaim = field(default_factory=DatabaseReclaim)
 
 
-# dbstat scans every page, so it runs well past the per-query lock budget; the
-# whole collection is already an off-request-path, multi-second walk, so this
-# one measurement gets a wider ceiling and degrades to empty (sizes hidden)
-# rather than blocking when it cannot finish.
+# dbstat scans every page, so it needs more headroom than the 250 ms per-query
+# lock budget; the collection runs off the request path.
 _DBSTAT_BUDGET_MS = 4000
 
 
@@ -96,8 +94,8 @@ def _read_table_bytes(conn: sqlite3.Connection) -> dict[str, int]:
 
     Attributes every index's pages to its owning table so a table's size is its
     whole on-disk footprint. Returns an empty mapping when dbstat is absent from
-    the SQLite build or the scan exceeds its budget — the caller then reports
-    record counts without sizes rather than a fabricated breakdown.
+    the SQLite build or the scan exceeds its budget; the caller then reports
+    record counts without sizes.
     """
     schema = budgeted_query(
         conn,

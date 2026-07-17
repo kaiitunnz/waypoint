@@ -26,9 +26,8 @@ export function InsightCards({
   onDismiss,
   onClickThrough,
 }: InsightCardsProps) {
-  // The skeleton is only for the true first load: once a request has settled,
-  // a known-empty region renders nothing even while a later refresh is in
-  // flight, so a background revalidation never flashes a placeholder panel.
+  // First load only: a settled-empty region stays absent through later
+  // refreshes instead of flashing the skeleton.
   if (loading && !hasSettled && insights.length === 0) {
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }

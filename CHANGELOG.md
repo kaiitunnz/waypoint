@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/kaiitunnz/waypoint/compare/v0.10.1...v0.11.0) (2026-07-18)
+
+
+### Features
+
+* add opt-in Telegram notification center ([#322](https://github.com/kaiitunnz/waypoint/issues/322)) ([5f73046](https://github.com/kaiitunnz/waypoint/commit/5f7304622a7189f5eac4c74ad4cd1c187a6af508))
+* per-signal notification config and active-session presence suppression ([#324](https://github.com/kaiitunnz/waypoint/issues/324)) ([875c9a3](https://github.com/kaiitunnz/waypoint/commit/875c9a3586f482dcbc86738fa45a3873daf1f694))
+
 ## [0.10.1](https://github.com/kaiitunnz/waypoint/compare/v0.10.0...v0.10.1) (2026-07-18)
 
 

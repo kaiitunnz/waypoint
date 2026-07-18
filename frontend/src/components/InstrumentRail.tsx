@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import {
+  formatRateLimitWindowReset,
   formatRelativeTime,
   rateLimitUsageTone,
   rateLimitWindowPercent,
@@ -175,6 +176,8 @@ function TelemetryTile({
           const weekly = findWindow(bucket, "weekly");
           const fivePct = five ? rateLimitWindowPercent(five) : null;
           const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
+          const fiveReset = five ? formatRateLimitWindowReset(five) : null;
+          const weekReset = weekly ? formatRateLimitWindowReset(weekly) : null;
           const peak = bucketPeak(bucket);
           return (
             <li className="inst-account" key={bucket.account_key}>
@@ -187,8 +190,8 @@ function TelemetryTile({
                   {bucket.account_label}
                 </span>
               </span>
-              <UsageWindowMeter label="5h" percent={fivePct} />
-              <UsageWindowMeter label="wk" percent={weekPct} />
+              <UsageWindowMeter label="5h" percent={fivePct} reset={fiveReset} />
+              <UsageWindowMeter label="wk" percent={weekPct} reset={weekReset} />
             </li>
           );
         })}
@@ -222,13 +225,16 @@ function toneOf(percent: number | null): "ok" | "warn" | "danger" {
   return t === "good" ? "ok" : t === "warn" ? "warn" : "danger";
 }
 
-// One labelled window row: a caption, a tone-filled meter, and the percentage.
+// One labelled window row: a caption, a tone-filled meter, the percentage, and a
+// compact reset hint (time until the quota window resets) when one is known.
 function UsageWindowMeter({
   label,
   percent,
+  reset,
 }: {
   label: string;
   percent: number | null;
+  reset: string | null;
 }) {
   const tone = toneOf(percent);
   return (
@@ -243,6 +249,14 @@ function UsageWindowMeter({
       <span className="inst-window-pct">
         {percent !== null ? `${percent}%` : "—"}
       </span>
+      {reset ? (
+        <span className="inst-window-reset" title={`Resets ${reset}`}>
+          <span aria-hidden="true" className="inst-window-reset-glyph">
+            ◷
+          </span>
+          {reset}
+        </span>
+      ) : null}
     </span>
   );
 }

@@ -919,11 +919,12 @@ button.inst:hover {
   white-space: nowrap;
 }
 
-/* Labelled window row: [cap] [────meter────] [pct] on one line, so 5h and
-   weekly each read as a bar plus its number. */
+/* Labelled window row: [cap] [────meter────] [pct] [◷ reset] on one line, so 5h
+   and weekly each read as a bar, its number, and when it resets. The reset column
+   is content-sized and collapses to nothing when no reset time is known. */
 .inst-window {
   display: grid;
-  grid-template-columns: 1.6rem 1fr 2.2rem;
+  grid-template-columns: 1.6rem 1fr 2.2rem auto;
   align-items: center;
   gap: 7px;
 }
@@ -964,6 +965,21 @@ button.inst:hover {
   color: var(--text);
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.inst-window-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+.inst-window-reset-glyph {
+  font-size: 0.66rem;
+  line-height: 1;
 }
 
 /* Top channels list: the most-recently-active channels with their post counts. */

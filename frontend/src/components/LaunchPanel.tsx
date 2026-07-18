@@ -41,6 +41,12 @@ interface ThreadSummary {
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
 
+// `default` uses the default-preset hydration; `preset` hydrates a specific
+// preset, or clears the selection when `presetId` is null (backend default).
+export type PresetSelection =
+  | { kind: "default" }
+  | { kind: "preset"; presetId: string | null };
+
 type ScheduleTiming = "delay" | "datetime";
 
 interface LaunchPanelProps {
@@ -112,6 +118,7 @@ interface LaunchPanelProps {
   // owns which mode is shown; otherwise the panel tracks it internally.
   mode?: PanelMode;
   onModeChange?: (mode: PanelMode) => void;
+  initialPreset?: PresetSelection;
 }
 
 export function LaunchPanel({
@@ -145,6 +152,7 @@ export function LaunchPanel({
   onDeletePreset,
   mode: controlledMode,
   onModeChange,
+  initialPreset,
 }: LaunchPanelProps) {
   const [internalMode, setInternalMode] = useState<PanelMode>("new");
   const mode = controlledMode ?? internalMode;
@@ -191,15 +199,21 @@ export function LaunchPanel({
     [presets, onFetchPresetSpec, form],
   );
 
-  // Hydrate the default preset into the shared form once on first load. Wait
-  // for the id to actually arrive (bootstrap resolves after mount) before
-  // consuming the once-guard, otherwise the first null run would disable it.
+  // Seed the form's preset once per mount: a caller-requested preset wins,
+  // otherwise the default. Wait for defaultPresetId to arrive (bootstrap
+  // resolves after mount) before consuming the once-guard, or the first null
+  // run disables it.
   useEffect(() => {
     if (presetHydratedRef.current) return;
+    if (initialPreset?.kind === "preset") {
+      presetHydratedRef.current = true;
+      void applyPresetById(initialPreset.presetId);
+      return;
+    }
     if (!defaultPresetId) return;
     presetHydratedRef.current = true;
     void applyPresetById(defaultPresetId);
-  }, [defaultPresetId, applyPresetById]);
+  }, [defaultPresetId, applyPresetById, initialPreset]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
   const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");

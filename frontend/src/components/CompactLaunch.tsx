@@ -3,9 +3,10 @@
 import type { Backend, SessionPresetSummary } from "@/lib/types";
 
 // Compact launch action that replaces the always-open form on the homepage: a
-// row of preset quick-launch chips (one-tap create) plus a "New session"
-// button that opens the full launch form in a glass sheet. Resume / Attach are
-// dashed chips that open the sheet on their respective tab.
+// row of preset quick-launch chips plus a "New session" button, both of which
+// open the full launch form in a glass sheet. A preset chip opens the sheet on
+// the New tab with that preset preselected; Resume / Schedule are dashed chips
+// that open their tab.
 export type LaunchSheetMode = "new" | "resume" | "attach" | "schedule";
 
 // Keep the quick-launch row to a scannable size; the rest live in the sheet's
@@ -17,8 +18,7 @@ interface CompactLaunchProps {
   presets: SessionPresetSummary[];
   defaultPresetId: string | null;
   defaultBackend: Backend;
-  launchingPresetId: string | null;
-  onLaunchPreset: (preset: SessionPresetSummary | null) => void;
+  onOpenPreset: (preset: SessionPresetSummary | null) => void;
   onOpenSheet: (mode: LaunchSheetMode) => void;
 }
 
@@ -27,11 +27,9 @@ export function CompactLaunch({
   presets,
   defaultPresetId,
   defaultBackend,
-  launchingPresetId,
-  onLaunchPreset,
+  onOpenPreset,
   onOpenSheet,
 }: CompactLaunchProps) {
-  const busy = launchingPresetId !== null;
   // Lead with the default preset, then the rest by recency-of-list order.
   const ordered = [...presets].sort((a, b) => {
     if (a.id === defaultPresetId) return -1;
@@ -64,10 +62,8 @@ export function CompactLaunch({
                 key={preset.id}
                 type="button"
                 className="launch-chip"
-                disabled={busy}
-                data-loading={launchingPresetId === preset.id ? "" : undefined}
-                onClick={() => onLaunchPreset(preset)}
-                title={`Launch ${preset.name}`}
+                onClick={() => onOpenPreset(preset)}
+                title={`Launch ${preset.name}…`}
               >
                 <span className="launch-chip-dot" data-owner={backend} />
                 {preset.name}
@@ -78,10 +74,8 @@ export function CompactLaunch({
           <button
             type="button"
             className="launch-chip"
-            disabled={busy}
-            data-loading={launchingPresetId === "__default__" ? "" : undefined}
-            onClick={() => onLaunchPreset(null)}
-            title="Launch with defaults"
+            onClick={() => onOpenPreset(null)}
+            title="Launch with defaults…"
           >
             <span className="launch-chip-dot" data-owner={defaultBackend} />
             Default

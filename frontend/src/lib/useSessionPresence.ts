@@ -8,6 +8,16 @@ import { registerSessionPresence, releaseSessionPresence } from "@/lib/api";
 // single missed renewal does not drop presence.
 const RENEW_INTERVAL_MS = 15_000;
 
+// crypto.randomUUID is gated on a secure context, so it is undefined when the
+// app is served over plain HTTP (e.g. a tailnet IP on mobile). The viewer id is
+// a non-security-sensitive per-tab tag, so fall back to a random string there.
+function makeViewerId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `v-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 // Lease presence for a session while its tab is visible, so the backend can
 // suppress notifications the user is already looking at. Best-effort: it fails
 // open, and avoids beforeunload/sendBeacon because those cannot carry the
@@ -21,7 +31,7 @@ export function useSessionPresence(
     if (!host || !token || !sessionId) {
       return;
     }
-    const viewerId = crypto.randomUUID();
+    const viewerId = makeViewerId();
     let renewTimer: ReturnType<typeof setInterval> | null = null;
 
     const stopRenew = () => {

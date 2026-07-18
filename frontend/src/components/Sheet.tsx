@@ -18,6 +18,12 @@ interface SheetProps {
 export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  // Key the focus effect on `open` alone; a fresh inline onClose each render
+  // would otherwise re-run it and its cleanup would steal focus mid-typing.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) {
@@ -32,7 +38,7 @@ export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       trapTabFocus(event, panelRef.current, { preventWhenEmpty: true });
@@ -43,7 +49,7 @@ export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
       document.removeEventListener("keydown", onKeyDown);
       restoreFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) {
     return null;

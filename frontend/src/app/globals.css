@@ -329,6 +329,998 @@ pre {
   min-width: 0;
 }
 
+/* ─── Home control deck (sessions-first homepage) ───
+ * Flat in-flow instruments (nav, launch deck, session list, rail tiles);
+ * glass on the floating chrome (backend popover, launch/schedule sheets,
+ * presence floaters). */
+.page-shell.page-home {
+  max-width: min(1200px, 100vw);
+  gap: 16px;
+}
+
+/* ── App-bar host control ── */
+.hostctl-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.hostctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+
+.hostctl:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+}
+
+.hostctl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+  flex: none;
+}
+
+.hostctl-dot.tone-live {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.hostctl-dot.tone-pending {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.hostctl-dot.tone-idle,
+.hostctl-dot.tone-off {
+  background: var(--muted-soft);
+  box-shadow: none;
+}
+
+.hostctl-name {
+  color: var(--text-strong);
+}
+
+.hostctl-url {
+  color: var(--muted-soft);
+}
+
+.hostctl-caret {
+  color: var(--muted-soft);
+  font-size: 0.7rem;
+}
+
+.backend-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  z-index: 60;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--glass-bg-thick);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.backend-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backend-popover-head h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  color: var(--text-strong);
+}
+
+.backend-popover-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--muted-soft);
+}
+
+.backend-popover-apply {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #171204;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+html[data-theme="light"] .backend-popover-apply {
+  color: #fff;
+}
+
+.backend-popover-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* On a phone the popover anchors to the app bar and spans the content width
+ * within the safe area, so it stays on-screen regardless of the chip position. */
+@media (max-width: 640px) {
+  .app-bar {
+    position: relative;
+  }
+  .hostctl-wrap {
+    position: static;
+  }
+  .backend-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: max(4px, env(safe-area-inset-left));
+    right: max(4px, env(safe-area-inset-right));
+    width: auto;
+    max-width: none;
+  }
+}
+
+/* ── Primary nav ── */
+.home-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.home-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.home-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-nav-tab:hover {
+  color: var(--text);
+}
+
+.home-nav-tab.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-strong);
+  cursor: default;
+}
+
+.home-nav-count {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+.home-nav-tab.is-active .home-nav-count {
+  color: var(--accent);
+}
+
+/* Inbox needs-you count: a filled accent pill so open items read as a call to
+   action rather than an idle tally. */
+.home-nav-count.is-alert {
+  min-width: 16px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-strong);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Layout grid: sessions main + sticky instrument rail. Grid areas keep the
+ * launch panel above the session list in the left column on desktop, and let
+ * mobile reorder to launch → instruments → sessions. ── */
+.home-layout {
+  display: grid;
+  grid-template-columns: 1fr 336px;
+  grid-template-areas:
+    "launch rail"
+    "main   rail";
+  gap: 16px;
+  align-items: start;
+}
+
+.home-layout > .launch-deck {
+  grid-area: launch;
+}
+
+.home-main {
+  grid-area: main;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 12px;
+}
+
+/* ── Compact launch deck ── */
+.launch-deck {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.launch-deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.launch-deck-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.launch-deck-label b {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.launch-deck-new {
+  flex: none;
+  padding: 11px 20px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #171204;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+html[data-theme="light"] .launch-deck-new {
+  color: #fff;
+}
+
+.launch-deck-new:hover {
+  background: var(--accent-strong);
+}
+
+.launch-deck-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.launch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.launch-chip:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.launch-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.launch-chip[data-loading] {
+  opacity: 0.7;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.launch-chip.is-ghost {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.launch-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.launch-chip-dot[data-owner="codex"] {
+  background: var(--accent-cool);
+}
+
+.launch-chip-dot[data-owner="claude_code"],
+.launch-chip-dot[data-owner="claude_tty"] {
+  background: var(--accent);
+}
+
+.launch-chip-dot[data-owner="opencode"] {
+  background: #cbd5e1;
+}
+
+html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
+  background: var(--muted);
+}
+
+/* ── Instrument rail tiles ── */
+.inst {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.16s ease;
+}
+
+/* Only whole-card links/buttons get the pointer + hover border; the Board card
+   is a plain container whose inner links are individually interactive. */
+a.inst,
+button.inst {
+  cursor: pointer;
+}
+
+a.inst:hover,
+button.inst:hover {
+  border-color: var(--line-strong);
+}
+
+.inst-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.inst-top-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.inst-top-link:hover .inst-name,
+.inst-top-link:hover .inst-go {
+  color: var(--accent);
+}
+
+.inst-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inst-go {
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.inst-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inst-lamp::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.inst-lamp.tone-ok {
+  color: var(--success);
+}
+
+.inst-lamp.tone-warn {
+  color: var(--warn);
+}
+
+.inst-lamp.tone-danger {
+  color: var(--danger);
+}
+
+.inst-lamp.tone-info {
+  color: var(--accent-cool);
+}
+
+.inst-lamp.tone-off {
+  color: var(--muted-soft);
+}
+
+.inst-headline {
+  margin: 4px 0 4px;
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.inst-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.inst-line b {
+  color: var(--text);
+}
+
+.inst-note {
+  margin: 8px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+/* Per-account usage rows: every account's worst-window meter + 5h/weekly
+ * figures, compact enough to list all accounts in the narrow rail. */
+.inst-accounts {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.inst-account {
+  display: grid;
+  gap: 5px;
+}
+
+.inst-account-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.inst-account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--success);
+}
+
+.inst-account-dot.tone-warn {
+  background: var(--warn);
+}
+
+.inst-account-dot.tone-danger {
+  background: var(--danger);
+}
+
+.inst-account-name {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Labelled window row: [cap] [────meter────] [pct] on one line, so 5h and
+   weekly each read as a bar plus its number. */
+.inst-window {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr 2.2rem;
+  align-items: center;
+  gap: 7px;
+}
+
+.inst-window-cap {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inst-window-meter {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--line-strong) 70%, transparent);
+  overflow: hidden;
+}
+
+.inst-window-bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--success);
+}
+
+.inst-window-bar.tone-warn {
+  background: var(--warn);
+}
+
+.inst-window-bar.tone-danger {
+  background: var(--danger);
+}
+
+.inst-window-pct {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Top channels list: the most-recently-active channels with their post counts. */
+.inst-channels {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.inst-channel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.inst-channel:hover .inst-channel-name {
+  color: var(--accent);
+}
+
+.inst-channel-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inst-channel-count {
+  flex: none;
+  color: var(--muted-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scheduled tile: a compact list of pending launches and messages with the
+   fire time, target, and a one-line preview. */
+.inst-sched {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.inst-sched-item {
+  display: grid;
+  gap: 2px;
+}
+
+.inst-sched-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.inst-sched-kind {
+  flex: none;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  color: var(--accent-cool);
+}
+
+.inst-sched-kind.kind-launch {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+}
+
+.inst-sched-target {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inst-sched-when {
+  flex: none;
+  color: var(--muted-soft);
+}
+
+.inst-sched-preview {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Low-profile presence floaters (Inbox + Assistant) ── */
+.presence-cluster {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: flex-end;
+}
+
+.presence-floater {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  width: 40px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  color: var(--muted);
+  text-decoration: none;
+  overflow: hidden;
+  transition: width 0.18s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.presence-floater-icon {
+  width: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.presence-inbox .presence-floater-icon {
+  color: var(--accent-cool);
+}
+
+.presence-assistant .presence-floater-icon {
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+}
+
+.presence-floater-label {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  width: 0;
+  transition: opacity 0.16s ease;
+}
+
+.presence-floater:hover,
+.presence-floater:focus-visible {
+  width: auto;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line));
+}
+
+.presence-floater:hover .presence-floater-label,
+.presence-floater:focus-visible .presence-floater-label {
+  opacity: 1;
+  width: auto;
+  padding-right: 14px;
+}
+
+/* Assistant presence lamp (corner dot at rest, inline when expanded). */
+.presence-floater-lamp {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--glass-bg-thick);
+  background: var(--muted-soft);
+}
+
+.presence-floater-lamp.tone-live {
+  background: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 26%, transparent);
+}
+
+.presence-floater-lamp.tone-idle {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.presence-floater-lamp.tone-off {
+  background: var(--muted-soft);
+}
+
+.presence-floater:hover .presence-floater-lamp,
+.presence-floater:focus-visible .presence-floater-lamp {
+  position: static;
+  margin-right: 12px;
+  border: none;
+  box-shadow: none;
+  width: 7px;
+  height: 7px;
+}
+
+/* Inbox needs-you count badge (corner at rest, inline when expanded). */
+.presence-floater-badge {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--glass-bg-thick);
+  background: var(--danger);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+
+.presence-floater-badge.is-zero {
+  display: none;
+}
+
+.presence-floater:hover .presence-floater-badge,
+.presence-floater:focus-visible .presence-floater-badge {
+  position: static;
+  margin-right: 12px;
+  border: none;
+}
+
+/* ── Glass sheet (launch form / schedule manager) ── */
+.wp-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(3, 5, 8, 0.55);
+  animation: wp-sheet-fade 0.18s ease;
+}
+
+html[data-theme="light"] .wp-sheet-scrim {
+  background: rgba(40, 30, 12, 0.32);
+}
+
+.wp-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 440px;
+  max-width: 92vw;
+  z-index: 71;
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
+  overflow: auto;
+  background: var(--glass-bg-thick);
+  border-left: 1px solid var(--glass-line);
+  box-shadow: var(--shadow);
+  animation: wp-sheet-slide-in 0.2s ease;
+}
+
+.wp-sheet:focus {
+  outline: none;
+}
+
+.wp-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.wp-sheet-eyebrow {
+  margin: 0 0 2px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.wp-sheet-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.wp-sheet-close {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card-soft);
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.wp-sheet-close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.wp-sheet-body {
+  min-width: 0;
+}
+
+.wp-sheet-empty {
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* The launch form and schedule manager are reused verbatim inside the sheet;
+ * strip their own card chrome and redundant top heading so the sheet header
+ * leads and the content sits flush in the glass. */
+.wp-sheet .launch-card,
+.wp-sheet .schedule-panel {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.wp-sheet .launch-card-titles,
+.wp-sheet .schedule-panel > .msg-sched-head {
+  display: none;
+}
+
+.wp-sheet .launch-card-head {
+  justify-content: flex-start;
+}
+
+@keyframes wp-sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes wp-sheet-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+/* ── Mobile: single column — launch, then instruments, then sessions. The rail
+ * is a full-width vertical stack so each card sizes to its own content. ── */
+@media (max-width: 900px) {
+  .home-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "launch"
+      "rail"
+      "main";
+  }
+  .rail {
+    position: static;
+    flex-direction: column;
+  }
+  .home-nav {
+    position: sticky;
+    top: max(0px, env(safe-area-inset-top));
+    z-index: 30;
+  }
+  /* Stack the launch header so the button sits full-width on its own line. */
+  .launch-deck-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .launch-deck-new {
+    width: 100%;
+    text-align: center;
+  }
+  .wp-sheet {
+    width: 100%;
+    max-width: 100%;
+    top: auto;
+    border-left: none;
+    border-top: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass) var(--radius-glass) 0 0;
+    max-height: 88vh;
+    animation: wp-sheet-slide-up 0.2s ease;
+  }
+  /* Reserve room so the last session row clears the presence floaters. */
+  .page-shell.page-home {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes wp-sheet-slide-up {
+  from {
+    transform: translateY(32px);
+    opacity: 0;
+  }
+}
+
 /* ─── Import / resume thread panel ─── */
 
 .import-thread-header {
@@ -1733,17 +2725,6 @@ html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.backend-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card-soft);
-  font-size: 0.86rem;
 }
 
 .link-button {
@@ -5143,789 +6124,6 @@ html[data-theme="light"] .usage-meta-bullet {
   color: rgba(184, 130, 14, 0.5);
 }
 
-/* ─── Telemetry deck (home-page usage dashboard) ─── */
-/*  A hinged toggle revealing a status strip, then an asymmetric grid of
-    instrument panels. Flat surfaces; the deck tone (accent/warn/danger)
-    carries the account-pressure state. */
-
-.usage-deck {
-  --deck-tone: var(--accent);
-  position: relative;
-  padding: 0;
-  overflow: hidden;
-  isolation: isolate;
-  background: var(--bg-card);
-  border: 1px solid var(--line);
-}
-
-.usage-deck.tone-warn {
-  --deck-tone: var(--warn);
-}
-
-.usage-deck.tone-danger {
-  --deck-tone: var(--danger);
-}
-
-.usage-deck > * {
-  position: relative;
-  z-index: 2;
-}
-
-/* ── Toggle bar ── */
-.usage-deck-toggle {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 20px;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid transparent;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    color 200ms ease,
-    border-color 200ms ease,
-    background-color 200ms ease;
-  -webkit-tap-highlight-color: transparent;
-  color: var(--text);
-}
-
-.usage-deck-toggle:hover {
-  background: var(--bg-card-soft);
-}
-
-.usage-deck.is-open .usage-deck-toggle {
-  border-bottom-color: var(--line);
-}
-
-/*  Mini compass-rose mark with a needle that rotates with the deck tone. */
-.usage-deck-toggle-mark {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.usage-deck-toggle-mark::before,
-.usage-deck-toggle-mark::after {
-  content: "";
-  position: absolute;
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-/*  Cardinal hairlines. */
-.usage-deck-toggle-mark::before {
-  left: 50%;
-  top: 4px;
-  bottom: 4px;
-  width: 1px;
-  transform: translateX(-50%);
-}
-
-.usage-deck-toggle-mark::after {
-  top: 50%;
-  left: 4px;
-  right: 4px;
-  height: 1px;
-  transform: translateY(-50%);
-}
-
-.usage-deck-toggle-needle {
-  /*  Positioned so the needle's BASE (not its midpoint) sits at the dial
-      center: `bottom: 50%` plants the bottom edge on the vertical center
-      line; `left: 50%` + `margin-left: -1px` plants its horizontal center
-      there too. With `transform-origin: 50% 100%`, rotations then pivot
-      cleanly around that base. */
-  position: absolute;
-  left: 50%;
-  bottom: 50%;
-  margin-left: -1px;
-  width: 2px;
-  height: 10px;
-  background: var(--deck-tone);
-  transform-origin: 50% 100%;
-  transform: rotate(-30deg);
-  transition: transform 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  border-radius: 1px;
-}
-
-.usage-deck.tone-warn .usage-deck-toggle-needle {
-  transform: rotate(35deg);
-}
-
-.usage-deck.tone-danger .usage-deck-toggle-needle {
-  transform: rotate(80deg);
-}
-
-.usage-deck-toggle-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.usage-deck-toggle-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.usage-deck-toggle-title {
-  font-family: var(--font-display);
-  font-size: 1.18rem;
-  letter-spacing: 0.005em;
-  color: var(--text-strong);
-  line-height: 1.1;
-}
-
-.usage-deck.tone-warn .usage-deck-toggle-title {
-  color: var(--warn);
-}
-
-.usage-deck.tone-danger .usage-deck-toggle-title {
-  color: var(--danger);
-}
-
-.usage-deck-toggle-summary {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  color: var(--muted-soft);
-  text-transform: lowercase;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  min-width: 0;
-  text-align: right;
-}
-
-html[data-theme="light"] .usage-deck-toggle-summary {
-  color: var(--muted);
-}
-
-.usage-deck-toggle-pips {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.usage-deck-pip {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.25),
-    0 0 8px var(--success);
-}
-
-.usage-deck-pip.tone-warn {
-  background: var(--warn);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.25),
-    0 0 8px var(--warn);
-}
-
-.usage-deck-pip.tone-danger {
-  background: var(--danger);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.25),
-    0 0 10px var(--danger);
-  animation: deck-pip-pulse 1.6s ease-in-out infinite;
-}
-
-html[data-theme="light"] .usage-deck-pip {
-  box-shadow:
-    0 0 0 1px rgba(60, 45, 20, 0.18),
-    0 0 6px var(--success);
-}
-
-html[data-theme="light"] .usage-deck-pip.tone-warn {
-  box-shadow:
-    0 0 0 1px rgba(60, 45, 20, 0.18),
-    0 0 6px var(--warn);
-}
-
-html[data-theme="light"] .usage-deck-pip.tone-danger {
-  box-shadow:
-    0 0 0 1px rgba(60, 45, 20, 0.18),
-    0 0 8px var(--danger);
-}
-
-@keyframes deck-pip-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.78);
-  }
-}
-
-.usage-deck-pip-extra {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
-  padding: 0 4px;
-}
-
-.usage-deck-toggle-chevron {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-
-.usage-deck-toggle-chevron::before,
-.usage-deck-toggle-chevron::after {
-  content: "";
-  position: absolute;
-  width: 5.5px;
-  height: 1.5px;
-  background: currentColor;
-  border-radius: 1px;
-  top: 50%;
-  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.usage-deck-toggle-chevron::before {
-  right: 50%;
-  margin-right: -0.5px;
-  transform: translateY(-50%) rotate(-45deg);
-  transform-origin: right center;
-}
-
-.usage-deck-toggle-chevron::after {
-  left: 50%;
-  margin-left: -0.5px;
-  transform: translateY(-50%) rotate(45deg);
-  transform-origin: left center;
-}
-
-.usage-deck.is-open .usage-deck-toggle-chevron::before {
-  transform: translateY(-50%) rotate(45deg);
-}
-
-.usage-deck.is-open .usage-deck-toggle-chevron::after {
-  transform: translateY(-50%) rotate(-45deg);
-}
-
-/* ── Body ── */
-.usage-deck-body {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 18px 20px 22px;
-  animation: deck-body-enter 320ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
-}
-
-@keyframes deck-body-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.usage-deck-status {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card-soft);
-}
-
-.usage-deck-status-rivet {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--deck-tone);
-}
-
-.usage-deck-status-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.usage-deck-status-headline {
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  color: var(--success);
-  letter-spacing: 0.005em;
-}
-
-.usage-deck-status-headline.tone-warn {
-  color: var(--warn);
-}
-
-.usage-deck-status-headline.tone-danger {
-  color: var(--danger);
-}
-
-.usage-deck-status-detail {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
-.usage-deck-status-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.usage-deck-status-sweep {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  color: var(--muted-soft);
-  text-transform: lowercase;
-}
-
-.usage-deck-refresh-all {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease;
-}
-
-.usage-deck-refresh-all:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent-strong);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
-.usage-deck-refresh-all:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.usage-deck-refresh-all-glyph {
-  display: inline-block;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.usage-deck-refresh-all-glyph.is-spinning {
-  animation: deck-spin 900ms linear infinite;
-}
-
-@keyframes deck-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.usage-deck-error {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--danger) 9%, transparent);
-  color: var(--danger);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-}
-
-/* ── Loading and empty ── */
-.usage-deck-loading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 30px 24px;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
-}
-
-.usage-deck-loading-bar {
-  width: 96px;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--accent) 50%,
-    transparent
-  );
-  background-size: 200% 100%;
-  animation: deck-loading 1.6s ease-in-out infinite;
-}
-
-@keyframes deck-loading {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-.usage-deck-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 36px 24px;
-  text-align: center;
-  border: 1px dashed color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: var(--radius-sm);
-}
-
-.usage-deck-empty-mark {
-  font-family: var(--font-display);
-  font-size: 2.4rem;
-  color: var(--accent);
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.usage-deck-empty-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  color: var(--text-strong);
-}
-
-.usage-deck-empty-sub {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-}
-
-/* ── Instrument grid (asymmetric on desktop) ── */
-.usage-deck-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 720px) {
-  .usage-deck-grid[data-bucket-count="2"],
-  .usage-deck-grid[data-bucket-count="3"],
-  .usage-deck-grid[data-bucket-count="4"],
-  .usage-deck-grid[data-bucket-count="5"],
-  .usage-deck-grid[data-bucket-count="6"] {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  /*  In a multi-bucket layout, the worst-tone (first) bucket takes the
-      full row as the "hero" instrument so its dials read at full scale. */
-  .usage-deck-grid[data-bucket-count="3"] > :nth-child(1),
-  .usage-deck-grid[data-bucket-count="4"] > :nth-child(1),
-  .usage-deck-grid[data-bucket-count="5"] > :nth-child(1),
-  .usage-deck-grid[data-bucket-count="6"] > :nth-child(1) {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (min-width: 1080px) {
-  .usage-deck-grid[data-bucket-count="4"],
-  .usage-deck-grid[data-bucket-count="5"],
-  .usage-deck-grid[data-bucket-count="6"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .usage-deck-grid[data-bucket-count="4"] > :nth-child(1),
-  .usage-deck-grid[data-bucket-count="5"] > :nth-child(1),
-  .usage-deck-grid[data-bucket-count="6"] > :nth-child(1) {
-    grid-column: 1 / -1;
-  }
-}
-
-/* ── Instrument panel ── */
-.usage-instrument {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 14px;
-  padding: 20px 22px 18px;
-  background: var(--bg-card-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
-  isolation: isolate;
-  animation: instrument-enter 520ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
-  animation-delay: var(--enter-delay, 0ms);
-}
-
-@keyframes instrument-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.usage-instrument.tone-warn {
-  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
-}
-
-.usage-instrument.tone-danger {
-  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
-}
-
-.usage-instrument-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.usage-instrument-plaque {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.usage-instrument-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.usage-instrument-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.16rem;
-  line-height: 1.2;
-  color: var(--text-strong);
-  letter-spacing: 0.005em;
-  word-break: break-word;
-}
-
-.usage-instrument-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.usage-instrument-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--success);
-}
-
-.usage-instrument-status.tone-warn {
-  color: var(--warn);
-}
-
-.usage-instrument-status.tone-danger {
-  color: var(--danger);
-}
-
-.usage-instrument-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.usage-instrument-refresh {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid rgba(200, 169, 106, 0.3);
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    transform 120ms ease;
-}
-
-.usage-instrument-refresh:hover:not(:disabled) {
-  background: rgba(200, 169, 106, 0.1);
-  border-color: rgba(200, 169, 106, 0.55);
-}
-
-.usage-instrument-refresh:active:not(:disabled) {
-  transform: rotate(-20deg);
-}
-
-.usage-instrument-refresh:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-html[data-theme="light"] .usage-instrument-refresh {
-  border-color: rgba(184, 130, 14, 0.3);
-}
-
-html[data-theme="light"] .usage-instrument-refresh:hover:not(:disabled) {
-  background: rgba(184, 130, 14, 0.08);
-  border-color: rgba(184, 130, 14, 0.55);
-}
-
-.usage-instrument-refresh-glyph {
-  font-size: 0.95rem;
-  line-height: 1;
-}
-
-.usage-instrument-refresh-glyph.is-spinning {
-  animation: deck-spin 900ms linear infinite;
-}
-
-.usage-instrument-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.usage-instrument-dials {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  width: 100%;
-  justify-items: center;
-}
-
-.usage-instrument.emphasis-primary .usage-instrument-dials {
-  gap: 32px;
-}
-
-.usage-instrument-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 18px 12px;
-  text-align: center;
-  color: var(--muted);
-}
-
-.usage-instrument-empty-mark {
-  font-family: var(--font-display);
-  font-size: 2rem;
-  color: var(--accent);
-  line-height: 1;
-  opacity: 0.7;
-}
-
-.usage-instrument-empty p {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.usage-instrument-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(200, 169, 106, 0.1);
-}
-
-html[data-theme="light"] .usage-instrument-footer {
-  border-top-color: rgba(184, 130, 14, 0.12);
-}
-
-.usage-instrument-footer-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px 22px;
-}
-
-.usage-instrument-footer-cell {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.usage-instrument-footer-cell em {
-  font-style: normal;
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted-soft);
-}
-
-.usage-instrument-footer-cell strong {
-  font-family: var(--font-display);
-  font-weight: 500;
-  font-size: 0.95rem;
-  color: var(--text);
-}
-
-.usage-instrument-notes {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.usage-instrument-note-chip {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  padding: 3px 9px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(200, 169, 106, 0.16);
-  background: rgba(200, 169, 106, 0.04);
-}
-
-html[data-theme="light"] .usage-instrument-note-chip {
-  border-color: rgba(184, 130, 14, 0.18);
-  background: rgba(184, 130, 14, 0.04);
-}
-
 /* ── Dial gauge ── */
 .usage-dial {
   display: flex;
@@ -6160,77 +6358,6 @@ html[data-theme="light"] .usage-dial-hub-cap {
     flex-wrap: wrap;
   }
 
-  /*  Deck collapses to a single column; dials shrink and align center. */
-  .usage-deck-toggle {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    gap: 10px;
-    padding: 12px 14px;
-  }
-
-  .usage-deck-toggle-summary {
-    display: none;
-  }
-
-  .usage-deck-toggle-title {
-    font-size: 1rem;
-  }
-
-  .usage-deck-body {
-    padding: 14px 14px 18px;
-    gap: 14px;
-  }
-
-  .usage-deck-status {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    gap: 10px 12px;
-    padding: 10px 12px;
-  }
-
-  .usage-deck-status-actions {
-    grid-column: 1 / -1;
-    justify-content: space-between;
-  }
-
-  .usage-deck-grid,
-  .usage-deck-grid[data-bucket-count="2"],
-  .usage-deck-grid[data-bucket-count="3"],
-  .usage-deck-grid[data-bucket-count="4"],
-  .usage-deck-grid[data-bucket-count="5"],
-  .usage-deck-grid[data-bucket-count="6"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .usage-deck-grid > * {
-    grid-column: auto;
-  }
-
-  .usage-instrument {
-    padding: 16px 16px 14px;
-  }
-
-  .usage-instrument-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .usage-instrument-meta {
-    align-self: flex-end;
-  }
-
-  .usage-instrument-title {
-    font-size: 1.02rem;
-  }
-
-  .usage-instrument-dials {
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 14px;
-  }
-
-  .usage-instrument.emphasis-primary .usage-instrument-dials {
-    gap: 18px;
-  }
-
   .usage-dial-svg {
     max-width: 130px;
   }
@@ -6241,10 +6368,6 @@ html[data-theme="light"] .usage-dial-hub-cap {
 
   .usage-dial-percent strong {
     font-size: 1.55rem;
-  }
-
-  .usage-instrument-footer-row {
-    gap: 14px 18px;
   }
 }
 
@@ -11860,61 +11983,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 /* ─── Personal assistant ─── */
-/* Floating action button, fixed to the bottom-right of the home page for
-   one-tap access. Collapses to a circular glyph on narrow/touch viewports. */
-.assistant-fab {
-  position: fixed;
-  right: max(20px, env(safe-area-inset-right));
-  bottom: max(20px, env(safe-area-inset-bottom));
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--glass-line));
-  background: color-mix(in srgb, var(--accent) 10%, var(--glass-bg));
-  color: var(--accent-strong);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--shadow);
-  backdrop-filter: var(--glass-blur);
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-
-.assistant-fab:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--glass-bg));
-  border-color: var(--accent);
-}
-
-.assistant-fab-glyph {
-  display: inline-flex;
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
-@media (max-width: 640px) {
-  .assistant-fab {
-    padding: 0;
-    width: 52px;
-    height: 52px;
-    justify-content: center;
-  }
-  .assistant-fab-label {
-    display: none;
-  }
-  .assistant-fab-glyph {
-    font-size: 1.5rem;
-  }
-}
-
 .assistant-banner {
   position: relative;
   display: flex;
@@ -12319,120 +12387,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 /* ─── Blackboard ─── */
-/* Home-deck summary panel */
-.board-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.board-summary-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.board-summary-eyebrow {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-cool);
-}
-
-.board-summary-title {
-  margin: 3px 0 0;
-  font-family: var(--font-display);
-  font-size: 1.15rem;
-  color: var(--text-strong);
-}
-
-.board-summary-link {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-cool);
-  text-decoration: none;
-}
-
-.board-summary-link:hover {
-  text-decoration: underline;
-}
-
-.board-summary-empty {
-  margin: 0;
-}
-
-.board-summary-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.board-summary-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  text-decoration: none;
-  color: var(--text);
-  transition:
-    background 0.14s ease,
-    border-color 0.14s ease;
-}
-
-.board-summary-row:hover {
-  background: var(--bg-card-soft);
-  border-color: var(--line);
-}
-
-.board-summary-name {
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-summary-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--muted-soft);
-}
-
-.board-summary-count {
-  color: var(--accent-cool);
-}
-
-.board-summary-more {
-  padding: 4px 11px;
-}
-
-.board-summary-more a {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--muted);
-  text-decoration: none;
-}
-
-.board-summary-more a:hover {
-  color: var(--accent-cool);
-}
-
 /* Composer */
 /* Composer collapses to a slim bar so reading the board, not posting, owns the
    top of the page. */
@@ -16124,12 +16078,6 @@ html[data-theme="light"] .wp-hl {
   font-size: 0.82rem;
 }
 
-/* In the collapsed pill the control sits after the "change" link; nudge it
-   apart so the two concerns (host vs. SSH auth) read as distinct. */
-.backend-pill .ssh-auth-row {
-  margin-left: auto;
-}
-
 .ssh-connect-backdrop {
   position: fixed;
   inset: 0;
@@ -17134,56 +17082,6 @@ html[data-theme="light"] .wp-hl {
   padding: 22px 24px;
 }
 
-/* Bottom-left glass floater with the unresolved-count badge — the only glass
-   surface in the inbox feature (mirrors .assistant-fab, flipped to the left). */
-.inbox-dock {
-  position: fixed;
-  left: max(20px, env(safe-area-inset-left));
-  bottom: max(20px, env(safe-area-inset-bottom));
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--glass-line);
-  background: var(--glass-bg);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--shadow);
-  backdrop-filter: var(--glass-blur);
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-
-.inbox-dock:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line));
-}
-
-.inbox-dock-glyph {
-  display: inline-flex;
-  color: var(--accent-strong);
-}
-
-.inbox-dock-count {
-  flex: none;
-  min-width: 18px;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent-strong);
-  font-size: 0.72rem;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
 @media (max-width: 720px) {
   /* Desktop traps scroll inside a fixed-100dvh shell with independent per-pane
      overflow — which fights the mobile URL-bar collapse and double-scrolls. On
@@ -17221,44 +17119,9 @@ html[data-theme="light"] .wp-hl {
   .inbox-doc-actions {
     margin-left: 0;
   }
-
-  .inbox-dock {
-    padding: 0;
-    width: 52px;
-    height: 52px;
-    justify-content: center;
-  }
-
-  .inbox-dock-label {
-    display: none;
-  }
-
-  .inbox-dock-count {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background: var(--accent);
-    color: var(--bg-base);
-  }
 }
 
 /* ─── Telemetry dashboard ─── */
-
-/* Home entry point into the dashboard is the "View full telemetry" link inside
-   the rate-limit Telemetry deck (.usage-deck-full-link). */
-.usage-deck-full-link {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--accent-cool);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.usage-deck-full-link:hover {
-  text-decoration: underline;
-}
 
 /* Disabled state shown on /telemetry when the master switch is off. Flat,
    opaque, in-flow content — reuses the .board-empty layout inside .panel. */

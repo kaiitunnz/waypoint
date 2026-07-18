@@ -1,17 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { connectSessionsSocket, fetchInboxUnresolvedCount } from "@/lib/api";
 import type { SessionEnvelope } from "@/lib/types";
 
-// Bottom-left glass floater with the unresolved-inbox count. Mounted only on
-// the homepage (auth is owned there and passed in), so the count socket lives
-// only while the homepage is mounted. Seeds from the REST count, then tracks
-// the absolute `unresolved_count` on every `inbox_update` over the global
-// session socket, re-fetching on (re)connect to close the reconnect gap.
-export function InboxDock({ host, token }: { host: string; token: string }) {
+// Shared unresolved-inbox count for the nav count and the floater badge. Seeds
+// from the REST count, then tracks the absolute `unresolved_count` on every
+// `inbox_update` over a dedicated session socket, re-fetching on (re)connect to
+// close the reconnect gap.
+export function useInboxCount(host: string, token: string): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
@@ -68,34 +66,5 @@ export function InboxDock({ host, token }: { host: string; token: string }) {
     };
   }, [host, token]);
 
-  return (
-    <Link className="inbox-dock" href="/inbox" aria-label="Open inbox">
-      <span className="inbox-dock-glyph" aria-hidden="true">
-        <EnvelopeIcon />
-      </span>
-      <span className="inbox-dock-label">Inbox</span>
-      {count > 0 ? (
-        <span className="inbox-dock-count">{count > 99 ? "99+" : count}</span>
-      ) : null}
-    </Link>
-  );
-}
-
-function EnvelopeIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="m3 7 9 6 9-6" />
-    </svg>
-  );
+  return count;
 }

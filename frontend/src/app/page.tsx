@@ -1,22 +1,23 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AssistantMark } from "@/components/AssistantMark";
 import { BackendSwitcher } from "@/components/BackendSwitcher";
-import { BoardPanel } from "@/components/BoardPanel";
-import { InboxDock } from "@/components/InboxDock";
+import { CompactLaunch, type LaunchSheetMode } from "@/components/CompactLaunch";
+import { HomeNav } from "@/components/HomeNav";
+import { InstrumentRail } from "@/components/InstrumentRail";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
+import { PresenceFloaters } from "@/components/PresenceFloaters";
 import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
+import { Sheet } from "@/components/Sheet";
 import { SessionSettingsModal } from "@/components/SessionSettingsModal";
 import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { UsageDashboardSection } from "@/components/UsageDashboardSection";
+import { useInboxCount } from "@/lib/useInboxCount";
 import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
@@ -41,6 +42,7 @@ import {
   fetchSchedules,
   fetchSessionPreset,
   fetchSessions,
+  fetchUsageDashboard,
   importBackendThread,
   isAuthError,
   login,
@@ -80,6 +82,7 @@ import {
   SessionPresetWriteRequest,
   SessionRecord,
   SessionTransport,
+  UsageDashboardBucket,
 } from "@/lib/types";
 
 interface ThreadSummary {
@@ -163,6 +166,14 @@ export default function HomePage() {
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
   const [messageSchedules, setMessageSchedules] = useState<MessageSchedule[]>([]);
   const [boardChannels, setBoardChannels] = useState<BoardChannel[]>([]);
+  const [usageBuckets, setUsageBuckets] = useState<UsageDashboardBucket[] | null>(
+    null,
+  );
+  const [launchSheetOpen, setLaunchSheetOpen] = useState(false);
+  const [launchSheetMode, setLaunchSheetMode] = useState<LaunchSheetMode>("new");
+  const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
+  const [launchingPresetId, setLaunchingPresetId] = useState<string | null>(null);
+  const inboxCount = useInboxCount(host, token);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
   const [threadsByBackend, setThreadsByBackend] = useState<
     Record<Backend, ThreadSummary[]>
@@ -436,6 +447,28 @@ export default function HomePage() {
     };
   }, [host, resetAuthState, token]);
 
+  // Telemetry tile source: one light per-account rate-limit snapshot from the
+  // existing /api/usage endpoint (never the heavy telemetry time-series, never
+  // the full dashboard component). Degrades to null so the tile falls back to a
+  // plain link when usage is momentarily unavailable.
+  useEffect(() => {
+    if (!host || !token) {
+      setUsageBuckets(null);
+      return;
+    }
+    let active = true;
+    fetchUsageDashboard(host, token)
+      .then((response) => {
+        if (active) setUsageBuckets(response.buckets);
+      })
+      .catch(() => {
+        if (active) setUsageBuckets(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [host, token]);
+
   // The set of backends we should fetch threads for: those that
   // advertise `supports_thread_discovery=True` AND are listed by the
   // active launch target (or all registered backends when launching
@@ -690,6 +723,54 @@ export default function HomePage() {
           : "failed to create session",
       );
     }
+  }
+
+  // One-tap launch from a preset chip on the compact launch deck. Resolves the
+  // preset spec (fetching the full, env-carrying spec only when the preset pins
+  // env vars) and routes through handleCreate so cwd-not-found, SSH-master
+  // retry, and auth handling stay identical to the sheet form. cwd/title are
+  // per-launch specifics absent from preset specs, so the effective default cwd
+  // is used. A null preset launches the plain backend default.
+  async function handleLaunchPreset(preset: SessionPresetSummary | null) {
+    if (launchingPresetId) {
+      return;
+    }
+    const marker = preset?.id ?? "__default__";
+    setLaunchingPresetId(marker);
+    try {
+      const spec = preset?.spec ?? null;
+      const backend = (spec?.backend ?? effectiveDefaultBackend) as Backend;
+      let launchEnv: Record<string, string> = {};
+      if (preset && (spec?.launch_env_keys?.length ?? 0) > 0) {
+        try {
+          const full = await fetchSessionPreset(host, token, preset.id, true);
+          launchEnv = full.spec.launch_env ?? {};
+        } catch {
+          // Fall through with empty env — handleCreate surfaces any failure.
+        }
+      }
+      await handleCreate(
+        backend,
+        effectiveDefaultCwd,
+        "",
+        spec?.model ?? null,
+        spec?.effort ?? null,
+        spec?.transport ?? null,
+        spec?.args ?? [],
+        spec?.config_overrides ?? [],
+        launchEnv,
+        spec?.permission_mode ?? null,
+        preset?.id ?? null,
+        spec?.account_profile_id ?? null,
+      );
+    } finally {
+      setLaunchingPresetId(null);
+    }
+  }
+
+  function openLaunchSheet(mode: LaunchSheetMode) {
+    setLaunchSheetMode(mode);
+    setLaunchSheetOpen(true);
   }
 
   async function refreshPresets() {
@@ -1060,18 +1141,20 @@ export default function HomePage() {
     setError("Switched backend. Log in to continue.");
   }
 
-  const connectionLabel = token
-    ? connection === "open"
-      ? "live"
-      : connection === "reconnecting"
-        ? "reconnecting"
-        : connection === "connecting"
-          ? "connecting"
-          : "idle"
-    : "signed out";
+  const filteredSessions = sessions.filter(
+    (session) =>
+      session.source !== "assistant" && session.source !== "telemetry",
+  );
+  const activeSessionCount = filteredSessions.filter(
+    (session) => session.status !== "exited",
+  ).length;
+  const pendingScheduledCount =
+    schedules.filter((schedule) => schedule.status === "pending").length +
+    messageSchedules.filter((message) => message.status === "pending").length;
+  const launchTargetLabel = activeLaunchTarget?.name ?? "Local";
 
   return (
-    <main className="page-shell">
+    <main className="page-shell page-home">
       <header className="app-bar">
         <div className="app-bar-brand">
           <div className="app-bar-mark" aria-hidden="true">
@@ -1085,12 +1168,28 @@ export default function HomePage() {
           </div>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint</p>
-            <h1 className="app-bar-title">Coding session control deck</h1>
+            <h1 className="app-bar-title">Sessions</h1>
           </div>
         </div>
         <div className="app-bar-meta">
-          <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
-          {host ? <span className="muted">{host}</span> : null}
+          {token ? (
+            <BackendSwitcher
+              host={host}
+              token={token}
+              launchTargets={launchTargets}
+              targetId={activeLaunchTargetId}
+              connection={connection}
+              onSwitch={handleSwitchBackend}
+              onConnectTarget={(target) => {
+                setConnectError("");
+                setConnectPrompt({ target, retry: null });
+              }}
+              onDisconnectTarget={handleDisconnectTarget}
+              onAuthFailure={handleAuthFailure}
+            />
+          ) : host ? (
+            <span className="muted">{host}</span>
+          ) : null}
           <ThemeToggle />
         </div>
       </header>
@@ -1102,92 +1201,48 @@ export default function HomePage() {
       ) : null}
       {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
       {token ? (
-        <BackendSwitcher
-          host={host}
-          token={token}
-          launchTargets={launchTargets}
-          targetId={activeLaunchTargetId}
-          onSwitch={handleSwitchBackend}
-          onConnectTarget={(target) => {
-            setConnectError("");
-            setConnectPrompt({ target, retry: null });
-          }}
-          onDisconnectTarget={handleDisconnectTarget}
-          onAuthFailure={handleAuthFailure}
-        />
-      ) : null}
-      {token ? (
-        <LaunchPanel
-          host={host}
-          token={token}
-          defaultBackend={effectiveDefaultBackend}
-          defaultCwd={effectiveDefaultCwd}
-          defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
-          accountProfilesByBackend={accountProfilesByBackend}
-          targetLabel={activeLaunchTarget?.name ?? null}
-          launchTargetId={activeLaunchTargetId || null}
-          recentCwds={recentCwds}
-          supportedBackends={launchableBackends}
-          catalog={catalog}
-          threadsByBackend={threadsByBackend}
-          loadingByBackend={loadingByBackend}
-          onDiscoveryScopeChange={handleDiscoveryScopeChange}
-          onDeleteThread={handleDeleteThread}
-          onAttach={handleAttach}
-          onCreate={handleCreate}
-          onImportThread={handleImportThread}
-          onCreateSchedule={handleCreateSchedule}
-          onAuthFailure={handleAuthFailure}
-          cwdError={cwdError}
-          onClearCwdError={() => setCwdError(null)}
-          presets={sessionPresets}
-          defaultPresetId={defaultPresetId}
-          onFetchPresetSpec={(presetId) =>
-            fetchSessionPreset(host, token, presetId, true)
-          }
-          onSavePreset={handleSavePreset}
-          onSetDefaultPreset={handleSetDefaultPreset}
-          onDeletePreset={handleDeletePreset}
-        />
-      ) : null}
-      {token ? (
-        <SchedulePanel
-          host={host}
-          token={token}
-          schedules={schedules}
-          messageSchedules={messageSchedules}
-          sessions={sessions}
-          catalog={catalog}
-          onCancelSchedule={handleCancelSchedule}
-          onClearScheduleHistory={handleClearScheduleHistory}
-          onDeleteMessage={handleDeleteMessageSchedule}
-          onClearMessageHistory={handleClearMessageScheduleHistory}
-        />
-      ) : null}
-      {token ? (
-        <UsageDashboardSection
-          host={host}
-          token={token}
-          sessions={sessions}
-          telemetryEnabled={telemetryEnabled}
-          onAuthFailure={handleAuthFailure}
-        />
-      ) : null}
-      {token ? <BoardPanel channels={boardChannels} /> : null}
-      {token ? (
-        <SessionList
-          sessions={sessions.filter(
-            (session) =>
-              session.source !== "assistant" && session.source !== "telemetry",
-          )}
-          catalog={catalog}
-          onDelete={handleDelete}
-          onDeleteExited={handleDeleteExited}
-          onTerminate={handleTerminate}
-          onSetPinned={handleSetPinned}
-          onSetTitle={handleSetTitle}
-          onOpenSettings={setSettingsSession}
-        />
+        <>
+          <HomeNav
+            activeSessions={activeSessionCount}
+            boardChannels={boardChannels.length}
+            telemetryAccounts={usageBuckets?.length ?? null}
+            inboxCount={inboxCount}
+            scheduledCount={pendingScheduledCount}
+            onOpenScheduled={() => setScheduleSheetOpen(true)}
+          />
+          <div className="home-layout">
+            <CompactLaunch
+              targetLabel={launchTargetLabel}
+              presets={sessionPresets}
+              defaultPresetId={defaultPresetId}
+              defaultBackend={effectiveDefaultBackend}
+              launchingPresetId={launchingPresetId}
+              onLaunchPreset={handleLaunchPreset}
+              onOpenSheet={openLaunchSheet}
+            />
+            <div className="home-main">
+              <SessionList
+                sessions={filteredSessions}
+                catalog={catalog}
+                onDelete={handleDelete}
+                onDeleteExited={handleDeleteExited}
+                onTerminate={handleTerminate}
+                onSetPinned={handleSetPinned}
+                onSetTitle={handleSetTitle}
+                onOpenSettings={setSettingsSession}
+              />
+            </div>
+            <InstrumentRail
+              usageBuckets={usageBuckets}
+              telemetryEnabled={telemetryEnabled}
+              boardChannels={boardChannels}
+              schedules={schedules}
+              messageSchedules={messageSchedules}
+              sessions={filteredSessions}
+              onOpenScheduled={() => setScheduleSheetOpen(true)}
+            />
+          </div>
+        </>
       ) : null}
       {settingsSession ? (
         <SessionSettingsModal
@@ -1203,19 +1258,80 @@ export default function HomePage() {
           onAuthFailure={handleAuthFailure}
         />
       ) : null}
-      {token && assistant ? (
-        <Link
-          className="assistant-fab"
-          href="/assistant"
-          aria-label="Open personal assistant"
-        >
-          <span className="assistant-fab-glyph" aria-hidden="true">
-            <AssistantMark />
-          </span>
-          <span className="assistant-fab-label">Assistant</span>
-        </Link>
+      {token ? (
+        <PresenceFloaters assistant={assistant} inboxCount={inboxCount} />
       ) : null}
-      {token ? <InboxDock host={host} token={token} /> : null}
+      {token ? (
+        <Sheet
+          open={launchSheetOpen}
+          onClose={() => setLaunchSheetOpen(false)}
+          eyebrow={`New session · ${launchTargetLabel}`}
+          title="Start a session"
+        >
+          <LaunchPanel
+            host={host}
+            token={token}
+            defaultBackend={effectiveDefaultBackend}
+            defaultCwd={effectiveDefaultCwd}
+            defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
+            accountProfilesByBackend={accountProfilesByBackend}
+            targetLabel={activeLaunchTarget?.name ?? null}
+            launchTargetId={activeLaunchTargetId || null}
+            recentCwds={recentCwds}
+            supportedBackends={launchableBackends}
+            catalog={catalog}
+            threadsByBackend={threadsByBackend}
+            loadingByBackend={loadingByBackend}
+            onDiscoveryScopeChange={handleDiscoveryScopeChange}
+            onDeleteThread={handleDeleteThread}
+            onAttach={handleAttach}
+            onCreate={handleCreate}
+            onImportThread={handleImportThread}
+            onCreateSchedule={handleCreateSchedule}
+            onAuthFailure={handleAuthFailure}
+            cwdError={cwdError}
+            onClearCwdError={() => setCwdError(null)}
+            presets={sessionPresets}
+            defaultPresetId={defaultPresetId}
+            onFetchPresetSpec={(presetId) =>
+              fetchSessionPreset(host, token, presetId, true)
+            }
+            onSavePreset={handleSavePreset}
+            onSetDefaultPreset={handleSetDefaultPreset}
+            onDeletePreset={handleDeletePreset}
+            mode={launchSheetMode}
+            onModeChange={setLaunchSheetMode}
+          />
+        </Sheet>
+      ) : null}
+      {token ? (
+        <Sheet
+          open={scheduleSheetOpen}
+          onClose={() => setScheduleSheetOpen(false)}
+          eyebrow="Manage · scheduled"
+          title="Scheduled"
+        >
+          {schedules.length || messageSchedules.length ? (
+            <SchedulePanel
+              host={host}
+              token={token}
+              schedules={schedules}
+              messageSchedules={messageSchedules}
+              sessions={sessions}
+              catalog={catalog}
+              onCancelSchedule={handleCancelSchedule}
+              onClearScheduleHistory={handleClearScheduleHistory}
+              onDeleteMessage={handleDeleteMessageSchedule}
+              onClearMessageHistory={handleClearMessageScheduleHistory}
+            />
+          ) : (
+            <p className="wp-sheet-empty muted">
+              Nothing scheduled. Queue a session launch or a message from the
+              launch sheet&rsquo;s Schedule tab.
+            </p>
+          )}
+        </Sheet>
+      ) : null}
       {connectPrompt ? (
         <SshConnectModal
           targetName={connectPrompt.target.name}

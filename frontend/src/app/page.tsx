@@ -47,6 +47,7 @@ import {
   isAuthError,
   login,
   postAction,
+  refreshUsageDashboard,
   setDefaultSessionPreset,
   setSessionPinned,
   setSessionTitle,
@@ -169,6 +170,7 @@ export default function HomePage() {
   const [usageBuckets, setUsageBuckets] = useState<UsageDashboardBucket[] | null>(
     null,
   );
+  const [refreshingUsage, setRefreshingUsage] = useState(false);
   const [launchSheetOpen, setLaunchSheetOpen] = useState(false);
   const [launchSheetMode, setLaunchSheetMode] = useState<LaunchSheetMode>("new");
   const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
@@ -272,6 +274,27 @@ export default function HomePage() {
   const handleAuthFailure = useCallback(() => {
     resetAuthState("Session expired. Log in again.");
   }, [resetAuthState]);
+
+  const handleRefreshUsage = useCallback(async () => {
+    if (!host || !token) return;
+    setRefreshingUsage(true);
+    try {
+      const response = await refreshUsageDashboard(host, token);
+      setUsageBuckets(response.buckets);
+    } catch (refreshError) {
+      if (isAuthError(refreshError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "failed to refresh usage",
+      );
+    } finally {
+      setRefreshingUsage(false);
+    }
+  }, [host, token, handleAuthFailure]);
 
   useEffect(() => {
     const currentHost = readHost();
@@ -1234,6 +1257,8 @@ export default function HomePage() {
             </div>
             <InstrumentRail
               usageBuckets={usageBuckets}
+              refreshingUsage={refreshingUsage}
+              onRefreshUsage={handleRefreshUsage}
               telemetryEnabled={telemetryEnabled}
               boardChannels={boardChannels}
               schedules={schedules}

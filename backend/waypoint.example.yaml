@@ -158,7 +158,12 @@ plugin_configs:
 # notifications:
 #   enabled: true
 #   public_base_url: https://waypoint.example.ts.net  # required; operator-controlled
-#                                                      # HTTPS origin, no token
+#                                                      # http(s) origin, optional port,
+#                                                      # no token (e.g.
+#                                                      # http://host.ts.net:3010). A valid
+#                                                      # https origin also gets a tappable
+#                                                      # inline button; otherwise the deep
+#                                                      # link goes in the message text.
 #   preview_chars: 900            # max preview body length before truncation
 #   title_chars: 160              # max title length
 #   worker_concurrency: 4         # concurrent sends per worker tick

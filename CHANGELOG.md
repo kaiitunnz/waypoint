@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/kaiitunnz/waypoint/compare/v0.12.0...v0.12.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* match dedicated pages' width to the redesigned homepage ([#327](https://github.com/kaiitunnz/waypoint/issues/327)) ([bb829a3](https://github.com/kaiitunnz/waypoint/commit/bb829a36d1d10c935e046659bd914b22e0a53c0d))
+
 ## [0.12.0](https://github.com/kaiitunnz/waypoint/compare/v0.11.0...v0.12.0) (2026-07-18)
 
 

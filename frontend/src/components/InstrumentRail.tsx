@@ -172,42 +172,21 @@ function TelemetryTile({
         {buckets.length} account{buckets.length === 1 ? "" : "s"}
       </h4>
       <ul className="inst-accounts">
-        {ordered.map((bucket) => {
-          const five = findWindow(bucket, "5h");
-          const weekly = findWindow(bucket, "weekly");
-          const fivePct = five ? rateLimitWindowPercent(five) : null;
-          const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
-          const fiveReset = five ? formatRateLimitWindowResetShort(five) : null;
-          const weekReset = weekly ? formatRateLimitWindowResetShort(weekly) : null;
-          const fiveResetFull = five ? formatRateLimitWindowReset(five) : null;
-          const weekResetFull = weekly ? formatRateLimitWindowReset(weekly) : null;
-          const peak = bucketPeak(bucket);
-          return (
-            <li className="inst-account" key={bucket.account_key}>
-              <span className="inst-account-head">
-                <span
-                  className={`inst-account-dot tone-${toneOf(peak)}`}
-                  aria-hidden="true"
-                />
-                <span className="inst-account-name" title={bucket.account_label}>
-                  {bucket.account_label}
-                </span>
+        {ordered.map((bucket) => (
+          <li className="inst-account" key={bucket.account_key}>
+            <span className="inst-account-head">
+              <span
+                className={`inst-account-dot tone-${toneOf(bucketPeak(bucket))}`}
+                aria-hidden="true"
+              />
+              <span className="inst-account-name" title={bucket.account_label}>
+                {bucket.account_label}
               </span>
-              <UsageWindowMeter
-                label="5h"
-                percent={fivePct}
-                reset={fiveReset}
-                resetTitle={fiveResetFull}
-              />
-              <UsageWindowMeter
-                label="wk"
-                percent={weekPct}
-                reset={weekReset}
-                resetTitle={weekResetFull}
-              />
-            </li>
-          );
-        })}
+            </span>
+            <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
+            <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -238,19 +217,16 @@ function toneOf(percent: number | null): "ok" | "warn" | "danger" {
   return t === "good" ? "ok" : t === "warn" ? "warn" : "danger";
 }
 
-// One labelled window row: a caption, a tone-filled meter, the percentage, and a
-// compact reset hint (time until the quota window resets) when one is known.
 function UsageWindowMeter({
   label,
-  percent,
-  reset,
-  resetTitle,
+  window,
 }: {
   label: string;
-  percent: number | null;
-  reset: string | null;
-  resetTitle: string | null;
+  window: UsageWindow | null;
 }) {
+  const percent = window ? rateLimitWindowPercent(window) : null;
+  const reset = window ? formatRateLimitWindowResetShort(window) : null;
+  const resetTitle = window ? formatRateLimitWindowReset(window) : null;
   const tone = toneOf(percent);
   return (
     <span className="inst-window">

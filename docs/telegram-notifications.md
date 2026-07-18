@@ -76,6 +76,43 @@ Session notifications link to `/session/<id>`. Opening any link uses Waypoint's
 normal login — the link itself carries no token. Enabling the feature does not
 retro-notify already-pending items; only new transitions notify.
 
+## Choosing which signals notify
+
+`signals` independently enables each of the four notification kinds. All default
+to `true`, so an `enabled` configuration that omits the block delivers every
+kind exactly as before.
+
+```yaml
+notifications:
+  enabled: true
+  signals:
+    inbox: true         # new inbox items
+    plan: true          # plan approvals
+    permission: false   # permission approvals
+    question: true      # user questions
+```
+
+A disabled signal is a policy decision applied **before** any outbox row is
+created: the source event and inbox item are still stored durably, but no
+delivery is queued and no external message is sent. Unknown keys fail
+validation. The mapping is `inbox` → inbox items, `plan` → plan approvals,
+`permission` → permission approvals, `question` → user questions.
+
+## Active-session presence
+
+A visible `/session/<id>` page suppresses that session's plan, permission, and
+question alerts while it is open — no point pinging a phone about a request the
+operator is already looking at. Inbox alerts are never presence-suppressed
+(an inbox item can originate from a different session).
+
+Presence is a short in-memory lease per browser tab, renewed while the tab is
+visible. A hidden tab, a closed page, a navigation, or a server restart lets
+the lease expire and the session becomes notifiable again within ~45 seconds;
+presence never permanently hides an alert. Two tabs or devices keep a session
+present until the last lease expires. There is no separate switch — presence is
+intrinsic to avoiding redundant active-session messages. To always receive
+every alert, disable no signals and keep the session page closed.
+
 ## `public_base_url`
 
 The operator-controlled origin the deep links are built from. It is **required**
@@ -109,7 +146,11 @@ large ids keep their exact form.
 | `worker_concurrency` | `4` | Concurrent sends per worker tick. |
 | `max_attempts` | `8` | Retries before a delivery is marked failed. |
 | `http_timeout_seconds` | `10` | Per-request Telegram timeout. |
-| `retention_days` | `30` | Sent/failed delivery rows are purged after this. |
+| `retention_days` | `30` | Sent/failed/suppressed delivery rows are purged after this. |
+| `signals.inbox` | `true` | Notify on new inbox items. |
+| `signals.plan` | `true` | Notify on plan approvals. |
+| `signals.permission` | `true` | Notify on permission approvals. |
+| `signals.question` | `true` | Notify on user questions. |
 | `channels[].bot_token_env` | — | Env var holding the bot token. |
 | `channels[].chat_ids` | `[]` | Target chat ids, as strings. |
 

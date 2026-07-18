@@ -169,7 +169,15 @@ plugin_configs:
 #   worker_concurrency: 4         # concurrent sends per worker tick
 #   max_attempts: 8               # retries before a delivery is marked failed
 #   http_timeout_seconds: 10
-#   retention_days: 30            # sent/failed delivery rows purged after this
+#   retention_days: 30            # sent/failed/suppressed delivery rows purged after this
+#   signals:                      # per-signal switches; omit the block to keep all on
+#     inbox: true                 # new inbox items
+#     plan: true                  # plan approvals
+#     permission: true            # permission approvals
+#     question: true              # user questions
+#   # A visible /session/<id> page suppresses that session's plan/permission/
+#   # question alerts while open (inbox alerts are unaffected); a hidden or
+#   # closed page becomes eligible again within ~45s.
 #   channels:
 #     - id: personal-telegram
 #       type: telegram

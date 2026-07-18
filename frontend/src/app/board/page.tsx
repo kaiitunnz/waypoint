@@ -1090,7 +1090,7 @@ export default function BoardPage() {
   }, [refreshChannels, refreshManagers]);
 
   // Resolve the initial view once: `?view=` wins, then a `?channel=` deep link
-  // opens Channels, else Board when a manager exists.
+  // opens Channels, else default to Board.
   useEffect(() => {
     if (viewResolvedRef.current || state !== "ready") return;
     viewResolvedRef.current = true;
@@ -1099,9 +1099,9 @@ export default function BoardPage() {
     } else if (deepLinkRef.current) {
       setView("channels");
     } else {
-      setView(managers.length > 0 ? "board" : "channels");
+      setView("board");
     }
-  }, [state, managers]);
+  }, [state]);
 
   useEffect(() => {
     if (!selectedManagerId) {

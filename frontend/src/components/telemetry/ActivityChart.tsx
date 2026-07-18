@@ -200,6 +200,17 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
     return map;
   }, [activity]);
 
+  // Anchor the weekday row order to the range's first calendar day so the rows
+  // read chronologically — a last-7-days window that opens on a Sunday renders
+  // Sun→Sat with today last, instead of a fixed Mon→Sun axis that strands the
+  // range's opening weekday below later dates.
+  const orderedDows = useMemo(() => {
+    const firstDay = activity?.daily?.[0]?.day;
+    const anchor = firstDay ? pythonDow(firstDay) : 0;
+    const start = anchor < 0 ? 0 : anchor;
+    return Array.from({ length: 7 }, (_, i) => (start + i) % 7);
+  }, [activity]);
+
   if (loading && !activity) {
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }
@@ -334,10 +345,11 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {DOW_LABELS.map((label, dow) => {
+                  {orderedDows.map((dow) => {
+                    const label = DOW_LABELS[dow];
                     const dates = dowDates.get(dow) ?? [];
                     return (
-                      <tr key={label}>
+                      <tr key={dow}>
                         <th scope="row" className="tm-heatmap-dow">
                           <span className="tm-heatmap-dow-name">{label}</span>
                           <span className="tm-heatmap-dow-date">{formatDowDates(dates)}</span>

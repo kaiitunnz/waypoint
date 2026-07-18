@@ -16260,6 +16260,43 @@ body.wp-dock-resizing .inbox-resizer::after {
   outline: none;
 }
 
+/* ↺ affordance shown only when a custom width is stored; clears it back to the
+   default detent. Sits at the foot of the seam, mirroring the usage popover;
+   an opaque card chip keeps it legible over scrolled list rows. */
+.inbox-resize-reset {
+  position: absolute;
+  bottom: 8px;
+  right: 6px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  color: var(--muted-soft);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.inbox-resize-reset:hover {
+  color: var(--accent-strong);
+  border-color: var(--line-strong);
+}
+
+.inbox-resize-reset:focus-visible {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 1px;
+  color: var(--accent-strong);
+}
+
 .inbox-toolbar {
   flex: none;
   display: flex;

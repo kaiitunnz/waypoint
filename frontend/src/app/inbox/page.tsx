@@ -28,13 +28,27 @@ const LIMIT = 30;
 const SIDEBAR_WIDTH_KEY = "waypoint.inboxSidebarWidth";
 const SIDEBAR_WIDTH_DEFAULT = 340;
 const SIDEBAR_WIDTH_MIN = 260;
+const SIDEBAR_WIDTH_MAX = 560;
+// A drag or key step landing within this many pixels of the default snaps back
+// to it and clears the stored width, so the partition reverts to the original
+// position rather than a near-default custom value.
+const SIDEBAR_SNAP_THRESHOLD = 14;
 
 function clampSidebarWidth(w: number): number {
   const max =
     typeof window === "undefined"
-      ? 560
-      : Math.min(560, Math.round(window.innerWidth * 0.5));
+      ? SIDEBAR_WIDTH_MAX
+      : Math.min(SIDEBAR_WIDTH_MAX, Math.round(window.innerWidth * 0.5));
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(w, max));
+}
+
+// `undefined` means "use the default width" (nothing stored); a clamped number
+// that snaps to the default detent collapses back to `undefined`.
+function snapSidebarWidth(w: number): number | undefined {
+  const clamped = clampSidebarWidth(w);
+  return Math.abs(clamped - SIDEBAR_WIDTH_DEFAULT) <= SIDEBAR_SNAP_THRESHOLD
+    ? undefined
+    : clamped;
 }
 
 const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
@@ -202,28 +216,33 @@ function InboxPageInner() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return SIDEBAR_WIDTH_DEFAULT;
+  // `undefined` = the default width (no stored preference).
+  const [sidebarWidth, setSidebarWidth] = useState<number | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
     const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
     return Number.isFinite(stored) && stored > 0
       ? clampSidebarWidth(stored)
-      : SIDEBAR_WIDTH_DEFAULT;
+      : undefined;
   });
   const didInit = useRef(false);
   const filterRef = useRef({ status, q: debouncedQ });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    if (sidebarWidth === undefined) {
+      window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+    } else {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    }
   }, [sidebarWidth]);
 
   const startSidebarResize = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startWidth = sidebarWidth;
+      const startWidth = sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT;
       const onMove = (ev: PointerEvent) =>
-        setSidebarWidth(clampSidebarWidth(startWidth + (ev.clientX - startX)));
+        setSidebarWidth(snapSidebarWidth(startWidth + (ev.clientX - startX)));
       const onUp = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
@@ -239,12 +258,14 @@ function InboxPageInner() {
   const onSidebarResizeKey = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      setSidebarWidth((w) => clampSidebarWidth(w + 24));
+      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) + 24));
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      setSidebarWidth((w) => clampSidebarWidth(w - 24));
+      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) - 24));
     }
   }, []);
+
+  const resetSidebarWidth = useCallback(() => setSidebarWidth(undefined), []);
 
   useEffect(() => {
     filterRef.current = { status, q: debouncedQ };
@@ -533,7 +554,9 @@ function InboxPageInner() {
         <div
           className="inbox-layout"
           style={
-            { "--inbox-sidebar-w": `${sidebarWidth}px` } as React.CSSProperties
+            {
+              "--inbox-sidebar-w": `${sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}px`,
+            } as React.CSSProperties
           }
         >
           <div
@@ -664,13 +687,24 @@ function InboxPageInner() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize inbox sidebar"
-              aria-valuenow={Math.round(sidebarWidth)}
+              aria-valuenow={sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}
               aria-valuemin={SIDEBAR_WIDTH_MIN}
-              aria-valuemax={560}
+              aria-valuemax={SIDEBAR_WIDTH_MAX}
               tabIndex={0}
               onPointerDown={startSidebarResize}
               onKeyDown={onSidebarResizeKey}
             />
+            {sidebarWidth !== undefined ? (
+              <button
+                type="button"
+                className="inbox-resize-reset"
+                aria-label="Reset sidebar width"
+                title="Reset width"
+                onClick={resetSidebarWidth}
+              >
+                ↺
+              </button>
+            ) : null}
           </div>
 
           <div

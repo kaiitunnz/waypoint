@@ -109,9 +109,9 @@ export function CompactLaunch({
         <button
           type="button"
           className="launch-chip is-ghost"
-          onClick={() => onOpenSheet("attach")}
+          onClick={() => onOpenSheet("schedule")}
         >
-          Attach tmux…
+          Schedule…
         </button>
       </div>
     </section>

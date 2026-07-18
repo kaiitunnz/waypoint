@@ -42,12 +42,12 @@ export function InstrumentRail({
   return (
     <aside className="rail" aria-label="Instruments">
       <TelemetryTile buckets={usageBuckets} telemetryEnabled={telemetryEnabled} />
-      <BoardTile channels={boardChannels} />
       <ScheduledTile
         schedules={schedules}
         messageSchedules={messageSchedules}
         onOpen={onOpenScheduled}
       />
+      <BoardTile channels={boardChannels} />
     </aside>
   );
 }
@@ -146,26 +146,19 @@ function TelemetryTile({
           const fivePct = five ? rateLimitWindowPercent(five) : null;
           const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
           const peak = bucketPeak(bucket);
-          const t = toneOf(peak);
           return (
             <li className="inst-account" key={bucket.account_key}>
               <span className="inst-account-head">
-                <span className={`inst-account-dot tone-${t}`} aria-hidden="true" />
+                <span
+                  className={`inst-account-dot tone-${toneOf(peak)}`}
+                  aria-hidden="true"
+                />
                 <span className="inst-account-name" title={bucket.account_label}>
                   {bucket.account_label}
                 </span>
               </span>
-              <span className="inst-account-meter" aria-hidden="true">
-                <span
-                  className={`inst-account-bar tone-${t}`}
-                  style={{ width: `${Math.min(peak, 100)}%` }}
-                />
-              </span>
-              <span className="inst-account-figs">
-                <span>{fivePct !== null ? `${fivePct}%` : "—"} 5h</span>
-                <span>·</span>
-                <span>{weekPct !== null ? `${weekPct}%` : "—"} wk</span>
-              </span>
+              <UsageWindowMeter label="5h" percent={fivePct} />
+              <UsageWindowMeter label="wk" percent={weekPct} />
             </li>
           );
         })}
@@ -179,6 +172,32 @@ function toneOf(percent: number | null): "ok" | "warn" | "danger" {
   return t === "good" ? "ok" : t === "warn" ? "warn" : "danger";
 }
 
+// One labelled window row: a caption, a tone-filled meter, and the percentage —
+// so both the 5h and the weekly window are shown graphically, not just numeric.
+function UsageWindowMeter({
+  label,
+  percent,
+}: {
+  label: string;
+  percent: number | null;
+}) {
+  const tone = toneOf(percent);
+  return (
+    <span className="inst-window">
+      <span className="inst-window-cap">{label}</span>
+      <span className="inst-window-meter" aria-hidden="true">
+        <span
+          className={`inst-window-bar tone-${tone}`}
+          style={{ width: `${Math.min(percent ?? 0, 100)}%` }}
+        />
+      </span>
+      <span className="inst-window-pct">
+        {percent !== null ? `${percent}%` : "—"}
+      </span>
+    </span>
+  );
+}
+
 /* ── Board ── */
 
 function BoardTile({ channels }: { channels: BoardChannel[] }) {
@@ -188,9 +207,9 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
     .filter(Boolean)
     .sort()
     .at(-1);
-  // Cheap sparkline: relative post volume across the most-recent channels.
-  const bars = channels.slice(0, 8).map((c) => c.entry_count);
-  const peak = Math.max(1, ...bars);
+  // The API returns channels most-recently-active first; surface the top few
+  // by name + post count — more informative than an abstract volume sparkline.
+  const topChannels = channels.slice(0, 3);
 
   if (channels.length === 0) {
     return (
@@ -224,11 +243,16 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
         <b>{totalPosts}</b> post{totalPosts === 1 ? "" : "s"}
         {lastActivity ? <> · {formatRelativeTime(lastActivity)}</> : null}
       </p>
-      <div className="inst-bars" aria-hidden="true">
-        {bars.map((value, i) => (
-          <span key={i} style={{ height: `${Math.max(12, (value / peak) * 100)}%` }} />
+      <ul className="inst-channels">
+        {topChannels.map((channel) => (
+          <li className="inst-channel" key={channel.channel}>
+            <span className="inst-channel-name" title={channel.channel}>
+              {channel.channel}
+            </span>
+            <span className="inst-channel-count">{channel.entry_count}</span>
+          </li>
         ))}
-      </div>
+      </ul>
     </Link>
   );
 }

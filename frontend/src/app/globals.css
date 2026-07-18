@@ -519,17 +519,16 @@ html[data-theme="light"] .backend-popover-apply {
   color: var(--accent);
 }
 
-.home-nav-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-
-.home-nav-spacer {
-  flex: 1;
-  min-width: 8px;
+/* Inbox needs-you count: a filled accent pill so open items read as a call to
+   action rather than an idle tally. */
+.home-nav-count.is-alert {
+  min-width: 16px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-strong);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Layout grid: sessions main + sticky instrument rail ── */
@@ -795,13 +794,10 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
 
 .inst-account {
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 4px 10px;
+  gap: 5px;
 }
 
 .inst-account-head {
-  grid-column: 1;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -833,54 +829,83 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   white-space: nowrap;
 }
 
-.inst-account-figs {
-  grid-column: 2;
-  grid-row: 1;
-  display: inline-flex;
-  gap: 5px;
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  color: var(--muted);
-  white-space: nowrap;
+/* Labelled window row: [cap] [────meter────] [pct] on one line, so 5h and
+   weekly each read as a bar plus its number. */
+.inst-window {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr 2.2rem;
+  align-items: center;
+  gap: 7px;
 }
 
-.inst-account-meter {
-  grid-column: 1 / -1;
-  grid-row: 2;
+.inst-window-cap {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inst-window-meter {
   height: 4px;
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--line-strong) 70%, transparent);
   overflow: hidden;
 }
 
-.inst-account-bar {
+.inst-window-bar {
   display: block;
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--success);
 }
 
-.inst-account-bar.tone-warn {
+.inst-window-bar.tone-warn {
   background: var(--warn);
 }
 
-.inst-account-bar.tone-danger {
+.inst-window-bar.tone-danger {
   background: var(--danger);
 }
 
-.inst-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 34px;
-  margin-top: 12px;
+.inst-window-pct {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
-.inst-bars span {
-  flex: 1;
-  min-height: 2px;
-  background: color-mix(in srgb, var(--accent-cool) 55%, transparent);
-  border-radius: 1px;
+/* Top channels list: the most-recently-active channels with their post
+   counts — the informative replacement for the old volume sparkline. */
+.inst-channels {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.inst-channel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.inst-channel-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inst-channel-count {
+  flex: none;
+  color: var(--muted-soft);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Low-profile presence floaters (Inbox + Assistant) ── */
@@ -1145,7 +1170,13 @@ html[data-theme="light"] .wp-sheet-scrim {
     position: static;
     order: -1;
     flex-direction: row;
+    /* Top-align the cards so a short tile (e.g. Scheduled) isn't stretched to
+       the tallest tile's height with empty space below — that ragged stretch
+       was the "badly aligned" strip. Scroll-snap makes the carousel land one
+       tile at a time. */
+    align-items: flex-start;
     overflow-x: auto;
+    scroll-snap-type: x proximity;
     padding-bottom: 4px;
     scrollbar-width: none;
   }
@@ -1153,12 +1184,12 @@ html[data-theme="light"] .wp-sheet-scrim {
     display: none;
   }
   .inst {
-    flex: 0 0 240px;
+    flex: 0 0 min(80vw, 300px);
+    scroll-snap-align: start;
   }
-  /* Drop the board sparkline / schedule note at strip size — the headline
-     figure carries. The Telemetry per-account list stays: seeing every
-     account's usage is the point. */
-  .inst-bars,
+  /* Drop the schedule footer note at strip size — the headline figure
+     carries. The Telemetry account meters and Board channel list stay:
+     surfacing that detail on the homepage is the point. */
   .inst-note {
     display: none;
   }

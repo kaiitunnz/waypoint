@@ -31,6 +31,12 @@ export function HomeNav({
           <span className="home-nav-count">{activeSessions} active</span>
         ) : null}
       </span>
+      <button type="button" className="home-nav-tab" onClick={onOpenScheduled}>
+        Scheduled
+        {scheduledCount > 0 ? (
+          <span className="home-nav-count">{scheduledCount}</span>
+        ) : null}
+      </button>
       <Link className="home-nav-tab" href="/board">
         Board
         {boardChannels > 0 ? (
@@ -47,20 +53,16 @@ export function HomeNav({
         Inbox
         {inboxCount > 0 ? (
           <span
-            className="home-nav-dot"
-            aria-label={`${inboxCount} need you`}
-          />
+            className="home-nav-count is-alert"
+            aria-label={`${inboxCount} open item${inboxCount === 1 ? "" : "s"}`}
+          >
+            {inboxCount > 99 ? "99+" : inboxCount}
+          </span>
         ) : null}
       </Link>
       <Link className="home-nav-tab" href="/assistant">
         Assistant
       </Link>
-      <button type="button" className="home-nav-tab" onClick={onOpenScheduled}>
-        Scheduled
-        {scheduledCount > 0 ? (
-          <span className="home-nav-count">{scheduledCount}</span>
-        ) : null}
-      </button>
     </nav>
   );
 }

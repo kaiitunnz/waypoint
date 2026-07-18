@@ -29,9 +29,6 @@ const SIDEBAR_WIDTH_KEY = "waypoint.inboxSidebarWidth";
 const SIDEBAR_WIDTH_DEFAULT = 340;
 const SIDEBAR_WIDTH_MIN = 260;
 const SIDEBAR_WIDTH_MAX = 560;
-// A drag or key step landing within this many pixels of the default snaps back
-// to it and clears the stored width, so the partition reverts to the original
-// position rather than a near-default custom value.
 const SIDEBAR_SNAP_THRESHOLD = 14;
 
 function clampSidebarWidth(w: number): number {
@@ -42,8 +39,8 @@ function clampSidebarWidth(w: number): number {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(w, max));
 }
 
-// `undefined` means "use the default width" (nothing stored); a clamped number
-// that snaps to the default detent collapses back to `undefined`.
+// A width within the snap threshold of the default collapses to `undefined`,
+// the sentinel for "no stored preference" that reverts to the default position.
 function snapSidebarWidth(w: number): number | undefined {
   const clamped = clampSidebarWidth(w);
   return Math.abs(clamped - SIDEBAR_WIDTH_DEFAULT) <= SIDEBAR_SNAP_THRESHOLD
@@ -216,7 +213,6 @@ function InboxPageInner() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  // `undefined` = the default width (no stored preference).
   const [sidebarWidth, setSidebarWidth] = useState<number | undefined>(() => {
     if (typeof window === "undefined") return undefined;
     const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));

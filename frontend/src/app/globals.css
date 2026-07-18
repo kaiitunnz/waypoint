@@ -13424,16 +13424,15 @@ html[data-theme="light"] .session-switcher-row.selected {
 .board-toolbar-nav {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 6px 11px;
+  padding: 7px 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
+  font-size: 1rem;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -13776,19 +13775,21 @@ html[data-theme="light"] .session-switcher-row.selected {
 
 .board-needs-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: 14px;
 }
 
+/* Opaque, lifted cards with a stronger hairline so each reads as its own item
+   against the translucent strip instead of merging with its neighbours. */
 .board-need-card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 14px;
+  padding: 13px 15px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card-soft);
 }
 
 /* Dog-ear fold marks a human-gated card (matches pinned cards elsewhere). */
@@ -14236,12 +14237,19 @@ a.board-fact-pr:hover {
   padding: 8px 12px;
 }
 
-/* App bar (board page) — keep it a single non-wrapping row: the meta cluster
-   holds its size and the brand truncates first, so the theme toggle can never
-   drop to a second line. A hairline divides the view switch from the session
-   link + theme toggle so the three controls read as two groups, not a jumble. */
+/* App bar (board page) — a single non-wrapping row that always fits the
+   viewport: nowrap keeps the theme toggle from dropping to a second line, while
+   min-width:0 on both zones lets them shrink (the brand truncates first) so the
+   bar can never exceed the viewport and rescale the page. A page-level clip is
+   the final backstop against any stray horizontal overflow. A hairline divides
+   the view switch from the session link + theme toggle. */
+.page-shell.board-shell {
+  overflow-x: clip;
+}
+
 .board-shell .app-bar {
   flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .board-shell .app-bar-brand {
@@ -14257,7 +14265,7 @@ a.board-fact-pr:hover {
 }
 
 .board-shell .app-bar-meta {
-  flex-shrink: 0;
+  min-width: 0;
   flex-wrap: nowrap;
   gap: 14px;
 }

@@ -1676,7 +1676,6 @@ export default function BoardPage() {
             aria-label="Open channels"
           >
             <span aria-hidden="true">☰</span>
-            <span>Channels</span>
           </button>
           <span className="board-toolbar-context">
             {view === "board"

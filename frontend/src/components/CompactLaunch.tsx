@@ -5,8 +5,8 @@ import type { Backend, SessionPresetSummary } from "@/lib/types";
 // Compact launch action that replaces the always-open form on the homepage: a
 // row of preset quick-launch chips plus a "New session" button, both of which
 // open the full launch form in a glass sheet. A preset chip opens the sheet on
-// the New tab with that preset preselected (so cwd/title can be confirmed
-// before launch); Resume / Schedule are dashed chips that open their tab.
+// the New tab with that preset preselected; Resume / Schedule are dashed chips
+// that open their tab.
 export type LaunchSheetMode = "new" | "resume" | "attach" | "schedule";
 
 // Keep the quick-launch row to a scannable size; the rest live in the sheet's

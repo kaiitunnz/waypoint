@@ -174,8 +174,7 @@ export default function HomePage() {
   const [launchSheetOpen, setLaunchSheetOpen] = useState(false);
   const [launchSheetMode, setLaunchSheetMode] = useState<LaunchSheetMode>("new");
   const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
-  // Which preset (if any) the launch sheet should preselect on its next open.
-  // The sheet remounts LaunchPanel every open, so this is read once at mount;
+  // The sheet remounts LaunchPanel on every open, so this is read once at mount;
   // every open path sets it explicitly so a stale value never bleeds through.
   const [presetSelection, setPresetSelection] = useState<PresetSelection>({
     kind: "default",
@@ -759,9 +758,7 @@ export default function HomePage() {
     setLaunchSheetOpen(true);
   }
 
-  // Open the launch sheet on the New tab with a preset chip preselected, so the
-  // human confirms cwd/title before launching rather than creating immediately
-  // in the default working directory. A null preset opens with no selection.
+  // A null preset opens the sheet with no preset selected (backend default).
   function openLaunchSheetWithPreset(preset: SessionPresetSummary | null) {
     setLaunchSheetMode("new");
     setPresetSelection({ kind: "preset", presetId: preset?.id ?? null });

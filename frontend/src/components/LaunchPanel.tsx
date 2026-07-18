@@ -41,9 +41,8 @@ interface ThreadSummary {
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
 
-// Which preset the panel should preselect when it mounts. `default` reuses the
-// once-on-load default-preset hydration; `preset` hydrates a specific preset
-// (or clears the selection when `presetId` is null, for the backend default).
+// `default` uses the default-preset hydration; `preset` hydrates a specific
+// preset, or clears the selection when `presetId` is null (backend default).
 export type PresetSelection =
   | { kind: "default" }
   | { kind: "preset"; presetId: string | null };
@@ -119,7 +118,6 @@ interface LaunchPanelProps {
   // owns which mode is shown; otherwise the panel tracks it internally.
   mode?: PanelMode;
   onModeChange?: (mode: PanelMode) => void;
-  // Which preset to seed into the form when the panel mounts.
   initialPreset?: PresetSelection;
 }
 
@@ -201,11 +199,10 @@ export function LaunchPanel({
     [presets, onFetchPresetSpec, form],
   );
 
-  // Seed the shared form's preset once on mount. A caller-requested preset wins
-  // (a chip click); otherwise hydrate the default preset, waiting for its id to
-  // arrive (bootstrap resolves after mount) before consuming the once-guard so
-  // the first null run doesn't disable it. The panel remounts on every sheet
-  // open, so this runs fresh each time.
+  // Seed the form's preset once per mount: a caller-requested preset wins,
+  // otherwise the default. Wait for defaultPresetId to arrive (bootstrap
+  // resolves after mount) before consuming the once-guard, or the first null
+  // run disables it.
   useEffect(() => {
     if (presetHydratedRef.current) return;
     if (initialPreset?.kind === "preset") {

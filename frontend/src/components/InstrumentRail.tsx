@@ -107,12 +107,6 @@ function TelemetryTile({
     );
   }
 
-  const worst = buckets.reduce((a, b) => (bucketPeak(b) > bucketPeak(a) ? b : a));
-  const fiveHour = findWindow(worst, "5h");
-  const weekly = findWindow(worst, "weekly");
-  const fivePct = fiveHour ? rateLimitWindowPercent(fiveHour) : null;
-  const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
-
   let tone: UsageTone = "good";
   for (const bucket of buckets) {
     const t = rateLimitUsageTone(bucket.snapshot);
@@ -130,6 +124,9 @@ function TelemetryTile({
         ? "Approaching limit"
         : "Quota critical";
 
+  // Worst-first so the account nearest its limit reads first at a glance.
+  const ordered = [...buckets].sort((a, b) => bucketPeak(b) - bucketPeak(a));
+
   return (
     <Link className="inst" href="/telemetry">
       <div className="inst-top">
@@ -142,67 +139,38 @@ function TelemetryTile({
       <h4 className="inst-headline">
         {buckets.length} account{buckets.length === 1 ? "" : "s"}
       </h4>
-      <p className="inst-line">
-        {fivePct !== null ? (
-          <>
-            <b>{fivePct}%</b> 5h
-          </>
-        ) : (
-          "5h —"
-        )}{" "}
-        ·{" "}
-        {weekPct !== null ? (
-          <>
-            <b>{weekPct}%</b> weekly usage
-          </>
-        ) : (
-          "weekly —"
-        )}
-      </p>
-      <div className="inst-gauges">
-        <Gauge percent={fivePct} caption="5h" />
-        <Gauge percent={weekPct} caption="weekly" />
-      </div>
+      <ul className="inst-accounts">
+        {ordered.map((bucket) => {
+          const five = findWindow(bucket, "5h");
+          const weekly = findWindow(bucket, "weekly");
+          const fivePct = five ? rateLimitWindowPercent(five) : null;
+          const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
+          const peak = bucketPeak(bucket);
+          const t = toneOf(peak);
+          return (
+            <li className="inst-account" key={bucket.account_key}>
+              <span className="inst-account-head">
+                <span className={`inst-account-dot tone-${t}`} aria-hidden="true" />
+                <span className="inst-account-name" title={bucket.account_label}>
+                  {bucket.account_label}
+                </span>
+              </span>
+              <span className="inst-account-meter" aria-hidden="true">
+                <span
+                  className={`inst-account-bar tone-${t}`}
+                  style={{ width: `${Math.min(peak, 100)}%` }}
+                />
+              </span>
+              <span className="inst-account-figs">
+                <span>{fivePct !== null ? `${fivePct}%` : "—"} 5h</span>
+                <span>·</span>
+                <span>{weekPct !== null ? `${weekPct}%` : "—"} wk</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </Link>
-  );
-}
-
-function Gauge({ percent, caption }: { percent: number | null; caption: string }) {
-  const pct = percent ?? 0;
-  const toneClass = `tone-${toneOf(percent)}`;
-  // Semicircle: centre (30,30), r=24, sweeping 180° (left) → 0° (right).
-  const angle = (180 - 1.8 * Math.min(pct, 100)) * (Math.PI / 180);
-  const ex = 30 + 24 * Math.cos(angle);
-  const ey = 30 - 24 * Math.sin(angle);
-  const full = pct >= 99.5;
-  return (
-    <div className="inst-gauge">
-      <svg viewBox="0 0 60 34" aria-hidden="true">
-        <path
-          className="inst-gauge-track"
-          d="M6 30 A24 24 0 0 1 54 30"
-          fill="none"
-        />
-        {percent !== null ? (
-          <path
-            className={`inst-gauge-fill ${toneClass}`}
-            d={full ? "M6 30 A24 24 0 0 1 54 30" : `M6 30 A24 24 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`}
-            fill="none"
-          />
-        ) : null}
-      </svg>
-      <div className="inst-gauge-value">
-        {percent !== null ? (
-          <>
-            {Math.round(pct)}
-            <span className="inst-gauge-pct">%</span>
-          </>
-        ) : (
-          "—"
-        )}
-      </div>
-      <div className="inst-gauge-cap">{caption}</div>
-    </div>
   );
 }
 

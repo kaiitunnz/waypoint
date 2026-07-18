@@ -14,11 +14,16 @@ import {
   TailnetSnapshot,
 } from "@/lib/tailnet";
 
+type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
+
 interface BackendSwitcherProps {
   host: string;
   token: string;
   launchTargets: LaunchTargetSummary[];
   targetId: string;
+  // Live websocket state, folded into the chip's status dot so the app bar
+  // carries a single connection indicator (no separate "live" pill).
+  connection?: ConnectionState;
   onSwitch: (nextHost: string, nextTargetId: string) => void;
   onConnectTarget: (target: LaunchTargetSummary) => void;
   onDisconnectTarget: (targetId: string) => void;
@@ -35,7 +40,7 @@ interface PickerOption {
   hint: string | null;
 }
 
-export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch, onConnectTarget, onDisconnectTarget, onAuthFailure }: BackendSwitcherProps) {
+export function BackendSwitcher({ host, token, launchTargets, targetId, connection, onSwitch, onConnectTarget, onDisconnectTarget, onAuthFailure }: BackendSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<TailnetSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -167,8 +172,24 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
   }, [open]);
 
   const { chipName, chipUrl } = describeChip(host, activeTarget);
-  const chipConnected =
-    activeTarget?.auth === "password" ? Boolean(activeTarget.connected) : true;
+  const sshBlocked =
+    activeTarget?.auth === "password" && !activeTarget.connected;
+  const dotTone = sshBlocked
+    ? "off"
+    : connection === "open"
+      ? "live"
+      : connection === "connecting" || connection === "reconnecting"
+        ? "pending"
+        : "idle";
+  const dotLabel = sshBlocked
+    ? "SSH disconnected"
+    : connection === "open"
+      ? "Live"
+      : connection === "connecting"
+        ? "Connecting"
+        : connection === "reconnecting"
+          ? "Reconnecting"
+          : "Idle";
 
   return (
     <span className="hostctl-wrap" ref={wrapRef}>
@@ -178,10 +199,12 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
         ref={triggerRef}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={`Backend ${chipName} · ${dotLabel} · switch`}
         onClick={() => setOpen((current) => !current)}
       >
         <span
-          className={`hostctl-dot${chipConnected ? "" : " is-off"}`}
+          className={`hostctl-dot tone-${dotTone}`}
+          title={dotLabel}
           aria-hidden="true"
         />
         <span className="hostctl-name">{chipName}</span>

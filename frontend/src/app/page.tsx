@@ -1141,16 +1141,6 @@ export default function HomePage() {
     setError("Switched backend. Log in to continue.");
   }
 
-  const connectionLabel = token
-    ? connection === "open"
-      ? "live"
-      : connection === "reconnecting"
-        ? "reconnecting"
-        : connection === "connecting"
-          ? "connecting"
-          : "idle"
-    : "signed out";
-
   const filteredSessions = sessions.filter(
     (session) =>
       session.source !== "assistant" && session.source !== "telemetry",
@@ -1182,13 +1172,13 @@ export default function HomePage() {
           </div>
         </div>
         <div className="app-bar-meta">
-          <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
           {token ? (
             <BackendSwitcher
               host={host}
               token={token}
               launchTargets={launchTargets}
               targetId={activeLaunchTargetId}
+              connection={connection}
               onSwitch={handleSwitchBackend}
               onConnectTarget={(target) => {
                 setConnectError("");

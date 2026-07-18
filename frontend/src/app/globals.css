@@ -374,7 +374,18 @@ pre {
   flex: none;
 }
 
-.hostctl-dot.is-off {
+.hostctl-dot.tone-live {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.hostctl-dot.tone-pending {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.hostctl-dot.tone-idle,
+.hostctl-dot.tone-off {
   background: var(--muted-soft);
   box-shadow: none;
 }
@@ -573,6 +584,7 @@ html[data-theme="light"] .backend-popover-apply {
 }
 
 .launch-deck-new {
+  flex: none;
   padding: 11px 20px;
   border: none;
   border-radius: var(--radius);
@@ -582,6 +594,7 @@ html[data-theme="light"] .backend-popover-apply {
   font-size: 0.82rem;
   letter-spacing: 0.04em;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.16s ease;
 }
@@ -770,61 +783,89 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   color: var(--muted-soft);
 }
 
-.inst-gauges {
-  display: flex;
-  gap: 16px;
-  margin-top: 12px;
+/* Per-account usage rows: every account's worst-window meter + 5h/weekly
+ * figures, compact enough to list all accounts in the narrow rail. */
+.inst-accounts {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
 }
 
-.inst-gauge {
-  flex: 1;
-  text-align: center;
+.inst-account {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 10px;
 }
 
-.inst-gauge svg {
-  width: 100%;
-  height: 46px;
+.inst-account-head {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 }
 
-.inst-gauge-track {
-  stroke: color-mix(in srgb, var(--line-strong) 80%, transparent);
-  stroke-width: 5;
-  stroke-linecap: round;
+.inst-account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--success);
 }
 
-.inst-gauge-fill {
-  stroke-width: 5;
-  stroke-linecap: round;
+.inst-account-dot.tone-warn {
+  background: var(--warn);
 }
 
-.inst-gauge-fill.tone-ok {
-  stroke: var(--success);
+.inst-account-dot.tone-danger {
+  background: var(--danger);
 }
 
-.inst-gauge-fill.tone-warn {
-  stroke: var(--warn);
-}
-
-.inst-gauge-fill.tone-danger {
-  stroke: var(--danger);
-}
-
-.inst-gauge-value {
+.inst-account-name {
   font-family: var(--font-mono);
-  font-size: 0.92rem;
-  color: var(--text-strong);
+  font-size: 0.72rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.inst-gauge-pct {
-  font-size: 0.62rem;
-}
-
-.inst-gauge-cap {
+.inst-account-figs {
+  grid-column: 2;
+  grid-row: 1;
+  display: inline-flex;
+  gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted-soft);
+  font-size: 0.66rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.inst-account-meter {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--line-strong) 70%, transparent);
+  overflow: hidden;
+}
+
+.inst-account-bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--success);
+}
+
+.inst-account-bar.tone-warn {
+  background: var(--warn);
+}
+
+.inst-account-bar.tone-danger {
+  background: var(--danger);
 }
 
 .inst-bars {
@@ -1114,8 +1155,9 @@ html[data-theme="light"] .wp-sheet-scrim {
   .inst {
     flex: 0 0 240px;
   }
-  /* Drop the gauges/sparklines at strip size — the headline figure carries. */
-  .inst-gauges,
+  /* Drop the board sparkline / schedule note at strip size — the headline
+     figure carries. The Telemetry per-account list stays: seeing every
+     account's usage is the point. */
   .inst-bars,
   .inst-note {
     display: none;
@@ -1124,6 +1166,17 @@ html[data-theme="light"] .wp-sheet-scrim {
     position: sticky;
     top: max(0px, env(safe-area-inset-top));
     z-index: 30;
+  }
+  /* Stack the launch header so the "New session" button sits full-width on its
+     own line instead of squeezing next to the label and wrapping mid-word. */
+  .launch-deck-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .launch-deck-new {
+    width: 100%;
+    text-align: center;
   }
   .wp-sheet {
     width: 100%;

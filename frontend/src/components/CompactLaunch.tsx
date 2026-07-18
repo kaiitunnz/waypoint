@@ -8,6 +8,10 @@ import type { Backend, SessionPresetSummary } from "@/lib/types";
 // dashed chips that open the sheet on their respective tab.
 export type LaunchSheetMode = "new" | "resume" | "attach" | "schedule";
 
+// Keep the quick-launch row to a scannable size; the rest live in the sheet's
+// full preset picker, reached via the "+N more" overflow chip.
+const MAX_PRESET_CHIPS = 3;
+
 interface CompactLaunchProps {
   targetLabel: string;
   presets: SessionPresetSummary[];
@@ -34,6 +38,8 @@ export function CompactLaunch({
     if (b.id === defaultPresetId) return 1;
     return 0;
   });
+  const visible = ordered.slice(0, MAX_PRESET_CHIPS);
+  const overflow = ordered.length - visible.length;
 
   return (
     <section className="launch-deck" aria-label="Start a session">
@@ -50,8 +56,8 @@ export function CompactLaunch({
         </button>
       </div>
       <div className="launch-deck-chips">
-        {ordered.length > 0 ? (
-          ordered.map((preset) => {
+        {visible.length > 0 ? (
+          visible.map((preset) => {
             const backend = (preset.spec.backend ?? defaultBackend) as Backend;
             const model = preset.spec.model;
             return (
@@ -83,6 +89,16 @@ export function CompactLaunch({
             Default
           </button>
         )}
+        {overflow > 0 ? (
+          <button
+            type="button"
+            className="launch-chip is-ghost"
+            onClick={() => onOpenSheet("new")}
+            title="All presets"
+          >
+            +{overflow} more
+          </button>
+        ) : null}
         <button
           type="button"
           className="launch-chip is-ghost"

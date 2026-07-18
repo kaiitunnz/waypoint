@@ -55,7 +55,6 @@ export function HomeNav({
       <Link className="home-nav-tab" href="/assistant">
         Assistant
       </Link>
-      <span className="home-nav-spacer" />
       <button type="button" className="home-nav-tab" onClick={onOpenScheduled}>
         Scheduled
         {scheduledCount > 0 ? (

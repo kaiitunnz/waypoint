@@ -108,6 +108,10 @@ interface LaunchPanelProps {
   ) => Promise<string | null>;
   onSetDefaultPreset: (presetId: string) => Promise<void>;
   onDeletePreset: (presetId: string) => Promise<void>;
+  // Optional controlled tab: when provided, the caller (e.g. the launch sheet)
+  // owns which mode is shown; otherwise the panel tracks it internally.
+  mode?: PanelMode;
+  onModeChange?: (mode: PanelMode) => void;
 }
 
 export function LaunchPanel({
@@ -139,8 +143,12 @@ export function LaunchPanel({
   onSavePreset,
   onSetDefaultPreset,
   onDeletePreset,
+  mode: controlledMode,
+  onModeChange,
 }: LaunchPanelProps) {
-  const [mode, setMode] = useState<PanelMode>("new");
+  const [internalMode, setInternalMode] = useState<PanelMode>("new");
+  const mode = controlledMode ?? internalMode;
+  const setMode = onModeChange ?? setInternalMode;
   const form = useLaunchForm({
     defaultBackend,
     defaultCwd,

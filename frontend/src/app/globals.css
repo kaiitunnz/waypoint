@@ -329,6 +329,825 @@ pre {
   min-width: 0;
 }
 
+/* ─── Home control deck (sessions-first homepage) ───
+ * Flat in-flow instruments (nav, launch deck, session list, rail tiles) with
+ * glass reserved for the floating chrome (backend popover, launch/schedule
+ * sheets, presence floaters). Everything derives from :root tokens so both
+ * themes resolve without per-theme overrides. */
+.page-shell.page-home {
+  /* Reclaim the wasted desktop width the old single centred column left. */
+  max-width: min(1200px, 100vw);
+  gap: 16px;
+}
+
+/* ── App-bar host control (folded BackendSwitcher) ── */
+.hostctl-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.hostctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+
+.hostctl:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+}
+
+.hostctl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+  flex: none;
+}
+
+.hostctl-dot.is-off {
+  background: var(--muted-soft);
+  box-shadow: none;
+}
+
+.hostctl-name {
+  color: var(--text-strong);
+}
+
+.hostctl-url {
+  color: var(--muted-soft);
+}
+
+.hostctl-caret {
+  color: var(--muted-soft);
+  font-size: 0.7rem;
+}
+
+.backend-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  z-index: 60;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--glass-bg-thick);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.backend-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backend-popover-head h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  color: var(--text-strong);
+}
+
+.backend-popover-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--muted-soft);
+}
+
+.backend-popover-apply {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #171204;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+html[data-theme="light"] .backend-popover-apply {
+  color: #fff;
+}
+
+.backend-popover-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Primary nav ── */
+.home-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.home-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.home-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-nav-tab:hover {
+  color: var(--text);
+}
+
+.home-nav-tab.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-strong);
+  cursor: default;
+}
+
+.home-nav-count {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+.home-nav-tab.is-active .home-nav-count {
+  color: var(--accent);
+}
+
+.home-nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.home-nav-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+/* ── Layout grid: sessions main + sticky instrument rail ── */
+.home-layout {
+  display: grid;
+  grid-template-columns: 1fr 336px;
+  gap: 16px;
+  align-items: start;
+}
+
+.home-main {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 12px;
+}
+
+/* ── Compact launch deck ── */
+.launch-deck {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.launch-deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.launch-deck-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.launch-deck-label b {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.launch-deck-new {
+  padding: 11px 20px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #171204;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+html[data-theme="light"] .launch-deck-new {
+  color: #fff;
+}
+
+.launch-deck-new:hover {
+  background: var(--accent-strong);
+}
+
+.launch-deck-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.launch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.launch-chip:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.launch-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.launch-chip[data-loading] {
+  opacity: 0.7;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.launch-chip.is-ghost {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.launch-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.launch-chip-dot[data-owner="codex"] {
+  background: var(--accent-cool);
+}
+
+.launch-chip-dot[data-owner="claude_code"],
+.launch-chip-dot[data-owner="claude_tty"] {
+  background: var(--accent);
+}
+
+.launch-chip-dot[data-owner="opencode"] {
+  background: #cbd5e1;
+}
+
+html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
+  background: var(--muted);
+}
+
+.launch-chip-meta {
+  color: var(--muted-soft);
+}
+
+/* ── Instrument rail tiles ── */
+.inst {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+
+.inst:hover {
+  border-color: var(--line-strong);
+}
+
+.inst-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.inst-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inst-go {
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.inst-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inst-lamp::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.inst-lamp.tone-ok {
+  color: var(--success);
+}
+
+.inst-lamp.tone-warn {
+  color: var(--warn);
+}
+
+.inst-lamp.tone-danger {
+  color: var(--danger);
+}
+
+.inst-lamp.tone-info {
+  color: var(--accent-cool);
+}
+
+.inst-lamp.tone-off {
+  color: var(--muted-soft);
+}
+
+.inst-headline {
+  margin: 4px 0 4px;
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.inst-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.inst-line b {
+  color: var(--text);
+}
+
+.inst-note {
+  margin: 8px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+.inst-gauges {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.inst-gauge {
+  flex: 1;
+  text-align: center;
+}
+
+.inst-gauge svg {
+  width: 100%;
+  height: 46px;
+}
+
+.inst-gauge-track {
+  stroke: color-mix(in srgb, var(--line-strong) 80%, transparent);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.inst-gauge-fill {
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.inst-gauge-fill.tone-ok {
+  stroke: var(--success);
+}
+
+.inst-gauge-fill.tone-warn {
+  stroke: var(--warn);
+}
+
+.inst-gauge-fill.tone-danger {
+  stroke: var(--danger);
+}
+
+.inst-gauge-value {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+}
+
+.inst-gauge-pct {
+  font-size: 0.62rem;
+}
+
+.inst-gauge-cap {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inst-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 34px;
+  margin-top: 12px;
+}
+
+.inst-bars span {
+  flex: 1;
+  min-height: 2px;
+  background: color-mix(in srgb, var(--accent-cool) 55%, transparent);
+  border-radius: 1px;
+}
+
+/* ── Low-profile presence floaters (Inbox + Assistant) ── */
+.presence-cluster {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: flex-end;
+}
+
+.presence-floater {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  width: 40px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  color: var(--muted);
+  text-decoration: none;
+  overflow: hidden;
+  transition: width 0.18s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.presence-floater-icon {
+  width: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.presence-inbox .presence-floater-icon {
+  color: var(--accent-cool);
+}
+
+.presence-assistant .presence-floater-icon {
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+}
+
+.presence-floater-label {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  width: 0;
+  transition: opacity 0.16s ease;
+}
+
+.presence-floater:hover,
+.presence-floater:focus-visible {
+  width: auto;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line));
+}
+
+.presence-floater:hover .presence-floater-label,
+.presence-floater:focus-visible .presence-floater-label {
+  opacity: 1;
+  width: auto;
+  padding-right: 14px;
+}
+
+/* Assistant presence lamp (corner dot at rest, inline when expanded). */
+.presence-floater-lamp {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--glass-bg-thick);
+  background: var(--muted-soft);
+}
+
+.presence-floater-lamp.tone-live {
+  background: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 26%, transparent);
+}
+
+.presence-floater-lamp.tone-idle {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.presence-floater-lamp.tone-off {
+  background: var(--muted-soft);
+}
+
+.presence-floater:hover .presence-floater-lamp,
+.presence-floater:focus-visible .presence-floater-lamp {
+  position: static;
+  margin-right: 12px;
+  border: none;
+  box-shadow: none;
+  width: 7px;
+  height: 7px;
+}
+
+/* Inbox needs-you count badge (corner at rest, inline when expanded). */
+.presence-floater-badge {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--glass-bg-thick);
+  background: var(--danger);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+
+.presence-floater-badge.is-zero {
+  display: none;
+}
+
+.presence-floater:hover .presence-floater-badge,
+.presence-floater:focus-visible .presence-floater-badge {
+  position: static;
+  margin-right: 12px;
+  border: none;
+}
+
+/* ── Glass sheet (launch form / schedule manager) ── */
+.wp-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(3, 5, 8, 0.55);
+  animation: wp-sheet-fade 0.18s ease;
+}
+
+html[data-theme="light"] .wp-sheet-scrim {
+  background: rgba(40, 30, 12, 0.32);
+}
+
+.wp-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 440px;
+  max-width: 92vw;
+  z-index: 71;
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
+  overflow: auto;
+  background: var(--glass-bg-thick);
+  border-left: 1px solid var(--glass-line);
+  box-shadow: var(--shadow);
+  animation: wp-sheet-slide-in 0.2s ease;
+}
+
+.wp-sheet:focus {
+  outline: none;
+}
+
+.wp-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.wp-sheet-eyebrow {
+  margin: 0 0 2px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.wp-sheet-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.wp-sheet-close {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card-soft);
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.wp-sheet-close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.wp-sheet-body {
+  min-width: 0;
+}
+
+.wp-sheet-empty {
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* The launch form and schedule manager are reused verbatim inside the sheet;
+ * strip their own card chrome and redundant top heading so the sheet header
+ * leads and the content sits flush in the glass. */
+.wp-sheet .launch-card,
+.wp-sheet .schedule-panel {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.wp-sheet .launch-card-titles,
+.wp-sheet .schedule-panel > .msg-sched-head {
+  display: none;
+}
+
+.wp-sheet .launch-card-head {
+  justify-content: flex-start;
+}
+
+@keyframes wp-sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes wp-sheet-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+/* ── Mobile: single column, rail becomes a horizontal strip above sessions ── */
+@media (max-width: 900px) {
+  .home-layout {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    position: static;
+    order: -1;
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .rail::-webkit-scrollbar {
+    display: none;
+  }
+  .inst {
+    flex: 0 0 240px;
+  }
+  /* Drop the gauges/sparklines at strip size — the headline figure carries. */
+  .inst-gauges,
+  .inst-bars,
+  .inst-note {
+    display: none;
+  }
+  .home-nav {
+    position: sticky;
+    top: max(0px, env(safe-area-inset-top));
+    z-index: 30;
+  }
+  .wp-sheet {
+    width: 100%;
+    max-width: 100%;
+    top: auto;
+    border-left: none;
+    border-top: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass) var(--radius-glass) 0 0;
+    max-height: 88vh;
+    animation: wp-sheet-slide-up 0.2s ease;
+  }
+  /* Reserve room so the last session row clears the presence floaters. */
+  .page-shell.page-home {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes wp-sheet-slide-up {
+  from {
+    transform: translateY(32px);
+    opacity: 0;
+  }
+}
+
 /* ─── Import / resume thread panel ─── */
 
 .import-thread-header {
@@ -1733,17 +2552,6 @@ html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.backend-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card-soft);
-  font-size: 0.86rem;
 }
 
 .link-button {
@@ -11860,61 +12668,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 /* ─── Personal assistant ─── */
-/* Floating action button, fixed to the bottom-right of the home page for
-   one-tap access. Collapses to a circular glyph on narrow/touch viewports. */
-.assistant-fab {
-  position: fixed;
-  right: max(20px, env(safe-area-inset-right));
-  bottom: max(20px, env(safe-area-inset-bottom));
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--glass-line));
-  background: color-mix(in srgb, var(--accent) 10%, var(--glass-bg));
-  color: var(--accent-strong);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--shadow);
-  backdrop-filter: var(--glass-blur);
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-
-.assistant-fab:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--glass-bg));
-  border-color: var(--accent);
-}
-
-.assistant-fab-glyph {
-  display: inline-flex;
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
-@media (max-width: 640px) {
-  .assistant-fab {
-    padding: 0;
-    width: 52px;
-    height: 52px;
-    justify-content: center;
-  }
-  .assistant-fab-label {
-    display: none;
-  }
-  .assistant-fab-glyph {
-    font-size: 1.5rem;
-  }
-}
-
 .assistant-banner {
   position: relative;
   display: flex;
@@ -16124,12 +16877,6 @@ html[data-theme="light"] .wp-hl {
   font-size: 0.82rem;
 }
 
-/* In the collapsed pill the control sits after the "change" link; nudge it
-   apart so the two concerns (host vs. SSH auth) read as distinct. */
-.backend-pill .ssh-auth-row {
-  margin-left: auto;
-}
-
 .ssh-connect-backdrop {
   position: fixed;
   inset: 0;
@@ -17134,56 +17881,6 @@ html[data-theme="light"] .wp-hl {
   padding: 22px 24px;
 }
 
-/* Bottom-left glass floater with the unresolved-count badge — the only glass
-   surface in the inbox feature (mirrors .assistant-fab, flipped to the left). */
-.inbox-dock {
-  position: fixed;
-  left: max(20px, env(safe-area-inset-left));
-  bottom: max(20px, env(safe-area-inset-bottom));
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--glass-line);
-  background: var(--glass-bg);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--shadow);
-  backdrop-filter: var(--glass-blur);
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-
-.inbox-dock:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line));
-}
-
-.inbox-dock-glyph {
-  display: inline-flex;
-  color: var(--accent-strong);
-}
-
-.inbox-dock-count {
-  flex: none;
-  min-width: 18px;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent-strong);
-  font-size: 0.72rem;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
 @media (max-width: 720px) {
   /* Desktop traps scroll inside a fixed-100dvh shell with independent per-pane
      overflow — which fights the mobile URL-bar collapse and double-scrolls. On
@@ -17220,25 +17917,6 @@ html[data-theme="light"] .wp-hl {
      right edge (the desktop margin-left:auto reads as disconnected here). */
   .inbox-doc-actions {
     margin-left: 0;
-  }
-
-  .inbox-dock {
-    padding: 0;
-    width: 52px;
-    height: 52px;
-    justify-content: center;
-  }
-
-  .inbox-dock-label {
-    display: none;
-  }
-
-  .inbox-dock-count {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background: var(--accent);
-    color: var(--bg-base);
   }
 }
 

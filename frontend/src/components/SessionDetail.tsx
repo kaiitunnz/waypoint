@@ -451,8 +451,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [loadingOlder, setLoadingOlder] = useState(false);
   const { openSwitcher, setCurrentSession } = useSwitcher();
   const scheduledMessages = useSessionScheduledMessages(host, token, sessionId);
-  // Advertise this visible tab so the backend skips redundant session-
-  // interaction notifications while the operator is looking at this session.
+  // Advertise this visible tab so the backend skips notifications for a session
+  // the user is already looking at.
   useSessionPresence(host, token, sessionId);
   // Auto-dismiss the "Copied!" pill after a beat so it doesn't squat on
   // the toast slot. The fallback "Tap to copy" toast stays until the user

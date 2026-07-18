@@ -8,13 +8,10 @@ import { registerSessionPresence, releaseSessionPresence } from "@/lib/api";
 // single missed renewal does not drop presence.
 const RENEW_INTERVAL_MS = 15_000;
 
-// Advertise this tab as actively viewing a session while it is visible, so the
-// backend suppresses redundant session-interaction notifications for it.
-// Presence is a best-effort lease: it starts only after a successful
-// authenticated touch, renews every 15s while visible, releases when the tab is
-// hidden or unmounted, and the server-side TTL is the authoritative fallback
-// when a release is missed. It never relies on beforeunload/sendBeacon, which
-// cannot carry the bearer token.
+// Lease presence for a session while its tab is visible, so the backend can
+// suppress notifications the user is already looking at. Best-effort: it fails
+// open, and avoids beforeunload/sendBeacon because those cannot carry the
+// bearer token — the server-side TTL is the fallback when a release is missed.
 export function useSessionPresence(
   host: string,
   token: string,

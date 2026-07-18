@@ -695,9 +695,7 @@ export async function generateNLInsight(
   return (await response.json()) as NLGenerateAck;
 }
 
-// Register/renew a visible-tab presence lease for a session. The backend uses
-// it to suppress redundant session-interaction notifications while the operator
-// is looking at that session. Fails open: the caller ignores errors.
+// Register/renew a visible-tab presence lease for a session.
 export async function registerSessionPresence(
   host: string,
   token: string,
@@ -715,8 +713,8 @@ export async function registerSessionPresence(
   await ensureOk(response, "failed to register session presence");
 }
 
-// Release a presence lease. ``keepalive`` lets the request outlive an unmounting
-// page; the lease TTL is the authoritative fallback when it can't be sent.
+// Release a presence lease. `keepalive` lets the request outlive an unmounting
+// page; the lease TTL is the fallback when it can't be sent.
 export async function releaseSessionPresence(
   host: string,
   token: string,

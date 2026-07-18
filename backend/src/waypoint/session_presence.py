@@ -9,8 +9,8 @@ leases use ``time.monotonic()`` so a wall-clock adjustment cannot extend them.
 
 import time
 
-# A visible tab renews every 15s (RFC frontend contract); a 45s lease survives
-# two missed renewals before it expires and fails open.
+# Longer than the frontend's 15s renewal, so one missed renewal does not drop
+# presence; short enough that a crashed tab stops suppressing within a minute.
 LEASE_SECONDS = 45.0
 
 

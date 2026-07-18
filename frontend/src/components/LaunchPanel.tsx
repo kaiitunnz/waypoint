@@ -41,6 +41,13 @@ interface ThreadSummary {
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
 
+// Which preset the panel should preselect when it mounts. `default` reuses the
+// once-on-load default-preset hydration; `preset` hydrates a specific preset
+// (or clears the selection when `presetId` is null, for the backend default).
+export type PresetSelection =
+  | { kind: "default" }
+  | { kind: "preset"; presetId: string | null };
+
 type ScheduleTiming = "delay" | "datetime";
 
 interface LaunchPanelProps {
@@ -112,6 +119,8 @@ interface LaunchPanelProps {
   // owns which mode is shown; otherwise the panel tracks it internally.
   mode?: PanelMode;
   onModeChange?: (mode: PanelMode) => void;
+  // Which preset to seed into the form when the panel mounts.
+  initialPreset?: PresetSelection;
 }
 
 export function LaunchPanel({
@@ -145,6 +154,7 @@ export function LaunchPanel({
   onDeletePreset,
   mode: controlledMode,
   onModeChange,
+  initialPreset,
 }: LaunchPanelProps) {
   const [internalMode, setInternalMode] = useState<PanelMode>("new");
   const mode = controlledMode ?? internalMode;
@@ -191,15 +201,22 @@ export function LaunchPanel({
     [presets, onFetchPresetSpec, form],
   );
 
-  // Hydrate the default preset into the shared form once on first load. Wait
-  // for the id to actually arrive (bootstrap resolves after mount) before
-  // consuming the once-guard, otherwise the first null run would disable it.
+  // Seed the shared form's preset once on mount. A caller-requested preset wins
+  // (a chip click); otherwise hydrate the default preset, waiting for its id to
+  // arrive (bootstrap resolves after mount) before consuming the once-guard so
+  // the first null run doesn't disable it. The panel remounts on every sheet
+  // open, so this runs fresh each time.
   useEffect(() => {
     if (presetHydratedRef.current) return;
+    if (initialPreset?.kind === "preset") {
+      presetHydratedRef.current = true;
+      void applyPresetById(initialPreset.presetId);
+      return;
+    }
     if (!defaultPresetId) return;
     presetHydratedRef.current = true;
     void applyPresetById(defaultPresetId);
-  }, [defaultPresetId, applyPresetById]);
+  }, [defaultPresetId, applyPresetById, initialPreset]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
   const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");

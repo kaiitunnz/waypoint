@@ -8,7 +8,7 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { CompactLaunch, type LaunchSheetMode } from "@/components/CompactLaunch";
 import { HomeNav } from "@/components/HomeNav";
 import { InstrumentRail } from "@/components/InstrumentRail";
-import { LaunchPanel } from "@/components/LaunchPanel";
+import { LaunchPanel, type PresetSelection } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { PresenceFloaters } from "@/components/PresenceFloaters";
 import { SchedulePanel } from "@/components/SchedulePanel";
@@ -174,7 +174,12 @@ export default function HomePage() {
   const [launchSheetOpen, setLaunchSheetOpen] = useState(false);
   const [launchSheetMode, setLaunchSheetMode] = useState<LaunchSheetMode>("new");
   const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
-  const [launchingPresetId, setLaunchingPresetId] = useState<string | null>(null);
+  // Which preset (if any) the launch sheet should preselect on its next open.
+  // The sheet remounts LaunchPanel every open, so this is read once at mount;
+  // every open path sets it explicitly so a stale value never bleeds through.
+  const [presetSelection, setPresetSelection] = useState<PresetSelection>({
+    kind: "default",
+  });
   const inboxCount = useInboxCount(host, token);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
   const [threadsByBackend, setThreadsByBackend] = useState<
@@ -748,51 +753,18 @@ export default function HomePage() {
     }
   }
 
-  // One-tap launch from a preset chip on the compact launch deck. Resolves the
-  // preset spec (fetching the full, env-carrying spec only when the preset pins
-  // env vars) and routes through handleCreate so cwd-not-found, SSH-master
-  // retry, and auth handling stay identical to the sheet form. cwd/title are
-  // per-launch specifics absent from preset specs, so the effective default cwd
-  // is used. A null preset launches the plain backend default.
-  async function handleLaunchPreset(preset: SessionPresetSummary | null) {
-    if (launchingPresetId) {
-      return;
-    }
-    const marker = preset?.id ?? "__default__";
-    setLaunchingPresetId(marker);
-    try {
-      const spec = preset?.spec ?? null;
-      const backend = (spec?.backend ?? effectiveDefaultBackend) as Backend;
-      let launchEnv: Record<string, string> = {};
-      if (preset && (spec?.launch_env_keys?.length ?? 0) > 0) {
-        try {
-          const full = await fetchSessionPreset(host, token, preset.id, true);
-          launchEnv = full.spec.launch_env ?? {};
-        } catch {
-          // Fall through with empty env — handleCreate surfaces any failure.
-        }
-      }
-      await handleCreate(
-        backend,
-        effectiveDefaultCwd,
-        "",
-        spec?.model ?? null,
-        spec?.effort ?? null,
-        spec?.transport ?? null,
-        spec?.args ?? [],
-        spec?.config_overrides ?? [],
-        launchEnv,
-        spec?.permission_mode ?? null,
-        preset?.id ?? null,
-        spec?.account_profile_id ?? null,
-      );
-    } finally {
-      setLaunchingPresetId(null);
-    }
-  }
-
   function openLaunchSheet(mode: LaunchSheetMode) {
     setLaunchSheetMode(mode);
+    setPresetSelection({ kind: "default" });
+    setLaunchSheetOpen(true);
+  }
+
+  // Open the launch sheet on the New tab with a preset chip preselected, so the
+  // human confirms cwd/title before launching rather than creating immediately
+  // in the default working directory. A null preset opens with no selection.
+  function openLaunchSheetWithPreset(preset: SessionPresetSummary | null) {
+    setLaunchSheetMode("new");
+    setPresetSelection({ kind: "preset", presetId: preset?.id ?? null });
     setLaunchSheetOpen(true);
   }
 
@@ -1239,8 +1211,7 @@ export default function HomePage() {
               presets={sessionPresets}
               defaultPresetId={defaultPresetId}
               defaultBackend={effectiveDefaultBackend}
-              launchingPresetId={launchingPresetId}
-              onLaunchPreset={handleLaunchPreset}
+              onOpenPreset={openLaunchSheetWithPreset}
               onOpenSheet={openLaunchSheet}
             />
             <div className="home-main">
@@ -1326,6 +1297,7 @@ export default function HomePage() {
             onDeletePreset={handleDeletePreset}
             mode={launchSheetMode}
             onModeChange={setLaunchSheetMode}
+            initialPreset={presetSelection}
           />
         </Sheet>
       ) : null}

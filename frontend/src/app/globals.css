@@ -656,18 +656,8 @@ html[data-theme="light"] .launch-deck-new {
   transition: border-color 0.16s ease, opacity 0.16s ease;
 }
 
-.launch-chip:hover:not(:disabled) {
+.launch-chip:hover {
   border-color: var(--line-strong);
-}
-
-.launch-chip:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.launch-chip[data-loading] {
-  opacity: 0.7;
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .launch-chip.is-ghost {

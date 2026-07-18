@@ -13456,34 +13456,25 @@ html[data-theme="light"] .session-switcher-row.selected {
   color: var(--accent-cool);
 }
 
-/* The desktop rail toggle carries a chevron that flips to point back out when
-   the sidebar is collapsed, plus a label so its target is unambiguous. */
-.board-toolbar-nav-chevron {
-  font-size: 1rem;
-  line-height: 1;
+/* The desktop rail toggle is an icon-only instrument — a sidebar-panel glyph
+   whose filled (open) / hollow (collapsed) rail states its own effect, so it
+   never reads as a back link or echoes the Channels view tab. */
+.board-rail-toggle {
   color: var(--muted);
-  transition: transform 0.16s ease;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
 }
 
-.board-toolbar-nav:hover .board-toolbar-nav-chevron {
+.board-rail-toggle:hover {
   color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--bg-card-soft);
 }
 
-.board-toolbar-nav-chevron[data-collapsed="true"] {
-  transform: rotate(180deg);
-}
-
-.board-toolbar-nav-label {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  transition: color 0.14s ease;
-}
-
-.board-toolbar-nav:hover .board-toolbar-nav-label {
-  color: var(--text);
+.board-rail-toggle-icon {
+  display: block;
 }
 
 /* Desktop: the toolbar is an in-flow control strip, so it drops the glass and
@@ -13500,9 +13491,8 @@ html[data-theme="light"] .session-switcher-row.selected {
     box-shadow: none;
   }
 
-  .board-toolbar-nav {
-    gap: 7px;
-    padding: 6px 11px;
+  .board-rail-toggle {
+    padding: 7px;
   }
 }
 

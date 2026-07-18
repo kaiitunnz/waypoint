@@ -809,6 +809,56 @@ function ManagerSwitcher({
   );
 }
 
+// A sidebar-panel glyph: the outer app frame with a divided-off left rail. The
+// rail reads as filled when the navigator is open and as a hollow frame when it
+// is collapsed, so the icon states the toggle's effect on its own.
+function RailToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className="board-rail-toggle-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <defs>
+        <clipPath id="board-rail-toggle-clip">
+          <rect x="2" y="3" width="12" height="10" rx="2.2" />
+        </clipPath>
+      </defs>
+      {collapsed ? null : (
+        <rect
+          x="2"
+          y="3"
+          width="4.4"
+          height="10"
+          fill="currentColor"
+          opacity="0.85"
+          clipPath="url(#board-rail-toggle-clip)"
+        />
+      )}
+      <rect
+        x="2"
+        y="3"
+        width="12"
+        height="10"
+        rx="2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <line
+        x1="6.4"
+        y1="3.2"
+        x2="6.4"
+        y2="12.8"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
 function ViewSwitch({
   view,
   onChange,
@@ -1692,21 +1742,15 @@ export default function BoardPage() {
           ) : (
             <button
               type="button"
-              className="board-toolbar-nav"
+              className="board-toolbar-nav board-rail-toggle"
               onClick={toggleRail}
-              aria-expanded={!railCollapsed}
+              aria-pressed={!railCollapsed}
               aria-label={
                 railCollapsed ? "Show channels sidebar" : "Hide channels sidebar"
               }
+              title={railCollapsed ? "Show channels" : "Hide channels"}
             >
-              <span
-                className="board-toolbar-nav-chevron"
-                data-collapsed={railCollapsed ? "true" : "false"}
-                aria-hidden="true"
-              >
-                ‹
-              </span>
-              <span className="board-toolbar-nav-label">Channels</span>
+              <RailToggleIcon collapsed={railCollapsed} />
             </button>
           )}
           <span className="board-toolbar-context">

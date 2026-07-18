@@ -12558,6 +12558,16 @@ html[data-theme="light"] .session-switcher-row.selected {
   align-items: start;
 }
 
+/* Collapsed rail: the channel navigator folds away so the workspace claims the
+   full width (the kanban lanes and detail need the horizontal room). */
+.board-grid.is-rail-collapsed {
+  grid-template-columns: 1fr;
+}
+
+.board-grid.is-rail-collapsed .board-rail {
+  display: none;
+}
+
 .board-rail {
   display: flex;
   flex-direction: column;
@@ -13369,7 +13379,7 @@ html[data-theme="light"] .session-switcher-row.selected {
   color: var(--tone);
 }
 
-/* App-bar view switch — a flat segmented control (the app bar never floats). */
+/* View switch — a flat segmented control living in the workspace toolbar. */
 .board-viewswitch {
   display: inline-flex;
   padding: 2px;
@@ -13444,6 +13454,56 @@ html[data-theme="light"] .session-switcher-row.selected {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--accent-cool);
+}
+
+/* The desktop rail toggle carries a chevron that flips to point back out when
+   the sidebar is collapsed, plus a label so its target is unambiguous. */
+.board-toolbar-nav-chevron {
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+
+.board-toolbar-nav:hover .board-toolbar-nav-chevron {
+  color: var(--text);
+}
+
+.board-toolbar-nav-chevron[data-collapsed="true"] {
+  transform: rotate(180deg);
+}
+
+.board-toolbar-nav-label {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color 0.14s ease;
+}
+
+.board-toolbar-nav:hover .board-toolbar-nav-label {
+  color: var(--text);
+}
+
+/* Desktop: the toolbar is an in-flow control strip, so it drops the glass and
+   sits flat like the rest of the workspace content (glass stays on the sticky
+   mobile bar and the sticky channel header). */
+@media (min-width: 721px) {
+  .board-toolbar {
+    position: static;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    backdrop-filter: none;
+    border: 1px solid var(--line);
+    box-shadow: none;
+  }
+
+  .board-toolbar-nav {
+    gap: 7px;
+    padding: 6px 11px;
+  }
 }
 
 /* Navigator — grouped, searchable channel list (fills the rail / drawer). */

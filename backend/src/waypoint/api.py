@@ -39,6 +39,7 @@ from waypoint.backends.tmux.renderer import (
     SyncFrameTracker,
     make_renderer,
 )
+from waypoint.notifications.contracts import NotificationStatus
 from waypoint.presets import (
     redact_preset,
     resolve_schedule_create_request,
@@ -376,6 +377,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "backends": _backend_descriptors(context.runtime.registry, context.settings)
         }
+
+    @app.get("/api/notifications/status", response_model=NotificationStatus)
+    async def notifications_status(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> NotificationStatus:
+        # Redacted by construction: channel health carries a non-secret reason
+        # only, and counts are per-status totals — never message content, a bot
+        # token, or a raw Telegram error.
+        service = context.runtime.notifications
+        if service is None:
+            return NotificationStatus(enabled=context.settings.notifications.enabled)
+        return service.status()
 
     # Plugin-registered routes (e.g. the Claude PreToolUse hook) come
     # in here so api.py stays backend-agnostic.

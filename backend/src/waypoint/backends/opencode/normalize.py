@@ -10,6 +10,12 @@ from waypoint.backends.diff_preview import (
     files_from_unified_diff,
     preview_to_metadata,
 )
+from waypoint.backends.events import (
+    INTERACTION_METADATA_KEY,
+    InteractionChoice,
+    InteractionEnvelope,
+    question_interaction,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -188,6 +194,13 @@ def map_event(
             rendered = ", ".join(p for p in patterns if isinstance(p, str) and p)
             if rendered:
                 text += f" ({rendered})"
+        decisions = ["approve", "acceptForSession", "decline"]
+        interaction = InteractionEnvelope(
+            kind="approval",
+            request_id=str(permission.get("id") or ""),
+            title=text,
+            choices=[InteractionChoice(label=decision) for decision in decisions],
+        )
         return (
             EventKind.APPROVAL_REQUEST,
             text,
@@ -201,11 +214,12 @@ def map_event(
                     "approval_id": permission.get("id"),
                     "tool_name": tool_name,
                     "tool_input": tool_input,
-                    "decisions": ["approve", "acceptForSession", "decline"],
+                    "decisions": decisions,
                 },
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "status": SessionStatus.WAITING_INPUT,
+                INTERACTION_METADATA_KEY: interaction.to_metadata(),
                 **preview_to_metadata(preview),
             },
         )
@@ -227,20 +241,20 @@ def map_event(
         questions = _normalize_questions(properties.get("questions"))
         if not questions:
             return (EventKind.SYSTEM_NOTE, "", {})
-        return (
-            EventKind.TOOL_CALL,
-            "Need your input",
-            {
-                "method": "question.asked",
-                "payload": {"input": {"questions": questions}},
-                "item_id": request_id,
-                "item_type": "tool_use",
-                "tool_name": "AskUserQuestion",
-                "tool_input": {"questions": questions},
-                "tool_use_id": request_id,
-                "status": SessionStatus.WAITING_INPUT,
-            },
-        )
+        question_metadata: dict[str, Any] = {
+            "method": "question.asked",
+            "payload": {"input": {"questions": questions}},
+            "item_id": request_id,
+            "item_type": "tool_use",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": questions},
+            "tool_use_id": request_id,
+            "status": SessionStatus.WAITING_INPUT,
+        }
+        question_env = question_interaction(str(request_id or ""), questions)
+        if question_env is not None:
+            question_metadata[INTERACTION_METADATA_KEY] = question_env.to_metadata()
+        return (EventKind.TOOL_CALL, "Need your input", question_metadata)
 
     if event_type == "question.replied":
         return (

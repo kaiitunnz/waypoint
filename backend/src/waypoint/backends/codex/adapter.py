@@ -26,6 +26,10 @@ from waypoint.backends.codex.normalize import (
     plan_todo_items,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
+from waypoint.backends.events import (
+    INTERACTION_METADATA_KEY,
+    InteractionEnvelope,
+)
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -329,16 +333,25 @@ class CodexAppServerAdapter:
                 else None
             )
             diff_preview = diff_preview_for_approval(method, payload, cached_preview)
+            approval_text = format_approval_text(method, payload)
+            interaction = InteractionEnvelope(
+                kind="approval",
+                request_id=(
+                    str(item_id) if isinstance(item_id, str) and item_id else method
+                ),
+                title=approval_text,
+            )
             if self._loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self._emit_event(
                         state.session_id,
                         EventKind.APPROVAL_REQUEST,
-                        format_approval_text(method, payload),
+                        approval_text,
                         {
                             "method": method,
                             "request": payload,
                             "status": SessionStatus.WAITING_INPUT,
+                            INTERACTION_METADATA_KEY: interaction.to_metadata(),
                             **preview_to_metadata(diff_preview),
                         },
                         SessionStatus.WAITING_INPUT,

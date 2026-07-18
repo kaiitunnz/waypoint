@@ -18,6 +18,8 @@ import {
   InboxQuestionAnswer,
   InboxStatus,
   LaunchSettingsUpdate,
+  ManagerStateResponse,
+  ManagerSummary,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
@@ -1218,6 +1220,39 @@ export async function updateBoardEntry(
   await ensureOk(response, "failed to update board entry");
   const payload = await response.json();
   return payload.entry as BoardEntry;
+}
+
+// A 404 (endpoint unavailable) degrades to [] so the page runs in general mode
+// instead of failing.
+export async function fetchManagers(
+  host: string,
+  token: string,
+): Promise<ManagerSummary[]> {
+  const response = await fetch(`${host}/api/manager`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (response.status === 404) return [];
+  await ensureOk(response, "failed to fetch managers");
+  const payload = await response.json();
+  return (payload.managers ?? []) as ManagerSummary[];
+}
+
+// Tickets come from /state; there is no /tickets list route.
+export async function fetchManagerState(
+  host: string,
+  token: string,
+  managerId: string,
+): Promise<ManagerStateResponse> {
+  const response = await fetch(
+    `${host}/api/manager/${encodeURIComponent(managerId)}/state`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch manager state");
+  return (await response.json()) as ManagerStateResponse;
 }
 
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {

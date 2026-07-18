@@ -591,6 +591,88 @@ export interface BoardChannel {
   last_created_at: string;
 }
 
+// ─── Waypoint Manager ───
+// The 13 states of a ticket in the manager state machine. Awaiting-human:
+// spec_review, blocked, review_requested. Terminal: merged, deferred, abandoned.
+export type ManagerTicketState =
+  | "intake"
+  | "triaged"
+  | "spec_pending"
+  | "spec_review"
+  | "ready"
+  | "delegated"
+  | "building"
+  | "blocked"
+  | "review_requested"
+  | "revising"
+  | "merged"
+  | "deferred"
+  | "abandoned";
+
+export type ManagerTicketScale = "trivial" | "substantial";
+
+export interface ManagerTicket {
+  id: string;
+  manager_id: string;
+  title: string;
+  priority: string;
+  kind?: string | null;
+  scale?: ManagerTicketScale | null;
+  state: ManagerTicketState;
+  footprint: string[];
+  is_partial: boolean;
+  spec_ref?: string | null;
+  intended_lead_title?: string | null;
+  lead_session_id?: string | null;
+  branch?: string | null;
+  pr_url?: string | null;
+  inbox_item_id?: string | null;
+  attempts: number;
+  lead_restarts: number;
+  deps: string[];
+  awaiting_since?: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export interface ManagerTreeState {
+  free: boolean;
+  held_by?: string | null;
+}
+
+export interface ManagerRenderContext {
+  templates_dir: string;
+  tickets_channel: string;
+  ticket_channel_prefix: string;
+}
+
+export interface ManagerConfig {
+  id: string;
+  project: string;
+  repo_dir: string;
+  trunk: string;
+  priority_levels: string[];
+  owner_session_id?: string | null;
+  render_context?: ManagerRenderContext | null;
+}
+
+export interface ManagerStateResponse {
+  config?: ManagerConfig | null;
+  tree: ManagerTreeState;
+  tickets: ManagerTicket[];
+}
+
+// One entry per initialized manager, for the board's per-project switcher.
+export interface ManagerSummary {
+  id: string;
+  project: string;
+  repo_dir: string;
+  owner_session_id?: string | null;
+  ticket_count: number;
+  attention_count: number;
+}
+
 export type MessageScheduleStatus = "pending" | "sent" | "cancelled" | "failed";
 
 export interface MessageSchedule {

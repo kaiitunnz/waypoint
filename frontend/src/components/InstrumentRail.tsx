@@ -374,11 +374,7 @@ function ScheduledTile({
           </li>
         ))}
       </ul>
-      {overflow > 0 ? (
-        <p className="inst-note">+{overflow} more · manage →</p>
-      ) : (
-        <p className="inst-note">manage →</p>
-      )}
+      {overflow > 0 ? <p className="inst-note">+{overflow} more</p> : null}
     </button>
   );
 }

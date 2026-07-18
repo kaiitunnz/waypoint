@@ -464,6 +464,27 @@ html[data-theme="light"] .backend-popover-apply {
   cursor: not-allowed;
 }
 
+/* On a phone the chip-anchored popover (right:0 + fixed 300px width) overflows
+ * off the viewport's left edge. Re-anchor it to the app bar and span the full
+ * content width within the safe area so the whole control (incl. Apply) is
+ * always on-screen. */
+@media (max-width: 640px) {
+  .app-bar {
+    position: relative;
+  }
+  .hostctl-wrap {
+    position: static;
+  }
+  .backend-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: max(4px, env(safe-area-inset-left));
+    right: max(4px, env(safe-area-inset-right));
+    width: auto;
+    max-width: none;
+  }
+}
+
 /* ── Primary nav ── */
 .home-nav {
   display: flex;
@@ -531,21 +552,32 @@ html[data-theme="light"] .backend-popover-apply {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Layout grid: sessions main + sticky instrument rail (RFC Option 1). ── */
+/* ── Layout grid: sessions main + sticky instrument rail (RFC Option 1).
+ * Grid areas keep the launch panel above the session list in the left column
+ * on desktop, and let mobile reorder to launch → instruments → sessions. ── */
 .home-layout {
   display: grid;
   grid-template-columns: 1fr 336px;
+  grid-template-areas:
+    "launch rail"
+    "main   rail";
   gap: 16px;
   align-items: start;
 }
 
+.home-layout > .launch-deck {
+  grid-area: launch;
+}
+
 .home-main {
+  grid-area: main;
   min-width: 0;
   display: grid;
   gap: 16px;
 }
 
 .rail {
+  grid-area: rail;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -669,10 +701,6 @@ html[data-theme="light"] .launch-deck-new {
 
 html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   background: var(--muted);
-}
-
-.launch-chip-meta {
-  color: var(--muted-soft);
 }
 
 /* ── Instrument rail tiles ── */
@@ -1248,16 +1276,19 @@ html[data-theme="light"] .wp-sheet-scrim {
 
 /* ── Mobile: single column, rail becomes a horizontal strip above sessions ── */
 @media (max-width: 900px) {
+  /* Mobile order: launch panel on top, instruments beneath it, session list at
+     the bottom. Instruments are a full-width vertical stack — a horizontal
+     strip left blank voids under short tiles (its row height is the tallest
+     tile); stacked full-width cards size to their own content, no empty space. */
   .home-layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "launch"
+      "rail"
+      "main";
   }
-  /* Mobile instruments: a full-width vertical stack above the session list.
-     A horizontal strip left blank voids under short tiles (its row height is
-     the tallest tile); stacked full-width cards size to their own content, so
-     each is dense with no empty space. */
   .rail {
     position: static;
-    order: -1;
     flex-direction: column;
   }
   .home-nav {

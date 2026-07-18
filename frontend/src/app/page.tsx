@@ -1211,16 +1211,16 @@ export default function HomePage() {
             onOpenScheduled={() => setScheduleSheetOpen(true)}
           />
           <div className="home-layout">
+            <CompactLaunch
+              targetLabel={launchTargetLabel}
+              presets={sessionPresets}
+              defaultPresetId={defaultPresetId}
+              defaultBackend={effectiveDefaultBackend}
+              launchingPresetId={launchingPresetId}
+              onLaunchPreset={handleLaunchPreset}
+              onOpenSheet={openLaunchSheet}
+            />
             <div className="home-main">
-              <CompactLaunch
-                targetLabel={launchTargetLabel}
-                presets={sessionPresets}
-                defaultPresetId={defaultPresetId}
-                defaultBackend={effectiveDefaultBackend}
-                launchingPresetId={launchingPresetId}
-                onLaunchPreset={handleLaunchPreset}
-                onOpenSheet={openLaunchSheet}
-              />
               <SessionList
                 sessions={filteredSessions}
                 catalog={catalog}

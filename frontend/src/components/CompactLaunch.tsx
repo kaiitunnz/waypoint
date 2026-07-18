@@ -59,7 +59,6 @@ export function CompactLaunch({
         {visible.length > 0 ? (
           visible.map((preset) => {
             const backend = (preset.spec.backend ?? defaultBackend) as Backend;
-            const model = preset.spec.model;
             return (
               <button
                 key={preset.id}
@@ -72,7 +71,6 @@ export function CompactLaunch({
               >
                 <span className="launch-chip-dot" data-owner={backend} />
                 {preset.name}
-                {model ? <span className="launch-chip-meta">· {model}</span> : null}
               </button>
             );
           })

@@ -265,8 +265,6 @@ function InboxPageInner() {
     }
   }, []);
 
-  const resetSidebarWidth = useCallback(() => setSidebarWidth(undefined), []);
-
   useEffect(() => {
     filterRef.current = { status, q: debouncedQ };
   }, [status, debouncedQ]);
@@ -694,17 +692,6 @@ function InboxPageInner() {
               onPointerDown={startSidebarResize}
               onKeyDown={onSidebarResizeKey}
             />
-            {sidebarWidth !== undefined ? (
-              <button
-                type="button"
-                className="inbox-resize-reset"
-                aria-label="Reset sidebar width"
-                title="Reset width"
-                onClick={resetSidebarWidth}
-              >
-                ↺
-              </button>
-            ) : null}
           </div>
 
           <div

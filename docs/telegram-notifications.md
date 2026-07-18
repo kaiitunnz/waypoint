@@ -40,7 +40,9 @@ written, no HTTP calls are made, and nothing leaves the host.
    ```yaml
    notifications:
      enabled: true
-     public_base_url: https://waypoint.example.ts.net   # your reachable origin
+     public_base_url: https://waypoint.example.ts.net   # any http(s) origin reachable
+                                                        # from your phone (http://host:port
+                                                        # is fine); see public_base_url below
      channels:
        - id: personal-telegram
          type: telegram
@@ -77,17 +79,18 @@ retro-notify already-pending items; only new transitions notify.
 ## `public_base_url`
 
 The operator-controlled origin the deep links are built from. It is **required**
-when notifications are enabled, must be an absolute `http`/`https` URL with no
-query, fragment, or userinfo, and should be reachable **from your phone** (your
-Tailscale MagicDNS name or a public HTTPS host — not `localhost` or an internal
-alias like `http://h0:8787`, which won't resolve on mobile).
+when notifications are enabled and must be an absolute `http` or `https` URL,
+with an optional port, and no query, fragment, or userinfo. Any such origin
+works for the deep link as long as it is reachable **from your phone** — a
+Tailscale MagicDNS name over plain HTTP is fine (e.g.
+`http://host.ts.net:3010`), a public HTTPS host is fine; `localhost` and a bare
+internal alias like `http://h0:8787` are not (they don't resolve on mobile).
 
-For the best experience use a public HTTPS origin with a real hostname (e.g.
-`https://waypoint.example.ts.net`): Telegram then renders the deep link as a
-tappable **Open** button. When the origin is an internal alias that Telegram
-won't accept as a button URL, the link is included in the message text instead
-so delivery still succeeds — but such a link only opens on a device that can
-resolve that host.
+A valid **https** origin with a real hostname (e.g.
+`https://waypoint.example.ts.net`) additionally lets Telegram render the deep
+link as a tappable **Open** button. For any other accepted origin the link is
+included in the message text instead — delivery still succeeds and the link
+still opens on a device that can reach that host.
 
 ## Multiple chats and channels
 

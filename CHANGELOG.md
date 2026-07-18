@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/kaiitunnz/waypoint/compare/v0.11.0...v0.12.0) (2026-07-18)
+
+
+### Features
+
+* sessions-first homepage control deck ([#325](https://github.com/kaiitunnz/waypoint/issues/325)) ([9a28a3a](https://github.com/kaiitunnz/waypoint/commit/9a28a3a2104c7fe4032e88eead3bfa5566ad49b8))
+
 ## [0.11.0](https://github.com/kaiitunnz/waypoint/compare/v0.10.1...v0.11.0) (2026-07-18)
 
 

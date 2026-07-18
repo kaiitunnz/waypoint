@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
 import { DOW_LABELS, formatDayLabel, formatHourLabel } from "@/lib/telemetry";
@@ -34,17 +34,16 @@ function niceMax(value: number): number {
   return niceResidual * magnitude;
 }
 
-// Python weekday (Mon=0…Sun=6) from a host-tz calendar day string, matching
-// the backend heatmap bucketing so the derived date labels line up with the rows.
+// Python weekday (Mon=0…Sun=6) from a calendar-day string, matching the backend
+// heatmap bucketing.
 function pythonDow(day: string): number {
   const parsed = new Date(`${day}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return -1;
   return (parsed.getDay() + 6) % 7;
 }
 
-// Each heatmap row is an aggregate over every day in the range that fell on
-// that weekday — not a single date. Surfacing the actual dates each row covers
-// is what makes "where did Sunday come from" self-evidently correct.
+// A weekday row aggregates every in-range date that fell on it, so it can span
+// multiple dates.
 function formatDowDates(days: string[]): string {
   if (days.length === 0) return "no days";
   if (days.length === 1) return formatDayLabel(days[0]);
@@ -181,6 +180,20 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
   const trendTitleId = useId();
   const heatmapTitleId = useId();
 
+  // Host-tz wall clock in the heatmap's (day, hour) shape. Resolved on the
+  // client to avoid an SSR hydration mismatch.
+  const [now, setNow] = useState<{ day: string; hour: number } | null>(null);
+  const offsetMinutes = activity?.range.utc_offset_minutes ?? 0;
+  useEffect(() => {
+    const tick = () => {
+      const shifted = new Date(Date.now() + offsetMinutes * 60_000);
+      setNow({ day: shifted.toISOString().slice(0, 10), hour: shifted.getUTCHours() });
+    };
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, [offsetMinutes]);
+
   const heatmapSummary = useMemo(() => {
     if (!activity || activity.heatmap.length === 0) return null;
     const peak = activity.heatmap.reduce((best, cell) => (cell.count > best.count ? cell : best));
@@ -200,12 +213,25 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
     return map;
   }, [activity]);
 
+  // Order the weekday rows from the range's first calendar day so they read
+  // chronologically (a Sunday-opening week renders Sun→Sat, today last).
+  const orderedDows = useMemo(() => {
+    const firstDay = activity?.daily?.[0]?.day;
+    const anchor = firstDay ? pythonDow(firstDay) : 0;
+    const start = anchor < 0 ? 0 : anchor;
+    return Array.from({ length: 7 }, (_, i) => (start + i) % 7);
+  }, [activity]);
+
   if (loading && !activity) {
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }
   if (!activity) return null;
 
   const daily = activity.daily;
+  // Mark "now" only when today falls inside the selected range.
+  const today = now && daily.some((d) => d.day === now.day) ? now : null;
+  const todayDow = today ? pythonDow(today.day) : -1;
+  const nowHour = today ? today.hour : -1;
   const trendSummary =
     daily.length > 0
       ? DAILY_SERIES.map(
@@ -327,18 +353,27 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
                   <tr>
                     <th scope="col" className="tm-heatmap-corner" />
                     {Array.from({ length: 24 }, (_, hour) => (
-                      <th key={hour} scope="col" className="tm-heatmap-hour">
-                        {hour % 3 === 0 ? formatHourLabel(hour) : ""}
+                      <th
+                        key={hour}
+                        scope="col"
+                        className={`tm-heatmap-hour${hour === nowHour ? " is-now-hour" : ""}`}
+                      >
+                        {hour % 3 === 0 || hour === nowHour ? formatHourLabel(hour) : ""}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {DOW_LABELS.map((label, dow) => {
+                  {orderedDows.map((dow) => {
+                    const label = DOW_LABELS[dow];
                     const dates = dowDates.get(dow) ?? [];
+                    const isToday = dow === todayDow;
                     return (
-                      <tr key={label}>
-                        <th scope="row" className="tm-heatmap-dow">
+                      <tr key={dow}>
+                        <th
+                          scope="row"
+                          className={`tm-heatmap-dow${isToday ? " is-today" : ""}`}
+                        >
                           <span className="tm-heatmap-dow-name">{label}</span>
                           <span className="tm-heatmap-dow-date">{formatDowDates(dates)}</span>
                         </th>
@@ -349,13 +384,14 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
                             heatmapSummary?.dow === dow &&
                             heatmapSummary?.hour === hour &&
                             count > 0;
+                          const isNow = isToday && hour === nowHour;
                           return (
                             <td key={hour} className="tm-heatmap-cell-wrap">
                               <button
                                 type="button"
                                 className={`tm-heatmap-cell${count === 0 ? " is-empty" : ""}${
                                   isPeak ? " is-peak" : ""
-                                }`}
+                                }${isNow ? " is-now" : ""}`}
                                 style={
                                   count === 0
                                     ? undefined
@@ -369,7 +405,7 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
                                 }
                                 aria-label={`${label} ${formatDowDates(dates)}, ${formatHourLabel(
                                   hour,
-                                )}: ${count} event${count === 1 ? "" : "s"}`}
+                                )}${isNow ? " (now)" : ""}: ${count} event${count === 1 ? "" : "s"}`}
                                 onMouseEnter={(event) =>
                                   setTooltip({
                                     left: event.clientX,

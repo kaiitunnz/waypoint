@@ -695,6 +695,46 @@ export async function generateNLInsight(
   return (await response.json()) as NLGenerateAck;
 }
 
+// Register/renew a visible-tab presence lease for a session. The backend uses
+// it to suppress redundant session-interaction notifications while the operator
+// is looking at that session. Fails open: the caller ignores errors.
+export async function registerSessionPresence(
+  host: string,
+  token: string,
+  sessionId: string,
+  viewerId: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/presence`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ viewer_id: viewerId }),
+  });
+  await ensureOk(response, "failed to register session presence");
+}
+
+// Release a presence lease. ``keepalive`` lets the request outlive an unmounting
+// page; the lease TTL is the authoritative fallback when it can't be sent.
+export async function releaseSessionPresence(
+  host: string,
+  token: string,
+  sessionId: string,
+  viewerId: string,
+  options: { keepalive?: boolean } = {},
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/presence/${encodeURIComponent(viewerId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+      keepalive: options.keepalive,
+    },
+  );
+  await ensureOk(response, "failed to release session presence");
+}
+
 export async function setSessionPermissionMode(
   host: string,
   token: string,

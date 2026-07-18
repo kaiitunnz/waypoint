@@ -14397,6 +14397,17 @@ a.board-fact-pr:hover {
   .board-shell .back-link {
     display: none;
   }
+  /* Override the global mobile app bar, which stacks its meta zone onto a
+     second row (flex-direction: column). With nav moved to the toolbar the
+     board's meta is just the theme toggle, so keep the bar a single row with
+     the toggle trailing the title instead of orphaned on a line of its own. */
+  .board-shell .app-bar {
+    flex-direction: row;
+    align-items: center;
+  }
+  .board-shell .app-bar-meta {
+    width: auto;
+  }
 }
 
 /* ─── Workspace preview ─── */

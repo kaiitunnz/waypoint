@@ -18,12 +18,8 @@ interface SheetProps {
 export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  // Read onClose through a ref so the focus-management effect below keys on
-  // `open` alone. Callers pass a fresh inline onClose each render, and the
-  // homepage re-renders continuously as live session/board updates stream in;
-  // depending on onClose would re-run the effect every render, and its cleanup
-  // (restoreFocusRef.current?.focus()) would yank focus out of whatever field
-  // the user is typing in back to the trigger.
+  // Key the focus effect on `open` alone; a fresh inline onClose each render
+  // would otherwise re-run it and its cleanup would steal focus mid-typing.
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;

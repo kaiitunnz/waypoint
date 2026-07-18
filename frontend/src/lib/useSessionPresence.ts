@@ -8,9 +8,8 @@ import { registerSessionPresence, releaseSessionPresence } from "@/lib/api";
 // single missed renewal does not drop presence.
 const RENEW_INTERVAL_MS = 15_000;
 
-// crypto.randomUUID is gated on a secure context, so it is undefined when the
-// app is served over plain HTTP (e.g. a tailnet IP on mobile). The viewer id is
-// a non-security-sensitive per-tab tag, so fall back to a random string there.
+// crypto.randomUUID is undefined outside a secure context (plain HTTP on
+// mobile); fall back to a random string for this non-security viewer id.
 function makeViewerId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();

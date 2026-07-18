@@ -1256,8 +1256,10 @@ export default function BoardPage() {
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    const search = node?.querySelector<HTMLElement>(".board-nav-search-input");
-    search?.focus();
+    // Move focus into the drawer for the trap and Escape handling, but land on
+    // the panel itself — not the search box — so opening it never pops the
+    // mobile keyboard or steals typing focus.
+    node?.focus();
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [navOpen]);
 
@@ -1518,6 +1520,14 @@ export default function BoardPage() {
   const cellAuthor = uniformAuthor(cells);
   const logAuthor = hasOlder ? null : uniformAuthor(log);
 
+  // Channel-detail layout: a summary header plus a two-column split (cells |
+  // log) on wide screens when both halves carry content, so the log timeline
+  // fills the space the single-column stack used to waste.
+  const activeChannelMeta =
+    channels.find((c) => c.channel === activeChannel) ?? null;
+  const hasPrimary = statusCell !== null || cells.length > 0;
+  const splitDetail = hasPrimary && log.length > 0;
+
   const controls: EntryControls = {
     editingId,
     editDraft,
@@ -1707,6 +1717,7 @@ export default function BoardPage() {
                 role="dialog"
                 aria-modal="true"
                 aria-label="Channels"
+                tabIndex={-1}
                 onClick={stopEvent}
               >
                 <div className="board-drawer-head">
@@ -1761,10 +1772,30 @@ export default function BoardPage() {
             ) : (
               <div className="board-detail-view">
                 {activeChannel ? (
-                  <div className="board-context">
-                    <div className="board-context-titles">
+                  <header className="board-channel-header">
+                    <div className="board-channel-headmain">
                       <p className="board-main-eyebrow">channel</p>
-                      <h2 className="board-main-title">{activeChannel}</h2>
+                      <h2 className="board-channel-title">{activeChannel}</h2>
+                      <div className="board-channel-summary">
+                        <span>
+                          {cells.length} {cells.length === 1 ? "cell" : "cells"}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          {logTotal} {logTotal === 1 ? "post" : "posts"}
+                        </span>
+                        {activeChannelMeta ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              updated{" "}
+                              {formatRelativeTime(
+                                activeChannelMeta.last_created_at,
+                              )}
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="board-actions">
                       <button
@@ -1782,280 +1813,294 @@ export default function BoardPage() {
                         Delete channel
                       </button>
                     </div>
-                  </div>
+                  </header>
                 ) : null}
 
-                {statusCell ? (
-                  <StatusBanner
-                    entry={statusCell}
-                    controls={controls}
-                    expanded={expandedId === statusCell.id}
-                    onActivate={() => activateEntry(statusCell.id)}
-                    onKeyDown={(event) => onEntryKeyDown(event, statusCell.id)}
-                  />
-                ) : null}
-
-                {cells.length > 0 ? (
-                  <section className="board-cells" aria-label="Cells">
-                    <h3 className="board-group-label">
-                      Cells · latest value
-                      {cellAuthor ? (
-                        <span className="board-group-by">
-                          {" · all by "}
-                          {shortId(cellAuthor)}
-                        </span>
+                <div
+                  className={`board-detail-columns${
+                    splitDetail ? " is-split" : ""
+                  }`}
+                >
+                  {hasPrimary ? (
+                    <div className="board-detail-primary">
+                      {statusCell ? (
+                        <StatusBanner
+                          entry={statusCell}
+                          controls={controls}
+                          expanded={expandedId === statusCell.id}
+                          onActivate={() => activateEntry(statusCell.id)}
+                          onKeyDown={(event) =>
+                            onEntryKeyDown(event, statusCell.id)
+                          }
+                        />
                       ) : null}
-                    </h3>
 
-                    {heroCell ? (
-                      <article
-                        className={`board-hero${
-                          expandedId === heroCell.id ? " is-expanded" : ""
-                        }`}
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={expandedId === heroCell.id}
-                        onClick={() => activateEntry(heroCell.id)}
-                        onKeyDown={(event) => onEntryKeyDown(event, heroCell.id)}
-                      >
-                        <header className="board-hero-head">
-                          <span className="board-hero-key">{heroCell.key}</span>
-                          <span className="board-cell-time">
-                            {formatRelativeTime(heroCell.created_at)}
-                            {heroCell.edited_at ? (
-                              <span className="board-edited"> · edited</span>
+                      {cells.length > 0 ? (
+                        <section className="board-cells" aria-label="Cells">
+                          <h3 className="board-group-label">
+                            Cells · latest value
+                            {cellAuthor ? (
+                              <span className="board-group-by">
+                                {" · all by "}
+                                {shortId(cellAuthor)}
+                              </span>
                             ) : null}
-                            <span
-                              className="board-expand-cue"
-                              aria-hidden="true"
-                            >
-                              ›
-                            </span>
-                          </span>
-                        </header>
-                        <EntryExpansion entry={heroCell} controls={controls}>
-                          <>
-                            <p className="board-hero-value">{heroCell.text}</p>
-                            <MetaChips metadata={heroCell.metadata} />
-                          </>
-                        </EntryExpansion>
-                      </article>
-                    ) : null}
+                          </h3>
 
-                    {scalarCells.length > 0 ? (
-                      <ul className="board-state-list">
-                        {scalarCells.map((entry) => (
-                          <li key={entry.id} className="board-state-wrap">
-                            <div
-                              className={`board-state-row${
-                                expandedId === entry.id ? " is-expanded" : ""
+                          {heroCell ? (
+                            <article
+                              className={`board-hero${
+                                expandedId === heroCell.id ? " is-expanded" : ""
                               }`}
                               role="button"
                               tabIndex={0}
-                              aria-expanded={expandedId === entry.id}
-                              onClick={() => activateEntry(entry.id)}
-                              onKeyDown={(event) =>
-                                onEntryKeyDown(event, entry.id)
-                              }
+                              aria-expanded={expandedId === heroCell.id}
+                              onClick={() => activateEntry(heroCell.id)}
+                              onKeyDown={(event) => onEntryKeyDown(event, heroCell.id)}
                             >
-                              <span className="board-state-key">
-                                {entry.key}
-                              </span>
-                              {editingId === entry.id ? null : (
-                                <span className="board-state-value">
-                                  {entry.text}
-                                </span>
-                              )}
-                              <MetaChips metadata={entry.metadata} />
-                              {cellAuthor ? null : (
-                                <span className="board-state-author">
-                                  {entry.author_session_id
-                                    ? shortId(entry.author_session_id)
-                                    : "—"}
-                                </span>
-                              )}
-                              <span className="board-state-time">
-                                {formatRelativeTime(entry.created_at)}
-                                {entry.edited_at ? (
-                                  <span className="board-edited"> · edited</span>
-                                ) : null}
-                                <span
-                                  className="board-expand-cue"
-                                  aria-hidden="true"
-                                >
-                                  ›
-                                </span>
-                              </span>
-                            </div>
-                            <EntryExpansion entry={entry} controls={controls}>
-                              {null}
-                            </EntryExpansion>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-
-                    {cardCells.length > 0 ? (
-                      <div className="board-cell-grid">
-                        {cardCells.map((entry) => (
-                          <article
-                            key={entry.id}
-                            className={`board-cell${
-                              expandedId === entry.id ? " is-expanded" : ""
-                            }`}
-                            role="button"
-                            tabIndex={0}
-                            aria-expanded={expandedId === entry.id}
-                            onClick={() => activateEntry(entry.id)}
-                            onKeyDown={(event) =>
-                              onEntryKeyDown(event, entry.id)
-                            }
-                          >
-                            <header className="board-cell-head">
-                              <span className="board-cell-key">
-                                {entry.key}
-                              </span>
-                              <span className="board-cell-time">
-                                {formatRelativeTime(entry.created_at)}
-                                {entry.edited_at ? (
-                                  <span className="board-edited"> · edited</span>
-                                ) : null}
-                                <span
-                                  className="board-expand-cue"
-                                  aria-hidden="true"
-                                >
-                                  ›
-                                </span>
-                              </span>
-                            </header>
-                            <EntryExpansion entry={entry} controls={controls}>
-                              <>
-                                <p className="board-cell-value">{entry.text}</p>
-                                {cellAuthor ? null : (
-                                  <footer className="board-cell-foot">
-                                    <span className="board-cell-author">
-                                      {entry.author_session_id
-                                        ? shortId(entry.author_session_id)
-                                        : "—"}
-                                    </span>
-                                  </footer>
-                                )}
-                                <SemanticFactRow
-                                  facts={semanticFacts(entry.metadata)}
-                                />
-                                <MetaChips
-                                  metadata={semanticFacts(entry.metadata).rest}
-                                />
-                              </>
-                            </EntryExpansion>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
-                  </section>
-                ) : null}
-
-                <section className="board-log" aria-label="Log">
-                  {cells.length > 0 ? (
-                    <h3 className="board-group-label">
-                      Log · newest first
-                      {logAuthor ? (
-                        <span className="board-group-by">
-                          {" · all by "}
-                          {shortId(logAuthor)}
-                        </span>
-                      ) : null}
-                    </h3>
-                  ) : null}
-                  {log.length === 0 ? (
-                    <p className="board-log-empty">
-                      {cells.length > 0
-                        ? "No log posts in this channel."
-                        : "No entries yet."}
-                    </p>
-                  ) : (
-                    <ol className="board-log-list">
-                      {log.map((entry) => {
-                        const kind = metaString(entry.metadata, "kind");
-                        const tone = kindTone(kind);
-                        const facts = semanticFacts(entry.metadata);
-                        const isRelay = kind === "relay";
-                        return (
-                          <li
-                            key={entry.id}
-                            className={`board-log-item${
-                              isRelay ? " is-relay" : ""
-                            }`}
-                            data-tone={tone}
-                          >
-                            <div className="board-log-rail" aria-hidden="true" />
-                            <div
-                              className={`board-log-body${
-                                expandedId === entry.id ? " is-expanded" : ""
-                              }`}
-                              role="button"
-                              tabIndex={0}
-                              aria-expanded={expandedId === entry.id}
-                              onClick={() => activateEntry(entry.id)}
-                              onKeyDown={(event) =>
-                                onEntryKeyDown(event, entry.id)
-                              }
-                            >
-                              <EntryExpansion entry={entry} controls={controls}>
-                                <div className="board-log-main">
-                                  {kind ? (
-                                    <span
-                                      className="board-log-tag"
-                                      data-tone={tone}
-                                    >
-                                      {isRelay ? "from you (via inbox)" : kind}
-                                    </span>
+                              <header className="board-hero-head">
+                                <span className="board-hero-key">{heroCell.key}</span>
+                                <span className="board-cell-time">
+                                  {formatRelativeTime(heroCell.created_at)}
+                                  {heroCell.edited_at ? (
+                                    <span className="board-edited"> · edited</span>
                                   ) : null}
-                                  <p className="board-log-text">{entry.text}</p>
-                                  <SemanticFactRow facts={facts} />
-                                  <div className="board-log-meta">
-                                    <span className="board-log-time">
-                                      {formatRelativeTime(entry.created_at)}
-                                      {entry.edited_at ? (
-                                        <span className="board-edited">
-                                          {" "}
-                                          · edited
-                                        </span>
-                                      ) : null}
+                                  <span
+                                    className="board-expand-cue"
+                                    aria-hidden="true"
+                                  >
+                                    ›
+                                  </span>
+                                </span>
+                              </header>
+                              <EntryExpansion entry={heroCell} controls={controls}>
+                                <>
+                                  <p className="board-hero-value">{heroCell.text}</p>
+                                  <MetaChips metadata={heroCell.metadata} />
+                                </>
+                              </EntryExpansion>
+                            </article>
+                          ) : null}
+
+                          {scalarCells.length > 0 ? (
+                            <ul className="board-state-list">
+                              {scalarCells.map((entry) => (
+                                <li key={entry.id} className="board-state-wrap">
+                                  <div
+                                    className={`board-state-row${
+                                      expandedId === entry.id ? " is-expanded" : ""
+                                    }`}
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-expanded={expandedId === entry.id}
+                                    onClick={() => activateEntry(entry.id)}
+                                    onKeyDown={(event) =>
+                                      onEntryKeyDown(event, entry.id)
+                                    }
+                                  >
+                                    <span className="board-state-key">
+                                      {entry.key}
                                     </span>
-                                    {logAuthor ? null : (
-                                      <span className="board-log-author">
+                                    {editingId === entry.id ? null : (
+                                      <span className="board-state-value">
+                                        {entry.text}
+                                      </span>
+                                    )}
+                                    <MetaChips metadata={entry.metadata} />
+                                    {cellAuthor ? null : (
+                                      <span className="board-state-author">
                                         {entry.author_session_id
                                           ? shortId(entry.author_session_id)
                                           : "—"}
                                       </span>
                                     )}
-                                    <MetaChips metadata={facts.rest} />
+                                    <span className="board-state-time">
+                                      {formatRelativeTime(entry.created_at)}
+                                      {entry.edited_at ? (
+                                        <span className="board-edited"> · edited</span>
+                                      ) : null}
+                                      <span
+                                        className="board-expand-cue"
+                                        aria-hidden="true"
+                                      >
+                                        ›
+                                      </span>
+                                    </span>
                                   </div>
-                                </div>
-                              </EntryExpansion>
+                                  <EntryExpansion entry={entry} controls={controls}>
+                                    {null}
+                                  </EntryExpansion>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+
+                          {cardCells.length > 0 ? (
+                            <div className="board-cell-grid">
+                              {cardCells.map((entry) => (
+                                <article
+                                  key={entry.id}
+                                  className={`board-cell${
+                                    expandedId === entry.id ? " is-expanded" : ""
+                                  }`}
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-expanded={expandedId === entry.id}
+                                  onClick={() => activateEntry(entry.id)}
+                                  onKeyDown={(event) =>
+                                    onEntryKeyDown(event, entry.id)
+                                  }
+                                >
+                                  <header className="board-cell-head">
+                                    <span className="board-cell-key">
+                                      {entry.key}
+                                    </span>
+                                    <span className="board-cell-time">
+                                      {formatRelativeTime(entry.created_at)}
+                                      {entry.edited_at ? (
+                                        <span className="board-edited"> · edited</span>
+                                      ) : null}
+                                      <span
+                                        className="board-expand-cue"
+                                        aria-hidden="true"
+                                      >
+                                        ›
+                                      </span>
+                                    </span>
+                                  </header>
+                                  <EntryExpansion entry={entry} controls={controls}>
+                                    <>
+                                      <p className="board-cell-value">{entry.text}</p>
+                                      {cellAuthor ? null : (
+                                        <footer className="board-cell-foot">
+                                          <span className="board-cell-author">
+                                            {entry.author_session_id
+                                              ? shortId(entry.author_session_id)
+                                              : "—"}
+                                          </span>
+                                        </footer>
+                                      )}
+                                      <SemanticFactRow
+                                        facts={semanticFacts(entry.metadata)}
+                                      />
+                                      <MetaChips
+                                        metadata={semanticFacts(entry.metadata).rest}
+                                      />
+                                    </>
+                                  </EntryExpansion>
+                                </article>
+                              ))}
                             </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  )}
-                  {hasOlder ? (
-                    <div className="board-log-more">
-                      <button
-                        type="button"
-                        className="board-load-older"
-                        onClick={() => void loadOlder()}
-                        disabled={loadingOlder}
-                      >
-                        {loadingOlder ? "Loading…" : "Load older"}
-                      </button>
-                      <span className="board-log-count">
-                        {log.length} of {logTotal}
-                      </span>
+                          ) : null}
+                        </section>
+                      ) : null}
                     </div>
                   ) : null}
-                </section>
+
+                  <div className="board-detail-secondary">
+                    <section className="board-log" aria-label="Log">
+                      {log.length > 0 || hasPrimary ? (
+                        <h3 className="board-group-label">
+                          Log · newest first
+                          {logAuthor ? (
+                            <span className="board-group-by">
+                              {" · all by "}
+                              {shortId(logAuthor)}
+                            </span>
+                          ) : null}
+                        </h3>
+                      ) : null}
+                      {log.length === 0 ? (
+                        <p className="board-log-empty">
+                          {cells.length > 0
+                            ? "No log posts in this channel."
+                            : "No entries yet."}
+                        </p>
+                      ) : (
+                        <ol className="board-log-list">
+                          {log.map((entry) => {
+                            const kind = metaString(entry.metadata, "kind");
+                            const tone = kindTone(kind);
+                            const facts = semanticFacts(entry.metadata);
+                            const isRelay = kind === "relay";
+                            return (
+                              <li
+                                key={entry.id}
+                                className={`board-log-item${
+                                  isRelay ? " is-relay" : ""
+                                }`}
+                                data-tone={tone}
+                              >
+                                <div className="board-log-rail" aria-hidden="true" />
+                                <div
+                                  className={`board-log-body${
+                                    expandedId === entry.id ? " is-expanded" : ""
+                                  }`}
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-expanded={expandedId === entry.id}
+                                  onClick={() => activateEntry(entry.id)}
+                                  onKeyDown={(event) =>
+                                    onEntryKeyDown(event, entry.id)
+                                  }
+                                >
+                                  <EntryExpansion entry={entry} controls={controls}>
+                                    <div className="board-log-main">
+                                      {kind ? (
+                                        <span
+                                          className="board-log-tag"
+                                          data-tone={tone}
+                                        >
+                                          {isRelay ? "from you (via inbox)" : kind}
+                                        </span>
+                                      ) : null}
+                                      <p className="board-log-text">{entry.text}</p>
+                                      <SemanticFactRow facts={facts} />
+                                      <div className="board-log-meta">
+                                        <span className="board-log-time">
+                                          {formatRelativeTime(entry.created_at)}
+                                          {entry.edited_at ? (
+                                            <span className="board-edited">
+                                              {" "}
+                                              · edited
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                        {logAuthor ? null : (
+                                          <span className="board-log-author">
+                                            {entry.author_session_id
+                                              ? shortId(entry.author_session_id)
+                                              : "—"}
+                                          </span>
+                                        )}
+                                        <MetaChips metadata={facts.rest} />
+                                      </div>
+                                    </div>
+                                  </EntryExpansion>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                      {hasOlder ? (
+                        <div className="board-log-more">
+                          <button
+                            type="button"
+                            className="board-load-older"
+                            onClick={() => void loadOlder()}
+                            disabled={loadingOlder}
+                          >
+                            {loadingOlder ? "Loading…" : "Load older"}
+                          </button>
+                          <span className="board-log-count">
+                            {log.length} of {logTotal}
+                          </span>
+                        </div>
+                      ) : null}
+                    </section>
+                  </div>
+                </div>
               </div>
             )}
           </div>

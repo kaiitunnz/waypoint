@@ -25,6 +25,8 @@ import type {
 
 interface InstrumentRailProps {
   usageBuckets: UsageDashboardBucket[] | null;
+  refreshingUsage: boolean;
+  onRefreshUsage: () => void;
   telemetryEnabled: boolean;
   boardChannels: BoardChannel[];
   schedules: ScheduledSession[];
@@ -35,6 +37,8 @@ interface InstrumentRailProps {
 
 export function InstrumentRail({
   usageBuckets,
+  refreshingUsage,
+  onRefreshUsage,
   telemetryEnabled,
   boardChannels,
   schedules,
@@ -44,7 +48,12 @@ export function InstrumentRail({
 }: InstrumentRailProps) {
   return (
     <aside className="rail" aria-label="Instruments">
-      <TelemetryTile buckets={usageBuckets} telemetryEnabled={telemetryEnabled} />
+      <TelemetryTile
+        buckets={usageBuckets}
+        telemetryEnabled={telemetryEnabled}
+        refreshing={refreshingUsage}
+        onRefresh={onRefreshUsage}
+      />
       <ScheduledTile
         schedules={schedules}
         messageSchedules={messageSchedules}
@@ -87,9 +96,13 @@ function bucketPeak(bucket: UsageDashboardBucket): number {
 function TelemetryTile({
   buckets,
   telemetryEnabled,
+  refreshing,
+  onRefresh,
 }: {
   buckets: UsageDashboardBucket[] | null;
   telemetryEnabled: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   // Degrade to a plain link when usage is unavailable or there are no accounts:
   // lamp keyed off the master telemetry opt-in rather than live figures.
@@ -132,14 +145,27 @@ function TelemetryTile({
   const ordered = [...buckets].sort((a, b) => bucketPeak(b) - bucketPeak(a));
 
   return (
-    <Link className="inst" href="/telemetry">
-      <div className="inst-top">
+    <section className="inst">
+      <Link className="inst-top inst-top-link" href="/telemetry">
         <span className="inst-name">Telemetry</span>
         <span className="inst-go" aria-hidden="true">
           →
         </span>
+      </Link>
+      <div className="inst-lamp-row">
+        <span className={`inst-lamp tone-${lampTone}`}>{lampText}</span>
+        <button
+          type="button"
+          className={`inst-refresh${refreshing ? " is-spinning" : ""}`}
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-busy={refreshing}
+          aria-label={refreshing ? "Refreshing usage" : "Refresh usage"}
+          title="Refresh usage"
+        >
+          <RefreshGlyph />
+        </button>
       </div>
-      <span className={`inst-lamp tone-${lampTone}`}>{lampText}</span>
       <h4 className="inst-headline">
         {buckets.length} account{buckets.length === 1 ? "" : "s"}
       </h4>
@@ -167,7 +193,27 @@ function TelemetryTile({
           );
         })}
       </ul>
-    </Link>
+    </section>
+  );
+}
+
+function RefreshGlyph() {
+  return (
+    <svg
+      className="inst-refresh-glyph"
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
   );
 }
 

@@ -757,6 +757,54 @@ button.inst:hover {
   font-size: 0.85rem;
 }
 
+.inst-lamp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Flat in-flow icon button: no glass, since in-flow content never uses it. */
+.inst-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted-soft);
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.inst-refresh:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.inst-refresh:disabled {
+  cursor: default;
+}
+
+.inst-refresh-glyph {
+  display: block;
+}
+
+.inst-refresh.is-spinning .inst-refresh-glyph {
+  animation: inst-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes inst-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .inst-lamp {
   display: inline-flex;
   align-items: center;

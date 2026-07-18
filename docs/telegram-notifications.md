@@ -9,104 +9,83 @@ your Telegram chat.
 It is **opt-in and off by default**. While disabled, no delivery rows are
 written, no HTTP calls are made, and nothing leaves the host.
 
-## What triggers a notification
+> Preview text (inbox subjects, plan text, question prompts, approval commands)
+> is sent to **Telegram, a third party**. Enable this only for chats you
+> control. Attachments are never uploaded — an attachment shows only as
+> `Attachment: <filename>`.
 
-- **A new inbox item** — subject, sender, a preview of its first blocks, and a
-  link to `/inbox/<id>`.
-- **A session tool approval** — the tool and its allowed decisions.
+## Quickstart
+
+1. **Create a bot.** In Telegram, message [@BotFather](https://t.me/BotFather),
+   send `/newbot`, and follow the prompts. It replies with an HTTP API **token**
+   like `123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`.
+
+2. **Provide the token by environment variable.** Waypoint never reads it from
+   `waypoint.yaml`. Set `WAYPOINT_TELEGRAM_BOT_TOKEN` in the repo-root `.env`
+   (or your service manager's secret store):
+   ```bash
+   WAYPOINT_TELEGRAM_BOT_TOKEN=123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+3. **Start the bot and get your chat ID.** A bot cannot message a chat that has
+   not started it first. Open your bot (the `t.me/<botname>` link) and press
+   **Start**, then read the chat id from:
+   ```bash
+   curl "https://api.telegram.org/bot$WAYPOINT_TELEGRAM_BOT_TOKEN/getUpdates"
+   ```
+   Take `result[].message.chat.id`. A personal chat id is a positive integer; a
+   group id is negative (e.g. `-100123456789`).
+
+4. **Enable it in `backend/waypoint.yaml`:**
+   ```yaml
+   notifications:
+     enabled: true
+     public_base_url: https://waypoint.example.ts.net   # your reachable origin
+     channels:
+       - id: personal-telegram
+         type: telegram
+         enabled: true
+         bot_token_env: WAYPOINT_TELEGRAM_BOT_TOKEN
+         chat_ids:
+           - "123456789"
+   ```
+
+5. **Restart and verify:**
+   ```bash
+   waypointctl restart backend
+   ```
+   Create an inbox item (or let a session ask for approval) and confirm the
+   message arrives with a working **Open** button. Check health at
+   `GET /api/notifications/status` (authenticated) — `channels[].available`
+   should be `true`.
+
+That is the whole setup. The rest of this page is reference.
+
+## What gets notified
+
+- **A new inbox item** — subject, sender, a preview of its first blocks, linked
+  to `/inbox/<id>`.
+- **A tool approval** — the tool and its allowed decisions.
 - **An `AskUserQuestion`** — each question and its option labels/descriptions.
 - **A plan approval** (Claude Code `ExitPlanMode`) — the plan body and its
   decisions.
 
-Each links to `/session/<id>` or `/inbox/<id>`. Opening a link uses Waypoint's
-normal login — the link itself carries no token. Existing pending items are not
-retro-notified when you enable the feature; only new transitions are.
+Session notifications link to `/session/<id>`. Opening any link uses Waypoint's
+normal login — the link itself carries no token. Enabling the feature does not
+retro-notify already-pending items; only new transitions notify.
 
-## Privacy
+## `public_base_url`
 
-Preview text (inbox subjects, plan text, question prompts, approval commands) is
-sent to **Telegram, a third party**. Attachments are never uploaded — an
-attachment appears only as `Attachment: <filename>`. Enable this only for chats
-you control, and prefer a private chat or a private group over anything public.
+The operator-controlled origin the deep links are built from. It is **required**
+when notifications are enabled, must be an absolute `http`/`https` URL with no
+query, fragment, or userinfo, and should be reachable from your phone (your
+Tailscale MagicDNS name or a public HTTPS host — not `localhost`).
 
-## Setup
+## Multiple chats and channels
 
-### 1. Create a bot
-
-1. In Telegram, message [@BotFather](https://t.me/BotFather) and send
-   `/newbot`.
-2. Follow the prompts to name the bot. BotFather replies with an **HTTP API
-   token** like `123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`.
-3. Keep the token secret.
-
-### 2. Provide the token by environment variable
-
-Waypoint never reads the token from `waypoint.yaml`. Export it (or add it to the
-repo-root `.env` / your service manager's secret store) under the name you will
-reference as `bot_token_env`:
-
-```bash
-export WAYPOINT_TELEGRAM_BOT_TOKEN='123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-```
-
-### 3. Start the bot and find your chat ID
-
-A bot cannot message a chat that has not started it first.
-
-1. Open your bot (the `t.me/<botname>` link BotFather gave you) and press
-   **Start** (or send any message).
-2. Discover the chat ID. The simplest way:
-   ```bash
-   curl "https://api.telegram.org/bot$WAYPOINT_TELEGRAM_BOT_TOKEN/getUpdates"
-   ```
-   Read `result[].message.chat.id` from the JSON. A personal chat id is a
-   positive integer; a group/channel id is negative (e.g. `-100123456789`).
-   Add the bot to a group and post a message there to get the group's id.
-3. Configure every id as a **string** so negative and large ids keep their exact
-   form.
-
-### 4. Enable it in `waypoint.yaml`
-
-```yaml
-notifications:
-  enabled: true
-  public_base_url: https://waypoint.example.ts.net
-  channels:
-    - id: personal-telegram
-      type: telegram
-      enabled: true
-      bot_token_env: WAYPOINT_TELEGRAM_BOT_TOKEN
-      chat_ids:
-        - "123456789"
-```
-
-`public_base_url` is the operator-controlled origin the deep links are built
-from. It is **required** when notifications are enabled, must be an absolute
-`http`/`https` URL with no query, fragment, or userinfo, and should be reachable
-from your phone (your Tailscale MagicDNS name or a public HTTPS host — not
-`localhost`).
-
-Multiple `chat_ids` on one channel fan the same message out to each — use this
-for a private group or several devices.
-
-### 5. Restart and verify
-
-```bash
-waypointctl restart backend
-waypointctl status
-```
-
-Create an inbox item (or let a session ask for approval) and confirm the message
-arrives with a working **Open** button. Check delivery health at
-`GET /api/notifications/status` (authenticated):
-
-```json
-{
-  "enabled": true,
-  "channels": [{ "channel_id": "personal-telegram", "available": true }],
-  "counts": { "sent": 3, "queued": 0, "failed": 0 }
-}
-```
+List several `chat_ids` on one channel to fan the same message out to a private
+group or several devices. Every id is a **string**, so negative group ids and
+large ids keep their exact form.
 
 ## Configuration reference
 
@@ -137,17 +116,17 @@ so a duplicate is harmless.
 
 ## Troubleshooting
 
-- **`available: false, "token environment variable … is unset"`** — the env var
-  named by `bot_token_env` is empty in the backend's environment. Export it and
+- **`available: false`, "token environment variable … is unset"** — the env var
+  named by `bot_token_env` is empty in the backend's environment. Set it and
   restart.
 - **Nothing arrives, `counts.failed` climbs** — the target chat has not started
-  the bot, or a chat id is wrong. Telegram returns a terminal `400`/`403` for
-  these; press Start in the chat and re-check the id via `getUpdates`.
+  the bot, or a chat id is wrong. Telegram returns a terminal `400`/`403`; press
+  Start in the chat and re-check the id via `getUpdates`.
 - **`counts.queued` stays high** — Telegram is unreachable or rate-limiting.
   Rows retry automatically; check backend logs (structured, non-content fields
   only) for the HTTP status.
-- **The Open button 404s or asks for login** — expected. Links carry no token;
-  log in to Waypoint as usual. A 404 means `public_base_url` is wrong or the
+- **The Open button asks for login or 404s** — expected: links carry no token,
+  so log in as usual. A 404 means `public_base_url` is wrong or the
   item/session no longer exists.
 
 ## Limitations (v1)
@@ -156,4 +135,4 @@ Delivery is **one-way**. You cannot approve, answer, or reply from Telegram —
 the button opens Waypoint, where you act as normal. The architecture defines an
 inbound contract for a future two-way channel (free-text replies and inline
 callback buttons) and for additional channels such as WhatsApp, but v1 ships
-neither an inbound handler nor those channels.
+neither.

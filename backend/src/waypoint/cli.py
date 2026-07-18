@@ -178,6 +178,10 @@ manager_ticket_app = typer.Typer(
     help="Add, inspect, update, and transition manager tickets.",
     no_args_is_help=True,
 )
+notifications_app = typer.Typer(
+    help="Inspect the notification center (channel health, delivery counts).",
+    no_args_is_help=True,
+)
 ManagerIdOption = Annotated[
     str | None,
     typer.Option(
@@ -198,6 +202,7 @@ app.add_typer(presets_app, name="presets")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(manager_app, name="manager")
 manager_app.add_typer(manager_ticket_app, name="ticket")
+app.add_typer(notifications_app, name="notifications")
 
 
 def _version_callback(value: bool) -> None:
@@ -2708,6 +2713,12 @@ def sessions_output(
         _settings_from_ctx(ctx),
         _get_and_process,
     )
+
+
+@notifications_app.command("status")
+def notifications_status(ctx: typer.Context) -> None:
+    """Show notification channel health and delivery counts (by status)."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.get_notifications_status())
 
 
 @board_app.command("post")

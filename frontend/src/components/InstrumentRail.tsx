@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import {
   formatRateLimitWindowReset,
+  formatRateLimitWindowResetShort,
   formatRelativeTime,
   rateLimitUsageTone,
   rateLimitWindowPercent,
@@ -176,8 +177,10 @@ function TelemetryTile({
           const weekly = findWindow(bucket, "weekly");
           const fivePct = five ? rateLimitWindowPercent(five) : null;
           const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
-          const fiveReset = five ? formatRateLimitWindowReset(five) : null;
-          const weekReset = weekly ? formatRateLimitWindowReset(weekly) : null;
+          const fiveReset = five ? formatRateLimitWindowResetShort(five) : null;
+          const weekReset = weekly ? formatRateLimitWindowResetShort(weekly) : null;
+          const fiveResetFull = five ? formatRateLimitWindowReset(five) : null;
+          const weekResetFull = weekly ? formatRateLimitWindowReset(weekly) : null;
           const peak = bucketPeak(bucket);
           return (
             <li className="inst-account" key={bucket.account_key}>
@@ -190,8 +193,18 @@ function TelemetryTile({
                   {bucket.account_label}
                 </span>
               </span>
-              <UsageWindowMeter label="5h" percent={fivePct} reset={fiveReset} />
-              <UsageWindowMeter label="wk" percent={weekPct} reset={weekReset} />
+              <UsageWindowMeter
+                label="5h"
+                percent={fivePct}
+                reset={fiveReset}
+                resetTitle={fiveResetFull}
+              />
+              <UsageWindowMeter
+                label="wk"
+                percent={weekPct}
+                reset={weekReset}
+                resetTitle={weekResetFull}
+              />
             </li>
           );
         })}
@@ -231,10 +244,12 @@ function UsageWindowMeter({
   label,
   percent,
   reset,
+  resetTitle,
 }: {
   label: string;
   percent: number | null;
   reset: string | null;
+  resetTitle: string | null;
 }) {
   const tone = toneOf(percent);
   return (
@@ -250,7 +265,11 @@ function UsageWindowMeter({
         {percent !== null ? `${percent}%` : "—"}
       </span>
       {reset ? (
-        <span className="inst-window-reset" title={reset}>
+        <span
+          className="inst-window-reset"
+          title={resetTitle ?? reset}
+          aria-label={resetTitle ?? reset}
+        >
           <span aria-hidden="true" className="inst-window-reset-glyph">
             ◷
           </span>

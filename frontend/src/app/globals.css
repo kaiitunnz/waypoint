@@ -920,11 +920,13 @@ button.inst:hover {
 }
 
 /* Window row: [cap] [meter] [pct] [◷ reset]. Only the meter flexes (1fr); percent
-   and reset are fixed-width so their variable text never resizes the bar, keeping
-   every row's meter full-width and identical across both windows. */
+   and reset are narrow fixed columns so their variable text never resizes the bar,
+   keeping every row's meter identical across both windows. The reset uses a terse
+   label ("4h") in a tight, right-flushed column so the bar stays the dominant
+   element and no dead space trails the reset text. */
 .inst-window {
   display: grid;
-  grid-template-columns: 1.6rem minmax(0, 1fr) 2.2rem 6.5rem;
+  grid-template-columns: 1.6rem minmax(0, 1fr) 2.2rem 2.75rem;
   align-items: center;
   gap: 7px;
 }
@@ -970,6 +972,7 @@ button.inst:hover {
 .inst-window-reset {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 3px;
   font-family: var(--font-mono);
   font-size: 0.6rem;

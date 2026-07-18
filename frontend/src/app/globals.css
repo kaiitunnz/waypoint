@@ -18120,6 +18120,44 @@ html[data-theme="light"] .wp-hl {
   outline-offset: 1px;
 }
 
+/* "Now" marker in the live/running-green language (distinct from the gold peak
+   and cool hover): a lamp on today's row, a green current-hour column, and a
+   ringed, pulsing intersection cell. */
+.tm-heatmap-hour.is-now-hour {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.tm-heatmap-dow.is-today .tm-heatmap-dow-name {
+  color: var(--success);
+}
+
+.tm-heatmap-dow.is-today .tm-heatmap-dow-name::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  vertical-align: middle;
+}
+
+.tm-heatmap-cell.is-now {
+  outline: 2px solid var(--success);
+  outline-offset: -1px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tm-heatmap-cell.is-now {
+    animation: pulse-running 2.4s ease-in-out infinite;
+  }
+
+  html[data-theme="light"] .tm-heatmap-cell.is-now {
+    animation-name: pulse-running-light;
+  }
+}
+
 /* Health panel */
 .tm-health-list {
   margin: 0;

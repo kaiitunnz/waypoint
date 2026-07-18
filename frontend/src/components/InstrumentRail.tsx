@@ -250,7 +250,7 @@ function UsageWindowMeter({
         {percent !== null ? `${percent}%` : "—"}
       </span>
       {reset ? (
-        <span className="inst-window-reset" title={`Resets ${reset}`}>
+        <span className="inst-window-reset" title={reset}>
           <span aria-hidden="true" className="inst-window-reset-glyph">
             ◷
           </span>

@@ -919,14 +919,12 @@ button.inst:hover {
   white-space: nowrap;
 }
 
-/* Labelled window row: [cap] [──meter──] [pct] [◷ reset] as a fixed-column table,
-   so 5h and weekly each read as a bar, its number, and when it resets. The meter
-   column is a fixed width so every bar is identical across rows and windows; the
-   reset column takes the remaining space and never stretches or shrinks the bar,
-   whatever the reset text (or the "—" no-data row) is. */
+/* Window row: [cap] [meter] [pct] [◷ reset]. Only the meter flexes (1fr); percent
+   and reset are fixed-width so their variable text never resizes the bar, keeping
+   every row's meter full-width and identical across both windows. */
 .inst-window {
   display: grid;
-  grid-template-columns: 1.6rem 8rem 2.2rem minmax(0, 1fr);
+  grid-template-columns: 1.6rem minmax(0, 1fr) 2.2rem 6.5rem;
   align-items: center;
   gap: 7px;
 }

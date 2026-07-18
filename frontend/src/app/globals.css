@@ -13310,16 +13310,910 @@ html[data-theme="light"] .session-switcher-row.selected {
   color: var(--text-strong);
 }
 
+/* ── Board workspace: lamps, tones, navigator, views ── */
+
+/* A state/CI/kind lamp: a currentColor dot whose hue names a tone. Color always
+   pairs with a text label elsewhere, so the dot is a reinforcement, not the only
+   cue (NFR4). One tone→token map drives lamps, tags, and pills. */
+.board-lamp {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  color: var(--muted-soft);
+}
+
+[data-tone="idle"],
+[data-tone="muted"] {
+  --tone: var(--muted-soft);
+}
+[data-tone="spec"],
+[data-tone="strategy"] {
+  --tone: var(--todo-glyph);
+}
+[data-tone="awaiting"],
+[data-tone="relay"] {
+  --tone: var(--accent-strong);
+}
+[data-tone="active"],
+[data-tone="writer"] {
+  --tone: var(--accent-cool);
+}
+[data-tone="revising"],
+[data-tone="warn"] {
+  --tone: var(--warn);
+}
+[data-tone="blocked"],
+[data-tone="danger"] {
+  --tone: var(--danger);
+}
+[data-tone="done"],
+[data-tone="success"] {
+  --tone: var(--success);
+}
+/* Priority hues: p0 loudest → p3 quietest. */
+[data-tone="p0"] {
+  --tone: var(--danger);
+}
+[data-tone="p1"] {
+  --tone: var(--warn);
+}
+[data-tone="p2"] {
+  --tone: var(--accent-cool);
+}
+[data-tone="p3"] {
+  --tone: var(--muted-soft);
+}
+.board-lamp[data-tone] {
+  color: var(--tone);
+}
+
+/* App-bar view switch — a flat segmented control (the app bar never floats). */
+.board-viewswitch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.board-viewswitch-tab {
+  padding: 5px 13px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.board-viewswitch-tab:hover {
+  color: var(--text);
+}
+
+.board-viewswitch-tab.is-active {
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  color: var(--accent-cool);
+}
+
+.board-hamburger {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Navigator — grouped, searchable channel list (fills the rail / drawer). */
+.board-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.board-nav-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.board-nav-search-cue {
+  color: var(--muted-soft);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.board-nav-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.board-nav-search-input:focus {
+  outline: none;
+}
+
+.board-nav-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.board-nav-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--muted-soft);
+}
+
+.board-nav-group-chevron {
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.board-nav-group-head[aria-expanded="true"] .board-nav-group-chevron {
+  transform: rotate(90deg);
+}
+
+.board-nav-group-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.board-nav-group-attention {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+
+.board-nav-group-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.board-nav-list {
+  list-style: none;
+  margin: 2px 0 4px;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.board-nav-item:hover {
+  background: var(--bg-card-soft);
+}
+
+.board-nav-item.is-active {
+  border-color: color-mix(in srgb, var(--accent-cool) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+}
+
+.board-nav-lamp-spacer {
+  width: 7px;
+  flex: none;
+}
+
+.board-nav-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.board-nav-attention {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+
+.board-nav-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+/* Mobile drawer — off-canvas glass navigator (floating chrome). */
+.board-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  display: flex;
+}
+
+.board-drawer {
+  width: min(84vw, 340px);
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--glass-bg-thick);
+  backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--glass-line);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+}
+
+.board-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board-drawer-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-drawer-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.board-drawer-close:hover {
+  color: var(--text);
+}
+
+/* Workspace context header (shared by Board and Channels views). */
+.board-context {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-context-titles {
+  min-width: 0;
+}
+
+.board-workspace,
+.board-detail-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* Manager switcher (per-project). */
+.board-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.board-switcher-label {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-switcher-project {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--accent-cool);
+}
+
+.board-switcher-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.board-switcher-select select {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.board-switcher-attention {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+
+/* Manager board: rollup, Needs-you, lifecycle lanes. */
+.board-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.board-rollup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.board-rollup-item strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.board-rollup-need strong {
+  color: var(--accent-strong);
+}
+
+.board-rollup-sep {
+  color: var(--muted-soft);
+}
+
+/* Needs you — the single glass strip of everything awaiting the human. */
+.board-needs {
+  padding: 14px 16px;
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-line);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+}
+
+.board-needs-title {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.board-needs-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.board-need-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+}
+
+/* Dog-ear fold marks a human-gated card (matches pinned cards elsewhere). */
+.board-dogear {
+  border-top-right-radius: 0;
+}
+
+.board-dogear::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 14px solid var(--accent-strong);
+  border-left: 14px solid transparent;
+}
+
+.board-need-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-need-id {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.board-need-gate {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tone, var(--muted));
+}
+
+.board-need-ticket-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.board-need-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.board-need-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.board-need-link {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.board-need-link:hover {
+  text-decoration: underline;
+}
+
+.board-need-link.is-disabled {
+  color: var(--muted-soft);
+  pointer-events: none;
+}
+
+.board-need-open {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.board-need-open:hover {
+  color: var(--text);
+}
+
+/* Lifecycle board — lanes scroll horizontally (Trello-style). */
+.board-lanes {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  /* Peek + fade signals more lanes past the edge. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+.board-lane {
+  flex: 0 0 clamp(212px, 24vw, 248px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+}
+
+.board-lane.is-empty {
+  flex-basis: 128px;
+  background: transparent;
+  border-style: dashed;
+}
+
+.board-lane.is-done {
+  opacity: 0.72;
+}
+
+.board-lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-lane-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-lane-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.board-lane-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Ticket card. */
+.board-ticket {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+.board-ticket:hover {
+  border-color: var(--line-strong);
+}
+
+.board-ticket:focus-visible {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.board-ticket.is-awaiting {
+  border-top-right-radius: 0;
+  border-color: color-mix(in srgb, var(--accent-strong) 40%, var(--line));
+}
+
+.board-ticket.is-awaiting::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 13px solid var(--accent-strong);
+  border-left: 13px solid transparent;
+}
+
+.board-ticket-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-ticket-id {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.board-ticket-priority {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tone, var(--muted));
+}
+
+.board-ticket-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.board-ticket-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+.board-ticket-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.board-ticket-assignee {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12ch;
+}
+
+.board-ticket-pr {
+  color: var(--accent-cool);
+}
+
+/* General channels overview (no manager). */
+.board-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.board-overview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.board-overview-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-overview-rollup {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.board-overview-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.board-overview-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s ease;
+}
+
+.board-overview-card:hover {
+  border-color: var(--line-strong);
+}
+
+.board-overview-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.board-overview-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+.board-overview-count {
+  color: var(--accent-cool);
+}
+
+/* Semantic status banner (the `status` cell). */
+.board-status-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 15px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--tone, var(--line-strong));
+  background: color-mix(in srgb, var(--tone, var(--accent-cool)) 5%, var(--bg-card));
+  cursor: pointer;
+  transition: border-color 0.14s ease;
+}
+
+.board-status-banner:focus-visible {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.board-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-status-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.board-status-kind {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tone, var(--text-strong));
+}
+
+.board-status-text {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Semantic facts row (PR link, CI lamp, commit sha). */
+.board-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.board-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.board-fact-pr {
+  color: var(--accent-cool);
+  text-decoration: none;
+}
+
+a.board-fact-pr:hover {
+  text-decoration: underline;
+}
+
+.board-fact-ci {
+  color: var(--muted);
+}
+
+.board-fact-commit {
+  color: var(--muted-soft);
+}
+
+/* Kind-aware log timeline: the rail node and a tag take the kind's tone. */
+.board-log-item[data-tone] .board-log-rail::before {
+  background: var(--tone, var(--accent-cool));
+}
+
+.board-log-tag {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tone, var(--muted));
+}
+
+.board-log-item.is-relay .board-log-body {
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent-strong) 6%, transparent);
+  padding: 8px 12px;
+}
+
 @media (max-width: 720px) {
   .board-grid {
     grid-template-columns: 1fr;
   }
+  /* The desktop rail is hidden; the drawer takes over on mobile. */
   .board-rail {
-    position: static;
+    display: none;
   }
-  /* Stack the title above its actions so a long channel name doesn't collide
-     with the Clear/Delete buttons. */
-  .board-main-head {
+  /* Stack the context title above its actions so a long channel name doesn't
+     collide with the Clear/Delete buttons. */
+  .board-context {
     flex-direction: column;
     align-items: stretch;
   }
@@ -13328,6 +14222,18 @@ html[data-theme="light"] .session-switcher-row.selected {
   }
   .board-actions {
     flex-wrap: wrap;
+  }
+  .board-needs-strip {
+    grid-template-columns: 1fr;
+  }
+  .board-viewswitch-tab {
+    padding: 5px 10px;
+  }
+  /* Eyebrow + secondary link hide below the breakpoint to fit hamburger +
+     title + view switch. */
+  .board-shell .app-bar-eyebrow,
+  .board-shell .back-link {
+    display: none;
   }
 }
 

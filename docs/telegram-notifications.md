@@ -57,9 +57,11 @@ written, no HTTP calls are made, and nothing leaves the host.
    waypointctl restart backend
    ```
    Create an inbox item (or let a session ask for approval) and confirm the
-   message arrives with a working **Open** button. Check health at
-   `GET /api/notifications/status` (authenticated) — `channels[].available`
-   should be `true`.
+   message arrives with a working **Open** button. Check health with:
+   ```bash
+   waypoint notifications status
+   ```
+   `channels[].available` should be `true`.
 
 That is the whole setup. The rest of this page is reference.
 
@@ -78,9 +80,8 @@ retro-notify already-pending items; only new transitions notify.
 
 ## Choosing which signals notify
 
-`signals` independently enables each of the four notification kinds. All default
-to `true`, so an `enabled` configuration that omits the block delivers every
-kind exactly as before.
+`signals` turns each notification kind on or off independently. All four default
+to `true`, so leaving the block out notifies on everything.
 
 ```yaml
 notifications:
@@ -92,26 +93,20 @@ notifications:
     question: true      # user questions
 ```
 
-A disabled signal is a policy decision applied **before** any outbox row is
-created: the source event and inbox item are still stored durably, but no
-delivery is queued and no external message is sent. Unknown keys fail
-validation. The mapping is `inbox` → inbox items, `plan` → plan approvals,
-`permission` → permission approvals, `question` → user questions.
+Turning a signal off stops only its notifications; the inbox item or session
+request still appears in Waypoint as usual. Unknown keys are rejected.
 
 ## Active-session presence
 
-A visible `/session/<id>` page suppresses that session's plan, permission, and
-question alerts while it is open — no point pinging a phone about a request the
-operator is already looking at. Inbox alerts are never presence-suppressed
-(an inbox item can originate from a different session).
+While you have a session's page open and visible, Waypoint skips that session's
+plan, permission, and question notifications — you are already looking at it.
+Inbox notifications always arrive, since an inbox item can come from another
+session.
 
-Presence is a short in-memory lease per browser tab, renewed while the tab is
-visible. A hidden tab, a closed page, a navigation, or a server restart lets
-the lease expire and the session becomes notifiable again within ~45 seconds;
-presence never permanently hides an alert. Two tabs or devices keep a session
-present until the last lease expires. There is no separate switch — presence is
-intrinsic to avoiding redundant active-session messages. To always receive
-every alert, disable no signals and keep the session page closed.
+Closing the tab, switching away, or locking the screen makes the session
+notifiable again within about 45 seconds. Opening the same session on two
+devices keeps it silent until you leave the last one. To always be notified,
+keep the session page closed.
 
 ## `public_base_url`
 
@@ -168,6 +163,8 @@ so a duplicate is harmless.
 
 ## Troubleshooting
 
+Run `waypoint notifications status` to see channel health and delivery counts.
+
 - **`available: false`, "token environment variable … is unset"** — the env var
   named by `bot_token_env` is empty in the backend's environment. Set it and
   restart.
@@ -177,6 +174,8 @@ so a duplicate is harmless.
 - **`counts.queued` stays high** — Telegram is unreachable or rate-limiting.
   Rows retry automatically; check backend logs (structured, non-content fields
   only) for the HTTP status.
+- **`counts.suppressed` grows** — expected when a session page is open or a
+  signal is off. A suppressed message is intentionally not sent.
 - **The Open button asks for login or 404s** — expected: links carry no token,
   so log in as usual. A 404 means `public_base_url` is wrong or the
   item/session no longer exists.

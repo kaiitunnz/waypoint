@@ -42,6 +42,8 @@ trusting any flag list reproduced in this skill.
 - Drive the per-project ticket state machine (`waypoint manager ...`) — config,
   re-anchor, ticket transitions, and prompt-template rendering: see
   `references/manager.md`.
+- Check the notification center — channel health and delivery counts (including
+  `suppressed`): `waypoint notifications status`.
 
 ## Guardrails
 

@@ -47,6 +47,12 @@ from waypoint.backends.diff_preview import (
     file_from_old_new,
     unavailable_file,
 )
+from waypoint.backends.events import (
+    INTERACTION_METADATA_KEY,
+    InteractionChoice,
+    InteractionEnvelope,
+    question_interaction,
+)
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -1009,6 +1015,33 @@ class ClaudeCliAdapter:
             # separate APPROVAL_REQUEST card would show the prompt twice. Only
             # register the pending entry so respond_to_ask_question answers it.
             if tool_name != "AskUserQuestion":
+                tool_input = payload.get("tool_input")
+                if tool_name == "ExitPlanMode":
+                    plan_body = (
+                        tool_input.get("plan") if isinstance(tool_input, dict) else None
+                    )
+                    interaction = InteractionEnvelope(
+                        kind="plan_approval",
+                        request_id=tool_use_id,
+                        title="Approve plan",
+                        body=plan_body if isinstance(plan_body, str) else None,
+                        plan_item_id=tool_use_id,
+                        choices=[
+                            InteractionChoice(label="approve"),
+                            InteractionChoice(label="decline"),
+                        ],
+                    )
+                else:
+                    interaction = InteractionEnvelope(
+                        kind="approval",
+                        request_id=tool_use_id,
+                        title=f"Approve {tool_name}",
+                        body=format_approval_text(payload),
+                        choices=[
+                            InteractionChoice(label="approve"),
+                            InteractionChoice(label="decline"),
+                        ],
+                    )
                 await self._emit_event(
                     state.session_id,
                     EventKind.APPROVAL_REQUEST,
@@ -1019,6 +1052,7 @@ class ClaudeCliAdapter:
                         "approval_id": tool_use_id,
                         "method": "can_use_tool",
                         "status": SessionStatus.WAITING_INPUT,
+                        INTERACTION_METADATA_KEY: interaction.to_metadata(),
                         **(
                             {
                                 "permission_suggestions": payload[
@@ -1720,18 +1754,27 @@ class ClaudeCliAdapter:
                     )
                     continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
+                tool_call_metadata: dict[str, Any] = {
+                    "method": "assistant.tool_use",
+                    "item_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "payload": block,
+                    "status": SessionStatus.RUNNING,
+                }
+                if tool_name == "AskUserQuestion":
+                    question = question_interaction(
+                        tool_use_id, (block.get("input") or {}).get("questions")
+                    )
+                    if question is not None:
+                        tool_call_metadata[INTERACTION_METADATA_KEY] = (
+                            question.to_metadata()
+                        )
                 await self._emit_event(
                     state.session_id,
                     EventKind.TOOL_CALL,
                     f"{tool_name}\n{input_text}",
-                    {
-                        "method": "assistant.tool_use",
-                        "item_id": tool_use_id,
-                        "tool_name": tool_name,
-                        "tool_use_id": tool_use_id,
-                        "payload": block,
-                        "status": SessionStatus.RUNNING,
-                    },
+                    tool_call_metadata,
                     SessionStatus.RUNNING,
                 )
             elif block_type == "thinking":

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -279,6 +279,29 @@ class Storage:
             -- otherwise scan the whole events table.
             CREATE INDEX IF NOT EXISTS idx_events_session_seq
                 ON events(session_id, sequence);
+
+            -- Durable notification outbox. One row per (channel, logical
+            -- request); UNIQUE(channel_id, dedupe_key) makes repeated adapter
+            -- events / retries idempotent. Holds no secrets — the rendered
+            -- intent only, never a bot token.
+            CREATE TABLE IF NOT EXISTS notification_deliveries (
+                id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                dedupe_key TEXT NOT NULL,
+                intent_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NOT NULL,
+                lease_until TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(channel_id, dedupe_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_notification_deliveries_ready
+                ON notification_deliveries(status, next_attempt_at);
 
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token TEXT PRIMARY KEY,
@@ -1233,6 +1256,215 @@ class Storage:
         return item
 
     @_synchronized
+    def create_inbox_item_with_notifications(
+        self,
+        *,
+        from_session_id: str,
+        from_label: str | None,
+        subject: str,
+        blocks: list[InboxBlockInput],
+        make_deliveries: Callable[[InboxItem], list[tuple[str, str, str]]],
+    ) -> InboxItem:
+        """Create an inbox item and its per-channel outbox rows atomically.
+
+        ``make_deliveries`` receives the persisted item (with its assigned id)
+        and returns ``(channel_id, dedupe_key, intent_json)`` rows, so the
+        source record and its notifications commit in one transaction — an item
+        is never durable with its notification silently unqueued.
+        """
+        now = datetime.now(UTC)
+        item = InboxItem(
+            id=uuid.uuid4().hex,
+            from_session_id=from_session_id,
+            from_label=from_label,
+            subject=subject,
+            status=InboxStatus.OPEN,
+            read_at=None,
+            version=0,
+            created_at=now,
+            updated_at=now,
+            blocks=_materialize_blocks(blocks),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO inbox_items (
+                id, from_session_id, from_label, subject, status, read_at,
+                version, created_at, updated_at, blocks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item.id,
+                item.from_session_id,
+                item.from_label,
+                item.subject,
+                item.status,
+                None,
+                item.version,
+                now.isoformat(),
+                now.isoformat(),
+                self._dump_inbox_blocks(item.blocks),
+            ),
+        )
+        self._insert_delivery_rows(make_deliveries(item), now)
+        self.connection.commit()
+        return item
+
+    # ── Notification outbox ──
+
+    def _insert_delivery_rows(
+        self, rows: list[tuple[str, str, str]], now: datetime
+    ) -> None:
+        """Insert queued outbox rows without committing (caller owns the txn)."""
+        now_iso = now.isoformat()
+        for channel_id, dedupe_key, intent_json in rows:
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO notification_deliveries (
+                    id, channel_id, dedupe_key, intent_json, status, attempts,
+                    next_attempt_at, lease_until, last_error, created_at,
+                    sent_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'queued', 0, ?, NULL, NULL, ?, NULL, ?)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    channel_id,
+                    dedupe_key,
+                    intent_json,
+                    now_iso,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+
+    @_synchronized
+    def claim_due_deliveries(
+        self, *, now: datetime, limit: int, lease_seconds: float
+    ) -> list[dict[str, Any]]:
+        now_iso = now.isoformat()
+        lease_iso = (now + timedelta(seconds=lease_seconds)).isoformat()
+        rows = self.connection.execute(
+            """
+            SELECT id, channel_id, dedupe_key, intent_json, status, attempts
+            FROM notification_deliveries
+            WHERE status = 'queued' AND next_attempt_at <= ?
+            ORDER BY next_attempt_at ASC
+            LIMIT ?
+            """,
+            (now_iso, limit),
+        ).fetchall()
+        claimed: list[dict[str, Any]] = []
+        for row in rows:
+            self.connection.execute(
+                """
+                UPDATE notification_deliveries
+                SET status = 'sending', lease_until = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (lease_iso, now_iso, row["id"]),
+            )
+            claimed.append(
+                {
+                    "id": row["id"],
+                    "channel_id": row["channel_id"],
+                    "dedupe_key": row["dedupe_key"],
+                    "intent_json": row["intent_json"],
+                    "status": "sending",
+                    "attempts": row["attempts"],
+                }
+            )
+        if claimed:
+            self.connection.commit()
+        return claimed
+
+    @_synchronized
+    def mark_delivery_sent(self, delivery_id: str, *, sent_at: datetime) -> None:
+        now_iso = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            UPDATE notification_deliveries
+            SET status = 'sent', sent_at = ?, lease_until = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (sent_at.isoformat(), now_iso, delivery_id),
+        )
+        self.connection.commit()
+
+    @_synchronized
+    def requeue_delivery(
+        self,
+        delivery_id: str,
+        *,
+        next_attempt_at: datetime,
+        attempts: int,
+        last_error: str | None,
+    ) -> None:
+        now_iso = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            UPDATE notification_deliveries
+            SET status = 'queued', next_attempt_at = ?, attempts = ?,
+                last_error = ?, lease_until = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (next_attempt_at.isoformat(), attempts, last_error, now_iso, delivery_id),
+        )
+        self.connection.commit()
+
+    @_synchronized
+    def fail_delivery(
+        self, delivery_id: str, *, attempts: int, last_error: str | None
+    ) -> None:
+        now_iso = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            UPDATE notification_deliveries
+            SET status = 'failed', attempts = ?, last_error = ?,
+                lease_until = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (attempts, last_error, now_iso, delivery_id),
+        )
+        self.connection.commit()
+
+    @_synchronized
+    def recover_stale_deliveries(self, now: datetime) -> int:
+        """Return in-flight ``sending`` rows to the queue.
+
+        Called at startup: a fresh process owns no in-flight sends, so every
+        ``sending`` row is a crash remnant and is requeued (at-least-once).
+        """
+        now_iso = now.isoformat()
+        cursor = self.connection.execute(
+            """
+            UPDATE notification_deliveries
+            SET status = 'queued', lease_until = NULL, updated_at = ?
+            WHERE status = 'sending'
+            """,
+            (now_iso,),
+        )
+        self.connection.commit()
+        return cursor.rowcount
+
+    @_synchronized
+    def count_deliveries_by_status(self) -> dict[str, int]:
+        rows = self.connection.execute(
+            "SELECT status, COUNT(*) AS n FROM notification_deliveries GROUP BY status"
+        ).fetchall()
+        return {row["status"]: row["n"] for row in rows}
+
+    @_synchronized
+    def delete_old_deliveries(self, cutoff: datetime) -> int:
+        cursor = self.connection.execute(
+            """
+            DELETE FROM notification_deliveries
+            WHERE status IN ('sent', 'failed') AND created_at < ?
+            """,
+            (cutoff.isoformat(),),
+        )
+        self.connection.commit()
+        return cursor.rowcount
+
+    @_synchronized
     def get_inbox_item(self, item_id: str) -> InboxItem | None:
         row = self.connection.execute(
             "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
@@ -1463,50 +1695,69 @@ class Storage:
 
     @_synchronized
     def append_event(self, event: EventRecord) -> EventRecord:
+        with debug_timer(log, "Storage.append_event", session=event.session_id):
+            persisted = self._insert_event(event)
+            self.connection.commit()
+            return persisted
+
+    @_synchronized
+    def append_event_with_notifications(
+        self, event: EventRecord, deliveries: list[tuple[str, str, str]]
+    ) -> EventRecord:
+        """Persist an event and its per-channel outbox rows in one transaction.
+
+        A ``UNIQUE(channel_id, dedupe_key)`` conflict is ignored, so a replayed
+        adapter event never queues a duplicate notification.
+        """
+        with debug_timer(
+            log, "Storage.append_event_with_notifications", session=event.session_id
+        ):
+            persisted = self._insert_event(event)
+            self._insert_delivery_rows(deliveries, event.ts)
+            self.connection.commit()
+            return persisted
+
+    def _insert_event(self, event: EventRecord) -> EventRecord:
         # Stamp every persisted event with the canonical envelope version
         # so older transcripts replay safely under newer readers (the
         # frontend's `parseEvent` looks at `metadata.version` to decide
-        # which schema to apply).
+        # which schema to apply). Does not commit; the caller owns the txn.
         if "version" not in event.metadata:
             event = event.model_copy(
                 update={"metadata": {**event.metadata, "version": 1}}
             )
-        with debug_timer(log, "Storage.append_event", session=event.session_id):
-            ts_iso = event.ts.isoformat()
-            cursor = self.connection.execute(
-                """
-                INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.session_id,
-                    ts_iso,
-                    event.kind,
-                    event.text,
-                    json.dumps(event.metadata),
-                    event.sequence,
-                ),
-            )
-            self.connection.execute(
-                """
-                UPDATE sessions
-                SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
-                WHERE id = ?
-                """,
-                (
-                    ts_iso,
-                    ts_iso,
-                    event.metadata.get("status"),
-                    event.session_id,
-                ),
-            )
-            self.connection.commit()
-            last_id = cursor.lastrowid
-            if last_id is None:
-                raise RuntimeError(
-                    "sqlite did not assign a row id for the inserted event"
-                )
-            return event.model_copy(update={"id": int(last_id)})
+        ts_iso = event.ts.isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.session_id,
+                ts_iso,
+                event.kind,
+                event.text,
+                json.dumps(event.metadata),
+                event.sequence,
+            ),
+        )
+        self.connection.execute(
+            """
+            UPDATE sessions
+            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
+            WHERE id = ?
+            """,
+            (
+                ts_iso,
+                ts_iso,
+                event.metadata.get("status"),
+                event.session_id,
+            ),
+        )
+        last_id = cursor.lastrowid
+        if last_id is None:
+            raise RuntimeError("sqlite did not assign a row id for the inserted event")
+        return event.model_copy(update={"id": int(last_id)})
 
     @_synchronized
     def clone_events(self, source_session_id: str, target_session_id: str) -> int:

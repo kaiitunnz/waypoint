@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -133,6 +134,98 @@ class TelemetryNLConfig(BaseModel):
     preset: str | None = None
 
 
+class TelegramChannelConfig(BaseModel):
+    """A Telegram delivery target. The bot token is never a YAML literal — it
+    is named by ``bot_token_env`` and read from the environment at startup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["telegram"] = "telegram"
+    enabled: bool = True
+    bot_token_env: str
+    # Strings so private and negative group/channel ids keep their exact form.
+    chat_ids: list[str] = Field(default_factory=list)
+
+
+# Channel-config dispatch registry. Adding WhatsApp/Slack later registers a
+# ``WhatsAppChannelConfig`` here and widens the ``channels`` annotation — the
+# notification producers do not change.
+_CHANNEL_CONFIG_TYPES: dict[str, type[BaseModel]] = {
+    "telegram": TelegramChannelConfig,
+}
+
+
+class NotificationSettings(BaseModel):
+    """Opt-in notification center. Disabled by default: with ``enabled`` false
+    no outbox rows are written and no external content is transmitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    # Operator-controlled origin the deep links are built from. Required when
+    # enabled; carries no token — opening a link uses the normal Waypoint auth.
+    public_base_url: str | None = None
+    preview_chars: int = Field(default=900, ge=1)
+    title_chars: int = Field(default=160, ge=1)
+    worker_concurrency: int = Field(default=4, ge=1)
+    max_attempts: int = Field(default=8, ge=1)
+    http_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Sent/failed delivery rows older than this are purged by the worker.
+    retention_days: int = Field(default=30, ge=1)
+    channels: list[TelegramChannelConfig] = Field(default_factory=list)
+
+    @field_validator("channels", mode="before")
+    @classmethod
+    def _dispatch_channels(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        dispatched: list[Any] = []
+        for raw in value:
+            if isinstance(raw, BaseModel):
+                dispatched.append(raw)
+                continue
+            if not isinstance(raw, dict):
+                raise ValueError("each notification channel must be a mapping")
+            channel_type = raw.get("type", "telegram")
+            schema = _CHANNEL_CONFIG_TYPES.get(channel_type)
+            if schema is None:
+                raise ValueError(f"unknown notification channel type: {channel_type!r}")
+            dispatched.append(schema.model_validate(raw))
+        return dispatched
+
+    @model_validator(mode="after")
+    def _validate_enabled(self) -> "NotificationSettings":
+        if self.enabled:
+            if not self.public_base_url:
+                raise ValueError(
+                    "notifications.public_base_url is required when notifications "
+                    "are enabled"
+                )
+            self.public_base_url = _normalize_public_base_url(self.public_base_url)
+        enabled_ids = [c.id for c in self.channels if c.enabled]
+        if len(enabled_ids) != len(set(enabled_ids)):
+            raise ValueError("notification channel ids must be unique")
+        return self
+
+    def enabled_channels(self) -> list[TelegramChannelConfig]:
+        return [c for c in self.channels if c.enabled]
+
+
+def _normalize_public_base_url(value: str) -> str:
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"}:
+        raise ValueError("notifications.public_base_url must be an http(s) URL")
+    if not parts.netloc:
+        raise ValueError("notifications.public_base_url must include a host")
+    if parts.query or parts.fragment or "@" in parts.netloc:
+        raise ValueError(
+            "notifications.public_base_url must not contain query, fragment, or "
+            "userinfo"
+        )
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
+
+
 class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8787
@@ -218,6 +311,9 @@ class Settings(BaseModel):
     telemetry_instance_fs_signals: bool = False
     # Opt-in NL-insight summarizer (CONTRACT-NL.md §1). Off by default.
     telemetry_nl: TelemetryNLConfig = Field(default_factory=TelemetryNLConfig)
+    # Opt-in notification center (inbox + session-interaction push to Telegram
+    # and future channels). Off by default; see docs/telegram-notifications.md.
+    notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
     @field_validator("plugin_configs", mode="before")
     @classmethod

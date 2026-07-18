@@ -62,6 +62,11 @@ from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.manager import ManagerRegistry
+from waypoint.notifications import (
+    NotificationService,
+    intent_from_event,
+    intent_from_inbox_item,
+)
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
@@ -474,6 +479,12 @@ class SessionRuntime:
         self.presets = PresetManager(storage)
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
+        self.notifications: NotificationService | None = (
+            NotificationService(settings.notifications, storage)
+            if settings.notifications.enabled
+            and settings.notifications.enabled_channels()
+            else None
+        )
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
         return self._transports[session.transport]
@@ -552,9 +563,13 @@ class SessionRuntime:
                     name=f"plugin-bg-{plugin.id}",
                 )
         await self.scheduler.start()
+        if self.notifications is not None:
+            await self.notifications.start()
 
     async def stop(self) -> None:
         await self.scheduler.stop()
+        if self.notifications is not None:
+            await self.notifications.stop()
         if self._telemetry_backfill_task is not None:
             self._telemetry_backfill_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -3549,12 +3564,25 @@ class SessionRuntime:
             )
             for block in request.blocks
         ]
-        item = self.storage.create_inbox_item(
-            from_session_id=request.from_session_id or "",
-            from_label=from_label,
-            subject=request.subject,
-            blocks=blocks,
-        )
+        service = self.notifications
+        if service is not None and service.has_targets():
+            item = self.storage.create_inbox_item_with_notifications(
+                from_session_id=request.from_session_id or "",
+                from_label=from_label,
+                subject=request.subject,
+                blocks=blocks,
+                make_deliveries=lambda created: service.delivery_rows(
+                    intent_from_inbox_item(created)
+                ),
+            )
+            service.wake()
+        else:
+            item = self.storage.create_inbox_item(
+                from_session_id=request.from_session_id or "",
+                from_label=from_label,
+                subject=request.subject,
+                blocks=blocks,
+            )
         # The author (a session filing its own item) is not woken; a human/UI
         # post carries no session id, so its subscribers are woken.
         await self._publish_inbox_update(
@@ -5139,7 +5167,20 @@ class SessionRuntime:
             metadata={**metadata, "status": status},
             sequence=self.storage.next_sequence(session_id),
         )
-        persisted = self.storage.append_event(event)
+        service = self.notifications
+        deliveries: list[tuple[str, str, str]] = []
+        if service is not None and service.has_targets():
+            session = self.storage.get_session(session_id)
+            intent = intent_from_event(
+                event, session_title=session.title if session is not None else None
+            )
+            if intent is not None:
+                deliveries = service.delivery_rows(intent)
+        if deliveries and service is not None:
+            persisted = self.storage.append_event_with_notifications(event, deliveries)
+            service.wake()
+        else:
+            persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
 

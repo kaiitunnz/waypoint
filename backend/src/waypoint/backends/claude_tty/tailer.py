@@ -27,6 +27,11 @@ from waypoint.backends.claude_tty.byte_source import (
     transcript_path,
 )
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
+from waypoint.backends.events import (
+    INTERACTION_METADATA_KEY,
+    InteractionChoice,
+    InteractionEnvelope,
+)
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionRecord, SessionStatus
 
@@ -386,6 +391,16 @@ class TranscriptTailer:
         )
         self._surfaced_sig = sig
 
+        interaction = InteractionEnvelope(
+            kind="approval",
+            request_id=approval_id,
+            title=f"Approve {tool_name}",
+            body=text,
+            choices=[
+                InteractionChoice(label="approve"),
+                InteractionChoice(label="decline"),
+            ],
+        )
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.APPROVAL_REQUEST,
@@ -396,6 +411,7 @@ class TranscriptTailer:
                 "approval_id": approval_id,
                 "method": "tty_permission",
                 "status": SessionStatus.WAITING_INPUT,
+                INTERACTION_METADATA_KEY: interaction.to_metadata(),
             },
             SessionStatus.WAITING_INPUT,
         )
@@ -462,6 +478,17 @@ class TranscriptTailer:
         self._surfaced_sig = sig
 
         payload = {"tool_name": "ExitPlanMode", "tool_input": tool_input}
+        interaction = InteractionEnvelope(
+            kind="plan_approval",
+            request_id=approval_id,
+            title="Approve plan",
+            body=tool_input.get("plan") or None,
+            plan_item_id=approval_id,
+            choices=[
+                InteractionChoice(label="approve"),
+                InteractionChoice(label="decline"),
+            ],
+        )
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.APPROVAL_REQUEST,
@@ -472,6 +499,7 @@ class TranscriptTailer:
                 "approval_id": approval_id,
                 "method": "tty_permission",
                 "status": SessionStatus.WAITING_INPUT,
+                INTERACTION_METADATA_KEY: interaction.to_metadata(),
             },
             SessionStatus.WAITING_INPUT,
         )

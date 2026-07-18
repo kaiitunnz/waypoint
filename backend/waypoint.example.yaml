@@ -147,6 +147,37 @@ plugin_configs:
 #                                 # backend/transport/model/account_profile above
 #                                 # wherever the preset itself sets them
 
+# Notification center: push new inbox items and actionable session
+# interactions (tool/plan approvals, AskUserQuestion) to Telegram with a
+# bounded preview and a deep link back into Waypoint. Opt-in and OFF by
+# default — while disabled, no outbox rows are written and nothing leaves the
+# host. Previews are sent to Telegram (a third party); enable only for chats
+# you trust. Bot tokens are named by env var, never written here. Delivery is
+# one-way in v1; the link opens Waypoint's normal authenticated UI. See
+# docs/telegram-notifications.md.
+# notifications:
+#   enabled: true
+#   public_base_url: https://waypoint.example.ts.net  # required; operator-controlled
+#                                                      # http(s) origin, optional port,
+#                                                      # no token (e.g.
+#                                                      # http://host.ts.net:3010). A valid
+#                                                      # https origin also gets a tappable
+#                                                      # inline button; otherwise the deep
+#                                                      # link goes in the message text.
+#   preview_chars: 900            # max preview body length before truncation
+#   title_chars: 160              # max title length
+#   worker_concurrency: 4         # concurrent sends per worker tick
+#   max_attempts: 8               # retries before a delivery is marked failed
+#   http_timeout_seconds: 10
+#   retention_days: 30            # sent/failed delivery rows purged after this
+#   channels:
+#     - id: personal-telegram
+#       type: telegram
+#       enabled: true
+#       bot_token_env: WAYPOINT_TELEGRAM_BOT_TOKEN  # env var holding the bot token
+#       chat_ids:                 # strings; private and negative group ids allowed
+#         - "123456789"
+
 ssh_targets:
   - id: devbox
     name: SSH coding backend

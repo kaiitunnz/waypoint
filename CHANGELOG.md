@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/kaiitunnz/waypoint/compare/v0.12.1...v0.12.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* restore telemetry rate-limit refresh on the homepage tile ([#329](https://github.com/kaiitunnz/waypoint/issues/329)) ([ce85aa8](https://github.com/kaiitunnz/waypoint/commit/ce85aa8cac73a38c8cbab8b6e956eb90c403ce7d))
+
 ## [0.12.1](https://github.com/kaiitunnz/waypoint/compare/v0.12.0...v0.12.1) (2026-07-18)
 
 

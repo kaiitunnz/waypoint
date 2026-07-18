@@ -757,22 +757,13 @@ button.inst:hover {
   font-size: 0.85rem;
 }
 
-/* Telemetry header row carries a refresh control between the name link and the
-   go-arrow: the name link grows, the button and arrow sit flush right. */
-.inst-top-link-grow {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.inst-go-link {
-  display: inline-flex;
-  margin-left: 4px;
-  color: inherit;
-  text-decoration: none;
-}
-
-.inst-go-link:hover .inst-go {
-  color: var(--accent);
+/* Telemetry status row: the lamp on the left, the refresh control flush right
+   directly under the go-arrow. */
+.inst-lamp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* Flat in-flow icon button — no glass: bare glyph in the muted hue with a

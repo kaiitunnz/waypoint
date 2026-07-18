@@ -146,10 +146,14 @@ function TelemetryTile({
 
   return (
     <section className="inst">
-      <div className="inst-top">
-        <Link className="inst-top-link inst-top-link-grow" href="/telemetry">
-          <span className="inst-name">Telemetry</span>
-        </Link>
+      <Link className="inst-top inst-top-link" href="/telemetry">
+        <span className="inst-name">Telemetry</span>
+        <span className="inst-go" aria-hidden="true">
+          →
+        </span>
+      </Link>
+      <div className="inst-lamp-row">
+        <span className={`inst-lamp tone-${lampTone}`}>{lampText}</span>
         <button
           type="button"
           className={`inst-refresh${refreshing ? " is-spinning" : ""}`}
@@ -161,13 +165,7 @@ function TelemetryTile({
         >
           <RefreshGlyph />
         </button>
-        <Link className="inst-go-link" href="/telemetry" aria-label="Open telemetry">
-          <span className="inst-go" aria-hidden="true">
-            →
-          </span>
-        </Link>
       </div>
-      <span className={`inst-lamp tone-${lampTone}`}>{lampText}</span>
       <h4 className="inst-headline">
         {buckets.length} account{buckets.length === 1 ? "" : "s"}
       </h4>

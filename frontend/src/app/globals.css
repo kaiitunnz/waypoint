@@ -757,8 +757,6 @@ button.inst:hover {
   font-size: 0.85rem;
 }
 
-/* Telemetry status row: the lamp on the left, the refresh control flush right
-   directly under the go-arrow. */
 .inst-lamp-row {
   display: flex;
   align-items: center;
@@ -766,8 +764,7 @@ button.inst:hover {
   gap: 8px;
 }
 
-/* Flat in-flow icon button — no glass: bare glyph in the muted hue with a
-   subtle accent tint on hover, spinning while a refresh is in flight. */
+/* Flat in-flow icon button: no glass, since in-flow content never uses it. */
 .inst-refresh {
   display: inline-flex;
   align-items: center;

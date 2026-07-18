@@ -197,7 +197,6 @@ function TelemetryTile({
   );
 }
 
-// Circular-arrow refresh mark; spins via the `.is-spinning` parent class.
 function RefreshGlyph() {
   return (
     <svg

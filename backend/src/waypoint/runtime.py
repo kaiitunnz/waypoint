@@ -61,7 +61,7 @@ from waypoint.backends.transcripts import (
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.manager import ManagerManager
+from waypoint.manager import ManagerRegistry
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
@@ -472,7 +472,7 @@ class SessionRuntime:
         for plugin in self.registry.all():
             plugin.setup(self)
         self.presets = PresetManager(storage)
-        self.manager = ManagerManager(storage)
+        self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
@@ -3340,9 +3340,9 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
-        # If this session ran `manager init`, it owns the manager state machine;
-        # tear that state down with it so no orphaned backlog lingers.
-        self.manager.deinit_if_owner(session_id)
+        # If this session ran `manager init` for any project(s), it owns those
+        # managers; tear their state down with it so no orphaned backlog lingers.
+        self.managers.deinit_owned_by(session_id)
         # Drop the per-session lock along with the record so the registry
         # doesn't grow unbounded over a long-lived server's session churn.
         self._session_locks.pop(session_id, None)

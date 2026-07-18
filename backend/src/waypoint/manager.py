@@ -35,6 +35,7 @@ from waypoint.schemas import (
     ManagerRecommendedAction,
     ManagerReconcileReport,
     ManagerStateResponse,
+    ManagerSummary,
     ManagerTicket,
     ManagerTicketScale,
     ManagerTicketState,
@@ -369,37 +370,32 @@ def compute_next(
 
 
 class ManagerManager:
-    """CRUD orchestration for the Waypoint Manager state machine."""
+    """CRUD orchestration for one manager's state machine (scoped by id)."""
 
-    def __init__(self, storage: Storage) -> None:
+    def __init__(self, storage: Storage, manager_id: str) -> None:
         self._storage = storage
+        self._manager_id = manager_id
+
+    @property
+    def manager_id(self) -> str:
+        return self._manager_id
 
     @staticmethod
     def _new_id() -> str:
         return f"ticket-{secrets.token_hex(4)}"
 
     def config(self) -> ManagerConfig:
-        return self._storage.get_manager_config() or ManagerConfig()
-
-    def init(self, request: ManagerInitRequest) -> ManagerConfig:
-        # init replaces the config wholesale from the manifest, which never
-        # carries an owner. Preserve a previously-recorded owner_session_id when
-        # this call does not supply one, so re-running init after a manifest edit
-        # does not silently drop the session-delete cascade binding.
-        config = request.config
-        if config.owner_session_id is None:
-            existing = self._storage.get_manager_config()
-            if existing is not None and existing.owner_session_id is not None:
-                config = config.model_copy(
-                    update={"owner_session_id": existing.owner_session_id}
-                )
-        return self._storage.set_manager_config(config)
+        return self._storage.get_manager_config(self._manager_id) or ManagerConfig(
+            id=self._manager_id
+        )
 
     def list_tickets(self) -> list[ManagerTicket]:
-        return self._storage.list_manager_tickets()
+        return self._storage.list_manager_tickets(manager_id=self._manager_id)
 
     def get_ticket(self, ticket_id: str) -> ManagerTicket:
-        ticket = self._storage.get_manager_ticket(ticket_id)
+        ticket = self._storage.get_manager_ticket(
+            ticket_id, manager_id=self._manager_id
+        )
         if ticket is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -420,6 +416,7 @@ class ManagerManager:
         now = datetime.now(UTC)
         ticket = ManagerTicket(
             id=request.id or self._new_id(),
+            manager_id=self._manager_id,
             title=request.title,
             priority=request.priority,
             kind=request.kind,
@@ -481,7 +478,11 @@ class ManagerManager:
         if request.reset_lead_restarts:
             updates["lead_restarts"] = 0
         updated = ticket.model_copy(update=updates)
-        others = [t for t in self._storage.list_manager_tickets() if t.id != ticket_id]
+        others = [
+            t
+            for t in self._storage.list_manager_tickets(manager_id=self._manager_id)
+            if t.id != ticket_id
+        ]
         try:
             check_invariants([*others, updated], config)
         except ManagerStateError as exc:
@@ -505,7 +506,9 @@ class ManagerManager:
         try:
             advanced = apply_transition(ticket, request, config, now)
             others = [
-                t for t in self._storage.list_manager_tickets() if t.id != ticket_id
+                t
+                for t in self._storage.list_manager_tickets(manager_id=self._manager_id)
+                if t.id != ticket_id
             ]
             check_invariants([*others, advanced], config)
         except ManagerStateError as exc:
@@ -521,35 +524,32 @@ class ManagerManager:
             ) from exc
 
     def delete_ticket(self, ticket_id: str) -> None:
-        if not self._storage.delete_manager_ticket(ticket_id):
+        if not self._storage.delete_manager_ticket(
+            ticket_id, manager_id=self._manager_id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"unknown ticket: {ticket_id!r}",
             )
 
     def deinit(self) -> int:
-        """Tear the manager state down: drop every ticket and the persisted config.
+        """Tear this manager down: drop its tickets and its persisted config.
         Returns the ticket count removed. Clears state records only — spawned
         sessions, branches, and board channels are reaped separately."""
-        removed = self._storage.clear_manager_tickets()
-        self._storage.clear_manager_config()
+        removed = self._storage.clear_manager_tickets(self._manager_id)
+        self._storage.clear_manager_config(self._manager_id)
         return removed
 
-    def deinit_if_owner(self, session_id: str) -> bool:
-        """Cascade a deinit when the deleted session is the one that ran ``init``
-        (so a deleted manager never leaves orphaned backlog state)."""
-        config = self._storage.get_manager_config()
-        if config is None or config.owner_session_id != session_id:
-            return False
-        self.deinit()
-        return True
-
     def next(self, tried: Iterable[str] = ()) -> ManagerNextResponse:
-        return compute_next(self._storage.list_manager_tickets(), self.config(), tried)
+        return compute_next(
+            self._storage.list_manager_tickets(manager_id=self._manager_id),
+            self.config(),
+            tried,
+        )
 
     def state(self) -> ManagerStateResponse:
-        config = self._storage.get_manager_config()
-        tickets = self._storage.list_manager_tickets()
+        config = self._storage.get_manager_config(self._manager_id)
+        tickets = self._storage.list_manager_tickets(manager_id=self._manager_id)
         return ManagerStateResponse(
             config=config, tree=tree_state(tickets), tickets=tickets
         )
@@ -562,7 +562,7 @@ class ManagerManager:
         acts. External signals (a PR's CI/merge state) stay in the agent's shell.
         """
         config = self.config()
-        tickets = self._storage.list_manager_tickets()
+        tickets = self._storage.list_manager_tickets(manager_id=self._manager_id)
         rc = config.render_context
         owner = config.owner_session_id
 
@@ -720,3 +720,128 @@ class ManagerManager:
             finalize_pending=finalize_pending,
             resolved_gates=resolved_gates,
         )
+
+
+class ManagerRegistry:
+    """Instance-wide registry of managers (one per repository).
+
+    Resolves a scoped :class:`ManagerManager` by id, enumerates managers for the
+    board switcher, and owns the operations that span the set: mint/resolve at
+    ``init`` (keyed by ``repo_dir``), channel-collision enforcement, and the
+    owner-session-delete cascade.
+    """
+
+    def __init__(self, storage: Storage) -> None:
+        self._storage = storage
+
+    @staticmethod
+    def _new_id() -> str:
+        return f"mgr-{secrets.token_hex(4)}"
+
+    def get(self, manager_id: str) -> ManagerManager:
+        return ManagerManager(self._storage, manager_id)
+
+    def exists(self, manager_id: str) -> bool:
+        return self._storage.get_manager_config(manager_id) is not None
+
+    def require(self, manager_id: str) -> ManagerManager:
+        if not self.exists(manager_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown manager: {manager_id!r}",
+            )
+        return self.get(manager_id)
+
+    def resolve_by_repo(self, repo_dir: str) -> ManagerManager | None:
+        config = self._storage.get_manager_config_by_repo(repo_dir)
+        return self.get(config.id) if config is not None else None
+
+    def list_summaries(self) -> list[ManagerSummary]:
+        summaries: list[ManagerSummary] = []
+        for config in self._storage.list_manager_configs():
+            tickets = self._storage.list_manager_tickets(manager_id=config.id)
+            attention = sum(1 for t in tickets if t.state in _AWAITING_STATES)
+            summaries.append(
+                ManagerSummary(
+                    id=config.id,
+                    project=config.project,
+                    repo_dir=config.repo_dir,
+                    owner_session_id=config.owner_session_id,
+                    ticket_count=len(tickets),
+                    attention_count=attention,
+                )
+            )
+        return summaries
+
+    def init(self, request: ManagerInitRequest) -> ManagerConfig:
+        """Mint or resolve a manager for ``config.repo_dir`` and persist its config.
+
+        A repo with no manager yet gets a freshly minted id; a re-init from the
+        same repo reuses the existing id and tickets (idempotent). ``init``
+        replaces the config wholesale from the manifest, which never carries an
+        owner; a previously-recorded ``owner_session_id`` is preserved when this
+        call does not supply one, so re-running init after a manifest edit does not
+        drop the session-delete cascade binding. Board channels must not collide
+        with another manager's.
+        """
+        config = request.config
+        existing = (
+            self._storage.get_manager_config_by_repo(config.repo_dir)
+            if config.repo_dir
+            else None
+        )
+        # No repo match: adopt a migrated legacy manager that carries no repo binding
+        # yet (its templates_dir was customized off the default layout, so migration
+        # could not recover its repo). A legacy DB migrates to exactly one manager, so
+        # a lone unbound manager is unambiguous; more than one means a genuine new repo.
+        if existing is None and config.repo_dir:
+            unbound = [
+                c for c in self._storage.list_manager_configs() if not c.repo_dir
+            ]
+            if len(unbound) == 1:
+                existing = unbound[0]
+        if existing is not None:
+            owner = config.owner_session_id or existing.owner_session_id
+            config = config.model_copy(
+                update={"id": existing.id, "owner_session_id": owner}
+            )
+        else:
+            config = config.model_copy(update={"id": config.id or self._new_id()})
+        self._check_channel_collision(config)
+        return self._storage.set_manager_config(config)
+
+    def deinit_owned_by(self, session_id: str) -> int:
+        """Cascade a deinit for every manager owned by a deleted session, so a
+        deleted manager never leaves orphaned backlog state behind."""
+        count = 0
+        for config in self._storage.get_manager_config_by_owner(session_id):
+            self.get(config.id).deinit()
+            count += 1
+        return count
+
+    def _check_channel_collision(self, config: ManagerConfig) -> None:
+        rc = config.render_context
+        if rc is None:
+            return
+        channels = {c for c in (rc.tickets_channel, rc.ticket_channel_prefix) if c}
+        if not channels:
+            return
+        for other in self._storage.list_manager_configs():
+            if other.id == config.id or other.render_context is None:
+                continue
+            other_rc = other.render_context
+            other_channels = {
+                c
+                for c in (other_rc.tickets_channel, other_rc.ticket_channel_prefix)
+                if c
+            }
+            clash = sorted(channels & other_channels)
+            if clash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"board channel(s) {clash} already used by manager "
+                        f"{other.id!r} (project {other.project!r}); choose distinct "
+                        "channels for this project"
+                    ),
+                )

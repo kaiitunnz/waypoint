@@ -27,7 +27,12 @@ never a `create`/`install`.
 1. **Load config.** `waypoint manager init --manifest <path-to>/waypoint-manager.yaml`
    (idempotent) persists the machine-relevant config and compiles your step templates
    and every child prompt to the templates dir (default `.waypoint/manager/templates`),
-   baking in the manifest's `board`, `roles`, `scale`, and `escalation`. That dir is
+   baking in the manifest's `board`, `roles`, `scale`, and `escalation`. It mints a
+   manager id (`mgr-<hex>`) keyed to this repo on the first init and reuses it on every
+   later init from the same repo; your commands resolve that id from the current repo,
+   so you never pass it. One instance runs one manager per repo, so your board channels
+   (`tickets_channel`, `org_channel`, `ticket_channel_prefix`) must be unique across the
+   instance — `init` rejects a channel already used by another manager. That dir is
    your runtime source of truth; `manager state` reports its path. Confirm `manager
    state` also reports a non-empty `config.owner_session_id` (your own session, from
    `$WAYPOINT_SESSION_ID`) — it scopes reaping and the intake self-exclusion; a missing

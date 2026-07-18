@@ -60,7 +60,7 @@ def test_cli_manager_ticket_add(
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/api/manager/tickets"
+        assert request.url.path == "/api/manager/mgr-1/tickets"
         captured["body"] = json.loads(request.content)
         return httpx.Response(
             200, json={"ticket": {"id": "ticket-1", "state": "intake"}}
@@ -80,6 +80,8 @@ def test_cli_manager_ticket_add(
             "p1",
             "--scale",
             "substantial",
+            "--manager",
+            "mgr-1",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -94,7 +96,7 @@ def test_cli_manager_ticket_add(
 def test_cli_manager_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/api/manager/next"
+        assert request.url.path == "/api/manager/mgr-1/next"
         return httpx.Response(
             200,
             json={
@@ -120,7 +122,15 @@ def test_cli_manager_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     _mock_cli(monkeypatch, handler)
     result = runner.invoke(
         cli_app,
-        ["--config", str(_cli_config(tmp_path)), "manager", "next", "--json"],
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "next",
+            "--json",
+            "--manager",
+            "mgr-1",
+        ],
     )
     assert result.exit_code == 0, result.stdout
     body = json.loads(result.stdout)
@@ -131,7 +141,7 @@ def test_cli_manager_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_cli_manager_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/api/manager/reconcile"
+        assert request.url.path == "/api/manager/mgr-1/reconcile"
         return httpx.Response(
             200,
             json={
@@ -146,7 +156,15 @@ def test_cli_manager_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     _mock_cli(monkeypatch, handler)
     result = runner.invoke(
         cli_app,
-        ["--config", str(_cli_config(tmp_path)), "manager", "reconcile", "--json"],
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "reconcile",
+            "--json",
+            "--manager",
+            "mgr-1",
+        ],
     )
     assert result.exit_code == 0, result.stdout
     body = json.loads(result.stdout)
@@ -156,7 +174,7 @@ def test_cli_manager_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/api/manager/state"
+        assert request.url.path == "/api/manager/mgr-1/state"
         return httpx.Response(
             200,
             json={
@@ -169,7 +187,15 @@ def test_cli_manager_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     _mock_cli(monkeypatch, handler)
     result = runner.invoke(
         cli_app,
-        ["--config", str(_cli_config(tmp_path)), "manager", "state", "--json"],
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "state",
+            "--json",
+            "--manager",
+            "mgr-1",
+        ],
     )
     assert result.exit_code == 0, result.stdout
     body = json.loads(result.stdout)
@@ -184,7 +210,7 @@ def test_cli_manager_ticket_transition(
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/api/manager/tickets/ticket-1/transition"
+        assert request.url.path == "/api/manager/mgr-1/tickets/ticket-1/transition"
         captured["body"] = json.loads(request.content)
         return httpx.Response(
             200, json={"ticket": {"id": "ticket-1", "state": "triaged"}}
@@ -202,6 +228,8 @@ def test_cli_manager_ticket_transition(
             "ticket-1",
             "--to",
             "triaged",
+            "--manager",
+            "mgr-1",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -382,7 +410,7 @@ def test_cli_manager_render_per_ticket_and_set(
     rc = _render_context(root)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/manager/state"
+        assert request.url.path == "/api/manager/mgr-1/state"
         return _state_response(rc)
 
     _mock_cli(monkeypatch, handler)
@@ -393,6 +421,8 @@ def test_cli_manager_render_per_ticket_and_set(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -419,6 +449,8 @@ def test_cli_manager_render_unknown_step_fails(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "prd_writer",
             "--step",
@@ -440,6 +472,8 @@ def test_cli_manager_render_requires_context(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -464,6 +498,8 @@ def test_cli_manager_render_strict_fails_on_unknown(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -488,6 +524,8 @@ def test_cli_manager_render_allow_unresolved(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -511,9 +549,9 @@ def test_cli_manager_render_ticket_pulls_record_and_board_cell(
     rc = _render_context(root)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/manager/state":
+        if request.url.path == "/api/manager/mgr-1/state":
             return _state_response(rc)
-        if request.url.path == "/api/manager/tickets/42":
+        if request.url.path == "/api/manager/mgr-1/tickets/42":
             return httpx.Response(
                 200,
                 json={
@@ -551,6 +589,8 @@ def test_cli_manager_render_ticket_pulls_record_and_board_cell(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -573,9 +613,9 @@ def test_cli_manager_render_set_overrides_board_body(
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/manager/state":
+        if request.url.path == "/api/manager/mgr-1/state":
             return _state_response(rc)
-        if request.url.path == "/api/manager/tickets/42":
+        if request.url.path == "/api/manager/mgr-1/tickets/42":
             return httpx.Response(
                 200,
                 json={
@@ -603,6 +643,8 @@ def test_cli_manager_render_set_overrides_board_body(
             str(_cli_config(tmp_path)),
             "manager",
             "render",
+            "--manager",
+            "mgr-1",
             "--role",
             "tech_lead",
             "--step",
@@ -625,14 +667,22 @@ def test_cli_manager_deinit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "DELETE"
-        assert request.url.path == "/api/manager"
+        assert request.url.path == "/api/manager/mgr-1"
         captured["hit"] = True
         return httpx.Response(200, json={"deinitialized": True, "tickets_deleted": 3})
 
     _mock_cli(monkeypatch, handler)
     result = runner.invoke(
         cli_app,
-        ["--config", str(_cli_config(tmp_path)), "manager", "deinit", "--yes"],
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "manager",
+            "deinit",
+            "--yes",
+            "--manager",
+            "mgr-1",
+        ],
     )
     assert result.exit_code == 0, result.stdout
     assert captured.get("hit")
@@ -663,7 +713,7 @@ def test_cli_manager_ticket_delete(
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "DELETE"
-        assert request.url.path == "/api/manager/tickets/ticket-1"
+        assert request.url.path == "/api/manager/mgr-1/tickets/ticket-1"
         return httpx.Response(200, json={"deleted": True})
 
     _mock_cli(monkeypatch, handler)
@@ -676,9 +726,95 @@ def test_cli_manager_ticket_delete(
             "ticket",
             "delete",
             "ticket-1",
+            "--manager",
+            "mgr-1",
         ],
     )
     assert result.exit_code == 0, result.stdout
+
+
+def test_cli_manager_ls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/manager"
+        return httpx.Response(
+            200,
+            json={
+                "managers": [
+                    {
+                        "id": "mgr-a",
+                        "project": "A",
+                        "repo_dir": "/repo/a",
+                        "ticket_count": 2,
+                        "attention_count": 1,
+                    }
+                ]
+            },
+        )
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "ls", "--json"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["managers"][0]["id"] == "mgr-a"
+
+
+def test_cli_manager_resolves_by_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no --manager, the CLI lists managers and picks the one bound to the
+    # current git toplevel.
+    monkeypatch.setattr("waypoint.cli._git_toplevel", lambda: "/repo/here")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/manager":
+            return httpx.Response(
+                200,
+                json={
+                    "managers": [
+                        {"id": "mgr-other", "repo_dir": "/repo/there"},
+                        {"id": "mgr-here", "repo_dir": "/repo/here"},
+                    ]
+                },
+            )
+        seen["path"] = request.url.path
+        return httpx.Response(
+            200,
+            json={
+                "config": None,
+                "tree": {"free": True, "held_by": None},
+                "tickets": [],
+            },
+        )
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "state", "--json"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert seen["path"] == "/api/manager/mgr-here/state"
+
+
+def test_cli_manager_no_manager_for_repo_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("waypoint.cli._git_toplevel", lambda: "/repo/absent")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/manager"
+        return httpx.Response(200, json={"managers": []})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        ["--config", str(_cli_config(tmp_path)), "manager", "state"],
+    )
+    assert result.exit_code != 0
+    assert "no manager initialized for repo" in result.output
 
 
 def test_cli_manager_init_sends_owner(

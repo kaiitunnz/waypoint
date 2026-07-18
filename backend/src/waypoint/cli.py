@@ -178,6 +178,13 @@ manager_ticket_app = typer.Typer(
     help="Add, inspect, update, and transition manager tickets.",
     no_args_is_help=True,
 )
+ManagerIdOption = Annotated[
+    str | None,
+    typer.Option(
+        "--manager",
+        help="Target manager id (default: the manager for the current repo).",
+    ),
+]
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -3895,6 +3902,26 @@ def _git_toplevel() -> str:
     return top or str(Path.cwd())
 
 
+def _resolve_manager_id(c: WaypointClient, manager_id: str | None) -> str:
+    """Resolve the target manager: an explicit ``--manager`` id, else the one
+    manager bound to the current repo (one manager per repo)."""
+    if manager_id:
+        return manager_id
+    repo = _git_toplevel()
+    managers = c.manager_list().get("managers") or []
+    matches = [m for m in managers if m.get("repo_dir") == repo]
+    if len(matches) == 1:
+        return str(matches[0]["id"])
+    if not matches:
+        raise typer.BadParameter(
+            f"no manager initialized for repo {repo!r}; run "
+            "`waypoint manager init --manifest <path>` or pass --manager <id>"
+        )
+    raise typer.BadParameter(
+        f"multiple managers for repo {repo!r}; pass --manager <id>"
+    )
+
+
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 _IF_RE = re.compile(r"^\s*\{\{#if (\w+) == (\w+)\}\}\s*$")
 _ENDIF_RE = re.compile(r"^\s*\{\{/if\}\}\s*$")
@@ -3997,6 +4024,9 @@ def manager_init(
     templates_dir = _compiled_templates_root(raw, repo_dir)
     static = _manager_static_bindings(raw, repo_dir, session_id, templates_dir)
     _compile_manager_templates(raw, static, Path(templates_dir))
+    config["repo_dir"] = repo_dir
+    if static.get("project"):
+        config["project"] = static["project"]
     config["render_context"] = {
         "templates_dir": templates_dir,
         "tickets_channel": static["tickets_channel"],
@@ -4007,24 +4037,53 @@ def manager_init(
     _emit(_settings_from_ctx(ctx), lambda c: {"config": c.manager_init(config)})
 
 
+@manager_app.command("ls")
+def manager_ls(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of a summary."),
+    ] = False,
+) -> None:
+    """List every manager initialized in this instance (one per repository)."""
+    result = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_list())
+    if json_output:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    managers = result.get("managers") or []
+    if not managers:
+        typer.echo("(no managers)")
+        return
+    for m in managers:
+        typer.echo(
+            f"  {m.get('id')}  {m.get('project') or '-'}  "
+            f"{m.get('repo_dir') or '-'}  tickets={m.get('ticket_count')} "
+            f"attention={m.get('attention_count')}"
+        )
+
+
 @manager_app.command("deinit")
 def manager_deinit(
     ctx: typer.Context,
+    manager_id: ManagerIdOption = None,
     yes: Annotated[
         bool, typer.Option("--yes", help="Skip the confirmation prompt.")
     ] = False,
 ) -> None:
-    """Clear the manager state: all tickets and the persisted config.
+    """Clear one manager's state: its tickets and persisted config.
 
     Removes state records only — spawned sessions, branches, and board channels
     are reaped separately (`sessions delete`, `board delete`).
     """
     if not yes:
         typer.confirm(
-            "Clear all manager tickets and config?",
+            "Clear this manager's tickets and config?",
             abort=True,
         )
-    _emit(_settings_from_ctx(ctx), lambda c: c.manager_deinit())
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_deinit(_resolve_manager_id(c, manager_id)),
+    )
 
 
 @manager_app.command("render")
@@ -4067,6 +4126,7 @@ def manager_render(
             help="Leave unknown {{placeholders}} in place instead of failing.",
         ),
     ] = False,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Render a child prompt from its compiled template and print the body.
 
@@ -4081,8 +4141,9 @@ def manager_render(
     def _fetch(
         c: WaypointClient,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]]]:
-        rc = (c.manager_state().get("config") or {}).get("render_context") or {}
-        ticket = c.manager_get_ticket(ticket_id) if ticket_id is not None else None
+        mid = _resolve_manager_id(c, manager_id)
+        rc = (c.manager_state(mid).get("config") or {}).get("render_context") or {}
+        ticket = c.manager_get_ticket(mid, ticket_id) if ticket_id is not None else None
         tickets_channel = rc.get("tickets_channel")
         cell = (
             c.read_board(tickets_channel, key=f"ticket:{ticket_id}")
@@ -4139,9 +4200,13 @@ def manager_state(
         bool,
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Show the whole ticket set and the derived tree state."""
-    state = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_state())
+    state = _run_client(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_state(_resolve_manager_id(c, manager_id)),
+    )
     if json_output:
         typer.echo(json.dumps(state, indent=2))
         return
@@ -4172,9 +4237,13 @@ def manager_next(
         bool,
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Re-anchor: derived tree state, per-ticket legal transitions, one recommendation."""
-    result = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_next(tried))
+    result = _run_client(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_next(_resolve_manager_id(c, manager_id), tried),
+    )
     if json_output:
         typer.echo(json.dumps(result, indent=2))
         return
@@ -4203,6 +4272,7 @@ def manager_reconcile(
         bool,
         typer.Option("--json", help="Emit structured JSON instead of a summary."),
     ] = False,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Report the drain's server-derived reconcile signals in one snapshot.
 
@@ -4212,7 +4282,10 @@ def manager_reconcile(
     resolved gates (awaiting tickets whose answered gate has a deferred transition).
     Read-only: the manager acts on each.
     """
-    report = _run_client(_settings_from_ctx(ctx), lambda c: c.manager_reconcile())
+    report = _run_client(
+        _settings_from_ctx(ctx),
+        lambda c: c.manager_reconcile(_resolve_manager_id(c, manager_id)),
+    )
     if json_output:
         typer.echo(json.dumps(report, indent=2))
         return
@@ -4271,6 +4344,7 @@ def manager_ticket_add(
         list[str] | None,
         typer.Option("--dep", help="Dependency ticket id. Repeatable."),
     ] = None,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Create an intake ticket."""
     body: dict[str, Any] = {"title": title, "priority": priority}
@@ -4286,7 +4360,9 @@ def manager_ticket_add(
         body["deps"] = deps
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"ticket": c.manager_create_ticket(body)},
+        lambda c: {
+            "ticket": c.manager_create_ticket(_resolve_manager_id(c, manager_id), body)
+        },
     )
 
 
@@ -4294,11 +4370,14 @@ def manager_ticket_add(
 def manager_ticket_delete(
     ctx: typer.Context,
     ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Delete one ticket's state record (not its spawned sessions or branch)."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.manager_delete_ticket(ticket_id),
+        lambda c: c.manager_delete_ticket(
+            _resolve_manager_id(c, manager_id), ticket_id
+        ),
     )
 
 
@@ -4306,11 +4385,16 @@ def manager_ticket_delete(
 def manager_ticket_show(
     ctx: typer.Context,
     ticket_id: Annotated[str, typer.Argument(help="Ticket id.")],
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Show a single ticket."""
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"ticket": c.manager_get_ticket(ticket_id)},
+        lambda c: {
+            "ticket": c.manager_get_ticket(
+                _resolve_manager_id(c, manager_id), ticket_id
+            )
+        },
     )
 
 
@@ -4343,6 +4427,7 @@ def manager_ticket_update(
             help="Zero the lead-restart budget (retry after fixing a dying lead).",
         ),
     ] = False,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Edit ticket metadata (no state change; use 'transition' for that)."""
     body: dict[str, Any] = {}
@@ -4371,7 +4456,11 @@ def manager_ticket_update(
         raise typer.BadParameter("provide at least one field to update")
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"ticket": c.manager_update_ticket(ticket_id, body)},
+        lambda c: {
+            "ticket": c.manager_update_ticket(
+                _resolve_manager_id(c, manager_id), ticket_id, body
+            )
+        },
     )
 
 
@@ -4390,6 +4479,7 @@ def manager_ticket_transition(
     is_partial: Annotated[
         bool | None, typer.Option("--is-partial/--not-partial")
     ] = None,
+    manager_id: ManagerIdOption = None,
 ) -> None:
     """Transition a ticket to a target state (server validates legality)."""
     body: dict[str, Any] = {"to": to}
@@ -4408,7 +4498,11 @@ def manager_ticket_transition(
         body["is_partial"] = is_partial
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"ticket": c.manager_transition_ticket(ticket_id, body)},
+        lambda c: {
+            "ticket": c.manager_transition_ticket(
+                _resolve_manager_id(c, manager_id), ticket_id, body
+            )
+        },
     )
 
 

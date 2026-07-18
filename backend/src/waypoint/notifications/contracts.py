@@ -17,6 +17,9 @@ IntentKind = Literal["inbox", "approval", "question", "plan_approval"]
 class TextBlock(BaseModel):
     type: Literal["text"] = "text"
     text: str
+    # Primary content (markdown/plan/question body) renders as a blockquote;
+    # metadata lines (sender/session) render plain.
+    quote: bool = False
 
 
 class ChoiceItem(BaseModel):

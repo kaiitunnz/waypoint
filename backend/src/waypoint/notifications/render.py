@@ -1,12 +1,15 @@
-"""Intent construction and deterministic plain-text rendering.
+"""Intent construction and deterministic Telegram-HTML rendering.
 
 Two pure mappers turn a source record into a :class:`NotificationIntent`
 (``intent_from_inbox_item``, ``intent_from_event``), and ``render_message``
-turns an intent plus the validated origin into a bounded, plaintext
-:class:`OutboundMessage`. No markup is interpreted, so agent-provided strings
-cannot inject message-service formatting or oversized payloads.
+turns an intent plus the validated origin into a bounded HTML
+:class:`OutboundMessage` (bold title, blockquote preview, bulleted choices).
+Every content string is HTML-escaped, so agent-provided strings cannot inject
+tags, break rendering, or error the send; visible length is bounded so the
+escaped result stays well under Telegram's message limit.
 """
 
+import html
 import re
 
 from waypoint.backends.events import (
@@ -29,10 +32,6 @@ from waypoint.schemas import (
     InboxMarkdownBlock,
     InboxQuestionBlock,
 )
-
-# Telegram accepts up to 4096 UTF-16 code units per message; stay well under it
-# even after a title and formatting. The channel re-checks defensively.
-HARD_TEXT_LIMIT = 3500
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _WHITESPACE_RUN = re.compile(r"[ \t]+")
@@ -66,7 +65,7 @@ def intent_from_inbox_item(item: InboxItem) -> NotificationIntent:
     for block in item.blocks:
         if isinstance(block, InboxMarkdownBlock):
             if block.text.strip():
-                blocks.append(TextBlock(text=block.text))
+                blocks.append(TextBlock(text=block.text, quote=True))
         elif isinstance(block, InboxQuestionBlock):
             blocks.append(
                 ChoiceListBlock(
@@ -118,7 +117,7 @@ def intent_from_event(
     if session_title:
         blocks.append(TextBlock(text=f"Session: {session_title}"))
     if envelope.body and envelope.body.strip():
-        blocks.append(TextBlock(text=envelope.body))
+        blocks.append(TextBlock(text=envelope.body, quote=True))
     if envelope.choices:
         blocks.append(
             ChoiceListBlock(
@@ -140,27 +139,65 @@ def intent_from_event(
     )
 
 
-def _render_blocks(blocks: list[PreviewBlock], budget: int) -> str:
+def _esc(text: str) -> str:
+    """Escape text for Telegram HTML parse mode (`&`, `<`, `>`).
+
+    Applied to every content string so agent-provided text cannot inject tags,
+    break rendering, or error the send.
+    """
+    return html.escape(text, quote=False)
+
+
+def _truncate(text: str, budget: int) -> tuple[str, int]:
+    """Take up to ``budget`` visible chars, appending an ellipsis when cut.
+
+    Truncation is on the *visible* text before HTML escaping/tagging, so a
+    multi-char entity or a tag is never split.
+    """
+    if budget <= 0:
+        return "", 0
+    if len(text) <= budget:
+        return text, budget - len(text)
+    return text[: max(budget - 1, 0)].rstrip() + "…", 0
+
+
+def _render_blocks_html(blocks: list[PreviewBlock], budget: int) -> list[str]:
     parts: list[str] = []
     for block in blocks:
         if budget <= 0:
             break
         if isinstance(block, TextBlock):
-            parts.append(_sanitize(block.text))
+            visible, budget = _truncate(_sanitize(block.text), budget)
+            if not visible:
+                continue
+            parts.append(
+                f"<blockquote>{_esc(visible)}</blockquote>"
+                if block.quote
+                else _esc(visible)
+            )
         elif isinstance(block, ChoiceListBlock):
             lines: list[str] = []
             if block.label:
-                lines.append(_sanitize(block.label))
+                label_visible, budget = _truncate(_sanitize(block.label), budget)
+                if label_visible:
+                    lines.append(_esc(label_visible))
             for choice in block.choices:
-                line = f"• {_sanitize(choice.label)}"
-                if choice.description:
-                    line += f" — {_sanitize(choice.description)}"
+                if budget <= 0:
+                    break
+                choice_visible, budget = _truncate(_sanitize(choice.label), budget)
+                if not choice_visible:
+                    continue
+                line = f"• <b>{_esc(choice_visible)}</b>"
+                if choice.description and budget > 0:
+                    desc_visible, budget = _truncate(
+                        _sanitize(choice.description), budget
+                    )
+                    if desc_visible:
+                        line += f" — {_esc(desc_visible)}"
                 lines.append(line)
-            parts.append("\n".join(lines))
-    body = "\n\n".join(part for part in parts if part)
-    if len(body) > budget:
-        body = body[: max(budget - 1, 0)].rstrip() + "…"
-    return body
+            if lines:
+                parts.append("\n".join(lines))
+    return parts
 
 
 def render_message(
@@ -170,15 +207,17 @@ def render_message(
     preview_chars: int,
     title_chars: int,
 ) -> OutboundMessage:
-    """Render an intent into a bounded plaintext message for a URL-only channel."""
+    """Render an intent into a bounded Telegram-HTML message.
+
+    The subject is a bold title, the content preview a blockquote, and choices a
+    bulleted list. Every content string is escaped; visible length is bounded so
+    the escaped result stays well under Telegram's message limit.
+    """
     label = _KIND_LABEL.get(intent.kind, "Notification")
-    title = _sanitize(f"{label}: {intent.subject}")
-    if len(title) > title_chars:
-        title = title[: max(title_chars - 1, 0)].rstrip() + "…"
-    body = _render_blocks(intent.preview_blocks, preview_chars)
-    text = f"{title}\n\n{body}" if body else title
-    if len(text) > HARD_TEXT_LIMIT:
-        text = text[: HARD_TEXT_LIMIT - 1].rstrip() + "…"
+    title_visible, _ = _truncate(_sanitize(f"{label}: {intent.subject}"), title_chars)
+    parts = [f"<b>{_esc(title_visible)}</b>"]
+    parts.extend(_render_blocks_html(intent.preview_blocks, preview_chars))
+    text = "\n\n".join(part for part in parts if part)
     button_label = "Open inbox item" if intent.kind == "inbox" else "Open session"
     return OutboundMessage(
         intent_id=intent.dedupe_key,

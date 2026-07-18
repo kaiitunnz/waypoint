@@ -6,6 +6,7 @@ bot token is read once from an environment variable at startup and travels only
 inside the HTTPS request URL — never persisted, logged, or returned by status.
 """
 
+import html
 import logging
 import os
 from urllib.parse import urlsplit
@@ -101,7 +102,12 @@ class TelegramChannel:
                 ]
             }
         else:
-            text = f"{message.text}\n\n{message.button_label}: {message.url}"
+            # No button — render the deep link as an HTML anchor in the text.
+            anchor = (
+                f'<a href="{html.escape(message.url, quote=True)}">'
+                f"{html.escape(message.button_label)}</a>"
+            )
+            text = f"{message.text}\n\n{anchor}"
             reply_markup = None
         # Deliver to every configured chat id. A partial failure requeues the
         # whole row (at-least-once): already-delivered chats may see a duplicate
@@ -111,6 +117,7 @@ class TelegramChannel:
             body: dict[str, object] = {
                 "chat_id": chat_id,
                 "text": text,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
             if reply_markup is not None:

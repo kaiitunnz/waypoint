@@ -75,6 +75,7 @@ async def test_send_builds_request(monkeypatch) -> None:
     url, body = session.calls[0]
     assert url == "https://api.telegram.org/botSECRET-TOKEN/sendMessage"
     assert body["chat_id"] == "12345"
+    assert body["parse_mode"] == "HTML"
     assert body["disable_web_page_preview"] is True
     keyboard = body["reply_markup"]["inline_keyboard"]
     assert keyboard == [[{"text": "Open inbox item", "url": _message().url}]]
@@ -94,9 +95,10 @@ async def test_internal_origin_falls_back_to_text_link() -> None:
     result = await channel.send(message)
     assert result.status == "sent"
     _url, body = session.calls[0]
+    assert body["parse_mode"] == "HTML"
     assert "reply_markup" not in body
-    assert "http://h0:8797/inbox/1" in body["text"]
-    assert "Open inbox item" in body["text"]
+    # The link is an HTML anchor in the message text.
+    assert '<a href="http://h0:8797/inbox/1">Open inbox item</a>' in body["text"]
 
 
 async def test_send_to_multiple_chats(monkeypatch) -> None:

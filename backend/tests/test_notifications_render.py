@@ -69,10 +69,11 @@ def test_inbox_markdown_question_approval_attachment() -> None:
     intent = intent_from_inbox_item(item)
     assert intent.dedupe_key == "inbox:item123"
     text = _render(intent)
-    assert "Inbox: Subject" in text
+    assert "<b>Inbox: Subject</b>" in text
+    assert "<blockquote>Please review</blockquote>" in text
     assert "From: S" in text
     assert "Ship it?" in text
-    assert "• yes — go" in text
+    assert "• <b>yes</b> — go" in text
     assert "Approve deploy" in text
     assert "Attachment: log.txt" in text
     msg = render_message(
@@ -98,19 +99,24 @@ def test_attachment_content_never_embedded() -> None:
     assert "secret" not in text  # the attachment id/handle is never leaked
 
 
-def test_control_characters_and_markup_are_plaintext() -> None:
+def test_control_chars_stripped_and_agent_markup_escaped() -> None:
     item = _inbox_item(
         [
             InboxMarkdownBlock(
-                id="a", text="line\x07one\x00\n\n\n\ntwo <b>bold</b> `code`"
+                id="a", text="line\x07one\x00\n\n\n\ntwo <b>bold</b> & `code`"
             )
         ]
     )
     text = _render(intent_from_inbox_item(item))
     assert "\x07" not in text and "\x00" not in text
     assert "\n\n\n" not in text
-    # Markup passes through as literal characters (no parse_mode interpretation).
-    assert "<b>bold</b>" in text
+    # Agent angle brackets / ampersands are HTML-escaped so they cannot inject
+    # Telegram formatting or error the send.
+    assert "&lt;b&gt;bold&lt;/b&gt;" in text
+    assert "two <b>bold</b>" not in text
+    assert "&amp;" in text
+    # Our own formatting tag (bold title) is present and intact.
+    assert text.startswith("<b>")
 
 
 def test_unicode_preserved() -> None:
@@ -122,7 +128,8 @@ def test_unicode_preserved() -> None:
 def test_truncation_appends_ellipsis() -> None:
     item = _inbox_item([InboxMarkdownBlock(id="a", text="x" * 5000)])
     text = _render(intent_from_inbox_item(item), preview_chars=100)
-    assert text.endswith("…")
+    assert "…" in text
+    assert "<blockquote>" in text and text.endswith("</blockquote>")
     assert len(text) < 400
 
 
@@ -134,9 +141,11 @@ def test_title_truncated_to_limit() -> None:
         preview_chars=900,
         title_chars=50,
     )
-    first_line = msg.text.splitlines()[0]
-    assert len(first_line) <= 50
-    assert first_line.endswith("…")
+    title = msg.text.splitlines()[0]
+    assert title.startswith("<b>") and title.endswith("</b>")
+    visible = title[len("<b>") : -len("</b>")]
+    assert len(visible) <= 50
+    assert visible.endswith("…")
 
 
 def _event_with_interaction(envelope: InteractionEnvelope) -> EventRecord:
@@ -169,9 +178,10 @@ def test_event_intent_for_approval() -> None:
     )
     assert msg.url == f"{BASE_URL}/session/sessX"
     assert msg.button_label == "Open session"
-    assert "Approval needed: Approve Bash" in msg.text
+    assert "<b>Approval needed: Approve Bash</b>" in msg.text
     assert "Session: My Session" in msg.text
-    assert "• approve" in msg.text
+    assert "<blockquote>pytest -q</blockquote>" in msg.text
+    assert "• <b>approve</b>" in msg.text
 
 
 def test_event_intent_for_plan_uses_plan_item_id() -> None:

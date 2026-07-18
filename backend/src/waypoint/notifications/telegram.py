@@ -8,6 +8,7 @@ inside the HTTPS request URL — never persisted, logged, or returned by status.
 
 import logging
 import os
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -25,6 +26,22 @@ _API_BASE = "https://api.telegram.org"
 # retryable. Everything else (400/401/403 — bad token, chat never started the
 # bot, malformed request) is terminal for this row.
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def _valid_button_url(url: str) -> bool:
+    """Whether Telegram will accept ``url`` as an inline-keyboard button URL.
+
+    Telegram rejects button URLs without a real host (e.g. an internal alias
+    like ``http://h0:8797`` — "Wrong HTTP URL"). A dotted hostname is a good
+    proxy for a public origin; anything else falls back to a link in the
+    message text, which Telegram accepts for any origin and auto-links.
+    """
+    parts = urlsplit(url)
+    return (
+        parts.scheme in ("http", "https")
+        and parts.hostname is not None
+        and "." in parts.hostname
+    )
 
 
 class TelegramChannel:
@@ -72,20 +89,32 @@ class TelegramChannel:
         if self._session is None or self._token is None:
             return DeliveryResult(status="failed", error="channel not started")
         url = f"{_API_BASE}/bot{self._token}/sendMessage"
-        reply_markup = {
-            "inline_keyboard": [[{"text": message.button_label, "url": message.url}]]
-        }
+        # An inline URL button is nicer, but Telegram rejects a button whose URL
+        # is not a valid public HTTP(S) URL — which would fail the whole send.
+        # For such origins, put the deep link in the text (Telegram auto-links
+        # it) so delivery succeeds regardless of the configured origin.
+        if _valid_button_url(message.url):
+            text = message.text
+            reply_markup: dict[str, object] | None = {
+                "inline_keyboard": [
+                    [{"text": message.button_label, "url": message.url}]
+                ]
+            }
+        else:
+            text = f"{message.text}\n\n{message.button_label}: {message.url}"
+            reply_markup = None
         # Deliver to every configured chat id. A partial failure requeues the
         # whole row (at-least-once): already-delivered chats may see a duplicate
         # on retry, which is the documented trade-off for durable delivery.
         result: DeliveryResult = DeliveryResult(status="sent")
         for chat_id in self._chat_ids:
-            body = {
+            body: dict[str, object] = {
                 "chat_id": chat_id,
-                "text": message.text,
+                "text": text,
                 "disable_web_page_preview": True,
-                "reply_markup": reply_markup,
             }
+            if reply_markup is not None:
+                body["reply_markup"] = reply_markup
             outcome = await self._send_one(url, body)
             if outcome.status == "sent":
                 continue

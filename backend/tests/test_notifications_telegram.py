@@ -80,6 +80,25 @@ async def test_send_builds_request(monkeypatch) -> None:
     assert keyboard == [[{"text": "Open inbox item", "url": _message().url}]]
 
 
+async def test_internal_origin_falls_back_to_text_link() -> None:
+    # An internal host alias is not a valid Telegram button URL; the deep link
+    # goes in the message text instead so the send still succeeds.
+    channel = _channel(chat_ids=["12345"])
+    session = _wire(channel, _FakeResponse(200, {"ok": True}))
+    message = OutboundMessage(
+        intent_id="inbox:1",
+        text="Inbox: hi",
+        url="http://h0:8797/inbox/1",
+        button_label="Open inbox item",
+    )
+    result = await channel.send(message)
+    assert result.status == "sent"
+    _url, body = session.calls[0]
+    assert "reply_markup" not in body
+    assert "http://h0:8797/inbox/1" in body["text"]
+    assert "Open inbox item" in body["text"]
+
+
 async def test_send_to_multiple_chats(monkeypatch) -> None:
     channel = _channel(chat_ids=["1", "2", "3"])
     session = _wire(channel, _FakeResponse(200, {"ok": True}))

@@ -78,8 +78,16 @@ retro-notify already-pending items; only new transitions notify.
 
 The operator-controlled origin the deep links are built from. It is **required**
 when notifications are enabled, must be an absolute `http`/`https` URL with no
-query, fragment, or userinfo, and should be reachable from your phone (your
-Tailscale MagicDNS name or a public HTTPS host — not `localhost`).
+query, fragment, or userinfo, and should be reachable **from your phone** (your
+Tailscale MagicDNS name or a public HTTPS host — not `localhost` or an internal
+alias like `http://h0:8787`, which won't resolve on mobile).
+
+For the best experience use a public HTTPS origin with a real hostname (e.g.
+`https://waypoint.example.ts.net`): Telegram then renders the deep link as a
+tappable **Open** button. When the origin is an internal alias that Telegram
+won't accept as a button URL, the link is included in the message text instead
+so delivery still succeeds — but such a link only opens on a device that can
+resolve that host.
 
 ## Multiple chats and channels
 

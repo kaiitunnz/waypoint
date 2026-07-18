@@ -809,6 +809,39 @@ function ManagerSwitcher({
   );
 }
 
+function ViewSwitch({
+  view,
+  onChange,
+}: {
+  view: BoardView;
+  onChange: (view: BoardView) => void;
+}) {
+  return (
+    <div className="board-viewswitch" role="tablist" aria-label="Board view">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "board"}
+        className={`board-viewswitch-tab${view === "board" ? " is-active" : ""}`}
+        onClick={() => onChange("board")}
+      >
+        Board
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "channels"}
+        className={`board-viewswitch-tab${
+          view === "channels" ? " is-active" : ""
+        }`}
+        onClick={() => onChange("channels")}
+      >
+        Channels
+      </button>
+    </div>
+  );
+}
+
 export default function BoardPage() {
   const router = useRouter();
   const { theme } = useTheme();
@@ -1518,16 +1551,6 @@ export default function BoardPage() {
     <main className="page-shell board-shell">
       <header className="app-bar">
         <div className="app-bar-brand">
-          {isMobile ? (
-            <button
-              type="button"
-              className="board-hamburger"
-              onClick={() => setNavOpen(true)}
-              aria-label="Open channels"
-            >
-              ☰
-            </button>
-          ) : null}
           <Link className="app-bar-mark" href="/" aria-label="Waypoint home">
             <Image
               src={theme === "light" ? "/waypoint-light.svg" : "/waypoint.svg"}
@@ -1543,34 +1566,9 @@ export default function BoardPage() {
           </div>
         </div>
         <div className="app-bar-meta">
-          <div
-            className="board-viewswitch"
-            role="tablist"
-            aria-label="Board view"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "board"}
-              className={`board-viewswitch-tab${
-                view === "board" ? " is-active" : ""
-              }`}
-              onClick={() => setView("board")}
-            >
-              Board
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "channels"}
-              className={`board-viewswitch-tab${
-                view === "channels" ? " is-active" : ""
-              }`}
-              onClick={() => setView("channels")}
-            >
-              Channels
-            </button>
-          </div>
+          {/* On mobile the view switch and channel opener live in the sticky
+              workspace toolbar below, keeping navigation out of the app bar. */}
+          {!isMobile ? <ViewSwitch view={view} onChange={setView} /> : null}
           <Link className="back-link" href="/">
             ← all sessions
           </Link>
@@ -1658,6 +1656,28 @@ export default function BoardPage() {
           </div>
         ) : null}
       </section>
+
+      {isMobile && state === "ready" && (channels.length > 0 || managerMode) ? (
+        <div className="board-toolbar">
+          <button
+            type="button"
+            className="board-toolbar-nav"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open channels"
+          >
+            <span aria-hidden="true">☰</span>
+            <span>Channels</span>
+          </button>
+          <span className="board-toolbar-context">
+            {view === "board"
+              ? managerMode
+                ? "Ticket board"
+                : "Overview"
+              : (activeChannel ?? "—")}
+          </span>
+          <ViewSwitch view={view} onChange={setView} />
+        </div>
+      ) : null}
 
       {state === "ready" && channels.length === 0 && !managerMode ? (
         <section className="panel bordered board-empty">

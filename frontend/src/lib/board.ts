@@ -1,6 +1,5 @@
-// Board-workspace taxonomy: how channels group, how manager ticket states map
-// to lifecycle lanes and status lamps, and how post kinds and priorities pick a
-// tone. Pure functions so the board page stays a view and this stays testable.
+// Board-workspace taxonomy: channel grouping, ticket-state to lane/lamp
+// mapping, and kind/priority tones.
 
 import { ManagerTicket, ManagerTicketState } from "@/lib/types";
 
@@ -30,9 +29,7 @@ export const CHANNEL_GROUP_COLLAPSED_DEFAULT: Record<ChannelGroupKey, boolean> =
   other: false,
 };
 
-// Classify a channel by namespace. `<x>-tickets` / `<x>-org` are the manager's
-// intake and outcome channels; `<x>-ticket-<id>` are per-ticket. The trailing
-// dash in `-ticket-` keeps `waypoint-tickets` out of the ticket group.
+// The trailing dash in `-ticket-` keeps `<x>-tickets` out of the ticket group.
 export function classifyChannel(channel: string): ChannelGroupKey {
   if (channel.startsWith("job:")) return "job";
   const name = channel.toLowerCase();
@@ -48,9 +45,6 @@ export function classifyChannel(channel: string): ChannelGroupKey {
   return "other";
 }
 
-// The ticket id embedded in a per-ticket channel, given the manager's
-// `ticket_channel_prefix` (e.g. `waypoint-ticket-`). Null when the channel isn't
-// one of this manager's ticket channels.
 export function ticketIdFromChannel(
   channel: string,
   prefix: string | null | undefined,
@@ -91,8 +85,7 @@ export function laneForState(state: ManagerTicketState): string {
   return STATE_TO_LANE[state] ?? "other";
 }
 
-// Tickets awaiting a human decision — the three approval gates. These carry a
-// dog-ear pin, feed the Needs-you strip, and drive navigator attention dots.
+// The three approval gates — tickets awaiting a human decision.
 export const AWAITING_STATES: ReadonlySet<ManagerTicketState> = new Set([
   "spec_review",
   "blocked",
@@ -103,7 +96,7 @@ export function isAwaiting(state: ManagerTicketState): boolean {
   return AWAITING_STATES.has(state);
 }
 
-// ─── State lamp: a tone token + a human label (color is never the only cue) ───
+// ─── Ticket state → lamp tone + label ───
 
 export type StateTone =
   | "idle"
@@ -154,7 +147,7 @@ export function stateLabel(state: ManagerTicketState): string {
   return STATE_LABEL[state] ?? state;
 }
 
-// ─── Post kind → tone (kind-aware log timeline) ───
+// ─── Post kind → tone ───
 
 export type KindTone =
   | "muted"
@@ -186,7 +179,7 @@ export function kindTone(kind: string | null | undefined): KindTone {
   return KIND_TONE[kind] ?? "muted";
 }
 
-// ─── Priority tone (p0 loudest → p3 quietest) ───
+// ─── Priority tone ───
 
 export type PriorityTone = "p0" | "p1" | "p2" | "p3";
 
@@ -203,7 +196,7 @@ export function priorityTone(priority: string | null | undefined): PriorityTone 
   }
 }
 
-// ─── Board rollup (Needs you · In flight · Blocked · Merged) ───
+// ─── Board rollup ───
 
 export interface BoardRollup {
   needYou: number;

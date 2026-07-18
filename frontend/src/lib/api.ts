@@ -1222,9 +1222,8 @@ export async function updateBoardEntry(
   return payload.entry as BoardEntry;
 }
 
-// Enumerate initialized managers for the board's per-project switcher. An
-// unavailable endpoint (older backend) or an empty list means general mode, so
-// a 404 degrades to [] rather than failing the page. Auth errors still surface.
+// A 404 (endpoint unavailable) degrades to [] so the page runs in general mode
+// instead of failing.
 export async function fetchManagers(
   host: string,
   token: string,
@@ -1239,9 +1238,7 @@ export async function fetchManagers(
   return (payload.managers ?? []) as ManagerSummary[];
 }
 
-// Read one manager's board data: config (with render context), tree, and the
-// authoritative ticket records. Tickets come from /state — there is no separate
-// /tickets list route.
+// Tickets come from /state; there is no /tickets list route.
 export async function fetchManagerState(
   host: string,
   token: string,

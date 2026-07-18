@@ -106,9 +106,8 @@ function metaString(
   return null;
 }
 
-// Meta keys the semantic renderers pull out as first-class facts (PR link, CI
-// lamp, commit sha) plus `kind`, which surfaces as a tone/tag. Everything else
-// falls back to chips.
+// Keys rendered as first-class facts (PR/CI/commit) or a tone/tag (kind); the
+// rest fall back to chips.
 const SEMANTIC_META_KEYS = new Set(["kind", "pr", "pr_url", "checks", "commit"]);
 
 interface SemanticFacts {
@@ -917,9 +916,8 @@ export default function BoardPage() {
   // Resolve the initial view once, after channels and managers first load.
   const viewResolvedRef = useRef(false);
   const requestedViewRef = useRef<BoardView | null>(null);
-  // Whether the load carried a `?channel=` deep link. `pendingChannelRef` is
-  // cleared as soon as the channel is selected, so the view resolver reads this
-  // stable flag instead to open Channels for a deep link.
+  // `pendingChannelRef` is cleared once the channel is selected, so the view
+  // resolver reads this stable flag to open Channels for a deep link.
   const deepLinkRef = useRef(false);
 
   const handleAuthFailure = useCallback(() => {
@@ -1091,9 +1089,8 @@ export default function BoardPage() {
     void refreshManagers();
   }, [refreshChannels, refreshManagers]);
 
-  // Once channels and managers have loaded, resolve the initial view: an explicit
-  // `?view=` wins; a `?channel=` deep link opens Channels; otherwise open Board
-  // when a manager exists, else Channels.
+  // Resolve the initial view once: `?view=` wins, then a `?channel=` deep link
+  // opens Channels, else Board when a manager exists.
   useEffect(() => {
     if (viewResolvedRef.current || state !== "ready") return;
     viewResolvedRef.current = true;
@@ -1106,7 +1103,6 @@ export default function BoardPage() {
     }
   }, [state, managers]);
 
-  // Fetch the selected manager's board data when it changes.
   useEffect(() => {
     if (!selectedManagerId) {
       setManagerState(null);
@@ -1256,9 +1252,8 @@ export default function BoardPage() {
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    // Move focus into the drawer for the trap and Escape handling, but land on
-    // the panel itself — not the search box — so opening it never pops the
-    // mobile keyboard or steals typing focus.
+    // Focus the panel, not the search box, so opening the drawer never pops the
+    // mobile keyboard.
     node?.focus();
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [navOpen]);
@@ -1520,9 +1515,7 @@ export default function BoardPage() {
   const cellAuthor = uniformAuthor(cells);
   const logAuthor = hasOlder ? null : uniformAuthor(log);
 
-  // Channel-detail layout: a summary header plus a two-column split (cells |
-  // log) on wide screens when both halves carry content, so the log timeline
-  // fills the space the single-column stack used to waste.
+  // Two-column split (cells | log) on wide screens when both halves have content.
   const activeChannelMeta =
     channels.find((c) => c.channel === activeChannel) ?? null;
   const hasPrimary = statusCell !== null || cells.length > 0;
@@ -1576,8 +1569,7 @@ export default function BoardPage() {
           </div>
         </div>
         <div className="app-bar-meta">
-          {/* On mobile the view switch and channel opener live in the sticky
-              workspace toolbar below, keeping navigation out of the app bar. */}
+          {/* On mobile the view switch and opener live in the sticky toolbar below. */}
           {!isMobile ? <ViewSwitch view={view} onChange={setView} /> : null}
           <Link className="back-link" href="/">
             ← all sessions

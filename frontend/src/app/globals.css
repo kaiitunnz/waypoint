@@ -13312,9 +13312,8 @@ html[data-theme="light"] .session-switcher-row.selected {
 
 /* ── Board workspace: lamps, tones, navigator, views ── */
 
-/* A state/CI/kind lamp: a currentColor dot whose hue names a tone. Color always
-   pairs with a text label elsewhere, so the dot is a reinforcement, not the only
-   cue (NFR4). One tone→token map drives lamps, tags, and pills. */
+/* A currentColor dot whose hue names a tone, always paired with a text label
+   (NFR4). One tone→token map drives lamps, tags, and pills. */
 .board-lamp {
   display: inline-block;
   width: 7px;
@@ -13404,8 +13403,8 @@ html[data-theme="light"] .session-switcher-row.selected {
   color: var(--accent-cool);
 }
 
-/* Mobile workspace toolbar — a sticky glass bar carrying the channel opener,
-   current context, and view switch, so navigation never sits in the app bar. */
+/* Mobile workspace toolbar: sticky glass bar with the channel opener, context,
+   and view switch, keeping nav out of the app bar. */
 .board-toolbar {
   position: sticky;
   top: 8px;
@@ -13779,8 +13778,8 @@ html[data-theme="light"] .session-switcher-row.selected {
   gap: 14px;
 }
 
-/* Opaque, lifted cards with a stronger hairline so each reads as its own item
-   against the translucent strip instead of merging with its neighbours. */
+/* Opaque cards with a stronger hairline so each reads as its own item on the
+   translucent strip. */
 .board-need-card {
   position: relative;
   display: flex;
@@ -14237,12 +14236,9 @@ a.board-fact-pr:hover {
   padding: 8px 12px;
 }
 
-/* App bar (board page) — a single non-wrapping row that always fits the
-   viewport: nowrap keeps the theme toggle from dropping to a second line, while
-   min-width:0 on both zones lets them shrink (the brand truncates first) so the
-   bar can never exceed the viewport and rescale the page. A page-level clip is
-   the final backstop against any stray horizontal overflow. A hairline divides
-   the view switch from the session link + theme toggle. */
+/* App bar (board page): a single non-wrapping row (nowrap) that still fits the
+   viewport (min-width:0 lets the brand truncate first); overflow-x:clip is the
+   backstop. A hairline divides the view switch from the session link + theme. */
 .page-shell.board-shell {
   overflow-x: clip;
 }
@@ -14276,8 +14272,7 @@ a.board-fact-pr:hover {
   white-space: nowrap;
 }
 
-/* Channel detail header — a summary line under the channel name, sticky glass
-   on desktop so the channel stays identified while its log scrolls. */
+/* Channel detail header: summary line under the name; sticky glass on desktop. */
 .board-channel-header {
   display: flex;
   align-items: flex-end;
@@ -14338,9 +14333,8 @@ a.board-fact-pr:hover {
   }
 }
 
-/* Two-column detail: cells (primary) beside the log (secondary) on wide
-   screens when both carry content, so the log fills the space the single stack
-   used to waste. Collapses to one column when a half is empty or on mobile. */
+/* Two-column detail: cells (primary) beside the log (secondary) on wide screens
+   when both carry content; one column otherwise. */
 .board-detail-columns {
   display: grid;
   grid-template-columns: 1fr;
@@ -14397,10 +14391,9 @@ a.board-fact-pr:hover {
   .board-shell .back-link {
     display: none;
   }
-  /* Override the global mobile app bar, which stacks its meta zone onto a
-     second row (flex-direction: column). With nav moved to the toolbar the
-     board's meta is just the theme toggle, so keep the bar a single row with
-     the toggle trailing the title instead of orphaned on a line of its own. */
+  /* The global mobile app bar stacks its meta onto a second row
+     (flex-direction: column); with nav in the toolbar the board's meta is just
+     the theme toggle, so keep it a single row. */
   .board-shell .app-bar {
     flex-direction: row;
     align-items: center;

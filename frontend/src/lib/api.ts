@@ -18,6 +18,8 @@ import {
   InboxQuestionAnswer,
   InboxStatus,
   LaunchSettingsUpdate,
+  ManagerStateResponse,
+  ManagerSummary,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
@@ -1218,6 +1220,42 @@ export async function updateBoardEntry(
   await ensureOk(response, "failed to update board entry");
   const payload = await response.json();
   return payload.entry as BoardEntry;
+}
+
+// Enumerate initialized managers for the board's per-project switcher. An
+// unavailable endpoint (older backend) or an empty list means general mode, so
+// a 404 degrades to [] rather than failing the page. Auth errors still surface.
+export async function fetchManagers(
+  host: string,
+  token: string,
+): Promise<ManagerSummary[]> {
+  const response = await fetch(`${host}/api/manager`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (response.status === 404) return [];
+  await ensureOk(response, "failed to fetch managers");
+  const payload = await response.json();
+  return (payload.managers ?? []) as ManagerSummary[];
+}
+
+// Read one manager's board data: config (with render context), tree, and the
+// authoritative ticket records. Tickets come from /state — there is no separate
+// /tickets list route.
+export async function fetchManagerState(
+  host: string,
+  token: string,
+  managerId: string,
+): Promise<ManagerStateResponse> {
+  const response = await fetch(
+    `${host}/api/manager/${encodeURIComponent(managerId)}/state`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch manager state");
+  return (await response.json()) as ManagerStateResponse;
 }
 
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {

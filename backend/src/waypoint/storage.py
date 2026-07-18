@@ -2797,9 +2797,7 @@ class Storage:
         legacy row never persisted ``repo_dir`` directly, so it is derived from the
         compiled ``templates_dir`` (default ``<repo>/.waypoint/manager/templates``);
         when that fails the migrated manager keeps a NULL ``repo_dir`` and the next
-        ``manager init`` adopts it as the lone unbound manager. The whole rebuild
-        runs in one transaction so a mid-rebuild failure rolls back cleanly rather
-        than leaving a half-migrated schema.
+        ``manager init`` adopts it as the lone unbound manager.
         """
         if self._has_column("manager_config", "repo_dir"):
             return

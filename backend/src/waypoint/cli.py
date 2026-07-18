@@ -178,7 +178,6 @@ manager_ticket_app = typer.Typer(
     help="Add, inspect, update, and transition manager tickets.",
     no_args_is_help=True,
 )
-# Selects which manager a command targets; defaults to the current repo's manager.
 ManagerIdOption = Annotated[
     str | None,
     typer.Option(

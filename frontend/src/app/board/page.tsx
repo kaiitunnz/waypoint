@@ -62,6 +62,7 @@ const LOG_LIMIT = 100;
 const MOBILE_BREAKPOINT = 720;
 const COLLAPSED_GROUPS_KEY = "waypoint.board.collapsedGroups";
 const SELECTED_MANAGER_KEY = "waypoint.board.manager";
+const RAIL_COLLAPSED_KEY = "waypoint.board.railCollapsed";
 
 type LoadState = "loading" | "ready" | "error";
 type BoardView = "board" | "channels";
@@ -808,6 +809,56 @@ function ManagerSwitcher({
   );
 }
 
+// A sidebar-panel glyph: the outer app frame with a divided-off left rail. The
+// rail reads as filled when the navigator is open and as a hollow frame when it
+// is collapsed, so the icon states the toggle's effect on its own.
+function RailToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className="board-rail-toggle-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <defs>
+        <clipPath id="board-rail-toggle-clip">
+          <rect x="2" y="3" width="12" height="10" rx="2.2" />
+        </clipPath>
+      </defs>
+      {collapsed ? null : (
+        <rect
+          x="2"
+          y="3"
+          width="4.4"
+          height="10"
+          fill="currentColor"
+          opacity="0.85"
+          clipPath="url(#board-rail-toggle-clip)"
+        />
+      )}
+      <rect
+        x="2"
+        y="3"
+        width="12"
+        height="10"
+        rx="2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <line
+        x1="6.4"
+        y1="3.2"
+        x2="6.4"
+        y2="12.8"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
 function ViewSwitch({
   view,
   onChange,
@@ -874,6 +925,9 @@ export default function BoardPage() {
   const [search, setSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [navOpen, setNavOpen] = useState(false);
+  // The desktop channel rail collapses so the workspace (kanban lanes, detail)
+  // can claim the full width; the choice persists across sessions.
+  const [railCollapsed, setRailCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const drawerRef = useRef<HTMLDivElement | null>(null);
 
@@ -956,6 +1010,9 @@ export default function BoardPage() {
       }
       const storedManager = window.localStorage.getItem(SELECTED_MANAGER_KEY);
       if (storedManager) setSelectedManagerId(storedManager);
+      if (window.localStorage.getItem(RAIL_COLLAPSED_KEY) === "1") {
+        setRailCollapsed(true);
+      }
     } catch {
       // localStorage may be unavailable; defaults are fine.
     }
@@ -1444,6 +1501,18 @@ export default function BoardPage() {
     });
   }, []);
 
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   const selectChannel = useCallback(
     (channel: string) => {
       setActiveChannel(channel);
@@ -1569,8 +1638,8 @@ export default function BoardPage() {
           </div>
         </div>
         <div className="app-bar-meta">
-          {/* On mobile the view switch and opener live in the sticky toolbar below. */}
-          {!isMobile ? <ViewSwitch view={view} onChange={setView} /> : null}
+          {/* The view switch and nav controls live in the workspace toolbar
+              below, not on the app bar. */}
           <Link className="back-link" href="/">
             ← all sessions
           </Link>
@@ -1659,16 +1728,31 @@ export default function BoardPage() {
         ) : null}
       </section>
 
-      {isMobile && state === "ready" && (channels.length > 0 || managerMode) ? (
+      {state === "ready" && (channels.length > 0 || managerMode) ? (
         <div className="board-toolbar">
-          <button
-            type="button"
-            className="board-toolbar-nav"
-            onClick={() => setNavOpen(true)}
-            aria-label="Open channels"
-          >
-            <span aria-hidden="true">☰</span>
-          </button>
+          {isMobile ? (
+            <button
+              type="button"
+              className="board-toolbar-nav"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open channels"
+            >
+              <span aria-hidden="true">☰</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="board-toolbar-nav board-rail-toggle"
+              onClick={toggleRail}
+              aria-pressed={!railCollapsed}
+              aria-label={
+                railCollapsed ? "Show channels sidebar" : "Hide channels sidebar"
+              }
+              title={railCollapsed ? "Show channels" : "Hide channels"}
+            >
+              <RailToggleIcon collapsed={railCollapsed} />
+            </button>
+          )}
           <span className="board-toolbar-context">
             {view === "board"
               ? managerMode
@@ -1692,7 +1776,11 @@ export default function BoardPage() {
       ) : null}
 
       {state === "ready" && (channels.length > 0 || managerMode) ? (
-        <section className="board-grid">
+        <section
+          className={`board-grid${
+            !isMobile && railCollapsed ? " is-rail-collapsed" : ""
+          }`}
+        >
           {/* Desktop navigator; on mobile this is hidden and the drawer takes over. */}
           {!isMobile ? (
             <aside className="panel board-rail" aria-label="Channels">

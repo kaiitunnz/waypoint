@@ -1210,37 +1210,34 @@ export default function HomePage() {
             scheduledCount={pendingScheduledCount}
             onOpenScheduled={() => setScheduleSheetOpen(true)}
           />
-          <div className="home-layout">
-            <div className="home-main">
-              <CompactLaunch
-                targetLabel={launchTargetLabel}
-                presets={sessionPresets}
-                defaultPresetId={defaultPresetId}
-                defaultBackend={effectiveDefaultBackend}
-                launchingPresetId={launchingPresetId}
-                onLaunchPreset={handleLaunchPreset}
-                onOpenSheet={openLaunchSheet}
-              />
-              <SessionList
-                sessions={filteredSessions}
-                catalog={catalog}
-                onDelete={handleDelete}
-                onDeleteExited={handleDeleteExited}
-                onTerminate={handleTerminate}
-                onSetPinned={handleSetPinned}
-                onSetTitle={handleSetTitle}
-                onOpenSettings={setSettingsSession}
-              />
-            </div>
-            <InstrumentRail
-              usageBuckets={usageBuckets}
-              telemetryEnabled={telemetryEnabled}
-              boardChannels={boardChannels}
-              schedules={schedules}
-              messageSchedules={messageSchedules}
-              onOpenScheduled={() => setScheduleSheetOpen(true)}
-            />
-          </div>
+          <CompactLaunch
+            targetLabel={launchTargetLabel}
+            presets={sessionPresets}
+            defaultPresetId={defaultPresetId}
+            defaultBackend={effectiveDefaultBackend}
+            launchingPresetId={launchingPresetId}
+            onLaunchPreset={handleLaunchPreset}
+            onOpenSheet={openLaunchSheet}
+          />
+          <InstrumentRail
+            usageBuckets={usageBuckets}
+            telemetryEnabled={telemetryEnabled}
+            boardChannels={boardChannels}
+            schedules={schedules}
+            messageSchedules={messageSchedules}
+            sessions={filteredSessions}
+            onOpenScheduled={() => setScheduleSheetOpen(true)}
+          />
+          <SessionList
+            sessions={filteredSessions}
+            catalog={catalog}
+            onDelete={handleDelete}
+            onDeleteExited={handleDeleteExited}
+            onTerminate={handleTerminate}
+            onSetPinned={handleSetPinned}
+            onSetTitle={handleSetTitle}
+            onOpenSettings={setSettingsSession}
+          />
         </>
       ) : null}
       {settingsSession ? (

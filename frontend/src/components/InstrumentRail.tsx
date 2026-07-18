@@ -13,6 +13,7 @@ import type {
   BoardChannel,
   MessageSchedule,
   ScheduledSession,
+  SessionRecord,
   UsageDashboardBucket,
   UsageWindow,
 } from "@/lib/types";
@@ -28,6 +29,7 @@ interface InstrumentRailProps {
   boardChannels: BoardChannel[];
   schedules: ScheduledSession[];
   messageSchedules: MessageSchedule[];
+  sessions: SessionRecord[];
   onOpenScheduled: () => void;
 }
 
@@ -37,6 +39,7 @@ export function InstrumentRail({
   boardChannels,
   schedules,
   messageSchedules,
+  sessions,
   onOpenScheduled,
 }: InstrumentRailProps) {
   return (
@@ -45,6 +48,7 @@ export function InstrumentRail({
       <ScheduledTile
         schedules={schedules}
         messageSchedules={messageSchedules}
+        sessions={sessions}
         onOpen={onOpenScheduled}
       />
       <BoardTile channels={boardChannels} />
@@ -227,14 +231,16 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
     );
   }
 
+  // A container (not a wrapping link) so each channel name can be its own link
+  // back to that channel — the header link covers the whole-board case.
   return (
-    <Link className="inst" href="/board">
-      <div className="inst-top">
+    <section className="inst">
+      <Link className="inst-top inst-top-link" href="/board">
         <span className="inst-name">Board</span>
         <span className="inst-go" aria-hidden="true">
           →
         </span>
-      </div>
+      </Link>
       <span className="inst-lamp tone-info">Blackboard</span>
       <h4 className="inst-headline">
         {channels.length} channel{channels.length === 1 ? "" : "s"}
@@ -245,58 +251,61 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
       </p>
       <ul className="inst-channels">
         {topChannels.map((channel) => (
-          <li className="inst-channel" key={channel.channel}>
-            <span className="inst-channel-name" title={channel.channel}>
-              {channel.channel}
-            </span>
-            <span className="inst-channel-count">{channel.entry_count}</span>
+          <li key={channel.channel}>
+            <Link
+              className="inst-channel"
+              href={`/board?channel=${encodeURIComponent(channel.channel)}`}
+            >
+              <span className="inst-channel-name" title={channel.channel}>
+                {channel.channel}
+              </span>
+              <span className="inst-channel-count">{channel.entry_count}</span>
+            </Link>
           </li>
         ))}
       </ul>
-    </Link>
+    </section>
   );
 }
 
 /* ── Scheduled ── */
 
-function scheduleLabel(schedule: ScheduledSession): string {
-  return (
-    schedule.title?.trim() ||
-    schedule.initial_prompt?.trim() ||
-    `${schedule.backend} session`
-  );
+interface ScheduledItem {
+  key: string;
+  kind: "launch" | "message";
+  when: number | null;
+  whenLabel: string;
+  target: string;
+  preview: string;
 }
 
-function formatCountdown(iso: string): string {
+function formatShortWhen(iso: string | null | undefined): string {
+  if (!iso) return "queued";
   const target = Date.parse(iso);
   if (!Number.isFinite(target)) return "queued";
-  const deltaMs = target - Date.now();
-  if (deltaMs <= 0) return "due now";
-  const mins = Math.round(deltaMs / 60000);
-  if (mins < 60) return `Next in ${mins}m`;
+  const delta = target - Date.now();
+  if (delta <= 0) return "due";
+  const mins = Math.round(delta / 60000);
+  if (mins < 60) return `in ${mins}m`;
   const hours = Math.floor(mins / 60);
-  const rem = mins % 60;
-  if (hours < 24) return `Next in ${hours}h${rem ? ` ${rem}m` : ""}`;
-  const days = Math.floor(hours / 24);
-  return `Next in ${days}d ${hours % 24}h`;
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.floor(hours / 24)}d`;
 }
 
 function ScheduledTile({
   schedules,
   messageSchedules,
+  sessions,
   onOpen,
 }: {
   schedules: ScheduledSession[];
   messageSchedules: MessageSchedule[];
+  sessions: SessionRecord[];
   onOpen: () => void;
 }) {
   const pendingSessions = schedules.filter((s) => s.status === "pending");
   const pendingMessages = messageSchedules.filter((m) => m.status === "pending");
   const queued = pendingSessions.length + pendingMessages.length;
-
-  const nextSession = [...pendingSessions].sort(
-    (a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at),
-  )[0];
 
   if (queued === 0) {
     return (
@@ -314,6 +323,29 @@ function ScheduledTile({
     );
   }
 
+  const titleById = new Map(sessions.map((s) => [s.id, s.title]));
+  const items: ScheduledItem[] = [
+    ...pendingSessions.map((s) => ({
+      key: `launch:${s.id}`,
+      kind: "launch" as const,
+      when: Date.parse(s.scheduled_at),
+      whenLabel: formatShortWhen(s.scheduled_at),
+      target: s.title?.trim() || `${s.backend} session`,
+      preview: s.initial_prompt?.trim() || s.cwd,
+    })),
+    ...pendingMessages.map((m) => ({
+      key: `message:${m.id}`,
+      kind: "message" as const,
+      when: m.scheduled_at ? Date.parse(m.scheduled_at) : null,
+      whenLabel: formatShortWhen(m.scheduled_at),
+      target: titleById.get(m.session_id)?.trim() || "session",
+      preview: m.text?.trim() || "",
+    })),
+  ].sort((a, b) => (a.when ?? Infinity) - (b.when ?? Infinity));
+
+  const shown = items.slice(0, 3);
+  const overflow = queued - shown.length;
+
   return (
     <button type="button" className="inst" onClick={onOpen}>
       <div className="inst-top">
@@ -322,22 +354,31 @@ function ScheduledTile({
           →
         </span>
       </div>
-      <span className="inst-lamp tone-warn">
-        {queued} queued
-      </span>
-      <h4 className="inst-headline">
-        {nextSession ? formatCountdown(nextSession.scheduled_at) : `${queued} queued`}
-      </h4>
-      <p className="inst-line">
-        {nextSession
-          ? scheduleLabel(nextSession)
-          : `${pendingMessages.length} message${pendingMessages.length === 1 ? "" : "s"} queued`}
-      </p>
-      {nextSession ? (
-        <p className="inst-note">
-          {nextSession.backend} · {formatRelativeTime(nextSession.scheduled_at)}
-        </p>
-      ) : null}
+      <span className="inst-lamp tone-warn">{queued} queued</span>
+      <ul className="inst-sched">
+        {shown.map((item) => (
+          <li className="inst-sched-item" key={item.key}>
+            <span className="inst-sched-line">
+              <span className={`inst-sched-kind kind-${item.kind}`}>
+                {item.kind === "launch" ? "launch" : "msg"}
+              </span>
+              <span className="inst-sched-target" title={item.target}>
+                {item.kind === "message" ? "→ " : ""}
+                {item.target}
+              </span>
+              <span className="inst-sched-when">{item.whenLabel}</span>
+            </span>
+            {item.preview ? (
+              <span className="inst-sched-preview">{item.preview}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {overflow > 0 ? (
+        <p className="inst-note">+{overflow} more · manage →</p>
+      ) : (
+        <p className="inst-note">manage →</p>
+      )}
     </button>
   );
 }

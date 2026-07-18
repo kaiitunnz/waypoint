@@ -531,26 +531,15 @@ html[data-theme="light"] .backend-popover-apply {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Layout grid: sessions main + sticky instrument rail ── */
-.home-layout {
-  display: grid;
-  grid-template-columns: 1fr 336px;
-  gap: 16px;
-  align-items: start;
-}
-
-.home-main {
-  min-width: 0;
-  display: grid;
-  gap: 16px;
-}
-
+/* ── Instrument band: a dense full-width row of glanceable tiles above the
+ * session list. A short sticky sidebar next to the long session list left a
+ * tall empty column; a top band fills the width and reads as a control-deck
+ * header instead. ── */
 .rail {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
-  position: sticky;
-  top: 12px;
+  align-items: stretch;
 }
 
 /* ── Compact launch deck ── */
@@ -686,11 +675,18 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   background: var(--bg-card);
   color: inherit;
   text-decoration: none;
-  cursor: pointer;
   transition: border-color 0.16s ease;
 }
 
-.inst:hover {
+/* Only whole-card links/buttons get the pointer + hover border; the Board card
+   is a plain container whose inner links are individually interactive. */
+a.inst,
+button.inst {
+  cursor: pointer;
+}
+
+a.inst:hover,
+button.inst:hover {
   border-color: var(--line-strong);
 }
 
@@ -699,6 +695,16 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.inst-top-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.inst-top-link:hover .inst-name,
+.inst-top-link:hover .inst-go {
+  color: var(--accent);
 }
 
 .inst-name {
@@ -893,6 +899,12 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   gap: 10px;
   font-family: var(--font-mono);
   font-size: 0.72rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.inst-channel:hover .inst-channel-name {
+  color: var(--accent);
 }
 
 .inst-channel-name {
@@ -906,6 +918,68 @@ html[data-theme="light"] .launch-chip-dot[data-owner="opencode"] {
   flex: none;
   color: var(--muted-soft);
   font-variant-numeric: tabular-nums;
+}
+
+/* Scheduled tile: a compact list of pending launches and messages with the
+   fire time, target, and a one-line preview. */
+.inst-sched {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.inst-sched-item {
+  display: grid;
+  gap: 2px;
+}
+
+.inst-sched-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.inst-sched-kind {
+  flex: none;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  color: var(--accent-cool);
+}
+
+.inst-sched-kind.kind-launch {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+}
+
+.inst-sched-target {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inst-sched-when {
+  flex: none;
+  color: var(--muted-soft);
+}
+
+.inst-sched-preview {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Low-profile presence floaters (Inbox + Assistant) ── */
@@ -1163,17 +1237,12 @@ html[data-theme="light"] .wp-sheet-scrim {
 
 /* ── Mobile: single column, rail becomes a horizontal strip above sessions ── */
 @media (max-width: 900px) {
-  .home-layout {
-    grid-template-columns: 1fr;
-  }
+  /* The band becomes a horizontal snap strip so it stays compact above the
+     session list. Top-align so a short tile isn't stretched to the tallest
+     tile's height with empty space below. */
   .rail {
-    position: static;
-    order: -1;
+    display: flex;
     flex-direction: row;
-    /* Top-align the cards so a short tile (e.g. Scheduled) isn't stretched to
-       the tallest tile's height with empty space below — that ragged stretch
-       was the "badly aligned" strip. Scroll-snap makes the carousel land one
-       tile at a time. */
     align-items: flex-start;
     overflow-x: auto;
     scroll-snap-type: x proximity;

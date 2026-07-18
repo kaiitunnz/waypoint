@@ -25,6 +25,29 @@ type StatusFilter = InboxStatus | "all";
 
 const LIMIT = 30;
 
+const SIDEBAR_WIDTH_KEY = "waypoint.inboxSidebarWidth";
+const SIDEBAR_WIDTH_DEFAULT = 340;
+const SIDEBAR_WIDTH_MIN = 260;
+const SIDEBAR_WIDTH_MAX = 560;
+const SIDEBAR_SNAP_THRESHOLD = 14;
+
+function clampSidebarWidth(w: number): number {
+  const max =
+    typeof window === "undefined"
+      ? SIDEBAR_WIDTH_MAX
+      : Math.min(SIDEBAR_WIDTH_MAX, Math.round(window.innerWidth * 0.5));
+  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(w, max));
+}
+
+// A width within the snap threshold of the default collapses to `undefined`,
+// the sentinel for "no stored preference" that reverts to the default position.
+function snapSidebarWidth(w: number): number | undefined {
+  const clamped = clampSidebarWidth(w);
+  return Math.abs(clamped - SIDEBAR_WIDTH_DEFAULT) <= SIDEBAR_SNAP_THRESHOLD
+    ? undefined
+    : clamped;
+}
+
 const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "open", label: "Open" },
   { id: "resolved", label: "Resolved" },
@@ -190,8 +213,53 @@ function InboxPageInner() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0
+      ? clampSidebarWidth(stored)
+      : undefined;
+  });
   const didInit = useRef(false);
   const filterRef = useRef({ status, q: debouncedQ });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sidebarWidth === undefined) {
+      window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+    } else {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    }
+  }, [sidebarWidth]);
+
+  const startSidebarResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT;
+      const onMove = (ev: PointerEvent) =>
+        setSidebarWidth(snapSidebarWidth(startWidth + (ev.clientX - startX)));
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.classList.remove("wp-dock-resizing");
+      };
+      document.body.classList.add("wp-dock-resizing");
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [sidebarWidth],
+  );
+
+  const onSidebarResizeKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) + 24));
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) - 24));
+    }
+  }, []);
 
   useEffect(() => {
     filterRef.current = { status, q: debouncedQ };
@@ -477,7 +545,14 @@ function InboxPageInner() {
       </header>
 
       {host && token ? (
-        <div className="inbox-layout">
+        <div
+          className="inbox-layout"
+          style={
+            {
+              "--inbox-sidebar-w": `${sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}px`,
+            } as React.CSSProperties
+          }
+        >
           <div
             className={`inbox-list-pane${mobileView === "item" ? " wp-mobile-hidden" : ""}`}
           >
@@ -601,6 +676,18 @@ function InboxPageInner() {
                 </button>
               </div>
             ) : null}
+            <div
+              className="inbox-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize inbox sidebar"
+              aria-valuenow={sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}
+              aria-valuemin={SIDEBAR_WIDTH_MIN}
+              aria-valuemax={SIDEBAR_WIDTH_MAX}
+              tabIndex={0}
+              onPointerDown={startSidebarResize}
+              onKeyDown={onSidebarResizeKey}
+            />
           </div>
 
           <div

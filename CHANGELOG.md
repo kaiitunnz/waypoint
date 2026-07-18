@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.1](https://github.com/kaiitunnz/waypoint/compare/v0.10.0...v0.10.1) (2026-07-18)
+
+
+### Features
+
+* collapsible desktop board sidebar and off-app-bar view switch ([#321](https://github.com/kaiitunnz/waypoint/issues/321)) ([7172a29](https://github.com/kaiitunnz/waypoint/commit/7172a29f0b192b95de331bdb3a1f3678d87ce3b4))
+* project-scope the Waypoint Manager backend for multiple managers ([#317](https://github.com/kaiitunnz/waypoint/issues/317)) ([06a9686](https://github.com/kaiitunnz/waypoint/commit/06a9686488188e03312f582508f96413fe642976))
+* rework the board page into a mobile-first board workspace with manager mode ([#319](https://github.com/kaiitunnz/waypoint/issues/319)) ([6736e1d](https://github.com/kaiitunnz/waypoint/commit/6736e1ddc83a70e0ccc255fec5a4ac989501d91f))
+
+
+### Bug Fixes
+
+* order telemetry activity heatmap rows chronologically ([#320](https://github.com/kaiitunnz/waypoint/issues/320)) ([7f79e04](https://github.com/kaiitunnz/waypoint/commit/7f79e04fa83524bbab1f01fff7107d94cb68e8db))
+
+
+### Miscellaneous Chores
+
+* release 0.10.1 ([47db877](https://github.com/kaiitunnz/waypoint/commit/47db877182a765c217bfbdc706b147fbecf27961))
+
 ## [0.10.0](https://github.com/kaiitunnz/waypoint/compare/v0.9.3...v0.10.0) (2026-07-17)
 
 

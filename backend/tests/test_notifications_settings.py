@@ -1,7 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
+from waypoint.notifications.contracts import IntentKind
 from waypoint.settings import NotificationSettings, Settings
+
+_ALL_KINDS: tuple[IntentKind, ...] = ("inbox", "plan_approval", "approval", "question")
 
 
 def test_disabled_by_default() -> None:
@@ -70,6 +73,45 @@ def test_duplicate_enabled_channel_ids_rejected() -> None:
                 {"id": "dup", "type": "telegram", "bot_token_env": "B"},
             ],
         )
+
+
+def test_signals_default_all_true() -> None:
+    signals = NotificationSettings().signals
+    assert (signals.inbox, signals.plan, signals.permission, signals.question) == (
+        True,
+        True,
+        True,
+        True,
+    )
+
+
+def test_omitted_signals_block_allows_every_intent() -> None:
+    settings = NotificationSettings()
+    for kind in _ALL_KINDS:
+        assert settings.allows_intent(kind) is True
+
+
+@pytest.mark.parametrize(
+    "key, intent_kind",
+    [
+        ("inbox", "inbox"),
+        ("plan", "plan_approval"),
+        ("permission", "approval"),
+        ("question", "question"),
+    ],
+)
+def test_each_signal_can_be_disabled(key: str, intent_kind: IntentKind) -> None:
+    settings = NotificationSettings(signals={key: False})
+    assert settings.allows_intent(intent_kind) is False
+    # Disabling one signal leaves the others on.
+    for other in _ALL_KINDS:
+        if other != intent_kind:
+            assert settings.allows_intent(other) is True
+
+
+def test_unknown_signal_key_fails_validation() -> None:
+    with pytest.raises(ValidationError):
+        NotificationSettings(signals={"bogus": True})
 
 
 def test_secret_never_a_yaml_literal() -> None:

@@ -1427,6 +1427,26 @@ class Storage:
         self.connection.commit()
 
     @_synchronized
+    def mark_delivery_suppressed(self, delivery_id: str, reason: str) -> None:
+        """Retire a claimed row as terminally ``suppressed`` without a send.
+
+        Used by the worker's pre-send race guard: a row queued before its
+        session became visibly open (or before a policy change) is recorded with
+        a compact, content-free reason and never retried.
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            UPDATE notification_deliveries
+            SET status = 'suppressed', last_error = ?, lease_until = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (reason, now_iso, delivery_id),
+        )
+        self.connection.commit()
+
+    @_synchronized
     def recover_stale_deliveries(self, now: datetime) -> int:
         """Return in-flight ``sending`` rows to the queue.
 
@@ -1457,7 +1477,7 @@ class Storage:
         cursor = self.connection.execute(
             """
             DELETE FROM notification_deliveries
-            WHERE status IN ('sent', 'failed') AND created_at < ?
+            WHERE status IN ('sent', 'failed', 'suppressed') AND created_at < ?
             """,
             (cutoff.isoformat(),),
         )

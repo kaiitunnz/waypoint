@@ -12,6 +12,7 @@ from waypoint.notifications.contracts import (
     NotificationChannel,
     NotificationIntent,
     NotificationStatus,
+    SuppressionReason,
 )
 from waypoint.notifications.render import (
     intent_from_event,
@@ -27,6 +28,7 @@ __all__ = [
     "NotificationIntent",
     "NotificationService",
     "NotificationStatus",
+    "SuppressionReason",
     "intent_from_event",
     "intent_from_inbox_item",
     "render_message",

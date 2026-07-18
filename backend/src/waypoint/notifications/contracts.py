@@ -13,6 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 IntentKind = Literal["inbox", "approval", "question", "plan_approval"]
 
+# Why a delivery row was skipped rather than sent: filtered by a per-signal
+# switch, or suppressed because a browser tab is actively viewing its session.
+SuppressionReason = Literal["signal_disabled", "active_session_presence"]
+
 
 class TextBlock(BaseModel):
     type: Literal["text"] = "text"

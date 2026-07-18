@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
+import fastapi
 from fastapi import (
     Depends,
     FastAPI,
@@ -82,6 +83,7 @@ from waypoint.schemas import (
     SessionModelRequest,
     SessionPermissionModeRequest,
     SessionPlanApprovalRequest,
+    SessionPresenceRequest,
     SessionPresetCreateRequest,
     SessionPresetListResponse,
     SessionPresetUpdateRequest,
@@ -631,6 +633,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = await context.runtime.handle_input(session_id, request)
         return {"session": session.model_dump(mode="json")}
+
+    @app.post(
+        "/api/sessions/{session_id}/presence",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def register_presence(
+        session_id: str,
+        request: SessionPresenceRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        # 404 on an unknown session before touching the registry.
+        context.runtime.get_session(session_id)
+        context.runtime.session_presence.touch(session_id, request.viewer_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.delete(
+        "/api/sessions/{session_id}/presence/{viewer_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def release_presence(
+        session_id: str,
+        viewer_id: Annotated[str, fastapi.Path(max_length=128)],
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        context.runtime.get_session(session_id)
+        context.runtime.session_presence.release(session_id, viewer_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/sessions/{session_id}/attachments")
     async def upload_attachment(

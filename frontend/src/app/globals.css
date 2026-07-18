@@ -531,15 +531,26 @@ html[data-theme="light"] .backend-popover-apply {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Instrument band: a dense full-width row of glanceable tiles above the
- * session list. A short sticky sidebar next to the long session list left a
- * tall empty column; a top band fills the width and reads as a control-deck
- * header instead. ── */
-.rail {
+/* ── Layout grid: sessions main + sticky instrument rail (RFC Option 1). ── */
+.home-layout {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 336px;
+  gap: 16px;
+  align-items: start;
+}
+
+.home-main {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: stretch;
+  position: sticky;
+  top: 12px;
 }
 
 /* ── Compact launch deck ── */
@@ -1237,30 +1248,17 @@ html[data-theme="light"] .wp-sheet-scrim {
 
 /* ── Mobile: single column, rail becomes a horizontal strip above sessions ── */
 @media (max-width: 900px) {
-  /* The band becomes a horizontal snap strip so it stays compact above the
-     session list. Top-align so a short tile isn't stretched to the tallest
-     tile's height with empty space below. */
+  .home-layout {
+    grid-template-columns: 1fr;
+  }
+  /* Mobile instruments: a full-width vertical stack above the session list.
+     A horizontal strip left blank voids under short tiles (its row height is
+     the tallest tile); stacked full-width cards size to their own content, so
+     each is dense with no empty space. */
   .rail {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
-  .rail::-webkit-scrollbar {
-    display: none;
-  }
-  .inst {
-    flex: 0 0 min(80vw, 300px);
-    scroll-snap-align: start;
-  }
-  /* Drop the schedule footer note at strip size — the headline figure
-     carries. The Telemetry account meters and Board channel list stay:
-     surfacing that detail on the homepage is the point. */
-  .inst-note {
-    display: none;
+    position: static;
+    order: -1;
+    flex-direction: column;
   }
   .home-nav {
     position: sticky;

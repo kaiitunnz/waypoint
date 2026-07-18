@@ -919,12 +919,14 @@ button.inst:hover {
   white-space: nowrap;
 }
 
-/* Labelled window row: [cap] [────meter────] [pct] [◷ reset] on one line, so 5h
-   and weekly each read as a bar, its number, and when it resets. The reset column
-   is content-sized and collapses to nothing when no reset time is known. */
+/* Labelled window row: [cap] [──meter──] [pct] [◷ reset] as a fixed-column table,
+   so 5h and weekly each read as a bar, its number, and when it resets. The meter
+   column is a fixed width so every bar is identical across rows and windows; the
+   reset column takes the remaining space and never stretches or shrinks the bar,
+   whatever the reset text (or the "—" no-data row) is. */
 .inst-window {
   display: grid;
-  grid-template-columns: 1.6rem 1fr 2.2rem auto;
+  grid-template-columns: 1.6rem 8rem 2.2rem minmax(0, 1fr);
   align-items: center;
   gap: 7px;
 }
@@ -975,6 +977,7 @@ button.inst:hover {
   font-size: 0.6rem;
   color: var(--muted-soft);
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .inst-window-reset-glyph {

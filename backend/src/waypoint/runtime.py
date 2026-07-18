@@ -63,7 +63,9 @@ from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.manager import ManagerRegistry
 from waypoint.notifications import (
+    NotificationIntent,
     NotificationService,
+    SuppressionReason,
     intent_from_event,
     intent_from_inbox_item,
 )
@@ -111,6 +113,7 @@ from waypoint.schemas import (
     WakeRegisterRequest,
     WakeSubscription,
 )
+from waypoint.session_presence import SessionPresenceRegistry
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
 from waypoint.storage import Storage
@@ -479,8 +482,13 @@ class SessionRuntime:
         self.presets = PresetManager(storage)
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
+        self.session_presence = SessionPresenceRegistry()
         self.notifications: NotificationService | None = (
-            NotificationService(settings.notifications, storage)
+            NotificationService(
+                settings.notifications,
+                storage,
+                suppression_reason=self._notification_suppression_reason,
+            )
             if settings.notifications.enabled
             and settings.notifications.enabled_channels()
             else None
@@ -568,6 +576,7 @@ class SessionRuntime:
 
     async def stop(self) -> None:
         await self.scheduler.stop()
+        self.session_presence.clear()
         if self.notifications is not None:
             await self.notifications.stop()
         if self._telemetry_backfill_task is not None:
@@ -3361,6 +3370,7 @@ class SessionRuntime:
         # Drop the per-session lock along with the record so the registry
         # doesn't grow unbounded over a long-lived server's session churn.
         self._session_locks.pop(session_id, None)
+        self.session_presence.drop_session(session_id)
         if session.worktree_path is not None:
             self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
         # Reclaim the session's uploaded blobs, which can be large.
@@ -3550,6 +3560,25 @@ class SessionRuntime:
             }
         )
 
+    def _notification_suppression_reason(
+        self, intent: NotificationIntent
+    ) -> SuppressionReason | None:
+        """Why this intent must not be delivered, or ``None`` if it may be.
+
+        Backend-neutral: reads only the persisted intent. A disabled per-signal
+        switch wins over presence; a session interaction whose session has an
+        active visible lease is suppressed. Inbox intents are never
+        presence-suppressed (they may target a different session)."""
+        if not self.settings.notifications.allows_intent(intent.kind):
+            return "signal_disabled"
+        if (
+            intent.source_session_id is not None
+            and intent.kind != "inbox"
+            and self.session_presence.is_active(intent.source_session_id)
+        ):
+            return "active_session_presence"
+        return None
+
     async def post_inbox_item(self, request: InboxPostRequest) -> InboxItem:
         from_label: str | None = None
         if request.from_session_id is not None:
@@ -3565,7 +3594,11 @@ class SessionRuntime:
             for block in request.blocks
         ]
         service = self.notifications
-        if service is not None and service.has_targets():
+        if (
+            service is not None
+            and service.has_targets()
+            and self.settings.notifications.allows_intent("inbox")
+        ):
             item = self.storage.create_inbox_item_with_notifications(
                 from_session_id=request.from_session_id or "",
                 from_label=from_label,
@@ -5174,7 +5207,12 @@ class SessionRuntime:
             intent = intent_from_event(
                 event, session_title=session.title if session is not None else None
             )
-            if intent is not None:
+            # Filter by per-signal switch and active-session presence before any
+            # outbox row is created; the source event is still persisted below.
+            if (
+                intent is not None
+                and self._notification_suppression_reason(intent) is None
+            ):
                 deliveries = service.delivery_rows(intent)
         if deliveries and service is not None:
             persisted = self.storage.append_event_with_notifications(event, deliveries)

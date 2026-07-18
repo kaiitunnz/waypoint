@@ -98,6 +98,37 @@ def test_backends_help_lists_threads() -> None:
     assert "threads" in result.stdout
 
 
+def test_notifications_status_emits_health_and_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/notifications/status":
+            return httpx.Response(
+                200,
+                json={
+                    "enabled": True,
+                    "channels": [
+                        {"channel_id": "t", "available": True, "detail": None}
+                    ],
+                    "counts": {"sent": 3, "suppressed": 2},
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "notifications", "status"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["enabled"] is True
+    assert payload["counts"]["suppressed"] == 2
+
+
 def test_help_command_dumps_full_surface() -> None:
     # No server or token configured — recursive help is pure introspection.
     result = runner.invoke(app, ["help"])

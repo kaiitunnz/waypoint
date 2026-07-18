@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
@@ -11,6 +11,9 @@ from waypoint.backends.registry import get_registry
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import BackendId, SessionTransportId
 from waypoint.workspace_preview import DEFAULT_WORKSPACE_DENYLIST
+
+if TYPE_CHECKING:
+    from waypoint.notifications.contracts import IntentKind
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -156,6 +159,18 @@ _CHANNEL_CONFIG_TYPES: dict[str, type[BaseModel]] = {
 }
 
 
+class NotificationSignalSettings(BaseModel):
+    """Per-signal delivery switches. All default true, so an ``enabled``
+    configuration that omits the block keeps delivering every signal kind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inbox: bool = True
+    plan: bool = True
+    permission: bool = True
+    question: bool = True
+
+
 class NotificationSettings(BaseModel):
     """Opt-in notification center. Disabled by default: with ``enabled`` false
     no outbox rows are written and no external content is transmitted."""
@@ -173,6 +188,10 @@ class NotificationSettings(BaseModel):
     http_timeout_seconds: float = Field(default=10.0, gt=0)
     # Sent/failed delivery rows older than this are purged by the worker.
     retention_days: int = Field(default=30, ge=1)
+    # Per-signal delivery switches; omitting the block keeps all signals on.
+    signals: NotificationSignalSettings = Field(
+        default_factory=NotificationSignalSettings
+    )
     channels: list[TelegramChannelConfig] = Field(default_factory=list)
 
     @field_validator("channels", mode="before")
@@ -210,6 +229,17 @@ class NotificationSettings(BaseModel):
 
     def enabled_channels(self) -> list[TelegramChannelConfig]:
         return [c for c in self.channels if c.enabled]
+
+    def allows_intent(self, intent_kind: "IntentKind") -> bool:
+        """Whether the per-signal switch for this intent kind permits delivery."""
+        signals = self.signals
+        by_kind: dict[str, bool] = {
+            "inbox": signals.inbox,
+            "plan_approval": signals.plan,
+            "approval": signals.permission,
+            "question": signals.question,
+        }
+        return by_kind[intent_kind]
 
 
 def _normalize_public_base_url(value: str) -> str:

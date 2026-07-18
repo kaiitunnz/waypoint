@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import random
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from waypoint.notifications.contracts import (
@@ -19,6 +20,7 @@ from waypoint.notifications.contracts import (
     NotificationChannel,
     NotificationIntent,
     NotificationStatus,
+    SuppressionReason,
 )
 from waypoint.notifications.registry import build_channels
 from waypoint.notifications.render import render_message
@@ -37,9 +39,20 @@ _CLEANUP_INTERVAL = timedelta(hours=1)
 
 
 class NotificationService:
-    def __init__(self, settings: NotificationSettings, storage: Storage) -> None:
+    def __init__(
+        self,
+        settings: NotificationSettings,
+        storage: Storage,
+        suppression_reason: (
+            Callable[[NotificationIntent], SuppressionReason | None] | None
+        ) = None,
+    ) -> None:
         self._settings = settings
         self._storage = storage
+        # Late race guard: asked once per row immediately before the channel
+        # send so a row queued before its session became visibly open (or before
+        # a policy change) is retired as ``suppressed`` instead of delivered.
+        self._suppression_reason = suppression_reason
         self._channels: dict[str, NotificationChannel] = {
             channel.id: channel for channel in build_channels(settings)
         }
@@ -173,6 +186,20 @@ class NotificationService:
                 record.id, attempts=attempts, last_error="channel unavailable"
             )
             return
+        if self._suppression_reason is not None:
+            reason = self._suppression_reason(record.intent)
+            if reason is not None:
+                log.info(
+                    "notification delivery suppressed",
+                    extra={
+                        "channel_id": record.channel_id,
+                        "kind": record.intent.kind,
+                        "delivery_id": record.id,
+                        "reason": reason,
+                    },
+                )
+                self._storage.mark_delivery_suppressed(record.id, reason)
+                return
         message = render_message(
             record.intent,
             public_base_url=self._settings.public_base_url or "",

@@ -76,6 +76,63 @@ def _enqueue(
     )
 
 
+async def _service_with_suppression(
+    tmp_path, channel: FakeChannel, reason, **kwargs
+) -> tuple[NotificationService, Storage]:
+    storage = Storage(tmp_path / "waypoint.db")
+    service = NotificationService(
+        _settings(**kwargs), storage, suppression_reason=reason
+    )
+    service._channels = {channel.id: channel}
+    await service._prepare_channels()
+    return service, storage
+
+
+async def test_active_presence_suppresses_at_delivery(tmp_path) -> None:
+    channel = FakeChannel()
+    service, storage = await _service_with_suppression(
+        tmp_path, channel, lambda intent: "active_session_presence"
+    )
+    try:
+        _enqueue(storage, service)
+        did_work = await service._drain_once()
+        assert did_work is True
+        # No channel send; row is terminally suppressed and not retried.
+        assert channel.sent == []
+        assert storage.count_deliveries_by_status() == {"suppressed": 1}
+        assert await service._drain_once() is False
+    finally:
+        await service.stop()
+
+
+async def test_signal_disabled_suppresses_at_delivery(tmp_path) -> None:
+    channel = FakeChannel()
+    service, storage = await _service_with_suppression(
+        tmp_path, channel, lambda intent: "signal_disabled"
+    )
+    try:
+        _enqueue(storage, service)
+        await service._drain_once()
+        assert channel.sent == []
+        assert storage.count_deliveries_by_status() == {"suppressed": 1}
+    finally:
+        await service.stop()
+
+
+async def test_no_suppression_reason_delivers_normally(tmp_path) -> None:
+    channel = FakeChannel()
+    service, storage = await _service_with_suppression(
+        tmp_path, channel, lambda intent: None
+    )
+    try:
+        _enqueue(storage, service)
+        await service._drain_once()
+        assert len(channel.sent) == 1
+        assert storage.count_deliveries_by_status() == {"sent": 1}
+    finally:
+        await service.stop()
+
+
 async def test_successful_delivery(tmp_path) -> None:
     channel = FakeChannel()
     service, storage = await _service_with(tmp_path, channel)

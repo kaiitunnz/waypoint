@@ -1035,6 +1035,16 @@ class SessionPlanApprovalRequest(BaseModel):
     text: str | None = None
 
 
+ViewerId = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+]
+
+
+class SessionPresenceRequest(BaseModel):
+    # Opaque client-generated per-tab identifier; never a user identity.
+    viewer_id: ViewerId
+
+
 class SessionTitleRequest(BaseModel):
     title: Annotated[
         str,

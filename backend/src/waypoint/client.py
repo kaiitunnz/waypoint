@@ -243,6 +243,10 @@ class WaypointClient:
         data: dict[str, Any] = self._request("GET", "/api/me").json()
         return data
 
+    def get_notifications_status(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/notifications/status").json()
+        return data
+
     def list_models(
         self,
         backend: str,

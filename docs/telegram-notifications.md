@@ -57,9 +57,11 @@ written, no HTTP calls are made, and nothing leaves the host.
    waypointctl restart backend
    ```
    Create an inbox item (or let a session ask for approval) and confirm the
-   message arrives with a working **Open** button. Check health at
-   `GET /api/notifications/status` (authenticated) — `channels[].available`
-   should be `true`.
+   message arrives with a working **Open** button. Check health with:
+   ```bash
+   waypoint notifications status
+   ```
+   `channels[].available` should be `true`.
 
 That is the whole setup. The rest of this page is reference.
 
@@ -75,6 +77,36 @@ That is the whole setup. The rest of this page is reference.
 Session notifications link to `/session/<id>`. Opening any link uses Waypoint's
 normal login — the link itself carries no token. Enabling the feature does not
 retro-notify already-pending items; only new transitions notify.
+
+## Choosing which signals notify
+
+`signals` turns each notification kind on or off independently. All four default
+to `true`, so leaving the block out notifies on everything.
+
+```yaml
+notifications:
+  enabled: true
+  signals:
+    inbox: true         # new inbox items
+    plan: true          # plan approvals
+    permission: false   # permission approvals
+    question: true      # user questions
+```
+
+Turning a signal off stops only its notifications; the inbox item or session
+request still appears in Waypoint as usual. Unknown keys are rejected.
+
+## Active-session presence
+
+While you have a session's page open and visible, Waypoint skips that session's
+plan, permission, and question notifications — you are already looking at it.
+Inbox notifications always arrive, since an inbox item can come from another
+session.
+
+Closing the tab, switching away, or locking the screen makes the session
+notifiable again within about 45 seconds. Opening the same session on two
+devices keeps it silent until you leave the last one. To always be notified,
+keep the session page closed.
 
 ## `public_base_url`
 
@@ -109,7 +141,11 @@ large ids keep their exact form.
 | `worker_concurrency` | `4` | Concurrent sends per worker tick. |
 | `max_attempts` | `8` | Retries before a delivery is marked failed. |
 | `http_timeout_seconds` | `10` | Per-request Telegram timeout. |
-| `retention_days` | `30` | Sent/failed delivery rows are purged after this. |
+| `retention_days` | `30` | Sent/failed/suppressed delivery rows are purged after this. |
+| `signals.inbox` | `true` | Notify on new inbox items. |
+| `signals.plan` | `true` | Notify on plan approvals. |
+| `signals.permission` | `true` | Notify on permission approvals. |
+| `signals.question` | `true` | Notify on user questions. |
 | `channels[].bot_token_env` | — | Env var holding the bot token. |
 | `channels[].chat_ids` | `[]` | Target chat ids, as strings. |
 
@@ -127,6 +163,8 @@ so a duplicate is harmless.
 
 ## Troubleshooting
 
+Run `waypoint notifications status` to see channel health and delivery counts.
+
 - **`available: false`, "token environment variable … is unset"** — the env var
   named by `bot_token_env` is empty in the backend's environment. Set it and
   restart.
@@ -136,6 +174,8 @@ so a duplicate is harmless.
 - **`counts.queued` stays high** — Telegram is unreachable or rate-limiting.
   Rows retry automatically; check backend logs (structured, non-content fields
   only) for the HTTP status.
+- **`counts.suppressed` grows** — expected when a session page is open or a
+  signal is off. A suppressed message is intentionally not sent.
 - **The Open button asks for login or 404s** — expected: links carry no token,
   so log in as usual. A 404 means `public_base_url` is wrong or the
   item/session no longer exists.

@@ -11,23 +11,36 @@ export function formatTokens(value: number): string {
   return TOKEN_FORMATTER.format(value);
 }
 
-export function formatRelativeTime(value: string): string {
+type RelativeTimeUnit = "second" | "minute" | "hour" | "day";
+
+// Shared by the verbose and terse relative-time formatters below.
+function relativeTimeParts(
+  value: string,
+): { value: number; unit: RelativeTimeUnit } | null {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
-    return "Unknown";
+    return null;
   }
   const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
   const absSeconds = Math.abs(diffSeconds);
   if (absSeconds < 60) {
-    return RELATIVE_TIME_FORMATTER.format(diffSeconds, "second");
+    return { value: diffSeconds, unit: "second" };
   }
   if (absSeconds < 3600) {
-    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 60), "minute");
+    return { value: Math.round(diffSeconds / 60), unit: "minute" };
   }
   if (absSeconds < 86400) {
-    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 3600), "hour");
+    return { value: Math.round(diffSeconds / 3600), unit: "hour" };
   }
-  return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 86400), "day");
+  return { value: Math.round(diffSeconds / 86400), unit: "day" };
+}
+
+export function formatRelativeTime(value: string): string {
+  const parts = relativeTimeParts(value);
+  if (!parts) {
+    return "Unknown";
+  }
+  return RELATIVE_TIME_FORMATTER.format(parts.value, parts.unit);
 }
 
 export function clampPercent(percent: number | null): number | null {
@@ -79,6 +92,30 @@ export function formatRateLimitWindowTokens(window: UsageWindow): string | null 
 export function formatRateLimitWindowReset(window: UsageWindow): string | null {
   if (window.resets_at) {
     return formatRelativeTime(window.resets_at);
+  }
+  return window.reset_description ?? null;
+}
+
+const RELATIVE_TIME_SUFFIX: Record<RelativeTimeUnit, string> = {
+  second: "s",
+  minute: "m",
+  hour: "h",
+  day: "d",
+};
+
+// Terse reset label ("in 4h", "3d ago", "now") for compact surfaces; falls back to
+// the backend's free-form description when no machine-readable reset time is known.
+export function formatRateLimitWindowResetShort(window: UsageWindow): string | null {
+  if (window.resets_at) {
+    const parts = relativeTimeParts(window.resets_at);
+    if (!parts) {
+      return null;
+    }
+    if (parts.value === 0) {
+      return "now";
+    }
+    const magnitude = `${Math.abs(parts.value)}${RELATIVE_TIME_SUFFIX[parts.unit]}`;
+    return parts.value < 0 ? `${magnitude} ago` : `in ${magnitude}`;
   }
   return window.reset_description ?? null;
 }

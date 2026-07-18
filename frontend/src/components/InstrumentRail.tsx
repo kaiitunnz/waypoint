@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 import {
+  formatRateLimitWindowReset,
+  formatRateLimitWindowResetShort,
   formatRelativeTime,
   rateLimitUsageTone,
   rateLimitWindowPercent,
@@ -170,28 +172,21 @@ function TelemetryTile({
         {buckets.length} account{buckets.length === 1 ? "" : "s"}
       </h4>
       <ul className="inst-accounts">
-        {ordered.map((bucket) => {
-          const five = findWindow(bucket, "5h");
-          const weekly = findWindow(bucket, "weekly");
-          const fivePct = five ? rateLimitWindowPercent(five) : null;
-          const weekPct = weekly ? rateLimitWindowPercent(weekly) : null;
-          const peak = bucketPeak(bucket);
-          return (
-            <li className="inst-account" key={bucket.account_key}>
-              <span className="inst-account-head">
-                <span
-                  className={`inst-account-dot tone-${toneOf(peak)}`}
-                  aria-hidden="true"
-                />
-                <span className="inst-account-name" title={bucket.account_label}>
-                  {bucket.account_label}
-                </span>
+        {ordered.map((bucket) => (
+          <li className="inst-account" key={bucket.account_key}>
+            <span className="inst-account-head">
+              <span
+                className={`inst-account-dot tone-${toneOf(bucketPeak(bucket))}`}
+                aria-hidden="true"
+              />
+              <span className="inst-account-name" title={bucket.account_label}>
+                {bucket.account_label}
               </span>
-              <UsageWindowMeter label="5h" percent={fivePct} />
-              <UsageWindowMeter label="wk" percent={weekPct} />
-            </li>
-          );
-        })}
+            </span>
+            <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
+            <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -222,14 +217,16 @@ function toneOf(percent: number | null): "ok" | "warn" | "danger" {
   return t === "good" ? "ok" : t === "warn" ? "warn" : "danger";
 }
 
-// One labelled window row: a caption, a tone-filled meter, and the percentage.
 function UsageWindowMeter({
   label,
-  percent,
+  window,
 }: {
   label: string;
-  percent: number | null;
+  window: UsageWindow | null;
 }) {
+  const percent = window ? rateLimitWindowPercent(window) : null;
+  const reset = window ? formatRateLimitWindowResetShort(window) : null;
+  const resetTitle = window ? formatRateLimitWindowReset(window) : null;
   const tone = toneOf(percent);
   return (
     <span className="inst-window">
@@ -243,6 +240,18 @@ function UsageWindowMeter({
       <span className="inst-window-pct">
         {percent !== null ? `${percent}%` : "—"}
       </span>
+      {reset ? (
+        <span
+          className="inst-window-reset"
+          title={resetTitle ?? reset}
+          aria-label={resetTitle ?? reset}
+        >
+          <span aria-hidden="true" className="inst-window-reset-glyph">
+            ◷
+          </span>
+          {reset}
+        </span>
+      ) : null}
     </span>
   );
 }

@@ -50,6 +50,8 @@
   --radius-sm: 3px;
   --radius-glass: 16px;
   --radius-pill: 999px;
+  /* Shared content width so every page tracks the homepage deck. */
+  --page-max: min(1200px, 100vw);
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial,
     sans-serif;
@@ -158,7 +160,7 @@ pre {
 /* ─── Page layout ─── */
 .page-shell {
   width: 100%;
-  max-width: min(1024px, 100vw);
+  max-width: var(--page-max);
   margin: 0 auto;
   /* Belt-and-braces against iOS Safari widening the layout viewport when a
    * descendant has wide intrinsic content: explicitly cap to viewport width
@@ -334,7 +336,6 @@ pre {
  * glass on the floating chrome (backend popover, launch/schedule sheets,
  * presence floaters). */
 .page-shell.page-home {
-  max-width: min(1200px, 100vw);
   gap: 16px;
 }
 
@@ -16188,7 +16189,7 @@ html[data-theme="light"] .wp-hl {
 
 /* ─── Inbox ─── */
 .inbox-shell {
-  max-width: min(1180px, 100vw);
+  max-width: var(--page-max);
   height: 100dvh;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.3](https://github.com/kaiitunnz/waypoint/compare/v0.12.2...v0.12.3) (2026-07-18)
+
+
+### Bug Fixes
+
+* open the launch sheet preselected on preset click instead of launching ([#334](https://github.com/kaiitunnz/waypoint/issues/334)) ([b2a112a](https://github.com/kaiitunnz/waypoint/commit/b2a112a221d808e6df355778498cf492303e4b95))
+* restore rate-limit reset time on the homepage telemetry tile ([#331](https://github.com/kaiitunnz/waypoint/issues/331)) ([46f6696](https://github.com/kaiitunnz/waypoint/commit/46f669655e9a0c7c3c5f4d1a8db21897c7c517f3))
+* stop the launch sheet from stealing input focus on re-render ([#333](https://github.com/kaiitunnz/waypoint/issues/333)) ([d609ffb](https://github.com/kaiitunnz/waypoint/commit/d609ffb72142839a7ba00e60057d88f469307976))
+
 ## [0.12.2](https://github.com/kaiitunnz/waypoint/compare/v0.12.1...v0.12.2) (2026-07-18)
 
 

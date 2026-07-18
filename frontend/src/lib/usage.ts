@@ -104,16 +104,22 @@ const RELATIVE_TIME_SUFFIX: Record<RelativeTimeUnit, string> = {
   day: "d",
 };
 
-// Terse reset label ("4h", "3d", "45m") for tight, glanceable surfaces where the
-// verbose relative phrase would crowd out the meter. Falls back to the backend's
-// free-form description when no machine-readable reset time is available.
+// Terse reset label ("in 4h", "3d ago", "now") for tight, glanceable surfaces
+// where the verbose relative phrase would crowd out the meter. Keeps the "in"/"ago"
+// direction so a stale, already-elapsed window is not mistaken for an upcoming one.
+// Falls back to the backend's free-form description when no machine-readable reset
+// time is available.
 export function formatRateLimitWindowResetShort(window: UsageWindow): string | null {
   if (window.resets_at) {
     const parts = relativeTimeParts(window.resets_at);
     if (!parts) {
       return null;
     }
-    return `${parts.value}${RELATIVE_TIME_SUFFIX[parts.unit]}`;
+    if (parts.value === 0) {
+      return "now";
+    }
+    const magnitude = `${Math.abs(parts.value)}${RELATIVE_TIME_SUFFIX[parts.unit]}`;
+    return parts.value < 0 ? `${magnitude} ago` : `in ${magnitude}`;
   }
   return window.reset_description ?? null;
 }

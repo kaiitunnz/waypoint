@@ -5,11 +5,10 @@ import { useEffect, useState } from "react";
 import { connectSessionsSocket, fetchInboxUnresolvedCount } from "@/lib/api";
 import type { SessionEnvelope } from "@/lib/types";
 
-// Shared unresolved-inbox count. Seeds from the REST count, then tracks the
-// absolute `unresolved_count` on every `inbox_update` over a dedicated session
-// socket, re-fetching on (re)connect to close the reconnect gap. Lifted out of
-// the old InboxDock so both the home nav dot and the floater badge read one
-// source instead of each opening its own socket.
+// Shared unresolved-inbox count for the nav count and the floater badge. Seeds
+// from the REST count, then tracks the absolute `unresolved_count` on every
+// `inbox_update` over a dedicated session socket, re-fetching on (re)connect to
+// close the reconnect gap.
 export function useInboxCount(host: string, token: string): number {
   const [count, setCount] = useState(0);
 

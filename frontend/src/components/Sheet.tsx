@@ -12,7 +12,6 @@ interface SheetProps {
   onClose: () => void;
   eyebrow: string;
   title: string;
-  labelledBy?: string;
   children: ReactNode;
 }
 

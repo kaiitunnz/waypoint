@@ -7,9 +7,8 @@ import type { AssistantSummary, SessionStatus } from "@/lib/types";
 
 // Bottom-right cluster of two low-profile glass circles (Inbox above,
 // Assistant below), icon-only at rest and expanding to labels on hover/focus.
-// Replaces the old bottom-left InboxDock + bottom-right assistant-fab. The
-// inbox count is passed in from the shared useInboxCount source so the nav dot
-// and this badge agree; the assistant lamp reflects AssistantSummary.status.
+// The inbox count comes from the shared useInboxCount source; the assistant
+// lamp reflects AssistantSummary.status.
 interface PresenceFloatersProps {
   assistant: AssistantSummary | null;
   inboxCount: number;

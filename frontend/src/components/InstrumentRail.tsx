@@ -176,8 +176,7 @@ function toneOf(percent: number | null): "ok" | "warn" | "danger" {
   return t === "good" ? "ok" : t === "warn" ? "warn" : "danger";
 }
 
-// One labelled window row: a caption, a tone-filled meter, and the percentage —
-// so both the 5h and the weekly window are shown graphically, not just numeric.
+// One labelled window row: a caption, a tone-filled meter, and the percentage.
 function UsageWindowMeter({
   label,
   percent,
@@ -211,8 +210,7 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
     .filter(Boolean)
     .sort()
     .at(-1);
-  // The API returns channels most-recently-active first; surface the top few
-  // by name + post count — more informative than an abstract volume sparkline.
+  // The API returns channels most-recently-active first.
   const topChannels = channels.slice(0, 3);
 
   if (channels.length === 0) {

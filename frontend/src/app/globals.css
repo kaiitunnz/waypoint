@@ -9690,8 +9690,7 @@ html[data-theme="light"] .preset-modal-overlay {
   min-width: 0;
 }
 
-/* Keep the Delete-exited button on one line and pinned to the top while the
-   summary text beside it wraps. */
+/* Pin the Delete button to the top as the counts wrap. */
 .session-list-header {
   align-items: flex-start;
 }
@@ -9700,9 +9699,7 @@ html[data-theme="light"] .preset-modal-overlay {
   white-space: nowrap;
 }
 
-/* On narrow screens the nowrap Delete button would squeeze the summary column
-   and force the counts to wrap across many lines, so stack instead: full-width
-   summary (counts wrap at most twice) above a left-aligned Delete button. */
+/* Narrow: stack the summary above the Delete button. */
 @media (max-width: 600px) {
   .session-list-header {
     flex-direction: column;
@@ -9715,10 +9712,6 @@ html[data-theme="light"] .preset-modal-overlay {
   }
 }
 
-/* Quiet text toggle that rides the right end of the search row on both the
-   panel and the switcher (adds no row of its own): small muted mono that
-   brightens on hover, reading as a secondary affordance rather than a prominent
-   control. */
 .exited-toggle {
   flex: none;
   background: transparent;
@@ -9749,8 +9742,6 @@ html[data-theme="light"] .preset-modal-overlay {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-/* The search input shares its row with the exited toggle on the panel, mirroring
-   the switcher, so the toggle sits just past the search help icon. */
 .session-list-search-row {
   display: flex;
   align-items: center;
@@ -9761,7 +9752,6 @@ html[data-theme="light"] .preset-modal-overlay {
 .session-list-search-row .session-list-search {
   flex: 1;
   min-width: 0;
-  margin-bottom: 0;
 }
 
 .session-section {
@@ -11478,10 +11468,6 @@ html[data-theme="light"] .advanced-warning {
   color: var(--text);
 }
 
-.session-list-search {
-  margin-bottom: 12px;
-}
-
 .thread-panel-search {
   margin-top: 8px;
 }
@@ -11519,8 +11505,6 @@ html[data-theme="light"] .advanced-warning {
   overflow: hidden;
 }
 
-/* The search row also hosts the exited toggle on its right, so the two share a
-   single row (the toggle adds no vertical space of its own). */
 .session-switcher-search {
   display: flex;
   align-items: center;

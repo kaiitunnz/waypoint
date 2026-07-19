@@ -40,9 +40,7 @@ export function SearchInput({
       return;
     }
     const rect = el.getBoundingClientRect();
-    // Right-align the popover to the help icon, but clamp it inside the viewport
-    // so it never runs off either edge on narrow screens (e.g. the switcher
-    // modal, where the icon sits well inside the right edge).
+    // Right-align to the help icon, clamped inside the viewport.
     const margin = 12;
     const maxWidth = Math.min(320, window.innerWidth - margin * 2);
     const left = Math.max(

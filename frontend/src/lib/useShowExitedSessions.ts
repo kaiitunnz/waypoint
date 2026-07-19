@@ -12,14 +12,9 @@ function readShowExited(): boolean {
   return window.localStorage.getItem(STORAGE_KEY) !== "0";
 }
 
-// Client preference shared by the sessions panel and the session switcher: a
-// single persisted flag kept live across both surfaces (and across tabs) so a
-// toggle on one reflects on the other. Default ON preserves the prior
-// behavior of showing exited sessions.
+// Persisted flag synced across the panel, the switcher, and tabs; default on.
 export function useShowExitedSessions(): [boolean, (next: boolean) => void] {
-  // Init true and hydrate in the effect to avoid an SSR/client hydration
-  // mismatch; the only visible cost is a one-frame flash when the stored
-  // preference is the non-default "hidden".
+  // Init true and hydrate in the effect to avoid an SSR/client hydration mismatch.
   const [showExited, setShowExited] = useState(true);
 
   useEffect(() => {

@@ -13,6 +13,7 @@ import {
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { formatClock } from "@/lib/scheduleTime";
 import { SessionRecord } from "@/lib/types";
+import { useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 import { SearchInput } from "./SearchInput";
 import { Pager } from "@/components/Pager";
@@ -44,6 +45,7 @@ export function SessionList({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [query, setQuery] = useState("");
+  const [showExited, setShowExited] = useShowExitedSessions();
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault();
@@ -145,19 +147,22 @@ export function SessionList({
   } = useMemo(() => {
     const exited = sessions.filter((session) => session.status === "exited").length;
     const active = sessions.length - exited;
+    const visible = showExited
+      ? sessions
+      : sessions.filter((session) => session.status !== "exited");
 
     if (query.trim() === "") {
-      const pinned = sessions
+      const pinned = visible
         .filter((session) => session.pinned_at)
         .sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
-      const recent = sessions.filter((session) => !session.pinned_at);
+      const recent = visible.filter((session) => !session.pinned_at);
       return { pinnedSessions: pinned, recentSessions: recent, flatSearchResults: null, exitedCount: exited, activeCount: active };
     }
 
     const terms = parseQuery(query.trim());
     const defaultFields = ["title", "cwd", "repo_name", "branch", "backend", "search_status"];
 
-    const matched = sessions.filter((session) => {
+    const matched = visible.filter((session) => {
       return matchesQuery(session, terms, defaultFields);
     });
 
@@ -170,7 +175,7 @@ export function SessionList({
     });
 
     return { pinnedSessions: [], recentSessions: [], flatSearchResults: matched, exitedCount: exited, activeCount: active };
-  }, [sessions, query]);
+  }, [sessions, query, showExited]);
 
   const listToPaginate = flatSearchResults !== null ? flatSearchResults : recentSessions;
   const totalPages = Math.max(1, Math.ceil(listToPaginate.length / PAGE_SIZE));
@@ -335,7 +340,7 @@ export function SessionList({
 
   return (
     <section className="panel stack session-list-shell">
-      <div className="field-row">
+      <div className="field-row session-list-header">
         <div className="session-list-summary">
           <h3>Sessions</h3>
           <p className="muted">
@@ -343,10 +348,27 @@ export function SessionList({
             {pinnedSessions.length ? ` · ${pinnedSessions.length} pinned` : null}
           </p>
         </div>
-        {onDeleteExited && exitedCount > 0 ? (
-          <button className="secondary" type="button" onClick={handleDeleteExited}>
-            Delete exited ({exitedCount})
-          </button>
+        {exitedCount > 0 ? (
+          <div className="session-list-controls">
+            <div className="session-filter-toggle">
+              <span className="session-filter-toggle-label">Show exited</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showExited}
+                aria-label="Show exited sessions"
+                className="switch"
+                onClick={() => setShowExited(!showExited)}
+              >
+                <span className="switch-thumb" />
+              </button>
+            </div>
+            {onDeleteExited ? (
+              <button className="secondary" type="button" onClick={handleDeleteExited}>
+                Delete exited ({exitedCount})
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

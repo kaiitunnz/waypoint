@@ -9690,6 +9690,34 @@ html[data-theme="light"] .preset-modal-overlay {
   min-width: 0;
 }
 
+/* Header wraps on narrow widths so the summary and the exited-session controls
+   stack instead of overflowing the panel. */
+.session-list-header {
+  flex-wrap: wrap;
+}
+
+.session-list-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.session-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-filter-toggle-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .session-section {
   display: grid;
   gap: 12px;
@@ -11452,6 +11480,23 @@ html[data-theme="light"] .advanced-warning {
 
 .session-switcher-search input {
   background: var(--bg-input);
+}
+
+.session-switcher-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-switcher-filter-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .session-switcher-list {

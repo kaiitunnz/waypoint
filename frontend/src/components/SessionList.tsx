@@ -346,19 +346,6 @@ export function SessionList({
           <p className="muted">
             {sessions.length} total · {activeCount} active · {exitedCount} exited
             {pinnedSessions.length ? ` · ${pinnedSessions.length} pinned` : null}
-            {exitedCount > 0 ? (
-              <>
-                {" · "}
-                <button
-                  type="button"
-                  className="exited-toggle"
-                  aria-pressed={!showExited}
-                  onClick={() => setShowExited(!showExited)}
-                >
-                  {showExited ? "hide exited" : "show exited"}
-                </button>
-              </>
-            ) : null}
           </p>
         </div>
         {onDeleteExited && exitedCount > 0 ? (
@@ -368,12 +355,24 @@ export function SessionList({
         ) : null}
       </div>
 
-      <SearchInput
-        className="session-list-search"
-        value={query}
-        onChange={setQuery}
-        placeholder='Search sessions... (e.g. "title:bug OR branch:main")'
-      />
+      <div className="session-list-search-row">
+        <SearchInput
+          className="session-list-search"
+          value={query}
+          onChange={setQuery}
+          placeholder='Search sessions... (e.g. "title:bug OR branch:main")'
+        />
+        {exitedCount > 0 ? (
+          <button
+            type="button"
+            className="exited-toggle"
+            aria-pressed={!showExited}
+            onClick={() => setShowExited(!showExited)}
+          >
+            {showExited ? "hide exited" : "show exited"}
+          </button>
+        ) : null}
+      </div>
 
       {flatSearchResults !== null ? (
         <section className="session-section">

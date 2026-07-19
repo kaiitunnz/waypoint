@@ -9715,16 +9715,19 @@ html[data-theme="light"] .preset-modal-overlay {
   }
 }
 
-/* Quiet text toggle folded into an existing line (the panel count row, the
-   switcher search row): bare mono that brightens on hover, reading as a
-   secondary affordance rather than a prominent control and adding no row of
-   its own. Inherits the count line's muted color on the panel. */
+/* Quiet text toggle that rides the right end of the search row on both the
+   panel and the switcher (adds no row of its own): small muted mono that
+   brightens on hover, reading as a secondary affordance rather than a prominent
+   control. */
 .exited-toggle {
+  flex: none;
   background: transparent;
   border: none;
   padding: 0;
-  font: inherit;
-  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
   text-decoration: underline;
@@ -9744,6 +9747,21 @@ html[data-theme="light"] .preset-modal-overlay {
   outline: none;
   border-radius: var(--radius-sm);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* The search input shares its row with the exited toggle on the panel, mirroring
+   the switcher, so the toggle sits just past the search help icon. */
+.session-list-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.session-list-search-row .session-list-search {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
 }
 
 .session-section {
@@ -11518,13 +11536,6 @@ html[data-theme="light"] .advanced-warning {
 
 .session-switcher-search input {
   background: var(--bg-input);
-}
-
-.session-switcher-search .exited-toggle {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  color: var(--muted);
 }
 
 .session-switcher-list {

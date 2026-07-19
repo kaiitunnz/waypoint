@@ -21,7 +21,7 @@ export function SearchInput({
   autoFocus = false,
 }: SearchInputProps) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
-  const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; maxWidth: number } | null>(null);
   const iconRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const isTouchRef = useRef(false);
@@ -40,9 +40,19 @@ export function SearchInput({
       return;
     }
     const rect = el.getBoundingClientRect();
+    // Right-align the popover to the help icon, but clamp it inside the viewport
+    // so it never runs off either edge on narrow screens (e.g. the switcher
+    // modal, where the icon sits well inside the right edge).
+    const margin = 12;
+    const maxWidth = Math.min(320, window.innerWidth - margin * 2);
+    const left = Math.max(
+      margin,
+      Math.min(rect.right - maxWidth, window.innerWidth - maxWidth - margin),
+    );
     setTooltipPos({
       top: rect.bottom + 8,
-      right: window.innerWidth - rect.right,
+      left,
+      maxWidth,
     });
   }
 
@@ -105,7 +115,7 @@ export function SearchInput({
           <div
             className="help-tooltip"
             role="tooltip"
-            style={{ position: "fixed", top: tooltipPos.top, right: tooltipPos.right }}
+            style={{ position: "fixed", top: tooltipPos.top, left: tooltipPos.left, maxWidth: tooltipPos.maxWidth }}
             onMouseEnter={openTooltip}
             onMouseLeave={scheduleClose}
           >

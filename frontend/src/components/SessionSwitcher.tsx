@@ -358,7 +358,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         }
       >
         <div className="session-switcher-search">
-          <SearchInput 
+          <SearchInput
             value={query}
             onChange={(val) => {
               setQuery(val);
@@ -369,23 +369,17 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
             autoFocus={!isMobile}
             showStatusExample={false}
           />
-        </div>
-
-        {filteredSessions.hasExited ? (
-          <div className="session-switcher-filter">
-            <span className="session-switcher-filter-label">Show exited</span>
+          {filteredSessions.hasExited ? (
             <button
               type="button"
-              role="switch"
-              aria-checked={showExited}
-              aria-label="Show exited sessions"
-              className="switch"
+              className="exited-toggle"
+              aria-pressed={!showExited}
               onClick={() => setShowExited(!showExited)}
             >
-              <span className="switch-thumb" />
+              {showExited ? "hide exited" : "show exited"}
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         <div className="session-switcher-list" ref={listRef}>
           {currentSession && !query ? (

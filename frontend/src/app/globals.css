@@ -9690,32 +9690,60 @@ html[data-theme="light"] .preset-modal-overlay {
   min-width: 0;
 }
 
-/* Header wraps on narrow widths so the summary and the exited-session controls
-   stack instead of overflowing the panel. */
+/* Keep the Delete-exited button on one line and pinned to the top while the
+   summary text beside it wraps. */
 .session-list-header {
-  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
-.session-list-controls {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.session-filter-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.session-filter-toggle-label {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
+.session-list-header .secondary {
   white-space: nowrap;
+}
+
+/* On narrow screens the nowrap Delete button would squeeze the summary column
+   and force the counts to wrap across many lines, so stack instead: full-width
+   summary (counts wrap at most twice) above a left-aligned Delete button. */
+@media (max-width: 600px) {
+  .session-list-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .session-list-header .secondary {
+    align-self: flex-start;
+  }
+}
+
+/* Quiet text toggle folded into an existing line (the panel count row, the
+   switcher search row): bare mono that brightens on hover, reading as a
+   secondary affordance rather than a prominent control and adding no row of
+   its own. Inherits the count line's muted color on the panel. */
+.exited-toggle {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+  transition:
+    color 140ms ease,
+    text-decoration-color 140ms ease;
+}
+
+.exited-toggle:hover {
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
+
+.exited-toggle:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .session-section {
@@ -11473,29 +11501,29 @@ html[data-theme="light"] .advanced-warning {
   overflow: hidden;
 }
 
+/* The search row also hosts the exited toggle on its right, so the two share a
+   single row (the toggle adds no vertical space of its own). */
 .session-switcher-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 14px 14px 10px;
   border-bottom: 1px solid var(--line);
+}
+
+.session-switcher-search .search-bar {
+  flex: 1;
+  min-width: 0;
 }
 
 .session-switcher-search input {
   background: var(--bg-input);
 }
 
-.session-switcher-filter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-}
-
-.session-switcher-filter-label {
+.session-switcher-search .exited-toggle {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 

@@ -346,29 +346,25 @@ export function SessionList({
           <p className="muted">
             {sessions.length} total · {activeCount} active · {exitedCount} exited
             {pinnedSessions.length ? ` · ${pinnedSessions.length} pinned` : null}
+            {exitedCount > 0 ? (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="exited-toggle"
+                  aria-pressed={!showExited}
+                  onClick={() => setShowExited(!showExited)}
+                >
+                  {showExited ? "hide exited" : "show exited"}
+                </button>
+              </>
+            ) : null}
           </p>
         </div>
-        {exitedCount > 0 ? (
-          <div className="session-list-controls">
-            <div className="session-filter-toggle">
-              <span className="session-filter-toggle-label">Show exited</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={showExited}
-                aria-label="Show exited sessions"
-                className="switch"
-                onClick={() => setShowExited(!showExited)}
-              >
-                <span className="switch-thumb" />
-              </button>
-            </div>
-            {onDeleteExited ? (
-              <button className="secondary" type="button" onClick={handleDeleteExited}>
-                Delete exited ({exitedCount})
-              </button>
-            ) : null}
-          </div>
+        {onDeleteExited && exitedCount > 0 ? (
+          <button className="secondary" type="button" onClick={handleDeleteExited}>
+            Delete exited ({exitedCount})
+          </button>
         ) : null}
       </div>
 

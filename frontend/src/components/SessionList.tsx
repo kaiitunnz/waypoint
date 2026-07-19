@@ -13,7 +13,7 @@ import {
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { formatClock } from "@/lib/scheduleTime";
 import { SessionRecord } from "@/lib/types";
-import { useShowExitedSessions } from "@/lib/useShowExitedSessions";
+import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 import { SearchInput } from "./SearchInput";
 import { Pager } from "@/components/Pager";
@@ -45,7 +45,7 @@ export function SessionList({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [query, setQuery] = useState("");
-  const [showExited, setShowExited] = useShowExitedSessions();
+  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault();

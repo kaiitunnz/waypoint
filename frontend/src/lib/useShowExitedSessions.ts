@@ -2,45 +2,45 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "waypoint.show-exited-sessions";
-const CHANGE_EVENT = "waypoint:show-exited-sessions-change";
+export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
+export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
 
-function readShowExited(): boolean {
+function readShowExited(storageKey: string): boolean {
   if (typeof window === "undefined") {
     return true;
   }
-  return window.localStorage.getItem(STORAGE_KEY) !== "0";
+  return window.localStorage.getItem(storageKey) !== "0";
 }
 
-// Persisted flag synced across the panel, the switcher, and tabs; default on.
-export function useShowExitedSessions(): [boolean, (next: boolean) => void] {
+// Persisted show-exited flag for one surface; default on. Synced across tabs.
+export function useShowExitedSessions(storageKey: string): [boolean, (next: boolean) => void] {
   // Init true and hydrate in the effect to avoid an SSR/client hydration mismatch.
   const [showExited, setShowExited] = useState(true);
 
   useEffect(() => {
-    setShowExited(readShowExited());
-    function handleChange() {
-      setShowExited(readShowExited());
-    }
-    window.addEventListener(CHANGE_EVENT, handleChange);
-    window.addEventListener("storage", handleChange);
-    return () => {
-      window.removeEventListener(CHANGE_EVENT, handleChange);
-      window.removeEventListener("storage", handleChange);
-    };
-  }, []);
-
-  const update = useCallback((next: boolean) => {
-    if (typeof window !== "undefined") {
-      if (next) {
-        window.localStorage.removeItem(STORAGE_KEY);
-      } else {
-        window.localStorage.setItem(STORAGE_KEY, "0");
+    setShowExited(readShowExited(storageKey));
+    function handleStorage(event: StorageEvent) {
+      if (event.key === storageKey) {
+        setShowExited(readShowExited(storageKey));
       }
-      window.dispatchEvent(new Event(CHANGE_EVENT));
     }
-    setShowExited(next);
-  }, []);
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [storageKey]);
+
+  const update = useCallback(
+    (next: boolean) => {
+      if (typeof window !== "undefined") {
+        if (next) {
+          window.localStorage.removeItem(storageKey);
+        } else {
+          window.localStorage.setItem(storageKey, "0");
+        }
+      }
+      setShowExited(next);
+    },
+    [storageKey],
+  );
 
   return [showExited, update];
 }

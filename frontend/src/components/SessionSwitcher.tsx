@@ -10,7 +10,7 @@ import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionEnvelope, SessionRecord } from "@/lib/types";
 import { SearchInput } from "@/components/SearchInput";
 import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
-import { useShowExitedSessions } from "@/lib/useShowExitedSessions";
+import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 interface SessionSwitcherProps {
   host: string;
@@ -57,7 +57,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const toggleHint = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
-  const [showExited, setShowExited] = useShowExitedSessions();
+  const [showExited, setShowExited] = useShowExitedSessions(SWITCHER_SHOW_EXITED_KEY);
   const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);

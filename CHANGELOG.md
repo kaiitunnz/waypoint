@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/kaiitunnz/waypoint/compare/v0.12.3...v0.12.4) (2026-07-19)
+
+
+### Bug Fixes
+
+* add client-persisted toggle to show/hide exited sessions ([#335](https://github.com/kaiitunnz/waypoint/issues/335)) ([3e53edd](https://github.com/kaiitunnz/waypoint/commit/3e53eddb1b8f6a84638cacafad06a7ffbc669ba1))
+
 ## [0.12.3](https://github.com/kaiitunnz/waypoint/compare/v0.12.2...v0.12.3) (2026-07-18)
 
 

@@ -10,6 +10,7 @@ import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionEnvelope, SessionRecord } from "@/lib/types";
 import { SearchInput } from "@/components/SearchInput";
 import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
+import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 interface SessionSwitcherProps {
   host: string;
@@ -56,6 +57,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const toggleHint = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
+  const [showExited, setShowExited] = useShowExitedSessions(SWITCHER_SHOW_EXITED_KEY);
   const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -131,6 +133,10 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
 
   const filteredSessions = useMemo(() => {
     let list = sessions.filter((s) => s.id !== currentSession?.id);
+    const hasExited = list.some((s) => s.status === "exited");
+    if (!showExited) {
+      list = list.filter((s) => s.status !== "exited");
+    }
     const parsed = parseQuery(query);
     list = list.filter((s) =>
       matchesQuery(s, parsed, ["title", "cwd", "repo_name", "branch", "backend", "search_status"]),
@@ -144,14 +150,15 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
 
     const totalPages = Math.ceil(recent.length / PAGE_SIZE) || 1;
     const cappedRecent = recent.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-    
+
     return {
       pinned,
       recent: cappedRecent,
       totalPages,
-      totalRecent: recent.length
+      totalRecent: recent.length,
+      hasExited
     };
-  }, [sessions, query, currentSession?.id, page]);
+  }, [sessions, query, currentSession?.id, page, showExited]);
 
   const flatItems = useMemo(() => {
     return [...filteredSessions.pinned, ...filteredSessions.recent];
@@ -351,7 +358,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         }
       >
         <div className="session-switcher-search">
-          <SearchInput 
+          <SearchInput
             value={query}
             onChange={(val) => {
               setQuery(val);
@@ -362,8 +369,18 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
             autoFocus={!isMobile}
             showStatusExample={false}
           />
+          {filteredSessions.hasExited ? (
+            <button
+              type="button"
+              className="exited-toggle"
+              aria-pressed={!showExited}
+              onClick={() => setShowExited(!showExited)}
+            >
+              {showExited ? "hide exited" : "show exited"}
+            </button>
+          ) : null}
         </div>
-        
+
         <div className="session-switcher-list" ref={listRef}>
           {currentSession && !query ? (
             <div className="session-switcher-here">

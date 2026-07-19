@@ -13,6 +13,7 @@ import {
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { formatClock } from "@/lib/scheduleTime";
 import { SessionRecord } from "@/lib/types";
+import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 import { SearchInput } from "./SearchInput";
 import { Pager } from "@/components/Pager";
@@ -44,6 +45,7 @@ export function SessionList({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [query, setQuery] = useState("");
+  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault();
@@ -145,19 +147,22 @@ export function SessionList({
   } = useMemo(() => {
     const exited = sessions.filter((session) => session.status === "exited").length;
     const active = sessions.length - exited;
+    const visible = showExited
+      ? sessions
+      : sessions.filter((session) => session.status !== "exited");
 
     if (query.trim() === "") {
-      const pinned = sessions
+      const pinned = visible
         .filter((session) => session.pinned_at)
         .sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
-      const recent = sessions.filter((session) => !session.pinned_at);
+      const recent = visible.filter((session) => !session.pinned_at);
       return { pinnedSessions: pinned, recentSessions: recent, flatSearchResults: null, exitedCount: exited, activeCount: active };
     }
 
     const terms = parseQuery(query.trim());
     const defaultFields = ["title", "cwd", "repo_name", "branch", "backend", "search_status"];
 
-    const matched = sessions.filter((session) => {
+    const matched = visible.filter((session) => {
       return matchesQuery(session, terms, defaultFields);
     });
 
@@ -170,7 +175,7 @@ export function SessionList({
     });
 
     return { pinnedSessions: [], recentSessions: [], flatSearchResults: matched, exitedCount: exited, activeCount: active };
-  }, [sessions, query]);
+  }, [sessions, query, showExited]);
 
   const listToPaginate = flatSearchResults !== null ? flatSearchResults : recentSessions;
   const totalPages = Math.max(1, Math.ceil(listToPaginate.length / PAGE_SIZE));
@@ -335,7 +340,7 @@ export function SessionList({
 
   return (
     <section className="panel stack session-list-shell">
-      <div className="field-row">
+      <div className="field-row session-list-header">
         <div className="session-list-summary">
           <h3>Sessions</h3>
           <p className="muted">
@@ -350,12 +355,24 @@ export function SessionList({
         ) : null}
       </div>
 
-      <SearchInput
-        className="session-list-search"
-        value={query}
-        onChange={setQuery}
-        placeholder='Search sessions... (e.g. "title:bug OR branch:main")'
-      />
+      <div className="session-list-search-row">
+        <SearchInput
+          className="session-list-search"
+          value={query}
+          onChange={setQuery}
+          placeholder='Search sessions... (e.g. "title:bug OR branch:main")'
+        />
+        {exitedCount > 0 ? (
+          <button
+            type="button"
+            className="exited-toggle"
+            aria-pressed={!showExited}
+            onClick={() => setShowExited(!showExited)}
+          >
+            {showExited ? "hide exited" : "show exited"}
+          </button>
+        ) : null}
+      </div>
 
       {flatSearchResults !== null ? (
         <section className="session-section">

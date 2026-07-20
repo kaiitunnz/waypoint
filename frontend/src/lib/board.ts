@@ -1,7 +1,7 @@
 // Board-workspace taxonomy: channel grouping, ticket-state to lane/lamp
 // mapping, and kind/priority tones.
 
-import { ManagerTicket, ManagerTicketState } from "@/lib/types";
+import { BoardChannel, ManagerTicket, ManagerTicketState } from "@/lib/types";
 
 // ─── Channel grouping (navigator) ───
 
@@ -28,6 +28,25 @@ export const CHANNEL_GROUP_COLLAPSED_DEFAULT: Record<ChannelGroupKey, boolean> =
   job: true,
   other: false,
 };
+
+// Bucket channels by group, optionally keeping only those matching a filter.
+export function groupChannels(
+  channels: BoardChannel[],
+  filter?: string,
+): Record<ChannelGroupKey, BoardChannel[]> {
+  const needle = filter?.trim().toLowerCase() ?? "";
+  const groups: Record<ChannelGroupKey, BoardChannel[]> = {
+    manager: [],
+    ticket: [],
+    job: [],
+    other: [],
+  };
+  for (const channel of channels) {
+    if (needle && !channel.channel.toLowerCase().includes(needle)) continue;
+    groups[classifyChannel(channel.channel)].push(channel);
+  }
+  return groups;
+}
 
 // The trailing dash in `-ticket-` keeps `<x>-tickets` out of the ticket group.
 export function classifyChannel(channel: string): ChannelGroupKey {

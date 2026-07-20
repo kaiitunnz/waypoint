@@ -38,7 +38,7 @@ import {
   CHANNEL_GROUP_COLLAPSED_DEFAULT,
   CHANNEL_GROUP_LABELS,
   CHANNEL_GROUP_ORDER,
-  classifyChannel,
+  groupChannels,
   isAwaiting,
   kindTone,
   laneForState,
@@ -48,7 +48,6 @@ import {
   stateLabel,
   stateTone,
   ticketIdFromChannel,
-  type ChannelGroupKey,
 } from "@/lib/board";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
@@ -451,20 +450,10 @@ function Navigator({
   attention,
   onSelect,
 }: NavigatorProps) {
-  const grouped = useMemo(() => {
-    const filter = search.trim().toLowerCase();
-    const groups: Record<ChannelGroupKey, BoardChannel[]> = {
-      manager: [],
-      ticket: [],
-      job: [],
-      other: [],
-    };
-    for (const channel of channels) {
-      if (filter && !channel.channel.toLowerCase().includes(filter)) continue;
-      groups[classifyChannel(channel.channel)].push(channel);
-    }
-    return groups;
-  }, [channels, search]);
+  const grouped = useMemo(
+    () => groupChannels(channels, search),
+    [channels, search],
+  );
 
   return (
     <div className="board-nav">
@@ -1750,8 +1739,6 @@ export default function BoardPage() {
           </div>
         </div>
         <div className="app-bar-meta">
-          {/* The view switch and nav controls live in the workspace toolbar
-              below, not on the app bar. */}
           <Link className="back-link" href="/">
             ← all sessions
           </Link>
@@ -1869,7 +1856,6 @@ export default function BoardPage() {
             !isMobile && railCollapsed ? " is-rail-collapsed" : ""
           }`}
         >
-          {/* Desktop navigator; on mobile this is hidden and the drawer takes over. */}
           {!isMobile ? (
             <aside className="panel board-rail" aria-label="Channels">
               {navigator}
@@ -2405,18 +2391,7 @@ function ChannelsOverview({
   channels: BoardChannel[];
   onSelect: (channel: string) => void;
 }) {
-  const grouped = useMemo(() => {
-    const groups: Record<ChannelGroupKey, BoardChannel[]> = {
-      manager: [],
-      ticket: [],
-      job: [],
-      other: [],
-    };
-    for (const channel of channels) {
-      groups[classifyChannel(channel.channel)].push(channel);
-    }
-    return groups;
-  }, [channels]);
+  const grouped = useMemo(() => groupChannels(channels), [channels]);
 
   return (
     <div className="board-overview">

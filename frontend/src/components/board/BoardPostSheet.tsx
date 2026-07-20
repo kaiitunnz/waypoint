@@ -10,8 +10,7 @@ import {
 import {
   CHANNEL_GROUP_LABELS,
   CHANNEL_GROUP_ORDER,
-  classifyChannel,
-  type ChannelGroupKey,
+  groupChannels,
 } from "@/lib/board";
 import { BoardChannel, ManagerSummary } from "@/lib/types";
 
@@ -95,7 +94,6 @@ export function BoardPostSheet({
     ticketAvailable ? initialMode : "update",
   );
 
-  // Ticket draft.
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [priority, setPriority] = useState(() =>
@@ -106,7 +104,7 @@ export function BoardPostSheet({
   // no channels to pick, start there so a first post is possible.
   const [useNamed, setUseNamed] = useState(channels.length === 0);
   const [existingChannel, setExistingChannel] = useState(
-    defaultUpdateChannel ?? channels[0]?.channel ?? "",
+    defaultUpdateChannel ?? "",
   );
   const [namedChannel, setNamedChannel] = useState("");
   const [writeMode, setWriteMode] = useState<UpdateWriteMode>("append");
@@ -133,20 +131,10 @@ export function BoardPostSheet({
   const intakeWarning =
     targetsIntake && writeMode === "append" && targetChannel.length > 0;
 
-  const groupedChannels = useMemo(() => {
-    const filter = pickerSearch.trim().toLowerCase();
-    const groups: Record<ChannelGroupKey, BoardChannel[]> = {
-      manager: [],
-      ticket: [],
-      job: [],
-      other: [],
-    };
-    for (const channel of channels) {
-      if (filter && !channel.channel.toLowerCase().includes(filter)) continue;
-      groups[classifyChannel(channel.channel)].push(channel);
-    }
-    return groups;
-  }, [channels, pickerSearch]);
+  const groupedChannels = useMemo(
+    () => groupChannels(channels, pickerSearch),
+    [channels, pickerSearch],
+  );
 
   const ticketValid = title.trim().length > 0 && managerReady;
   const updateValid =

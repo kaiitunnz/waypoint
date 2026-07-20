@@ -113,23 +113,29 @@ export function supportedTimezones(): string[] {
 }
 
 /** Short timezone abbreviation for a moment in a zone, e.g. "EDT", "GMT+8". */
-export function timezoneAbbrev(when: Date, timezone: string): string {
+export function timezoneAbbrev(
+  when: Date,
+  timezone: string | null | undefined,
+): string {
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
+      timeZone: timezone ?? undefined,
       timeZoneName: "short",
     }).formatToParts(when);
-    return parts.find((p) => p.type === "timeZoneName")?.value ?? timezone;
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? (timezone ?? "");
   } catch {
-    return timezone;
+    return timezone ?? "";
   }
 }
 
 /** Format an instant in a specific IANA zone: "Jul 21, 09:00". */
-export function formatInZone(when: Date, timezone: string): string {
+export function formatInZone(
+  when: Date,
+  timezone: string | null | undefined,
+): string {
   try {
     return when.toLocaleString(undefined, {
-      timeZone: timezone,
+      timeZone: timezone ?? undefined,
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -147,7 +153,11 @@ const HHMM = /^(\d{1,2}) (\d{1,2})$/;
  * the canonical preset shapes and otherwise showing the raw expression. Shape:
  * `WEEKDAYS · 09:00 · America/New_York`.
  */
-export function cronToLabel(cron: string, timezone?: string | null): string {
+export function cronToLabel(
+  cron: string | null | undefined,
+  timezone?: string | null,
+): string {
+  if (!cron) return "";
   const zone = timezone ? ` · ${timezone}` : "";
   const fields = cron.trim().split(/\s+/);
   if (fields.length !== 5) return `CRON ${cron}${zone}`;

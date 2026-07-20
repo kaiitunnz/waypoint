@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
@@ -343,17 +344,21 @@ class Scheduler:
         return min(delta, POLL_INTERVAL_SECONDS)
 
     async def _fire_due_schedules(self) -> None:
-        # Capture ``now`` once for the whole batch: due schedules are fired
-        # sequentially and a launch can take seconds, so re-reading the clock
-        # per item would let a slow earlier fire push a legitimately due
-        # recurring occurrence past its grace window and misclassify it.
+        # One clock read for the batch so a slow sequential fire can't shift the
+        # grace window under a later due occurrence.
         now = datetime.now(UTC)
         pending = self._runtime.storage.list_schedules([ScheduleStatus.PENDING])
         for schedule in pending:
             if schedule.scheduled_at > now:
                 continue
             if schedule.cron is not None:
-                await self._fire_due_recurring_schedule(schedule, now)
+                await self._claim_and_fire(
+                    schedule,
+                    now,
+                    self._runtime.storage.claim_recurring_schedule,
+                    self._fire_recurring,
+                    "schedule_id",
+                )
             else:
                 await self._fire(schedule)
         pending_msgs = self._runtime.storage.list_scheduled_messages(
@@ -363,68 +368,44 @@ class Scheduler:
             if msg.scheduled_at > now:
                 continue
             if msg.cron is not None:
-                await self._fire_due_recurring_message(msg, now)
+                await self._claim_and_fire(
+                    msg,
+                    now,
+                    self._runtime.storage.claim_recurring_message,
+                    self._fire_recurring_message,
+                    "msg_id",
+                )
             else:
                 await self._fire_message(msg)
 
-    async def _fire_due_recurring_schedule(
-        self, schedule: ScheduledSessionRecord, now: datetime
+    async def _claim_and_fire(
+        self,
+        record: ScheduledSessionRecord | ScheduledMessageRecord,
+        now: datetime,
+        claim: Callable[
+            [str, datetime, datetime],
+            ScheduledSessionRecord | ScheduledMessageRecord | None,
+        ],
+        fire: Callable[[Any, datetime], Awaitable[None]],
+        id_key: str,
     ) -> None:
-        occurrence = schedule.scheduled_at
-        if schedule.cron is None or schedule.timezone is None:
-            return
-        try:
-            next_at = next_occurrence_after(schedule.cron, schedule.timezone, now)
-        except RecurrenceError:
-            log.exception(
-                "recurrence advance failed", extra={"schedule_id": schedule.id}
-            )
-            return
-        claimed = self._runtime.storage.claim_recurring_schedule(
-            schedule.id, occurrence, next_at
-        )
-        if claimed is None:
-            return
-        log.info(
-            "recurrence claimed",
-            extra={
-                "schedule_id": schedule.id,
-                "occurrence": occurrence.isoformat(),
-                "next_run": next_at.isoformat(),
-            },
-        )
-        if (now - occurrence).total_seconds() > MISSED_RUN_GRACE_SECONDS:
-            log.info(
-                "recurrence misfire skipped",
-                extra={
-                    "schedule_id": schedule.id,
-                    "occurrence": occurrence.isoformat(),
-                },
-            )
-            await self._publish_update()
-            return
-        await self._fire_recurring(claimed, occurrence)
-
-    async def _fire_due_recurring_message(
-        self, record: ScheduledMessageRecord, now: datetime
-    ) -> None:
+        # Advance the recurrence to its next occurrence before running, so a
+        # second poll or a restart cannot fire the same occurrence twice.
         occurrence = record.scheduled_at
         if record.cron is None or record.timezone is None:
             return
         try:
             next_at = next_occurrence_after(record.cron, record.timezone, now)
         except RecurrenceError:
-            log.exception("recurrence advance failed", extra={"msg_id": record.id})
+            log.exception("recurrence advance failed", extra={id_key: record.id})
             return
-        claimed = self._runtime.storage.claim_recurring_message(
-            record.id, occurrence, next_at
-        )
+        claimed = claim(record.id, occurrence, next_at)
         if claimed is None:
             return
         log.info(
             "recurrence claimed",
             extra={
-                "msg_id": record.id,
+                id_key: record.id,
                 "occurrence": occurrence.isoformat(),
                 "next_run": next_at.isoformat(),
             },
@@ -432,11 +413,53 @@ class Scheduler:
         if (now - occurrence).total_seconds() > MISSED_RUN_GRACE_SECONDS:
             log.info(
                 "recurrence misfire skipped",
-                extra={"msg_id": record.id, "occurrence": occurrence.isoformat()},
+                extra={id_key: record.id, "occurrence": occurrence.isoformat()},
             )
             await self._publish_update()
             return
-        await self._fire_recurring_message(claimed, occurrence)
+        await fire(claimed, occurrence)
+
+    async def _launch_session(self, schedule: ScheduledSessionRecord) -> str:
+        session = await self._runtime.create_session(
+            SessionCreateRequest(
+                backend=schedule.backend,
+                cwd=schedule.cwd,
+                launch_target_id=schedule.launch_target_id,
+                launch_mode=schedule.launch_mode,
+                transport=schedule.transport,
+                title=schedule.title,
+                args=schedule.args,
+                config_overrides=schedule.config_overrides,
+                launch_env=schedule.launch_env,
+                source_mode=SessionSource.MANAGED,
+                permission_mode=schedule.permission_mode,
+                model=schedule.model,
+                effort=schedule.effort,
+                account_profile_id=schedule.account_profile_id,
+            ),
+            preset_id=schedule.preset_id,
+            preset_name=schedule.preset_name,
+        )
+        if schedule.initial_prompt:
+            # Some backends aren't idle the tick they finish boot.
+            await asyncio.sleep(0.1)
+            await self._runtime.handle_input(
+                session.id,
+                SessionInputRequest(text=schedule.initial_prompt, submit=True),
+            )
+        return session.id
+
+    async def _send_input(self, record: ScheduledMessageRecord) -> None:
+        await self._runtime.handle_input(
+            record.session_id,
+            SessionInputRequest(
+                text=record.text,
+                submit=record.submit,
+                command=record.command,
+                items=record.items,
+                attachments=list(record.attachments) if record.attachments else None,
+            ),
+        )
 
     async def _fire_message(self, record: ScheduledMessageRecord) -> None:
         try:
@@ -448,26 +471,12 @@ class Scheduler:
                     failure_reason="session not found",
                 )
                 return
-            await self._runtime.handle_input(
-                record.session_id,
-                SessionInputRequest(
-                    text=record.text,
-                    submit=record.submit,
-                    command=record.command,
-                    items=record.items,
-                    attachments=(
-                        list(record.attachments) if record.attachments else None
-                    ),
-                ),
-            )
+            await self._send_input(record)
             self._runtime.storage.update_scheduled_message(
                 record.id, status=ScheduledMessageStatus.SENT
             )
         except Exception as exc:  # noqa: BLE001
-            log.exception(
-                "scheduled message fire failed",
-                extra={"msg_id": record.id},
-            )
+            log.exception("scheduled message fire failed", extra={"msg_id": record.id})
             self._runtime.storage.update_scheduled_message(
                 record.id,
                 status=ScheduledMessageStatus.FAILED,
@@ -477,39 +486,12 @@ class Scheduler:
 
     async def _fire(self, schedule: ScheduledSessionRecord) -> None:
         try:
-            session = await self._runtime.create_session(
-                SessionCreateRequest(
-                    backend=schedule.backend,
-                    cwd=schedule.cwd,
-                    launch_target_id=schedule.launch_target_id,
-                    launch_mode=schedule.launch_mode,
-                    transport=schedule.transport,
-                    title=schedule.title,
-                    args=schedule.args,
-                    config_overrides=schedule.config_overrides,
-                    launch_env=schedule.launch_env,
-                    source_mode=SessionSource.MANAGED,
-                    permission_mode=schedule.permission_mode,
-                    model=schedule.model,
-                    effort=schedule.effort,
-                    account_profile_id=schedule.account_profile_id,
-                ),
-                preset_id=schedule.preset_id,
-                preset_name=schedule.preset_name,
-            )
+            session_id = await self._launch_session(schedule)
             self._runtime.storage.update_schedule(
                 schedule.id,
                 status=ScheduleStatus.LAUNCHED,
-                session_id=session.id,
+                session_id=session_id,
             )
-            if schedule.initial_prompt:
-                # Brief grace window before the first input; some backends are
-                # not yet idle the same tick they finish boot.
-                await asyncio.sleep(0.1)
-                await self._runtime.handle_input(
-                    session.id,
-                    SessionInputRequest(text=schedule.initial_prompt, submit=True),
-                )
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "scheduled session launch failed",
@@ -525,42 +507,13 @@ class Scheduler:
     async def _fire_recurring(
         self, schedule: ScheduledSessionRecord, occurrence: datetime
     ) -> None:
-        """Launch a recurring session, recording only the latest outcome.
-
-        The schedule stays ``pending`` (its ``scheduled_at`` was already
-        advanced by the claim); a failure is recorded in ``last_run_*`` and does
-        not disable the recurrence.
-        """
+        # Stays pending — the claim already advanced scheduled_at; a failure is
+        # recorded in last_run_* without disabling the recurrence.
         try:
-            session = await self._runtime.create_session(
-                SessionCreateRequest(
-                    backend=schedule.backend,
-                    cwd=schedule.cwd,
-                    launch_target_id=schedule.launch_target_id,
-                    launch_mode=schedule.launch_mode,
-                    transport=schedule.transport,
-                    title=schedule.title,
-                    args=schedule.args,
-                    config_overrides=schedule.config_overrides,
-                    launch_env=schedule.launch_env,
-                    source_mode=SessionSource.MANAGED,
-                    permission_mode=schedule.permission_mode,
-                    model=schedule.model,
-                    effort=schedule.effort,
-                    account_profile_id=schedule.account_profile_id,
-                ),
-                preset_id=schedule.preset_id,
-                preset_name=schedule.preset_name,
-            )
-            if schedule.initial_prompt:
-                await asyncio.sleep(0.1)
-                await self._runtime.handle_input(
-                    session.id,
-                    SessionInputRequest(text=schedule.initial_prompt, submit=True),
-                )
+            session_id = await self._launch_session(schedule)
             self._runtime.storage.update_schedule(
                 schedule.id,
-                session_id=session.id,
+                session_id=session_id,
                 last_run_at=occurrence,
                 last_run_status=ScheduleStatus.LAUNCHED.value,
                 last_failure_reason=None,
@@ -588,7 +541,6 @@ class Scheduler:
     async def _fire_recurring_message(
         self, record: ScheduledMessageRecord, occurrence: datetime
     ) -> None:
-        """Deliver a recurring message, recording only the latest outcome."""
         try:
             session = self._runtime.storage.get_session(record.session_id)
             if session is None:
@@ -599,23 +551,11 @@ class Scheduler:
                     last_failure_reason="session not found",
                 )
                 log.warning(
-                    "recurring message target missing",
-                    extra={"msg_id": record.id},
+                    "recurring message target missing", extra={"msg_id": record.id}
                 )
                 await self._publish_update()
                 return
-            await self._runtime.handle_input(
-                record.session_id,
-                SessionInputRequest(
-                    text=record.text,
-                    submit=record.submit,
-                    command=record.command,
-                    items=record.items,
-                    attachments=(
-                        list(record.attachments) if record.attachments else None
-                    ),
-                ),
-            )
+            await self._send_input(record)
             self._runtime.storage.update_scheduled_message(
                 record.id,
                 last_run_at=occurrence,

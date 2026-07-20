@@ -1111,15 +1111,6 @@ class WaypointClient:
         ).json()["message_schedule"]
         return data
 
-    def preview_schedule(self, cron: str, timezone: str, count: int = 3) -> list[str]:
-        data: dict[str, Any] = self._request(
-            "POST",
-            "/api/schedules/preview",
-            json={"cron": cron, "timezone": timezone, "count": count},
-        ).json()
-        occurrences: list[str] = data["occurrences"]
-        return occurrences
-
     def delete_message_schedule(self, schedule_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "DELETE", f"/api/message-schedules/{schedule_id}"

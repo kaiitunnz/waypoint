@@ -228,11 +228,6 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(200, json={"removed": 3})
         if request.url.path == "/api/schedules" and request.method == "GET":
             return httpx.Response(200, json={"schedules": [{"id": "sc1"}]})
-        if request.url.path == "/api/schedules/preview" and request.method == "POST":
-            state["preview_body"] = json.loads(request.content)
-            return httpx.Response(
-                200, json={"occurrences": ["2026-07-20T01:00:00+00:00"]}
-            )
         if request.url.path == "/api/schedules" and request.method == "POST":
             payload = json.loads(request.content)
             state["schedule_create"] = payload
@@ -821,21 +816,6 @@ def test_create_schedule_passes_cron_and_timezone(
     assert state["schedule_create"]["cron"] == "0 9 * * 1-5"
     assert state["schedule_create"]["timezone"] == "Asia/Singapore"
     assert "delay_seconds" not in state["schedule_create"]
-
-
-def test_preview_schedule_posts_body(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
-    state: dict = {}
-    with _client(_settings(tmp_path), state) as client:
-        occ = client.preview_schedule("0 9 * * 1-5", "Asia/Singapore", count=1)
-    assert occ == ["2026-07-20T01:00:00+00:00"]
-    assert state["preview_body"] == {
-        "cron": "0 9 * * 1-5",
-        "timezone": "Asia/Singapore",
-        "count": 1,
-    }
 
 
 def test_delete_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

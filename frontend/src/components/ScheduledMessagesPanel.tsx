@@ -126,7 +126,7 @@ function MessageRow({
   const zone = schedule.timezone ?? undefined;
   const absolute = when
     ? recurring
-      ? `${formatInZone(when, zone!)} ${timezoneAbbrev(when, zone!)}`
+      ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
       : formatClock(when)
     : "";
   const isPending = schedule.status === "pending";
@@ -143,7 +143,7 @@ function MessageRow({
         </span>
         {recurring ? (
           <span className="badge schedule-recurrence" title="Recurring message">
-            {cronToLabel(schedule.cron!, schedule.timezone)}
+            {cronToLabel(schedule.cron, schedule.timezone)}
           </span>
         ) : null}
         <a
@@ -185,7 +185,7 @@ function MessageRow({
       {recurring && lastRun ? (
         <p className="schedule-last muted">
           <span className="schedule-when-label">Last</span>{" "}
-          {formatInZone(lastRun, zone!)} {timezoneAbbrev(lastRun, zone!)}
+          {formatInZone(lastRun, zone)} {timezoneAbbrev(lastRun, zone)}
           {schedule.last_run_status ? ` · ${schedule.last_run_status}` : ""}
         </p>
       ) : null}

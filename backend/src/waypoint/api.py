@@ -1796,8 +1796,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: SchedulePreviewRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        # Single authoritative source of cron/DST math, shared by the launch and
-        # message creation UIs so their preview matches what actually fires.
+        # Authoritative next-run source shared by both creation UIs.
         try:
             occurrences = next_occurrences(
                 request.cron,

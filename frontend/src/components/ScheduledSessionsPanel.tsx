@@ -151,7 +151,7 @@ function ScheduleRow({
   const recurring = isRecurring(schedule);
   const zone = schedule.timezone ?? undefined;
   const formatted = recurring
-    ? `${formatInZone(when, zone!)} ${timezoneAbbrev(when, zone!)}`
+    ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
     : formatClock(when);
   const relative = schedule.status === "pending" ? formatRelative(when) : null;
   const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
@@ -173,7 +173,7 @@ function ScheduleRow({
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
         {recurring ? (
           <span className="badge schedule-recurrence" title="Recurring schedule">
-            {cronToLabel(schedule.cron!, schedule.timezone)}
+            {cronToLabel(schedule.cron, schedule.timezone)}
           </span>
         ) : null}
         {modeLabel ? (
@@ -224,7 +224,7 @@ function ScheduleRow({
       {recurring && lastRun ? (
         <p className="schedule-last muted">
           <span className="schedule-when-label">Last</span>{" "}
-          {formatInZone(lastRun, zone!)} {timezoneAbbrev(lastRun, zone!)}
+          {formatInZone(lastRun, zone)} {timezoneAbbrev(lastRun, zone)}
           {schedule.last_run_status ? ` · ${schedule.last_run_status}` : ""}
         </p>
       ) : null}

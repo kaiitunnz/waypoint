@@ -1,23 +1,16 @@
 """Cron recurrence evaluation for scheduled sessions and messages.
 
-Wraps ``croniter`` and ``zoneinfo`` so the five-field grammar, timezone
-validation, and daylight-saving policy live at Waypoint's boundary and are
-tested here rather than scattered across the scheduler.
-
-DST policy (wall-clock in the stored zone):
+Wraps ``croniter`` and ``zoneinfo`` behind the five-field grammar, timezone
+validation, and this DST policy (wall-clock in the stored zone):
 
 * A nonexistent local time during a forward transition (spring-forward) is
-  **skipped**.
-* A repeated local time during a backward transition (fall-back) runs **once**,
-  at the earlier occurrence.
+  skipped.
+* A repeated local time during a backward transition (fall-back) runs once, at
+  the earlier occurrence.
 
-Both fall out of iterating croniter in *naive* local time and localizing each
-candidate with ``fold=0``: the ambiguous fall-back wall-clock appears once in
-the naive sequence (earlier instant chosen by the fold), and a nonexistent
-spring-forward wall-clock fails the round-trip check and is dropped. Passing a
-tz-aware base to croniter instead reproduces croniter's own behavior (roll the
-nonexistent time forward, emit the fall-back time twice), which violates the
-policy above.
+Occurrences are computed by iterating croniter in naive local time and
+localizing each candidate with ``fold=0``; a candidate whose wall clock does
+not survive a UTC round-trip is a spring-forward gap and is dropped.
 """
 
 from datetime import UTC, datetime
@@ -27,11 +20,8 @@ from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 
 CRON_FIELD_COUNT = 5
 
-# How long after a recurring occurrence's due time the scheduler may still run
-# it. Sized well above the worst-case poll-loop latency (a batch of due
-# schedules is fired sequentially and a session launch can take seconds), so a
-# legitimately due occurrence is never misclassified as missed, while a real
-# downtime of minutes is. Not a UI option.
+# Seconds past its due time within which a recurring occurrence still fires;
+# beyond this it is treated as a missed run (downtime) and skipped.
 MISSED_RUN_GRACE_SECONDS = 60.0
 
 # Bound on how far ahead we search for a next occurrence before treating the

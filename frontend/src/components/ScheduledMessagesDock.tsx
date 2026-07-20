@@ -107,7 +107,7 @@ export function ScheduledMessagesDock({
                     {isRecurring(m) ? (
                       <span
                         className="sched-dock-recur"
-                        title={cronToLabel(m.cron!, m.timezone)}
+                        title={cronToLabel(m.cron, m.timezone)}
                       >
                         ↻
                       </span>
@@ -121,7 +121,7 @@ export function ScheduledMessagesDock({
                     />
                     {isRecurring(m) ? (
                       <span className="sched-dock-item-cadence">
-                        {cronToLabel(m.cron!, m.timezone)}
+                        {cronToLabel(m.cron, m.timezone)}
                       </span>
                     ) : null}
                   </div>

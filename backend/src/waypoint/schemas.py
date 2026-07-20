@@ -1240,9 +1240,7 @@ class ScheduleCreateRequest(BaseModel):
     effort: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
-    # Recurring timing: five-field cron + IANA timezone, mutually exclusive with
-    # the one-time fields above (enforced by the scheduler, not this model, so
-    # the API returns 400 rather than a 422 body-validation error).
+    # Recurring timing: five-field cron + IANA timezone.
     cron: str | None = None
     timezone: str | None = None
     # See SessionCreateRequest — apply a preset before validation. Explicit
@@ -1261,8 +1259,6 @@ class ScheduleLaunchRequest(ScheduleCreateRequest):
 
 
 class SchedulePreviewRequest(BaseModel):
-    # Shared cron preview for both creation surfaces; the backend is the single
-    # authority for cron/DST math so preview matches what actually fires.
     cron: str
     timezone: str
     count: int = 3

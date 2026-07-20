@@ -11,15 +11,33 @@ Thin subclass of ``TmuxTransport`` that overrides:
   Pending state is owned by the plugin singleton (``ClaudeTtyPlugin``).
 """
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from waypoint.backends.approvals import is_approve_decision
+from waypoint.backends.claude_tty import pane_dialog
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.schemas import SessionRecord
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
     from waypoint.runtime import SessionRuntime
+
+# Dialogs that Esc cancels/declines as part of interrupting the turn. Esc on a
+# trust prompt or the model/effort popups means something else, so the
+# verify-and-retry loop must not spam Esc at those.
+_INTERRUPTIBLE_DIALOGS = frozenset(
+    {
+        pane_dialog.PaneScreen.APPROVAL,
+        pane_dialog.PaneScreen.PLAN,
+        pane_dialog.PaneScreen.QUESTION,
+    }
+)
+# A single Esc sometimes loses the TUI's escape-disambiguation race, so confirm
+# the dialog left the pane and re-send it a bounded number of times.
+_INTERRUPT_ESC_RETRIES = 4
+_INTERRUPT_ESC_POLL_SECONDS = 0.3
 
 
 class ClaudeTtyTransport(TmuxTransport):
@@ -38,9 +56,37 @@ class ClaudeTtyTransport(TmuxTransport):
         # would fire a stray digit at the ready prompt. A pending question is
         # already dismissed on the pane (we Esc it when surfacing), so just drop
         # the entry so a later answer is rejected rather than misrouted.
-        self._plugin._pending_approvals.pop(session.id, None)
+        pending = self._plugin._pending_approvals.pop(session.id, None)
         self._plugin._pending_questions.pop(session.id, None)
-        await self.adapter.send_bytes(self._target(session), b"\x1b")
+        target = self._target(session)
+        await self.adapter.send_bytes(target, b"\x1b")
+        # A lone Esc can fail to dismiss the dialog, stranding the prompt on the
+        # pane with nothing to retry it: the tailer's surfaced-signature guard
+        # suppresses a re-emit and the pending entry is already gone. Confirm the
+        # pane left the interruptible dialog and re-send Esc until it does.
+        await self._ensure_dialog_dismissed(target)
+        # The chat approval card is dequeued only by an explicit resolution note;
+        # "Sent interrupt" is not one, so invalidate the surfaced request here.
+        if pending is not None:
+            await self._runtime._record_system_event(
+                session.id,
+                "Pending approval cleared by interrupt",
+                metadata={
+                    "method": "approval.invalidated",
+                    "approval_id": pending.approval_id,
+                },
+            )
+
+    async def _ensure_dialog_dismissed(self, target: str) -> None:
+        for _ in range(_INTERRUPT_ESC_RETRIES):
+            await asyncio.sleep(_INTERRUPT_ESC_POLL_SECONDS)
+            try:
+                snapshot = await self.adapter.capture_snapshot(target)
+            except TmuxError:
+                return
+            if pane_dialog.classify(snapshot) not in _INTERRUPTIBLE_DIALOGS:
+                return
+            await self.adapter.send_bytes(target, b"\x1b")
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return session.id in self._plugin._pending_approvals

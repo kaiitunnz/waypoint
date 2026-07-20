@@ -888,6 +888,9 @@ class WaypointClient:
         config_overrides: list[str] | None = None,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
+        start_at: str | None = None,
         launch_env: dict[str, str] | None = None,
         account_profile_id: str | None = None,
         preset_id: str | None = None,
@@ -910,6 +913,9 @@ class WaypointClient:
             "initial_prompt": initial_prompt,
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
+            "cron": cron,
+            "timezone": timezone,
+            "start_at": start_at,
             "launch_env": launch_env,
             "account_profile_id": account_profile_id,
             "preset_id": preset_id,
@@ -1085,6 +1091,9 @@ class WaypointClient:
         submit: bool = True,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
+        start_at: str | None = None,
         attachments: list[str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "submit": submit}
@@ -1092,6 +1101,12 @@ class WaypointClient:
             body["delay_seconds"] = delay_seconds
         if scheduled_at is not None:
             body["scheduled_at"] = scheduled_at
+        if cron is not None:
+            body["cron"] = cron
+        if timezone is not None:
+            body["timezone"] = timezone
+        if start_at is not None:
+            body["start_at"] = start_at
         if attachments:
             body["attachments"] = attachments
         data: dict[str, Any] = self._request(

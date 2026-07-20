@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
+import { cronToLabel, isRecurring } from "@/lib/recurrence";
 import { MessageSchedule } from "@/lib/types";
 
 // A single chevron glyph (pointing up); orientation handled with a CSS rotation,
@@ -103,6 +104,14 @@ export function ScheduledMessagesDock({
                 <div key={m.id} className="sched-dock-item">
                   <span className="sched-dock-item-when">
                     {relativeFromNow(m)}
+                    {isRecurring(m) ? (
+                      <span
+                        className="sched-dock-recur"
+                        title={cronToLabel(m.cron, m.timezone)}
+                      >
+                        ↻
+                      </span>
+                    ) : null}
                   </span>
                   <div className="sched-dock-item-body">
                     <ExpandableText
@@ -110,6 +119,11 @@ export function ScheduledMessagesDock({
                       text={m.text || "(no text)"}
                       collapsedMaxHeight="3em"
                     />
+                    {isRecurring(m) ? (
+                      <span className="sched-dock-item-cadence">
+                        {cronToLabel(m.cron, m.timezone)}
+                      </span>
+                    ) : null}
                   </div>
                   <button
                     type="button"
@@ -135,6 +149,11 @@ export function ScheduledMessagesDock({
             <span className="sched-dock-glyph" aria-hidden>
               ◷
             </span>
+            {isRecurring(next) ? (
+              <span className="sched-dock-recur" aria-hidden>
+                ↻
+              </span>
+            ) : null}
             <span className="sched-dock-label">{label}</span>
             <span className="sched-dock-when">{relativeFromNow(next)}</span>
             <span className="sched-dock-count">{messages.length}</span>

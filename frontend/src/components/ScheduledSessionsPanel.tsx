@@ -12,6 +12,12 @@ import { Pager } from "@/components/Pager";
 import { usePagination } from "@/lib/usePagination";
 import { formatClock, formatRelative } from "@/lib/scheduleTime";
 import {
+  cronToLabel,
+  formatInZone,
+  isRecurring,
+  timezoneAbbrev,
+} from "@/lib/recurrence";
+import {
   Backend,
   BackendModelOption,
   ScheduledSession,
@@ -142,8 +148,13 @@ function ScheduleRow({
   modelsByBackend: Record<string, BackendModelOption[]>;
 }) {
   const when = new Date(schedule.scheduled_at);
-  const formatted = formatClock(when);
+  const recurring = isRecurring(schedule);
+  const zone = schedule.timezone ?? undefined;
+  const formatted = recurring
+    ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
+    : formatClock(when);
   const relative = schedule.status === "pending" ? formatRelative(when) : null;
+  const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
   const modelCacheKey = scheduleModelCacheKey(
     schedule.backend,
     schedule.launch_target_id ?? null,
@@ -160,6 +171,11 @@ function ScheduleRow({
           {catalog.byId(schedule.backend)?.label ?? humaniseBackend(schedule.backend)}
         </span>
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
+        {recurring ? (
+          <span className="badge schedule-recurrence" title="Recurring schedule">
+            {cronToLabel(schedule.cron, schedule.timezone)}
+          </span>
+        ) : null}
         {modeLabel ? (
           <span className="badge schedule-mode">{modeLabel}</span>
         ) : null}
@@ -183,6 +199,7 @@ function ScheduleRow({
         ) : null}
         <span className="msg-row-right">
           <span className="msg-row-when">
+            {recurring ? <span className="schedule-when-label">Next</span> : null}
             {relative ? <span className="msg-countdown">{relative}</span> : null}
             <span className="muted">{formatted}</span>
           </span>
@@ -204,7 +221,19 @@ function ScheduleRow({
       {schedule.initial_prompt ? (
         <p className="muted schedule-prompt">“{schedule.initial_prompt}”</p>
       ) : null}
-      {schedule.failure_reason ? (
+      {recurring && lastRun ? (
+        <p className="schedule-last muted">
+          <span className="schedule-when-label">Last</span>{" "}
+          {formatInZone(lastRun, zone)} {timezoneAbbrev(lastRun, zone)}
+          {schedule.last_run_status ? ` · ${schedule.last_run_status}` : ""}
+        </p>
+      ) : null}
+      {recurring && schedule.last_failure_reason ? (
+        <p className="error schedule-last-error">
+          Last run failed: {schedule.last_failure_reason}
+        </p>
+      ) : null}
+      {!recurring && schedule.failure_reason ? (
         <p className="error">{schedule.failure_reason}</p>
       ) : null}
       {schedule.session_id ? (

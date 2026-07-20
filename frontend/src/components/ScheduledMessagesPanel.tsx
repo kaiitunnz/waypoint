@@ -6,6 +6,12 @@ import { ExpandableText } from "@/components/ExpandableText";
 import { Pager } from "@/components/Pager";
 import { usePagination } from "@/lib/usePagination";
 import { formatClock, formatRelative } from "@/lib/scheduleTime";
+import {
+  cronToLabel,
+  formatInZone,
+  isRecurring,
+  timezoneAbbrev,
+} from "@/lib/recurrence";
 import { MessageSchedule, SessionRecord } from "@/lib/types";
 
 const PAGE_SIZE = 5;
@@ -116,9 +122,16 @@ function MessageRow({
     : schedule.created_at
       ? new Date(schedule.created_at)
       : null;
-  const absolute = when ? formatClock(when) : "";
+  const recurring = isRecurring(schedule);
+  const zone = schedule.timezone ?? undefined;
+  const absolute = when
+    ? recurring
+      ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
+      : formatClock(when)
+    : "";
   const isPending = schedule.status === "pending";
-  const relative = isPending && when ? formatRelative(when) : null;
+  const relative = isPending && when && !recurring ? formatRelative(when) : null;
+  const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
   const label = sessionTitle?.trim() || shortSessionId(schedule.session_id);
 
   return (
@@ -128,6 +141,11 @@ function MessageRow({
         <span className={`badge schedule-status ${schedule.status}`}>
           {schedule.status}
         </span>
+        {recurring ? (
+          <span className="badge schedule-recurrence" title="Recurring message">
+            {cronToLabel(schedule.cron, schedule.timezone)}
+          </span>
+        ) : null}
         <a
           className="msg-session-link"
           href={`/session/${schedule.session_id}`}
@@ -140,6 +158,7 @@ function MessageRow({
         </a>
         <span className="msg-row-right">
           <span className="msg-row-when">
+            {recurring ? <span className="schedule-when-label">Next</span> : null}
             {relative ? <span className="msg-countdown">{relative}</span> : null}
             <span className="muted">{absolute}</span>
           </span>
@@ -163,7 +182,19 @@ function MessageRow({
           <em className="muted">(no text)</em>
         </p>
       )}
-      {schedule.failure_reason ? (
+      {recurring && lastRun ? (
+        <p className="schedule-last muted">
+          <span className="schedule-when-label">Last</span>{" "}
+          {formatInZone(lastRun, zone)} {timezoneAbbrev(lastRun, zone)}
+          {schedule.last_run_status ? ` · ${schedule.last_run_status}` : ""}
+        </p>
+      ) : null}
+      {recurring && schedule.last_failure_reason ? (
+        <p className="error msg-error">
+          Last run failed: {schedule.last_failure_reason}
+        </p>
+      ) : null}
+      {!recurring && schedule.failure_reason ? (
         <p className="error msg-error">{schedule.failure_reason}</p>
       ) : null}
     </article>

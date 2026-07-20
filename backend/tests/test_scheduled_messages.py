@@ -439,6 +439,119 @@ async def test_fire_due_message_schedule_records_failure(tmp_path, monkeypatch) 
     assert refreshed.failure_reason == "boom"
 
 
+# ── Recurring (cron) message schedules ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_recurring_message_sets_next_run(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="stand-up",
+            cron="0 9 * * 1-5",
+            timezone="Asia/Singapore",
+        ),
+    )
+    assert record.status == ScheduledMessageStatus.PENDING
+    assert record.cron == "0 9 * * 1-5"
+    assert record.timezone == "Asia/Singapore"
+    assert record.scheduled_at > datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"cron": "* * * * *"},  # cron without timezone
+        {"timezone": "UTC"},  # timezone without cron
+        {"delay_seconds": 60, "cron": "* * * * *", "timezone": "UTC"},  # mix
+        {"cron": "bad", "timezone": "UTC"},  # invalid cron
+    ],
+)
+async def test_create_recurring_message_invalid_timing_400(tmp_path, kwargs) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_message_schedule(
+            "sess-1", ScheduledMessageCreateRequest(text="hi", **kwargs)
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_recurring_message_stays_pending_and_advances(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="tick", cron="* * * * *", timezone="UTC"),
+    )
+    occurrence = datetime.now(UTC) - timedelta(seconds=1)
+    runtime.storage.update_scheduled_message(record.id, scheduled_at=occurrence)
+
+    sends = 0
+
+    async def fake_handle_input(session_id, request) -> SessionRecord:
+        nonlocal sends
+        sends += 1
+        return session
+
+    monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    refreshed = runtime.storage.get_scheduled_message(record.id)
+    assert refreshed is not None
+    assert refreshed.status == ScheduledMessageStatus.PENDING
+    assert refreshed.scheduled_at > datetime.now(UTC)
+    assert refreshed.last_run_status == "sent"
+    assert refreshed.last_run_at == occurrence
+    assert sends == 1
+
+
+@pytest.mark.asyncio
+async def test_clear_history_never_deletes_active_recurrence(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    recurring = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="daily", cron="0 9 * * *", timezone="UTC"),
+    )
+    # Simulate a run that left a failure on the still-active recurrence.
+    runtime.storage.update_scheduled_message(
+        recurring.id, last_run_status="failed", last_failure_reason="nope"
+    )
+
+    removed = runtime.scheduler.clear_message_history(session_id="sess-1")
+    assert removed == 0
+    still_there = runtime.storage.get_scheduled_message(recurring.id)
+    assert still_there is not None
+    assert still_there.status == ScheduledMessageStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_session_deletion_removes_recurring_messages(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    recurring = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="daily", cron="0 9 * * *", timezone="UTC"),
+    )
+    removed = await runtime.scheduler.purge_session_messages("sess-1")
+    assert removed == 1
+    assert runtime.storage.get_scheduled_message(recurring.id) is None
+
+
 # ── API tests ────────────────────────────────────────────────────────────────
 
 

@@ -1204,6 +1204,14 @@ class ScheduledSessionRecord(BaseModel):
     status: ScheduleStatus = ScheduleStatus.PENDING
     session_id: str | None = None
     failure_reason: str | None = None
+    # Recurrence: ``cron`` (five-field) + ``timezone`` (IANA) mark a recurring
+    # definition; both null means one-time. ``scheduled_at`` is always the next
+    # run. ``last_run_*`` carry the most recent claimed occurrence's outcome.
+    cron: str | None = None
+    timezone: str | None = None
+    last_run_at: datetime | None = None
+    last_run_status: str | None = None
+    last_failure_reason: str | None = None
     # Preset provenance snapshotted at schedule-creation time (see SessionRecord).
     preset_id: str | None = None
     preset_name: str | None = None
@@ -1232,6 +1240,12 @@ class ScheduleCreateRequest(BaseModel):
     effort: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
+    # Recurring timing: five-field cron + IANA timezone. ``start_at`` is the
+    # recurrence's not-before wall-clock in that timezone (the first run is the
+    # first cron occurrence at or after it); null starts now.
+    cron: str | None = None
+    timezone: str | None = None
+    start_at: str | None = None
     # See SessionCreateRequest — apply a preset before validation. Explicit
     # request fields win; schedule timing/prompt fields are never taken from a
     # preset.
@@ -1245,6 +1259,17 @@ class ScheduleLaunchRequest(ScheduleCreateRequest):
     # Boundary input for POST /api/schedules — see SessionLaunchRequest.
     backend: BackendId | None = None  # type: ignore[assignment]
     cwd: str | None = None  # type: ignore[assignment]
+
+
+class SchedulePreviewRequest(BaseModel):
+    cron: str
+    timezone: str
+    start_at: str | None = None
+    count: int = 3
+
+
+class SchedulePreviewResponse(BaseModel):
+    occurrences: list[datetime]
 
 
 class SessionEnvelope(BaseModel):
@@ -1271,6 +1296,12 @@ class ScheduledMessageRecord(BaseModel):
     created_at: datetime
     status: ScheduledMessageStatus = ScheduledMessageStatus.PENDING
     failure_reason: str | None = None
+    # Recurrence — see ScheduledSessionRecord.
+    cron: str | None = None
+    timezone: str | None = None
+    last_run_at: datetime | None = None
+    last_run_status: str | None = None
+    last_failure_reason: str | None = None
 
 
 class ScheduledMessageCreateRequest(BaseModel):
@@ -1281,6 +1312,10 @@ class ScheduledMessageCreateRequest(BaseModel):
     attachments: list[str] = Field(default_factory=list)
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
+    # Recurring timing — see ScheduleCreateRequest.
+    cron: str | None = None
+    timezone: str | None = None
+    start_at: str | None = None
 
 
 class SideQuestionStatus(StrEnum):

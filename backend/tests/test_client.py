@@ -801,6 +801,23 @@ def test_create_schedule_posts_payload(
     assert "launch_mode" not in state["schedule_create"]
 
 
+def test_create_schedule_passes_cron_and_timezone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_schedule(
+            backend="codex",
+            cwd="/tmp",
+            cron="0 9 * * 1-5",
+            timezone="Asia/Singapore",
+        )
+    assert state["schedule_create"]["cron"] == "0 9 * * 1-5"
+    assert state["schedule_create"]["timezone"] == "Asia/Singapore"
+    assert "delay_seconds" not in state["schedule_create"]
+
+
 def test_delete_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
     state: dict = {}

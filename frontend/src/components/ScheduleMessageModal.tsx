@@ -3,8 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { createMessageSchedule } from "@/lib/api";
 import { trapTabFocus } from "@/lib/keyboard";
+import {
+  cronFromState,
+  defaultRecurrenceState,
+  RecurrenceState,
+  TimingMode,
+} from "@/lib/recurrence";
 
 interface ScheduleMessageModalProps {
   host: string;
@@ -46,6 +53,11 @@ export function ScheduleMessageModal({
   const [submit, setSubmit] = useState(true);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [timingMode, setTimingMode] = useState<TimingMode>("once");
+  const [recurrence, setRecurrence] = useState<RecurrenceState>(
+    defaultRecurrenceState,
+  );
+  const [recurrenceValid, setRecurrenceValid] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -86,8 +98,20 @@ export function ScheduleMessageModal({
       submit: boolean;
       delaySeconds?: number;
       scheduledAt?: string;
+      cron?: string;
+      timezone?: string;
+      startAt?: string;
     } = { submit };
-    if (timing === "delay") {
+    if (timingMode === "repeat") {
+      const cron = cronFromState(recurrence);
+      if (!cron) {
+        setError("Enter a valid recurrence.");
+        return;
+      }
+      options.cron = cron;
+      options.timezone = recurrence.timezone;
+      if (recurrence.startAt) options.startAt = recurrence.startAt;
+    } else if (timing === "delay") {
       const minutes = Number.parseFloat(delay);
       if (!Number.isFinite(minutes) || minutes < 0) {
         setError("Enter a non-negative delay in minutes.");
@@ -158,77 +182,91 @@ export function ScheduleMessageModal({
           placeholder="Message text…"
           aria-label="Message text"
         />
-        <div className="segmented schedule-msg-modes" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={timing === "delay"}
-            className={`segmented-item${timing === "delay" ? " active" : ""}`}
-            onClick={() => setTiming("delay")}
-          >
-            After delay
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={timing === "datetime"}
-            className={`segmented-item${timing === "datetime" ? " active" : ""}`}
-            onClick={() => setTiming("datetime")}
-          >
-            At a time
-          </button>
-        </div>
-        {timing === "delay" ? (
-          <div className="schedule-msg-delay">
-            <div className="schedule-msg-presets">
-              {DELAY_PRESETS.map((preset) => (
-                <button
-                  key={preset.minutes}
-                  type="button"
-                  className={`schedule-msg-preset${
-                    delay === String(preset.minutes) ? " active" : ""
-                  }`}
-                  onClick={() => setDelay(String(preset.minutes))}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <label className="schedule-msg-field-inline">
-              <input
-                type="number"
-                className="schedule-msg-dialog-number"
-                min={0}
-                step={1}
-                value={delay}
-                onChange={(e) => setDelay(e.target.value)}
-                placeholder="15"
-                aria-label="Delay in minutes"
-              />
-              <span className="schedule-msg-field-suffix">minutes</span>
-            </label>
+        <RecurrenceControl
+          host={host}
+          token={token}
+          timing={timingMode}
+          onTimingChange={setTimingMode}
+          state={recurrence}
+          onStateChange={setRecurrence}
+          onValidChange={setRecurrenceValid}
+        >
+          <div className="segmented schedule-msg-modes" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={timing === "delay"}
+              className={`segmented-item${timing === "delay" ? " active" : ""}`}
+              onClick={() => setTiming("delay")}
+            >
+              After delay
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={timing === "datetime"}
+              className={`segmented-item${
+                timing === "datetime" ? " active" : ""
+              }`}
+              onClick={() => setTiming("datetime")}
+            >
+              At a time
+            </button>
           </div>
-        ) : (
-          <label className="schedule-msg-field">
-            <span className="schedule-msg-field-label">Local time</span>
-            <input
-              type="datetime-local"
-              className="schedule-msg-dialog-number"
-              value={at}
-              onChange={(e) => setAt(e.target.value)}
-              aria-label="Scheduled local time"
-            />
-          </label>
-        )}
-        {preview ? (
-          <p className="schedule-msg-preview">
-            <span className="schedule-msg-preview-glyph" aria-hidden="true">
-              →
-            </span>
-            Sends&nbsp;<strong>{preview.absolute}</strong>
-            <span className="schedule-msg-preview-rel">{preview.relative}</span>
-          </p>
-        ) : null}
+          {timing === "delay" ? (
+            <div className="schedule-msg-delay">
+              <div className="schedule-msg-presets">
+                {DELAY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.minutes}
+                    type="button"
+                    className={`schedule-msg-preset${
+                      delay === String(preset.minutes) ? " active" : ""
+                    }`}
+                    onClick={() => setDelay(String(preset.minutes))}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <label className="schedule-msg-field-inline">
+                <input
+                  type="number"
+                  className="schedule-msg-dialog-number"
+                  min={0}
+                  step={1}
+                  value={delay}
+                  onChange={(e) => setDelay(e.target.value)}
+                  placeholder="15"
+                  aria-label="Delay in minutes"
+                />
+                <span className="schedule-msg-field-suffix">minutes</span>
+              </label>
+            </div>
+          ) : (
+            <label className="schedule-msg-field">
+              <span className="schedule-msg-field-label">Local time</span>
+              <input
+                type="datetime-local"
+                className="schedule-msg-dialog-number"
+                value={at}
+                onChange={(e) => setAt(e.target.value)}
+                aria-label="Scheduled local time"
+              />
+            </label>
+          )}
+          {preview ? (
+            <p className="schedule-msg-preview">
+              <span className="schedule-msg-preview-glyph" aria-hidden="true">
+                →
+              </span>
+              Sends&nbsp;<strong>{preview.absolute}</strong>
+              <span className="schedule-msg-preview-rel">
+                {preview.relative}
+              </span>
+            </p>
+          ) : null}
+        </RecurrenceControl>
         <div className="schedule-msg-submit-row">
           <span className="schedule-msg-submit-label">On delivery</span>
           <div className="segmented segmented-quiet schedule-msg-submit">
@@ -261,7 +299,11 @@ export function ScheduleMessageModal({
             type="button"
             className="primary"
             onClick={() => void handleSchedule()}
-            disabled={!draft.trim() || sending}
+            disabled={
+              !draft.trim() ||
+              sending ||
+              (timingMode === "repeat" && !recurrenceValid)
+            }
           >
             {sending ? "Scheduling…" : "Schedule"}
           </button>

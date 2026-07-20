@@ -304,6 +304,104 @@ def test_schedule_round_trip_persists_launch_mode(tmp_path) -> None:
     assert storage.list_schedules()[0].launch_mode == LaunchMode.TMUX_WRAPPER
 
 
+def test_schedule_recurrence_fields_round_trip(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    occurrence = now - timedelta(minutes=1)
+    schedule = ScheduledSessionRecord(
+        id="rec-1",
+        backend="codex",
+        cwd="/tmp/project",
+        cron="0 9 * * 1-5",
+        timezone="America/New_York",
+        last_run_at=occurrence,
+        last_run_status="launched",
+        last_failure_reason="prior boom",
+        scheduled_at=now + timedelta(minutes=15),
+        created_at=now,
+        status=ScheduleStatus.PENDING,
+    )
+    storage.create_schedule(schedule)
+    loaded = storage.get_schedule("rec-1")
+    assert loaded is not None
+    assert loaded.cron == "0 9 * * 1-5"
+    assert loaded.timezone == "America/New_York"
+    assert loaded.last_run_at == occurrence
+    assert loaded.last_run_status == "launched"
+    assert loaded.last_failure_reason == "prior boom"
+
+
+def test_claim_recurring_schedule_is_conditional(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    due = now - timedelta(seconds=1)
+    nxt = now + timedelta(minutes=1)
+    storage.create_schedule(
+        ScheduledSessionRecord(
+            id="rec-2",
+            backend="codex",
+            cwd="/tmp/project",
+            cron="* * * * *",
+            timezone="UTC",
+            scheduled_at=due,
+            created_at=now,
+            status=ScheduleStatus.PENDING,
+        )
+    )
+    claimed = storage.claim_recurring_schedule("rec-2", due, nxt)
+    assert claimed is not None
+    assert claimed.scheduled_at == nxt
+    # A second claim at the stale due time no longer matches → None.
+    assert storage.claim_recurring_schedule("rec-2", due, nxt) is None
+    # A cancelled row is never claimed.
+    storage.update_schedule("rec-2", status=ScheduleStatus.CANCELLED)
+    assert storage.claim_recurring_schedule("rec-2", nxt, now) is None
+
+
+def test_recurrence_columns_added_to_legacy_tables(tmp_path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    # Pre-recurrence schema (no cron/timezone/last_run_* columns).
+    conn.executescript("""
+        CREATE TABLE scheduled_sessions (
+            id TEXT PRIMARY KEY,
+            backend TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            scheduled_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE TABLE scheduled_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            text TEXT NOT NULL DEFAULT '',
+            scheduled_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+        );
+        """)
+    conn.commit()
+    conn.close()
+
+    Storage(db_path)  # additive migration must not raise
+
+    check = sqlite3.connect(db_path)
+    for table in ("scheduled_sessions", "scheduled_messages"):
+        cols = {
+            row[1] for row in check.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        assert {
+            "cron",
+            "timezone",
+            "last_run_at",
+            "last_run_status",
+            "last_failure_reason",
+        } <= cols
+    check.close()
+
+
 def _seed_session(
     tmp_path,
     *,

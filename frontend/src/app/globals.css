@@ -10003,13 +10003,15 @@ html[data-theme="light"] .preset-modal-overlay {
   gap: 10px;
 }
 
-/* Full-width segmented toggle for the One time / Repeat mode. */
-.recurrence__mode {
+/* Timing toggles read as flat in-flow controls: full-width segments and no
+   dark container fill, so no black void shows behind the inactive segment. */
+.recurrence .segmented {
   display: flex;
   width: 100%;
+  background: transparent;
 }
 
-.recurrence__mode .segmented-item {
+.recurrence .segmented .segmented-item {
   flex: 1;
 }
 

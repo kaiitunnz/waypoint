@@ -305,11 +305,7 @@ export function ScheduleMessageModal({
               (timingMode === "repeat" && !recurrenceValid)
             }
           >
-            {sending
-              ? "Scheduling…"
-              : timingMode === "repeat"
-                ? "Create recurrence"
-                : "Schedule once"}
+            {sending ? "Scheduling…" : "Schedule"}
           </button>
         </div>
       </div>

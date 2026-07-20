@@ -494,11 +494,7 @@ export function LaunchPanel({
               disabled={formBusy || (timingMode === "repeat" && !recurrenceValid)}
               type="submit"
             >
-              {formBusy
-                ? "Scheduling…"
-                : timingMode === "repeat"
-                  ? "Create recurrence"
-                  : "Schedule once"}
+              {formBusy ? "Scheduling…" : "Schedule"}
             </button>
           </div>
         </form>

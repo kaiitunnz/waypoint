@@ -1063,6 +1063,13 @@ button.inst:hover {
   color: var(--muted-soft);
 }
 
+.inst-sched-recur {
+  flex: none;
+  color: var(--accent);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
 .inst-sched-preview {
   font-family: var(--font-mono);
   font-size: 0.66rem;
@@ -10003,6 +10010,146 @@ html[data-theme="light"] .preset-modal-overlay {
   font-size: 0.86rem;
 }
 
+/* ── Recurrence control (shared by launch panel + schedule-message modal) ── */
+.recurrence {
+  display: grid;
+  gap: 12px;
+}
+
+.recurrence__body {
+  display: grid;
+  gap: 12px;
+}
+
+.recurrence__cadences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recurrence__chip {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.recurrence__chip:hover {
+  color: var(--text-strong);
+}
+
+.recurrence__chip.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.recurrence__preset-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recurrence__preset-fields .field {
+  flex: 1 1 120px;
+}
+
+.recurrence__hint {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.recurrence__hint code {
+  font-family: var(--font-mono);
+  color: var(--accent-cool);
+}
+
+.recurrence__preview {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+}
+
+.recurrence__preview-label {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.recurrence__preview-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+
+.recurrence__preview-list li {
+  font-size: 0.84rem;
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+}
+
+.recurrence__preview-tz {
+  color: var(--accent-cool);
+  font-size: 0.76rem;
+}
+
+.recurrence__preview-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.recurrence__error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+}
+
+/* Recurrence cadence label: bare mono text in the accent hue, no fill. */
+.badge.schedule-recurrence {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+  padding-inline: 0;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.schedule-when-label {
+  font-size: 0.64rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.schedule-last {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.schedule-last-error {
+  font-size: 0.82rem;
+}
+
 .schedule-row {
   display: grid;
   gap: 6px;
@@ -10627,6 +10774,22 @@ html[data-theme="light"] .sched-dock-scrim {
 
 .sched-dock-item-body {
   min-width: 0;
+}
+
+.sched-dock-recur {
+  color: var(--accent);
+  font-size: 0.72rem;
+  line-height: 1;
+  margin-left: 4px;
+}
+
+.sched-dock-item-cadence {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: var(--accent);
 }
 
 .sched-dock-item-text {

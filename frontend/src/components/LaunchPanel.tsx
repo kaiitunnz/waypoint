@@ -14,7 +14,14 @@ import {
   useLaunchForm,
 } from "@/components/LaunchFormFields";
 import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
+import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
+import {
+  cronFromState,
+  defaultRecurrenceState,
+  RecurrenceState,
+  TimingMode,
+} from "@/lib/recurrence";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import {
@@ -220,6 +227,11 @@ export function LaunchPanel({
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
   const [scheduleError, setScheduleError] = useState("");
+  const [timingMode, setTimingMode] = useState<TimingMode>("once");
+  const [recurrence, setRecurrence] = useState<RecurrenceState>(
+    defaultRecurrenceState,
+  );
+  const [recurrenceValid, setRecurrenceValid] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
@@ -283,7 +295,15 @@ export function LaunchPanel({
       preset_id: selectedPresetId,
       account_profile_id: form.accountProfileId || null,
     };
-    if (scheduleTiming === "delay") {
+    if (timingMode === "repeat") {
+      const cron = cronFromState(recurrence);
+      if (!cron) {
+        setScheduleError("Enter a valid recurrence.");
+        return;
+      }
+      payload.cron = cron;
+      payload.timezone = recurrence.timezone;
+    } else if (scheduleTiming === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
       if (!Number.isFinite(minutes) || minutes < 0) {
         setScheduleError("Enter a non-negative delay in minutes.");
@@ -401,43 +421,55 @@ export function LaunchPanel({
               placeholder="Optional — sent automatically once the session starts"
             />
           </label>
-          <div className="schedule-mode-row">
-            <button
-              type="button"
-              className={scheduleTiming === "delay" ? "primary" : "secondary"}
-              onClick={() => setScheduleTiming("delay")}
-            >
-              After delay
-            </button>
-            <button
-              type="button"
-              className={scheduleTiming === "datetime" ? "primary" : "secondary"}
-              onClick={() => setScheduleTiming("datetime")}
-            >
-              At specific time
-            </button>
-          </div>
-          {scheduleTiming === "delay" ? (
-            <label className="field">
-              <span>Minutes from now</span>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={delayMinutes}
-                onChange={(event) => setDelayMinutes(event.target.value)}
-              />
-            </label>
-          ) : (
-            <label className="field">
-              <span>Local time</span>
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-              />
-            </label>
-          )}
+          <RecurrenceControl
+            host={host}
+            token={token}
+            timing={timingMode}
+            onTimingChange={setTimingMode}
+            state={recurrence}
+            onStateChange={setRecurrence}
+            onValidChange={setRecurrenceValid}
+          >
+            <div className="schedule-mode-row">
+              <button
+                type="button"
+                className={scheduleTiming === "delay" ? "primary" : "secondary"}
+                onClick={() => setScheduleTiming("delay")}
+              >
+                After delay
+              </button>
+              <button
+                type="button"
+                className={
+                  scheduleTiming === "datetime" ? "primary" : "secondary"
+                }
+                onClick={() => setScheduleTiming("datetime")}
+              >
+                At specific time
+              </button>
+            </div>
+            {scheduleTiming === "delay" ? (
+              <label className="field">
+                <span>Minutes from now</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={delayMinutes}
+                  onChange={(event) => setDelayMinutes(event.target.value)}
+                />
+              </label>
+            ) : (
+              <label className="field">
+                <span>Local time</span>
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(event) => setScheduledAt(event.target.value)}
+                />
+              </label>
+            )}
+          </RecurrenceControl>
           {scheduleError ? <p className="error">{scheduleError}</p> : null}
           <PresetSaveActions
             form={form}
@@ -450,8 +482,16 @@ export function LaunchPanel({
           />
           <div className="launch-actions">
             <span className="grow" />
-            <button className="primary" disabled={formBusy} type="submit">
-              {formBusy ? "Scheduling…" : "Schedule"}
+            <button
+              className="primary"
+              disabled={formBusy || (timingMode === "repeat" && !recurrenceValid)}
+              type="submit"
+            >
+              {formBusy
+                ? "Scheduling…"
+                : timingMode === "repeat"
+                  ? "Create recurrence"
+                  : "Schedule once"}
             </button>
           </div>
         </form>

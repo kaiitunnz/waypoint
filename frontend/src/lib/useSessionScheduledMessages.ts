@@ -90,7 +90,9 @@ function sameSchedules(a: MessageSchedule[], b: MessageSchedule[]): boolean {
     return (
       m.id === other.id &&
       m.status === other.status &&
-      m.scheduled_at === other.scheduled_at
+      m.scheduled_at === other.scheduled_at &&
+      m.cron === other.cron &&
+      m.last_run_at === other.last_run_at
     );
   });
 }

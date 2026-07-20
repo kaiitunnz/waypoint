@@ -529,6 +529,14 @@ export interface ScheduledSession {
   failure_reason?: string | null;
   account_profile_id?: string | null;
   account_profile_label?: string | null;
+  // Recurrence: cron + timezone mark a recurring definition (both null =
+  // one-time). scheduled_at is always the next run; last_run_* carry the most
+  // recent occurrence's outcome.
+  cron?: string | null;
+  timezone?: string | null;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_failure_reason?: string | null;
 }
 
 export interface ScheduleCreateRequest {
@@ -549,6 +557,10 @@ export interface ScheduleCreateRequest {
   effort?: string | null;
   delay_seconds?: number | null;
   scheduled_at?: string | null;
+  // Recurring timing — mutually exclusive with delay_seconds/scheduled_at,
+  // enforced server-side.
+  cron?: string | null;
+  timezone?: string | null;
   // Provenance only — the frontend submits already-resolved fields; sending the
   // selected preset id lets the server stamp it onto the scheduled record.
   preset_id?: string | null;
@@ -687,6 +699,12 @@ export interface MessageSchedule {
   status: MessageScheduleStatus;
   created_at: string;
   failure_reason?: string | null;
+  // Recurrence — see ScheduledSession.
+  cron?: string | null;
+  timezone?: string | null;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_failure_reason?: string | null;
 }
 
 export interface SessionEnvelope {

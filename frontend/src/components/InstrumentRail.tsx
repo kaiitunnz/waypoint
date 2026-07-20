@@ -11,6 +11,7 @@ import {
   usageTone,
   type UsageTone,
 } from "@/lib/usage";
+import { isRecurring } from "@/lib/recurrence";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -330,6 +331,7 @@ interface ScheduledItem {
   whenLabel: string;
   target: string;
   preview: string;
+  recurring: boolean;
 }
 
 function formatShortWhen(iso: string | null | undefined): string {
@@ -385,6 +387,7 @@ function ScheduledTile({
       whenLabel: formatShortWhen(s.scheduled_at),
       target: s.title?.trim() || `${s.backend} session`,
       preview: s.initial_prompt?.trim() || s.cwd,
+      recurring: isRecurring(s),
     })),
     ...pendingMessages.map((m) => ({
       key: `message:${m.id}`,
@@ -393,6 +396,7 @@ function ScheduledTile({
       whenLabel: formatShortWhen(m.scheduled_at),
       target: titleById.get(m.session_id)?.trim() || "session",
       preview: m.text?.trim() || "",
+      recurring: isRecurring(m),
     })),
   ].sort((a, b) => (a.when ?? Infinity) - (b.when ?? Infinity));
 
@@ -419,6 +423,11 @@ function ScheduledTile({
                 {item.kind === "message" ? "→ " : ""}
                 {item.target}
               </span>
+              {item.recurring ? (
+                <span className="inst-sched-recur" aria-label="recurring">
+                  ↻
+                </span>
+              ) : null}
               <span className="inst-sched-when">{item.whenLabel}</span>
             </span>
             {item.preview ? (

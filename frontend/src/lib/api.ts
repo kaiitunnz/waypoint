@@ -916,6 +916,26 @@ export async function createSchedule(
   return body.schedule as ScheduledSession;
 }
 
+export async function previewSchedule(
+  host: string,
+  token: string,
+  cron: string,
+  timezone: string,
+  count = 3,
+): Promise<string[]> {
+  const response = await fetch(`${host}/api/schedules/preview`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ cron, timezone, count }),
+  });
+  await ensureOk(response, "failed to preview schedule");
+  const payload = await response.json();
+  return payload.occurrences as string[];
+}
+
 export async function cancelSchedule(host: string, token: string, scheduleId: string): Promise<void> {
   const response = await fetch(`${host}/api/schedules/${scheduleId}`, {
     method: "DELETE",
@@ -1053,11 +1073,15 @@ export async function createMessageSchedule(
     submit?: boolean;
     delaySeconds?: number | null;
     scheduledAt?: string | null;
+    cron?: string | null;
+    timezone?: string | null;
   } = {},
 ): Promise<MessageSchedule> {
   const body: Record<string, unknown> = { text, submit: options.submit ?? true };
   if (options.delaySeconds != null) body.delay_seconds = options.delaySeconds;
   if (options.scheduledAt != null) body.scheduled_at = options.scheduledAt;
+  if (options.cron != null) body.cron = options.cron;
+  if (options.timezone != null) body.timezone = options.timezone;
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/message-schedules`,
     {

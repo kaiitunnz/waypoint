@@ -888,6 +888,8 @@ class WaypointClient:
         config_overrides: list[str] | None = None,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
         launch_env: dict[str, str] | None = None,
         account_profile_id: str | None = None,
         preset_id: str | None = None,
@@ -910,6 +912,8 @@ class WaypointClient:
             "initial_prompt": initial_prompt,
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
+            "cron": cron,
+            "timezone": timezone,
             "launch_env": launch_env,
             "account_profile_id": account_profile_id,
             "preset_id": preset_id,
@@ -1085,6 +1089,8 @@ class WaypointClient:
         submit: bool = True,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
         attachments: list[str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "submit": submit}
@@ -1092,6 +1098,10 @@ class WaypointClient:
             body["delay_seconds"] = delay_seconds
         if scheduled_at is not None:
             body["scheduled_at"] = scheduled_at
+        if cron is not None:
+            body["cron"] = cron
+        if timezone is not None:
+            body["timezone"] = timezone
         if attachments:
             body["attachments"] = attachments
         data: dict[str, Any] = self._request(
@@ -1100,6 +1110,15 @@ class WaypointClient:
             json=body,
         ).json()["message_schedule"]
         return data
+
+    def preview_schedule(self, cron: str, timezone: str, count: int = 3) -> list[str]:
+        data: dict[str, Any] = self._request(
+            "POST",
+            "/api/schedules/preview",
+            json={"cron": cron, "timezone": timezone, "count": count},
+        ).json()
+        occurrences: list[str] = data["occurrences"]
+        return occurrences
 
     def delete_message_schedule(self, schedule_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(

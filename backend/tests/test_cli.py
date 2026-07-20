@@ -153,6 +153,11 @@ def test_help_json_is_structured() -> None:
     assert any("--preset" in o["flags"] for o in start["options"])
     schedule_create = by_path["schedule create"]
     assert any("--launch-env" in o["flags"] for o in schedule_create["options"])
+    assert any("--cron" in o["flags"] for o in schedule_create["options"])
+    assert any("--timezone" in o["flags"] for o in schedule_create["options"])
+    schedule_message_create = by_path["schedule message create"]
+    assert any("--cron" in o["flags"] for o in schedule_message_create["options"])
+    assert any("--timezone" in o["flags"] for o in schedule_message_create["options"])
 
 
 def _walk_leaf_paths(group: click.Group, prefix: str) -> list[str]:

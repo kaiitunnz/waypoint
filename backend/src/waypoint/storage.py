@@ -326,7 +326,12 @@ class Storage:
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 session_id TEXT,
-                failure_reason TEXT
+                failure_reason TEXT,
+                cron TEXT,
+                timezone TEXT,
+                last_run_at TEXT,
+                last_run_status TEXT,
+                last_failure_reason TEXT
             );
 
             CREATE TABLE IF NOT EXISTS scheduled_messages (
@@ -341,6 +346,11 @@ class Storage:
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 failure_reason TEXT,
+                cron TEXT,
+                timezone TEXT,
+                last_run_at TEXT,
+                last_run_status TEXT,
+                last_failure_reason TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
@@ -499,6 +509,13 @@ class Storage:
         self._ensure_column("scheduled_sessions", "preset_name", "TEXT")
         self._ensure_column("scheduled_sessions", "account_profile_id", "TEXT")
         self._ensure_column("scheduled_sessions", "account_profile_label", "TEXT")
+        # Recurrence (ticket 1076): additive, null means one-time.
+        for _sched_table in ("scheduled_sessions", "scheduled_messages"):
+            self._ensure_column(_sched_table, "cron", "TEXT")
+            self._ensure_column(_sched_table, "timezone", "TEXT")
+            self._ensure_column(_sched_table, "last_run_at", "TEXT")
+            self._ensure_column(_sched_table, "last_run_status", "TEXT")
+            self._ensure_column(_sched_table, "last_failure_reason", "TEXT")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -2052,8 +2069,9 @@ class Storage:
                 id, backend, cwd, launch_target_id, launch_mode, transport, title, args,
                 config_overrides, launch_env, initial_prompt, permission_mode, model, effort, scheduled_at,
                 created_at, status, session_id, failure_reason, preset_id, preset_name,
-                account_profile_id, account_profile_label
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                account_profile_id, account_profile_label,
+                cron, timezone, last_run_at, last_run_status, last_failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -2079,6 +2097,11 @@ class Storage:
                 schedule.preset_name,
                 schedule.account_profile_id,
                 schedule.account_profile_label,
+                schedule.cron,
+                schedule.timezone,
+                schedule.last_run_at.isoformat() if schedule.last_run_at else None,
+                schedule.last_run_status,
+                schedule.last_failure_reason,
             ),
         )
         self.connection.commit()
@@ -2127,6 +2150,34 @@ class Storage:
         if updated is None:
             raise KeyError(schedule_id)
         return updated
+
+    @_synchronized
+    def claim_recurring_schedule(
+        self,
+        schedule_id: str,
+        expected_scheduled_at: datetime,
+        next_scheduled_at: datetime,
+    ) -> ScheduledSessionRecord | None:
+        """Atomically advance a due recurring session schedule to its next run.
+
+        Conditional on the row still being ``pending`` at the expected due time,
+        so a second poll or a restarted scheduler cannot claim the same
+        occurrence twice. Returns the advanced record, or ``None`` when another
+        pass already claimed or cancelled it.
+        """
+        cursor = self.connection.execute(
+            "UPDATE scheduled_sessions SET scheduled_at = ? "
+            "WHERE id = ? AND status = 'pending' AND scheduled_at = ?",
+            (
+                next_scheduled_at.isoformat(),
+                schedule_id,
+                expected_scheduled_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+        if (cursor.rowcount or 0) == 0:
+            return None
+        return self.get_schedule(schedule_id)
 
     @_synchronized
     def delete_schedule(self, schedule_id: str) -> bool:
@@ -2549,8 +2600,9 @@ class Storage:
             """
             INSERT INTO scheduled_messages (
                 id, session_id, text, submit, command, items, attachments,
-                scheduled_at, created_at, status, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                scheduled_at, created_at, status, failure_reason,
+                cron, timezone, last_run_at, last_run_status, last_failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -2572,6 +2624,11 @@ class Storage:
                 record.created_at.isoformat(),
                 record.status,
                 record.failure_reason,
+                record.cron,
+                record.timezone,
+                record.last_run_at.isoformat() if record.last_run_at else None,
+                record.last_run_status,
+                record.last_failure_reason,
             ),
         )
         self.connection.commit()
@@ -2628,6 +2685,31 @@ class Storage:
         if updated is None:
             raise KeyError(message_id)
         return updated
+
+    @_synchronized
+    def claim_recurring_message(
+        self,
+        message_id: str,
+        expected_scheduled_at: datetime,
+        next_scheduled_at: datetime,
+    ) -> ScheduledMessageRecord | None:
+        """Atomically advance a due recurring message schedule to its next run.
+
+        See :meth:`claim_recurring_schedule`.
+        """
+        cursor = self.connection.execute(
+            "UPDATE scheduled_messages SET scheduled_at = ? "
+            "WHERE id = ? AND status = 'pending' AND scheduled_at = ?",
+            (
+                next_scheduled_at.isoformat(),
+                message_id,
+                expected_scheduled_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+        if (cursor.rowcount or 0) == 0:
+            return None
+        return self.get_scheduled_message(message_id)
 
     @_synchronized
     def delete_scheduled_message(self, message_id: str) -> bool:
@@ -2883,6 +2965,8 @@ class Storage:
         payload = dict(row)
         for field_name in ("scheduled_at", "created_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
+        if payload.get("last_run_at"):
+            payload["last_run_at"] = datetime.fromisoformat(payload["last_run_at"])
         payload["status"] = ScheduleStatus(payload.get("status", "pending"))
         payload["launch_mode"] = payload.get("launch_mode") or "auto"
         raw_args = payload.get("args") or "[]"
@@ -2913,6 +2997,8 @@ class Storage:
         payload = dict(row)
         for field_name in ("scheduled_at", "created_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
+        if payload.get("last_run_at"):
+            payload["last_run_at"] = datetime.fromisoformat(payload["last_run_at"])
         payload["status"] = ScheduledMessageStatus(payload.get("status", "pending"))
         payload["submit"] = bool(payload.get("submit", 1))
         raw_command = payload.pop("command", None)

@@ -46,6 +46,7 @@ from waypoint.presets import (
     resolve_schedule_create_request,
     resolve_session_create_request,
 )
+from waypoint.recurrence import RecurrenceError, next_occurrences
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AccountProbeResult,
@@ -72,6 +73,8 @@ from waypoint.schemas import (
     ProfileDoctorReport,
     ScheduledMessageCreateRequest,
     ScheduleLaunchRequest,
+    SchedulePreviewRequest,
+    SchedulePreviewResponse,
     SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
@@ -1787,6 +1790,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         removed = context.runtime.scheduler.clear_history()
         return {"removed": removed}
+
+    @app.post("/api/schedules/preview", response_model=SchedulePreviewResponse)
+    async def preview_schedule(
+        request: SchedulePreviewRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Single authoritative source of cron/DST math, shared by the launch and
+        # message creation UIs so their preview matches what actually fires.
+        try:
+            occurrences = next_occurrences(
+                request.cron,
+                request.timezone,
+                datetime.now(UTC),
+                max(1, min(request.count, 10)),
+            )
+        except RecurrenceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        return SchedulePreviewResponse(occurrences=occurrences)
 
     # ── Session presets ──────────────────────────────────────────────────
     @app.get("/api/session-presets", response_model=SessionPresetListResponse)

@@ -150,6 +150,17 @@ inbox_app = typer.Typer(
     help="Durable human-facing inbox for lead-initiated checkpoints.",
     no_args_is_help=True,
 )
+_CRON_HELP = (
+    "Recurring five-field cron expression (minute hour day-of-month month "
+    "day-of-week), e.g. '0 9 * * 1-5' for 09:00 on weekdays. Requires "
+    "--timezone and cannot be combined with --delay-seconds/--scheduled-at. "
+    "Aliases like '@daily' and second-level fields are not supported."
+)
+_TIMEZONE_HELP = (
+    "IANA timezone for --cron, e.g. 'Asia/Singapore' or 'America/New_York'. "
+    "Required with --cron; the next run is computed in this zone (DST-aware)."
+)
+
 schedule_app = typer.Typer(
     help="Manage scheduled session launches on a running Waypoint server.",
     no_args_is_help=True,
@@ -3426,6 +3437,14 @@ def schedule_create(
         str | None,
         typer.Option(help="ISO 8601 datetime at which to launch the session."),
     ] = None,
+    cron: Annotated[
+        str | None,
+        typer.Option(help=_CRON_HELP),
+    ] = None,
+    timezone: Annotated[
+        str | None,
+        typer.Option(help=_TIMEZONE_HELP),
+    ] = None,
     account_profile: Annotated[
         str | None,
         typer.Option(
@@ -3467,6 +3486,8 @@ def schedule_create(
                 args=list(args or []),
                 delay_seconds=delay_seconds,
                 scheduled_at=scheduled_at,
+                cron=cron,
+                timezone=timezone,
                 launch_env=launch_env_map,
                 account_profile_id=account_profile,
                 preset_id=preset,
@@ -4757,12 +4778,20 @@ def schedule_message_create(
         str | None,
         typer.Option(help="ISO 8601 datetime at which to send the message."),
     ] = None,
+    cron: Annotated[
+        str | None,
+        typer.Option(help=_CRON_HELP),
+    ] = None,
+    timezone: Annotated[
+        str | None,
+        typer.Option(help=_TIMEZONE_HELP),
+    ] = None,
     no_submit: Annotated[
         bool,
         typer.Option("--no-submit", help="Do not auto-submit the message."),
     ] = False,
 ) -> None:
-    """Schedule a message to be sent to a session."""
+    """Schedule a message to be sent to a session, once or on a recurring cron."""
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
@@ -4772,6 +4801,8 @@ def schedule_message_create(
                 submit=not no_submit,
                 delay_seconds=delay_seconds,
                 scheduled_at=scheduled_at,
+                cron=cron,
+                timezone=timezone,
             )
         },
     )

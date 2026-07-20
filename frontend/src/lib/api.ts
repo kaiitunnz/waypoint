@@ -921,6 +921,7 @@ export async function previewSchedule(
   token: string,
   cron: string,
   timezone: string,
+  startAt?: string | null,
   count = 3,
 ): Promise<string[]> {
   const response = await fetch(`${host}/api/schedules/preview`, {
@@ -929,7 +930,7 @@ export async function previewSchedule(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ cron, timezone, count }),
+    body: JSON.stringify({ cron, timezone, start_at: startAt ?? null, count }),
   });
   await ensureOk(response, "failed to preview schedule");
   const payload = await response.json();
@@ -1075,6 +1076,7 @@ export async function createMessageSchedule(
     scheduledAt?: string | null;
     cron?: string | null;
     timezone?: string | null;
+    startAt?: string | null;
   } = {},
 ): Promise<MessageSchedule> {
   const body: Record<string, unknown> = { text, submit: options.submit ?? true };
@@ -1082,6 +1084,7 @@ export async function createMessageSchedule(
   if (options.scheduledAt != null) body.scheduled_at = options.scheduledAt;
   if (options.cron != null) body.cron = options.cron;
   if (options.timezone != null) body.timezone = options.timezone;
+  if (options.startAt != null) body.start_at = options.startAt;
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/message-schedules`,
     {

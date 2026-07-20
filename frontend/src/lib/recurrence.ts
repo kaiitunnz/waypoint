@@ -32,17 +32,28 @@ export const WEEKDAY_LABELS = [
 
 export interface RecurrenceState {
   cadence: Cadence;
-  time: string; // "HH:mm" local wall-clock, for the four presets
+  // "YYYY-MM-DDTHH:MM" wall-clock in `timezone`: the recurrence start, and for
+  // the four presets also the time of day.
+  startAt: string;
   weekday: number; // 0=Sun … 6=Sat, for the weekly cadence
   dayOfMonth: number; // 1–31, for the monthly cadence
   customCron: string; // raw five-field expression, for the custom cadence
   timezone: string; // IANA zone
 }
 
+export function defaultStartAt(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+    `T09:00`
+  );
+}
+
 export function defaultRecurrenceState(): RecurrenceState {
   return {
     cadence: "daily",
-    time: "09:00",
+    startAt: defaultStartAt(),
     weekday: 1,
     dayOfMonth: 1,
     customCron: "0 9 * * 1-5",
@@ -50,8 +61,8 @@ export function defaultRecurrenceState(): RecurrenceState {
   };
 }
 
-function parseTime(time: string): { minute: number; hour: number } | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+function timeFields(startAt: string): { minute: number; hour: number } | null {
+  const match = /T(\d{1,2}):(\d{2})/.exec(startAt);
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -61,16 +72,15 @@ function parseTime(time: string): { minute: number; hour: number } | null {
 
 /**
  * Build a five-field cron expression from the current recurrence state, or
- * `null` when the state is not yet valid enough to submit (bad time, empty
- * custom expression). The custom expression is passed through verbatim; the
- * backend remains authoritative for validating it.
+ * `null` when the state is not yet valid enough to submit. The custom
+ * expression is passed through verbatim; the backend validates it.
  */
 export function cronFromState(state: RecurrenceState): string | null {
   if (state.cadence === "custom") {
     const trimmed = state.customCron.trim();
     return trimmed.length > 0 ? trimmed : null;
   }
-  const parsed = parseTime(state.time);
+  const parsed = timeFields(state.startAt);
   if (!parsed) return null;
   const { minute, hour } = parsed;
   switch (state.cadence) {

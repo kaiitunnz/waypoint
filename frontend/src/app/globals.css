@@ -9997,28 +9997,30 @@ html[data-theme="light"] .preset-modal-overlay {
   border-color: var(--line);
 }
 
-.schedule-mode-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.schedule-mode-row .primary,
-.schedule-mode-row .secondary {
-  min-height: 36px;
-  padding: 0 14px;
-  font-size: 0.86rem;
-}
-
 /* ── Recurrence control (shared by launch panel + schedule-message modal) ── */
 .recurrence {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
-.recurrence__body {
+/* Full-width segmented toggle for the One time / Repeat mode. */
+.recurrence__mode {
+  display: flex;
+  width: 100%;
+}
+
+.recurrence__mode .segmented-item {
+  flex: 1;
+}
+
+/* Partitions the controls the mode toggle governs from the rest of the form. */
+.recurrence__section {
   display: grid;
   gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
 }
 
 .recurrence__cadences {
@@ -10052,16 +10054,6 @@ html[data-theme="light"] .preset-modal-overlay {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.recurrence__preset-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.recurrence__preset-fields .field {
-  flex: 1 1 120px;
 }
 
 .recurrence__hint {

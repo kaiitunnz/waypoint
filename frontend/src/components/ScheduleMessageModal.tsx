@@ -100,6 +100,7 @@ export function ScheduleMessageModal({
       scheduledAt?: string;
       cron?: string;
       timezone?: string;
+      startAt?: string;
     } = { submit };
     if (timingMode === "repeat") {
       const cron = cronFromState(recurrence);
@@ -109,6 +110,7 @@ export function ScheduleMessageModal({
       }
       options.cron = cron;
       options.timezone = recurrence.timezone;
+      if (recurrence.startAt) options.startAt = recurrence.startAt;
     } else if (timing === "delay") {
       const minutes = Number.parseFloat(delay);
       if (!Number.isFinite(minutes) || minutes < 0) {

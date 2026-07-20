@@ -303,6 +303,7 @@ export function LaunchPanel({
       }
       payload.cron = cron;
       payload.timezone = recurrence.timezone;
+      payload.start_at = recurrence.startAt || null;
     } else if (scheduleTiming === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
       if (!Number.isFinite(minutes) || minutes < 0) {
@@ -430,19 +431,25 @@ export function LaunchPanel({
             onStateChange={setRecurrence}
             onValidChange={setRecurrenceValid}
           >
-            <div className="schedule-mode-row">
+            <div className="segmented" role="tablist" aria-label="One-time timing">
               <button
                 type="button"
-                className={scheduleTiming === "delay" ? "primary" : "secondary"}
+                role="tab"
+                aria-selected={scheduleTiming === "delay"}
+                className={`segmented-item${
+                  scheduleTiming === "delay" ? " active" : ""
+                }`}
                 onClick={() => setScheduleTiming("delay")}
               >
                 After delay
               </button>
               <button
                 type="button"
-                className={
-                  scheduleTiming === "datetime" ? "primary" : "secondary"
-                }
+                role="tab"
+                aria-selected={scheduleTiming === "datetime"}
+                className={`segmented-item${
+                  scheduleTiming === "datetime" ? " active" : ""
+                }`}
                 onClick={() => setScheduleTiming("datetime")}
               >
                 At specific time

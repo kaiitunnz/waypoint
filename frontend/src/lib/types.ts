@@ -558,9 +558,10 @@ export interface ScheduleCreateRequest {
   delay_seconds?: number | null;
   scheduled_at?: string | null;
   // Recurring timing — mutually exclusive with delay_seconds/scheduled_at,
-  // enforced server-side.
+  // enforced server-side. start_at is the recurrence's wall-clock start.
   cron?: string | null;
   timezone?: string | null;
+  start_at?: string | null;
   // Provenance only — the frontend submits already-resolved fields; sending the
   // selected preset id lets the server stamp it onto the scheduled record.
   preset_id?: string | null;

@@ -53,6 +53,8 @@ interface TerminalComposeProps {
   // Focus target when the user dismisses the drawer via Escape — the
   // xterm canvas, so typing resumes inside the pane.
   refocusTerminal: () => void;
+  // A post-mount increment opens the files panel; the mount value is the baseline.
+  filesOpenRequest?: number;
 }
 
 
@@ -68,6 +70,7 @@ export function TerminalCompose({
   onExpandedChange,
   connection,
   refocusTerminal,
+  filesOpenRequest = 0,
 }: TerminalComposeProps) {
   const regionId = useId();
   const [draft, setDraft] = useState("");
@@ -80,6 +83,14 @@ export function TerminalCompose({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
+
+  // Baseline the mount value so a session switch never reopens Files.
+  const filesRequestBaseline = useRef(filesOpenRequest);
+  useEffect(() => {
+    if (filesOpenRequest === filesRequestBaseline.current) return;
+    filesRequestBaseline.current = filesOpenRequest;
+    setFilesOpen(true);
+  }, [filesOpenRequest]);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);

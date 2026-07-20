@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
@@ -61,6 +62,7 @@ interface SessionTerminalViewProps {
     attachmentIds: string[],
   ) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
+  workspacePreviewEnabled: boolean;
   onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;
@@ -74,6 +76,8 @@ interface SessionTerminalViewProps {
   onRemoveFromList: () => void | Promise<void>;
   onSwitchSession: () => void;
   onOpenSettings: () => void;
+  onBrowseWorkspace: () => void;
+  onScheduled: () => void;
   onError: (message: string) => void;
 }
 
@@ -101,6 +105,7 @@ export function SessionTerminalView({
   onTerminalSubmit,
   onTerminalSubmitWithAttachments,
   attachmentsEnabled,
+  workspacePreviewEnabled,
   onRequestPaste,
   onTerminalResize,
   onTerminalScrollChip,
@@ -113,6 +118,8 @@ export function SessionTerminalView({
   onRemoveFromList,
   onSwitchSession,
   onOpenSettings,
+  onBrowseWorkspace,
+  onScheduled,
   onError,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
@@ -147,6 +154,9 @@ export function SessionTerminalView({
   };
 
   const [composeOpen, setComposeOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  // TerminalCompose owns the files panel; bumping this asks it to open.
+  const [filesOpenRequest, setFilesOpenRequest] = useState(0);
   // The compose drawer collapses back to a hairline handle when the
   // session isn't interactive, so we don't carry stale "open" state across a
   // disconnect / view switch.
@@ -281,6 +291,48 @@ export function SessionTerminalView({
                   Session settings…
                 </button>
               ) : null}
+              {session ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => {
+                    closeMenu();
+                    setScheduleOpen(true);
+                  }}
+                >
+                  <span className="glyph">◷</span>
+                  Schedule message…
+                </button>
+              ) : null}
+              {workspacePreviewEnabled ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => {
+                    closeMenu();
+                    onBrowseWorkspace();
+                  }}
+                >
+                  <span className="glyph">◫</span>
+                  Browse workspace…
+                </button>
+              ) : null}
+              {attachmentsEnabled && composeEnabled ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => {
+                    closeMenu();
+                    setFilesOpenRequest((n) => n + 1);
+                  }}
+                >
+                  <span className="glyph">▤</span>
+                  Files…
+                </button>
+              ) : null}
               {session && !sessionExited ? (
                 <>
                   <div className="composer-overflow-separator" />
@@ -373,6 +425,18 @@ export function SessionTerminalView({
           onExpandedChange={setComposeOpen}
           connection={connection}
           refocusTerminal={refocusTerminal}
+          filesOpenRequest={filesOpenRequest}
+        />
+      ) : null}
+      {scheduleOpen ? (
+        <ScheduleMessageModal
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          initialDraft=""
+          onClose={() => setScheduleOpen(false)}
+          onScheduled={onScheduled}
+          onError={onError}
         />
       ) : null}
     </section>

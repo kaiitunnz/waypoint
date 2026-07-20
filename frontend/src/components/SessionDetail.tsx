@@ -1749,6 +1749,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setWorkspaceRevealSeq(seq);
     setWorkspaceOpen(true);
   }, []);
+  // Opens the workspace dock at the root.
+  const openWorkspaceRoot = useCallback(() => {
+    setWorkspaceInitialPath(undefined);
+    setWorkspaceInitialDir(undefined);
+    setWorkspaceRevealSeq(++workspaceRequestRef.current);
+    setWorkspaceOpen(true);
+  }, []);
   // Route a clicked transcript path (absolute or ~/-relative) through the
   // backend resolver: files open the preview, directories reveal the tree. If
   // it resolves to nothing in the workspace, explicit links degrade to opening
@@ -2044,6 +2051,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
           }
+          workspacePreviewEnabled={workspacePreviewEnabled}
           onRequestPaste={requestPaste}
           onTerminalResize={handleTerminalResize}
           onTerminalScrollChip={handleTerminalScrollChip}
@@ -2056,6 +2064,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRemoveFromList={removeFromList}
           onSwitchSession={openSwitcher}
           onOpenSettings={() => setSettingsOpen(true)}
+          onBrowseWorkspace={openWorkspaceRoot}
+          onScheduled={scheduledMessages.refresh}
           onError={setError}
         />
       ) : null}
@@ -2360,12 +2370,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           assistant={assistant}
           assistantControls={assistantControls}
           workspacePreviewEnabled={workspacePreviewEnabled}
-          onBrowseWorkspace={() => {
-            setWorkspaceInitialPath(undefined);
-            setWorkspaceInitialDir(undefined);
-            setWorkspaceRevealSeq(++workspaceRequestRef.current);
-            setWorkspaceOpen(true);
-          }}
+          onBrowseWorkspace={openWorkspaceRoot}
         />
       ) : null}
       {workspacePreviewEnabled ? (

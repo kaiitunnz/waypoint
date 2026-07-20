@@ -1920,6 +1920,17 @@ export default function BoardPage() {
                       {managerMode ? "Ticket board" : "Channels overview"}
                     </h2>
                   </div>
+                  {/* The toolbar project switcher is hidden on mobile for space;
+                      surface it here, in the always-visible workspace header. */}
+                  {managerMode && managers.length > 0 ? (
+                    <div className="board-context-project">
+                      <ManagerSwitcher
+                        managers={managers}
+                        selectedId={selectedManagerId}
+                        onSelect={setSelectedManagerId}
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
                 {managerMode && managerState ? (

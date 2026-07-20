@@ -14346,6 +14346,19 @@ html[data-theme="light"] .session-switcher-row.selected {
   min-width: 0;
 }
 
+/* The selected project lives in the toolbar on desktop; on mobile that switcher
+   is dropped for space, so surface it here in the workspace header instead. */
+.board-context-project {
+  display: none;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .board-context-project {
+    display: flex;
+  }
+}
+
 .board-workspace,
 .board-detail-view {
   display: flex;

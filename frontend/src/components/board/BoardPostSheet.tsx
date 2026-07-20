@@ -309,11 +309,7 @@ export function BoardPostSheet({
               This project has no configured intake channel. It can’t receive a
               ticket until that’s set.
             </p>
-          ) : (
-            <p className="board-post-note">
-              The manager registers this as a ticket shortly after you submit.
-            </p>
-          )}
+          ) : null}
 
           {submitError ? (
             <p className="board-post-error" role="alert">
@@ -359,7 +355,7 @@ export function BoardPostSheet({
                     className="board-post-linkbtn"
                     onClick={() => setUseNamed(false)}
                   >
-                    ← Pick an existing channel
+                    ← Existing channels
                   </button>
                 ) : null}
               </div>

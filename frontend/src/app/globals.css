@@ -12739,120 +12739,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 /* Composer */
 /* Composer collapses to a slim bar so reading the board, not posting, owns the
    top of the page. */
-.board-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 0;
-  overflow: hidden;
-}
-
-.board-composer-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 16px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-}
-
-.board-composer-cue {
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  line-height: 1;
-  color: var(--accent-cool);
-}
-
-.board-composer-toggle-label {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.board-composer-toggle:hover .board-composer-toggle-label {
-  color: var(--text);
-}
-
-.board-composer-target {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: var(--accent-cool);
-}
-
-.board-composer-chevron {
-  margin-left: auto;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--muted-soft);
-  transition: transform 0.16s ease;
-}
-
-.board-composer.is-open .board-composer-chevron {
-  transform: rotate(90deg);
-}
-
-.board-composer-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 16px 14px;
-}
-
-.board-composer-fields {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.board-composer-sep {
-  color: var(--muted-soft);
-  font-family: var(--font-mono);
-}
-
-.board-composer-row {
-  display: flex;
-  gap: 10px;
-}
-
-.board-input {
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--bg-input);
-  color: var(--text);
-  font: inherit;
-}
-
-.board-input:focus {
-  outline: none;
-  border-color: var(--accent-cool);
-}
-
-.board-input-channel,
-.board-input-key {
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-}
-
-.board-input-text {
-  flex: 1;
-}
-
 /* Two-pane layout */
 .board-grid {
   display: grid;
@@ -13725,6 +13611,10 @@ html[data-theme="light"] .session-switcher-row.selected {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Without this the toolbar's flex content min-width can force the page-shell
+     grid track wider than the viewport on mobile, pushing the trailing Post
+     action off screen. */
+  min-width: 0;
   padding: 8px 10px;
   border-radius: var(--radius-glass);
   background: var(--glass-bg);
@@ -13757,6 +13647,417 @@ html[data-theme="light"] .session-switcher-row.selected {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--accent-cool);
+}
+
+/* Trailing action cluster: project switcher (multi-manager) + the single Post
+   action. The context label's flex:1 pushes this to the toolbar's far edge. */
+.board-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.board-toolbar-post {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 15px;
+}
+
+.board-toolbar-post-cue {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+/* ─── Post: confirmation + unified sheet ─── */
+
+/* Truthful, non-blocking acknowledgement after a post. In-flow and flat (not
+   glass — it sits in the content column, not on floating chrome). */
+.board-post-confirm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, var(--line));
+  background: color-mix(in srgb, var(--success) 10%, var(--bg-card));
+  animation: board-post-confirm-in 0.18s ease;
+}
+
+@keyframes board-post-confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.board-post-confirm-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.board-post-confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.board-post-confirm-link {
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--success) 88%, var(--text));
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.board-post-confirm-link:hover {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-color: color-mix(in srgb, var(--success) 65%, transparent);
+}
+
+.board-post-confirm-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.board-post-confirm-dismiss:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* The sheet body content is flat opaque instruments; the glass lives on the
+   Sheet chrome around it. */
+.board-post {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Peer Ticket | Update toggle — equal-width segments so neither mode reads as
+   secondary. */
+.board-post-modes.segmented {
+  display: flex;
+  width: 100%;
+}
+
+.board-post-modes .segmented-item {
+  flex: 1;
+}
+
+.board-post-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.board-post-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.board-post-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.board-post-field-inline .board-post-select {
+  flex: 1;
+}
+
+.board-post-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.board-post-optional {
+  margin-left: 6px;
+  color: var(--muted-soft);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.board-post-input,
+.board-post-textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.board-post-textarea {
+  resize: vertical;
+  min-height: 84px;
+  line-height: 1.5;
+}
+
+.board-post-input:focus,
+.board-post-textarea:focus {
+  outline: none;
+  border-color: var(--accent-cool);
+}
+
+.board-post-select {
+  position: relative;
+  display: inline-flex;
+}
+
+.board-post-select select {
+  width: 100%;
+  padding: 9px 30px 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  appearance: none;
+}
+
+.board-post-select select:focus {
+  outline: none;
+  border-color: var(--accent-cool);
+}
+
+.board-post-select::after {
+  content: "›";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%) rotate(90deg);
+  color: var(--muted-soft);
+  pointer-events: none;
+  font-size: 0.95rem;
+}
+
+/* Ticket destination readout: the project + its human-readable intake target,
+   never an editable channel field. */
+.board-post-target {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+}
+
+.board-post-target-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.board-post-target-sub {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+/* Update target picker. */
+.board-post-target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.board-post-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-post-picker-search {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+}
+
+.board-post-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.board-post-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-post-picker-grouplabel {
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-post-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.board-post-picker-item:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.board-post-picker-item.is-active {
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 34%, transparent);
+}
+
+.board-post-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.board-post-picker-count {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+}
+
+.board-post-named {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.board-post-named .board-post-input {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+}
+
+.board-post-writemode.segmented {
+  display: flex;
+  align-self: flex-start;
+}
+
+.board-post-linkbtn {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-cool);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.board-post-linkbtn:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+
+.board-post-inlineswitch {
+  display: inline;
+}
+
+.board-post-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.board-post-note-warn {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: color-mix(in srgb, var(--warn) 30%, var(--text));
+}
+
+.board-post-error {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: color-mix(in srgb, var(--danger) 30%, var(--text));
+  font-size: 0.83rem;
+}
+
+.board-post-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.board-post-hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+.board-post-submit {
+  flex-shrink: 0;
 }
 
 /* The desktop rail toggle is an icon-only instrument — a sidebar-panel glyph
@@ -13796,6 +14097,23 @@ html[data-theme="light"] .session-switcher-row.selected {
 
   .board-rail-toggle {
     padding: 7px;
+  }
+}
+
+/* Mobile: the toolbar has little width, so the context label — which just
+   echoes the workspace heading / channel title below it — is dropped to keep
+   ☰ · Board|Channels · Post on screen. */
+@media (max-width: 720px) {
+  .board-toolbar-context {
+    display: none;
+  }
+
+  .board-toolbar-actions {
+    margin-left: auto;
+  }
+
+  .board-toolbar-post {
+    padding: 8px 13px;
   }
 }
 
@@ -14016,6 +14334,13 @@ html[data-theme="light"] .session-switcher-row.selected {
 
 .board-context-titles {
   min-width: 0;
+}
+
+/* The selected project sits directly under the workspace title — one location
+   on every viewport. */
+.board-context-project {
+  display: flex;
+  margin-top: 4px;
 }
 
 .board-workspace,

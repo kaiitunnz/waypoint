@@ -15,11 +15,13 @@ Verifies:
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
+from waypoint.backends.claude_tty import transport as transport_mod
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
@@ -28,6 +30,7 @@ from waypoint.backends.claude_tty.byte_source import (
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
@@ -35,6 +38,13 @@ FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 
 def _load(name: str) -> str:
     return (FIXTURES / name).read_text()
+
+
+@pytest.fixture(autouse=True)
+def _fast_interrupt_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The interrupt verify-and-retry loop sleeps between pane captures; collapse
+    # it to zero so the interrupt tests do not wait real seconds.
+    monkeypatch.setattr(transport_mod, "_INTERRUPT_ESC_POLL_SECONDS", 0)
 
 
 def _make_session(
@@ -571,6 +581,91 @@ async def test_interrupt_clears_pending_question() -> None:
     tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
 
 
+async def test_interrupt_retries_esc_until_dialog_clears() -> None:
+    # A lone Esc can fail to dismiss the permission dialog. The transport must
+    # confirm the pane left the dialog and re-send Esc until it does.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    approval = _load("approval_write.txt")
+    ready = _load("ready.txt")
+
+    transport, tmux = _make_transport(plugin)
+    tmux.capture_snapshot = AsyncMock(side_effect=[approval, approval, ready])
+
+    await transport.interrupt(session)
+
+    # Initial Esc + one per lingering-dialog capture (two) = three.
+    assert tmux.send_bytes.call_count == 3
+    for call in tmux.send_bytes.call_args_list:
+        assert call.args == ("%0", b"\x1b")
+
+
+async def test_interrupt_esc_retries_are_bounded() -> None:
+    # A dialog that never clears must not loop forever: Esc is re-sent at most
+    # once per bounded retry.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+
+    transport, tmux = _make_transport(plugin)
+    tmux.capture_snapshot = AsyncMock(return_value=_load("approval_write.txt"))
+
+    await transport.interrupt(session)
+
+    assert tmux.send_bytes.call_count == 1 + transport_mod._INTERRUPT_ESC_RETRIES
+
+
+async def test_interrupt_without_dialog_sends_single_esc() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+
+    transport, tmux = _make_transport(plugin)  # capture → ready
+
+    await transport.interrupt(session)
+
+    tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+
+
+async def test_interrupt_invalidates_surfaced_approval_card() -> None:
+    # The chat approval card is dequeued only by a resolution note, so interrupt
+    # must emit an approval.invalidated note carrying the surfaced approval_id.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_approvals["sess-1"] = _pending(approval_id="aid-42")
+
+    transport, _ = _make_transport(plugin)
+    await transport.interrupt(session)
+
+    assert "sess-1" not in plugin._pending_approvals
+    record = cast(AsyncMock, transport._runtime._record_system_event)
+    record.assert_awaited_once()
+    _, kwargs = record.call_args
+    assert kwargs["metadata"]["method"] == "approval.invalidated"
+    assert kwargs["metadata"]["approval_id"] == "aid-42"
+
+
+async def test_interrupt_without_pending_approval_emits_no_note() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+
+    transport, _ = _make_transport(plugin)
+    await transport.interrupt(session)
+
+    cast(AsyncMock, transport._runtime._record_system_event).assert_not_called()
+
+
+async def test_interrupt_verify_swallows_capture_error() -> None:
+    # A pane that vanishes mid-interrupt (capture raises) must not propagate.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+
+    transport, tmux = _make_transport(plugin)
+    tmux.capture_snapshot = AsyncMock(side_effect=TmuxError("pane dead"))
+
+    await transport.interrupt(session)
+
+    tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+
+
 # ── plugin: reconnect resume must not replay the transcript ──────────────────
 
 
@@ -649,8 +744,12 @@ def _make_transport(plugin: ClaudeTtyPlugin) -> tuple[ClaudeTtyTransport, MagicM
     tmux = MagicMock()
     tmux.send_input = AsyncMock()
     tmux.send_bytes = AsyncMock()
+    # After the interrupt Esc, the transport confirms the pane left the dialog;
+    # default to a non-dialog snapshot so the verify loop returns without retry.
+    tmux.capture_snapshot = AsyncMock(return_value=_load("ready.txt"))
     runtime = MagicMock()
     runtime.tmux = tmux
+    runtime._record_system_event = AsyncMock()
     transport = ClaudeTtyTransport(runtime, plugin)
     return transport, tmux
 

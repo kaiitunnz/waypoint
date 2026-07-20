@@ -17430,19 +17430,6 @@ body.wp-dock-resizing .inbox-resizer::after {
   gap: 8px;
 }
 
-/* Compact the reply-action buttons to the inbox's flat vocabulary — the app's
-   40px primary/secondary read oversized beside the mono triggers and option
-   chips. Scoped to the reply row only, so the approval card's decision buttons
-   (also primary/secondary, but nested in the block content) are untouched;
-   weight/colors/radius inherit from the base rules, keeping Save's primary
-   emphasis and both themes correct. */
-.inbox-reply-actions .primary,
-.inbox-reply-actions .secondary {
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 0.82rem;
-}
-
 /* Existing reply attachments carried forward while editing, shown read-only
    above the editable note so the user sees what's preserved. */
 .inbox-reply-carried {

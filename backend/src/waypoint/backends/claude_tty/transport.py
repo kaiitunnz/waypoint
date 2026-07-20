@@ -24,9 +24,8 @@ if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
     from waypoint.runtime import SessionRuntime
 
-# Dialogs that Esc cancels/declines as part of interrupting the turn. Esc on a
-# trust prompt or the model/effort popups means something else, so the
-# verify-and-retry loop must not spam Esc at those.
+# Dialogs where Esc cancels the turn. Esc means something else on the
+# trust/model/effort popups, so the retry loop must not target those.
 _INTERRUPTIBLE_DIALOGS = frozenset(
     {
         pane_dialog.PaneScreen.APPROVAL,
@@ -34,8 +33,8 @@ _INTERRUPTIBLE_DIALOGS = frozenset(
         pane_dialog.PaneScreen.QUESTION,
     }
 )
-# A single Esc sometimes loses the TUI's escape-disambiguation race, so confirm
-# the dialog left the pane and re-send it a bounded number of times.
+# A single Esc can lose the TUI's escape-disambiguation race, so confirm the
+# dialog left the pane and re-send it a bounded number of times.
 _INTERRUPT_ESC_RETRIES = 4
 _INTERRUPT_ESC_POLL_SECONDS = 0.3
 
@@ -60,13 +59,8 @@ class ClaudeTtyTransport(TmuxTransport):
         self._plugin._pending_questions.pop(session.id, None)
         target = self._target(session)
         await self.adapter.send_bytes(target, b"\x1b")
-        # A lone Esc can fail to dismiss the dialog, stranding the prompt on the
-        # pane with nothing to retry it: the tailer's surfaced-signature guard
-        # suppresses a re-emit and the pending entry is already gone. Confirm the
-        # pane left the interruptible dialog and re-send Esc until it does.
-        await self._ensure_dialog_dismissed(target)
-        # The chat approval card is dequeued only by an explicit resolution note;
-        # "Sent interrupt" is not one, so invalidate the surfaced request here.
+        # The chat approval card is dequeued only by a resolution note; emit one
+        # so interrupt clears it promptly, before the dismissal retries below.
         if pending is not None:
             await self._runtime._record_system_event(
                 session.id,
@@ -76,6 +70,9 @@ class ClaudeTtyTransport(TmuxTransport):
                     "approval_id": pending.approval_id,
                 },
             )
+        # Nothing else retries a stranded prompt: the tailer's surfaced-signature
+        # guard suppresses a re-emit and the pending entry is already popped.
+        await self._ensure_dialog_dismissed(target)
 
     async def _ensure_dialog_dismissed(self, target: str) -> None:
         for _ in range(_INTERRUPT_ESC_RETRIES):

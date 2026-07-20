@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 import { trapTabFocus } from "@/lib/keyboard";
 
@@ -13,9 +13,21 @@ interface SheetProps {
   eyebrow: string;
   title: string;
   children: ReactNode;
+  // When set, initial focus lands on this element instead of the panel. A
+  // child's `autoFocus` can't win here: the open rAF below runs after commit
+  // and would steal focus back to the panel, so a field that wants focus must
+  // route through this ref.
+  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
+export function Sheet({
+  open,
+  onClose,
+  eyebrow,
+  title,
+  children,
+  initialFocusRef,
+}: SheetProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   // Key the focus effect on `open` alone; a fresh inline onClose each render
@@ -31,9 +43,11 @@ export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
     }
     restoreFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    // Move focus into the sheet on open.
+    // Move focus into the sheet on open — a named field if one asked for it,
+    // otherwise the panel.
     const raf = requestAnimationFrame(() => {
-      panelRef.current?.focus();
+      const target = initialFocusRef?.current ?? panelRef.current;
+      target?.focus();
     });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -49,7 +63,9 @@ export function Sheet({ open, onClose, eyebrow, title, children }: SheetProps) {
       document.removeEventListener("keydown", onKeyDown);
       restoreFocusRef.current?.focus();
     };
-  }, [open]);
+    // `initialFocusRef` is a stable ref object from the parent, so listing it
+    // here satisfies exhaustive-deps without re-running the effect on renders.
+  }, [open, initialFocusRef]);
 
   if (!open) {
     return null;

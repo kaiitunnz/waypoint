@@ -1947,9 +1947,10 @@ html[data-theme="light"] .field select {
 .primary,
 .secondary,
 .danger {
-  min-height: 40px;
+  min-height: 32px;
   border-radius: var(--radius-sm);
-  padding: 0 16px;
+  padding: 0 12px;
+  font-size: 0.82rem;
   font-weight: 500;
   letter-spacing: 0.02em;
   transition:
@@ -9752,13 +9753,8 @@ html[data-theme="light"] .preset-modal-overlay {
   align-items: flex-start;
 }
 
-/* Scoped below the shared 40px .secondary so the Delete-exited button matches
-   the compact header; other .secondary buttons keep their size. */
 .session-list-header .secondary {
   white-space: nowrap;
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 0.82rem;
 }
 
 /* Narrow: stack the summary above the Delete button. */
@@ -9816,14 +9812,6 @@ html[data-theme="light"] .preset-modal-overlay {
 .session-list-search-row .session-list-search {
   flex: 1;
   min-width: 0;
-}
-
-/* Shrink only the sessions search field to card scale (double class beats the
-   shared .search-bar input rule regardless of source order). The inbox,
-   switcher, and resume search inputs keep the standard field height. */
-.session-list-search.search-bar input {
-  padding: 8px 32px 8px 12px;
-  font-size: 0.82rem;
 }
 
 .session-section {
@@ -9919,7 +9907,7 @@ html[data-theme="light"] .preset-modal-overlay {
   color: var(--accent-strong);
 }
 
-/* Session-card actions (and the scheduled-panel row Cancel/Dismiss, via
+/* Session-card actions and the scheduled-panel row Cancel/Dismiss (via
    .action-chip) are bare mono text actions; color alone separates pin
    (neutral→gold) from terminate/delete/cancel (danger-red). Padding keeps
    the touch target without drawing a chip around it. */
@@ -9929,20 +9917,11 @@ html[data-theme="light"] .preset-modal-overlay {
 .link-button.action-chip {
   align-self: center;
   margin-top: 0;
-  padding: 6px 10px;
+  padding: 3px 7px;
+  font-size: 0.76rem;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background 140ms ease, color 140ms ease;
-}
-
-/* The session card runs denser than the schedule/resume panels, so its
-   actions shrink below the shared .action-chip footprint (which keeps 6px
-   10px for those panels). */
-.session-card-actions .link-button.pin-link,
-.session-card-actions .link-button.settings-link,
-.session-card-actions .link-button.danger-link {
-  padding: 3px 7px;
-  font-size: 0.76rem;
 }
 
 .session-card-actions .link-button.pin-link:hover:not(:disabled),
@@ -9992,14 +9971,9 @@ html[data-theme="light"] .preset-modal-overlay {
 }
 
 .edit-title-btn {
-  font-size: 1rem;
+  font-size: 0.82rem;
   padding: 0 4px;
   opacity: 0.6;
-}
-
-/* Scoped to the card so the larger session-detail header pencil is unaffected. */
-.session-card .edit-title-btn {
-  font-size: 0.82rem;
 }
 
 .edit-title-btn:hover {
@@ -11630,12 +11604,11 @@ html[data-theme="light"] .advanced-warning {
 }
 
 .search-bar input {
-  /* Match ``.field input/select/textarea``: same vertical padding + the
-     same inherited font so a SearchInput beside a Backend dropdown
-     lines up on desktop. The extra right-padding leaves room for the
-     clear button absolutely positioned at right: 6px. */
+  /* The extra right-padding leaves room for the clear button absolutely
+     positioned at right: 6px. */
   width: 100%;
-  padding: 11px 32px 11px 14px;
+  padding: 8px 32px 8px 12px;
+  font-size: 0.82rem;
   font-family: var(--font-mono);
   background: var(--bg-input);
   border: 1px solid var(--line);

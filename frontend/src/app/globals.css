@@ -142,6 +142,17 @@ select {
   color: inherit;
 }
 
+/* Native date/time pickers report a large intrinsic min-width and overflow
+   narrow (mobile) containers; cap the width and let them shrink so they don't. */
+input[type="datetime-local"],
+input[type="date"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
 button {
   cursor: pointer;
   border: 0;
@@ -11021,6 +11032,9 @@ html[data-theme="light"] .schedule-msg-preset.active {
 
 .schedule-msg-field-inline .schedule-msg-dialog-number {
   width: 96px;
+}
+.schedule-msg-field .schedule-msg-dialog-number {
+  width: 100%;
 }
 
 .schedule-msg-field-suffix {

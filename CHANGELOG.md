@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/kaiitunnz/waypoint/compare/v0.12.4...v0.13.0) (2026-07-20)
+
+
+### Features
+
+* add recurring (cron) schedules for sessions and messages ([#341](https://github.com/kaiitunnz/waypoint/issues/341)) ([daa857e](https://github.com/kaiitunnz/waypoint/commit/daa857ed45cfb620bd41893665e47a4b955e8895))
+* add schedule, browse-workspace, and files actions to terminal popover ([#339](https://github.com/kaiitunnz/waypoint/issues/339)) ([b32362c](https://github.com/kaiitunnz/waypoint/commit/b32362c435baac708316578db3d7cddc0bcd881e))
+* redesign the board page and streamline ticket posting ([#343](https://github.com/kaiitunnz/waypoint/issues/343)) ([b8f6f0b](https://github.com/kaiitunnz/waypoint/commit/b8f6f0bae8839af39219c7185d12beef3e9dfd6b))
+* tighten the sessions panel — smaller cards, type, and actions ([#342](https://github.com/kaiitunnz/waypoint/issues/342)) ([838fcee](https://github.com/kaiitunnz/waypoint/commit/838fcee5d31d57c9b227b1cbb428bb6d11ef2896))
+
+
+### Bug Fixes
+
+* dismiss the claude_tty permission prompt reliably on interrupt ([#337](https://github.com/kaiitunnz/waypoint/issues/337)) ([6ba02d7](https://github.com/kaiitunnz/waypoint/commit/6ba02d761e1a4a2771d85b095087e171a45c7aa5))
+* stop inbox sidebar rows from squishing instead of scrolling ([#340](https://github.com/kaiitunnz/waypoint/issues/340)) ([c10f75e](https://github.com/kaiitunnz/waypoint/commit/c10f75e63ba7e94241f4ce3aa15a700224edc793))
+
 ## [0.12.4](https://github.com/kaiitunnz/waypoint/compare/v0.12.3...v0.12.4) (2026-07-19)
 
 

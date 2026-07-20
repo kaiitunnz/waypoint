@@ -17569,16 +17569,6 @@ body.wp-dock-resizing .inbox-resizer::after {
   gap: 8px;
 }
 
-.tm-date-input {
-  padding: 8px 11px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-}
-
 .tm-date-input,
 .tm-text-input {
   font-family: var(--font-mono);

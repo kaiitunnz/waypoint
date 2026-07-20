@@ -2,11 +2,9 @@
  * Client-side recurrence helpers shared by the schedule-session and
  * schedule-message creation surfaces and the readout rows.
  *
- * This module is pure string/label logic: it maps friendly cadence presets to
- * canonical five-field cron expressions and formats cron + timezone for
- * display. It deliberately does NOT evaluate cron or compute occurrences — the
- * backend `/api/schedules/preview` endpoint is the single authority for that,
- * so the preview always matches what the scheduler actually fires.
+ * Pure string/label logic: maps cadence presets to five-field cron expressions
+ * and formats cron + timezone for display. Cron evaluation and occurrence
+ * computation live in the backend `/api/schedules/preview` endpoint.
  */
 
 export type TimingMode = "once" | "repeat";
@@ -41,7 +39,7 @@ export interface RecurrenceState {
   timezone: string; // IANA zone
 }
 
-export function defaultStartAt(): string {
+function defaultStartAt(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return (

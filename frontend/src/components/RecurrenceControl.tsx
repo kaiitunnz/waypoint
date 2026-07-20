@@ -58,8 +58,7 @@ export function RecurrenceControl({
   const cron = timing === "repeat" ? cronFromState(state) : null;
   const custom = state.cadence === "custom";
 
-  // Debounced server preview — the backend is authoritative for cron/DST, so
-  // the preview always matches what the scheduler will fire.
+  // Debounced server preview of the next occurrences.
   useEffect(() => {
     if (timing !== "repeat") {
       onValidChange(true);

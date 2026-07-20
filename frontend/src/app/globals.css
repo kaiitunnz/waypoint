@@ -9725,10 +9725,26 @@ html[data-theme="light"] .preset-modal-overlay {
 
 .session-list-shell {
   overflow: hidden;
+  /* Tighten the panel's inner rhythm to the compact cards (global .stack is
+     14px) so the header, search, and sections don't float apart. */
+  gap: 12px;
 }
 
 .session-list-summary {
   min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+/* The panel title and count sit at card scale, not the full .panel h3 /
+   1rem body size, so the header reads as dense as the list below it. */
+.session-list-summary h3 {
+  font-size: 0.95rem;
+}
+
+.session-list-summary p {
+  margin: 0;
+  font-size: 0.78rem;
 }
 
 /* Pin the Delete button to the top as the counts wrap. */
@@ -9736,8 +9752,13 @@ html[data-theme="light"] .preset-modal-overlay {
   align-items: flex-start;
 }
 
+/* Scoped below the shared 40px .secondary so the Delete-exited button matches
+   the compact header; other .secondary buttons keep their size. */
 .session-list-header .secondary {
   white-space: nowrap;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.82rem;
 }
 
 /* Narrow: stack the summary above the Delete button. */
@@ -9787,12 +9808,22 @@ html[data-theme="light"] .preset-modal-overlay {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  /* The shell's 12px gap already separates the search row from the section
+     below; the extra bottom margin doubled that space. */
+  margin-bottom: 0;
 }
 
 .session-list-search-row .session-list-search {
   flex: 1;
   min-width: 0;
+}
+
+/* Shrink only the sessions search field to card scale (double class beats the
+   shared .search-bar input rule regardless of source order). The inbox,
+   switcher, and resume search inputs keep the standard field height. */
+.session-list-search.search-bar input {
+  padding: 8px 32px 8px 12px;
+  font-size: 0.82rem;
 }
 
 .session-section {

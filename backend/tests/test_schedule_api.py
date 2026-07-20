@@ -96,6 +96,20 @@ async def test_preview_endpoint(tmp_path: Path) -> None:
         )
         assert bad.status_code == 400
 
+        # A future start shifts the previewed occurrences to begin at it.
+        started = await client.post(
+            "/api/schedules/preview",
+            json={
+                "cron": "0 9 * * *",
+                "timezone": "Asia/Singapore",
+                "start_at": "2099-01-05T09:00",
+                "count": 2,
+            },
+            headers=_auth(token),
+        )
+        assert started.status_code == 200
+        assert started.json()["occurrences"][0] == "2099-01-05T01:00:00Z"
+
 
 async def test_preview_requires_auth(tmp_path: Path) -> None:
     app, _ = _build(tmp_path)

@@ -160,6 +160,11 @@ _TIMEZONE_HELP = (
     "IANA timezone for --cron, e.g. 'Asia/Singapore' or 'America/New_York'. "
     "Required with --cron; the next run is computed in this zone (DST-aware)."
 )
+_START_AT_HELP = (
+    "Wall-clock start for a recurrence in --timezone (e.g. '2026-07-25T09:00'). "
+    "The first run is the first cron occurrence at or after it; a past start is "
+    "not backfilled. Only valid with --cron."
+)
 
 schedule_app = typer.Typer(
     help="Manage scheduled session launches on a running Waypoint server.",
@@ -3445,6 +3450,10 @@ def schedule_create(
         str | None,
         typer.Option(help=_TIMEZONE_HELP),
     ] = None,
+    start_at: Annotated[
+        str | None,
+        typer.Option(help=_START_AT_HELP),
+    ] = None,
     account_profile: Annotated[
         str | None,
         typer.Option(
@@ -3488,6 +3497,7 @@ def schedule_create(
                 scheduled_at=scheduled_at,
                 cron=cron,
                 timezone=timezone,
+                start_at=start_at,
                 launch_env=launch_env_map,
                 account_profile_id=account_profile,
                 preset_id=preset,
@@ -4786,6 +4796,10 @@ def schedule_message_create(
         str | None,
         typer.Option(help=_TIMEZONE_HELP),
     ] = None,
+    start_at: Annotated[
+        str | None,
+        typer.Option(help=_START_AT_HELP),
+    ] = None,
     no_submit: Annotated[
         bool,
         typer.Option("--no-submit", help="Do not auto-submit the message."),
@@ -4803,6 +4817,7 @@ def schedule_message_create(
                 scheduled_at=scheduled_at,
                 cron=cron,
                 timezone=timezone,
+                start_at=start_at,
             )
         },
     )

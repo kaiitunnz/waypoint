@@ -13,7 +13,7 @@ localizing each candidate with ``fold=0``; a candidate whose wall clock does
 not survive a UTC round-trip is a spring-forward gap and is dropped.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadCronError, CroniterBadDateError, croniter
@@ -121,3 +121,26 @@ def next_occurrences(
 def next_occurrence_after(expression: str, timezone: str, after: datetime) -> datetime:
     """Return the first UTC occurrence strictly after ``after``."""
     return next_occurrences(expression, timezone, after, 1)[0]
+
+
+def resolve_recurrence_base(
+    now: datetime, timezone: str, start_at: str | None
+) -> datetime:
+    """Base instant to compute the first occurrence from.
+
+    A future ``start_at`` (wall-clock in ``timezone``) makes the first run its
+    first cron occurrence at or after it; a past or absent start uses ``now``,
+    so a start in the past is not backfilled.
+    """
+    if not start_at:
+        return now
+    try:
+        naive = datetime.fromisoformat(start_at)
+    except ValueError as exc:
+        raise RecurrenceError(f"invalid start_at: {start_at!r}") from exc
+    tz = validate_timezone(timezone)
+    aware = naive if naive.tzinfo is not None else naive.replace(tzinfo=tz)
+    start = aware.astimezone(UTC)
+    if start <= now:
+        return now
+    return start - timedelta(microseconds=1)

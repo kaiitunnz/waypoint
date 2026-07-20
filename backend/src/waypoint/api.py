@@ -46,7 +46,11 @@ from waypoint.presets import (
     resolve_schedule_create_request,
     resolve_session_create_request,
 )
-from waypoint.recurrence import RecurrenceError, next_occurrences
+from waypoint.recurrence import (
+    RecurrenceError,
+    next_occurrences,
+    resolve_recurrence_base,
+)
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AccountProbeResult,
@@ -1798,10 +1802,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         # Authoritative next-run source shared by both creation UIs.
         try:
+            base = resolve_recurrence_base(
+                datetime.now(UTC), request.timezone, request.start_at
+            )
             occurrences = next_occurrences(
                 request.cron,
                 request.timezone,
-                datetime.now(UTC),
+                base,
                 max(1, min(request.count, 10)),
             )
         except RecurrenceError as exc:

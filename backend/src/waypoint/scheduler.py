@@ -12,6 +12,7 @@ from waypoint.recurrence import (
     MISSED_RUN_GRACE_SECONDS,
     RecurrenceError,
     next_occurrence_after,
+    resolve_recurrence_base,
 )
 from waypoint.schemas import (
     ScheduleCreateRequest,
@@ -39,6 +40,7 @@ def validate_timing_mode(
     scheduled_at: datetime | None,
     cron: str | None,
     timezone: str | None,
+    start_at: str | None = None,
 ) -> None:
     """Enforce the timing-mode exclusivity matrix, raising HTTP 400.
 
@@ -56,6 +58,11 @@ def validate_timing_mode(
             detail="timezone is only valid together with cron for a recurring schedule",
         )
     recurring = cron is not None
+    if start_at is not None and not recurring:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="start_at is only valid for a recurring schedule",
+        )
     has_one_time = delay_seconds is not None or scheduled_at is not None
     if recurring and has_one_time:
         raise HTTPException(
@@ -607,12 +614,14 @@ class Scheduler:
             request.scheduled_at,
             request.cron,
             request.timezone,
+            request.start_at,
         )
         if request.cron is not None and request.timezone is not None:
             try:
-                return next_occurrence_after(
-                    request.cron, request.timezone, datetime.now(UTC)
+                base = resolve_recurrence_base(
+                    datetime.now(UTC), request.timezone, request.start_at
                 )
+                return next_occurrence_after(request.cron, request.timezone, base)
             except RecurrenceError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)

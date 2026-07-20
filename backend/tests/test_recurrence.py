@@ -8,6 +8,7 @@ from waypoint.recurrence import (
     RecurrenceError,
     next_occurrence_after,
     next_occurrences,
+    resolve_recurrence_base,
     validate_cron,
     validate_timezone,
 )
@@ -99,3 +100,35 @@ def test_dst_fall_back_repeated_time_runs_once_at_earlier() -> None:
 
 def test_grace_constant_is_named() -> None:
     assert MISSED_RUN_GRACE_SECONDS == 60.0
+
+
+def test_resolve_base_uses_now_without_start() -> None:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    assert resolve_recurrence_base(now, "UTC", None) == now
+
+
+def test_resolve_base_ignores_past_start() -> None:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    assert resolve_recurrence_base(now, "UTC", "2020-01-01T00:00") == now
+
+
+def test_future_start_makes_first_occurrence_at_or_after_it() -> None:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    # Daily 09:00 SGT starting Fri 2026-07-24 → first run is 2026-07-24 09:00 SGT.
+    base = resolve_recurrence_base(now, "Asia/Singapore", "2026-07-24T09:00")
+    first = next_occurrence_after("0 9 * * *", "Asia/Singapore", base)
+    assert first == datetime(2026, 7, 24, 1, 0, tzinfo=UTC)  # 09:00 SGT
+
+
+def test_start_interpreted_in_recurrence_timezone() -> None:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    # 09:00 wall-clock resolves against the zone, not UTC/browser.
+    base = resolve_recurrence_base(now, "America/New_York", "2026-07-24T09:00")
+    first = next_occurrence_after("0 9 * * *", "America/New_York", base)
+    assert first == datetime(2026, 7, 24, 13, 0, tzinfo=UTC)  # 09:00 EDT
+
+
+def test_invalid_start_raises() -> None:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    with pytest.raises(RecurrenceError):
+        resolve_recurrence_base(now, "UTC", "not-a-date")

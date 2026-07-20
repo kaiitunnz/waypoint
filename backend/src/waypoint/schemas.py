@@ -1240,9 +1240,12 @@ class ScheduleCreateRequest(BaseModel):
     effort: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
-    # Recurring timing: five-field cron + IANA timezone.
+    # Recurring timing: five-field cron + IANA timezone. ``start_at`` is the
+    # recurrence's not-before wall-clock in that timezone (the first run is the
+    # first cron occurrence at or after it); null starts now.
     cron: str | None = None
     timezone: str | None = None
+    start_at: str | None = None
     # See SessionCreateRequest — apply a preset before validation. Explicit
     # request fields win; schedule timing/prompt fields are never taken from a
     # preset.
@@ -1261,6 +1264,7 @@ class ScheduleLaunchRequest(ScheduleCreateRequest):
 class SchedulePreviewRequest(BaseModel):
     cron: str
     timezone: str
+    start_at: str | None = None
     count: int = 3
 
 
@@ -1311,6 +1315,7 @@ class ScheduledMessageCreateRequest(BaseModel):
     # Recurring timing — see ScheduleCreateRequest.
     cron: str | None = None
     timezone: str | None = None
+    start_at: str | None = None
 
 
 class SideQuestionStatus(StrEnum):

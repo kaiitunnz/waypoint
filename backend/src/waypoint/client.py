@@ -890,6 +890,7 @@ class WaypointClient:
         scheduled_at: str | None = None,
         cron: str | None = None,
         timezone: str | None = None,
+        start_at: str | None = None,
         launch_env: dict[str, str] | None = None,
         account_profile_id: str | None = None,
         preset_id: str | None = None,
@@ -914,6 +915,7 @@ class WaypointClient:
             "scheduled_at": scheduled_at,
             "cron": cron,
             "timezone": timezone,
+            "start_at": start_at,
             "launch_env": launch_env,
             "account_profile_id": account_profile_id,
             "preset_id": preset_id,
@@ -1091,6 +1093,7 @@ class WaypointClient:
         scheduled_at: str | None = None,
         cron: str | None = None,
         timezone: str | None = None,
+        start_at: str | None = None,
         attachments: list[str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "submit": submit}
@@ -1102,6 +1105,8 @@ class WaypointClient:
             body["cron"] = cron
         if timezone is not None:
             body["timezone"] = timezone
+        if start_at is not None:
+            body["start_at"] = start_at
         if attachments:
             body["attachments"] = attachments
         data: dict[str, Any] = self._request(

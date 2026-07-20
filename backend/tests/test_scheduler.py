@@ -614,6 +614,37 @@ async def test_multiple_due_recurring_all_fire_in_one_batch(
 
 
 @pytest.mark.asyncio
+async def test_recurring_start_at_sets_first_run(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="codex",
+            cwd="/tmp/project",
+            cron="0 9 * * *",
+            timezone="Asia/Singapore",
+            start_at="2099-01-05T09:00",
+        )
+    )
+    # First run is the start day's 09:00 SGT (01:00 UTC), not today.
+    assert schedule.scheduled_at == datetime(2099, 1, 5, 1, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_start_at_without_cron_returns_400(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_schedule(
+            ScheduleCreateRequest(
+                backend="codex",
+                cwd="/tmp/project",
+                delay_seconds=60,
+                start_at="2099-01-05T09:00",
+            )
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_cancel_recurring_stops_future_claims(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(

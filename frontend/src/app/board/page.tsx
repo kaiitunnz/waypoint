@@ -13,6 +13,13 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  BoardPostSheet,
+  type SubmitResult,
+  type TicketSubmit,
+  type UpdateSubmit,
+} from "@/components/board/BoardPostSheet";
+import { Sheet } from "@/components/Sheet";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   clearBoardChannel,
@@ -66,6 +73,13 @@ const RAIL_COLLAPSED_KEY = "waypoint.board.railCollapsed";
 
 type LoadState = "loading" | "ready" | "error";
 type BoardView = "board" | "channels";
+type ComposerMode = "closed" | "ticket" | "update";
+
+// A truthful, non-blocking acknowledgement shown after a successful post.
+interface PostConfirm {
+  text: string;
+  action: { label: string; channel: string };
+}
 
 function shortId(value: string): string {
   return value.length > 16 ? `${value.slice(0, 16)}…` : value;
@@ -904,11 +918,18 @@ export default function BoardPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
-  const [draftChannel, setDraftChannel] = useState("");
-  const [draftText, setDraftText] = useState("");
-  const [draftKey, setDraftKey] = useState("");
   const [posting, setPosting] = useState(false);
-  const [composerOpen, setComposerOpen] = useState(false);
+  // The unified Post sheet: "closed" when hidden, else the mode it opened in.
+  // The sheet owns its own live mode toggle; this only records the open state
+  // and the opening default.
+  const [composerMode, setComposerMode] = useState<ComposerMode>("closed");
+  const [postConfirm, setPostConfirm] = useState<PostConfirm | null>(null);
+  // Set synchronously before the first await so two fast clicks can't enqueue a
+  // duplicate keyless intake post; the disabled button is only a backstop.
+  const postingRef = useRef(false);
+  // Initial focus target for the sheet; the child attaches it to the right
+  // field for its opening mode.
+  const postFocusRef = useRef<HTMLElement | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -1179,7 +1200,6 @@ export default function BoardPage() {
     setEditDraft("");
     setConfirmDeleteId(null);
     if (activeChannel) {
-      setDraftChannel(activeChannel);
       void refreshEntries(activeChannel);
     } else {
       setEntries([]);
@@ -1315,42 +1335,101 @@ export default function BoardPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [navOpen]);
 
-  const handlePost = useCallback(async () => {
-    const channel = draftChannel.trim();
-    const text = draftText.trim();
-    if (!host || !token || !channel || !text) return;
-    setPosting(true);
-    setError("");
-    try {
-      await postBoardEntry(host, token, channel, {
-        text,
-        key: draftKey.trim() || null,
-      });
-      setDraftText("");
-      setDraftKey("");
-      setActiveChannel(channel);
-      setView("channels");
-      await refreshChannels();
-      await refreshEntries(channel);
-    } catch (err) {
-      if (isAuthError(err)) {
-        handleAuthFailure();
-        return;
+  const closePost = useCallback(() => setComposerMode("closed"), []);
+
+  const handleSubmitTicket = useCallback(
+    async (draft: TicketSubmit): Promise<SubmitResult> => {
+      if (postingRef.current) return { ok: false };
+      const channel = managerState?.config?.render_context?.tickets_channel;
+      // Guard on identity: managerState may still be the previously selected
+      // manager's while the new one loads, so never post to a stale intake.
+      const ready =
+        managerState?.config?.id === selectedManagerId && !!channel;
+      if (!host || !token || !channel || !ready) return { ok: false };
+      const project = managerState?.config?.project ?? "the project";
+      const title = draft.title.trim();
+      const details = draft.details.trim();
+      const text = details ? `${title}\n\n${details}` : title;
+      postingRef.current = true;
+      setPosting(true);
+      try {
+        await postBoardEntry(host, token, channel, {
+          text,
+          key: null,
+          metadata: { priority: draft.priority },
+        });
+        setComposerMode("closed");
+        setPostConfirm({
+          text: `Sent to ${project} intake. The manager will register it shortly.`,
+          action: { label: "Open intake", channel },
+        });
+        await refreshChannels();
+        void refreshManagerState(selectedManagerId!);
+        return { ok: true };
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return { ok: false };
+        }
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : "failed to post ticket",
+        };
+      } finally {
+        postingRef.current = false;
+        setPosting(false);
       }
-      setError(err instanceof Error ? err.message : "failed to post entry");
-    } finally {
-      setPosting(false);
-    }
-  }, [
-    host,
-    token,
-    draftChannel,
-    draftText,
-    draftKey,
-    refreshChannels,
-    refreshEntries,
-    handleAuthFailure,
-  ]);
+    },
+    [
+      host,
+      token,
+      managerState,
+      selectedManagerId,
+      refreshChannels,
+      refreshManagerState,
+      handleAuthFailure,
+    ],
+  );
+
+  const handleSubmitUpdate = useCallback(
+    async (draft: UpdateSubmit): Promise<SubmitResult> => {
+      if (postingRef.current) return { ok: false };
+      const channel = draft.channel.trim();
+      const text = draft.text.trim();
+      if (!host || !token || !channel || !text) return { ok: false };
+      postingRef.current = true;
+      setPosting(true);
+      try {
+        await postBoardEntry(host, token, channel, {
+          text,
+          key: draft.key?.trim() || null,
+        });
+        setComposerMode("closed");
+        setActiveChannel(channel);
+        setView("channels");
+        setPostConfirm({
+          text: `Posted to ${channel}.`,
+          action: { label: "Open channel", channel },
+        });
+        await refreshChannels();
+        await refreshEntries(channel);
+        return { ok: true };
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return { ok: false };
+        }
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : "failed to post update",
+        };
+      } finally {
+        postingRef.current = false;
+        setPosting(false);
+      }
+    },
+    [host, token, refreshChannels, refreshEntries, handleAuthFailure],
+  );
 
   const handleClear = useCallback(
     async (channel: string) => {
@@ -1558,6 +1637,39 @@ export default function BoardPage() {
     [ticketByChannel],
   );
 
+  // Ticket posting reads the selected manager's loaded state. Gate on config
+  // identity so a project switch (which refetches async) can't post to the
+  // old project's intake while the new state is still loading.
+  const managerStateForSelection =
+    managerState?.config?.id === selectedManagerId ? managerState : null;
+  const managerReady =
+    managerMode &&
+    !!managerStateForSelection?.config?.render_context?.tickets_channel;
+  const managerMisconfigured =
+    managerMode &&
+    managerStateForSelection !== null &&
+    !managerStateForSelection.config?.render_context?.tickets_channel;
+  const selectedProject =
+    managers.find((manager) => manager.id === selectedManagerId)?.project ??
+    null;
+  const ticketsChannel =
+    managerStateForSelection?.config?.render_context?.tickets_channel ?? null;
+  const priorityLevels =
+    managerStateForSelection?.config?.priority_levels ?? [];
+  const defaultUpdateChannel = activeChannel ?? channels[0]?.channel ?? null;
+
+  // Toolbar Post follows the view: Ticket on a manager Board, Update on
+  // Channels. Update opens directly for a channel shortcut or the empty state.
+  const openPost = useCallback(() => {
+    setPostConfirm(null);
+    setComposerMode(view === "board" && managerMode ? "ticket" : "update");
+  }, [view, managerMode]);
+
+  const openUpdate = useCallback(() => {
+    setPostConfirm(null);
+    setComposerMode("update");
+  }, []);
+
   // The two shapes the board is built on: keyed cells (latest-wins
   // variables, pinned) and the append-only log (newest first).
   const cells = entries
@@ -1660,73 +1772,31 @@ export default function BoardPage() {
         </div>
       ) : null}
 
-      <section
-        className={`panel board-composer${composerOpen ? " is-open" : ""}`}
-        aria-label="Post to a channel"
-      >
-        <button
-          type="button"
-          className="board-composer-toggle"
-          onClick={() => setComposerOpen((open) => !open)}
-          aria-expanded={composerOpen}
-        >
-          <span className="board-composer-cue" aria-hidden="true">
-            ＋
-          </span>
-          <span className="board-composer-toggle-label">Post to a channel</span>
-          {!composerOpen && (draftChannel.trim() || activeChannel) ? (
-            <span className="board-composer-target">
-              {draftChannel.trim() || activeChannel}
-            </span>
-          ) : null}
-          <span className="board-composer-chevron" aria-hidden="true">
-            ›
-          </span>
-        </button>
-        {composerOpen ? (
-          <div className="board-composer-body">
-            <div className="board-composer-fields">
-              <input
-                className="board-input board-input-channel"
-                placeholder="channel — e.g. topic:plan"
-                value={draftChannel}
-                onChange={(event) => setDraftChannel(event.target.value)}
-                aria-label="Channel"
-              />
-              <span className="board-composer-sep" aria-hidden="true">
-                /
-              </span>
-              <input
-                className="board-input board-input-key"
-                placeholder="key — blank appends to the log"
-                value={draftKey}
-                onChange={(event) => setDraftKey(event.target.value)}
-                aria-label="Key"
-              />
-            </div>
-            <div className="board-composer-row">
-              <input
-                className="board-input board-input-text"
-                placeholder="message"
-                value={draftText}
-                onChange={(event) => setDraftText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void handlePost();
-                }}
-                aria-label="Message"
-              />
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void handlePost()}
-                disabled={posting || !draftChannel.trim() || !draftText.trim()}
-              >
-                {draftKey.trim() ? "Set cell" : "Post"}
-              </button>
-            </div>
+      {postConfirm ? (
+        <div className="board-post-confirm" role="status">
+          <span className="board-post-confirm-text">{postConfirm.text}</span>
+          <div className="board-post-confirm-actions">
+            <button
+              type="button"
+              className="board-post-confirm-link"
+              onClick={() => {
+                selectChannel(postConfirm.action.channel);
+                setPostConfirm(null);
+              }}
+            >
+              {postConfirm.action.label} →
+            </button>
+            <button
+              type="button"
+              className="board-post-confirm-dismiss"
+              onClick={() => setPostConfirm(null)}
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
           </div>
-        ) : null}
-      </section>
+        </div>
+      ) : null}
 
       {state === "ready" && (channels.length > 0 || managerMode) ? (
         <div className="board-toolbar">
@@ -1761,6 +1831,25 @@ export default function BoardPage() {
               : (activeChannel ?? "—")}
           </span>
           <ViewSwitch view={view} onChange={setView} />
+          <div className="board-toolbar-actions">
+            {managerMode && managers.length > 0 ? (
+              <ManagerSwitcher
+                managers={managers}
+                selectedId={selectedManagerId}
+                onSelect={setSelectedManagerId}
+              />
+            ) : null}
+            <button
+              type="button"
+              className="primary board-toolbar-post"
+              onClick={openPost}
+            >
+              <span className="board-toolbar-post-cue" aria-hidden="true">
+                ＋
+              </span>
+              Post
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -1770,8 +1859,14 @@ export default function BoardPage() {
           <p className="muted">
             Nothing has been posted yet. Sessions post with{" "}
             <code>waypoint board post &lt;channel&gt; &lt;message&gt;</code>, or
-            use the composer above.
+            post one now.
           </p>
+          <button type="button" className="primary" onClick={openUpdate}>
+            <span className="board-toolbar-post-cue" aria-hidden="true">
+              ＋
+            </span>
+            Post to a channel
+          </button>
         </section>
       ) : null}
 
@@ -1825,13 +1920,6 @@ export default function BoardPage() {
                       {managerMode ? "Ticket board" : "Channels overview"}
                     </h2>
                   </div>
-                  {managerMode && managers.length > 0 ? (
-                    <ManagerSwitcher
-                      managers={managers}
-                      selectedId={selectedManagerId}
-                      onSelect={setSelectedManagerId}
-                    />
-                  ) : null}
                 </div>
 
                 {managerMode && managerState ? (
@@ -1877,6 +1965,13 @@ export default function BoardPage() {
                       </div>
                     </div>
                     <div className="board-actions">
+                      <button
+                        type="button"
+                        className="board-action board-action-post"
+                        onClick={openUpdate}
+                      >
+                        Post here
+                      </button>
                       <button
                         type="button"
                         className="board-action"
@@ -2208,6 +2303,35 @@ export default function BoardPage() {
           </button>
         </section>
       ) : null}
+
+      <Sheet
+        open={composerMode !== "closed"}
+        onClose={closePost}
+        eyebrow={view === "board" && managerMode ? "Board · post" : "Channels · post"}
+        title="Post"
+        initialFocusRef={postFocusRef}
+      >
+        {composerMode !== "closed" ? (
+          <BoardPostSheet
+            initialMode={composerMode}
+            initialFocusRef={postFocusRef}
+            ticketAvailable={managerMode}
+            managerReady={managerReady}
+            managerMisconfigured={managerMisconfigured}
+            project={selectedProject}
+            ticketsChannel={ticketsChannel}
+            priorityLevels={priorityLevels}
+            managers={managers}
+            selectedManagerId={selectedManagerId}
+            onSelectManager={setSelectedManagerId}
+            channels={channels}
+            defaultUpdateChannel={defaultUpdateChannel}
+            posting={posting}
+            onSubmitTicket={handleSubmitTicket}
+            onSubmitUpdate={handleSubmitUpdate}
+          />
+        ) : null}
+      </Sheet>
     </main>
   );
 }

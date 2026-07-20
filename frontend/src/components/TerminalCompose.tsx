@@ -53,10 +53,7 @@ interface TerminalComposeProps {
   // Focus target when the user dismisses the drawer via Escape — the
   // xterm canvas, so typing resumes inside the pane.
   refocusTerminal: () => void;
-  // Monotonic counter the terminal-bar "Files…" menu item bumps to open this
-  // component's files panel — the panel owns the compose ``useAttachments``, so
-  // routing the request here preserves add-to-message reference behavior. The
-  // baseline value is ignored so a stale request never opens Files on remount.
+  // A post-mount increment opens the files panel; the mount value is the baseline.
   filesOpenRequest?: number;
 }
 
@@ -87,9 +84,7 @@ export function TerminalCompose({
   const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
 
-  // Treat the request value present at mount as the baseline; only a later
-  // increment (a user clicking the terminal-bar "Files…" item) opens the
-  // panel, so switching sessions never reopens Files in a fresh compose.
+  // Baseline the mount value so a session switch never reopens Files.
   const filesRequestBaseline = useRef(filesOpenRequest);
   useEffect(() => {
     if (filesOpenRequest === filesRequestBaseline.current) return;

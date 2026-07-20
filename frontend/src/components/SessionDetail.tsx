@@ -1749,8 +1749,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setWorkspaceRevealSeq(seq);
     setWorkspaceOpen(true);
   }, []);
-  // Opens the dock at the workspace root — shared by the chat composer and the
-  // terminal-bar "Browse workspace…" items so both start from the same state.
+  // Opens the workspace dock at the root.
   const openWorkspaceRoot = useCallback(() => {
     setWorkspaceInitialPath(undefined);
     setWorkspaceInitialDir(undefined);

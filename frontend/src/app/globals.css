@@ -13867,27 +13867,13 @@ html[data-theme="light"] .session-switcher-row.selected {
    never an editable channel field. */
 .board-post-target {
   display: flex;
-  align-items: flex-start;
-  gap: 11px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-card-soft);
-}
-
-.board-post-target-cue {
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  line-height: 1.3;
-  color: var(--accent);
-}
-
-.board-post-target-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
 }
 
 .board-post-target-name {
@@ -13898,15 +13884,10 @@ html[data-theme="light"] .session-switcher-row.selected {
 
 .board-post-target-sub {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0.03em;
   color: var(--muted);
-}
-
-.board-post-project {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
 }
 
 /* Update target picker. */
@@ -13998,12 +13979,13 @@ html[data-theme="light"] .session-switcher-row.selected {
 
 .board-post-named {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .board-post-named .board-post-input {
-  flex: 1;
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 0.84rem;
 }

@@ -214,40 +214,31 @@ export function BoardPostSheet({
       {mode === "ticket" ? (
         <div className="board-post-form">
           <div className="board-post-target" aria-label="Ticket destination">
-            <span className="board-post-target-cue" aria-hidden="true">
-              ⁂
-            </span>
-            <div className="board-post-target-lines">
-              {managers.length > 1 ? (
-                <label className="board-post-project">
-                  <span className="board-post-label">Project</span>
-                  <span className="board-post-select">
-                    <select
-                      value={selectedManagerId ?? ""}
-                      onChange={(event) => onSelectManager(event.target.value)}
-                      aria-label="Project"
-                    >
-                      {managers.map((manager) => (
-                        <option key={manager.id} value={manager.id}>
-                          {manager.project}
-                        </option>
-                      ))}
-                    </select>
-                  </span>
-                </label>
-              ) : (
-                <span className="board-post-target-name">
-                  {project ?? "manager"}
-                </span>
-              )}
-              <span className="board-post-target-sub">
-                {managerReady
-                  ? "manager intake"
-                  : managerMisconfigured
-                    ? "no intake channel configured"
-                    : "loading manager…"}
+            <span className="board-post-label">Destination</span>
+            {managers.length > 1 ? (
+              <span className="board-post-select">
+                <select
+                  value={selectedManagerId ?? ""}
+                  onChange={(event) => onSelectManager(event.target.value)}
+                  aria-label="Project"
+                >
+                  {managers.map((manager) => (
+                    <option key={manager.id} value={manager.id}>
+                      {manager.project} · manager intake
+                    </option>
+                  ))}
+                </select>
               </span>
-            </div>
+            ) : (
+              <span className="board-post-target-name">
+                {project ?? "manager"}
+                {managerReady ? (
+                  <span className="board-post-target-sub"> · manager intake</span>
+                ) : !managerMisconfigured ? (
+                  <span className="board-post-target-sub"> · loading…</span>
+                ) : null}
+              </span>
+            )}
           </div>
 
           <label className="board-post-field">
@@ -320,8 +311,7 @@ export function BoardPostSheet({
             </p>
           ) : (
             <p className="board-post-note">
-              Submitting sends your request to the project’s manager intake. The
-              manager registers it as a ticket shortly after.
+              The manager registers this as a ticket shortly after you submit.
             </p>
           )}
 
@@ -369,7 +359,7 @@ export function BoardPostSheet({
                     className="board-post-linkbtn"
                     onClick={() => setUseNamed(false)}
                   >
-                    Pick existing
+                    ← Pick an existing channel
                   </button>
                 ) : null}
               </div>
@@ -441,6 +431,7 @@ export function BoardPostSheet({
               }`}
               aria-pressed={writeMode === "append"}
               onClick={() => setWriteMode("append")}
+              title="Appends a new post to the channel log"
             >
               Append
             </button>
@@ -449,15 +440,11 @@ export function BoardPostSheet({
               className={`segmented-item${writeMode === "cell" ? " active" : ""}`}
               aria-pressed={writeMode === "cell"}
               onClick={() => setWriteMode("cell")}
+              title="Sets a keyed cell — the latest value for that key wins"
             >
               Set cell
             </button>
           </div>
-          <p className="board-post-note">
-            {writeMode === "append"
-              ? "Appends a new post to the channel log."
-              : "Sets a keyed cell — the latest value for that key wins."}
-          </p>
 
           {intakeWarning ? (
             <p className="board-post-note board-post-note-warn" role="alert">

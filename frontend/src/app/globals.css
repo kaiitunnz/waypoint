@@ -16484,6 +16484,9 @@ body.wp-dock-resizing .inbox-resizer::after {
    hover/focus delete button above it — the row itself is a sibling, never a
    parent of another button. */
 .inbox-row-wrap {
+  /* The list is a flex column; without this, many rows shrink to fit the pane
+     instead of scrolling, and each row's overflow:hidden clips its content. */
+  flex: none;
   position: relative;
   overflow: hidden;
 }
@@ -16724,6 +16727,7 @@ body.wp-dock-resizing .inbox-resizer::after {
 }
 
 .inbox-load-more {
+  flex: none;
   margin: 12px auto;
   padding: 6px 16px;
   border: 1px solid var(--line);
@@ -16870,6 +16874,7 @@ body.wp-dock-resizing .inbox-resizer::after {
 
 /* ── Skeleton (loading) ── */
 .inbox-row-skeleton {
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 8px;

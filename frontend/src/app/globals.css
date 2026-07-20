@@ -153,6 +153,28 @@ input[type="week"] {
   min-width: 0;
 }
 
+/* iOS Safari sizes native date/time controls to their intrinsic value width and
+   ignores the box model, so the cap above is not enough and they overflow the
+   viewport. Dropping the native appearance makes them honor width; scoped to
+   iOS via the touch-callout probe so desktop keeps its native picker chrome. */
+@supports (-webkit-touch-callout: none) {
+  input[type="datetime-local"],
+  input[type="date"],
+  input[type="time"],
+  input[type="month"],
+  input[type="week"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+  }
+  input[type="datetime-local"]::-webkit-date-and-time-value,
+  input[type="date"]::-webkit-date-and-time-value,
+  input[type="time"]::-webkit-date-and-time-value {
+    min-width: 0;
+    text-align: left;
+  }
+}
+
 button {
   cursor: pointer;
   border: 0;
@@ -17545,6 +17567,16 @@ body.wp-dock-resizing .inbox-resizer::after {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.tm-date-input {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
 }
 
 .tm-date-input,

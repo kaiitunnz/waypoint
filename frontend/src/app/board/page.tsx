@@ -1832,13 +1832,6 @@ export default function BoardPage() {
           </span>
           <ViewSwitch view={view} onChange={setView} />
           <div className="board-toolbar-actions">
-            {managerMode && managers.length > 0 ? (
-              <ManagerSwitcher
-                managers={managers}
-                selectedId={selectedManagerId}
-                onSelect={setSelectedManagerId}
-              />
-            ) : null}
             <button
               type="button"
               className="primary board-toolbar-post"
@@ -1919,18 +1912,18 @@ export default function BoardPage() {
                     <h2 className="board-main-title">
                       {managerMode ? "Ticket board" : "Channels overview"}
                     </h2>
+                    {/* The selected project lives under the title — one location
+                        across desktop and mobile. */}
+                    {managerMode && managers.length > 0 ? (
+                      <div className="board-context-project">
+                        <ManagerSwitcher
+                          managers={managers}
+                          selectedId={selectedManagerId}
+                          onSelect={setSelectedManagerId}
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  {/* The toolbar project switcher is hidden on mobile for space;
-                      surface it here, in the always-visible workspace header. */}
-                  {managerMode && managers.length > 0 ? (
-                    <div className="board-context-project">
-                      <ManagerSwitcher
-                        managers={managers}
-                        selectedId={selectedManagerId}
-                        onSelect={setSelectedManagerId}
-                      />
-                    </div>
-                  ) : null}
                 </div>
 
                 {managerMode && managerState ? (

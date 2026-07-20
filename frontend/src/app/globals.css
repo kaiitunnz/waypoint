@@ -14100,11 +14100,9 @@ html[data-theme="light"] .session-switcher-row.selected {
   }
 }
 
-/* Mobile: the toolbar has little width, so it sheds redundant labels to keep
-   the Post action on screen. The context echoes the workspace heading / channel
-   title below it, and a single-manager project label repeats the intake
-   readout in the sheet — both are dropped so ☰ · Board|Channels · Post always
-   fit. The multi-manager project select stays but is width-capped. */
+/* Mobile: the toolbar has little width, so the context label — which just
+   echoes the workspace heading / channel title below it — is dropped to keep
+   ☰ · Board|Channels · Post on screen. */
 @media (max-width: 720px) {
   .board-toolbar-context {
     display: none;
@@ -14112,14 +14110,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 
   .board-toolbar-actions {
     margin-left: auto;
-  }
-
-  .board-toolbar-actions .board-switcher-static {
-    display: none;
-  }
-
-  .board-toolbar-actions .board-switcher select {
-    max-width: 116px;
   }
 
   .board-toolbar-post {
@@ -14346,17 +14336,11 @@ html[data-theme="light"] .session-switcher-row.selected {
   min-width: 0;
 }
 
-/* The selected project lives in the toolbar on desktop; on mobile that switcher
-   is dropped for space, so surface it here in the workspace header instead. */
+/* The selected project sits directly under the workspace title — one location
+   on every viewport. */
 .board-context-project {
-  display: none;
-  flex-shrink: 0;
-}
-
-@media (max-width: 720px) {
-  .board-context-project {
-    display: flex;
-  }
+  display: flex;
+  margin-top: 4px;
 }
 
 .board-workspace,

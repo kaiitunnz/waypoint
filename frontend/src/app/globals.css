@@ -9668,9 +9668,10 @@ html[data-theme="light"] .preset-modal-overlay {
 /* ─── Session list & cards ─── */
 .session-card {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
   width: 100%;
+  padding: 10px 13px;
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -9719,7 +9720,7 @@ html[data-theme="light"] .preset-modal-overlay {
 }
 
 .session-card h3 {
-  font-size: 1.04rem;
+  font-size: 0.94rem;
 }
 
 .session-list-shell {
@@ -9796,8 +9797,15 @@ html[data-theme="light"] .preset-modal-overlay {
 
 .session-section {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+}
+
+/* Session cards sit tighter than the global 14px stack rhythm — this is the
+   dense instrument list, not spaced-out panels. Scoped so the outer shell
+   stack and every other .stack keep their own spacing. */
+.session-section .stack {
+  gap: 8px;
 }
 
 .session-section-header {
@@ -9809,10 +9817,10 @@ html[data-theme="light"] .preset-modal-overlay {
 
 .session-section-header h4 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 0.92rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent-cool);
 }
@@ -9846,8 +9854,9 @@ html[data-theme="light"] .preset-modal-overlay {
 .session-card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 4px 10px;
   align-items: center;
+  margin-top: 1px;
 }
 
 .pin-link {
@@ -9893,6 +9902,16 @@ html[data-theme="light"] .preset-modal-overlay {
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background 140ms ease, color 140ms ease;
+}
+
+/* The session card runs denser than the schedule/resume panels, so its
+   actions shrink below the shared .action-chip footprint (which keeps 6px
+   10px for those panels). */
+.session-card-actions .link-button.pin-link,
+.session-card-actions .link-button.settings-link,
+.session-card-actions .link-button.danger-link {
+  padding: 3px 7px;
+  font-size: 0.76rem;
 }
 
 .session-card-actions .link-button.pin-link:hover:not(:disabled),
@@ -9947,6 +9966,11 @@ html[data-theme="light"] .preset-modal-overlay {
   opacity: 0.6;
 }
 
+/* Scoped to the card so the larger session-detail header pencil is unaffected. */
+.session-card .edit-title-btn {
+  font-size: 0.82rem;
+}
+
 .edit-title-btn:hover {
   opacity: 1;
 }
@@ -9992,13 +10016,17 @@ html[data-theme="light"] .preset-modal-overlay {
 
 .session-card-path {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
 }
 
 .session-card-meta {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.session-card-meta .meta {
+  font-size: 0.74rem;
 }
 
 /* Card header: badges as one group on the left, last-activity time on the right.
@@ -10015,13 +10043,13 @@ html[data-theme="light"] .preset-modal-overlay {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 10px;
   min-width: 0;
 }
 
 .session-card-when {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--muted);
   white-space: nowrap;
 }

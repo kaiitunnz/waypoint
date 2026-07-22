@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0", "wheel", "setuptools-scm>=10.2.0"]
+requires = ["setuptools>=83.0.0", "wheel", "setuptools-scm>=10.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,7 +28,7 @@ dependencies = [
 dev = [
   "httpx>=0.28.0",
   "mypy>=2.3.0",
-  "pre-commit>=4.0.0",
+  "pre-commit>=4.6.1",
   "pytest>=8.4.0",
   "pytest-asyncio>=0.24.0",
   "ruff>=0.15.21",

@@ -90,13 +90,13 @@ def test_command_execution_item_synthesizes_paired_tool_call_and_result() -> Non
 
 
 def test_unknown_item_type_becomes_preserved_passthrough_event() -> None:
-    # A thread item whose type the pinned SDK does not model (e.g. a newer CLI's
-    # subAgentActivity) must import as a generic passthrough note carrying the raw
-    # item, not be dropped and not crash the whole import.
+    # A thread item whose type the pinned SDK does not model (a newer CLI's item
+    # ahead of the SDK union) must import as a generic passthrough note carrying
+    # the raw item, not be dropped and not crash the whole import.
     turn = _turn(
         items=[
             {
-                "type": "subAgentActivity",
+                "type": "waypointFutureItem",
                 "id": "item-x1",
                 "path": "/root/plan_review",
                 "detail": {"nested": "kept"},
@@ -107,8 +107,8 @@ def test_unknown_item_type_becomes_preserved_passthrough_event() -> None:
     assert len(events) == 1
     event = events[0]
     assert event.kind == EventKind.SYSTEM_NOTE
-    assert "subAgentActivity" in event.text
-    assert event.metadata["item_type"] == "subAgentActivity"
+    assert "waypointFutureItem" in event.text
+    assert event.metadata["item_type"] == "waypointFutureItem"
     item = event.metadata["payload"]["item"]
     assert item["path"] == "/root/plan_review"
     assert item["detail"] == {"nested": "kept"}

@@ -148,7 +148,7 @@ def test_help_json_is_structured() -> None:
     # --backend is optional: a --preset (or the default preset) may supply it,
     # with required-field validation happening after preset resolution.
     assert backend["required"] is False
-    assert backend["type"] == "text"
+    assert backend["type"] == "str"
     assert any("--launch-env" in o["flags"] for o in start["options"])
     assert any("--preset" in o["flags"] for o in start["options"])
     schedule_create = by_path["schedule create"]

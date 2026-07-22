@@ -26,7 +26,7 @@ def test_help_json_is_structured() -> None:
     install = by_path["skills install"]
     skill_dir = next(o for o in install["options"] if "--skill-dir" in o["flags"])
     assert skill_dir["required"] is False
-    assert skill_dir["type"] == "text"
+    assert skill_dir["type"] == "str"
 
 
 def _walk_leaf_paths(group: click.Group, prefix: str) -> list[str]:

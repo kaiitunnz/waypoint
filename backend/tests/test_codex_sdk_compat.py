@@ -1,8 +1,9 @@
-"""Tolerance for a codex CLI whose enums are ahead of the pinned SDK.
+"""Tolerance for a codex CLI whose thread items are ahead of the pinned SDK.
 
-Fixtures are real responses captured from codex 0.144.0 (which advertises the
-``max``/``ultra`` reasoning efforts the pinned SDK's ``ReasoningEffort`` enum does
-not know). Importing the codex package installs the tolerance shim.
+Fixtures are real responses captured from codex 0.144.0. The SDK's own
+``ReasoningEffort`` is an open ``str`` enum, so unknown efforts (``max``,
+``ultra``) preserve their value without a shim; importing the codex package
+installs the ``ThreadItem`` union tolerance.
 """
 
 import json
@@ -23,10 +24,7 @@ from openai_codex.generated.v2_all import (
 from pydantic import ValidationError
 
 import waypoint.backends.codex  # noqa: F401  (installs the shim on import)
-from waypoint.backends.codex._sdk_compat import (
-    install_reasoning_effort_tolerance,
-    install_thread_item_tolerance,
-)
+from waypoint.backends.codex._sdk_compat import install_thread_item_tolerance
 from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.codex.plugin import CodexPlugin, CodexPluginConfig
 
@@ -35,21 +33,6 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 def _load(name: str) -> dict:
     return json.loads((_FIXTURES / f"{name}.json").read_text())
-
-
-@pytest.fixture(autouse=True)
-def _restore_reasoning_effort() -> Any:
-    """Undo enum members fabricated by a test so the process-global enum
-    doesn't leak throwaway values into later tests."""
-    value_map = dict(ReasoningEffort._value2member_map_)
-    member_map = dict(ReasoningEffort._member_map_)
-    names = list(ReasoningEffort._member_names_)
-    yield
-    ReasoningEffort._value2member_map_.clear()
-    ReasoningEffort._value2member_map_.update(value_map)
-    ReasoningEffort._member_map_.clear()
-    ReasoningEffort._member_map_.update(member_map)
-    ReasoningEffort._member_names_[:] = names
 
 
 def test_model_list_with_unknown_efforts_validates_and_preserves_values() -> None:
@@ -73,14 +56,6 @@ def test_unknown_effort_resolves_to_string_preserving_member() -> None:
     assert ReasoningEffort("ultra").value == "ultra"
     # A value not seen before is tolerated too (future CLI additions).
     assert ReasoningEffort("hyper").value == "hyper"
-    # Fabricated members are first-class: iteration surfaces them.
-    assert ReasoningEffort("hyper") in list(ReasoningEffort)
-
-
-def test_shim_is_idempotent_and_identity_stable() -> None:
-    install_reasoning_effort_tolerance()
-    install_reasoning_effort_tolerance()
-    assert ReasoningEffort("max") is ReasoningEffort("max")
 
 
 def test_unknown_effort_round_trips_through_json_serialization() -> None:
@@ -155,11 +130,12 @@ async def test_list_models_surfaces_unknown_efforts_through_plugin(
 
 # ── ThreadItem union tolerance ──────────────────────────────────────────────
 # A codex CLI ahead of the pinned SDK emits thread item types the SDK's
-# ``ThreadItem`` union does not model (observed: ``subAgentActivity``), which made
-# ``thread/resume`` responses fail validation and reattach return 400.
+# ``ThreadItem`` union does not model, which made ``thread/resume`` responses
+# fail validation and reattach return 400. The synthetic type below stands in
+# for any such not-yet-modeled item.
 
 _UNKNOWN_ITEM = {
-    "type": "subAgentActivity",
+    "type": "waypointFutureItem",
     "id": "item-x1",
     "path": "/root/plan_review",
     "detail": {"nested": "kept"},

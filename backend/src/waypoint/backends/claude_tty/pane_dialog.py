@@ -84,18 +84,11 @@ _PLAN_FOOTER = "to approve with this feedback"
 _COMPOSER_PROMPT_RE = re.compile(r"^\s*❯(?:\s|$)")
 _OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 
-# The bottom edge of a live inline dialog. When the human sends a follow-up while
-# a turn is still generating, Claude Code queues it and renders each queued message
-# as a leading-❯ line *below* the dialog's footer; a free-text answer field ("Type
-# something") renders the same way. A trailing run of blank / leading-❯ lines that
-# rests directly on such a footer is that dialog output, not the live composer, so
-# `_active_region` skips it rather than slicing the pane to it. "Esc to cancel"
-# ends every inline dialog `classify` recognizes — approval, question, trust,
-# model, effort — so it is the one anchor needed; a new inline dialog adds its
-# footer token here. The plan dialog is excluded on purpose: it renders as a
-# full-pane overlay that covers the transcript, so no queued line ever falls below
-# its footer, and its option rows (`❯ 1.`) are not composer lines, so it already
-# classifies correctly without a guard.
+# Footer tokens marking the bottom edge of a live inline dialog. A trailing run of
+# blank / leading-❯ lines resting on one is queued-message or free-text-field
+# output, not the composer. "Esc to cancel" ends every inline dialog `classify`
+# recognizes; the plan dialog is a full-pane overlay with nothing below its footer,
+# so it needs no token.
 _DIALOG_FOOTER_TOKENS = ("Esc to cancel",)
 
 
@@ -207,12 +200,11 @@ def _is_composer_line(line: str) -> bool:
 
 
 def _rests_on_dialog_footer(lines: list[str], run_end: int) -> int | None:
-    """The footer index a trailing blank / leading-❯ run rests on, else None.
+    """Index of the dialog footer the trailing run ending at ``run_end`` rests on.
 
-    Walks up from ``run_end`` over the contiguous run of blank and composer
-    (leading-``❯``) lines and returns the index of the first line below the run
-    when that line is a live dialog footer. Such a run is queued-message or
-    free-text-field output the TUI draws beneath a dialog, not the live composer.
+    Walks up over the contiguous run of blank and composer (leading-``❯``) lines;
+    returns the index of the line below it when that line is a dialog footer, else
+    None.
     """
     j = run_end
     while j >= 0 and (not lines[j].strip() or _is_composer_line(lines[j])):
@@ -225,16 +217,10 @@ def _rests_on_dialog_footer(lines: list[str], run_end: int) -> int | None:
 def _active_region(lines: list[str]) -> list[str]:
     """The pane text at and below the bottom-most live composer prompt.
 
-    Settled transcript sits above the live composer, so scoping here drops a
-    dialog-signature string an agent merely quoted or pasted into the
-    conversation. A dialog's interactive rows are options (``❯ 1.``), so those
-    never bound the region; but Claude Code renders queued follow-up messages and
-    a dialog's free-text answer field as leading-``❯`` lines *below* the dialog
-    footer, which would otherwise be read as the live composer and slice the
-    dialog above away. A trailing run of such lines resting on a live dialog
-    footer is therefore skipped, and the scan continues above the footer for a
-    real composer boundary; keying on a live footer preserves the scrollback-quote
-    guard, since a quoted marker is not followed by a footer beneath a ``❯`` run.
+    Scoping here drops dialog signatures quoted higher in settled transcript. A
+    trailing run of blank / leading-``❯`` lines resting on a dialog footer is
+    queued messages or a free-text answer field, not the composer, so it is
+    skipped and the scan continues above the footer.
     """
     i = len(lines) - 1
     while i >= 0:

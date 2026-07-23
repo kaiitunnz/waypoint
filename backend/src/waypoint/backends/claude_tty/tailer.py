@@ -368,15 +368,29 @@ class TranscriptTailer:
         decline_num = decline_opt.number if decline_opt else None
 
         approval_id = str(uuid.uuid4())
-        tool_name = dialog.tool_name or "Unknown"
         target = dialog.target or ""
 
-        if tool_name == "Bash":
-            tool_input: dict[str, str] = {"command": target}
-        elif tool_name in {"Write", "Edit", "MultiEdit"}:
-            tool_input = {"file_path": target}
-        else:
-            tool_input = {"description": target}
+        # A dialog whose box overflows the pane drops its tool label/header, so
+        # `parse_approval` yields tool_name=None (the "Approve Unknown" card of
+        # ticket 1191). The pending tool_use in the transcript carries the real
+        # tool and its full, untruncated input — recover from there, the way the
+        # plan-approval card reads the plan body off the normalizer.
+        tool_name = dialog.tool_name
+        tool_input: dict[str, Any] | None = None
+        if tool_name is None:
+            pending = self._normalizer.pending_tool_use
+            if pending is not None:
+                tool_name, pending_input = pending
+                tool_input = dict(pending_input)
+        if tool_name is None:
+            tool_name = "Unknown"
+        if tool_input is None:
+            if tool_name == "Bash":
+                tool_input = {"command": target}
+            elif tool_name in {"Write", "Edit", "MultiEdit"}:
+                tool_input = {"file_path": target}
+            else:
+                tool_input = {"description": target}
 
         payload: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input}
         text = format_approval_text(payload)

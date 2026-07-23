@@ -115,9 +115,27 @@ class TranscriptNormalizer:
         # the body captured here when it surfaces the plan-approval card.
         self.last_plan_path: str | None = None
         self.last_plan_content: str | None = None
+        # tool_use records flushed to the transcript but not yet resolved by a
+        # tool_result, keyed by tool_use id in submission order. A permission
+        # dialog (Bash, file op, MCP …) flushes its tool_use — with the full,
+        # untruncated input — before the TUI draws the box, so the tailer reads
+        # the pending tool here to build the approval card when a tall dialog
+        # overflows the pane and drops the tool label/header (ticket 1191).
+        self._pending_tool_uses: dict[str, tuple[str, dict[str, Any]]] = {}
 
     def arm_question_dismissal(self) -> None:
         self._expect_dismissed_question = True
+
+    @property
+    def pending_tool_use(self) -> tuple[str, dict[str, Any]] | None:
+        """The oldest unresolved tool_use (name, input), or None.
+
+        The pane prompts batched tool calls in submission order, so the oldest
+        still-unresolved record is the one the current dialog is asking about.
+        """
+        for name, tool_input in self._pending_tool_uses.values():
+            return name, tool_input
+        return None
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -274,6 +292,11 @@ class TranscriptNormalizer:
                     self._maybe_capture_plan(tool_name, block.get("input") or {})
                     if tool_use_id:
                         self._file_edit_tool_use_ids.add(tool_use_id)
+                if tool_use_id:
+                    self._pending_tool_uses[tool_use_id] = (
+                        tool_name,
+                        block.get("input") or {},
+                    )
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 events.append(
                     NormalizedEvent(
@@ -315,6 +338,10 @@ class TranscriptNormalizer:
         ):
             if message_id:
                 self._result_emitted_ids.add(message_id)
+            # The turn resolved with no tool_use pending approval; any survivors
+            # in the map are stale (never resolved by a tool_result) and must not
+            # leak into the next turn's approval recovery.
+            self._pending_tool_uses.clear()
             usage_payload: dict[str, Any] = usage if first_seen else {}
             output_tokens = int(usage.get("output_tokens") or 0)
             if stop_reason == "end_turn":
@@ -382,6 +409,8 @@ class TranscriptNormalizer:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id:
+                self._pending_tool_uses.pop(tool_use_id, None)
             if tool_use_id and tool_use_id in self._dismissed_question_ids:
                 # The "user rejected" result the TUI writes when we Esc the
                 # popup to surface it. Drop it so the question card stays

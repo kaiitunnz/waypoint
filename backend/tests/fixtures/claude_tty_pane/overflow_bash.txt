@@ -1,0 +1,50 @@
+   touch "$BASE/item_32.txt"
+   touch "$BASE/item_33.txt"
+   touch "$BASE/item_34.txt"
+   touch "$BASE/item_35.txt"
+   touch "$BASE/item_36.txt"
+   touch "$BASE/item_37.txt"
+   touch "$BASE/item_38.txt"
+   touch "$BASE/item_39.txt"
+   touch "$BASE/item_40.txt"
+   touch "$BASE/item_41.txt"
+   touch "$BASE/item_42.txt"
+   touch "$BASE/item_43.txt"
+   touch "$BASE/item_44.txt"
+   touch "$BASE/item_45.txt"
+   touch "$BASE/item_46.txt"
+   touch "$BASE/item_47.txt"
+   touch "$BASE/item_48.txt"
+   touch "$BASE/item_49.txt"
+   touch "$BASE/item_50.txt"
+   touch "$BASE/item_51.txt"
+   touch "$BASE/item_52.txt"
+   touch "$BASE/item_53.txt"
+   touch "$BASE/item_54.txt"
+   touch "$BASE/item_55.txt"
+   touch "$BASE/item_56.txt"
+   touch "$BASE/item_57.txt"
+   touch "$BASE/item_58.txt"
+   touch "$BASE/item_59.txt"
+   touch "$BASE/item_60.txt"
+   touch "$BASE/item_61.txt"
+   touch "$BASE/item_62.txt"
+   touch "$BASE/item_63.txt"
+   touch "$BASE/item_64.txt"
+   touch "$BASE/item_65.txt"
+   touch "$BASE/item_66.txt"
+   touch "$BASE/item_67.txt"
+   touch "$BASE/item_68.txt"
+   touch "$BASE/item_69.txt"
+   touch "$BASE/item_70.txt"
+   echo "bigtree created with 70 items under $BASE"
+   Run shell command
+
+ This command requires approval
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for similar commands in /tmp/cctty-repro-1191
+   3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain

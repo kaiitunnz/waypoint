@@ -1169,3 +1169,62 @@ def test_non_plan_file_write_does_not_capture_plan() -> None:
     )
     assert norm.last_plan_path is None
     assert norm.last_plan_content is None
+
+
+# ── pending tool_use tracking (approval recovery for overflowing dialogs) ──────
+
+
+def test_pending_tool_use_tracks_bash_until_result() -> None:
+    # A tall Bash approval drops its label off the pane, so the tailer recovers
+    # the tool + full command from the pending (unresolved) transcript tool_use.
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "m1",
+            [_tool_use_block("tu-1", "Bash", {"command": "echo hi"})],
+            stop_reason="tool_use",
+        )
+    )
+    assert norm.pending_tool_use == ("Bash", {"command": "echo hi"})
+
+    norm.process_record(_user_record([_tool_result_block("tu-1", "hi")]))
+    assert norm.pending_tool_use is None
+
+
+def test_pending_tool_use_is_fifo_oldest_first() -> None:
+    # Batched tool calls are prompted in submission order, so the oldest
+    # unresolved tool_use is the one the current dialog is asking about.
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "m1",
+            [
+                _tool_use_block("tu-1", "Bash", {"command": "first"}),
+                _tool_use_block("tu-2", "Bash", {"command": "second"}),
+            ],
+            stop_reason="tool_use",
+        )
+    )
+    assert norm.pending_tool_use == ("Bash", {"command": "first"})
+
+    norm.process_record(_user_record([_tool_result_block("tu-1", "ok")]))
+    assert norm.pending_tool_use == ("Bash", {"command": "second"})
+
+
+def test_pending_tool_use_cleared_on_turn_complete() -> None:
+    # A pending tool_use that never got a matching result must not leak into the
+    # next turn's approval recovery once the turn resolves.
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "m1",
+            [_tool_use_block("tu-1", "Bash", {"command": "echo hi"})],
+            stop_reason="tool_use",
+        )
+    )
+    assert norm.pending_tool_use is not None
+
+    norm.process_record(
+        _assistant_record("m2", [_text_block("done")], stop_reason="end_turn")
+    )
+    assert norm.pending_tool_use is None

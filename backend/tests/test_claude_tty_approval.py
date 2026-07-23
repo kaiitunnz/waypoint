@@ -196,6 +196,55 @@ async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
     assert pending.is_plan is True
 
 
+async def test_overflow_bash_dialog_recovers_tool_from_transcript() -> None:
+    # A long Bash command's approval box overflows the pane, so the "Bash
+    # command" label + header scroll off and parse_approval yields tool_name=None
+    # (the "Approve Unknown" card of ticket 1191). The pending tool_use in the
+    # transcript carries the real tool + full command, so the surfaced card is a
+    # proper Bash approval with the complete command.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("overflow_bash.txt"))
+    tailer = _make_tailer(plugin, runtime)
+    command = "\n".join(f'touch "$BASE/item_{i:02d}.txt"' for i in range(1, 71))
+    tailer._normalizer._pending_tool_uses["tu-1"] = ("Bash", {"command": command})
+
+    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer._poll_dialog()  # tick 2: stable → emit
+    runtime._emit_adapter_event.assert_called_once()
+
+    call = runtime._emit_adapter_event.call_args
+    assert call.args[1] is EventKind.APPROVAL_REQUEST
+    assert call.args[2] == f"Approve Bash command:\n{command}"
+    meta = call.args[3]
+    assert meta["tool_name"] == "Bash"
+    assert meta["tool_input"] == {"command": command}
+    assert meta["method"] == "tty_permission"
+
+    pending = plugin._pending_approvals["sess-1"]
+    assert pending.tool_name == "Bash"
+    assert pending.approve_number == 1
+    assert pending.decline_number == 3
+
+
+async def test_overflow_dialog_without_transcript_falls_back_to_unknown() -> None:
+    # With nothing pending in the transcript the surfaced card degrades to the
+    # prior "Unknown" behaviour rather than crashing — the recovery is additive
+    # and never leaves `target` unbound.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("overflow_bash.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+    runtime._emit_adapter_event.assert_called_once()
+
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    assert meta["tool_name"] == "Unknown"
+    assert meta["tool_input"] == {"description": ""}
+
+
 async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")

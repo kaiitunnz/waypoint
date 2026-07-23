@@ -38,6 +38,7 @@ def _load(name: str) -> str:
         ("question_with_one_queued.txt", PaneScreen.QUESTION),
         ("question_with_two_queued.txt", PaneScreen.QUESTION),
         ("approval_with_queued.txt", PaneScreen.APPROVAL),
+        ("overflow_bash.txt", PaneScreen.APPROVAL),
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
@@ -59,6 +60,7 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("question_with_one_queued.txt", True),
         ("question_with_two_queued.txt", True),
         ("approval_with_queued.txt", True),
+        ("overflow_bash.txt", True),
         ("trust_dialog.txt", True),
         ("model_selector.txt", True),
         ("effort_popup.txt", True),
@@ -310,6 +312,20 @@ def test_body_extraction_ignores_earlier_scrollback_label() -> None:
     assert dialog.tool_name == "Bash"
     assert dialog.target == "mkdir /tmp/cc-tty-probe/probe_subdir"
     assert dialog.target != "rm -rf /decoy"
+
+
+def test_overflow_bash_approval_yields_no_tool_but_valid_options() -> None:
+    # A long Bash command's box overflows the pane, dropping the "Bash command"
+    # label and tool header off the capture. The tool can no longer be read off
+    # the pane, but classify and the options still parse — enough for the tailer
+    # to approve/decline while it recovers the tool from the transcript.
+    dialog = parse_approval(_load("overflow_bash.txt"))
+    assert dialog is not None
+    assert dialog.tool_name is None
+    assert dialog.target is None
+    assert dialog.question == "Do you want to proceed?"
+    assert dialog.approve_option is not None and dialog.approve_option.number == 1
+    assert dialog.decline_option is not None and dialog.decline_option.number == 3
 
 
 def test_classify_robust_to_wrapped_footer() -> None:

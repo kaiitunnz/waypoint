@@ -368,15 +368,8 @@ class TranscriptTailer:
         decline_num = decline_opt.number if decline_opt else None
 
         approval_id = str(uuid.uuid4())
-        tool_name = dialog.tool_name or "Unknown"
         target = dialog.target or ""
-
-        if tool_name == "Bash":
-            tool_input: dict[str, str] = {"command": target}
-        elif tool_name in {"Write", "Edit", "MultiEdit"}:
-            tool_input = {"file_path": target}
-        else:
-            tool_input = {"description": target}
+        tool_name, tool_input = self._resolve_approval_tool(dialog)
 
         payload: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input}
         text = format_approval_text(payload)
@@ -415,6 +408,28 @@ class TranscriptTailer:
             },
             SessionStatus.WAITING_INPUT,
         )
+
+    def _resolve_approval_tool(
+        self, dialog: pane_dialog.ApprovalDialog
+    ) -> tuple[str, dict[str, Any]]:
+        """Tool name and input for the approval card.
+
+        A dialog whose box overflows the pane drops its tool label, so
+        `parse_approval` yields tool_name=None; recover the tool and its full,
+        untruncated input from the pending transcript tool_use in that case.
+        """
+        if dialog.tool_name is None:
+            pending = self._normalizer.pending_tool_use
+            if pending is not None:
+                name, tool_input = pending
+                return name, dict(tool_input)
+        tool_name = dialog.tool_name or "Unknown"
+        target = dialog.target or ""
+        if tool_name == "Bash":
+            return tool_name, {"command": target}
+        if tool_name in {"Write", "Edit", "MultiEdit"}:
+            return tool_name, {"file_path": target}
+        return tool_name, {"description": target}
 
     async def _surface_plan_dialog(self, session: SessionRecord, snapshot: str) -> None:
         """Surface the ExitPlanMode dialog as the same approval card Chat shows.

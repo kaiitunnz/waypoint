@@ -1,0 +1,36 @@
+❯ Use your AskUserQuestion tool right now to ask my favorite color with options red, green, blue. Call the tool as your 
+  very first action, nothing else.                                                                                      
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Fav color 
+
+What is your favorite color?
+
+❯ 1. Red
+     Red
+  2. Green
+     Green
+  3. Blue
+     Blue
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                      
+                                                                                                                      
+
+
+
+  ❯ QMSG-ONE queued during the turn                                                                                     
+  ❯ QMSG-TWO queued during the turn                                                                                   

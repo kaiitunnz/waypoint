@@ -84,6 +84,13 @@ _PLAN_FOOTER = "to approve with this feedback"
 _COMPOSER_PROMPT_RE = re.compile(r"^\s*❯(?:\s|$)")
 _OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 
+# Footer tokens marking the bottom edge of a live inline dialog. A trailing run of
+# blank / leading-❯ lines resting on one is queued-message or free-text-field
+# output, not the composer. "Esc to cancel" ends every inline dialog `classify`
+# recognizes; the plan dialog is a full-pane overlay with nothing below its footer,
+# so it needs no token.
+_DIALOG_FOOTER_TOKENS = ("Esc to cancel",)
+
 
 def _strip_ansi(text: str) -> str:
     return strip_ansi(text)
@@ -192,19 +199,39 @@ def _is_composer_line(line: str) -> bool:
     )
 
 
+def _rests_on_dialog_footer(lines: list[str], run_end: int) -> int | None:
+    """Index of the dialog footer the trailing run ending at ``run_end`` rests on.
+
+    Walks up over the contiguous run of blank and composer (leading-``❯``) lines;
+    returns the index of the line below it when that line is a dialog footer, else
+    None.
+    """
+    j = run_end
+    while j >= 0 and (not lines[j].strip() or _is_composer_line(lines[j])):
+        j -= 1
+    if j >= 0 and any(token in lines[j] for token in _DIALOG_FOOTER_TOKENS):
+        return j
+    return None
+
+
 def _active_region(lines: list[str]) -> list[str]:
     """The pane text at and below the bottom-most live composer prompt.
 
-    Settled transcript sits above the live composer, so scoping here drops a
-    dialog-signature string an agent merely quoted or pasted into the
-    conversation. A real dialog's interactive rows are options (``❯ 1.``), never
-    a leading free-text prompt, so the boundary never slices an actual dialog.
+    Scoping here drops dialog signatures quoted higher in settled transcript. A
+    trailing run of blank / leading-``❯`` lines resting on a dialog footer is
+    queued messages or a free-text answer field, not the composer, so it is
+    skipped and the scan continues above the footer.
     """
-    last_composer = next(
-        (i for i in range(len(lines) - 1, -1, -1) if _is_composer_line(lines[i])),
-        None,
-    )
-    return lines if last_composer is None else lines[last_composer:]
+    i = len(lines) - 1
+    while i >= 0:
+        if not _is_composer_line(lines[i]):
+            i -= 1
+            continue
+        footer_idx = _rests_on_dialog_footer(lines, i)
+        if footer_idx is None:
+            return lines[i:]
+        i = footer_idx - 1
+    return lines
 
 
 def composer_ready(screen: str) -> bool:

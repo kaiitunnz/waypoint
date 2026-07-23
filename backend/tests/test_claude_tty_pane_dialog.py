@@ -35,6 +35,9 @@ def _load(name: str) -> str:
         ("question_dialog.txt", PaneScreen.QUESTION),
         ("question_dialog_single.txt", PaneScreen.QUESTION),
         ("question_dialog_notes.txt", PaneScreen.QUESTION),
+        ("question_with_one_queued.txt", PaneScreen.QUESTION),
+        ("question_with_two_queued.txt", PaneScreen.QUESTION),
+        ("approval_with_queued.txt", PaneScreen.APPROVAL),
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
@@ -53,6 +56,9 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("approval_bash.txt", True),
         ("plan_approval.txt", True),
         ("question_dialog.txt", True),
+        ("question_with_one_queued.txt", True),
+        ("question_with_two_queued.txt", True),
+        ("approval_with_queued.txt", True),
         ("trust_dialog.txt", True),
         ("model_selector.txt", True),
         ("effort_popup.txt", True),
@@ -393,6 +399,96 @@ def test_glyph_in_dialog_body_does_not_truncate_region() -> None:
     assert (
         dialog is not None and dialog.question == "Do you want to create probe_out.txt?"
     )
+
+
+def test_queued_messages_below_footer_do_not_mask_dialog() -> None:
+    # Captured live (Claude Code 2.1.x): a human who sends a follow-up while the
+    # turn is still generating has it queued and rendered as a leading-❯ line below
+    # the live dialog's footer. The region selector must skip that trailing run
+    # (any depth) rather than slice the pane to it, or the dialog above is dropped
+    # and classify returns OTHER — the session hangs on an unanswerable prompt.
+    one = _load("question_with_one_queued.txt")
+    two = _load("question_with_two_queued.txt")
+    assert "❯ QMSG-ONE" in one
+    assert "❯ QMSG-ONE" in two and "❯ QMSG-TWO" in two
+    assert classify(one) is PaneScreen.QUESTION
+    assert classify(two) is PaneScreen.QUESTION
+    assert shows_blocking_dialog(one) is True
+    assert shows_blocking_dialog(two) is True
+
+
+def test_approval_with_queued_still_parses() -> None:
+    # A tool-approval dialog with queued messages beneath its footer must both
+    # classify as APPROVAL and parse the live tool/target/options — the tailer
+    # surfaces the card and the transport still refuses to send into it.
+    dialog = parse_approval(_load("approval_with_queued.txt"))
+    assert dialog is not None
+    assert dialog.tool_name == "Write"
+    assert dialog.target == "probe.txt"
+    assert dialog.question == "Do you want to create probe.txt?"
+    assert [o.number for o in dialog.options] == [1, 2, 3]
+    assert dialog.approve_option is not None and dialog.approve_option.number == 1
+    assert dialog.decline_option is not None and dialog.decline_option.number == 3
+
+
+def test_freetext_answer_field_below_footer_classifies() -> None:
+    # The AskUserQuestion "Type something" option opens a free-text ❯ field that
+    # renders below the footer exactly like a single queued message (the N=1 case).
+    # It must not be read as the live composer.
+    screen = "\n".join(
+        [
+            " ☐ Fav color",
+            "What is your favorite color?",
+            "❯ 1. Red",
+            "  2. Green",
+            "  3. Blue",
+            "  4. Type something.",
+            "Enter to select · ↑/↓ to navigate · Esc to cancel",
+            "",
+            "  ❯ ",
+        ]
+    )
+    assert classify(screen) is PaneScreen.QUESTION
+    assert shows_blocking_dialog(screen) is True
+
+
+def test_queued_messages_with_no_dialog_do_not_classify() -> None:
+    # The no-dialog counterpart: queued messages sit in the transcript flow above
+    # the *true* composer (the dim "Press up to edit queued messages" ghost),
+    # whose status footer is present below it. No dialog footer rests under the
+    # trailing run, so the region bounds at the true composer and stays OTHER.
+    screen = "\n".join(
+        [
+            "❯ QMSG-ONE queued during the turn",
+            "",
+            "❯ QMSG-TWO queued during the turn",
+            "────────────────────────────",
+            "❯ Press up to edit queued messages",
+            "────────────────────────────",
+            "  ⏸ manual mode on · esc to interrupt · ← for agents",
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen) is False
+
+
+def test_quoted_footer_directly_above_composer_does_not_mask_it() -> None:
+    # FR4 guard under the new run-aware skip: a dialog footer quoted in transcript,
+    # directly above a live composer holding a typed reply (its status footer
+    # below), must not be read as a live dialog. The composer does not rest on the
+    # quoted footer — a rule line and the status footer sit between — so the skip
+    # never fires and the region bounds at the composer.
+    screen = "\n".join(
+        [
+            "● As I said the footer reads Esc to cancel · Tab to amend",
+            "────────────────────────────",
+            "❯ yes, go ahead and implement it",
+            "────────────────────────────",
+            "  ⏸ manual mode on · ? for shortcuts · ← for agents",
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen) is False
 
 
 def test_composer_is_empty_for_bare_prompt() -> None:

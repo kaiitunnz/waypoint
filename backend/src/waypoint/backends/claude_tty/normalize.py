@@ -115,12 +115,10 @@ class TranscriptNormalizer:
         # the body captured here when it surfaces the plan-approval card.
         self.last_plan_path: str | None = None
         self.last_plan_content: str | None = None
-        # tool_use records flushed to the transcript but not yet resolved by a
-        # tool_result, keyed by tool_use id in submission order. A permission
-        # dialog (Bash, file op, MCP …) flushes its tool_use — with the full,
-        # untruncated input — before the TUI draws the box, so the tailer reads
-        # the pending tool here to build the approval card when a tall dialog
-        # overflows the pane and drops the tool label/header (ticket 1191).
+        # Unresolved tool_use records (name + full input) in submission order.
+        # The tool_use is flushed with its untruncated input before the
+        # permission dialog blocks, so the tailer recovers the tool from here
+        # when a tall dialog overflows the pane and drops its label off-screen.
         self._pending_tool_uses: dict[str, tuple[str, dict[str, Any]]] = {}
 
     def arm_question_dismissal(self) -> None:
@@ -130,8 +128,8 @@ class TranscriptNormalizer:
     def pending_tool_use(self) -> tuple[str, dict[str, Any]] | None:
         """The oldest unresolved tool_use (name, input), or None.
 
-        The pane prompts batched tool calls in submission order, so the oldest
-        still-unresolved record is the one the current dialog is asking about.
+        Batched calls prompt in submission order, so the oldest is the one the
+        current dialog is asking about.
         """
         for name, tool_input in self._pending_tool_uses.values():
             return name, tool_input
@@ -338,9 +336,8 @@ class TranscriptNormalizer:
         ):
             if message_id:
                 self._result_emitted_ids.add(message_id)
-            # The turn resolved with no tool_use pending approval; any survivors
-            # in the map are stale (never resolved by a tool_result) and must not
-            # leak into the next turn's approval recovery.
+            # Turn resolved; drop any tool_use that never got a result so it
+            # cannot leak into the next turn's approval recovery.
             self._pending_tool_uses.clear()
             usage_payload: dict[str, Any] = usage if first_seen else {}
             output_tokens = int(usage.get("output_tokens") or 0)

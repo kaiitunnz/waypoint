@@ -315,12 +315,10 @@ def test_body_extraction_ignores_earlier_scrollback_label() -> None:
 
 
 def test_overflow_bash_approval_yields_no_tool_but_valid_options() -> None:
-    # A long Bash command's approval box is taller than the pane, so Claude Code
-    # drops the box top — the "Bash command" label and the tool header scroll off
-    # and are absent from the capture. The tool/target can no longer be read off
-    # the pane, but classify still recognizes the approval and the options parse.
-    # That is what lets the tailer approve/decline correctly while it recovers the
-    # tool name + full command from the transcript instead (ticket 1191).
+    # A long Bash command's box overflows the pane, dropping the "Bash command"
+    # label and tool header off the capture. The tool can no longer be read off
+    # the pane, but classify and the options still parse — enough for the tailer
+    # to approve/decline while it recovers the tool from the transcript.
     dialog = parse_approval(_load("overflow_bash.txt"))
     assert dialog is not None
     assert dialog.tool_name is None

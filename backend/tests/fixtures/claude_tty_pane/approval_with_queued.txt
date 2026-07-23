@@ -1,0 +1,17 @@
+● Write(probe.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ probe.txt                                                                                                             
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 waypoint-probe
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create probe.txt?                                                                                       
+ ❯ 1. Yes                                                                                                             
+   2. Yes, allow all edits during this session (shift+tab)                                                            
+   3. No                                                                                                               
+                                                                                                                       
+ Esc to cancel · Tab to amend                                                                                           
+
+  ❯ QMSG-ONE queued during the turn                                                                                     
+  ❯ QMSG-TWO queued during the turn                                                                                   

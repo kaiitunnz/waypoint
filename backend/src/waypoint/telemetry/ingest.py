@@ -26,6 +26,7 @@ from waypoint.backends.approvals import is_approve_decision
 from waypoint.schemas import (
     EventKind,
     EventRecord,
+    ProviderUsageSnapshot,
     SessionContextUsage,
     SessionRateLimitUsage,
     SessionRecord,
@@ -236,6 +237,23 @@ class TelemetryIngester:
             log.debug(
                 "telemetry derivation failed for session update",
                 extra={"session_id": session.id, "fields": sorted(updates)},
+                exc_info=True,
+            )
+
+    def ingest_provider_usage(self, snapshot: ProviderUsageSnapshot) -> None:
+        """Ingest one usage-provider snapshot as account-scoped limit facts.
+
+        Only wired by the runtime when telemetry is enabled, so no opt-in check
+        is repeated here. Provider facts are NOT session-attributable: they use
+        an opaque provenance ``session_id`` and are excluded from every
+        session-scoped query.
+        """
+        try:
+            self._ingest_provider_usage(snapshot)
+        except Exception:
+            log.debug(
+                "telemetry derivation failed for provider snapshot",
+                extra={"provider_id": snapshot.provider_id},
                 exc_info=True,
             )
 
@@ -482,6 +500,43 @@ class TelemetryIngester:
                     ),
                     tags,
                 )
+
+    def _ingest_provider_usage(self, snapshot: ProviderUsageSnapshot) -> None:
+        # Account-scoped, non-session-attributable. dims mark the external
+        # provider (backend=provider type, source/transport="usage_provider",
+        # no repo/parent). ``account_key`` is the provider's versioned keyed
+        # digest (never re-pseudonymized); ``session_id`` is an opaque
+        # provenance key so the non-null-session-id invariant holds without a
+        # synthetic SessionRecord.
+        dims = FactDimensions(
+            backend=snapshot.provider_type,
+            source="usage_provider",
+            transport="usage_provider",
+        )
+        provenance = f"provider:{snapshot.provider_id}:{snapshot.account_key}"
+        observed_at = snapshot.snapshot.updated_at
+        for window in snapshot.snapshot.windows:
+            self._enqueue(
+                LimitSnapshotFact(
+                    fact_id=f"{snapshot.account_key}:{window.id}:{observed_at.isoformat()}",
+                    source=snapshot.provider_type,
+                    session_id=provenance,
+                    session_attributable=False,
+                    occurred_at=observed_at,
+                    revision=_epoch_ms(observed_at),
+                    dims=dims,
+                    account_key=snapshot.account_key,
+                    account_label=snapshot.account_label,
+                    profile_label=snapshot.provider_type,
+                    window_id=window.id,
+                    window_label=window.label,
+                    used_percent=window.used_percent,
+                    used_tokens=window.used_tokens,
+                    limit_tokens=window.limit_tokens,
+                    resets_at=window.resets_at,
+                ),
+                {},
+            )
 
     def _enqueue(self, fact: TelemetryFact, tags: Mapping[str, str]) -> None:
         self._queue.append((fact, dict(tags)))

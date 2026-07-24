@@ -294,9 +294,17 @@ export function DrilldownPanel({
                   </div>
 
                   <div className="tm-drilldown-meta">
-                    <Link className="tm-drilldown-session" href={`/session/${item.session_id}`}>
-                      {shortId(item.session_id)}
-                    </Link>
+                    {item.session_attributable === false ? (
+                      // External usage-provider row: session_id is an opaque
+                      // provenance key, not a real session — never link it.
+                      <span className="tm-drilldown-session is-external">
+                        external
+                      </span>
+                    ) : (
+                      <Link className="tm-drilldown-session" href={`/session/${item.session_id}`}>
+                        {shortId(item.session_id)}
+                      </Link>
+                    )}
                     <span className="tm-drilldown-time">
                       {new Date(item.occurred_at).toLocaleString()}
                     </span>

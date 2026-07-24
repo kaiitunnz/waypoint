@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import mimetypes
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1126,7 +1126,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         dashboard = build_dashboard(
-            context.runtime.list_sessions(), context.runtime.registry
+            context.runtime.list_sessions(),
+            context.runtime.registry,
+            context.runtime.usage_providers,
         )
         return dashboard.model_dump(mode="json")
 
@@ -1136,20 +1138,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         # Refresh one representative session per bucket — every session in
         # a bucket shares the same account-level rate limit, so probing
-        # one is enough to update the bucket's snapshot.
+        # one is enough to update the bucket's snapshot. Configured usage
+        # providers refresh concurrently; a failure in one source class must
+        # not fail the other.
         dashboard = build_dashboard(
             context.runtime.list_sessions(), context.runtime.registry
         )
         targets = [
             bucket.session_ids[0] for bucket in dashboard.buckets if bucket.session_ids
         ]
-        if targets:
-            await asyncio.gather(
-                *(context.runtime.refresh_rate_limit_usage(sid) for sid in targets),
-                return_exceptions=True,
-            )
+        tasks: list[Awaitable[Any]] = [
+            context.runtime.refresh_rate_limit_usage(sid) for sid in targets
+        ]
+        if context.runtime.usage_providers is not None:
+            tasks.append(context.runtime.usage_providers.refresh_all(force=True))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         refreshed = build_dashboard(
-            context.runtime.list_sessions(), context.runtime.registry
+            context.runtime.list_sessions(),
+            context.runtime.registry,
+            context.runtime.usage_providers,
         )
         return refreshed.model_dump(mode="json")
 

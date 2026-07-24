@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit
@@ -256,6 +257,50 @@ def _normalize_public_base_url(value: str) -> str:
     return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
+_ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class LumidUsageProviderConfig(BaseModel):
+    """A configured Lumid usage provider. The PAT(s) are never a YAML literal —
+    the environment variable named by ``token_env`` holds a comma-separated list
+    read from the environment at refresh time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["lumid"] = "lumid"
+    enabled: bool = True
+    token_env: str
+    label: str = "Lumid"
+    refresh_interval_seconds: int = Field(default=300, ge=60, le=3600)
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        if not value or value.strip() != value or " " in value:
+            raise ValueError(
+                "usage provider id must be non-empty and contain no spaces"
+            )
+        return value
+
+    @field_validator("token_env")
+    @classmethod
+    def _validate_token_env(cls, value: str) -> str:
+        if not _ENV_VAR_NAME_PATTERN.match(value):
+            raise ValueError(
+                "usage provider token_env must be a valid environment variable name"
+            )
+        return value
+
+
+# Usage-provider config dispatch registry. A future provider type registers its
+# config model here and widens the ``usage_providers`` annotation; the runtime,
+# dashboard, and telemetry paths do not change.
+_USAGE_PROVIDER_CONFIG_TYPES: dict[str, type[BaseModel]] = {
+    "lumid": LumidUsageProviderConfig,
+}
+
+
 class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8787
@@ -344,6 +389,36 @@ class Settings(BaseModel):
     # Opt-in notification center (inbox + session-interaction push to Telegram
     # and future channels). Off by default; see docs/telegram-notifications.md.
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+    # Session-independent usage providers (Lumid in v1). Empty by default: with
+    # no enabled provider nothing is fetched and no provider cards appear. See
+    # docs/usage-providers.md.
+    usage_providers: list[LumidUsageProviderConfig] = Field(default_factory=list)
+
+    @field_validator("usage_providers", mode="before")
+    @classmethod
+    def _dispatch_usage_providers(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        dispatched: list[Any] = []
+        for raw in value:
+            if isinstance(raw, BaseModel):
+                dispatched.append(raw)
+                continue
+            if not isinstance(raw, dict):
+                raise ValueError("each usage provider must be a mapping")
+            provider_type = raw.get("type", "lumid")
+            schema = _USAGE_PROVIDER_CONFIG_TYPES.get(provider_type)
+            if schema is None:
+                raise ValueError(f"unknown usage provider type: {provider_type!r}")
+            dispatched.append(schema.model_validate(raw))
+        return dispatched
+
+    @model_validator(mode="after")
+    def _validate_usage_provider_ids(self) -> "Settings":
+        enabled_ids = [p.id for p in self.usage_providers if p.enabled]
+        if len(enabled_ids) != len(set(enabled_ids)):
+            raise ValueError("usage provider ids must be unique")
+        return self
 
     @field_validator("plugin_configs", mode="before")
     @classmethod
@@ -390,6 +465,9 @@ class Settings(BaseModel):
         if cfg is not None:
             return cfg
         return get_registry().get(plugin_id).config_schema()
+
+    def enabled_usage_providers(self) -> list[LumidUsageProviderConfig]:
+        return [p for p in self.usage_providers if p.enabled]
 
     def assistant_backend(self) -> str | None:
         """Effective backend id for the assistant, or ``None`` when disabled.

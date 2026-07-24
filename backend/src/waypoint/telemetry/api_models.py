@@ -209,6 +209,9 @@ class TelemetryHealth(BaseModel):
 
 class DrilldownItem(BaseModel):
     session_id: str
+    # False for external usage-provider rows: ``session_id`` is an opaque
+    # provenance key, not a real session, so the UI must not link it.
+    session_attributable: bool = True
     kind: TelemetryFactKind
     fact_id: str
     occurred_at: datetime

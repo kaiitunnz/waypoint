@@ -199,6 +199,18 @@ plugin_configs:
 #       chat_ids:                 # strings; private and negative group ids allowed
 #         - "123456789"
 
+# Session-independent usage providers (Lumid in v1). Empty/omitted by default:
+# no provider is fetched and no provider cards appear. Each PAT is read from the
+# env var named by `token_env` (comma-separated list) — never a YAML literal.
+# See docs/usage-providers.md.
+# usage_providers:
+#   - id: lumid
+#     type: lumid                 # only `lumid` is supported in v1
+#     enabled: true
+#     token_env: LUMID_TOKENS     # env var holding the Lumid PAT(s)
+#     label: Lumid                # source label shown on the usage card
+#     refresh_interval_seconds: 300  # 60–3600
+
 ssh_targets:
   - id: devbox
     name: SSH coding backend

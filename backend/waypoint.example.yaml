@@ -62,7 +62,7 @@ plugin_configs:
     #     config_dir: ~/.codex-work
     #     transcript_policy: copy_thread_on_switch  # require_existing | symlink_shared | copy_thread_on_switch
     #     expected_account_key: codex:work@example.com   # gate the switch to this account (optional)
-  claude_code:
+  claude_code:                             # claude_tty honors the same catalogue fields
     # default_model_id: opus
     # default_effort: high
     # local_bin: /opt/claude/bin/claude
@@ -70,6 +70,19 @@ plugin_configs:
     #   ANTHROPIC_AUTH_TOKEN: sk-ant-your-key
     # cli_args:
     #   - "--dangerously-skip-permissions"
+    # APPEND custom models to the built-in, version-gated catalogue. Each entry
+    # is selectable in every model picker; an entry whose id matches a built-in
+    # replaces it in place (relabel / re-effort).
+    # extra_models:
+    #   - id: kimi-k3[1m]
+    #     label: Kimi K3 (1M)
+    #     description: Custom gateway model
+    #     # supported_efforts omitted -> efforts unknown: the picker offers the
+    #     # full ladder (low..max) and forwards the choice unvalidated. Set an
+    #     # explicit list to enforce it; set [] for a model with no effort knob.
+    #     default_effort: high             # advisory: preselects in the picker
+    # default_model_id: kimi-k3[1m]        # may point at an extra id
+    # REPLACE the whole catalogue instead (opts out of CLI-version gating) -- rarely needed:
     # models:
     #   - id: opus
     #     label: Opus 4.7

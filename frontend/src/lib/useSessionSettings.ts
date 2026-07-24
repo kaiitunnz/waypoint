@@ -98,6 +98,7 @@ export interface SessionSettingsController {
   launchSettings: SessionLaunchSettings | null;
   caps: BackendCapabilities | undefined;
   models: BackendModelOption[];
+  effortLevels: string[];
   defaultModelLabel: string | null;
 
   // Draft state.
@@ -192,6 +193,7 @@ export function useSessionSettings(
   const [launchSettings, setLaunchSettings] =
     useState<SessionLaunchSettings | null>(null);
   const [models, setModels] = useState<BackendModelOption[]>([]);
+  const [effortLevels, setEffortLevels] = useState<string[]>([]);
   const [defaultModelLabel, setDefaultModelLabel] = useState<string | null>(
     null,
   );
@@ -281,6 +283,7 @@ export function useSessionSettings(
       ]);
       let modelList: BackendModelOption[] = [];
       let defaultLabel: string | null = null;
+      let effortVocabulary: string[] = [];
       try {
         const resp = await fetchBackendModels(host, token, backend, {
           launchTargetId,
@@ -288,6 +291,7 @@ export function useSessionSettings(
         });
         modelList = resp.models ?? [];
         defaultLabel = resp.default_model_label ?? null;
+        effortVocabulary = resp.effort_levels ?? [];
       } catch {
         // Model discovery is best-effort; the picker degrades to the current
         // value when it fails (e.g. a backend with no live model list).
@@ -296,6 +300,7 @@ export function useSessionSettings(
       setSession(record);
       setLaunchSettings(settings);
       setModels(modelList);
+      setEffortLevels(effortVocabulary);
       setDefaultModelLabel(defaultLabel);
       resetDraft(record, settings);
     } catch (error) {
@@ -319,6 +324,7 @@ export function useSessionSettings(
       loadToken.current += 1;
       setLaunchSettings(null);
       setModels([]);
+      setEffortLevels([]);
       setExistingEnv([]);
       setNewEnv([]);
       setArgsText("");
@@ -730,6 +736,7 @@ export function useSessionSettings(
     launchSettings,
     caps,
     models,
+    effortLevels,
     defaultModelLabel,
     title,
     permissionMode,

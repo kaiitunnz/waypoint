@@ -574,7 +574,9 @@ export interface BackendModelOption {
   description?: string | null;
   is_default?: boolean;
   hidden?: boolean;
-  supported_efforts?: string[];
+  // Three-state: null = efforts unknown (offer the agent's full vocabulary),
+  // [] = no effort knob, list = the accepted set.
+  supported_efforts?: string[] | null;
   default_effort?: string | null;
 }
 
@@ -585,6 +587,9 @@ export interface BackendModelListResponse {
   default_model_label?: string | null;
   default_effort?: string | null;
   supports_free_text?: boolean;
+  // The agent's full effort vocabulary; offered as the effort options when a
+  // selected model's supported_efforts is null (unknown).
+  effort_levels?: string[];
 }
 
 export interface BoardEntry {

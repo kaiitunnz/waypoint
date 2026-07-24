@@ -109,6 +109,7 @@ export function SessionSettingsModal({
     launchSettings,
     caps,
     models,
+    effortLevels,
     defaultModelLabel,
     title,
     permissionMode,
@@ -230,11 +231,16 @@ export function SessionSettingsModal({
   const permissionModes = permissionModesFor(backend, catalog);
   const effortOptions = useMemo(() => {
     const selectedModel = models.find((m) => m.id === (model ?? ""));
-    if (selectedModel) return selectedModel.supported_efforts ?? [];
+    if (selectedModel) {
+      // null/undefined efforts → unknown: offer the agent's full vocabulary.
+      return selectedModel.supported_efforts == null
+        ? effortLevels
+        : selectedModel.supported_efforts;
+    }
     return Array.from(
       new Set(models.flatMap((m) => m.supported_efforts ?? [])),
     );
-  }, [models, model]);
+  }, [models, model, effortLevels]);
   const accountProfiles = launchSettings?.account_profiles ?? [];
 
   // The transport option describing the current-or-staged interface; drives the

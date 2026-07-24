@@ -17,6 +17,7 @@ from waypoint.backends.claude_code.plugin import (
     ClaudeCodePlugin,
     ClaudeCodePluginConfig,
 )
+from waypoint.schemas import BackendModelOption
 
 
 def _fake_runtime(config: ClaudeCodePluginConfig | None = None) -> Any:
@@ -175,3 +176,48 @@ def test_honors_explicit_models_override(monkeypatch: pytest.MonkeyPatch) -> Non
     plugin.validate_new_session_selection(
         cast(Any, _fake_runtime(config=config)), "sonnet", "low", None
     )
+
+
+def test_null_supported_efforts_forwards_any_effort_unvalidated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A recognized model with supported_efforts=None (the default for a gateway
+    # extra_models entry) forwards the effort to the CLI unchecked -- even one
+    # not in the built-in ladder -- while the version gate on the built-ins is
+    # preserved (detection still runs).
+    plugin = ClaudeCodePlugin()
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: (2, 1, 197),
+    )
+    config = ClaudeCodePluginConfig(
+        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")]
+    )
+
+    plugin.validate_new_session_selection(
+        cast(Any, _fake_runtime(config=config)), "kimi-k3[1m]", "ludicrous", None
+    )
+
+
+def test_empty_supported_efforts_names_none_in_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An explicit [] (no effort knob) rejects any effort and reports the
+    # supported set as "none".
+    plugin = ClaudeCodePlugin()
+
+    def fail_detect(binary: str, launch_target: Any) -> tuple[int, ...] | None:
+        raise AssertionError("explicit models opt out of version detection")
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version", fail_detect
+    )
+    config = ClaudeCodePluginConfig(
+        models=[BackendModelOption(id="no-knob", label="No Knob", supported_efforts=[])]
+    )
+
+    with pytest.raises(ValueError) as exc:
+        plugin.validate_new_session_selection(
+            cast(Any, _fake_runtime(config=config)), "no-knob", "high", None
+        )
+    assert "supported efforts: none" in str(exc.value)

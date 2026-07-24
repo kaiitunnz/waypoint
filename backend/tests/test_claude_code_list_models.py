@@ -5,12 +5,16 @@ from typing import Any, cast
 
 import pytest
 
-from waypoint.backends.claude_code.models import DEFAULT_CLAUDE_MODELS
+from waypoint.backends.claude_code.models import (
+    CLAUDE_EFFORT_LEVELS,
+    DEFAULT_CLAUDE_MODELS,
+)
 from waypoint.backends.claude_code.plugin import (
     ClaudeCodePlugin,
     ClaudeCodePluginConfig,
 )
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.schemas import BackendModelOption
 
 
 def _fake_runtime(
@@ -126,3 +130,42 @@ async def test_list_models_honors_explicit_models_override(
 
     assert not called
     assert [m["id"] for m in result["models"]] == [custom[0].id]
+
+
+@pytest.mark.asyncio
+async def test_list_models_includes_effort_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = ClaudeCodePlugin()
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: (2, 1, 197),
+    )
+
+    result = await plugin.list_models(cast(Any, _fake_runtime()))
+
+    assert result["effort_levels"] == list(CLAUDE_EFFORT_LEVELS)
+
+
+@pytest.mark.asyncio
+async def test_list_models_surfaces_extra_model_with_null_effort_as_json_null(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = ClaudeCodePlugin()
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: (2, 1, 197),
+    )
+    config = ClaudeCodePluginConfig(
+        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")]
+    )
+
+    result = await plugin.list_models(cast(Any, _fake_runtime(config=config)))
+
+    kimi = next(m for m in result["models"] if m["id"] == "kimi-k3[1m]")
+    # Unknown efforts must serialize as JSON null (distinct from []) so the
+    # frontend can tell "unknown" from "no knob".
+    assert kimi["supported_efforts"] is None
+    # Haiku's pinned [] stays an empty list, not null.
+    haiku = next(m for m in result["models"] if m["id"] == "haiku")
+    assert haiku["supported_efforts"] == []

@@ -15,10 +15,10 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from waypoint.backends.base import (
     ConfigDirNotReadyError,
@@ -51,6 +51,8 @@ from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
     claude_models_for_version,
+    merge_model_catalogue,
+    overridden_builtin_ids,
     resolve_import_model_id,
 )
 from waypoint.backends.claude_code.permission_modes import (
@@ -150,6 +152,7 @@ class ClaudeCatalogueConfig(Protocol):
     """
 
     models: list[BackendModelOption]
+    extra_models: list[BackendModelOption]
     local_bin: str | None
 
     @property
@@ -175,11 +178,19 @@ def offered_claude_models(
     loop should run it via ``asyncio.to_thread``.
     """
     if "models" in config.model_fields_set:
-        return list(config.models), None
-    version = detect_claude_cli_version(
-        config.local_bin or cli_binary or "claude", launch_target
-    )
-    return list(claude_models_for_version(version)), version
+        base, version = list(config.models), None
+    else:
+        version = detect_claude_cli_version(
+            config.local_bin or cli_binary or "claude", launch_target
+        )
+        base = list(claude_models_for_version(version))
+    return merge_model_catalogue(base, config.extra_models), version
+
+
+def log_extra_model_overrides(extra: list[BackendModelOption]) -> None:
+    """Log one line per ``extra`` id that shadows a built-in Claude model."""
+    for model_id in overridden_builtin_ids(extra):
+        log.info("extra_models entry %r overrides a built-in Claude model", model_id)
 
 
 def raise_for_unsupported_selection(
@@ -193,13 +204,19 @@ def raise_for_unsupported_selection(
     ``model`` is looked up in the version-gated catalogue ``list_models`` would
     offer for the target. A model that isn't in it is free text (or an id from
     a newer/unknown CLI) -- nothing to check it against, so it passes through
-    unrejected. Only a *recognized* model paired with an effort that catalogue
-    entry doesn't list is provably unsupported.
+    unrejected. A recognized model whose ``supported_efforts`` is ``None``
+    (efforts unknown, e.g. a gateway model) forwards the effort unchecked. Only
+    a *recognized* model with a concrete ``supported_efforts`` list that omits
+    the requested effort is provably unsupported.
     """
     if effort is None:
         return None
     option = next((opt for opt in models if opt.id == model), None)
-    if option is None or effort in option.supported_efforts:
+    if (
+        option is None
+        or option.supported_efforts is None
+        or effort in option.supported_efforts
+    ):
         return None
     version_label = ".".join(str(part) for part in version) if version else "unknown"
     supported = ", ".join(option.supported_efforts) or "none"
@@ -220,6 +237,9 @@ class ClaudeCodePluginConfig(PluginConfig):
     models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
+    # Custom models appended to the version-gated catalogue; see
+    # offered_claude_models.
+    extra_models: list[BackendModelOption] = Field(default_factory=list)
     default_model_id: str | None = Field(default_factory=claude_default_model_id)
     # Deprecated no-op: tool approval moved from the PreToolUse HTTP hook to
     # the `can_use_tool` control protocol, which has no network timeout.
@@ -229,6 +249,11 @@ class ClaudeCodePluginConfig(PluginConfig):
     # backends that own a config-dir env var carry this field; the base config
     # model rejects it for other backends via extra="forbid".
     account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _warn_extra_model_overrides(self) -> Self:
+        log_extra_model_overrides(self.extra_models)
+        return self
 
 
 class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
@@ -834,6 +859,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             "default_model_label": default_model_label,
             "default_effort": default_effort,
             "supports_free_text": True,
+            "effort_levels": list(CLAUDE_EFFORT_LEVELS),
         }
 
     async def list_command_completions(

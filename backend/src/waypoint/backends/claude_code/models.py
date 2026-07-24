@@ -5,7 +5,7 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 ``model/list`` RPC, Claude does not.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from waypoint.schemas import BackendModelOption
 
@@ -64,6 +64,8 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="haiku",
         label="Haiku 4.5",
         description="Fast and lightweight",
+        # No effort knob; explicit [] so the None default (unknown) still rejects.
+        supported_efforts=[],
     ),
     BackendModelOption(
         id="opus[1m]",
@@ -95,6 +97,40 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         default_effort="high",
     ),
 )
+
+
+_BUILTIN_MODEL_IDS: frozenset[str] = frozenset(opt.id for opt in DEFAULT_CLAUDE_MODELS)
+
+
+def merge_model_catalogue(
+    base: Sequence[BackendModelOption],
+    extra: list[BackendModelOption],
+) -> list[BackendModelOption]:
+    """Append ``extra`` to ``base``.
+
+    An extra whose id matches a base entry replaces that entry in place
+    (preserving position), which lets an operator relabel or re-effort a
+    built-in. Net-new extras append in declared order.
+    """
+    merged = list(base)
+    index_by_id = {opt.id: i for i, opt in enumerate(merged)}
+    for opt in extra:
+        existing = index_by_id.get(opt.id)
+        if existing is None:
+            index_by_id[opt.id] = len(merged)
+            merged.append(opt)
+        else:
+            merged[existing] = opt
+    return merged
+
+
+def overridden_builtin_ids(extra: list[BackendModelOption]) -> list[str]:
+    """The ``extra`` ids that shadow a current-epoch built-in.
+
+    The reference set is ``DEFAULT_CLAUDE_MODELS`` (startup-time; not gated on a
+    target's CLI version).
+    """
+    return [opt.id for opt in extra if opt.id in _BUILTIN_MODEL_IDS]
 
 
 def normalize_claude_model_id(model: str | None) -> str | None:

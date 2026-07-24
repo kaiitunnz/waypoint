@@ -29,10 +29,10 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from waypoint.backends.base import (
     TerminalAppearance,
@@ -47,12 +47,14 @@ from waypoint.backends.claude_code.history import (
     read_local_claude_token_usage_history,
 )
 from waypoint.backends.claude_code.models import (
+    CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
     resolve_import_model_id,
 )
 from waypoint.backends.claude_code.plugin import (
     ClaudeCodePlugin,
+    log_extra_model_overrides,
     offered_claude_models,
     raise_for_unsupported_selection,
 )
@@ -128,8 +130,15 @@ class ClaudeTtyPluginConfig(PluginConfig):
     models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
+    # Appended to the version-gated catalogue; honored identically to claude_code.
+    extra_models: list[BackendModelOption] = Field(default_factory=list)
     default_model_id: str | None = Field(default_factory=claude_default_model_id)
     default_effort: str | None = None
+
+    @model_validator(mode="after")
+    def _warn_extra_model_overrides(self) -> Self:
+        log_extra_model_overrides(self.extra_models)
+        return self
 
 
 class ClaudeTtyPlugin:
@@ -382,6 +391,7 @@ class ClaudeTtyPlugin:
             "default_model_label": default_model_label,
             "default_effort": config.default_effort,
             "supports_free_text": True,
+            "effort_levels": list(CLAUDE_EFFORT_LEVELS),
         }
 
     def validate_new_session_selection(

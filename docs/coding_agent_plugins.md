@@ -335,8 +335,17 @@ async def delete_thread(self, runtime, thread_id, launch_target_id=None, account
 
 `list_models` returns the same payload shape `/api/backends/{id}/models`
 serves to the frontend (`{models, default_model_id, default_model_label,
-default_effort, supports_free_text}`). `list_threads` returns plugin-specific
-summary objects; the API serialises via `model_dump`.
+default_effort, supports_free_text, effort_levels}`). `effort_levels` is the
+agent's full effort vocabulary; the frontend offers it as the effort options
+for a selected model whose `supported_efforts` is `null` (see below).
+`list_threads` returns plugin-specific summary objects; the API serialises via
+`model_dump`.
+
+Each model entry (`BackendModelOption`) carries a three-state
+`supported_efforts`: `null` (the default) means efforts are unknown, so the
+picker offers `effort_levels` and forwards the chosen level to the CLI
+unvalidated; `[]` means the model has no effort knob (any effort is rejected);
+an explicit list is the accepted set (membership enforced).
 
 The optional `account_profile_id` scopes this session-less discovery to a named
 account profile: the runtime resolves it to the profile's config-dir env via
@@ -353,6 +362,31 @@ so scoping is a no-op there; Codex's is a live per-account RPC that runs under
 the resolved env. Remote (SSH launch target) profile scoping is not yet wired —
 the remote branches read the target's default store (see
 [`account_profiles.md`](account_profiles.md)).
+
+#### Model catalogue (Claude)
+
+Claude has no runtime `model/list` RPC (Codex does), so its catalogue is static
+config in `backends/claude_code/models.py`, gated on the detected CLI version.
+Two `waypoint.yaml` keys shape it (both honored identically by `claude_code` and
+`claude_tty`, the two transports of the Claude agent):
+
+- **`extra_models`** — *appends* custom `BackendModelOption` entries to the
+  built-in catalogue while keeping the CLI-version gate. An entry whose `id`
+  matches a built-in replaces it in place (relabel / re-effort); net-new ids
+  append in declared order, and a collision logs one line at config load. Use
+  it to surface a gateway-served `--model` id (e.g. `kimi-k3[1m]`) as a picker
+  option. `default_model_id` may point at an extra id.
+- **`models`** — *replaces* the whole catalogue and opts out of the version
+  gate (`version` becomes `None`); you redeclare every built-in you still want,
+  and they lose version-aware effort labels. `extra_models` still appends on top
+  of an explicit `models` list.
+
+Leave a custom model's `supported_efforts` unset to offer `effort_levels` in the
+picker and forward the level unvalidated; set an explicit list to enforce it, or
+`[]` for a model with no effort knob. Setting neither catalogue key leaves
+behavior unchanged; the CLI `waypoint launch --model <id>` free-text passthrough
+still warns without blocking, and the merged catalogue is what the frontend
+pickers and `waypoint models` show.
 
 `import_thread` adopts an externally-created native thread into a brand-new
 session. When the import request's `import_history` flag is set (it defaults to

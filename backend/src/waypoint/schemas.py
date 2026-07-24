@@ -1145,10 +1145,11 @@ class BackendModelOption(BaseModel):
     description: str | None = None
     is_default: bool = False
     hidden: bool = False
-    # Reasoning-effort levels this model accepts. Empty list means the model
-    # has no effort knob (e.g. Claude Haiku, or Codex models without an
-    # entry in `supported_reasoning_efforts`).
-    supported_efforts: list[str] = Field(default_factory=list)
+    # Reasoning-effort levels this model accepts (three-state):
+    #   None -> efforts unknown; any level is accepted and forwarded unvalidated
+    #   []   -> no effort knob (e.g. Claude Haiku); any effort is rejected
+    #   list -> the accepted set; membership is enforced
+    supported_efforts: list[str] | None = None
     default_effort: str | None = None
 
 
@@ -1163,6 +1164,9 @@ class BackendModelListResponse(BaseModel):
     # Backend-wide default effort (used when no model-specific default
     # applies); falls back to None to mean "let the runtime pick".
     default_effort: str | None = None
+    # The agent's full effort vocabulary; the frontend offers it as the effort
+    # options for a selected model whose `supported_efforts` is None.
+    effort_levels: list[str] = Field(default_factory=list)
 
 
 class AskQuestionAnswer(BaseModel):

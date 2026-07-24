@@ -213,7 +213,11 @@ export function useLaunchForm({
     if (resolvedModelId) {
       const opt = modelInfo.models.find((entry) => entry.id === resolvedModelId);
       if (opt) {
-        return opt.supported_efforts ?? [];
+        // null/undefined efforts → unknown: offer the agent's full vocabulary;
+        // [] → no control; explicit list → that list.
+        return opt.supported_efforts == null
+          ? (modelInfo.effort_levels ?? [])
+          : opt.supported_efforts;
       }
     }
 

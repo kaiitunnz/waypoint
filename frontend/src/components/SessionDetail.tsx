@@ -440,6 +440,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
   const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
+  const [effortLevels, setEffortLevels] = useState<string[]>([]);
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
   const [defaultModelLabel, setDefaultModelLabel] = useState<string | null>(null);
   const [defaultEffort, setDefaultEffort] = useState<string | null>(null);
@@ -585,6 +586,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       .then((response) => {
         if (cancelled) return;
         setModelOptions(response.models);
+        setEffortLevels(response.effort_levels ?? []);
         setDefaultModelId(response.default_model_id ?? null);
         setDefaultModelLabel(response.default_model_label ?? null);
         setDefaultEffort(response.default_effort ?? null);
@@ -598,6 +600,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         // Discovery failure is non-fatal: the picker just falls back to
         // showing whatever model the session already has.
         setModelOptions([]);
+        setEffortLevels([]);
         setDefaultModelId(null);
         setDefaultModelLabel(null);
         setDefaultEffort(null);
@@ -2323,6 +2326,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           modeBusy={modeBusy}
           modelBusy={modelBusy}
           modelOptions={modelOptions}
+          effortLevels={effortLevels}
           defaultModelId={defaultModelId}
           defaultModelLabel={defaultModelLabel}
           defaultEffort={defaultEffort}
@@ -2426,6 +2430,7 @@ interface ReplyComposerProps {
   modeBusy: boolean;
   modelBusy: boolean;
   modelOptions: BackendModelOption[];
+  effortLevels: string[];
   defaultModelId: string | null;
   defaultModelLabel: string | null;
   defaultEffort: string | null;
@@ -2482,6 +2487,7 @@ const ReplyComposer = memo(function ReplyComposer({
   modeBusy,
   modelBusy,
   modelOptions,
+  effortLevels,
   defaultModelId,
   defaultModelLabel,
   defaultEffort,
@@ -2802,7 +2808,9 @@ const ReplyComposer = memo(function ReplyComposer({
     ? modelOptions.find((opt) => opt.id === resolvedModelId)
     : undefined;
   const effortOptions: string[] = matchingModelEntry
-    ? matchingModelEntry.supported_efforts ?? []
+    ? matchingModelEntry.supported_efforts == null
+      ? effortLevels // unknown → the agent's full vocabulary
+      : matchingModelEntry.supported_efforts
     : Array.from(
         new Set(
           modelOptions.flatMap((opt) => opt.supported_efforts ?? []),

@@ -101,6 +101,12 @@ OAuth email or org. The provider-derived account label is shown only when
 account-wide, so the limit card is hidden whenever a session-scoping filter is
 active.
 
+Configured usage providers (see [`usage-providers.md`](usage-providers.md))
+contribute account-scoped limit snapshots the same way when telemetry is
+enabled. Their facts are marked non-session-attributable: they appear in the
+unscoped limit view but are excluded by every session-scoping filter, and in
+drill-down they render as external-provider rows with no session link.
+
 ## Insights
 
 Deterministic insight cards fire only when their evidence gates are met, and each

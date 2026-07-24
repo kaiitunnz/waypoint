@@ -12,6 +12,7 @@ import {
   type UsageTone,
 } from "@/lib/usage";
 import { isRecurring } from "@/lib/recurrence";
+import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -30,6 +31,7 @@ import type {
 interface InstrumentRailProps {
   usageBuckets: UsageDashboardBucket[] | null;
   usageProviders: ProviderUsageStatus[];
+  backendCatalog: BackendCatalog | null;
   refreshingUsage: boolean;
   onRefreshUsage: () => void;
   telemetryEnabled: boolean;
@@ -43,6 +45,7 @@ interface InstrumentRailProps {
 export function InstrumentRail({
   usageBuckets,
   usageProviders,
+  backendCatalog,
   refreshingUsage,
   onRefreshUsage,
   telemetryEnabled,
@@ -57,6 +60,7 @@ export function InstrumentRail({
       <TelemetryTile
         buckets={usageBuckets}
         providers={usageProviders}
+        catalog={backendCatalog}
         telemetryEnabled={telemetryEnabled}
         refreshing={refreshingUsage}
         onRefresh={onRefreshUsage}
@@ -102,6 +106,20 @@ function bucketPeak(bucket: { snapshot: { windows: UsageWindow[] } }): number {
   );
 }
 
+// Source label for an account row: the agent name for a session bucket, the
+// provider label for a configured-provider bucket (with a stale hint).
+function sourceLabel(
+  bucket: UsageDashboardBucket,
+  catalog: BackendCatalog | null,
+): string {
+  if (bucket.origin === "provider") {
+    return bucket.health.stale
+      ? `${bucket.provider_label} · stale`
+      : bucket.provider_label;
+  }
+  return humaniseBackend(bucket.backend, catalog ?? undefined);
+}
+
 // A provider whose latest refresh resolved no account bucket but reported a
 // coarse error surfaces as a compact health line so missing_token /
 // identity_failed states are visible without a card.
@@ -134,12 +152,14 @@ function providerHealthLine(
 function TelemetryTile({
   buckets,
   providers,
+  catalog,
   telemetryEnabled,
   refreshing,
   onRefresh,
 }: {
   buckets: UsageDashboardBucket[] | null;
   providers: ProviderUsageStatus[];
+  catalog: BackendCatalog | null;
   telemetryEnabled: boolean;
   refreshing: boolean;
   onRefresh: () => void;
@@ -243,15 +263,9 @@ function TelemetryTile({
                 <span className="inst-account-name" title={bucket.account_label}>
                   {bucket.account_label}
                 </span>
-                {bucket.origin === "provider" ? (
-                  <span
-                    className="inst-account-src"
-                    title={`Configured provider: ${bucket.provider_label}`}
-                  >
-                    {bucket.provider_label}
-                    {bucket.health.stale ? " · stale" : ""}
-                  </span>
-                ) : null}
+                <span className="inst-account-src" title={sourceLabel(bucket, catalog)}>
+                  {sourceLabel(bucket, catalog)}
+                </span>
               </span>
               <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
               <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />

@@ -1232,6 +1232,7 @@ export default function HomePage() {
             <InstrumentRail
               usageBuckets={usageBuckets}
               usageProviders={usageProviders}
+              backendCatalog={catalog}
               refreshingUsage={refreshingUsage}
               onRefreshUsage={handleRefreshUsage}
               telemetryEnabled={telemetryEnabled}

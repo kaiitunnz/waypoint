@@ -157,7 +157,9 @@ async def test_list_models_surfaces_extra_model_with_null_effort_as_json_null(
         lambda binary, launch_target: (2, 1, 197),
     )
     config = ClaudeCodePluginConfig(
-        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")]
+        extra_models=[
+            BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M context)")
+        ]
     )
 
     result = await plugin.list_models(cast(Any, _fake_runtime(config=config)))

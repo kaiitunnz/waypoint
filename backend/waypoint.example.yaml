@@ -75,7 +75,7 @@ plugin_configs:
     # replaces it in place (relabel / re-effort).
     # extra_models:
     #   - id: kimi-k3[1m]
-    #     label: Kimi K3 (1M)
+    #     label: Kimi K3 (1M context)
     #     description: Custom gateway model
     #     # supported_efforts omitted -> efforts unknown: the picker offers the
     #     # full ladder (low..max) and forwards the choice unvalidated. Set an

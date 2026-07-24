@@ -191,7 +191,9 @@ def test_null_supported_efforts_forwards_any_effort_unvalidated(
         lambda binary, launch_target: (2, 1, 197),
     )
     config = ClaudeCodePluginConfig(
-        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")]
+        extra_models=[
+            BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M context)")
+        ]
     )
 
     plugin.validate_new_session_selection(

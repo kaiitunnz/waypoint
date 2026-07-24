@@ -78,7 +78,7 @@ def test_legacy_offering_has_same_model_ids_as_default() -> None:
 def test_merge_appends_net_new_in_declared_order() -> None:
     base = list(DEFAULT_CLAUDE_MODELS)
     extra = [
-        BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)"),
+        BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M context)"),
         BackendModelOption(id="gw-mini", label="Gateway Mini"),
     ]
     merged = merge_model_catalogue(base, extra)
@@ -138,7 +138,9 @@ def test_offered_appends_extras_and_keeps_version_gate(
         lambda binary, launch_target: SONNET5_MIN_CLI_VERSION,
     )
     config = ClaudeCodePluginConfig(
-        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")]
+        extra_models=[
+            BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M context)")
+        ]
     )
 
     models, version = offered_claude_models(config, "claude", None)
@@ -163,7 +165,9 @@ def test_offered_merges_extras_on_explicit_models_with_none_version(
     )
     config = ClaudeCodePluginConfig(
         models=[BackendModelOption(id="only-model", label="Only")],
-        extra_models=[BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M)")],
+        extra_models=[
+            BackendModelOption(id="kimi-k3[1m]", label="Kimi K3 (1M context)")
+        ],
     )
 
     models, version = offered_claude_models(config, "claude", None)

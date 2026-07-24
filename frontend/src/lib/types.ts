@@ -80,7 +80,8 @@ export interface SessionRateLimitUsage {
   notes?: string[];
 }
 
-export interface UsageDashboardBucket {
+export interface SessionUsageDashboardBucket {
+  origin: "session";
   backend: Backend;
   account_key: string;
   account_label: string;
@@ -88,8 +89,74 @@ export interface UsageDashboardBucket {
   session_ids: string[];
 }
 
+export interface ProviderRateLimitUsage {
+  source_id: string;
+  updated_at: string;
+  windows: UsageWindow[];
+  credits_remaining?: number | null;
+  credits_currency?: string | null;
+  notes?: string[];
+}
+
+export interface ProviderModelUsage {
+  model: string;
+  tokens?: number | null;
+  cost?: number | null;
+}
+
+export interface ProviderUsageMetadata {
+  requests_7d?: number | null;
+  last_ts?: string | null;
+  model_breakdown?: ProviderModelUsage[] | null;
+  total_cost_7d?: number | null;
+}
+
+export interface ProviderBucketHealth {
+  last_success_at?: string | null;
+  stale: boolean;
+}
+
+export interface ProviderUsageDashboardBucket {
+  origin: "provider";
+  provider_id: string;
+  provider_type: string;
+  provider_label: string;
+  account_key: string;
+  account_label: string;
+  snapshot: ProviderRateLimitUsage;
+  metadata: ProviderUsageMetadata;
+  health: ProviderBucketHealth;
+  session_ids: string[];
+}
+
+export type UsageDashboardBucket =
+  | SessionUsageDashboardBucket
+  | ProviderUsageDashboardBucket;
+
+export type ProviderErrorState =
+  | "missing_token"
+  | "identity_failed"
+  | "permission_denied"
+  | "usage_unavailable"
+  | "no_matching_usage"
+  | "network"
+  | "unknown";
+
+export interface ProviderUsageStatus {
+  provider_id: string;
+  provider_type: string;
+  provider_label: string;
+  enabled: boolean;
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  stale: boolean;
+  result_counts: Record<string, number>;
+  error_counts: Record<string, number>;
+}
+
 export interface UsageDashboardResponse {
   buckets: UsageDashboardBucket[];
+  providers: ProviderUsageStatus[];
 }
 
 export interface SessionRecord {
@@ -1059,6 +1126,9 @@ export interface TelemetryHealth {
 
 export interface DrilldownItem {
   session_id: string;
+  // False for external usage-provider rows: session_id is an opaque provenance
+  // key, not a real session, so the row must not link to /session/<id>.
+  session_attributable?: boolean;
   kind: TelemetryFactKind;
   fact_id: string;
   occurred_at: string;

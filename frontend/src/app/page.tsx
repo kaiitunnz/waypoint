@@ -80,6 +80,7 @@ import {
   ScheduledSession,
   SessionEnvelope,
   SessionPresetSummary,
+  ProviderUsageStatus,
   SessionPresetWriteRequest,
   SessionRecord,
   SessionTransport,
@@ -170,6 +171,7 @@ export default function HomePage() {
   const [usageBuckets, setUsageBuckets] = useState<UsageDashboardBucket[] | null>(
     null,
   );
+  const [usageProviders, setUsageProviders] = useState<ProviderUsageStatus[]>([]);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const [launchSheetOpen, setLaunchSheetOpen] = useState(false);
   const [launchSheetMode, setLaunchSheetMode] = useState<LaunchSheetMode>("new");
@@ -285,6 +287,7 @@ export default function HomePage() {
     try {
       const response = await refreshUsageDashboard(host, token);
       setUsageBuckets(response.buckets);
+      setUsageProviders(response.providers ?? []);
     } catch (refreshError) {
       if (isAuthError(refreshError)) {
         handleAuthFailure();
@@ -481,12 +484,15 @@ export default function HomePage() {
   useEffect(() => {
     if (!host || !token) {
       setUsageBuckets(null);
+      setUsageProviders([]);
       return;
     }
     let active = true;
     fetchUsageDashboard(host, token)
       .then((response) => {
-        if (active) setUsageBuckets(response.buckets);
+        if (!active) return;
+        setUsageBuckets(response.buckets);
+        setUsageProviders(response.providers ?? []);
       })
       .catch(() => {
         if (active) setUsageBuckets(null);
@@ -1225,6 +1231,7 @@ export default function HomePage() {
             </div>
             <InstrumentRail
               usageBuckets={usageBuckets}
+              usageProviders={usageProviders}
               refreshingUsage={refreshingUsage}
               onRefreshUsage={handleRefreshUsage}
               telemetryEnabled={telemetryEnabled}

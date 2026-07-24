@@ -942,6 +942,48 @@ button.inst:hover {
   white-space: nowrap;
 }
 
+/* Source tag on a configured-provider account row (e.g. "Lumid"): bare mono,
+   muted, boxed with the content-chip radius to read as a label, not a status. */
+.inst-account-src {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* Provider health lines: a configured provider that resolved no account bucket
+   but reported a coarse error state, shown as a lamp-dot + short label. */
+.inst-provider-health-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.inst-provider-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.inst-provider-health-text {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Window row: [cap] [meter] [pct] [◷ reset]. Only the meter flexes (1fr); the fixed
    percent and reset columns keep every row's meter identical across both windows. */
 .inst-window {
@@ -19177,6 +19219,15 @@ body.wp-dock-resizing .inbox-resizer::after {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--accent-cool);
+}
+
+/* External usage-provider row: not a session, so it reads as muted plain text
+   rather than an actionable link. */
+.tm-drilldown-session.is-external {
+  color: var(--muted-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6rem;
 }
 
 .tm-drilldown-time {

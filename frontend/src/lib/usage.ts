@@ -1,4 +1,4 @@
-import { SessionRateLimitUsage, UsageWindow } from "@/lib/types";
+import { UsageWindow } from "@/lib/types";
 
 const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
@@ -121,7 +121,7 @@ export function formatRateLimitWindowResetShort(window: UsageWindow): string | n
 }
 
 export function rateLimitUsageTone(
-  usage: SessionRateLimitUsage | null,
+  usage: { windows: UsageWindow[] } | null,
 ): UsageTone {
   if (!usage || usage.windows.length === 0) {
     return "good";

@@ -15,6 +15,7 @@ import { isRecurring } from "@/lib/recurrence";
 import type {
   BoardChannel,
   MessageSchedule,
+  ProviderUsageStatus,
   ScheduledSession,
   SessionRecord,
   UsageDashboardBucket,
@@ -28,6 +29,7 @@ import type {
 
 interface InstrumentRailProps {
   usageBuckets: UsageDashboardBucket[] | null;
+  usageProviders: ProviderUsageStatus[];
   refreshingUsage: boolean;
   onRefreshUsage: () => void;
   telemetryEnabled: boolean;
@@ -40,6 +42,7 @@ interface InstrumentRailProps {
 
 export function InstrumentRail({
   usageBuckets,
+  usageProviders,
   refreshingUsage,
   onRefreshUsage,
   telemetryEnabled,
@@ -53,6 +56,7 @@ export function InstrumentRail({
     <aside className="rail" aria-label="Instruments">
       <TelemetryTile
         buckets={usageBuckets}
+        providers={usageProviders}
         telemetryEnabled={telemetryEnabled}
         refreshing={refreshingUsage}
         onRefresh={onRefreshUsage}
@@ -71,7 +75,7 @@ export function InstrumentRail({
 /* ── Telemetry ── */
 
 function findWindow(
-  bucket: UsageDashboardBucket,
+  bucket: { snapshot: { windows: UsageWindow[] } },
   kind: "5h" | "weekly",
 ): UsageWindow | null {
   for (const window of bucket.snapshot.windows) {
@@ -81,7 +85,9 @@ function findWindow(
     }
     if (
       kind === "weekly" &&
-      (label.includes("week") || window.window_minutes === 7 * 24 * 60)
+      (label.includes("week") ||
+        label.includes("7d") ||
+        window.window_minutes === 7 * 24 * 60)
     ) {
       return window;
     }
@@ -89,27 +95,72 @@ function findWindow(
   return null;
 }
 
-function bucketPeak(bucket: UsageDashboardBucket): number {
+function bucketPeak(bucket: { snapshot: { windows: UsageWindow[] } }): number {
   return Math.max(
     0,
     ...bucket.snapshot.windows.map((w) => rateLimitWindowPercent(w) ?? 0),
   );
 }
 
+// A provider whose latest refresh resolved no account bucket but reported a
+// coarse error surfaces as a compact health line so missing_token /
+// identity_failed states are visible without a card.
+const PROVIDER_ERROR_LABELS: Record<string, { text: string; danger: boolean }> = {
+  missing_token: { text: "token missing", danger: true },
+  identity_failed: { text: "identity failed", danger: true },
+  network: { text: "unreachable", danger: true },
+  unknown: { text: "error", danger: true },
+  permission_denied: { text: "permission denied", danger: false },
+  usage_unavailable: { text: "usage unavailable", danger: false },
+  no_matching_usage: { text: "no usage", danger: false },
+};
+
+function providerHealthLine(
+  status: ProviderUsageStatus,
+): { text: string; danger: boolean } | null {
+  const errors = Object.entries(status.error_counts).filter(([, n]) => n > 0);
+  if (errors.length === 0) return null;
+  // Worst error first: a hard failure (danger) outranks a soft one.
+  errors.sort(
+    (a, b) =>
+      Number(PROVIDER_ERROR_LABELS[b[0]]?.danger ?? true) -
+      Number(PROVIDER_ERROR_LABELS[a[0]]?.danger ?? true),
+  );
+  const [code] = errors[0];
+  const entry = PROVIDER_ERROR_LABELS[code] ?? { text: "error", danger: true };
+  return { text: `${status.provider_label} · ${entry.text}`, danger: entry.danger };
+}
+
 function TelemetryTile({
   buckets,
+  providers,
   telemetryEnabled,
   refreshing,
   onRefresh,
 }: {
   buckets: UsageDashboardBucket[] | null;
+  providers: ProviderUsageStatus[];
   telemetryEnabled: boolean;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  // Degrade to a plain link when usage is unavailable or there are no accounts:
-  // lamp keyed off the master telemetry opt-in rather than live figures.
-  if (buckets === null || buckets.length === 0) {
+  // Provider health lines for providers that resolved no bucket but reported an
+  // error — so a configured Lumid provider is visible even with no card.
+  const bucketProviderIds = new Set(
+    (buckets ?? [])
+      .filter((b) => b.origin === "provider")
+      .map((b) => b.provider_id),
+  );
+  const providerHealth = providers
+    .filter((p) => !bucketProviderIds.has(p.provider_id))
+    .map((p) => providerHealthLine(p))
+    .filter((line): line is { text: string; danger: boolean } => line !== null);
+
+  // Degrade to a plain link only when there is no usage data at all: no account
+  // buckets and no provider health worth showing. Lamp keyed off the master
+  // telemetry opt-in rather than live figures.
+  const hasBuckets = buckets !== null && buckets.length > 0;
+  if (!hasBuckets && providerHealth.length === 0) {
     return (
       <Link className="inst" href="/telemetry">
         <div className="inst-top">
@@ -127,14 +178,20 @@ function TelemetryTile({
     );
   }
 
+  const accounts = buckets ?? [];
   let tone: UsageTone = "good";
-  for (const bucket of buckets) {
+  for (const bucket of accounts) {
     const t = rateLimitUsageTone(bucket.snapshot);
     if (t === "danger") {
       tone = "danger";
       break;
     }
     if (t === "warn") tone = "warn";
+  }
+  // A hard provider failure (danger) escalates the tile lamp even with no card.
+  if (providerHealth.some((h) => h.danger)) tone = "danger";
+  else if (tone !== "danger" && providerHealth.length > 0) {
+    tone = tone === "good" ? "warn" : tone;
   }
   const lampTone = tone === "good" ? "ok" : tone === "warn" ? "warn" : "danger";
   const lampText =
@@ -145,7 +202,11 @@ function TelemetryTile({
         : "Quota critical";
 
   // Worst-first so the account nearest its limit reads first at a glance.
-  const ordered = [...buckets].sort((a, b) => bucketPeak(b) - bucketPeak(a));
+  const ordered = [...accounts].sort((a, b) => bucketPeak(b) - bucketPeak(a));
+  const headline =
+    accounts.length > 0
+      ? `${accounts.length} account${accounts.length === 1 ? "" : "s"}`
+      : "Providers";
 
   return (
     <section className="inst">
@@ -169,26 +230,48 @@ function TelemetryTile({
           <RefreshGlyph />
         </button>
       </div>
-      <h4 className="inst-headline">
-        {buckets.length} account{buckets.length === 1 ? "" : "s"}
-      </h4>
-      <ul className="inst-accounts">
-        {ordered.map((bucket) => (
-          <li className="inst-account" key={bucket.account_key}>
-            <span className="inst-account-head">
+      <h4 className="inst-headline">{headline}</h4>
+      {ordered.length > 0 ? (
+        <ul className="inst-accounts">
+          {ordered.map((bucket) => (
+            <li className="inst-account" key={bucket.account_key}>
+              <span className="inst-account-head">
+                <span
+                  className={`inst-account-dot tone-${toneOf(bucketPeak(bucket))}`}
+                  aria-hidden="true"
+                />
+                <span className="inst-account-name" title={bucket.account_label}>
+                  {bucket.account_label}
+                </span>
+                {bucket.origin === "provider" ? (
+                  <span
+                    className="inst-account-src"
+                    title={`Configured provider: ${bucket.provider_label}`}
+                  >
+                    {bucket.provider_label}
+                    {bucket.health.stale ? " · stale" : ""}
+                  </span>
+                ) : null}
+              </span>
+              <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
+              <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {providerHealth.length > 0 ? (
+        <ul className="inst-provider-health-list">
+          {providerHealth.map((line) => (
+            <li className="inst-provider-health" key={line.text}>
               <span
-                className={`inst-account-dot tone-${toneOf(bucketPeak(bucket))}`}
+                className={`inst-account-dot tone-${line.danger ? "danger" : "warn"}`}
                 aria-hidden="true"
               />
-              <span className="inst-account-name" title={bucket.account_label}>
-                {bucket.account_label}
-              </span>
-            </span>
-            <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
-            <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />
-          </li>
-        ))}
-      </ul>
+              <span className="inst-provider-health-text">{line.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

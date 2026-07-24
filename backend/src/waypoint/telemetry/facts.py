@@ -152,6 +152,11 @@ class TelemetryFactBase(BaseModel):
     revision: int = 0
     partial: bool = False
     session_id: str
+    # Whether this fact belongs to a real coding session and may appear under
+    # session-scoping filters. External usage-provider facts set this False:
+    # they are account-scoped, carry an opaque non-session ``session_id`` for
+    # provenance only, and are excluded from every session-scoped query.
+    session_attributable: bool = True
     occurred_at: datetime
     schema_version: Literal[1] = _SCHEMA_VERSION
     dims: FactDimensions
@@ -221,6 +226,8 @@ class LimitSnapshotFact(TelemetryFactBase):
     window_id: str
     window_label: str | None = None
     used_percent: float
+    used_tokens: int | None = None
+    limit_tokens: int | None = None
     resets_at: datetime | None = None
 
 

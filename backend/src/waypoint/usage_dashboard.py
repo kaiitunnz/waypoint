@@ -11,8 +11,11 @@ email/plan) lives on the plugin's ``rate_limit_account`` method, not here.
 from typing import Protocol
 
 from waypoint.schemas import (
+    ProviderUsageDashboardBucket,
+    ProviderUsageStatus,
     SessionRateLimitUsage,
     SessionRecord,
+    SessionUsageDashboardBucket,
     UsageDashboardBucket,
     UsageDashboardResponse,
 )
@@ -28,6 +31,18 @@ class _PluginRegistry(Protocol):
     def has_backend(self, backend_id: str) -> bool: ...
 
     def get(self, backend_id: str) -> object: ...
+
+
+class _ProviderService(Protocol):
+    """Minimal provider-service surface the dashboard consumes.
+
+    Declared structurally so the dashboard stays provider-neutral and never
+    imports the usage_providers package or any concrete provider.
+    """
+
+    def dashboard_buckets(self) -> list[ProviderUsageDashboardBucket]: ...
+
+    def statuses(self) -> list[ProviderUsageStatus]: ...
 
 
 def resolve_account(
@@ -103,12 +118,14 @@ def _humanise_backend(backend: str, registry: _PluginRegistry) -> str:
 
 
 def build_dashboard(
-    sessions: list[SessionRecord], registry: _PluginRegistry
+    sessions: list[SessionRecord],
+    registry: _PluginRegistry,
+    provider_service: _ProviderService | None = None,
 ) -> UsageDashboardResponse:
     # ``session_ids[0]`` is the session that produced the freshest snapshot
     # in the bucket — refresh paths target it so a stale/torn-down session
     # cannot silently no-op the probe when a live one is available.
-    buckets: dict[str, UsageDashboardBucket] = {}
+    buckets: dict[str, SessionUsageDashboardBucket] = {}
     for session in sessions:
         snapshot = session.rate_limit_usage
         if snapshot is None:
@@ -122,7 +139,7 @@ def build_dashboard(
         )
         existing = buckets.get(key)
         if existing is None:
-            buckets[key] = UsageDashboardBucket(
+            buckets[key] = SessionUsageDashboardBucket(
                 backend=snapshot.source,
                 account_key=key,
                 account_label=label,
@@ -137,8 +154,14 @@ def build_dashboard(
         else:
             existing.session_ids.append(session.id)
 
-    ordered = sorted(
+    session_ordered = sorted(
         buckets.values(),
         key=lambda bucket: (bucket.backend, -bucket.snapshot.updated_at.timestamp()),
     )
-    return UsageDashboardResponse(buckets=ordered)
+    ordered: list[UsageDashboardBucket] = list(session_ordered)
+    statuses: list[ProviderUsageStatus] = []
+    if provider_service is not None:
+        # Provider buckets sort after all session buckets.
+        ordered.extend(provider_service.dashboard_buckets())
+        statuses = provider_service.statuses()
+    return UsageDashboardResponse(buckets=ordered, providers=statuses)

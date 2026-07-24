@@ -913,6 +913,7 @@ def _drilldown_label(row: dict[str, Any]) -> str:
 def _drilldown_item(row: dict[str, Any]) -> DrilldownItem:
     return DrilldownItem(
         session_id=row["session_id"],
+        session_attributable=bool(row["session_attributable"]),
         kind=row["kind"],
         fact_id=row["fact_id"],
         occurred_at=datetime.fromisoformat(row["occurred_at"]),

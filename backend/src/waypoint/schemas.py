@@ -244,7 +244,94 @@ class SessionRateLimitUsage(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class UsageDashboardBucket(BaseModel):
+# ── Session-independent usage providers (Lumid in v1) ──
+#
+# Provider-neutral models shared by the usage_providers package, the dashboard
+# composer, the API response, and telemetry ingestion. They live here (not in
+# usage_providers/) so ``schemas`` never imports the provider package — the
+# provider package depends on ``schemas``, like the rest of the codebase. All
+# ids are plain ``str`` (never ``BackendId``, which rejects unregistered ids).
+
+# Coarse, safe result state for a provider refresh. Never carries a raw token,
+# email, header, or upstream body.
+ProviderErrorState = Literal[
+    "missing_token",
+    "identity_failed",
+    "permission_denied",
+    "usage_unavailable",
+    "no_matching_usage",
+    "network",
+    "unknown",
+]
+
+
+class ProviderRateLimitUsage(BaseModel):
+    """A provider account's rate-limit snapshot. Mirrors ``SessionRateLimitUsage``
+    but ``source_id`` is an unconstrained provider string, not a ``BackendId``."""
+
+    source_id: str
+    updated_at: datetime
+    windows: list[UsageWindow] = Field(default_factory=list)
+    credits_remaining: float | None = None
+    credits_currency: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProviderModelUsage(BaseModel):
+    model: str
+    tokens: int | None = None
+    cost: float | None = None
+
+
+class ProviderUsageMetadata(BaseModel):
+    requests_7d: int | None = None
+    last_ts: datetime | None = None
+    model_breakdown: list[ProviderModelUsage] | None = None
+    total_cost_7d: float | None = None
+
+
+class ProviderBucketHealth(BaseModel):
+    last_success_at: datetime | None = None
+    stale: bool = False
+
+
+class ProviderUsageSnapshot(BaseModel):
+    provider_id: str
+    provider_type: str
+    account_key: str
+    account_label: str
+    snapshot: ProviderRateLimitUsage
+    metadata: ProviderUsageMetadata = Field(default_factory=ProviderUsageMetadata)
+    observed_at: datetime
+    last_success_at: datetime
+
+
+class ProviderRefreshResult(BaseModel):
+    provider_id: str
+    ok_count: int = 0
+    error_count: int = 0
+    last_attempt_at: datetime | None = None
+    last_success_at: datetime | None = None
+    errors: list[ProviderErrorState] = Field(default_factory=list)
+
+
+class ProviderUsageStatus(BaseModel):
+    provider_id: str
+    provider_type: str
+    provider_label: str
+    enabled: bool
+    last_attempt_at: datetime | None = None
+    last_success_at: datetime | None = None
+    stale: bool = False
+    result_counts: dict[str, int] = Field(default_factory=dict)
+    error_counts: dict[str, int] = Field(default_factory=dict)
+
+
+# ── Usage dashboard: discriminated union of session + provider buckets ──
+
+
+class SessionUsageDashboardBucket(BaseModel):
+    origin: Literal["session"] = "session"
     backend: BackendId
     account_key: str
     account_label: str
@@ -252,8 +339,28 @@ class UsageDashboardBucket(BaseModel):
     session_ids: list[str] = Field(default_factory=list)
 
 
+class ProviderUsageDashboardBucket(BaseModel):
+    origin: Literal["provider"] = "provider"
+    provider_id: str
+    provider_type: str
+    provider_label: str
+    account_key: str
+    account_label: str
+    snapshot: ProviderRateLimitUsage
+    metadata: ProviderUsageMetadata = Field(default_factory=ProviderUsageMetadata)
+    health: ProviderBucketHealth = Field(default_factory=ProviderBucketHealth)
+    session_ids: list[str] = Field(default_factory=list)
+
+
+UsageDashboardBucket = Annotated[
+    SessionUsageDashboardBucket | ProviderUsageDashboardBucket,
+    Field(discriminator="origin"),
+]
+
+
 class UsageDashboardResponse(BaseModel):
     buckets: list[UsageDashboardBucket] = Field(default_factory=list)
+    providers: list[ProviderUsageStatus] = Field(default_factory=list)
 
 
 class SessionRecord(BaseModel):

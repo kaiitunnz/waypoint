@@ -136,8 +136,12 @@ from waypoint.telemetry.query import (
 )
 from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_request
 from waypoint.transports import TransportAdapter
+from waypoint.usage_providers import UsageProviderService
+from waypoint.usage_providers.registry import build_providers
 
 TMUX_TRANSPORT_ID = "tmux"
+# Per-request HTTP timeout for usage-provider fetches (NFR2: bounded I/O).
+_USAGE_PROVIDER_HTTP_TIMEOUT = 15.0
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 # Debounce window for streaming-driven session_state / session_list
 # broadcasts. A burst of streamed events collapses into one broadcast per
@@ -493,6 +497,28 @@ class SessionRuntime:
             and settings.notifications.enabled_channels()
             else None
         )
+        # Session-independent usage providers (Lumid in v1). Constructed after
+        # ``telemetry_ingester`` so a provider snapshot can be ingested as an
+        # account-scoped fact only when telemetry collection is enabled.
+        self.usage_providers: UsageProviderService | None = None
+        enabled_providers = settings.enabled_usage_providers()
+        # Drop durable snapshots for providers no longer configured/enabled.
+        configured_ids = {p.id for p in enabled_providers}
+        for provider_id in storage.usage_providers.list_provider_ids():
+            if provider_id not in configured_ids:
+                storage.usage_providers.remove_provider(provider_id)
+        if enabled_providers:
+            hook = (
+                self.telemetry_ingester.ingest_provider_usage
+                if self.telemetry_ingester is not None
+                else None
+            )
+            self.usage_providers = UsageProviderService(
+                build_providers(
+                    settings, storage.usage_providers, _USAGE_PROVIDER_HTTP_TIMEOUT
+                ),
+                telemetry_hook=hook,
+            )
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
         return self._transports[session.transport]
@@ -573,12 +599,16 @@ class SessionRuntime:
         await self.scheduler.start()
         if self.notifications is not None:
             await self.notifications.start()
+        if self.usage_providers is not None:
+            await self.usage_providers.start()
 
     async def stop(self) -> None:
         await self.scheduler.stop()
         self.session_presence.clear()
         if self.notifications is not None:
             await self.notifications.stop()
+        if self.usage_providers is not None:
+            await self.usage_providers.stop()
         if self._telemetry_backfill_task is not None:
             self._telemetry_backfill_task.cancel()
             with suppress(asyncio.CancelledError):

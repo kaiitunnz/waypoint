@@ -46,6 +46,7 @@ from waypoint.schemas import (
     WakeSubscription,
 )
 from waypoint.telemetry.store import TelemetryStore
+from waypoint.usage_providers.store import UsageProviderStore
 
 log = logging.getLogger("waypoint.storage")
 
@@ -219,6 +220,9 @@ class Storage:
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self.telemetry = TelemetryStore(self.connection, self._lock)
+        self.usage_providers = UsageProviderStore(
+            self.connection, self._lock, self.database_path.parent
+        )
         self._init_db()
 
     def _init_db(self) -> None:
@@ -555,6 +559,7 @@ class Storage:
                 ON manager_tickets(priority);
             """)
         self.telemetry.init_schema()
+        self.usage_providers.init_schema()
         if token_usage_column_is_new:
             self._mark_sessions_pretracked()
         self.connection.commit()

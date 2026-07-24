@@ -166,7 +166,9 @@ class TelemetryStore:
                   window_id       TEXT,
                   window_label    TEXT,
                   used_percent    REAL,
+                  limit_tokens    INTEGER,
                   resets_at       TEXT,
+                  session_attributable INTEGER NOT NULL DEFAULT 1,
                   PRIMARY KEY (kind, source, fact_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_tf_kind_time      ON telemetry_facts(kind, occurred_at);
@@ -225,6 +227,11 @@ class TelemetryStore:
                 """)
             self._ensure_column("account_label", "TEXT")
             self._ensure_column("profile_label", "TEXT")
+            # Additive: existing rows backfill to 1 (session-attributable), so
+            # every pre-existing session fact keeps its current meaning while
+            # external usage-provider facts store 0.
+            self._ensure_column("session_attributable", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column("limit_tokens", "INTEGER")
             self._conn.commit()
 
     def _ensure_column(self, column: str, ddl: str) -> None:
@@ -946,6 +953,10 @@ class TelemetryStore:
         params: list[Any] = [*kinds, _iso_utc(rng.start), _iso_utc(rng.end)]
         if not partial:
             clauses.append("partial = 0")
+        # Any session-scoping filter excludes external usage-provider facts:
+        # they are account-scoped and carry no real session to scope by.
+        if flt.has_session_scoping():
+            clauses.append("session_attributable = 1")
         if flt.backends:
             clauses.append(f"backend IN ({', '.join('?' for _ in flt.backends)})")
             params.extend(flt.backends)
@@ -1002,6 +1013,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         "revision": fact.revision,
         "partial": int(fact.partial),
         "session_id": fact.session_id,
+        "session_attributable": int(fact.session_attributable),
         "occurred_at": _iso_utc(fact.occurred_at),
         "recorded_at": _iso_utc(datetime.now(UTC)),
         "schema_version": fact.schema_version,
@@ -1029,6 +1041,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         "window_id": None,
         "window_label": None,
         "used_percent": None,
+        "limit_tokens": None,
         "resets_at": None,
     }
     if isinstance(fact, SessionLifecycleFact):
@@ -1055,5 +1068,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         row["window_id"] = fact.window_id
         row["window_label"] = fact.window_label
         row["used_percent"] = fact.used_percent
+        row["used_tokens"] = fact.used_tokens
+        row["limit_tokens"] = fact.limit_tokens
         row["resets_at"] = _iso_utc(fact.resets_at) if fact.resets_at else None
     return row

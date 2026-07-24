@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/kaiitunnz/waypoint/compare/v0.13.0...v0.14.0) (2026-07-24)
+
+
+### Features
+
+* add configured Lumid usage provider (session-independent usage subsystem) ([#359](https://github.com/kaiitunnz/waypoint/issues/359)) ([f2f447d](https://github.com/kaiitunnz/waypoint/commit/f2f447d12ffb1e1336c5b186b5f1c25ecf623318))
+* add custom model catalogue (extra_models) for the Claude agent ([#358](https://github.com/kaiitunnz/waypoint/issues/358)) ([1d1a480](https://github.com/kaiitunnz/waypoint/commit/1d1a480e672f41ff10d86e90bc2c4b5694e9d9a0))
+
+
+### Bug Fixes
+
+* detect claude_tty dialogs when queued messages render below the footer ([#355](https://github.com/kaiitunnz/waypoint/issues/355)) ([ab34ae4](https://github.com/kaiitunnz/waypoint/commit/ab34ae4fb83e7b71afa38edd62234ebe674c648b))
+* recover claude_tty approval tool from the transcript when the dialog overflows the pane ([#357](https://github.com/kaiitunnz/waypoint/issues/357)) ([3760dbd](https://github.com/kaiitunnz/waypoint/commit/3760dbdc34a0178ded2c5510f283f656efd8f808))
+
 ## [0.13.0](https://github.com/kaiitunnz/waypoint/compare/v0.12.4...v0.13.0) (2026-07-20)
 
 

@@ -39,7 +39,7 @@ _SEVEN_DAY_MINUTES = 7 * 24 * 60
 _MAX_CONCURRENCY = 4
 
 
-# ── Lumid response envelopes (extra ignored; only documented fields retained) ──
+# ── Lumid response envelopes (extra ignored) ──
 
 
 class _UserData(BaseModel):
@@ -203,7 +203,6 @@ class LumidUsageProvider:
         client = await self._get_client()
         headers = {"Authorization": f"Bearer {token}"}
 
-        # 1. Identity.
         try:
             user_resp = await client.get(_USER_PATH, headers=headers)
         except httpx.HTTPError:
@@ -214,7 +213,6 @@ class LumidUsageProvider:
         if email is None:
             return _CredResult(credential_digest, error="identity_failed")
 
-        # 2. Usage.
         try:
             usage_resp = await client.get(_USAGE_PATH, headers=headers)
         except httpx.HTTPError:

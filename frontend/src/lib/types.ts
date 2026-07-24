@@ -93,9 +93,6 @@ export interface ProviderRateLimitUsage {
   source_id: string;
   updated_at: string;
   windows: UsageWindow[];
-  credits_remaining?: number | null;
-  credits_currency?: string | null;
-  notes?: string[];
 }
 
 export interface ProviderModelUsage {

@@ -266,15 +266,12 @@ ProviderErrorState = Literal[
 
 
 class ProviderRateLimitUsage(BaseModel):
-    """A provider account's rate-limit snapshot. Mirrors ``SessionRateLimitUsage``
-    but ``source_id`` is an unconstrained provider string, not a ``BackendId``."""
+    """A provider account's rate-limit snapshot. ``source_id`` is an
+    unconstrained provider string, not a ``BackendId``."""
 
     source_id: str
     updated_at: datetime
     windows: list[UsageWindow] = Field(default_factory=list)
-    credits_remaining: float | None = None
-    credits_currency: str | None = None
-    notes: list[str] = Field(default_factory=list)
 
 
 class ProviderModelUsage(BaseModel):

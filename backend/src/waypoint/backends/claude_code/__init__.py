@@ -1,6 +1,7 @@
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    merge_model_catalogue,
 )
 from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_ACCEPT_EDITS_TOOLS,
@@ -30,4 +31,5 @@ __all__ = [
     "ClaudeThreadSummary",
     "DEFAULT_CLAUDE_MODELS",
     "build_plugin",
+    "merge_model_catalogue",
 ]

@@ -22,6 +22,11 @@ class UsageProvider(Protocol):
     id: str
     label: str
     type: str
+    refresh_interval_seconds: int
+
+    def load_durable(self) -> None:
+        """Load the durable latest snapshots into memory (called once at start)."""
+        ...
 
     async def refresh(self, *, force: bool) -> ProviderRefreshResult:
         """Fetch fresh usage for every configured credential, persist the latest

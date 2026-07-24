@@ -18,7 +18,6 @@ import hmac
 import secrets
 import sqlite3
 import threading
-from datetime import datetime
 from pathlib import Path
 
 from waypoint.schemas import ProviderUsageSnapshot
@@ -192,9 +191,3 @@ class UsageProviderStore:
                 "SELECT DISTINCT provider_id FROM usage_provider_snapshots"
             ).fetchall()
         return [r["provider_id"] for r in rows]
-
-
-def parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value)

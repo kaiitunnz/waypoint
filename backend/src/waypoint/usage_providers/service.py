@@ -35,7 +35,6 @@ class UsageProviderService:
         telemetry_hook: TelemetryHook | None = None,
     ) -> None:
         self._providers = providers
-        self._by_id = {p.id: p for p in providers}
         self._telemetry_hook = telemetry_hook
         self._loops: list[asyncio.Task[None]] = []
         self._inflight: dict[str, asyncio.Task[ProviderRefreshResult]] = {}
@@ -46,9 +45,7 @@ class UsageProviderService:
 
     async def start(self) -> None:
         for provider in self._providers:
-            load = getattr(provider, "load_durable", None)
-            if callable(load):
-                load()
+            provider.load_durable()
         # Initial refresh + poll loops run off the boot path so a slow provider
         # never delays startup.
         for provider in self._providers:
@@ -77,7 +74,7 @@ class UsageProviderService:
                 await provider.aclose()
 
     async def _run(self, provider: UsageProvider) -> None:
-        interval = getattr(provider, "refresh_interval_seconds", 300)
+        interval = provider.refresh_interval_seconds
         # Initial refresh immediately, then poll at the interval.
         first = True
         while not self._stopping:
@@ -145,7 +142,7 @@ class UsageProviderService:
     def dashboard_buckets(self) -> list[ProviderUsageDashboardBucket]:
         buckets: list[ProviderUsageDashboardBucket] = []
         for provider in self._providers:
-            interval = getattr(provider, "refresh_interval_seconds", 300)
+            interval = provider.refresh_interval_seconds
             threshold = max(2 * interval, 600)
             for snapshot in provider.buckets():
                 age = (datetime.now(UTC) - snapshot.last_success_at).total_seconds()

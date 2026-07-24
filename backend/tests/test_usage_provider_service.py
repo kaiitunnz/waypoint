@@ -35,6 +35,9 @@ class _FakeProvider:
         self.refresh_calls = 0
         self._snapshot = _snapshot(provider_id)
 
+    def load_durable(self) -> None:
+        return None
+
     async def refresh(self, *, force: bool) -> ProviderRefreshResult:
         self.refresh_calls += 1
         return ProviderRefreshResult(

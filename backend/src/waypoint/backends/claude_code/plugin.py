@@ -187,6 +187,12 @@ def offered_claude_models(
     return merge_model_catalogue(base, config.extra_models), version
 
 
+def log_extra_model_overrides(extra: list[BackendModelOption]) -> None:
+    """Log one line per ``extra`` id that shadows a built-in Claude model."""
+    for model_id in overridden_builtin_ids(extra):
+        log.info("extra_models entry %r overrides a built-in Claude model", model_id)
+
+
 def raise_for_unsupported_selection(
     models: list[BackendModelOption],
     version: tuple[int, ...] | None,
@@ -231,9 +237,8 @@ class ClaudeCodePluginConfig(PluginConfig):
     models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
-    # Custom models appended to the catalogue (built-in or explicit `models`)
-    # without opting out of the CLI-version gate. An entry whose id matches a
-    # catalogue entry replaces it in place. See offered_claude_models.
+    # Custom models appended to the version-gated catalogue; see
+    # offered_claude_models.
     extra_models: list[BackendModelOption] = Field(default_factory=list)
     default_model_id: str | None = Field(default_factory=claude_default_model_id)
     # Deprecated no-op: tool approval moved from the PreToolUse HTTP hook to
@@ -247,10 +252,7 @@ class ClaudeCodePluginConfig(PluginConfig):
 
     @model_validator(mode="after")
     def _warn_extra_model_overrides(self) -> Self:
-        for model_id in overridden_builtin_ids(self.extra_models):
-            log.info(
-                "extra_models entry %r overrides a built-in Claude model", model_id
-            )
+        log_extra_model_overrides(self.extra_models)
         return self
 
 

@@ -64,8 +64,7 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="haiku",
         label="Haiku 4.5",
         description="Fast and lightweight",
-        # No --effort knob; pinned to [] so the three-state default flip
-        # (None = unknown/lenient) keeps rejecting an effort on Haiku.
+        # No effort knob; explicit [] so the None default (unknown) still rejects.
         supported_efforts=[],
     ),
     BackendModelOption(
@@ -126,11 +125,10 @@ def merge_model_catalogue(
 
 
 def overridden_builtin_ids(extra: list[BackendModelOption]) -> list[str]:
-    """The ``extra`` ids that collide with a current-epoch built-in.
+    """The ``extra`` ids that shadow a current-epoch built-in.
 
-    A startup-time approximation: the reference set is ``DEFAULT_CLAUDE_MODELS``
-    and does not know a target's CLI version, which is sufficient for surfacing
-    an accidental override of a shipping alias.
+    The reference set is ``DEFAULT_CLAUDE_MODELS`` (startup-time; not gated on a
+    target's CLI version).
     """
     return [opt.id for opt in extra if opt.id in _BUILTIN_MODEL_IDS]
 

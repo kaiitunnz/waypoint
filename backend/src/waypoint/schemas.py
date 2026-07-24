@@ -1146,11 +1146,9 @@ class BackendModelOption(BaseModel):
     is_default: bool = False
     hidden: bool = False
     # Reasoning-effort levels this model accepts (three-state):
-    #   None -> efforts unknown; accept and forward any level unvalidated
-    #           (the honest default for a gateway model Waypoint can't probe).
-    #   []   -> model has no effort knob (e.g. Claude Haiku); any effort is
-    #           rejected.
-    #   list -> the accepted set; membership is enforced.
+    #   None -> efforts unknown; any level is accepted and forwarded unvalidated
+    #   []   -> no effort knob (e.g. Claude Haiku); any effort is rejected
+    #   list -> the accepted set; membership is enforced
     supported_efforts: list[str] | None = None
     default_effort: str | None = None
 
@@ -1166,9 +1164,8 @@ class BackendModelListResponse(BaseModel):
     # Backend-wide default effort (used when no model-specific default
     # applies); falls back to None to mean "let the runtime pick".
     default_effort: str | None = None
-    # The agent's full effort vocabulary. The frontend offers this as the
-    # effort options for a selected model whose `supported_efforts` is None
-    # (unknown). Empty means no fallback vocabulary is advertised.
+    # The agent's full effort vocabulary; the frontend offers it as the effort
+    # options for a selected model whose `supported_efforts` is None.
     effort_levels: list[str] = Field(default_factory=list)
 
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/kaiitunnz/waypoint/compare/v0.14.0...v0.15.0) (2026-07-25)
+
+
+### Features
+
+* add Claude Opus 5 to the claude model catalogue (CLI 2.1.219 epoch) ([#360](https://github.com/kaiitunnz/waypoint/issues/360)) ([915c64e](https://github.com/kaiitunnz/waypoint/commit/915c64e721b21f8bac8195ac4eeeb6c40af70e2b))
+* add per-session usage-provider selection ([#365](https://github.com/kaiitunnz/waypoint/issues/365)) ([69b97ca](https://github.com/kaiitunnz/waypoint/commit/69b97ca5c914e872cb84add81498519a35310631))
+
+
+### Bug Fixes
+
+* support switching to Claude profiles with static token auth ([#364](https://github.com/kaiitunnz/waypoint/issues/364)) ([d16f302](https://github.com/kaiitunnz/waypoint/commit/d16f302cd0cb6861f47f176774b97ec067ef09cf))
+
 ## [0.14.0](https://github.com/kaiitunnz/waypoint/compare/v0.13.0...v0.14.0) (2026-07-24)
 
 

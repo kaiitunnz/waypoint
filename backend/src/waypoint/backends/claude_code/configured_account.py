@@ -17,6 +17,15 @@ from another: a token in ``plugin_configs.<agent>.env`` reaches every session of
 every profile, so deriving identity from it would collapse them all onto one key
 and make the runtime's "this switch would not change the account" guard refuse
 every switch. The endpoint is the one exception — see :func:`_resolve_base_url`.
+
+The CLI's *project* settings layers (``<cwd>/.claude/settings.local.json`` and
+``<cwd>/.claude/settings.json``, see ``terminal_theme``) outrank the config dir,
+so a project that declares its own token in one of them authenticates as that
+token while this resolves the profile dir's. They are deliberately not consulted:
+identity has to be a property of the profile, not of a directory, or the same
+profile would resolve differently under ``accounts probe`` and ``accounts doctor``
+— which have no session cwd at all — than under a live switch. A project-scoped
+token is therefore an accepted limitation, recorded in ``docs/account_profiles.md``.
 """
 
 import hashlib
@@ -28,7 +37,7 @@ from urllib.parse import urlsplit
 
 from waypoint.schemas import AccountProbeResult
 
-DEFAULT_ANTHROPIC_HOST = "api.anthropic.com"
+_DEFAULT_ANTHROPIC_HOST = "api.anthropic.com"
 
 _BASE_URL_VAR = "ANTHROPIC_BASE_URL"
 
@@ -57,7 +66,7 @@ _DIGESTED_VARS = (
 _DIGEST_CHARS = 12
 
 
-def settings_file(config_dir: str | None) -> Path:
+def _settings_file(config_dir: str | None) -> Path:
     """The user-layer settings file for ``config_dir`` (else the default home).
 
     ``<config_dir>/settings.json`` when a profile is active, else
@@ -75,7 +84,7 @@ def read_settings_env(config_dir: str | None) -> dict[str, str]:
     non-object ``env`` — a broken settings file must leave the caller falling
     back to the live probe, never raise into a launch or a switch.
     """
-    path = settings_file(config_dir)
+    path = _settings_file(config_dir)
     try:
         if not path.is_file():
             return {}
@@ -100,19 +109,20 @@ def _present(env: Mapping[str, str], name: str) -> str | None:
 
 
 def _resolve_base_url(
-    settings_env: Mapping[str, str], launch_env: Mapping[str, str]
+    settings_env: Mapping[str, str], process_env: Mapping[str, str]
 ) -> str | None:
-    """The endpoint this dir talks to: launch env, overridden by settings.
+    """The endpoint this dir talks to: the settings layer, else the process env.
 
     The only value not confined to the settings layer. A dir whose settings file
-    carries just the token while the endpoint comes from a plugin-level ``env``
-    would otherwise be keyed and *labelled* ``api.anthropic.com`` while actually
-    talking to a gateway. Reading it cannot collapse profiles the way reading a
-    secret would: an endpoint alone never yields an identity, and a shared one
-    contributes identical material to every profile, leaving the per-profile
-    secret digest to discriminate. Settings wins, matching the CLI.
+    carries just the token while the endpoint comes from a plugin-level ``env`` or
+    the host environment the agent inherits would otherwise be keyed and
+    *labelled* ``api.anthropic.com`` while actually talking to a gateway. Reading
+    it cannot collapse profiles the way reading a secret would: an endpoint alone
+    never yields an identity, and a shared one contributes identical material to
+    every profile, leaving the per-profile secret digest to discriminate. Settings
+    wins over the env, matching the CLI.
     """
-    return _present(settings_env, _BASE_URL_VAR) or _present(launch_env, _BASE_URL_VAR)
+    return _present(settings_env, _BASE_URL_VAR) or _present(process_env, _BASE_URL_VAR)
 
 
 def _endpoint_host(base_url: str | None) -> str:
@@ -125,15 +135,15 @@ def _endpoint_host(base_url: str | None) -> str:
     keys. An absent or unparsable URL resolves to the default host.
     """
     if not base_url:
-        return DEFAULT_ANTHROPIC_HOST
+        return _DEFAULT_ANTHROPIC_HOST
     try:
         parts = urlsplit(base_url)
         host = parts.hostname
         port = parts.port
     except ValueError:
-        return DEFAULT_ANTHROPIC_HOST
+        return _DEFAULT_ANTHROPIC_HOST
     if not host:
-        return DEFAULT_ANTHROPIC_HOST
+        return _DEFAULT_ANTHROPIC_HOST
     return f"{host}:{port}" if port else host
 
 
@@ -169,7 +179,7 @@ def _digest(settings_env: Mapping[str, str], base_url: str | None) -> str:
 
 
 def configured_account_identity(
-    config_dir: str | None, launch_env: Mapping[str, str]
+    config_dir: str | None, process_env: Mapping[str, str]
 ) -> AccountProbeResult | None:
     """The account ``config_dir`` authenticates as by its own configuration.
 
@@ -181,13 +191,16 @@ def configured_account_identity(
     gateway can proxy an OAuth login), and flipping such a profile's key would
     break a configured ``expected_account_key`` that matches today.
 
+    ``process_env`` is what the agent process will see — the session's launch env
+    over the host env — and supplies the endpoint only, never the credential.
+
     The key carries the endpoint host and a digest, never a secret; both it and
     the label reach API payloads, and the label is not redacted.
     """
     settings_env = read_settings_env(config_dir)
     if not any(_present(settings_env, name) for name in _TRIGGER_SECRET_VARS):
         return None
-    base_url = _resolve_base_url(settings_env, launch_env)
+    base_url = _resolve_base_url(settings_env, process_env)
     host = _endpoint_host(base_url)
     return AccountProbeResult(
         account_key=f"claude_code:endpoint:{host}:{_digest(settings_env, base_url)}",

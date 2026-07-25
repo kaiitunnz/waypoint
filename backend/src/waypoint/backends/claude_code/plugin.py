@@ -611,16 +611,21 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     def configured_account_identity(
         self, launch_env: Mapping[str, str]
     ) -> AccountProbeResult | None:
-        # Mirrors the config-dir chain the CLI itself would resolve for a local
-        # process: the session's override, else the host env, else ~/.claude
-        # (claude does not implement DefaultConfigDirProviding, and adding it here
-        # would also change how the switch resolves the *current* config dir for
-        # the transcript step). Only the dir's location comes from launch_env; the
-        # credential is read from the dir. See ConfiguredAccountIdentifying.
-        config_dir = config_dir_for(self.capabilities, launch_env) or os.environ.get(
-            "CLAUDE_CONFIG_DIR"
+        # Resolve both the config dir and the endpoint the way a local agent
+        # process would: the session's launch env, else the host env the process
+        # inherits. (claude does not implement DefaultConfigDirProviding, and
+        # adding it here would also change how the switch resolves the *current*
+        # config dir for the transcript step, so the ~/.claude default stays inside
+        # the identity helper.) Only the dir's location and the endpoint come from
+        # the env; the credential is read from the dir. See
+        # ConfiguredAccountIdentifying.
+        config_dir_key = self.capabilities.config_dir_env_var
+        config_dir = config_dir_for(self.capabilities, launch_env) or (
+            os.environ.get(config_dir_key) if config_dir_key else None
         )
-        return configured_account_identity(config_dir, launch_env)
+        # Same composition the live probe and the launched process see: the
+        # session's launch env over the host env (cf. runtime.account_lookup_env).
+        return configured_account_identity(config_dir, {**os.environ, **launch_env})
 
     def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
         # Setting CLAUDE_CONFIG_DIR moves .claude.json into the profile dir; if

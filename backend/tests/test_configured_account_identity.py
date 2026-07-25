@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from waypoint.backends.account_profiles import probe_account
+from waypoint.backends.base import ConfiguredAccountIdentifying
 from waypoint.backends.claude_code.configured_account import (
     configured_account_identity,
     read_settings_env,
@@ -172,6 +173,25 @@ def test_base_url_comes_from_launch_env_when_settings_omits_it(tmp_path: Path) -
     )
     assert identity is not None
     assert identity.account_key.startswith("claude_code:endpoint:gw.example.com:")
+
+
+def test_base_url_comes_from_the_host_env_as_a_last_resort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Exporting the endpoint in the shell that runs the service is a normal way to
+    # point at a gateway, and the agent process inherits it, so the key and label
+    # must name that gateway rather than the default host. The plugin composes the
+    # chain; the mapper only sees the composed view.
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gw.example.com")
+    config_dir = _pool_dir(tmp_path, ANTHROPIC_AUTH_TOKEN=TOKEN)
+    plugin = _runtime(tmp_path).registry.get("claude_code")
+    assert isinstance(plugin, ConfiguredAccountIdentifying)
+
+    identity = plugin.configured_account_identity({"CLAUDE_CONFIG_DIR": config_dir})
+
+    assert identity is not None
+    assert identity.account_key.startswith("claude_code:endpoint:gw.example.com:")
+    assert identity.account_label == "gw.example.com · token auth"
 
 
 def test_settings_base_url_overrides_launch_env(tmp_path: Path) -> None:

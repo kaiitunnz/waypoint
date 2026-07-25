@@ -5,16 +5,14 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 ``model/list`` RPC, Claude does not.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, NamedTuple
 
 from waypoint.schemas import BackendModelOption
 
-# The effort vocabulary. Per-model `supported_efforts` below is the ladder Waypoint
-# *offers and enforces*, not a mirror of what the CLI refuses: the binary carries
-# per-capability lists (`effort`, `xhigh_effort`, `max_effort`) that drive its own
-# picker, but the flag itself is accepted regardless -- `claude --model haiku --effort
-# max` runs. So a narrower list here only ever narrows Waypoint. The server can also
-# clamp a request at runtime via the account's `max_effort_level` entitlement.
+# Per-model `supported_efforts` is the ladder Waypoint offers and enforces. The CLI
+# accepts `--effort` for every model, so a narrower list only narrows Waypoint; the
+# server may still clamp a request via the account's `max_effort_level` entitlement.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
@@ -49,16 +47,10 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
     "fable[1m]": 1_000_000,
 }
 
-# Pinned legacy models reachable on the current CLI by full model name (the CLI's own
-# short picker keys -- `opus48`, `sonnet46`, ... -- are internal and rejected by
-# `--model`). Reachability was probed against the 2.1.220 binary: `claude-opus-4-1` is
-# silently remapped to Opus 5 and `claude-3-5-haiku` is retired, so neither is offered.
-#
-# `supported_efforts` is deliberately None (unknown -> forward unvalidated) rather than
-# a per-model ladder. The binary's capability lists do imply narrower ladders for these,
-# but they are not CLI-level rejection -- `claude --model haiku --effort max` is accepted
-# -- so pinning a narrower list here would make *Waypoint* reject launches the CLI
-# honors, including when only a configured `default_effort` supplies the level.
+# Legacy models the CLI still runs, pinned by full model name; its own short picker
+# keys (`opus48`, `sonnet46`, ...) are internal and rejected by `--model`.
+# `claude-opus-4-1` is remapped to Opus 5 and `claude-3-5-haiku` is retired, so neither
+# is offered. `supported_efforts` stays unset, leaving the CLI the authority.
 _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="claude-opus-4-8",
@@ -90,8 +82,7 @@ _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         label="Opus 4.6 (1M context)",
         description="Legacy Opus version, long sessions",
     ),
-    # No [1m] pairing: claude-opus-4-5 is on the CLI's own 1M blocklist, and requesting
-    # the suffix fails with "the long context beta is not yet available".
+    # No [1m] pairing: claude-opus-4-5 is on the CLI's 1M blocklist.
     BackendModelOption(
         id="claude-opus-4-5",
         label="Opus 4.5",
@@ -168,13 +159,7 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="haiku",
         label="Haiku 4.5",
         description="Fast and lightweight",
-        # Explicit [] so the None default (unknown) still rejects. This is a curated
-        # product choice -- offer no effort control for Haiku -- not a claim that the
-        # CLI refuses the flag; it accepts `--effort max` here. The pinned legacy
-        # entries below deliberately go the other way (None) because narrowing them
-        # would newly reject launches that work today. Enforcing [] does mean a
-        # deployment with `default_effort` set cannot launch `haiku` without
-        # overriding the effort -- pre-existing, tracked separately.
+        # Offer no effort control; explicit [] so the None default (unknown) rejects.
         supported_efforts=[],
     ),
     *_LEGACY_CLAUDE_MODELS,
@@ -248,12 +233,9 @@ def normalize_claude_model_id(model: str | None) -> str | None:
         return None
     if candidate in CLAUDE_CONTEXT_WINDOWS:
         return candidate
-    # A concrete id may carry the 1M entitlement as a suffix
-    # (``claude-opus-5[1m]``). Resolve the base family, then re-attach the
-    # suffix so the entitlement survives normalization instead of collapsing to
-    # the bare 200K family id. Families with no 1M offering (haiku) have no
-    # ``[1m]`` catalogue entry, so the suffix is correctly dropped for them. An
-    # id whose base resolves to nothing known keeps passing through untouched.
+    # A concrete id may carry the 1M entitlement as a suffix (`claude-opus-5[1m]`);
+    # re-attach it to the resolved base so the entitlement survives. A family with no
+    # 1M offering (haiku) has no `[1m]` entry, so the suffix resolves away.
     if candidate.endswith(_ONE_M_SUFFIX):
         base = _resolve_claude_model_base(candidate[: -len(_ONE_M_SUFFIX)])
         if base not in CLAUDE_CONTEXT_WINDOWS:
@@ -271,10 +253,8 @@ def claude_model_family(model: str | None) -> str | None:
 
 
 def claude_context_window_for_model(model: str | None) -> int | None:
-    # normalize_claude_model_id resolves anything family-ish to a catalogue id
-    # (including re-attaching a `[1m]` entitlement) and otherwise returns the
-    # input verbatim, so an unresolved id has no family to fall back on --
-    # don't fabricate a window for it.
+    # An unresolved id normalizes to itself, so it has no window rather than a
+    # fabricated default.
     normalized = normalize_claude_model_id(model)
     if normalized is None:
         return None
@@ -302,117 +282,67 @@ def resolve_import_model_id(
     return default_model_id
 
 
-# CLI version milestones, from the official changelog (anthropics/claude-code):
-#   2.1.154  Opus 4.8 introduced (defaults high; accepts xhigh + max)
-#   2.1.170  Fable 5 introduced (accepts xhigh + max; 1M context)
-#   2.1.197  Sonnet 5 introduced as the `sonnet` alias (native 1M context)
-#   2.1.219  Opus 5 introduced as the `opus` alias (native 1M context)
-#
-# Each boundary below swaps an alias's target model, so only the affected
-# family's labels/efforts differ across it. The rollbacks are applied
-# cumulatively (newest first) rather than each rebuilding from
-# DEFAULT_CLAUDE_MODELS, so an older CLI sees *every* rollback that applies to
-# it, not just the newest one.
+# CLI versions that swapped an alias's target model, from the official changelog
+# (anthropics/claude-code). Only the affected family differs across each boundary.
+#   2.1.197  `sonnet` becomes Sonnet 5
+#   2.1.219  `opus` becomes Opus 5
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
 OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
 
-# Labels pre-Opus-5 CLI builds use for the opus ids.
-_LEGACY_OPUS_LABELS: dict[str, str] = {
-    "opus": "Opus 4.8",
-    "opus[1m]": "Opus 4.8 (1M context)",
-}
 
-# Labels pre-Sonnet-5 CLI builds use for the sonnet ids.
-_LEGACY_SONNET_LABELS: dict[str, str] = {
-    "sonnet": "Sonnet 4.6",
-    "sonnet[1m]": "Sonnet 4.6 (1M context)",
-}
+class _ModelEpoch(NamedTuple):
+    """What an alias swap looks like to CLI builds older than ``min_version``.
 
-# Pinned ids each rollback makes redundant: once the alias itself resolves to Opus 4.8,
-# the pinned claude-opus-4-8 entry is the same model under the same label, so the
-# offering would list it twice. Dropping the pin (rather than the alias) keeps the
-# default selection -- which is an alias id -- valid on every epoch.
-_OPUS5_REDUNDANT_IDS: frozenset[str] = frozenset(
-    {"claude-opus-4-8", "claude-opus-4-8[1m]"}
-)
-_SONNET5_REDUNDANT_IDS: frozenset[str] = frozenset(
-    {"claude-sonnet-4-6", "claude-sonnet-4-6[1m]"}
-)
-
-
-def _roll_back_opus5(
-    offering: tuple[BackendModelOption, ...],
-) -> tuple[BackendModelOption, ...]:
-    """``offering`` as CLI builds older than OPUS5_MIN_CLI_VERSION see it.
-
-    On these builds the ``opus`` alias resolves to Opus 4.8, which accepts the
-    same full effort set as Opus 5 (verified against the 2.1.218 and 2.1.220
-    binaries: neither ``claude-opus-4-8`` nor ``claude-opus-5`` appears in the
-    ``effort`` / ``xhigh_effort`` / ``max_effort`` exclusion lists), so only
-    the label differs across this boundary. The pinned ``claude-opus-4-8`` entries drop
-    out, since the rolled-back alias already offers that model under that label.
+    ``labels`` relabels the affected alias ids and ``efforts`` narrows their ladder.
+    ``drop`` removes the pinned ids the relabelled alias now duplicates; the pin goes
+    rather than the alias so the default selection, an alias id, stays valid.
     """
-    return tuple(
-        (
-            option.model_copy(update={"label": _LEGACY_OPUS_LABELS[option.id]})
-            if option.id in _LEGACY_OPUS_LABELS
-            else option
-        )
-        for option in offering
-        if option.id not in _OPUS5_REDUNDANT_IDS
-    )
+
+    min_version: tuple[int, ...]
+    labels: Mapping[str, str]
+    drop: frozenset[str]
+    efforts: tuple[str, ...] | None = None
 
 
-def _roll_back_sonnet5(
-    offering: tuple[BackendModelOption, ...],
+# Newest first, applied cumulatively, so a build below several boundaries gets every
+# rollback and adding an epoch is one prepended entry.
+_CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
+    _ModelEpoch(
+        min_version=OPUS5_MIN_CLI_VERSION,
+        labels={"opus": "Opus 4.8", "opus[1m]": "Opus 4.8 (1M context)"},
+        drop=frozenset({"claude-opus-4-8", "claude-opus-4-8[1m]"}),
+    ),
+    _ModelEpoch(
+        min_version=SONNET5_MIN_CLI_VERSION,
+        labels={"sonnet": "Sonnet 4.6", "sonnet[1m]": "Sonnet 4.6 (1M context)"},
+        drop=frozenset({"claude-sonnet-4-6", "claude-sonnet-4-6[1m]"}),
+        # Sonnet 4.6's capability lists carry `max_effort` but not `xhigh_effort`.
+        efforts=tuple(level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"),
+    ),
+)
+
+
+def _roll_back(
+    offering: tuple[BackendModelOption, ...], epoch: _ModelEpoch
 ) -> tuple[BackendModelOption, ...]:
-    """``offering`` as CLI builds older than SONNET5_MIN_CLI_VERSION see it.
+    """``offering`` as builds older than ``epoch.min_version`` see it.
 
-    On these builds the ``sonnet`` alias resolves to Sonnet 4.6, whose capability
-    lists carry ``max_effort`` but not ``xhigh_effort`` (verified in the 2.1.175 /
-    2.1.195 / 2.1.196 binaries), so the offered ladder drops ``xhigh``. As with
-    Haiku above this is a curated offering, not CLI-level rejection -- and as with
-    Haiku it is left as-is rather than loosened to ``None``, since narrowing an
-    *alias* ladder is pre-existing behavior this catalogue already relies on.
-    Fable 5 and Haiku are identical across this boundary, so
-    only the sonnet family is transformed, and the pinned ``claude-sonnet-4-6`` entries
-    drop out as redundant with the rolled-back alias. Applied via ``model_copy`` to
-    whatever offering the newer epochs produced, so unrelated catalogue edits
-    (wording, descriptions, new fields) stay in sync automatically.
+    Applied to whatever the newer epochs produced, via ``model_copy``, so unrelated
+    catalogue edits stay in sync.
     """
-    sonnet_efforts = [level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"]
     rolled: list[BackendModelOption] = []
     for option in offering:
-        if option.id in _SONNET5_REDUNDANT_IDS:
+        if option.id in epoch.drop:
             continue
-        if option.id.split("[", 1)[0] != "sonnet":
+        label = epoch.labels.get(option.id)
+        if label is None:
             rolled.append(option)
             continue
-        rolled.append(
-            option.model_copy(
-                update={
-                    "label": _LEGACY_SONNET_LABELS.get(option.id, option.label),
-                    "supported_efforts": sonnet_efforts,
-                }
-            )
-        )
+        update: dict[str, Any] = {"label": label}
+        if epoch.efforts is not None:
+            update["supported_efforts"] = list(epoch.efforts)
+        rolled.append(option.model_copy(update=update))
     return tuple(rolled)
-
-
-# Each entry pairs the version a model epoch started at with the rollback that
-# undoes it, i.e. the transform a build *older* than that version needs.
-# Ordered newest first, and applied cumulatively, so introducing a future epoch
-# is exactly one edit: prepend its ``(min_version, rollback)`` pair.
-_CLAUDE_MODEL_EPOCH_ROLLBACKS: tuple[
-    tuple[
-        tuple[int, ...],
-        Callable[[tuple[BackendModelOption, ...]], tuple[BackendModelOption, ...]],
-    ],
-    ...,
-] = (
-    (OPUS5_MIN_CLI_VERSION, _roll_back_opus5),
-    (SONNET5_MIN_CLI_VERSION, _roll_back_sonnet5),
-)
 
 
 def claude_models_for_version(
@@ -427,8 +357,8 @@ def claude_models_for_version(
     if version is None:
         return DEFAULT_CLAUDE_MODELS
     offering = DEFAULT_CLAUDE_MODELS
-    for min_version, roll_back in _CLAUDE_MODEL_EPOCH_ROLLBACKS:
-        if version >= min_version:
+    for epoch in _CLAUDE_MODEL_EPOCHS:
+        if version >= epoch.min_version:
             break
-        offering = roll_back(offering)
+        offering = _roll_back(offering, epoch)
     return offering

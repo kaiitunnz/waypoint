@@ -383,38 +383,32 @@ Two `waypoint.yaml` keys shape it (both honored identically by `claude_code` and
 
 Leave a custom model's `supported_efforts` unset to offer `effort_levels` in the
 picker and forward the level unvalidated; set an explicit list to enforce it, or
-`[]` for a model with no effort knob. Note that `supported_efforts` is the ladder
-Waypoint offers and enforces, not a mirror of what the CLI refuses — the CLI
-accepts `--effort` for every model, so a narrower list only narrows Waypoint.
-Setting neither catalogue key leaves behavior unchanged; the CLI
-`waypoint launch --model <id>` free-text passthrough still warns without
-blocking, and the merged catalogue is what the frontend pickers and
+`[]` for a model with no effort knob. `supported_efforts` is the ladder Waypoint
+offers and enforces — the CLI accepts `--effort` for every model, so a narrower
+list only narrows Waypoint. Setting neither catalogue key leaves behavior
+unchanged; the CLI `waypoint launch --model <id>` free-text passthrough still
+warns without blocking, and the merged catalogue is what the frontend pickers and
 `waypoint models` show.
 
 The catalogue is ordered by family, newest first, with each model's `[1m]` entry
 directly after its base. Alongside the current aliases it pins the legacy models
-still reachable on the CLI (`claude-opus-4-8` down to `claude-opus-4-5`,
-`claude-sonnet-4-6`, `claude-sonnet-4-5`, plus a `[1m]` entry for each except
-`claude-opus-4-5`, which the CLI excludes from long context). Pinned ids are the
-full model names, since the CLI's short picker keys (`opus48`, …) are internal
-and rejected by `--model`. Models the CLI silently remaps to the latest
-(`claude-opus-4-1`) or has retired (`claude-3-5-haiku`) are deliberately absent,
-so a picker entry never runs as a different model than it names. Their
-`supported_efforts` is unset for the reason above. Because a rolled-back alias
-already covers one of these versions on an older CLI (below `2.1.219` the `opus`
-alias *is* Opus 4.8), that epoch drops the now-redundant pin instead of listing
-the model twice — so an older offering is an ordered subset of the current one.
+the CLI still runs: `claude-opus-4-8` down to `claude-opus-4-5`,
+`claude-sonnet-4-6`, and `claude-sonnet-4-5`, each with a `[1m]` entry except
+`claude-opus-4-5`, which the CLI excludes from long context. Pins use full model
+names; the CLI's short picker keys (`opus48`, …) are internal and rejected by
+`--model`. Models the CLI remaps to the latest (`claude-opus-4-1`) or has retired
+(`claude-3-5-haiku`) are absent, so a picker entry never runs as a different
+model than it names. Reachability is a runtime property: the remap/retirement
+table is fetched from the server, so a pinned model can start remapping without a
+CLI upgrade.
 
-Reachability here is a runtime property of the CLI, not a static fact: the
-remap/retirement table is fetched from the server, so a model pinned today can
-start remapping without a CLI upgrade. Operators who had added a legacy model
-through `extra_models` will now find that id collides with a built-in and
-replaces it in place, logging the usual override line at config load. On an
-epoch that dropped the pin as redundant, though, there is nothing left to
-replace, so the entry appends instead — and if it reuses the rolled-back alias's
-label, that reintroduces the duplicate the drop existed to remove. The override
-line still logs either way, because collision detection reads the ungated
-built-in id set rather than the version-gated offering.
+Below `2.1.219` the `opus` alias is itself Opus 4.8, so that epoch drops the
+redundant pin rather than listing the model twice, and an older offering is an
+ordered subset of the current one. An `extra_models` entry reusing a pinned id
+replaces it in place on the current epoch, and appends on an epoch that already
+dropped it — reintroducing the duplicate label if it reuses the alias's label.
+The override line logs either way, since collision detection reads the ungated
+built-in ids.
 
 `import_thread` adopts an externally-created native thread into a brand-new
 session. When the import request's `import_history` flag is set (it defaults to

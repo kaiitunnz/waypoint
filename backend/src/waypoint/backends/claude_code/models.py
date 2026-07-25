@@ -135,14 +135,10 @@ def overridden_builtin_ids(extra: list[BackendModelOption]) -> list[str]:
     return [opt.id for opt in extra if opt.id in _BUILTIN_MODEL_IDS]
 
 
-def normalize_claude_model_id(model: str | None) -> str | None:
-    if model is None or not isinstance(model, str):
-        return None
-    candidate = model.strip()
-    if not candidate:
-        return None
-    if candidate in CLAUDE_CONTEXT_WINDOWS:
-        return candidate
+_ONE_M_SUFFIX = "[1m]"
+
+
+def _resolve_claude_model_base(candidate: str) -> str:
     normalized = CLAUDE_MODEL_ALIASES.get(candidate)
     if normalized is not None:
         return normalized
@@ -162,6 +158,29 @@ def normalize_claude_model_id(model: str | None) -> str | None:
         if family in lowered:
             return family
     return candidate
+
+
+def normalize_claude_model_id(model: str | None) -> str | None:
+    if model is None or not isinstance(model, str):
+        return None
+    candidate = model.strip()
+    if not candidate:
+        return None
+    if candidate in CLAUDE_CONTEXT_WINDOWS:
+        return candidate
+    # A concrete id may carry the 1M entitlement as a suffix
+    # (``claude-opus-5[1m]``). Resolve the base family, then re-attach the
+    # suffix so the entitlement survives normalization instead of collapsing to
+    # the bare 200K family id. Families with no 1M offering (haiku) have no
+    # ``[1m]`` catalogue entry, so the suffix is correctly dropped for them. An
+    # id whose base resolves to nothing known keeps passing through untouched.
+    if candidate.endswith(_ONE_M_SUFFIX):
+        base = _resolve_claude_model_base(candidate[: -len(_ONE_M_SUFFIX)])
+        if base not in CLAUDE_CONTEXT_WINDOWS:
+            return candidate
+        with_suffix = f"{base}{_ONE_M_SUFFIX}"
+        return with_suffix if with_suffix in CLAUDE_CONTEXT_WINDOWS else base
+    return _resolve_claude_model_base(candidate)
 
 
 def claude_model_family(model: str | None) -> str | None:

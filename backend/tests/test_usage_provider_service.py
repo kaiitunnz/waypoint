@@ -173,6 +173,67 @@ async def test_refresh_all_coalesces_and_isolates() -> None:
     assert [r.provider_id for r in results] == ["good"]
 
 
+async def test_options_lists_enabled_provider_accounts() -> None:
+    service = UsageProviderService([_FakeProvider()])
+    options = service.options()
+    assert [o.id for o in options] == ["lumid"]
+    assert options[0].type == "lumid"
+    assert [a.account_label for a in options[0].accounts] == ["a@x.com"]
+    assert options[0].status.enabled is True
+
+
+async def test_options_lists_provider_with_no_accounts() -> None:
+    class _NoBucketProvider(_FakeProvider):
+        def buckets(self) -> list[ProviderUsageSnapshot]:
+            return []
+
+    service = UsageProviderService([_NoBucketProvider()])
+    options = service.options()
+    assert options[0].accounts == []
+
+
+async def test_snapshot_and_status_lookup() -> None:
+    service = UsageProviderService([_FakeProvider()])
+    key = _snapshot().account_key
+    assert service.snapshot("lumid", key) is not None
+    assert service.snapshot("lumid", "hmac:v1:missing") is None
+    assert service.snapshot("nope", key) is None
+    assert service.provider_status("lumid") is not None
+    assert service.provider_status("nope") is None
+
+
+async def test_refresh_one_targets_single_provider() -> None:
+    a = _FakeProvider("a")
+    b = _FakeProvider("b")
+    service = UsageProviderService([a, b])
+    result = await service.refresh_one("a", force=True)
+    assert result is not None and result.provider_id == "a"
+    assert a.refresh_calls == 1 and b.refresh_calls == 0
+    assert await service.refresh_one("missing") is None
+
+
+async def test_observer_fires_on_success_and_failure() -> None:
+    seen: list[tuple[str, int]] = []
+
+    async def observer(
+        provider_id: str,
+        buckets: list[ProviderUsageSnapshot],
+        status: ProviderUsageStatus,
+    ) -> None:
+        seen.append((provider_id, len(buckets)))
+
+    good = _FakeProvider("good")
+
+    class _Boom(_FakeProvider):
+        async def refresh(self, *, force: bool) -> ProviderRefreshResult:
+            raise RuntimeError("boom")
+
+    service = UsageProviderService([good, _Boom("bad")], observer=observer)
+    await service.refresh_all(force=True)
+    # The observer runs for both the successful and the failed provider (FR-8).
+    assert {pid for pid, _ in seen} == {"good", "bad"}
+
+
 async def test_telemetry_hook_called_on_success(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     ingester = TelemetryIngester(storage, _StubRegistry())

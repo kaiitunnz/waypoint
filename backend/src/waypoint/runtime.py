@@ -97,6 +97,8 @@ from waypoint.schemas import (
     LaunchSettingsUpdateRequest,
     ProfileCheck,
     ProfileDoctorReport,
+    ProviderUsageSnapshot,
+    ProviderUsageStatus,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCommandInvocation,
@@ -104,12 +106,15 @@ from waypoint.schemas import (
     SessionEnvelope,
     SessionInputRequest,
     SessionPlanApprovalRequest,
+    SessionRateLimitUsage,
     SessionRecord,
     SessionSource,
     SessionStatus,
     TokenUsageInit,
     TokenUsageRecord,
     TransportSettingsOption,
+    UsageLimitSource,
+    UsageLimitSourceUpdateRequest,
     WakeRegisterRequest,
     WakeSubscription,
 )
@@ -518,6 +523,7 @@ class SessionRuntime:
                     settings, storage.usage_providers, _USAGE_PROVIDER_HTTP_TIMEOUT
                 ),
                 telemetry_hook=hook,
+                observer=self._project_provider_sessions,
             )
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
@@ -601,6 +607,31 @@ class SessionRuntime:
             await self.notifications.start()
         if self.usage_providers is not None:
             await self.usage_providers.start()
+        self._reconcile_provider_selections()
+
+    def _reconcile_provider_selections(self) -> None:
+        """Mark provider-selected sessions whose provider is no longer enabled as
+        unavailable, retaining their last-good projection. Never falls back to
+        plugin data. A still-enabled provider re-projects on its first poll."""
+        for session in self.storage.list_sessions():
+            if session.usage_limit_source != "usage_provider":
+                continue
+            provider_id = session.usage_provider_id
+            still_enabled = (
+                self.usage_providers is not None
+                and provider_id is not None
+                and self.usage_providers.provider_status(provider_id) is not None
+            )
+            if still_enabled:
+                continue
+            existing = session.rate_limit_usage
+            if existing is not None and existing.origin == "usage_provider":
+                self.storage.update_session(
+                    session.id,
+                    rate_limit_usage=existing.model_copy(
+                        update={"stale": True, "unavailable": True}
+                    ),
+                )
 
     async def stop(self) -> None:
         await self.scheduler.stop()
@@ -2704,11 +2735,170 @@ class SessionRuntime:
 
     async def refresh_rate_limit_usage(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.usage_limit_source == "usage_provider":
+            # Refresh only the selected provider (coalesced with poll/manual
+            # work); its post-refresh observer re-projects this session. Never
+            # calls the agent plugin resolver for a provider-selected session.
+            if self.usage_providers is not None and session.usage_provider_id:
+                await self.usage_providers.refresh_one(
+                    session.usage_provider_id, force=True
+                )
+            return self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         refresher = getattr(plugin, "refresh_rate_limit_usage", None)
         if callable(refresher):
             await refresher(self, session)
         return self.get_session(session_id)
+
+    def validate_usage_limit_selection(
+        self,
+        source: UsageLimitSource,
+        provider_id: str | None,
+        account_key: str | None,
+    ) -> tuple[UsageLimitSource, str | None, str | None]:
+        """Normalize + validate a usage-limit-source selection.
+
+        Used by direct launch, preset-resolved launch, schedule create/fire, and
+        the settings endpoint. ``plugin`` requires both provider fields absent;
+        ``usage_provider`` requires both present, an enabled provider, and a
+        currently-known account snapshot. Raises 400 on a malformed combination
+        and 409 on a persisted-but-unavailable selection.
+        """
+        if source == "plugin":
+            if provider_id is not None or account_key is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "usage_limit_source 'plugin' must not carry "
+                        "usage_provider_id/usage_provider_account_key"
+                    ),
+                )
+            return ("plugin", None, None)
+        if source == "usage_provider":
+            if not provider_id or not account_key:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "usage_limit_source 'usage_provider' requires both "
+                        "usage_provider_id and usage_provider_account_key"
+                    ),
+                )
+            if self.usage_providers is None or (
+                self.usage_providers.provider_status(provider_id) is None
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"usage provider {provider_id!r} is not enabled",
+                )
+            if self.usage_providers.snapshot(provider_id, account_key) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="selected usage-provider account is not available",
+                )
+            return ("usage_provider", provider_id, account_key)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid usage_limit_source: {source!r}",
+        )
+
+    async def set_usage_limit_source(
+        self, session_id: str, request: UsageLimitSourceUpdateRequest
+    ) -> SessionRecord:
+        """Change a session's rate-limit source without restarting the agent.
+
+        Validates + persists the selection, clears the old projection, then
+        projects the new source (cached provider snapshot, or a best-effort
+        plugin refresh). Never sets ``restart`` or touches the agent process.
+        """
+        self.get_session(session_id)  # 404 if unknown
+        normalized_source, provider_id, account_key = (
+            self.validate_usage_limit_selection(
+                request.usage_limit_source,
+                request.usage_provider_id,
+                request.usage_provider_account_key,
+            )
+        )
+        # Persist the selection and clear the prior projection in one write so
+        # the UI never shows a stale prior-source snapshot as current.
+        self.storage.update_session(
+            session_id,
+            usage_limit_source=normalized_source,
+            usage_provider_id=provider_id,
+            usage_provider_account_key=account_key,
+            rate_limit_usage=None,
+        )
+        self._publish_session_state(session_id)
+        if (
+            normalized_source == "usage_provider"
+            and provider_id is not None
+            and self.usage_providers is not None
+        ):
+            # Project the cached snapshot immediately (no upstream request).
+            buckets = self.usage_providers.provider_buckets(provider_id)
+            provider_status = self.usage_providers.provider_status(provider_id)
+            if provider_status is not None:
+                await self._project_provider_sessions(
+                    provider_id, buckets, provider_status
+                )
+        elif normalized_source == "plugin":
+            await self.refresh_rate_limit_usage(session_id)
+        return self.get_session(session_id)
+
+    async def _project_provider_sessions(
+        self,
+        provider_id: str,
+        buckets: list[ProviderUsageSnapshot],
+        provider_status: ProviderUsageStatus,
+    ) -> None:
+        """Post-refresh observer: re-project every session selecting this
+        provider/account from the provider's current snapshot. Marks a session
+        stale/unavailable when its account is missing; never falls back to
+        plugin data."""
+        by_account = {snap.account_key: snap for snap in buckets}
+        for session in self.storage.list_sessions():
+            if (
+                session.usage_limit_source != "usage_provider"
+                or session.usage_provider_id != provider_id
+            ):
+                continue
+            key = session.usage_provider_account_key
+            snapshot = by_account.get(key) if key else None
+            projection = self._build_provider_projection(
+                session, snapshot, provider_status
+            )
+            await self.update_session_fields(session.id, rate_limit_usage=projection)
+
+    def _build_provider_projection(
+        self,
+        session: SessionRecord,
+        snapshot: ProviderUsageSnapshot | None,
+        provider_status: ProviderUsageStatus,
+    ) -> SessionRateLimitUsage:
+        if snapshot is not None:
+            return SessionRateLimitUsage(
+                origin="usage_provider",
+                source=snapshot.provider_type,
+                source_label=f"{provider_status.provider_label} — "
+                f"{snapshot.account_label}",
+                stale=provider_status.stale,
+                unavailable=False,
+                updated_at=snapshot.snapshot.updated_at,
+                windows=list(snapshot.snapshot.windows),
+            )
+        # Account is gone: retain the last-good provider projection (flipped to
+        # unavailable) rather than substitute plugin data (RFC FR-8 / Non-Goal).
+        existing = session.rate_limit_usage
+        if existing is not None and existing.origin == "usage_provider":
+            return existing.model_copy(update={"stale": True, "unavailable": True})
+        return SessionRateLimitUsage(
+            origin="usage_provider",
+            source=provider_status.provider_type,
+            source_label=f"{provider_status.provider_label} (unavailable)",
+            stale=True,
+            unavailable=True,
+            updated_at=datetime.now(UTC),
+            windows=[],
+        )
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
@@ -4463,6 +4653,19 @@ class SessionRuntime:
     async def update_session_fields(
         self, session_id: str, *, publish: bool = True, **updates: Any
     ) -> SessionRecord:
+        # Central origin-ownership guard: a ``rate_limit_usage`` write must match
+        # the session's selected source. This lets structured adapters keep
+        # publishing native (plugin-origin) snapshots safely while a provider is
+        # selected, and stops the provider observer from overwriting a session
+        # switched back to plugin. Clearing to ``None`` is always allowed.
+        if (
+            "rate_limit_usage" in updates
+            and updates["rate_limit_usage"] is not None
+            and not self._rate_limit_origin_allowed(session_id, updates)
+        ):
+            updates = {k: v for k, v in updates.items() if k != "rate_limit_usage"}
+            if not updates:
+                return self.get_session(session_id)
         session = self.storage.update_session(session_id, **updates)
         if self.telemetry_ingester is not None and (
             "context_usage" in updates or "rate_limit_usage" in updates
@@ -4471,6 +4674,25 @@ class SessionRuntime:
         if publish:
             self._publish_session_state(session_id)
         return session
+
+    def _rate_limit_origin_allowed(
+        self, session_id: str, updates: dict[str, Any]
+    ) -> bool:
+        incoming = updates["rate_limit_usage"]
+        if isinstance(incoming, SessionRateLimitUsage):
+            incoming_origin = incoming.origin
+        elif isinstance(incoming, dict):
+            incoming_origin = incoming.get("origin", "plugin")
+        else:
+            return True  # unknown shape — let storage handle it
+        # Expected origin comes from the same update when it also carries a new
+        # selection (the set-source path persists both together), else from the
+        # session's currently-persisted selection.
+        source = updates.get("usage_limit_source")
+        if source is None:
+            source = self.get_session(session_id).usage_limit_source
+        expected = "usage_provider" if source == "usage_provider" else "plugin"
+        return incoming_origin == expected
 
     def session_update_callback(
         self,

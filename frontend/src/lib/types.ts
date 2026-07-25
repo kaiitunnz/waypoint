@@ -71,8 +71,17 @@ export interface UsageWindow {
   reset_description?: string | null;
 }
 
+export type UsageLimitSource = "plugin" | "usage_provider";
+
 export interface SessionRateLimitUsage {
-  source: Backend;
+  // "plugin" (default) or "usage_provider" for a projected provider account.
+  origin?: UsageLimitSource;
+  // A backend id for plugin origin, or a provider type otherwise — plain string.
+  source: string;
+  // Server-owned display label for a provider-origin snapshot.
+  source_label?: string | null;
+  stale?: boolean;
+  unavailable?: boolean;
   updated_at: string;
   windows: UsageWindow[];
   credits_remaining?: number | null;
@@ -154,6 +163,21 @@ export interface ProviderUsageStatus {
 export interface UsageDashboardResponse {
   buckets: UsageDashboardBucket[];
   providers: ProviderUsageStatus[];
+}
+
+// Per-session usage-provider selection options (secret-free) for the launch and
+// settings selectors. Account keys are opaque; labels are server-derived.
+export interface UsageProviderAccountOption {
+  account_key: string;
+  account_label: string;
+}
+
+export interface UsageProviderOption {
+  id: string;
+  label: string;
+  type: string;
+  accounts: UsageProviderAccountOption[];
+  status: ProviderUsageStatus;
 }
 
 export interface SessionRecord {
@@ -424,6 +448,9 @@ export interface MeResponse {
   // Master telemetry opt-in. When false (or absent), the dashboard entry point
   // is hidden and the /telemetry page renders its disabled state.
   telemetry_enabled?: boolean;
+  // Enabled usage-provider account choices for the "Usage limit source" launch
+  // control. Empty/absent when no provider is configured.
+  usage_provider_options?: UsageProviderOption[];
 }
 
 // Full preset spec (with launch_env values); returned only from the
@@ -443,6 +470,9 @@ export interface SessionPresetSpec {
   effort?: string | null;
   tags?: Record<string, string>;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource | null;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 // Redacted spec used on list / bootstrap surfaces: env values are omitted,
@@ -460,6 +490,9 @@ export interface SessionPresetSpecSummary {
   effort?: string | null;
   tags?: Record<string, string>;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource | null;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export interface SessionPresetSummary {
@@ -630,6 +663,9 @@ export interface ScheduleCreateRequest {
   // selected preset id lets the server stamp it onto the scheduled record.
   preset_id?: string | null;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export interface BackendModelOption {

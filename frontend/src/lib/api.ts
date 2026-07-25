@@ -47,6 +47,8 @@ import {
   NLGenerateAck,
   NLInsightResponse,
   UsageDashboardResponse,
+  UsageLimitSource,
+  UsageProviderOption,
 } from "@/lib/types";
 import { parseDiffPreviewPayload, type EventDiffPreview } from "@/lib/events";
 import type { TelemetryFiltersState, TelemetryRangeState } from "@/lib/telemetry";
@@ -487,6 +489,45 @@ export async function refreshUsageDashboard(
   });
   await ensureOk(response, "failed to refresh usage dashboard");
   return (await response.json()) as UsageDashboardResponse;
+}
+
+export async function fetchUsageProviderOptions(
+  host: string,
+  token: string,
+): Promise<UsageProviderOption[]> {
+  const response = await fetch(`${host}/api/usage-provider-options`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch usage-provider options");
+  const body = await response.json();
+  return (body.usage_provider_options ?? []) as UsageProviderOption[];
+}
+
+export async function setUsageLimitSource(
+  host: string,
+  token: string,
+  sessionId: string,
+  selection: {
+    usage_limit_source: UsageLimitSource;
+    usage_provider_id?: string | null;
+    usage_provider_account_key?: string | null;
+  },
+): Promise<SessionRecord> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/usage-limit-source`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(selection),
+    },
+  );
+  await ensureOk(response, "failed to update usage limit source");
+  const body = await response.json();
+  return body.session as SessionRecord;
 }
 
 // ── Telemetry (CONTRACT.md §4 — /api/telemetry/*) ────────────────────────

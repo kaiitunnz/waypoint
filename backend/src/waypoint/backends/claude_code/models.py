@@ -9,12 +9,12 @@ from collections.abc import Callable, Sequence
 
 from waypoint.schemas import BackendModelOption
 
-# Effort levels the CLI accepts per model (verified against the binary's
-# per-capability exclusion lists -- `effort` for effort at all, plus
-# `xhigh_effort` and `max_effort`). opus-5, opus-4-8, sonnet-5, and fable-5
-# accept the full set; haiku and pre-4.6 opus/sonnet don't accept --effort at
-# all. The server can still clamp a request at runtime via the account's
-# `max_effort_level` entitlement.
+# The effort vocabulary. Per-model `supported_efforts` below is the ladder Waypoint
+# *offers and enforces*, not a mirror of what the CLI refuses: the binary carries
+# per-capability lists (`effort`, `xhigh_effort`, `max_effort`) that drive its own
+# picker, but the flag itself is accepted regardless -- `claude --model haiku --effort
+# max` runs. So a narrower list here only ever narrows Waypoint. The server can also
+# clamp a request at runtime via the account's `max_effort_level` entitlement.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
@@ -30,6 +30,8 @@ CLAUDE_MODEL_ALIASES: dict[str, str] = {
     "claude-opus-5": "opus",
     "claude-opus-4-8": "opus",
     "claude-opus-4-7": "opus",
+    "claude-opus-4-6": "opus",
+    "claude-opus-4-5": "opus",
     "claude-sonnet-5": "sonnet",
     "claude-sonnet-4-6": "sonnet",
     "claude-sonnet-4-5": "sonnet",
@@ -47,6 +49,77 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
     "fable[1m]": 1_000_000,
 }
 
+# Pinned legacy models reachable on the current CLI by full model name (the CLI's own
+# short picker keys -- `opus48`, `sonnet46`, ... -- are internal and rejected by
+# `--model`). Reachability was probed against the 2.1.220 binary: `claude-opus-4-1` is
+# silently remapped to Opus 5 and `claude-3-5-haiku` is retired, so neither is offered.
+#
+# `supported_efforts` is deliberately None (unknown -> forward unvalidated) rather than
+# a per-model ladder. The binary's capability lists do imply narrower ladders for these,
+# but they are not CLI-level rejection -- `claude --model haiku --effort max` is accepted
+# -- so pinning a narrower list here would make *Waypoint* reject launches the CLI
+# honors, including when only a configured `default_effort` supplies the level.
+_LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
+    BackendModelOption(
+        id="claude-opus-4-8",
+        label="Opus 4.8",
+        description="Previous Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-8[1m]",
+        label="Opus 4.8 (1M context)",
+        description="Previous Opus version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-7",
+        label="Opus 4.7",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-7[1m]",
+        label="Opus 4.7 (1M context)",
+        description="Legacy Opus version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-6",
+        label="Opus 4.6",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-6[1m]",
+        label="Opus 4.6 (1M context)",
+        description="Legacy Opus version, long sessions",
+    ),
+    # No [1m] pairing: claude-opus-4-5 is on the CLI's own 1M blocklist, and requesting
+    # the suffix fails with "the long context beta is not yet available".
+    BackendModelOption(
+        id="claude-opus-4-5",
+        label="Opus 4.5",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-6",
+        label="Sonnet 4.6",
+        description="Previous Sonnet version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-6[1m]",
+        label="Sonnet 4.6 (1M context)",
+        description="Previous Sonnet version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-5",
+        label="Sonnet 4.5",
+        description="Legacy Sonnet version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-5[1m]",
+        label="Sonnet 4.5 (1M context)",
+        description="Legacy Sonnet version, long sessions",
+    ),
+)
+
+# Grouped by family, newest first, each model immediately followed by its 1M variant.
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
@@ -56,24 +129,17 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         default_effort="high",
     ),
     BackendModelOption(
-        id="sonnet",
-        label="Sonnet 5",
-        description="Best for everyday tasks",
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-    BackendModelOption(
-        id="haiku",
-        label="Haiku 4.5",
-        description="Fast and lightweight",
-        # No effort knob; explicit [] so the None default (unknown) still rejects.
-        supported_efforts=[],
-    ),
-    BackendModelOption(
         id="opus[1m]",
         label="Opus 5 (1M context)",
         description="Long sessions with large codebases",
         is_default=True,
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
+    ),
+    BackendModelOption(
+        id="sonnet",
+        label="Sonnet 5",
+        description="Best for everyday tasks",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
@@ -98,6 +164,14 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
+    BackendModelOption(
+        id="haiku",
+        label="Haiku 4.5",
+        description="Fast and lightweight",
+        # No effort knob; explicit [] so the None default (unknown) still rejects.
+        supported_efforts=[],
+    ),
+    *_LEGACY_CLAUDE_MODELS,
 )
 
 
@@ -248,6 +322,17 @@ _LEGACY_SONNET_LABELS: dict[str, str] = {
     "sonnet[1m]": "Sonnet 4.6 (1M context)",
 }
 
+# Pinned ids each rollback makes redundant: once the alias itself resolves to Opus 4.8,
+# the pinned claude-opus-4-8 entry is the same model under the same label, so the
+# offering would list it twice. Dropping the pin (rather than the alias) keeps the
+# default selection -- which is an alias id -- valid on every epoch.
+_OPUS5_REDUNDANT_IDS: frozenset[str] = frozenset(
+    {"claude-opus-4-8", "claude-opus-4-8[1m]"}
+)
+_SONNET5_REDUNDANT_IDS: frozenset[str] = frozenset(
+    {"claude-sonnet-4-6", "claude-sonnet-4-6[1m]"}
+)
+
 
 def _roll_back_opus5(
     offering: tuple[BackendModelOption, ...],
@@ -258,7 +343,8 @@ def _roll_back_opus5(
     same full effort set as Opus 5 (verified against the 2.1.218 and 2.1.220
     binaries: neither ``claude-opus-4-8`` nor ``claude-opus-5`` appears in the
     ``effort`` / ``xhigh_effort`` / ``max_effort`` exclusion lists), so only
-    the label differs across this boundary.
+    the label differs across this boundary. The pinned ``claude-opus-4-8`` entries drop
+    out, since the rolled-back alias already offers that model under that label.
     """
     return tuple(
         (
@@ -267,6 +353,7 @@ def _roll_back_opus5(
             else option
         )
         for option in offering
+        if option.id not in _OPUS5_REDUNDANT_IDS
     )
 
 
@@ -279,13 +366,16 @@ def _roll_back_sonnet5(
     ``max`` but not ``xhigh`` (verified in the 2.1.175 / 2.1.195 / 2.1.196
     binaries: Sonnet 4.6's capabilities carry ``max_effort`` but not
     ``xhigh_effort``). Fable 5 and Haiku are identical across this boundary, so
-    only the sonnet family is transformed. Applied via ``model_copy`` to
+    only the sonnet family is transformed, and the pinned ``claude-sonnet-4-6`` entries
+    drop out as redundant with the rolled-back alias. Applied via ``model_copy`` to
     whatever offering the newer epochs produced, so unrelated catalogue edits
     (wording, descriptions, new fields) stay in sync automatically.
     """
     sonnet_efforts = [level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"]
     rolled: list[BackendModelOption] = []
     for option in offering:
+        if option.id in _SONNET5_REDUNDANT_IDS:
+            continue
         if option.id.split("[", 1)[0] != "sonnet":
             rolled.append(option)
             continue

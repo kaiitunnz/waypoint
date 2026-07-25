@@ -113,12 +113,115 @@ def test_rollbacks_apply_cumulatively_at_each_boundary(
     assert _by_id(models, "sonnet").label == sonnet_label
 
 
-@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 190), (2, 1, 218)])
-def test_legacy_offerings_have_same_model_ids_as_default(version) -> None:
-    legacy = claude_models_for_version(version)
-    assert {opt.id for opt in legacy} == {opt.id for opt in DEFAULT_CLAUDE_MODELS}
-    assert [opt.id for opt in legacy] == [opt.id for opt in DEFAULT_CLAUDE_MODELS]
-    assert sum(opt.is_default for opt in legacy) == 1
+@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220)])
+def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
+    # Rollbacks may drop a pinned entry the rolled-back alias makes redundant, so an
+    # older offering is a subset rather than an exact match -- but never a superset,
+    # never reordered, and always with exactly one default (an alias id, which no
+    # rollback removes).
+    offering = claude_models_for_version(version)
+    default_ids = [opt.id for opt in DEFAULT_CLAUDE_MODELS]
+    ids = [opt.id for opt in offering]
+
+    assert set(ids) <= set(default_ids)
+    assert ids == [model_id for model_id in default_ids if model_id in set(ids)]
+    assert sum(opt.is_default for opt in offering) == 1
+
+
+@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220)])
+def test_no_offering_lists_a_label_twice(version) -> None:
+    # Below 2.1.219 the `opus` alias itself is labelled "Opus 4.8", which would collide
+    # with the pinned claude-opus-4-8 entry; likewise `sonnet` below 2.1.197.
+    labels = [opt.label for opt in claude_models_for_version(version)]
+    assert len(labels) == len(set(labels)), sorted(
+        label for label in labels if labels.count(label) > 1
+    )
+
+
+def test_rollbacks_drop_the_pin_the_alias_makes_redundant() -> None:
+    below_opus5 = {opt.id for opt in claude_models_for_version((2, 1, 218))}
+    assert "claude-opus-4-8" not in below_opus5
+    assert "claude-opus-4-8[1m]" not in below_opus5
+    # Older opus pins are still distinct models, so they stay.
+    assert "claude-opus-4-7" in below_opus5
+    # Sonnet 5 still shipped at 2.1.218, so its pin is untouched here.
+    assert "claude-sonnet-4-6" in below_opus5
+
+    below_sonnet5 = {opt.id for opt in claude_models_for_version((2, 1, 196))}
+    assert "claude-sonnet-4-6" not in below_sonnet5
+    assert "claude-sonnet-4-6[1m]" not in below_sonnet5
+    assert "claude-sonnet-4-5" in below_sonnet5
+
+
+# --- pinned legacy models -------------------------------------------------
+
+
+_LEGACY_IDS = (
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+)
+
+
+@pytest.mark.parametrize("model_id", _LEGACY_IDS)
+def test_reachable_legacy_models_are_offered(model_id: str) -> None:
+    assert _by_id(DEFAULT_CLAUDE_MODELS, model_id).id == model_id
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    # Remapped to Opus 5 / retired respectively -- offering either would let a user
+    # pick a model that silently runs as something else.
+    ["claude-opus-4-1", "claude-3-5-haiku", "opus48", "opus47", "sonnet46"],
+)
+def test_unreachable_models_and_internal_picker_keys_are_not_offered(
+    model_id: str,
+) -> None:
+    assert all(opt.id != model_id for opt in DEFAULT_CLAUDE_MODELS)
+
+
+@pytest.mark.parametrize("model_id", _LEGACY_IDS)
+def test_legacy_models_forward_effort_unvalidated(model_id: str) -> None:
+    # None, not a narrower ladder: the CLI accepts any --effort, so pinning a list
+    # would only make Waypoint reject launches the CLI honors.
+    assert _by_id(DEFAULT_CLAUDE_MODELS, model_id).supported_efforts is None
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5",
+    ],
+)
+def test_legacy_models_with_a_1m_variant_are_paired(model_id: str) -> None:
+    variant = _by_id(DEFAULT_CLAUDE_MODELS, f"{model_id}[1m]")
+    assert variant.label.endswith("(1M context)")
+
+
+def test_opus_4_5_has_no_1m_variant() -> None:
+    # On the CLI's own 1M blocklist: requesting the suffix fails with "the long
+    # context beta is not yet available".
+    assert all(opt.id != "claude-opus-4-5[1m]" for opt in DEFAULT_CLAUDE_MODELS)
+
+
+def test_catalogue_groups_families_with_each_1m_variant_after_its_base() -> None:
+    ids = [opt.id for opt in DEFAULT_CLAUDE_MODELS]
+    for index, model_id in enumerate(ids):
+        base = model_id.removesuffix("[1m]")
+        if base != model_id:
+            assert ids[index - 1] == base
+
+
+def test_legacy_models_are_visible() -> None:
+    # The human chose to surface them alongside the current models.
+    assert all(not opt.hidden for opt in DEFAULT_CLAUDE_MODELS)
 
 
 # --- merge_model_catalogue ------------------------------------------------
@@ -194,12 +297,12 @@ def test_offered_appends_extras_and_keeps_version_gate(
 
     models, version = offered_claude_models(config, "claude", None)
 
-    # Version gate preserved (extras did not opt out of it).
+    # Version gate preserved (extras did not opt out of it): extras append after the
+    # *gated* base, not after the current-epoch catalogue.
     assert version == SONNET5_MIN_CLI_VERSION
+    gated = [opt.id for opt in claude_models_for_version(SONNET5_MIN_CLI_VERSION)]
     ids = [opt.id for opt in models]
-    assert ids[: len(DEFAULT_CLAUDE_MODELS)] == [
-        opt.id for opt in DEFAULT_CLAUDE_MODELS
-    ]
+    assert ids[: len(gated)] == gated
     assert ids[-1] == "kimi-k3[1m]"
 
 

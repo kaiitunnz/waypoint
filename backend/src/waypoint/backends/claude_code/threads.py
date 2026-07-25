@@ -95,6 +95,27 @@ def claude_onboarding_complete(config_dir: str) -> bool:
     return bool(isinstance(data, dict) and data.get("hasCompletedOnboarding"))
 
 
+def claude_settings_env(config_dir: str) -> dict[str, str]:
+    """The ``env`` block the CLI auto-loads from ``<config_dir>/settings.json``.
+
+    Mirrors what ``CLAUDE_CONFIG_DIR=<config_dir> claude`` applies to its process
+    environment on launch (custom ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_AUTH_TOKEN``
+    etc.), so Waypoint's own account resolution can see the same auth the session
+    runs under. Only string-valued entries are returned; a missing/unreadable/
+    malformed file or absent ``env`` mapping yields ``{}``.
+    """
+    try:
+        data = json.loads((Path(config_dir).expanduser() / "settings.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    env = data.get("env")
+    if not isinstance(env, dict):
+        return {}
+    return {str(k): v for k, v in env.items() if isinstance(v, str)}
+
+
 def encode_project_dir(cwd: str) -> str:
     """Encode a cwd to the project-dir name Claude stores transcripts under.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.resources
 import json
 import logging
@@ -15,12 +16,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from waypoint.backends.claude_code.threads import claude_settings_env
 from waypoint.backends.claude_code.version import claude_cli_version_string
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.perf import debug_timer
-from waypoint.schemas import SessionRateLimitUsage, UsageWindow
+from waypoint.schemas import AccountProbeResult, SessionRateLimitUsage, UsageWindow
 
 log = logging.getLogger("waypoint.claude_code.rate_limits")
 
@@ -657,6 +660,39 @@ def _fetch_url(request: Request) -> _ClaudeHTTPResponse | None:
         return _ClaudeHTTPResponse(status=exc.code, headers=headers, body=body)
     except (URLError, OSError):
         return None
+
+
+def claude_static_account_identity(
+    account_prefix: str, config_dir: str
+) -> AccountProbeResult | None:
+    """Identify a static-credential profile's account from its ``settings.json``.
+
+    A profile whose ``settings.json`` ``env`` sets ``ANTHROPIC_AUTH_TOKEN`` or
+    ``ANTHROPIC_API_KEY`` authenticates via that static credential (no OAuth
+    ``.credentials.json`` exists), so the live rate-limit probe can't verify it.
+    Derive a stable, network-free identity keyed on the endpoint host plus a
+    short credential fingerprint — enough to accept the switch, match an
+    ``expected_account_key``, and distinguish it from a different endpoint or
+    token. Returns ``None`` when no static credential is configured, so OAuth
+    profiles fall through to the live probe. The token is read from the profile's
+    own file, not the process-merged env, so a stray ambient ``ANTHROPIC_API_KEY``
+    can't produce a false positive on an OAuth profile.
+    """
+    env = claude_settings_env(config_dir)
+    auth_token = env.get("ANTHROPIC_AUTH_TOKEN")
+    token = auth_token or env.get("ANTHROPIC_API_KEY")
+    if not token:
+        return None
+    base_url = env.get("ANTHROPIC_BASE_URL", "").strip()
+    host = urlparse(base_url).netloc if base_url else ""
+    host = host or "api.anthropic.com"
+    fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    kind = "auth token" if auth_token else "API key"
+    return AccountProbeResult(
+        account_key=f"{account_prefix}:token:{host}:{fingerprint}",
+        account_label=f"{host} ({kind})",
+        source="api",
+    )
 
 
 def _read_cli_credentials_for_env(

@@ -18,7 +18,11 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from waypoint.backends.base import ConfigDirReadinessReporting
+from waypoint.backends.base import (
+    ConfigDirReadinessReporting,
+    StaticAccountIdentifying,
+    config_dir_for,
+)
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.registry import get_registry
 from waypoint.schemas import AccountProbeResult, ProfileCheck
@@ -268,6 +272,17 @@ async def probe_account(
     through the registry; no per-backend branching.
     """
     plugin = get_registry().get(backend)
+    # A static-credential profile (e.g. a claude profile whose settings.json env
+    # sets ANTHROPIC_AUTH_TOKEN/API_KEY) has no OAuth creds, so the live probe
+    # below can never verify it. Identify it straight from its config dir instead.
+    # Local only: a remote config dir can't be read here (remote static-auth is a
+    # later phase), matching the remote-skip of the other filesystem checks.
+    if launch_target is None and isinstance(plugin, StaticAccountIdentifying):
+        config_dir = config_dir_for(plugin.capabilities, launch_env)
+        if config_dir is not None:
+            identity = plugin.static_account_identity(config_dir)
+            if identity is not None:
+                return identity
     probe = getattr(plugin, "probe_account_rate_limit", None)
     account_of = getattr(plugin, "rate_limit_account", None)
     if probe is None or account_of is None:

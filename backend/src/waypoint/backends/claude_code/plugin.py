@@ -61,6 +61,7 @@ from waypoint.backends.claude_code.permission_modes import (
     claude_permission_mode_label,
 )
 from waypoint.backends.claude_code.rate_limits import (
+    claude_static_account_identity,
     invalidate_shared_probe_local,
     invalidate_shared_probe_remote,
     probe_claude_usage_remote_shared,
@@ -106,6 +107,7 @@ from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    AccountProbeResult,
     BackendModelOption,
     CommandCompletion,
     CompletionDispatch,
@@ -566,6 +568,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         tier = _find_prefixed(snapshot.notes, _CLAUDE_ORG_TIER_PREFIX)
         label = f"{org} · {tier}" if tier else org
         return f"{self.id}:{org}", label
+
+    def static_account_identity(self, config_dir: str) -> AccountProbeResult | None:
+        # StaticAccountIdentifying: a profile whose settings.json env carries a
+        # static ANTHROPIC_AUTH_TOKEN/API_KEY authenticates without OAuth creds,
+        # so account verification reads its identity from the config dir instead
+        # of the (impossible) live probe. None => OAuth profile, use the probe.
+        return claude_static_account_identity(self.id, config_dir)
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the support

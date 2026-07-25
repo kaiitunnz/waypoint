@@ -402,9 +402,10 @@ model than it names. Reachability is a runtime property: the remap/retirement
 table is fetched from the server, so a pinned model can start remapping without a
 CLI upgrade.
 
-Below `2.1.219` the `opus` alias is itself Opus 4.8, so that epoch drops the
-redundant pin rather than listing the model twice, and an older offering is an
-ordered subset of the current one. An `extra_models` entry reusing a pinned id
+Below `2.1.219` the `opus` alias is itself Opus 4.8, and below `2.1.197` `sonnet`
+is Sonnet 4.6, so each of those epochs drops the pin its alias duplicates rather
+than listing the model twice, and an older offering is an ordered subset of the
+current one. An `extra_models` entry reusing a pinned id
 replaces it in place on the current epoch, and appends on an epoch that already
 dropped it — reintroducing the duplicate label if it reuses the alias's label.
 The override line logs either way, since collision detection reads the ungated

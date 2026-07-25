@@ -6,7 +6,7 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 """
 
 from collections.abc import Mapping, Sequence
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from waypoint.schemas import BackendModelOption
 
@@ -50,7 +50,8 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
 # Legacy models the CLI still runs, pinned by full model name; its own short picker
 # keys (`opus48`, `sonnet46`, ...) are internal and rejected by `--model`.
 # `claude-opus-4-1` is remapped to Opus 5 and `claude-3-5-haiku` is retired, so neither
-# is offered. `supported_efforts` stays unset, leaving the CLI the authority.
+# is offered. `supported_efforts` stays unset, leaving the CLI the authority. Probed
+# against 2.1.220; the remap/retirement table is server-fetched and can drift.
 _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="claude-opus-4-8",
@@ -160,6 +161,8 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         label="Haiku 4.5",
         description="Fast and lightweight",
         # Offer no effort control; explicit [] so the None default (unknown) rejects.
+        # A deployment with `default_effort` set therefore cannot launch `haiku`
+        # without overriding the effort -- see issue #361.
         supported_efforts=[],
     ),
     *_LEGACY_CLAUDE_MODELS,
@@ -282,8 +285,12 @@ def resolve_import_model_id(
     return default_model_id
 
 
-# CLI versions that swapped an alias's target model, from the official changelog
-# (anthropics/claude-code). Only the affected family differs across each boundary.
+# Catalogue boundaries from the official changelog (anthropics/claude-code). Only the
+# affected family differs across each. The introduction boundaries carry no rollback:
+# a CLI below them is still offered the model, so `fable` reaches builds older than
+# 2.1.170.
+#   2.1.154  Opus 4.8 introduced      (unhandled)
+#   2.1.170  Fable 5 introduced       (unhandled)
 #   2.1.197  `sonnet` becomes Sonnet 5
 #   2.1.219  `opus` becomes Opus 5
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
@@ -305,18 +312,19 @@ class _ModelEpoch(NamedTuple):
 
 
 # Newest first, applied cumulatively, so a build below several boundaries gets every
-# rollback and adding an epoch is one prepended entry.
+# rollback.
 _CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
     _ModelEpoch(
         min_version=OPUS5_MIN_CLI_VERSION,
         labels={"opus": "Opus 4.8", "opus[1m]": "Opus 4.8 (1M context)"},
         drop=frozenset({"claude-opus-4-8", "claude-opus-4-8[1m]"}),
+        # No `efforts`: Opus 4.8 is in none of the capability lists, as Opus 5 is not.
     ),
     _ModelEpoch(
         min_version=SONNET5_MIN_CLI_VERSION,
         labels={"sonnet": "Sonnet 4.6", "sonnet[1m]": "Sonnet 4.6 (1M context)"},
         drop=frozenset({"claude-sonnet-4-6", "claude-sonnet-4-6[1m]"}),
-        # Sonnet 4.6's capability lists carry `max_effort` but not `xhigh_effort`.
+        # Sonnet 4.6 is in `xhigh_effort` but not `max_effort` (2.1.196 binary).
         efforts=tuple(level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"),
     ),
 )
@@ -325,11 +333,7 @@ _CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
 def _roll_back(
     offering: tuple[BackendModelOption, ...], epoch: _ModelEpoch
 ) -> tuple[BackendModelOption, ...]:
-    """``offering`` as builds older than ``epoch.min_version`` see it.
-
-    Applied to whatever the newer epochs produced, via ``model_copy``, so unrelated
-    catalogue edits stay in sync.
-    """
+    """``offering`` as builds older than ``epoch.min_version`` see it."""
     rolled: list[BackendModelOption] = []
     for option in offering:
         if option.id in epoch.drop:
@@ -338,7 +342,7 @@ def _roll_back(
         if label is None:
             rolled.append(option)
             continue
-        update: dict[str, Any] = {"label": label}
+        update: dict[str, str | list[str]] = {"label": label}
         if epoch.efforts is not None:
             update["supported_efforts"] = list(epoch.efforts)
         rolled.append(option.model_copy(update=update))

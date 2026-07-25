@@ -8,7 +8,12 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
-from waypoint.schemas import CommandCompletion, SessionContextUsage, SessionRecord
+from waypoint.schemas import (
+    AccountProbeResult,
+    CommandCompletion,
+    SessionContextUsage,
+    SessionRecord,
+)
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -103,6 +108,32 @@ class ConfigDirValidating(Protocol):
         """Raise :class:`ConfigDirNotReadyError` if launching or resuming under
         ``config_dir`` would block on an interactive first-run prompt this agent
         cannot clear headlessly; return ``None`` when the dir is ready."""
+        ...
+
+
+@runtime_checkable
+class StaticAccountIdentifying(Protocol):
+    """An agent that can identify a profile's account from static config, no probe.
+
+    Some profiles authenticate via a static credential rather than an OAuth
+    login — a claude profile that sets ``ANTHROPIC_AUTH_TOKEN`` /
+    ``ANTHROPIC_API_KEY`` (typically against a custom ``ANTHROPIC_BASE_URL``),
+    either in its config dir's ``settings.json`` ``env`` block or in the session's
+    configured launch env, is the motivating case. No OAuth credential file exists
+    for such a profile, so the live rate-limit probe cannot verify it and a switch
+    onto it is wrongly rejected. This hook derives a stable account identity from
+    the credential wherever it is configured; returning ``None`` means "not a
+    static-auth profile" so the caller falls back to the live probe.
+    """
+
+    def static_account_identity(
+        self, config_dir: str | None, env: Mapping[str, str]
+    ) -> AccountProbeResult | None:
+        """Identify the account this profile authenticates as from a static
+        credential in ``config_dir`` or the configured ``env``, or ``None`` when
+        it uses none (fall back to a probe). ``env`` is the session's configured
+        launch env — never the ambient process env — so a stray host key cannot
+        misidentify an OAuth profile."""
         ...
 
 

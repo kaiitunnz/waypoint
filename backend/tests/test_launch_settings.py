@@ -14,6 +14,9 @@ from typing import Any
 import pytest
 
 from waypoint.backends.account_profiles import probe_account
+from waypoint.backends.claude_code.configured_account import (
+    configured_account_identity,
+)
 from waypoint.backends.transcripts import ThreadAvailability
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
@@ -1128,3 +1131,151 @@ async def test_update_rejects_unpersisted_thread_with_conversation_events(
     assert getattr(exc.value, "status_code", None) == 400
     assert "conversation events" in str(getattr(exc.value, "detail", ""))
     assert terminated == []
+
+
+# ── switching onto a profile that declares its own auth ─────────────────────
+#
+# The reported bug: a config dir whose settings.json carries a token (typically
+# against a custom endpoint) has no OAuth credentials for the rate-limit probe to
+# read, so probe_account returned None and the switch was refused with "could not
+# verify the target account before switching" — before expected_account_key could
+# even be consulted. These deliberately do NOT patch probe_account: the real
+# two-tier resolution is what is under test.
+
+
+def _write_claude_settings_env(config_dir: Path, **env: str) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "settings.json").write_text(json.dumps({"env": env}))
+
+
+@pytest.fixture
+def _offline_claude_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Both sides of the switch must resolve without a network call or a read of
+    # the developer's real config: the fallback chain consults CLAUDE_CONFIG_DIR
+    # and then ~/.claude, and the current-side probe runs for real here.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    home = tmp_path / "fake-home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+
+def _write_pool_dirs(tmp_path: Path, target_token: str) -> tuple[Path, Path]:
+    current_dir = tmp_path / "claude-current"
+    target_dir = tmp_path / "claude-pool"
+    _write_claude_settings_env(
+        current_dir,
+        ANTHROPIC_BASE_URL="https://gw.example.com",
+        ANTHROPIC_AUTH_TOKEN="token-current",
+    )
+    _write_claude_settings_env(
+        target_dir,
+        ANTHROPIC_BASE_URL="https://gw.example.com",
+        ANTHROPIC_AUTH_TOKEN=target_token,
+    )
+    # claude has no fresh-thread restart path, so an unpersisted thread is a hard
+    # 400; the artifact makes the transcript step return PERSISTED and leaves the
+    # account gate as the thing this test exercises.
+    _write_claude_thread(target_dir)
+    _write_claude_onboarding_complete(target_dir)
+    return current_dir, target_dir
+
+
+def _pool_switch_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    current_dir: Path,
+    target_dir: Path,
+    *,
+    expected_account_key: str | None = None,
+) -> SessionRuntime:
+    profile: dict[str, Any] = {
+        "label": "Pool",
+        "config_dir": str(target_dir),
+        "transcript_policy": "require_existing",
+    }
+    if expected_account_key is not None:
+        profile["expected_account_key"] = expected_account_key
+    runtime = _runtime(tmp_path, claude_code={"account_profiles": {"pool": profile}})
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="tmux",
+        cwd="/repo/app",
+        launch_env={"CLAUDE_CONFIG_DIR": str(current_dir)},
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+    return runtime
+
+
+async def test_update_switches_onto_a_profile_that_declares_its_own_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _offline_claude_config: None
+) -> None:
+    current_dir, target_dir = _write_pool_dirs(tmp_path, "token-pool")
+    runtime = _pool_switch_runtime(tmp_path, monkeypatch, current_dir, target_dir)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="pool", restart=True)
+    )
+
+    assert updated.account_profile_id == "pool"
+    assert updated.launch_env["CLAUDE_CONFIG_DIR"] == str(target_dir)
+    # Verified synchronously from the same probe the gate used, so the identity is
+    # the endpoint-and-digest one, not an OAuth org.
+    session = runtime.get_session("s1")
+    assert session.verified_account_key is not None
+    assert session.verified_account_key.startswith(
+        "claude_code:endpoint:gw.example.com:"
+    )
+    assert session.verified_account_label == "gw.example.com · token auth"
+    assert "token-pool" not in session.verified_account_key
+
+
+async def test_update_rejects_a_switch_between_profiles_sharing_one_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _offline_claude_config: None
+) -> None:
+    # Same endpoint and same token on both sides is genuinely the same account, so
+    # the no-op guard must still refuse — the configured identity has to
+    # discriminate accounts, not merely unblock switching.
+    current_dir, target_dir = _write_pool_dirs(tmp_path, "token-current")
+    runtime = _pool_switch_runtime(tmp_path, monkeypatch, current_dir, target_dir)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(account_profile_id="pool", restart=True)
+        )
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "same account" in str(getattr(exc.value, "detail", ""))
+
+
+async def test_update_allows_a_shared_credential_switch_with_an_expected_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _offline_claude_config: None
+) -> None:
+    # The documented escape hatch for two profiles on one account still applies to
+    # a configured identity — and it is now reachable at all, since the gate no
+    # longer fails before consulting it.
+    current_dir, target_dir = _write_pool_dirs(tmp_path, "token-current")
+    expected = configured_account_identity(str(target_dir), {})
+    assert expected is not None
+    runtime = _pool_switch_runtime(
+        tmp_path,
+        monkeypatch,
+        current_dir,
+        target_dir,
+        expected_account_key=expected.account_key,
+    )
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="pool", restart=True)
+    )
+
+    assert updated.launch_env["CLAUDE_CONFIG_DIR"] == str(target_dir)

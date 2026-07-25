@@ -11,7 +11,9 @@ import logging
 import pytest
 
 from waypoint.backends.claude_code.models import (
+    CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    OPUS5_MIN_CLI_VERSION,
     SONNET5_MIN_CLI_VERSION,
     claude_models_for_version,
     merge_model_catalogue,
@@ -28,7 +30,7 @@ def _by_id(models: tuple, model_id: str):
     return next(opt for opt in models if opt.id == model_id)
 
 
-@pytest.mark.parametrize("version", [None, SONNET5_MIN_CLI_VERSION, (2, 2, 0)])
+@pytest.mark.parametrize("version", [None, OPUS5_MIN_CLI_VERSION, (2, 2, 0)])
 def test_current_offering_for_none_or_recent_version(version) -> None:
     models = claude_models_for_version(version)
     assert models == DEFAULT_CLAUDE_MODELS
@@ -36,12 +38,37 @@ def test_current_offering_for_none_or_recent_version(version) -> None:
     assert sonnet.label == "Sonnet 5"
     assert "max" in sonnet.supported_efforts
 
+    # Opus 5 accepts the full effort set, same as Opus 4.8 before it.
+    opus = _by_id(models, "opus")
+    assert opus.label == "Opus 5"
+    assert "xhigh" in opus.supported_efforts and "max" in opus.supported_efforts
+    assert _by_id(models, "opus[1m]").label == "Opus 5 (1M context)"
+
+
+def test_legacy_offering_below_opus5_min_version() -> None:
+    models = claude_models_for_version((2, 1, 218))
+
+    # Only the opus labels roll back across the 2.1.219 boundary: Opus 4.8
+    # accepts the same full effort set as Opus 5.
+    opus = _by_id(models, "opus")
+    assert opus.label == "Opus 4.8"
+    assert opus.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+
+    opus_1m = _by_id(models, "opus[1m]")
+    assert opus_1m.label == "Opus 4.8 (1M context)"
+    assert opus_1m.is_default is True
+
+    # Sonnet 5 already shipped by 2.1.218, so it is not rolled back here.
+    sonnet = _by_id(models, "sonnet")
+    assert sonnet.label == "Sonnet 5"
+    assert "xhigh" in sonnet.supported_efforts
+
 
 def test_legacy_offering_below_sonnet5_min_version() -> None:
     models = claude_models_for_version((2, 1, 190))
 
-    # Sonnet 4.6 accepts `max` but not `xhigh` (only the sonnet family differs
-    # across the 2.1.197 boundary).
+    # Sonnet 4.6 accepts `max` but not `xhigh` (only the sonnet family's
+    # efforts differ across the 2.1.197 boundary).
     sonnet = _by_id(models, "sonnet")
     assert sonnet.label == "Sonnet 4.6"
     assert sonnet.supported_efforts == ["low", "medium", "high", "max"]
@@ -50,7 +77,7 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
     assert sonnet_1m.label == "Sonnet 4.6 (1M context)"
     assert sonnet_1m.supported_efforts == ["low", "medium", "high", "max"]
 
-    # Opus 4.8 and Fable 5 are unchanged across the boundary: full set incl. max.
+    # A build this old also predates Opus 5, so the opus rollback applies too.
     opus = _by_id(models, "opus")
     assert opus.label == "Opus 4.8"
     assert "xhigh" in opus.supported_efforts and "max" in opus.supported_efforts
@@ -62,13 +89,16 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
     assert haiku.supported_efforts == []
 
     opus_1m = _by_id(models, "opus[1m]")
+    assert opus_1m.label == "Opus 4.8 (1M context)"
     assert opus_1m.is_default is True
     assert "xhigh" in opus_1m.supported_efforts and "max" in opus_1m.supported_efforts
 
 
-def test_legacy_offering_has_same_model_ids_as_default() -> None:
-    legacy = claude_models_for_version((2, 0, 0))
+@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 190), (2, 1, 218)])
+def test_legacy_offerings_have_same_model_ids_as_default(version) -> None:
+    legacy = claude_models_for_version(version)
     assert {opt.id for opt in legacy} == {opt.id for opt in DEFAULT_CLAUDE_MODELS}
+    assert [opt.id for opt in legacy] == [opt.id for opt in DEFAULT_CLAUDE_MODELS]
     assert sum(opt.is_default for opt in legacy) == 1
 
 

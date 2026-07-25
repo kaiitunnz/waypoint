@@ -220,6 +220,10 @@ export interface SessionRecord {
   // across a switch); null when the backend hosts no profiles.
   account_profile_id?: string | null;
   account_profile_label?: string | null;
+  // Durable rate-limit readout source selection.
+  usage_limit_source?: UsageLimitSource;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export type AttachmentKind = "image" | "file";

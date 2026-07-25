@@ -447,9 +447,15 @@ export function SessionUsagePill({
         : null
     : null;
   const rateLimitSourceLabel = rateLimitUsage
-    ? rateLimitUsage.notes?.length
-      ? rateLimitUsage.notes.join(" · ")
-      : humaniseBackend(rateLimitUsage.source, catalog)
+    ? rateLimitUsage.origin === "usage_provider"
+      ? // Provider projections carry a server-owned display label; flag an
+        // unavailable selection so the readout isn't mistaken for live.
+        (rateLimitUsage.unavailable
+          ? `${rateLimitUsage.source_label ?? "Usage provider"} (unavailable)`
+          : rateLimitUsage.source_label) ?? "Usage provider"
+      : rateLimitUsage.notes?.length
+        ? rateLimitUsage.notes.join(" · ")
+        : humaniseBackend(rateLimitUsage.source, catalog)
     : "Unavailable";
   // The trigger only ever wears the context-pressure or rate-limit tone; the
   // cumulative total never raises an alarm colour.

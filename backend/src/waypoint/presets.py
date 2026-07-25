@@ -55,6 +55,17 @@ _SCALAR_FIELDS = (
 _LIST_FIELDS = ("args", "config_overrides")
 _MAP_FIELDS = ("launch_env", "tags")
 
+# The usage-limit-source selection is a coupled triple, not three independent
+# scalars: overlaying the provider fields alone would let an explicit
+# ``usage_limit_source: "plugin"`` request inherit a provider id from the preset
+# (an invalid combination). Resolve it as a unit — inherit all three from the
+# preset only when the request omitted ``usage_limit_source`` entirely.
+_USAGE_SELECTION_FIELDS = (
+    "usage_limit_source",
+    "usage_provider_id",
+    "usage_provider_account_key",
+)
+
 # Request-only control fields that must never flow into the resolved launch.
 _CONTROL_FIELDS = ("preset_id", "use_default_preset")
 
@@ -75,6 +86,9 @@ def redact_preset(record: SessionPresetRecord) -> SessionPresetSummary:
         effort=spec.effort,
         tags=dict(spec.tags),
         account_profile_id=spec.account_profile_id,
+        usage_limit_source=spec.usage_limit_source,
+        usage_provider_id=spec.usage_provider_id,
+        usage_provider_account_key=spec.usage_provider_account_key,
     )
     return SessionPresetSummary(
         id=record.id,
@@ -252,6 +266,17 @@ def _merge(request: object, preset: SessionPresetRecord | None) -> dict[str, obj
             value = getattr(spec, name)
             if value:
                 merged[name] = dict(value)
+    # Coupled usage-selection triple (see _USAGE_SELECTION_FIELDS). Only inherit
+    # from the preset when the request left the source unset; an explicit source
+    # (even "plugin") takes the whole triple from the request.
+    if (
+        "usage_limit_source" in req_fields
+        and "usage_limit_source" not in explicit
+        and spec.usage_limit_source is not None
+    ):
+        merged["usage_limit_source"] = spec.usage_limit_source
+        merged["usage_provider_id"] = spec.usage_provider_id
+        merged["usage_provider_account_key"] = spec.usage_provider_account_key
     return merged
 
 

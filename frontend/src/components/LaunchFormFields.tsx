@@ -24,11 +24,16 @@ import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { permissionModesFor } from "@/lib/backends";
 import {
+  PLUGIN_SELECTION,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
+import {
   AccountProfile,
   Backend,
   BackendModelListResponse,
   SessionPresetSpec,
   SessionTransport,
+  UsageProviderOption,
 } from "@/lib/types";
 
 interface UseLaunchFormParams {
@@ -39,6 +44,7 @@ interface UseLaunchFormParams {
   // Account/config profiles keyed by backend — target-merged when a launch
   // target is active, else the global per-backend catalogue.
   accountProfilesByBackend: Record<Backend, AccountProfile[]>;
+  usageProviderOptions: UsageProviderOption[];
   catalog: BackendCatalog;
 }
 
@@ -76,6 +82,11 @@ export interface LaunchForm {
   supportsConfigOverrides: boolean;
   effortSupported: boolean;
   effortOptions: string[];
+  // Rate-limit readout source selection — independent of agent/transport, so it
+  // survives backend and transport changes (never cleared by the reset effects).
+  usageProviderOptions: UsageProviderOption[];
+  usageSelection: UsageLimitSourceValue;
+  setUsageSelection: (value: UsageLimitSourceValue) => void;
   changeBackend: (backend: Backend) => void;
   applyPreset: (spec: SessionPresetSpec) => void;
   handleModelsLoaded: (response: BackendModelListResponse) => void;
@@ -92,9 +103,12 @@ export function useLaunchForm({
   launchTargetId,
   defaultLaunchEnvByBackend,
   accountProfilesByBackend,
+  usageProviderOptions,
   catalog,
 }: UseLaunchFormParams): LaunchForm {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
+  const [usageSelection, setUsageSelection] =
+    useState<UsageLimitSourceValue>(PLUGIN_SELECTION);
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
@@ -187,6 +201,17 @@ export function useLaunchForm({
       if (spec.permission_mode) setPermissionMode(spec.permission_mode);
       setCustomArgsText((spec.args ?? []).join("\n"));
       setConfigOverridesText((spec.config_overrides ?? []).join("\n"));
+      // Usage-limit-source is backend-independent, so hydrate it inline (like
+      // permission_mode) rather than deferring to the backend-change resets.
+      if (spec.usage_limit_source === "usage_provider") {
+        setUsageSelection({
+          source: "usage_provider",
+          providerId: spec.usage_provider_id ?? null,
+          accountKey: spec.usage_provider_account_key ?? null,
+        });
+      } else if (spec.usage_limit_source === "plugin") {
+        setUsageSelection(PLUGIN_SELECTION);
+      }
       // Backend-scoped fields: model/effort/env/transport are wiped by the
       // backend-change resets, so apply them after those run.
       const applyScoped = () => {
@@ -304,6 +329,9 @@ export function useLaunchForm({
     supportsConfigOverrides,
     effortSupported,
     effortOptions,
+    usageProviderOptions,
+    usageSelection,
+    setUsageSelection,
     changeBackend,
     applyPreset,
     handleModelsLoaded,
@@ -437,6 +465,9 @@ export function LaunchFormFields({
         onConfigOverridesChange={form.setConfigOverridesText}
         envEntries={form.envEntries}
         onEnvEntriesChange={form.setEnvEntries}
+        usageProviderOptions={form.usageProviderOptions}
+        usageSelection={form.usageSelection}
+        onUsageSelectionChange={form.setUsageSelection}
         formBusy={busy}
       />
     </div>

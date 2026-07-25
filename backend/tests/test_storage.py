@@ -1731,6 +1731,75 @@ def test_delete_events_for_older_than(tmp_path) -> None:
     assert storage.list_events("fresh") == []
 
 
+def test_usage_limit_source_defaults_plugin_for_old_rows(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "sess-usage-default", "Default")
+    loaded = storage.get_session("sess-usage-default")
+    assert loaded is not None
+    assert loaded.usage_limit_source == "plugin"
+    assert loaded.usage_provider_id is None
+    assert loaded.usage_provider_account_key is None
+
+
+def test_usage_provider_selection_round_trip(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    storage.create_session(
+        SessionRecord(
+            id="sess-usage-provider",
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title="Provider-selected",
+            cwd="/tmp",
+            status=SessionStatus.RUNNING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="/tmp/raw.log",
+            structured_log_path="/tmp/events.jsonl",
+            usage_limit_source="usage_provider",
+            usage_provider_id="lumid",
+            usage_provider_account_key="hmac:v1:abc123",
+        )
+    )
+    loaded = storage.get_session("sess-usage-provider")
+    assert loaded is not None
+    assert loaded.usage_limit_source == "usage_provider"
+    assert loaded.usage_provider_id == "lumid"
+    assert loaded.usage_provider_account_key == "hmac:v1:abc123"
+
+    updated = storage.update_session(
+        "sess-usage-provider",
+        usage_limit_source="plugin",
+        usage_provider_id=None,
+        usage_provider_account_key=None,
+    )
+    assert updated.usage_limit_source == "plugin"
+    assert updated.usage_provider_id is None
+
+
+def test_schedule_usage_provider_selection_round_trip(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    schedule = ScheduledSessionRecord(
+        id="sched-usage-provider",
+        backend="codex",
+        cwd="/tmp/project",
+        scheduled_at=now + timedelta(minutes=5),
+        created_at=now,
+        status=ScheduleStatus.PENDING,
+        usage_limit_source="usage_provider",
+        usage_provider_id="lumid",
+        usage_provider_account_key="hmac:v1:def456",
+    )
+    storage.create_schedule(schedule)
+    loaded = storage.get_schedule("sched-usage-provider")
+    assert loaded is not None
+    assert loaded.usage_limit_source == "usage_provider"
+    assert loaded.usage_provider_id == "lumid"
+    assert loaded.usage_provider_account_key == "hmac:v1:def456"
+
+
 def test_vacuum_runs_without_error(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     storage.vacuum()  # Should not raise

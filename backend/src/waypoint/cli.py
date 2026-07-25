@@ -728,6 +728,43 @@ def _parse_tags(items: list[str] | None) -> dict[str, str]:
     return tags
 
 
+def _resolve_usage_selection(
+    source: str | None, provider: str | None, account: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Validate the usage-limit-source flag combination for launch/schedule.
+
+    Returns the (source, provider_id, account_key) to send, omitting them
+    (``None``) when unset so a preset/server default still applies. Incomplete
+    combinations fail with an actionable error rather than a silent drop."""
+    if source is None:
+        if provider is not None or account is not None:
+            raise typer.BadParameter(
+                "--usage-provider/--usage-provider-account require "
+                "--usage-limit-source usage_provider",
+                param_hint="--usage-limit-source",
+            )
+        return None, None, None
+    if source == "plugin":
+        if provider is not None or account is not None:
+            raise typer.BadParameter(
+                "--usage-limit-source plugin does not take a provider/account",
+                param_hint="--usage-limit-source",
+            )
+        return "plugin", None, None
+    if source == "usage_provider":
+        if not provider or not account:
+            raise typer.BadParameter(
+                "--usage-limit-source usage_provider requires both "
+                "--usage-provider and --usage-provider-account",
+                param_hint="--usage-provider",
+            )
+        return "usage_provider", provider, account
+    raise typer.BadParameter(
+        f"invalid --usage-limit-source: {source!r} (use plugin or usage_provider)",
+        param_hint="--usage-limit-source",
+    )
+
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
@@ -1982,9 +2019,35 @@ def sessions_start(
             "host profiles only; see `accounts list`).",
         ),
     ] = None,
+    usage_limit_source: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-limit-source",
+            help="Rate-limit readout source: 'plugin' (the agent resolver, "
+            "default) or 'usage_provider' (a configured provider account). "
+            "'usage_provider' requires --usage-provider and "
+            "--usage-provider-account.",
+        ),
+    ] = None,
+    usage_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-provider", help="Usage provider id (with 'usage_provider')."
+        ),
+    ] = None,
+    usage_provider_account: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-provider-account",
+            help="Opaque usage-provider account key (with 'usage_provider').",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
+    usage_source, usage_provider_id, usage_account_key = _resolve_usage_selection(
+        usage_limit_source, usage_provider, usage_provider_account
+    )
     use_default = preset is None and not no_preset
     effective_cwd = cwd
     worktree_path: str | None = None
@@ -2029,6 +2092,9 @@ def sessions_start(
                 tags=tags,
                 launch_env=launch_env_map,
                 account_profile_id=account_profile,
+                usage_limit_source=usage_source,
+                usage_provider_id=usage_provider_id,
+                usage_provider_account_key=usage_account_key,
                 preset_id=preset,
                 use_default_preset=use_default,
             )
@@ -3462,11 +3528,36 @@ def schedule_create(
             "host profiles only; see `accounts list`).",
         ),
     ] = None,
+    usage_limit_source: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-limit-source",
+            help="Rate-limit readout source: 'plugin' (default) or "
+            "'usage_provider' (requires --usage-provider and "
+            "--usage-provider-account).",
+        ),
+    ] = None,
+    usage_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-provider", help="Usage provider id (with 'usage_provider')."
+        ),
+    ] = None,
+    usage_provider_account: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-provider-account",
+            help="Opaque usage-provider account key (with 'usage_provider').",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Schedule a session launch on the running server."""
     use_default = preset is None and not no_preset
     launch_env_map = _parse_launch_env(launch_env) if launch_env is not None else None
+    usage_source, usage_provider_id, usage_account_key = _resolve_usage_selection(
+        usage_limit_source, usage_provider, usage_provider_account
+    )
 
     def _run(c: WaypointClient) -> dict[str, Any]:
         # Preserve the launch warnings on the values the preset would resolve to.
@@ -3500,6 +3591,9 @@ def schedule_create(
                 start_at=start_at,
                 launch_env=launch_env_map,
                 account_profile_id=account_profile,
+                usage_limit_source=usage_source,
+                usage_provider_id=usage_provider_id,
+                usage_provider_account_key=usage_account_key,
                 preset_id=preset,
                 use_default_preset=use_default,
             )

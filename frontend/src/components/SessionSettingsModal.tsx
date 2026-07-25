@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { EnvVarRows } from "@/components/EnvVarRows";
+import { UsageLimitSourceField } from "@/components/UsageLimitSourceField";
 import type { AssistantControls } from "@/components/SessionDetail";
 import {
   agentTransports,
@@ -116,6 +117,8 @@ export function SessionSettingsModal({
     model,
     effort,
     accountProfileId,
+    usageSelection,
+    usageProviderOptions,
     argsText,
     configOverridesText,
     existingEnv,
@@ -138,6 +141,7 @@ export function SessionSettingsModal({
     setModel,
     setEffort,
     setAccountProfileId,
+    setUsageSelection,
     setArgsText,
     setConfigOverridesText,
     setExistingEnvOp,
@@ -319,12 +323,21 @@ export function SessionSettingsModal({
     if (ok) onClose();
   }, [apply, onClose]);
 
+  // Usage limit source is a display/refresh setting (no restart), so it shows
+  // whenever a provider is configured or the session already selects one — even
+  // for sessions with no editable launch fields.
+  const usageSourceVisible =
+    !isAssistant &&
+    (usageProviderOptions.length > 0 ||
+      usageSelection.source === "usage_provider");
+
   const advancedVisible =
     !isAssistant &&
     (launchSettings?.supports_custom_args ||
       launchSettings?.supports_config_overrides ||
       launchFieldsAvailable ||
-      launchFieldsDisabledReason !== null);
+      launchFieldsDisabledReason !== null ||
+      usageSourceVisible);
 
   // Existing env keys the user can act on (profile-owned/runtime-owned keys are
   // hidden and stay server-managed).
@@ -645,12 +658,27 @@ export function SessionSettingsModal({
                     </span>
                   </button>
                   {advancedOpen ? (
-                    launchFieldsDisabledReason ? (
-                      <p className="settings-modal-note">
-                        {launchFieldsDisabledReason}
-                      </p>
-                    ) : (
-                      <div className="settings-advanced-body">
+                    <div className="settings-advanced-body">
+                      {usageSourceVisible ? (
+                        <section className="settings-group">
+                          <div className="settings-group-caption">
+                            Usage limit source
+                          </div>
+                          <UsageLimitSourceField
+                            variant="settings"
+                            options={usageProviderOptions}
+                            value={usageSelection}
+                            onChange={setUsageSelection}
+                            disabled={busy}
+                          />
+                        </section>
+                      ) : null}
+                      {launchFieldsDisabledReason ? (
+                        <p className="settings-modal-note">
+                          {launchFieldsDisabledReason}
+                        </p>
+                      ) : (
+                        <>
                         {launchSettings?.supports_custom_args ? (
                           <div className="settings-field">
                             <label
@@ -759,8 +787,9 @@ export function SessionSettingsModal({
                             disabled={busy}
                           />
                         </div>
-                      </div>
-                    )
+                        </>
+                      )}
+                    </div>
                   ) : null}
                 </section>
               ) : null}

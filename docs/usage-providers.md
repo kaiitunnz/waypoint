@@ -75,6 +75,35 @@ and `GET /api/usage` even when no account resolves:
 | `usage_unavailable` | The usage endpoint returned an unexpected or malformed response. |
 | `network` | The request timed out or could not connect. |
 
+## Per-session usage limit source
+
+A session's rate-limit readout defaults to its coding-agent plugin resolver
+(`usage_limit_source: plugin`). A session may instead read one enabled provider
+account (`usage_limit_source: usage_provider` with `usage_provider_id` and an
+opaque `usage_provider_account_key`). The selection is durable across restart,
+schedule firing, and reload.
+
+Choose it under **Advanced → Usage limit source** in the launch sheet (New and
+Schedule) and in the session settings modal: a provider with one account is a
+single option (`Lumid — user@example.com`), one with several reveals an account
+picker. The CLI takes `--usage-limit-source`, `--usage-provider`, and
+`--usage-provider-account` on `sessions start` and `schedule create`; the API
+takes the same fields on create/schedule plus a dedicated non-restart
+`PATCH /api/sessions/{id}/usage-limit-source`, and `GET /api/usage-provider-options`
+(and launch bootstrap) list the current choices. Only opaque account keys and
+server-derived labels cross the wire.
+
+Changing the source in settings never restarts or interrupts the agent.
+Switching to a provider projects that account's cached snapshot immediately;
+switching back runs the plugin refresh. A provider-selected session refreshes
+only through its provider, coalesced onto one upstream request.
+
+A removed or unrefreshable provider/account retains its last-good projection
+marked stale/unavailable rather than falling back to plugin data, and a
+scheduled run with a now-unavailable selection fails instead of launching under
+an unintended source. The projection reuses the provider's own dashboard card
+and telemetry facts, so it is never counted twice.
+
 ## Security
 
 PATs live only in process memory, read from the environment at refresh. They are

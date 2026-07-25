@@ -71,8 +71,15 @@ export interface UsageWindow {
   reset_description?: string | null;
 }
 
+export type UsageLimitSource = "plugin" | "usage_provider";
+
 export interface SessionRateLimitUsage {
-  source: Backend;
+  origin?: UsageLimitSource;
+  // A backend id for plugin origin, or a provider type otherwise.
+  source: string;
+  source_label?: string | null;
+  stale?: boolean;
+  unavailable?: boolean;
   updated_at: string;
   windows: UsageWindow[];
   credits_remaining?: number | null;
@@ -156,6 +163,20 @@ export interface UsageDashboardResponse {
   providers: ProviderUsageStatus[];
 }
 
+// Account keys are opaque; labels are server-derived.
+export interface UsageProviderAccountOption {
+  account_key: string;
+  account_label: string;
+}
+
+export interface UsageProviderOption {
+  id: string;
+  label: string;
+  type: string;
+  accounts: UsageProviderAccountOption[];
+  status: ProviderUsageStatus;
+}
+
 export interface SessionRecord {
   id: string;
   backend: Backend;
@@ -196,6 +217,9 @@ export interface SessionRecord {
   // across a switch); null when the backend hosts no profiles.
   account_profile_id?: string | null;
   account_profile_label?: string | null;
+  usage_limit_source?: UsageLimitSource;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export type AttachmentKind = "image" | "file";
@@ -424,6 +448,7 @@ export interface MeResponse {
   // Master telemetry opt-in. When false (or absent), the dashboard entry point
   // is hidden and the /telemetry page renders its disabled state.
   telemetry_enabled?: boolean;
+  usage_provider_options?: UsageProviderOption[];
 }
 
 // Full preset spec (with launch_env values); returned only from the
@@ -443,6 +468,9 @@ export interface SessionPresetSpec {
   effort?: string | null;
   tags?: Record<string, string>;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource | null;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 // Redacted spec used on list / bootstrap surfaces: env values are omitted,
@@ -460,6 +488,9 @@ export interface SessionPresetSpecSummary {
   effort?: string | null;
   tags?: Record<string, string>;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource | null;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export interface SessionPresetSummary {
@@ -630,6 +661,9 @@ export interface ScheduleCreateRequest {
   // selected preset id lets the server stamp it onto the scheduled record.
   preset_id?: string | null;
   account_profile_id?: string | null;
+  usage_limit_source?: UsageLimitSource;
+  usage_provider_id?: string | null;
+  usage_provider_account_key?: string | null;
 }
 
 export interface BackendModelOption {

@@ -6,10 +6,12 @@ import {
   fetchBackendModels,
   fetchLaunchSettings,
   fetchSession,
+  fetchUsageProviderOptions,
   setSessionEffort,
   setSessionModel,
   setSessionPermissionMode,
   setSessionTitle,
+  setUsageLimitSource,
   updateLaunchSettings,
 } from "@/lib/api";
 import type { BackendCatalog } from "@/lib/backends";
@@ -21,7 +23,34 @@ import type {
   SessionLaunchSettings,
   SessionRecord,
   TransportSettingsOption,
+  UsageProviderOption,
 } from "@/lib/types";
+import {
+  PLUGIN_SELECTION,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
+
+function selectionFromRecord(record: SessionRecord): UsageLimitSourceValue {
+  if (record.usage_limit_source === "usage_provider") {
+    return {
+      source: "usage_provider",
+      providerId: record.usage_provider_id ?? null,
+      accountKey: record.usage_provider_account_key ?? null,
+    };
+  }
+  return PLUGIN_SELECTION;
+}
+
+function sameSelection(
+  a: UsageLimitSourceValue,
+  b: UsageLimitSourceValue,
+): boolean {
+  return (
+    a.source === b.source &&
+    a.providerId === b.providerId &&
+    a.accountKey === b.accountKey
+  );
+}
 
 // Editing model for an existing (redacted) env key. Its stored value is never
 // fetched or prefilled: the user may keep it, replace it (typing a new value),
@@ -107,6 +136,8 @@ export interface SessionSettingsController {
   model: string | null;
   effort: string | null;
   accountProfileId: string | null;
+  usageSelection: UsageLimitSourceValue;
+  usageProviderOptions: UsageProviderOption[];
   argsText: string;
   configOverridesText: string;
   existingEnv: ExistingEnvEntry[];
@@ -138,6 +169,7 @@ export interface SessionSettingsController {
   setModel: (value: string | null) => void;
   setEffort: (value: string | null) => void;
   setAccountProfileId: (value: string | null) => void;
+  setUsageSelection: (value: UsageLimitSourceValue) => void;
   setArgsText: (value: string) => void;
   setConfigOverridesText: (value: string) => void;
   setExistingEnvOp: (key: string, op: EnvKeyOp) => void;
@@ -204,6 +236,11 @@ export function useSessionSettings(
   const [model, setModel] = useState<string | null>(null);
   const [effort, setEffort] = useState<string | null>(null);
   const [accountProfileId, setAccountProfileId] = useState<string | null>(null);
+  const [usageSelection, setUsageSelection] =
+    useState<UsageLimitSourceValue>(PLUGIN_SELECTION);
+  const [usageProviderOptions, setUsageProviderOptions] = useState<
+    UsageProviderOption[]
+  >([]);
   const [argsText, setArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [existingEnv, setExistingEnv] = useState<ExistingEnvEntry[]>([]);
@@ -245,6 +282,7 @@ export function useSessionSettings(
       setModel(record.model ?? null);
       setEffort(record.effort ?? null);
       setAccountProfileId(record.account_profile_id ?? null);
+      setUsageSelection(selectionFromRecord(record));
       setArgsText(argsToText(settings?.args ?? record.args ?? []));
       setConfigOverridesText(
         argsToText(settings?.config_overrides ?? record.config_overrides ?? []),
@@ -277,9 +315,12 @@ export function useSessionSettings(
       setPartialSuccess(false);
     }
     try {
-      const [record, settings] = await Promise.all([
+      const [record, settings, providerOptions] = await Promise.all([
         fetchSession(host, token, sessionId),
         fetchLaunchSettings(host, token, sessionId).catch(() => null),
+        // Fetch current provider options fresh on open so a provider refresh
+        // since page bootstrap is reflected; best-effort (empty on failure).
+        fetchUsageProviderOptions(host, token).catch(() => []),
       ]);
       let modelList: BackendModelOption[] = [];
       let defaultLabel: string | null = null;
@@ -299,6 +340,7 @@ export function useSessionSettings(
       if (currentToken !== loadToken.current) return;
       setSession(record);
       setLaunchSettings(settings);
+      setUsageProviderOptions(providerOptions);
       setModels(modelList);
       setEffortLevels(effortVocabulary);
       setDefaultModelLabel(defaultLabel);
@@ -491,6 +533,11 @@ export function useSessionSettings(
   );
   const envChanged =
     Object.keys(envPatch.envSet).length > 0 || envPatch.envUnset.length > 0;
+  // Usage-limit-source is an inline, non-restart change; it applies via its own
+  // endpoint and is independent of a staged interface switch.
+  const usageLimitSourceChanged = Boolean(
+    session && !sameSelection(usageSelection, selectionFromRecord(session)),
+  );
 
   const launchChanged =
     launchFieldsAvailable &&
@@ -506,6 +553,7 @@ export function useSessionSettings(
     permissionChanged ||
     modelChanged ||
     effortChanged ||
+    usageLimitSourceChanged ||
     restartLaunchChanged ||
     assistantReplacementStaged;
 
@@ -678,6 +726,19 @@ export function useSessionSettings(
         setSession(updated);
         onApplied?.(updated);
       }
+      // Usage-limit-source via its own non-restart endpoint. Kept last so an
+      // earlier failure never leaves a source switch as the only applied change
+      // without the user's other edits.
+      if (usageLimitSourceChanged) {
+        const updated = await setUsageLimitSource(host, token, sessionId, {
+          usage_limit_source: usageSelection.source,
+          usage_provider_id: usageSelection.providerId,
+          usage_provider_account_key: usageSelection.accountKey,
+        });
+        anySucceeded = true;
+        setSession(updated);
+        onApplied?.(updated);
+      }
       return true;
     } catch (error) {
       const message =
@@ -721,6 +782,8 @@ export function useSessionSettings(
     model,
     effortChanged,
     effort,
+    usageLimitSourceChanged,
+    usageSelection,
     onApplied,
     onAuthFailure,
     load,
@@ -743,6 +806,8 @@ export function useSessionSettings(
     model,
     effort,
     accountProfileId,
+    usageSelection,
+    usageProviderOptions,
     argsText,
     configOverridesText,
     existingEnv,
@@ -766,6 +831,7 @@ export function useSessionSettings(
     setModel,
     setEffort,
     setAccountProfileId,
+    setUsageSelection,
     setArgsText,
     setConfigOverridesText,
     setExistingEnvOp,

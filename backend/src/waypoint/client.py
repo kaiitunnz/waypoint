@@ -387,6 +387,9 @@ class WaypointClient:
         tags: dict[str, str] | None = None,
         launch_env: dict[str, str] | None = None,
         account_profile_id: str | None = None,
+        usage_limit_source: str | None = None,
+        usage_provider_id: str | None = None,
+        usage_provider_account_key: str | None = None,
         preset_id: str | None = None,
         use_default_preset: bool = False,
     ) -> dict[str, Any]:
@@ -407,6 +410,9 @@ class WaypointClient:
             ("launch_mode", launch_mode),
             ("transport", transport),
             ("account_profile_id", account_profile_id),
+            ("usage_limit_source", usage_limit_source),
+            ("usage_provider_id", usage_provider_id),
+            ("usage_provider_account_key", usage_provider_account_key),
             ("preset_id", preset_id),
         ):
             if value is not None:
@@ -893,6 +899,9 @@ class WaypointClient:
         start_at: str | None = None,
         launch_env: dict[str, str] | None = None,
         account_profile_id: str | None = None,
+        usage_limit_source: str | None = None,
+        usage_provider_id: str | None = None,
+        usage_provider_account_key: str | None = None,
         preset_id: str | None = None,
         use_default_preset: bool = False,
     ) -> dict[str, Any]:
@@ -918,6 +927,9 @@ class WaypointClient:
             "start_at": start_at,
             "launch_env": launch_env,
             "account_profile_id": account_profile_id,
+            "usage_limit_source": usage_limit_source,
+            "usage_provider_id": usage_provider_id,
+            "usage_provider_account_key": usage_provider_account_key,
             "preset_id": preset_id,
         }
         body.update(
@@ -1141,6 +1153,30 @@ class WaypointClient:
 
     def refresh_usage(self) -> dict[str, Any]:
         data: dict[str, Any] = self._request("POST", "/api/usage/refresh").json()
+        return data
+
+    def get_usage_provider_options(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", "/api/usage-provider-options"
+        ).json()
+        return data
+
+    def set_usage_limit_source(
+        self,
+        session_id: str,
+        *,
+        usage_limit_source: str = "plugin",
+        usage_provider_id: str | None = None,
+        usage_provider_account_key: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"usage_limit_source": usage_limit_source}
+        if usage_provider_id is not None:
+            body["usage_provider_id"] = usage_provider_id
+        if usage_provider_account_key is not None:
+            body["usage_provider_account_key"] = usage_provider_account_key
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/sessions/{session_id}/usage-limit-source", json=body
+        ).json()["session"]
         return data
 
     # ── telemetry ───────────────────────────────────────────────────────

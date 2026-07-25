@@ -528,7 +528,7 @@ already refreshed in-place is not double-broadcast).
 The runtime invokes it after an explicit inline model change and after a transport
 switch restores, under the session lifecycle lock and before the state broadcast.
 This is a Claude concern: Claude's catalogue distinguishes `opus[1m]` (1M) from
-`opus`/`claude-opus-4-8` (200K), and the transcript records only the resolved base
+`opus`/`claude-opus-5` (200K), and the transcript records only the resolved base
 id, so the durable selection is the sole source of the `[1m]` entitlement. Codex
 and OpenCode take their window from the provider directly (Codex's `token_count`
 `model_context_window`, OpenCode's per-model lookup), so they neither implement

@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.assistant_assets import AssistantAssetError
+from waypoint.backends.claude_code.models import OPUS5_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
@@ -4325,8 +4326,20 @@ async def test_set_model_codex_calls_adapter_and_persists(tmp_path) -> None:
     assert updated.model == "gpt-5"
 
 
+@pytest.fixture
+def _current_epoch_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Model labels are version-gated, so pin the probed CLI version instead of
+    # depending on whichever `claude` binary the host happens to have installed.
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: OPUS5_MIN_CLI_VERSION,
+    )
+
+
 @pytest.mark.asyncio
-async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None:
+async def test_list_backend_models_returns_curated_claude_list(
+    tmp_path, _current_epoch_claude_cli
+) -> None:
     runtime, _, settings = make_runtime(tmp_path)
     response = await runtime.list_backend_models("claude_code")
 
@@ -4338,11 +4351,13 @@ async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None
     # Default falls back to the entry flagged is_default in the curated list
     # when no plugin_configs.claude_code.default_model_id override is present.
     assert response["default_model_id"] == "opus[1m]"
-    assert response["default_model_label"] == "Opus 4.8 (1M context)"
+    assert response["default_model_label"] == "Opus 5 (1M context)"
 
 
 @pytest.mark.asyncio
-async def test_list_backend_models_honours_default_models_override(tmp_path) -> None:
+async def test_list_backend_models_honours_default_models_override(
+    tmp_path, _current_epoch_claude_cli
+) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
         plugin_configs={"claude_code": {"default_model_id": "opus"}},
@@ -4352,7 +4367,7 @@ async def test_list_backend_models_honours_default_models_override(tmp_path) -> 
     runtime = SessionRuntime(settings, storage)
     response = await runtime.list_backend_models("claude_code")
     assert response["default_model_id"] == "opus"
-    assert response["default_model_label"] == "Opus 4.8"
+    assert response["default_model_label"] == "Opus 5"
 
 
 def _seed_session_with_events(

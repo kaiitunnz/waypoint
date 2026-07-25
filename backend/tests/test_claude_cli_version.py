@@ -1,5 +1,6 @@
 """Unit tests for backends/claude_code/version.py's ``claude --version`` probe."""
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -13,9 +14,12 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 @pytest.fixture(autouse=True)
-def _clear_version_cache() -> None:
-    # The TTL cache is keyed by binary path; clear it so one test's fake
-    # subprocess result can't leak into the next.
+def _clear_version_cache() -> Iterator[None]:
+    # The TTL cache is keyed by binary path; clear it around every test so one
+    # test's fake subprocess result can't leak into the next -- or, on teardown,
+    # out of this module into any other test that probes the real binary.
+    version_module._VERSION_STRING_CACHE.clear()
+    yield
     version_module._VERSION_STRING_CACHE.clear()
 
 

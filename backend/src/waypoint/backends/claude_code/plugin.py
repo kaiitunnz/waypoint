@@ -696,12 +696,6 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return list(custom_args)
         return self._config(runtime).cli_args + custom_args
 
-    def static_model_options(self, runtime: "SessionRuntime") -> list[Any]:
-        # Plugin config carries the (configurable) Claude model catalogue.
-        # Deployments patch the list via ``plugin_configs.claude_code.models``
-        # in waypoint.yaml without forking this module.
-        return list(self._config(runtime).models)
-
     @property
     def permission_mode_ids(self) -> tuple[str, ...]:
         return CLAUDE_PERMISSION_MODES

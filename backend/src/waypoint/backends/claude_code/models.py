@@ -5,15 +5,14 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 ``model/list`` RPC, Claude does not.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Mapping, Sequence
+from typing import NamedTuple
 
 from waypoint.schemas import BackendModelOption
 
-# Effort levels the CLI accepts per model (verified against v2.1.197's
-# gate functions: `Jw` for effort at all, `Rne` for xhigh, `c0e` for max).
-# opus-4-8, sonnet-5, and fable-5 accept the full set; haiku and pre-4.6
-# opus/sonnet don't accept --effort at all. The server can still clamp a
-# request at runtime via the account's `max_effort_level` entitlement.
+# Per-model `supported_efforts` is the ladder Waypoint offers and enforces. The CLI
+# accepts `--effort` for every model, so a narrower list only narrows Waypoint; the
+# server may still clamp a request via the account's `max_effort_level` entitlement.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
@@ -26,8 +25,11 @@ CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max"
 # claude-sonnet-4-5), and those ids must keep resolving for display and usage
 # tracking for as long as such sessions can be resumed.
 CLAUDE_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-5": "opus",
     "claude-opus-4-8": "opus",
     "claude-opus-4-7": "opus",
+    "claude-opus-4-6": "opus",
+    "claude-opus-4-5": "opus",
     "claude-sonnet-5": "sonnet",
     "claude-sonnet-4-6": "sonnet",
     "claude-sonnet-4-5": "sonnet",
@@ -45,11 +47,84 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
     "fable[1m]": 1_000_000,
 }
 
+# Legacy models the CLI still runs, pinned by full model name; its own short picker
+# keys (`opus48`, `sonnet46`, ...) are internal and rejected by `--model`.
+# `claude-opus-4-1` is remapped to Opus 5 and `claude-3-5-haiku` is retired, so neither
+# is offered. `supported_efforts` stays unset, leaving the CLI the authority. Probed
+# against 2.1.220; the remap/retirement table is server-fetched and can drift.
+_LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
+    BackendModelOption(
+        id="claude-opus-4-8",
+        label="Opus 4.8",
+        description="Previous Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-8[1m]",
+        label="Opus 4.8 (1M context)",
+        description="Previous Opus version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-7",
+        label="Opus 4.7",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-7[1m]",
+        label="Opus 4.7 (1M context)",
+        description="Legacy Opus version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-6",
+        label="Opus 4.6",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-4-6[1m]",
+        label="Opus 4.6 (1M context)",
+        description="Legacy Opus version, long sessions",
+    ),
+    # No [1m] pairing: claude-opus-4-5 is on the CLI's 1M blocklist.
+    BackendModelOption(
+        id="claude-opus-4-5",
+        label="Opus 4.5",
+        description="Legacy Opus version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-6",
+        label="Sonnet 4.6",
+        description="Previous Sonnet version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-6[1m]",
+        label="Sonnet 4.6 (1M context)",
+        description="Previous Sonnet version, long sessions",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-5",
+        label="Sonnet 4.5",
+        description="Legacy Sonnet version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-4-5[1m]",
+        label="Sonnet 4.5 (1M context)",
+        description="Legacy Sonnet version, long sessions",
+    ),
+)
+
+# Grouped by family, newest first, each model immediately followed by its 1M variant.
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
-        label="Opus 4.8",
+        label="Opus 5",
         description="Most capable for complex work",
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
+    ),
+    BackendModelOption(
+        id="opus[1m]",
+        label="Opus 5 (1M context)",
+        description="Long sessions with large codebases",
+        is_default=True,
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
@@ -57,21 +132,6 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="sonnet",
         label="Sonnet 5",
         description="Best for everyday tasks",
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-    BackendModelOption(
-        id="haiku",
-        label="Haiku 4.5",
-        description="Fast and lightweight",
-        # No effort knob; explicit [] so the None default (unknown) still rejects.
-        supported_efforts=[],
-    ),
-    BackendModelOption(
-        id="opus[1m]",
-        label="Opus 4.8 (1M context)",
-        description="Long sessions with large codebases",
-        is_default=True,
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
@@ -96,6 +156,16 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
+    BackendModelOption(
+        id="haiku",
+        label="Haiku 4.5",
+        description="Fast and lightweight",
+        # Offer no effort control; explicit [] so the None default (unknown) rejects.
+        # A deployment with `default_effort` set therefore cannot launch `haiku`
+        # without overriding the effort -- see issue #361.
+        supported_efforts=[],
+    ),
+    *_LEGACY_CLAUDE_MODELS,
 )
 
 
@@ -133,14 +203,10 @@ def overridden_builtin_ids(extra: list[BackendModelOption]) -> list[str]:
     return [opt.id for opt in extra if opt.id in _BUILTIN_MODEL_IDS]
 
 
-def normalize_claude_model_id(model: str | None) -> str | None:
-    if model is None or not isinstance(model, str):
-        return None
-    candidate = model.strip()
-    if not candidate:
-        return None
-    if candidate in CLAUDE_CONTEXT_WINDOWS:
-        return candidate
+_ONE_M_SUFFIX = "[1m]"
+
+
+def _resolve_claude_model_base(candidate: str) -> str:
     normalized = CLAUDE_MODEL_ALIASES.get(candidate)
     if normalized is not None:
         return normalized
@@ -162,6 +228,26 @@ def normalize_claude_model_id(model: str | None) -> str | None:
     return candidate
 
 
+def normalize_claude_model_id(model: str | None) -> str | None:
+    if model is None or not isinstance(model, str):
+        return None
+    candidate = model.strip()
+    if not candidate:
+        return None
+    if candidate in CLAUDE_CONTEXT_WINDOWS:
+        return candidate
+    # A concrete id may carry the 1M entitlement as a suffix (`claude-opus-5[1m]`);
+    # re-attach it to the resolved base so the entitlement survives. A family with no
+    # 1M offering (haiku) has no `[1m]` entry, so the suffix resolves away.
+    if candidate.endswith(_ONE_M_SUFFIX):
+        base = _resolve_claude_model_base(candidate[: -len(_ONE_M_SUFFIX)])
+        if base not in CLAUDE_CONTEXT_WINDOWS:
+            return candidate
+        with_suffix = f"{base}{_ONE_M_SUFFIX}"
+        return with_suffix if with_suffix in CLAUDE_CONTEXT_WINDOWS else base
+    return _resolve_claude_model_base(candidate)
+
+
 def claude_model_family(model: str | None) -> str | None:
     normalized = normalize_claude_model_id(model)
     if normalized is None:
@@ -170,20 +256,12 @@ def claude_model_family(model: str | None) -> str | None:
 
 
 def claude_context_window_for_model(model: str | None) -> int | None:
+    # An unresolved id normalizes to itself, so it has no window rather than a
+    # fabricated default.
     normalized = normalize_claude_model_id(model)
     if normalized is None:
         return None
-    if normalized in CLAUDE_CONTEXT_WINDOWS:
-        return CLAUDE_CONTEXT_WINDOWS[normalized]
-    family = claude_model_family(normalized)
-    if family is None or family not in CLAUDE_CONTEXT_WINDOWS:
-        # No family could be inferred at all (genuine garbage) -- don't
-        # fabricate a window.
-        return None
-    candidate = model.strip() if isinstance(model, str) else ""
-    if normalized.endswith("[1m]") or candidate.endswith("[1m]"):
-        return 1_000_000
-    return CLAUDE_CONTEXT_WINDOWS[family]
+    return CLAUDE_CONTEXT_WINDOWS.get(normalized)
 
 
 def claude_default_model_id() -> str | None:
@@ -207,62 +285,68 @@ def resolve_import_model_id(
     return default_model_id
 
 
-# CLI version milestones, from the official changelog (anthropics/claude-code):
-#   2.1.154  Opus 4.8 introduced (defaults high; accepts xhigh + max)
-#   2.1.170  Fable 5 introduced (accepts xhigh + max; 1M context)
-#   2.1.197  Sonnet 5 introduced as the `sonnet` alias (native 1M context)
-#
-# 2.1.197 is the offering boundary we gate on: it swaps the `sonnet` alias from
-# Sonnet 4.6 to Sonnet 5. Sonnet 5 accepts `xhigh` where Sonnet 4.6 did not
-# (4.6 accepts `max` but not `xhigh`); Opus 4.8 and Fable 5 already accept the
-# full set on both sides of the boundary. Verified against the 2.1.175 /
-# 2.1.195 / 2.1.196 / 2.1.197 binaries installed on this host.
+# Catalogue boundaries from the official changelog (anthropics/claude-code). Only the
+# affected family differs across each. The introduction boundaries carry no rollback:
+# a CLI below them is still offered the model, so `fable` reaches builds older than
+# 2.1.170.
+#   2.1.154  Opus 4.8 introduced      (unhandled)
+#   2.1.170  Fable 5 introduced       (unhandled)
+#   2.1.197  `sonnet` becomes Sonnet 5
+#   2.1.219  `opus` becomes Opus 5
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
-
-# Labels pre-Sonnet-5 CLI builds use for the sonnet ids.
-_LEGACY_SONNET_LABELS: dict[str, str] = {
-    "sonnet": "Sonnet 4.6",
-    "sonnet[1m]": "Sonnet 4.6 (1M context)",
-}
+OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
 
 
-def _pre_sonnet5_offering() -> tuple[BackendModelOption, ...]:
-    """The catalogue offered by CLI builds older than SONNET5_MIN_CLI_VERSION.
+class _ModelEpoch(NamedTuple):
+    """What an alias swap looks like to CLI builds older than ``min_version``.
 
-    On these builds the ``sonnet`` alias resolves to Sonnet 4.6, which accepts
-    ``max`` but not ``xhigh`` (verified in the 2.1.175 / 2.1.195 / 2.1.196
-    binaries: Sonnet 4.6's capabilities carry ``max_effort`` but not
-    ``xhigh_effort``). Opus 4.8, Fable 5, and Haiku are identical to the
-    current catalogue across this boundary, so only the sonnet family is
-    transformed. Derived from ``DEFAULT_CLAUDE_MODELS`` via ``model_copy`` so
-    unrelated catalogue edits (wording, descriptions, new fields) stay in sync
-    automatically.
+    ``labels`` relabels the affected alias ids and ``efforts`` narrows their ladder.
+    ``drop`` removes the pinned ids the relabelled alias now duplicates; the pin goes
+    rather than the alias so the default selection, an alias id, stays valid.
     """
-    sonnet_efforts = [level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"]
-    offering: list[BackendModelOption] = []
-    for option in DEFAULT_CLAUDE_MODELS:
-        if option.id.split("[", 1)[0] != "sonnet":
-            offering.append(option)
-            continue
-        offering.append(
-            option.model_copy(
-                update={
-                    "label": _LEGACY_SONNET_LABELS.get(option.id, option.label),
-                    "supported_efforts": sonnet_efforts,
-                }
-            )
-        )
-    return tuple(offering)
+
+    min_version: tuple[int, ...]
+    labels: Mapping[str, str]
+    drop: frozenset[str]
+    efforts: tuple[str, ...] | None = None
 
 
-# Ordered by descending minimum version so adding a future epoch is a small,
-# obvious edit: prepend a new ``(min_version, builder)`` pair at the front.
-_CLAUDE_MODEL_EPOCHS: tuple[
-    tuple[tuple[int, ...], Callable[[], tuple[BackendModelOption, ...]]], ...
-] = (
-    (SONNET5_MIN_CLI_VERSION, lambda: DEFAULT_CLAUDE_MODELS),
-    ((0,), _pre_sonnet5_offering),
+# Newest first, applied cumulatively, so a build below several boundaries gets every
+# rollback.
+_CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
+    _ModelEpoch(
+        min_version=OPUS5_MIN_CLI_VERSION,
+        labels={"opus": "Opus 4.8", "opus[1m]": "Opus 4.8 (1M context)"},
+        drop=frozenset({"claude-opus-4-8", "claude-opus-4-8[1m]"}),
+        # No `efforts`: Opus 4.8 is in none of the capability lists, as Opus 5 is not.
+    ),
+    _ModelEpoch(
+        min_version=SONNET5_MIN_CLI_VERSION,
+        labels={"sonnet": "Sonnet 4.6", "sonnet[1m]": "Sonnet 4.6 (1M context)"},
+        drop=frozenset({"claude-sonnet-4-6", "claude-sonnet-4-6[1m]"}),
+        # Sonnet 4.6 is in `xhigh_effort` but not `max_effort` (2.1.196 binary).
+        efforts=tuple(level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"),
+    ),
 )
+
+
+def _roll_back(
+    offering: tuple[BackendModelOption, ...], epoch: _ModelEpoch
+) -> tuple[BackendModelOption, ...]:
+    """``offering`` as builds older than ``epoch.min_version`` see it."""
+    rolled: list[BackendModelOption] = []
+    for option in offering:
+        if option.id in epoch.drop:
+            continue
+        label = epoch.labels.get(option.id)
+        if label is None:
+            rolled.append(option)
+            continue
+        update: dict[str, str | list[str]] = {"label": label}
+        if epoch.efforts is not None:
+            update["supported_efforts"] = list(epoch.efforts)
+        rolled.append(option.model_copy(update=update))
+    return tuple(rolled)
 
 
 def claude_models_for_version(
@@ -276,7 +360,9 @@ def claude_models_for_version(
     """
     if version is None:
         return DEFAULT_CLAUDE_MODELS
-    for min_version, builder in _CLAUDE_MODEL_EPOCHS:
-        if version >= min_version:
-            return builder()
-    return DEFAULT_CLAUDE_MODELS
+    offering = DEFAULT_CLAUDE_MODELS
+    for epoch in _CLAUDE_MODEL_EPOCHS:
+        if version >= epoch.min_version:
+            break
+        offering = _roll_back(offering, epoch)
+    return offering

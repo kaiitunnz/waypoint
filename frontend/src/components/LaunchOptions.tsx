@@ -3,6 +3,11 @@
 import { useState } from "react";
 
 import { EnvVarRows, type EnvEntry } from "@/components/EnvVarRows";
+import {
+  UsageLimitSourceField,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
+import type { UsageProviderOption } from "@/lib/types";
 
 export function GearGlyph() {
   return (
@@ -40,6 +45,9 @@ interface LaunchOptionsDetailsProps {
   onCustomArgsChange?: (value: string) => void;
   configOverridesText?: string;
   onConfigOverridesChange?: (value: string) => void;
+  usageProviderOptions?: UsageProviderOption[];
+  usageSelection?: UsageLimitSourceValue;
+  onUsageSelectionChange?: (value: UsageLimitSourceValue) => void;
   formBusy?: boolean;
 }
 
@@ -53,6 +61,9 @@ export function LaunchOptionsDetails({
   onCustomArgsChange,
   configOverridesText,
   onConfigOverridesChange,
+  usageProviderOptions,
+  usageSelection,
+  onUsageSelectionChange,
   formBusy,
 }: LaunchOptionsDetailsProps) {
   const [open, setOpen] = useState(false);
@@ -60,10 +71,23 @@ export function LaunchOptionsDetails({
     envEntries !== undefined && Boolean(onEnvEntriesChange);
   const showCustomArgs = mode === "new" && Boolean(supportsCustomArgs);
   const showConfigOverrides = mode === "new" && Boolean(supportsConfigOverrides);
+  // The usage-limit-source control appears for New/Schedule when a provider is
+  // configured (or one is already selected, e.g. an unavailable preset choice).
+  const showUsageSource =
+    mode === "new" &&
+    usageSelection !== undefined &&
+    Boolean(onUsageSelectionChange) &&
+    ((usageProviderOptions?.length ?? 0) > 0 ||
+      usageSelection.source === "usage_provider");
   const showWarning = showLaunchEnv || showCustomArgs || showConfigOverrides;
 
   // Nothing to configure — don't render an empty Advanced toggle.
-  if (!showLaunchEnv && !showCustomArgs && !showConfigOverrides) {
+  if (
+    !showLaunchEnv &&
+    !showCustomArgs &&
+    !showConfigOverrides &&
+    !showUsageSource
+  ) {
     return null;
   }
 
@@ -81,6 +105,15 @@ export function LaunchOptionsDetails({
       </button>
       <div className="advanced-body">
         <div className="advanced-body-inner">
+          {showUsageSource ? (
+            <UsageLimitSourceField
+              variant="launch"
+              options={usageProviderOptions ?? []}
+              value={usageSelection!}
+              onChange={(next) => onUsageSelectionChange?.(next)}
+              disabled={formBusy}
+            />
+          ) : null}
           {showLaunchEnv ? (
             <div className="field advanced-args-field">
               <span>Environment variables</span>

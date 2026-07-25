@@ -33,7 +33,9 @@ import {
   SessionPresetSummary,
   SessionPresetWriteRequest,
   SessionTransport,
+  UsageProviderOption,
 } from "@/lib/types";
+import type { UsageLimitSourceValue } from "@/components/UsageLimitSourceField";
 
 interface ThreadSummary {
   id: string;
@@ -63,6 +65,7 @@ interface LaunchPanelProps {
   defaultCwd: string;
   defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
   accountProfilesByBackend: Record<Backend, AccountProfile[]>;
+  usageProviderOptions: UsageProviderOption[];
   targetLabel: string | null;
   launchTargetId: string | null;
   recentCwds: string[];
@@ -87,6 +90,7 @@ interface LaunchPanelProps {
     permissionMode: string | null,
     presetId: string | null,
     accountProfileId: string | null,
+    usageSelection: UsageLimitSourceValue,
   ) => Promise<void>;
   onAttach: (
     target: string,
@@ -135,6 +139,7 @@ export function LaunchPanel({
   defaultCwd,
   defaultLaunchEnvByBackend,
   accountProfilesByBackend,
+  usageProviderOptions,
   targetLabel,
   launchTargetId,
   recentCwds,
@@ -169,6 +174,7 @@ export function LaunchPanel({
     defaultCwd,
     defaultLaunchEnvByBackend,
     accountProfilesByBackend,
+    usageProviderOptions,
     launchTargetId,
     catalog,
   });
@@ -252,6 +258,7 @@ export function LaunchPanel({
         form.permissionMode || null,
         selectedPresetId,
         form.accountProfileId || null,
+        form.usageSelection,
       );
       form.setTitle("");
     } finally {
@@ -294,6 +301,9 @@ export function LaunchPanel({
       // above are the resolved values the server persists).
       preset_id: selectedPresetId,
       account_profile_id: form.accountProfileId || null,
+      usage_limit_source: form.usageSelection.source,
+      usage_provider_id: form.usageSelection.providerId,
+      usage_provider_account_key: form.usageSelection.accountKey,
     };
     if (timingMode === "repeat") {
       const cron = cronFromState(recurrence);

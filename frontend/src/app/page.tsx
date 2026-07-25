@@ -85,7 +85,9 @@ import {
   SessionRecord,
   SessionTransport,
   UsageDashboardBucket,
+  UsageProviderOption,
 } from "@/lib/types";
+import type { UsageLimitSourceValue } from "@/components/UsageLimitSourceField";
 
 interface ThreadSummary {
   id: string;
@@ -156,6 +158,9 @@ export default function HomePage() {
   const [sessionPresets, setSessionPresets] = useState<SessionPresetSummary[]>([]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(null);
   const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [usageProviderOptions, setUsageProviderOptions] = useState<
+    UsageProviderOption[]
+  >([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   // Password-auth SSH connect prompt. ``retry`` re-runs the launch that hit a
   // 409 once the ControlMaster is up; ``null`` when the prompt was opened
@@ -371,6 +376,7 @@ export default function HomePage() {
         setSessionPresets(me.session_presets ?? []);
         setDefaultPresetId(me.default_preset_id ?? null);
         setTelemetryEnabled(me.telemetry_enabled ?? false);
+        setUsageProviderOptions(me.usage_provider_options ?? []);
         setSchedules(scheduleItems);
         setMessageSchedules(messageItems);
         const storedTargetId = readLaunchTarget(host);
@@ -682,6 +688,11 @@ export default function HomePage() {
     permissionMode: string | null = null,
     presetId: string | null = null,
     accountProfileId: string | null = null,
+    usageSelection: UsageLimitSourceValue = {
+      source: "plugin",
+      providerId: null,
+      accountKey: null,
+    },
   ) {
     setCwdError(null);
     try {
@@ -699,6 +710,9 @@ export default function HomePage() {
         effort,
         permission_mode: permissionMode,
         account_profile_id: accountProfileId,
+        usage_limit_source: usageSelection.source,
+        usage_provider_id: usageSelection.providerId,
+        usage_provider_account_key: usageSelection.accountKey,
         // Provenance only — the fields above are already resolved.
         preset_id: presetId,
       });
@@ -746,6 +760,7 @@ export default function HomePage() {
               permissionMode,
               presetId,
               accountProfileId,
+              usageSelection,
             ),
         });
         return;
@@ -1276,6 +1291,7 @@ export default function HomePage() {
             defaultCwd={effectiveDefaultCwd}
             defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
             accountProfilesByBackend={accountProfilesByBackend}
+            usageProviderOptions={usageProviderOptions}
             targetLabel={activeLaunchTarget?.name ?? null}
             launchTargetId={activeLaunchTargetId || null}
             recentCwds={recentCwds}

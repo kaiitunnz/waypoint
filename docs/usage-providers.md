@@ -75,6 +75,40 @@ and `GET /api/usage` even when no account resolves:
 | `usage_unavailable` | The usage endpoint returned an unexpected or malformed response. |
 | `network` | The request timed out or could not connect. |
 
+## Per-session usage limit source
+
+A session's rate-limit readout defaults to its coding-agent plugin resolver
+(`usage_limit_source: plugin`). A session may instead read from one enabled
+provider account (`usage_limit_source: usage_provider` with `usage_provider_id`
+and an opaque `usage_provider_account_key`). The selection is durable and
+survives restart, schedule firing, and reload.
+
+Choose it under **Advanced → Usage limit source** in the launch sheet (New and
+Schedule) and in the session settings modal. A provider with one account is a
+single option (`Lumid — user@example.com`); a provider with several accounts
+reveals an account picker. The CLI mirrors it with `--usage-limit-source`,
+`--usage-provider`, and `--usage-provider-account` on `sessions start` and
+`schedule create`. The API takes the same fields on create/schedule and a
+dedicated non-restart `PATCH /api/sessions/{id}/usage-limit-source`; launch
+bootstrap and `GET /api/usage-provider-options` expose the current choices. Only
+opaque account keys and server-derived labels cross the wire — never a browser
+label.
+
+Changing the source in settings never restarts or interrupts the agent.
+Switching to a provider projects that account's cached snapshot immediately (the
+provider's poll/manual refresh keeps it current); switching back to the plugin
+runs the ordinary plugin refresh. A provider-selected session's readout is
+refreshed only through its provider — a manual session refresh coalesces onto
+one upstream provider request.
+
+If a selected provider or account is removed or cannot refresh, the session
+retains its last-good provider projection marked stale/unavailable; it never
+falls back to plugin data, and a scheduled run with a now-unavailable selection
+fails safely rather than launching under an unintended source. A
+provider-selected session's projected readout does not create a second usage
+dashboard card or duplicate telemetry — the provider's own account card and
+facts represent it once.
+
 ## Security
 
 PATs live only in process memory, read from the environment at refresh. They are

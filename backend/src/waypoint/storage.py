@@ -503,6 +503,13 @@ class Storage:
         self._ensure_column("sessions", "verified_account_key", "TEXT")
         self._ensure_column("sessions", "verified_account_label", "TEXT")
         self._ensure_column("sessions", "verified_account_probed_at", "TEXT")
+        # Per-session usage-provider selection (ticket 1273): additive, old rows
+        # default to the plugin resolver with null provider fields.
+        self._ensure_column(
+            "sessions", "usage_limit_source", "TEXT NOT NULL DEFAULT 'plugin'"
+        )
+        self._ensure_column("sessions", "usage_provider_id", "TEXT")
+        self._ensure_column("sessions", "usage_provider_account_key", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -513,6 +520,14 @@ class Storage:
         self._ensure_column("scheduled_sessions", "preset_name", "TEXT")
         self._ensure_column("scheduled_sessions", "account_profile_id", "TEXT")
         self._ensure_column("scheduled_sessions", "account_profile_label", "TEXT")
+        # Per-session usage-provider selection (ticket 1273): mirrors sessions.
+        self._ensure_column(
+            "scheduled_sessions",
+            "usage_limit_source",
+            "TEXT NOT NULL DEFAULT 'plugin'",
+        )
+        self._ensure_column("scheduled_sessions", "usage_provider_id", "TEXT")
+        self._ensure_column("scheduled_sessions", "usage_provider_account_key", "TEXT")
         # Recurrence (ticket 1076): additive, null means one-time.
         for _sched_table in ("scheduled_sessions", "scheduled_messages"):
             self._ensure_column(_sched_table, "cron", "TEXT")
@@ -607,8 +622,9 @@ class Storage:
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
                 resolved_model, effort, args, config_overrides, launch_env, context_usage,
                 rate_limit_usage, tags, preset_id, preset_name,
-                account_profile_id, account_profile_label
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                account_profile_id, account_profile_label,
+                usage_limit_source, usage_provider_id, usage_provider_account_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -653,6 +669,9 @@ class Storage:
                 session.preset_name,
                 session.account_profile_id,
                 session.account_profile_label,
+                session.usage_limit_source,
+                session.usage_provider_id,
+                session.usage_provider_account_key,
             ),
         )
         self.connection.commit()
@@ -2075,8 +2094,9 @@ class Storage:
                 config_overrides, launch_env, initial_prompt, permission_mode, model, effort, scheduled_at,
                 created_at, status, session_id, failure_reason, preset_id, preset_name,
                 account_profile_id, account_profile_label,
-                cron, timezone, last_run_at, last_run_status, last_failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cron, timezone, last_run_at, last_run_status, last_failure_reason,
+                usage_limit_source, usage_provider_id, usage_provider_account_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -2107,6 +2127,9 @@ class Storage:
                 schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 schedule.last_run_status,
                 schedule.last_failure_reason,
+                schedule.usage_limit_source,
+                schedule.usage_provider_id,
+                schedule.usage_provider_account_key,
             ),
         )
         self.connection.commit()

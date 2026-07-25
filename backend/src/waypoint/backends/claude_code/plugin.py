@@ -12,6 +12,7 @@ import asyncio
 import logging
 import shlex
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -569,12 +570,15 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         label = f"{org} · {tier}" if tier else org
         return f"{self.id}:{org}", label
 
-    def static_account_identity(self, config_dir: str) -> AccountProbeResult | None:
-        # StaticAccountIdentifying: a profile whose settings.json env carries a
-        # static ANTHROPIC_AUTH_TOKEN/API_KEY authenticates without OAuth creds,
-        # so account verification reads its identity from the config dir instead
-        # of the (impossible) live probe. None => OAuth profile, use the probe.
-        return claude_static_account_identity(self.id, config_dir)
+    def static_account_identity(
+        self, config_dir: str | None, env: Mapping[str, str]
+    ) -> AccountProbeResult | None:
+        # StaticAccountIdentifying: a profile that sets a static
+        # ANTHROPIC_AUTH_TOKEN/API_KEY (in its settings.json or the session's
+        # configured env) authenticates without OAuth creds, so verification reads
+        # its identity from that config instead of the (impossible) live probe.
+        # None => OAuth profile, use the probe.
+        return claude_static_account_identity(self.id, config_dir, env)
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the support

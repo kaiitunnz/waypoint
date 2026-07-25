@@ -10,7 +10,7 @@ import platform
 import re
 import subprocess
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -662,28 +662,43 @@ def _fetch_url(request: Request) -> _ClaudeHTTPResponse | None:
         return None
 
 
-def claude_static_account_identity(
-    account_prefix: str, config_dir: str
-) -> AccountProbeResult | None:
-    """Identify a static-credential profile's account from its ``settings.json``.
+_ANTHROPIC_AUTH_ENV_KEYS = (
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+)
 
-    A profile whose ``settings.json`` ``env`` sets ``ANTHROPIC_AUTH_TOKEN`` or
-    ``ANTHROPIC_API_KEY`` authenticates via that static credential (no OAuth
-    ``.credentials.json`` exists), so the live rate-limit probe can't verify it.
+
+def claude_static_account_identity(
+    account_prefix: str, config_dir: str | None, env: Mapping[str, str]
+) -> AccountProbeResult | None:
+    """Identify a static-credential profile's account from its configured auth.
+
+    A profile that sets ``ANTHROPIC_AUTH_TOKEN`` or ``ANTHROPIC_API_KEY``
+    authenticates via that static credential (no OAuth ``.credentials.json``
+    exists), so the live rate-limit probe can't verify it. The launched CLI reads
+    such vars from both the session's configured env (which Waypoint populates
+    from the plugin/profile/per-session ``env`` config) and the ``settings.json``
+    ``env`` it auto-loads, so both sources are considered here; ``settings.json``
+    is applied last by the CLI, so it wins a tie. ``env`` is the session's
+    configured launch env, never the ambient ``os.environ``, so a stray host
+    ``ANTHROPIC_API_KEY`` can't produce a false positive on an OAuth profile.
+
     Derive a stable, network-free identity keyed on the endpoint host plus a
     short credential fingerprint — enough to accept the switch, match an
-    ``expected_account_key``, and distinguish it from a different endpoint or
-    token. Returns ``None`` when no static credential is configured, so OAuth
-    profiles fall through to the live probe. The token is read from the profile's
-    own file, not the process-merged env, so a stray ambient ``ANTHROPIC_API_KEY``
-    can't produce a false positive on an OAuth profile.
+    ``expected_account_key``, and distinguish a different endpoint or token.
+    Returns ``None`` when no static credential is configured, so OAuth profiles
+    fall through to the live probe.
     """
-    env = claude_settings_env(config_dir)
-    auth_token = env.get("ANTHROPIC_AUTH_TOKEN")
-    token = auth_token or env.get("ANTHROPIC_API_KEY")
+    resolved = {
+        **{k: env[k] for k in _ANTHROPIC_AUTH_ENV_KEYS if k in env},
+        **(claude_settings_env(config_dir) if config_dir else {}),
+    }
+    auth_token = resolved.get("ANTHROPIC_AUTH_TOKEN")
+    token = auth_token or resolved.get("ANTHROPIC_API_KEY")
     if not token:
         return None
-    base_url = env.get("ANTHROPIC_BASE_URL", "").strip()
+    base_url = resolved.get("ANTHROPIC_BASE_URL", "").strip()
     host = urlparse(base_url).netloc if base_url else ""
     host = host or "api.anthropic.com"
     fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]

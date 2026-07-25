@@ -78,36 +78,31 @@ and `GET /api/usage` even when no account resolves:
 ## Per-session usage limit source
 
 A session's rate-limit readout defaults to its coding-agent plugin resolver
-(`usage_limit_source: plugin`). A session may instead read from one enabled
-provider account (`usage_limit_source: usage_provider` with `usage_provider_id`
-and an opaque `usage_provider_account_key`). The selection is durable and
-survives restart, schedule firing, and reload.
+(`usage_limit_source: plugin`). A session may instead read one enabled provider
+account (`usage_limit_source: usage_provider` with `usage_provider_id` and an
+opaque `usage_provider_account_key`). The selection is durable across restart,
+schedule firing, and reload.
 
 Choose it under **Advanced → Usage limit source** in the launch sheet (New and
-Schedule) and in the session settings modal. A provider with one account is a
-single option (`Lumid — user@example.com`); a provider with several accounts
-reveals an account picker. The CLI mirrors it with `--usage-limit-source`,
-`--usage-provider`, and `--usage-provider-account` on `sessions start` and
-`schedule create`. The API takes the same fields on create/schedule and a
-dedicated non-restart `PATCH /api/sessions/{id}/usage-limit-source`; launch
-bootstrap and `GET /api/usage-provider-options` expose the current choices. Only
-opaque account keys and server-derived labels cross the wire — never a browser
-label.
+Schedule) and in the session settings modal: a provider with one account is a
+single option (`Lumid — user@example.com`), one with several reveals an account
+picker. The CLI takes `--usage-limit-source`, `--usage-provider`, and
+`--usage-provider-account` on `sessions start` and `schedule create`; the API
+takes the same fields on create/schedule plus a dedicated non-restart
+`PATCH /api/sessions/{id}/usage-limit-source`, and `GET /api/usage-provider-options`
+(and launch bootstrap) list the current choices. Only opaque account keys and
+server-derived labels cross the wire.
 
 Changing the source in settings never restarts or interrupts the agent.
-Switching to a provider projects that account's cached snapshot immediately (the
-provider's poll/manual refresh keeps it current); switching back to the plugin
-runs the ordinary plugin refresh. A provider-selected session's readout is
-refreshed only through its provider — a manual session refresh coalesces onto
-one upstream provider request.
+Switching to a provider projects that account's cached snapshot immediately;
+switching back runs the plugin refresh. A provider-selected session refreshes
+only through its provider, coalesced onto one upstream request.
 
-If a selected provider or account is removed or cannot refresh, the session
-retains its last-good provider projection marked stale/unavailable; it never
-falls back to plugin data, and a scheduled run with a now-unavailable selection
-fails safely rather than launching under an unintended source. A
-provider-selected session's projected readout does not create a second usage
-dashboard card or duplicate telemetry — the provider's own account card and
-facts represent it once.
+A removed or unrefreshable provider/account retains its last-good projection
+marked stale/unavailable rather than falling back to plugin data, and a
+scheduled run with a now-unavailable selection fails instead of launching under
+an unintended source. The projection reuses the provider's own dashboard card
+and telemetry facts, so it is never counted twice.
 
 ## Security
 

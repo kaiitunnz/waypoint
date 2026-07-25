@@ -87,7 +87,10 @@ import {
   UsageDashboardBucket,
   UsageProviderOption,
 } from "@/lib/types";
-import type { UsageLimitSourceValue } from "@/components/UsageLimitSourceField";
+import {
+  PLUGIN_SELECTION,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
 
 interface ThreadSummary {
   id: string;
@@ -688,11 +691,7 @@ export default function HomePage() {
     permissionMode: string | null = null,
     presetId: string | null = null,
     accountProfileId: string | null = null,
-    usageSelection: UsageLimitSourceValue = {
-      source: "plugin",
-      providerId: null,
-      accountKey: null,
-    },
+    usageSelection: UsageLimitSourceValue = PLUGIN_SELECTION,
   ) {
     setCwdError(null);
     try {

@@ -23,7 +23,10 @@ import { SessionContextFields } from "@/components/SessionContextFields";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { permissionModesFor } from "@/lib/backends";
-import type { UsageLimitSourceValue } from "@/components/UsageLimitSourceField";
+import {
+  PLUGIN_SELECTION,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
 import {
   AccountProfile,
   Backend,
@@ -41,16 +44,9 @@ interface UseLaunchFormParams {
   // Account/config profiles keyed by backend — target-merged when a launch
   // target is active, else the global per-backend catalogue.
   accountProfilesByBackend: Record<Backend, AccountProfile[]>;
-  // Enabled usage-provider account choices for the "Usage limit source" control.
   usageProviderOptions: UsageProviderOption[];
   catalog: BackendCatalog;
 }
-
-const PLUGIN_SELECTION: UsageLimitSourceValue = {
-  source: "plugin",
-  providerId: null,
-  accountKey: null,
-};
 
 // The shared launch-form state behind the New and Schedule modes: agent,
 // transport, working directory, title, model, effort, permission mode, and the

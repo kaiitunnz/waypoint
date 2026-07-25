@@ -25,13 +25,10 @@ import type {
   TransportSettingsOption,
   UsageProviderOption,
 } from "@/lib/types";
-import type { UsageLimitSourceValue } from "@/components/UsageLimitSourceField";
-
-const PLUGIN_SELECTION: UsageLimitSourceValue = {
-  source: "plugin",
-  providerId: null,
-  accountKey: null,
-};
+import {
+  PLUGIN_SELECTION,
+  type UsageLimitSourceValue,
+} from "@/components/UsageLimitSourceField";
 
 function selectionFromRecord(record: SessionRecord): UsageLimitSourceValue {
   if (record.usage_limit_source === "usage_provider") {

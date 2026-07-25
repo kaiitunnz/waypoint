@@ -235,25 +235,15 @@ class UsageWindow(BaseModel):
     reset_description: str | None = None
 
 
-# Where a session's rate-limit readout came from. ``plugin`` is the coding-agent
-# resolver (the default and the only origin for existing rows); ``usage_provider``
-# is a configured usage-provider account projected onto the session.
-RateLimitOrigin = Literal["plugin", "usage_provider"]
-
-# A session's durable selection of which source drives its rate-limit readout.
-# Shares values with ``RateLimitOrigin`` but is a distinct concept (the user's
-# choice vs. the origin stamped on a produced snapshot).
 UsageLimitSource = Literal["plugin", "usage_provider"]
 
 
 class SessionRateLimitUsage(BaseModel):
-    # ``source`` is a plain ``str`` (not ``BackendId``): a ``usage_provider``
-    # projection stamps the provider *type*, which is not a registered backend
-    # id. Old JSON omits ``origin`` and deserializes as ``plugin``.
-    origin: RateLimitOrigin = "plugin"
+    # ``source`` is a plain ``str``, not ``BackendId``: a provider projection
+    # stamps the provider type, which is not a registered backend id. Old JSON
+    # omits ``origin`` and deserializes as ``plugin``.
+    origin: UsageLimitSource = "plugin"
     source: str
-    # Server-owned display label for an external (provider) source. ``None`` for
-    # plugin origin, where the frontend humanises ``source`` itself.
     source_label: str | None = None
     stale: bool = False
     unavailable: bool = False
@@ -344,11 +334,10 @@ class ProviderUsageStatus(BaseModel):
     error_counts: dict[str, int] = Field(default_factory=dict)
 
 
-# ── Per-session usage-provider selection (options + settings payload) ──
+# ── Per-session usage-provider selection ──
 #
-# Secret-free launch/settings choices, computed only from instantiated enabled
-# providers. Account keys are opaque provider-store HMAC digests; labels are
-# server-derived presentation values, never accepted from the browser.
+# Account keys are opaque provider-store HMAC digests; labels are server-derived
+# and never accepted from the browser.
 
 
 class UsageProviderAccountOption(BaseModel):
@@ -365,8 +354,6 @@ class UsageProviderOption(BaseModel):
 
 
 class UsageLimitSourceUpdateRequest(BaseModel):
-    # Body for the dedicated non-restart PATCH endpoint. ``plugin`` requires both
-    # provider fields absent; ``usage_provider`` requires both present.
     usage_limit_source: UsageLimitSource = "plugin"
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None
@@ -484,11 +471,8 @@ class SessionRecord(BaseModel):
     verified_account_key: str | None = Field(default=None, exclude=True)
     verified_account_label: str | None = Field(default=None, exclude=True)
     verified_account_probed_at: datetime | None = None
-    # Durable selection of the rate-limit readout source. ``plugin`` (default)
-    # uses the coding-agent resolver; ``usage_provider`` projects the selected
-    # configured provider account (``usage_provider_id`` + opaque
-    # ``usage_provider_account_key``). The account key is a provider-store HMAC
-    # digest — never a raw token/email.
+    # Rate-limit readout source. For ``usage_provider`` the account key is a
+    # provider-store HMAC digest, never a raw token/email.
     usage_limit_source: UsageLimitSource = "plugin"
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None
@@ -726,9 +710,8 @@ class SessionPresetSpec(BaseModel):
     # Preset the account/config-dir profile to launch under. Applying the preset
     # selects this profile first, so model/thread lists are fetched profile-scoped.
     account_profile_id: str | None = None
-    # Rate-limit readout source. ``None`` (not ``"plugin"``) is the unset value
-    # so field-presence merge can tell "preset carries a selection" from "preset
-    # leaves it to the request". Resolved as a coupled triple by ``presets``.
+    # ``None`` (not ``"plugin"``) is the unset value, so the preset merge can
+    # tell a carried selection from one left to the request. See ``presets``.
     usage_limit_source: UsageLimitSource | None = None
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None
@@ -1108,9 +1091,8 @@ class MeResponse(BaseModel):
     # decide whether to offer the dashboard entry point and to short-circuit
     # the `/telemetry` page to its disabled state before any telemetry fetch.
     telemetry_enabled: bool = False
-    # Enabled usage-provider account choices for the launch "Usage limit source"
-    # control. Computed only from instantiated enabled providers; empty when none
-    # are configured. Secret-free (opaque account keys + server-derived labels).
+    # Enabled usage-provider account choices for the launch control; empty when
+    # none are configured.
     usage_provider_options: list[UsageProviderOption] = Field(default_factory=list)
 
 
@@ -1159,8 +1141,7 @@ class SessionCreateRequest(BaseModel):
     # profile owns its config-dir env key (it wins over any raw launch_env value
     # for that key). Unknown ids are rejected. Label is derived server-side.
     account_profile_id: str | None = None
-    # Rate-limit readout source (see SessionRecord). Validated at the launch
-    # boundary; the default ``plugin`` preserves existing behavior.
+    # Rate-limit readout source (see SessionRecord).
     usage_limit_source: UsageLimitSource = "plugin"
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None
@@ -1401,8 +1382,7 @@ class ScheduledSessionRecord(BaseModel):
     # schedule fires under this profile (see SessionRecord).
     account_profile_id: str | None = None
     account_profile_label: str | None = None
-    # Rate-limit readout source snapshotted at schedule-creation time; validated
-    # again at fire time (see SessionRecord).
+    # Rate-limit readout source; re-validated at fire time (see SessionRecord).
     usage_limit_source: UsageLimitSource = "plugin"
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None

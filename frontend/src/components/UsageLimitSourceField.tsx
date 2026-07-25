@@ -2,17 +2,19 @@
 
 import type { UsageLimitSource, UsageProviderOption } from "@/lib/types";
 
-// The session's rate-limit readout source: the agent plugin (default) or a
-// configured usage-provider account, identified by an opaque account key.
 export interface UsageLimitSourceValue {
   source: UsageLimitSource;
   providerId: string | null;
   accountKey: string | null;
 }
 
+export const PLUGIN_SELECTION: UsageLimitSourceValue = {
+  source: "plugin",
+  providerId: null,
+  accountKey: null,
+};
+
 interface UsageLimitSourceFieldProps {
-  // "launch" mirrors the Tuning label.field pattern; "settings" mirrors the
-  // settings modal's div.settings-field / select.settings-input pattern.
   variant: "launch" | "settings";
   options: UsageProviderOption[];
   value: UsageLimitSourceValue;

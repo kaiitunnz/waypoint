@@ -9,11 +9,12 @@ from collections.abc import Callable, Sequence
 
 from waypoint.schemas import BackendModelOption
 
-# Effort levels the CLI accepts per model (verified against v2.1.197's
-# gate functions: `Jw` for effort at all, `Rne` for xhigh, `c0e` for max).
-# opus-4-8, sonnet-5, and fable-5 accept the full set; haiku and pre-4.6
-# opus/sonnet don't accept --effort at all. The server can still clamp a
-# request at runtime via the account's `max_effort_level` entitlement.
+# Effort levels the CLI accepts per model (verified against the binary's
+# per-capability exclusion lists -- `effort` for effort at all, plus
+# `xhigh_effort` and `max_effort`). opus-5, opus-4-8, sonnet-5, and fable-5
+# accept the full set; haiku and pre-4.6 opus/sonnet don't accept --effort at
+# all. The server can still clamp a request at runtime via the account's
+# `max_effort_level` entitlement.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
@@ -26,6 +27,7 @@ CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max"
 # claude-sonnet-4-5), and those ids must keep resolving for display and usage
 # tracking for as long as such sessions can be resumed.
 CLAUDE_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-5": "opus",
     "claude-opus-4-8": "opus",
     "claude-opus-4-7": "opus",
     "claude-sonnet-5": "sonnet",
@@ -48,7 +50,7 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
-        label="Opus 4.8",
+        label="Opus 5",
         description="Most capable for complex work",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
@@ -69,7 +71,7 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     ),
     BackendModelOption(
         id="opus[1m]",
-        label="Opus 4.8 (1M context)",
+        label="Opus 5 (1M context)",
         description="Long sessions with large codebases",
         is_default=True,
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
@@ -211,13 +213,20 @@ def resolve_import_model_id(
 #   2.1.154  Opus 4.8 introduced (defaults high; accepts xhigh + max)
 #   2.1.170  Fable 5 introduced (accepts xhigh + max; 1M context)
 #   2.1.197  Sonnet 5 introduced as the `sonnet` alias (native 1M context)
+#   2.1.219  Opus 5 introduced as the `opus` alias (native 1M context)
 #
-# 2.1.197 is the offering boundary we gate on: it swaps the `sonnet` alias from
-# Sonnet 4.6 to Sonnet 5. Sonnet 5 accepts `xhigh` where Sonnet 4.6 did not
-# (4.6 accepts `max` but not `xhigh`); Opus 4.8 and Fable 5 already accept the
-# full set on both sides of the boundary. Verified against the 2.1.175 /
-# 2.1.195 / 2.1.196 / 2.1.197 binaries installed on this host.
+# Each boundary below swaps an alias's target model, so only the affected
+# family's labels/efforts differ across it. Each builder transforms the
+# next-newer epoch's offering rather than DEFAULT_CLAUDE_MODELS, so an older
+# CLI correctly sees *every* rollback that applies to it.
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
+OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
+
+# Labels pre-Opus-5 CLI builds use for the opus ids.
+_LEGACY_OPUS_LABELS: dict[str, str] = {
+    "opus": "Opus 4.8",
+    "opus[1m]": "Opus 4.8 (1M context)",
+}
 
 # Labels pre-Sonnet-5 CLI builds use for the sonnet ids.
 _LEGACY_SONNET_LABELS: dict[str, str] = {
@@ -226,21 +235,41 @@ _LEGACY_SONNET_LABELS: dict[str, str] = {
 }
 
 
+def _pre_opus5_offering() -> tuple[BackendModelOption, ...]:
+    """The catalogue offered by CLI builds older than OPUS5_MIN_CLI_VERSION.
+
+    On these builds the ``opus`` alias resolves to Opus 4.8, which accepts the
+    same full effort set as Opus 5 (verified against the 2.1.218 and 2.1.220
+    binaries: neither ``claude-opus-4-8`` nor ``claude-opus-5`` appears in the
+    ``effort`` / ``xhigh_effort`` / ``max_effort`` exclusion lists), so only
+    the label differs across this boundary.
+    """
+    return tuple(
+        (
+            option.model_copy(update={"label": _LEGACY_OPUS_LABELS[option.id]})
+            if option.id in _LEGACY_OPUS_LABELS
+            else option
+        )
+        for option in DEFAULT_CLAUDE_MODELS
+    )
+
+
 def _pre_sonnet5_offering() -> tuple[BackendModelOption, ...]:
     """The catalogue offered by CLI builds older than SONNET5_MIN_CLI_VERSION.
 
     On these builds the ``sonnet`` alias resolves to Sonnet 4.6, which accepts
     ``max`` but not ``xhigh`` (verified in the 2.1.175 / 2.1.195 / 2.1.196
     binaries: Sonnet 4.6's capabilities carry ``max_effort`` but not
-    ``xhigh_effort``). Opus 4.8, Fable 5, and Haiku are identical to the
-    current catalogue across this boundary, so only the sonnet family is
-    transformed. Derived from ``DEFAULT_CLAUDE_MODELS`` via ``model_copy`` so
+    ``xhigh_effort``). Fable 5 and Haiku are identical to the current
+    catalogue across this boundary, and the opus rollback comes from
+    ``_pre_opus5_offering`` (every build this old also predates Opus 5), so
+    only the sonnet family is transformed here. Derived via ``model_copy`` so
     unrelated catalogue edits (wording, descriptions, new fields) stay in sync
     automatically.
     """
     sonnet_efforts = [level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"]
     offering: list[BackendModelOption] = []
-    for option in DEFAULT_CLAUDE_MODELS:
+    for option in _pre_opus5_offering():
         if option.id.split("[", 1)[0] != "sonnet":
             offering.append(option)
             continue
@@ -260,7 +289,8 @@ def _pre_sonnet5_offering() -> tuple[BackendModelOption, ...]:
 _CLAUDE_MODEL_EPOCHS: tuple[
     tuple[tuple[int, ...], Callable[[], tuple[BackendModelOption, ...]]], ...
 ] = (
-    (SONNET5_MIN_CLI_VERSION, lambda: DEFAULT_CLAUDE_MODELS),
+    (OPUS5_MIN_CLI_VERSION, lambda: DEFAULT_CLAUDE_MODELS),
+    (SONNET5_MIN_CLI_VERSION, _pre_opus5_offering),
     ((0,), _pre_sonnet5_offering),
 )
 

@@ -8,7 +8,12 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
-from waypoint.schemas import CommandCompletion, SessionContextUsage, SessionRecord
+from waypoint.schemas import (
+    AccountProbeResult,
+    CommandCompletion,
+    SessionContextUsage,
+    SessionRecord,
+)
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -103,6 +108,42 @@ class ConfigDirValidating(Protocol):
         """Raise :class:`ConfigDirNotReadyError` if launching or resuming under
         ``config_dir`` would block on an interactive first-run prompt this agent
         cannot clear headlessly; return ``None`` when the dir is ready."""
+        ...
+
+
+@runtime_checkable
+class ConfiguredAccountIdentifying(Protocol):
+    """An agent that can name the account a config dir declares, without probing.
+
+    The account behind a config dir is normally identified by probing the
+    provider — but a dir may instead declare its own credential in its local
+    configuration (a bearer token, often against a custom endpoint), in which case
+    the provider probe finds no login and cannot identify anything. The runtime
+    then has no account to verify and refuses to switch a session onto that
+    profile at all.
+
+    An agent implementing this supplies the identity from the dir's configuration
+    instead: local, deterministic, no network. It takes precedence over the live
+    probe because a declared credential is what the agent process authenticates
+    as — a dir holding *both* a declared token and a stale login would otherwise
+    verify as the login it will not use.
+
+    Returning ``None`` means "this dir declares no credential of its own", which
+    leaves the caller on the live probe. Implementations must be conservative
+    about that: claiming an identity for a dir that really authenticates as its
+    provider login would flip a working profile's key and break a configured
+    ``expected_account_key``. Because the resolution is filesystem-local, callers
+    only use it for local launch targets.
+    """
+
+    def configured_account_identity(
+        self, launch_env: Mapping[str, str]
+    ) -> AccountProbeResult | None:
+        """The account this session's config dir declares, or ``None``.
+
+        ``launch_env`` locates the config dir (the agent's ``config_dir_env_var``);
+        credentials are read from that dir, not from the env.
+        """
         ...
 
 

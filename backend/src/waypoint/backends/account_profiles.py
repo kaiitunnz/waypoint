@@ -18,7 +18,10 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from waypoint.backends.base import ConfigDirReadinessReporting
+from waypoint.backends.base import (
+    ConfigDirReadinessReporting,
+    ConfiguredAccountIdentifying,
+)
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.registry import get_registry
 from waypoint.schemas import AccountProbeResult, ProfileCheck
@@ -260,14 +263,27 @@ async def probe_account(
 ) -> AccountProbeResult | None:
     """Identify the account a ``backend`` authenticates as under ``launch_env``.
 
-    Composes the account rate-limit probe (run with the target ``launch_env`` so
-    it authenticates as that config dir's account, ``force`` to bypass any TTL
-    cache) with the plugin's ``rate_limit_account`` mapping. Returns ``None``
-    when the backend can't probe or can't produce a stable account key — the
-    runtime treats that as "cannot verify" and refuses a switch. Dispatches
-    through the registry; no per-backend branching.
+    Two tiers, in the order the agent itself resolves credentials. First, a config
+    dir that declares its own credential (:class:`ConfiguredAccountIdentifying`)
+    is identified from that declaration — it is what the agent will authenticate
+    as, and such a dir usually has no provider login for a probe to find. Local
+    launch targets only: the resolution reads the config dir, which for a remote
+    target lives on the remote host, so a same-path local dir would otherwise
+    yield a false identity.
+
+    Otherwise, composes the account rate-limit probe (run with the target
+    ``launch_env`` so it authenticates as that config dir's account, ``force`` to
+    bypass any TTL cache) with the plugin's ``rate_limit_account`` mapping.
+
+    Returns ``None`` when the backend can't probe or can't produce a stable
+    account key — the runtime treats that as "cannot verify" and refuses a switch.
+    Dispatches through the registry; no per-backend branching.
     """
     plugin = get_registry().get(backend)
+    if launch_target is None and isinstance(plugin, ConfiguredAccountIdentifying):
+        configured = plugin.configured_account_identity(launch_env)
+        if configured is not None:
+            return configured
     probe = getattr(plugin, "probe_account_rate_limit", None)
     account_of = getattr(plugin, "rate_limit_account", None)
     if probe is None or account_of is None:

@@ -10,8 +10,10 @@ no longer leak into runtime.py.
 
 import asyncio
 import logging
+import os
 import shlex
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +43,9 @@ from waypoint.backends.claude_code.adapter import (
 from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
     list_claude_command_completions,
+)
+from waypoint.backends.claude_code.configured_account import (
+    configured_account_identity,
 )
 from waypoint.backends.claude_code.history import (
     read_local_claude_history,
@@ -106,6 +111,7 @@ from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    AccountProbeResult,
     BackendModelOption,
     CommandCompletion,
     CompletionDispatch,
@@ -601,6 +607,20 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         if thread_id is None or not UUID_RE.match(thread_id):
             return None
         return f"projects/*/{thread_id}.jsonl"
+
+    def configured_account_identity(
+        self, launch_env: Mapping[str, str]
+    ) -> AccountProbeResult | None:
+        # Mirrors the config-dir chain the CLI itself would resolve for a local
+        # process: the session's override, else the host env, else ~/.claude
+        # (claude does not implement DefaultConfigDirProviding, and adding it here
+        # would also change how the switch resolves the *current* config dir for
+        # the transcript step). Only the dir's location comes from launch_env; the
+        # credential is read from the dir. See ConfiguredAccountIdentifying.
+        config_dir = config_dir_for(self.capabilities, launch_env) or os.environ.get(
+            "CLAUDE_CONFIG_DIR"
+        )
+        return configured_account_identity(config_dir, launch_env)
 
     def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
         # Setting CLAUDE_CONFIG_DIR moves .claude.json into the profile dir; if

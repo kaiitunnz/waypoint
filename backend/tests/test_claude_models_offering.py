@@ -215,8 +215,26 @@ def test_catalogue_groups_families_with_each_1m_variant_after_its_base() -> None
     ids = [opt.id for opt in DEFAULT_CLAUDE_MODELS]
     for index, model_id in enumerate(ids):
         base = model_id.removesuffix("[1m]")
-        if base != model_id:
-            assert ids[index - 1] == base
+        if base == model_id:
+            continue
+        # Guard the index explicitly: ids[-1] would wrap and pass vacuously.
+        assert index > 0, f"{model_id} is first, so it cannot follow its base"
+        assert ids[index - 1] == base
+
+
+def test_extra_appends_when_the_epoch_already_dropped_that_pin() -> None:
+    # On a rolled-back epoch the pin is gone from the gated base, so an operator
+    # entry reusing its id has nothing to replace and appends instead.
+    gated = claude_models_for_version((2, 1, 218))
+    assert all(opt.id != "claude-opus-4-8" for opt in gated)
+
+    extra = BackendModelOption(id="claude-opus-4-8", label="Opus 4.8 (mine)")
+    merged = merge_model_catalogue(list(gated), [extra])
+
+    assert len(merged) == len(gated) + 1
+    assert merged[-1] is extra
+    # Collision detection reads the ungated built-in set, so it still reports it.
+    assert overridden_builtin_ids([extra]) == ["claude-opus-4-8"]
 
 
 def test_legacy_models_are_visible() -> None:

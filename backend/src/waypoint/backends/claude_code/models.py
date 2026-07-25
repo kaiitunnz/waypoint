@@ -168,7 +168,13 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="haiku",
         label="Haiku 4.5",
         description="Fast and lightweight",
-        # No effort knob; explicit [] so the None default (unknown) still rejects.
+        # Explicit [] so the None default (unknown) still rejects. This is a curated
+        # product choice -- offer no effort control for Haiku -- not a claim that the
+        # CLI refuses the flag; it accepts `--effort max` here. The pinned legacy
+        # entries below deliberately go the other way (None) because narrowing them
+        # would newly reject launches that work today. Enforcing [] does mean a
+        # deployment with `default_effort` set cannot launch `haiku` without
+        # overriding the effort -- pre-existing, tracked separately.
         supported_efforts=[],
     ),
     *_LEGACY_CLAUDE_MODELS,
@@ -362,10 +368,13 @@ def _roll_back_sonnet5(
 ) -> tuple[BackendModelOption, ...]:
     """``offering`` as CLI builds older than SONNET5_MIN_CLI_VERSION see it.
 
-    On these builds the ``sonnet`` alias resolves to Sonnet 4.6, which accepts
-    ``max`` but not ``xhigh`` (verified in the 2.1.175 / 2.1.195 / 2.1.196
-    binaries: Sonnet 4.6's capabilities carry ``max_effort`` but not
-    ``xhigh_effort``). Fable 5 and Haiku are identical across this boundary, so
+    On these builds the ``sonnet`` alias resolves to Sonnet 4.6, whose capability
+    lists carry ``max_effort`` but not ``xhigh_effort`` (verified in the 2.1.175 /
+    2.1.195 / 2.1.196 binaries), so the offered ladder drops ``xhigh``. As with
+    Haiku above this is a curated offering, not CLI-level rejection -- and as with
+    Haiku it is left as-is rather than loosened to ``None``, since narrowing an
+    *alias* ladder is pre-existing behavior this catalogue already relies on.
+    Fable 5 and Haiku are identical across this boundary, so
     only the sonnet family is transformed, and the pinned ``claude-sonnet-4-6`` entries
     drop out as redundant with the rolled-back alias. Applied via ``model_copy`` to
     whatever offering the newer epochs produced, so unrelated catalogue edits

@@ -451,7 +451,15 @@ class TelemetryIngester:
             )
 
         rate_limit_usage = updates.get("rate_limit_usage")
-        if isinstance(rate_limit_usage, SessionRateLimitUsage):
+        if (
+            isinstance(rate_limit_usage, SessionRateLimitUsage)
+            and rate_limit_usage.origin == "plugin"
+        ):
+            # Provider-origin projections are ingested once by the provider
+            # service as account-scoped facts; deriving them here too would
+            # duplicate history and falsely attribute one account observation to
+            # each selected session. Only plugin-origin snapshots derive here.
+            #
             # Provider limits are account-scoped (FR-6). Without a resolvable
             # account the snapshot can't be attributed to one, so skip it
             # rather than mint a per-session pseudo-account that fragments

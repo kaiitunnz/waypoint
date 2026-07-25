@@ -149,6 +149,38 @@ async def test_dashboard_without_provider_service_is_unchanged() -> None:
     assert dashboard.providers == []
 
 
+async def test_dashboard_excludes_provider_origin_session_projection() -> None:
+    # A session displaying a provider projection must not create a second
+    # (session-origin) bucket for that account, and must not raise on the
+    # provider-type source that is not a valid BackendId.
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-proj",
+        backend="codex",
+        source="managed",
+        title="sess-proj",
+        cwd="~/",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/p.raw",
+        structured_log_path="/tmp/p.json",
+        usage_limit_source="usage_provider",
+        usage_provider_id="lumid",
+        usage_provider_account_key="hmac:v1:a@x.com",
+        rate_limit_usage=SessionRateLimitUsage(
+            origin="usage_provider",
+            source="lumid",
+            source_label="Lumid — a@x.com",
+            updated_at=now,
+            windows=[UsageWindow(id="5h", label="5h", used_percent=61.9)],
+        ),
+    )
+    dashboard = build_dashboard([session], _StubRegistry())
+    assert dashboard.buckets == []
+
+
 async def test_provider_status_visible_without_bucket() -> None:
     class _NoBucketProvider(_FakeProvider):
         def buckets(self) -> list[ProviderUsageSnapshot]:

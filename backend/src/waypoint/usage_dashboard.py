@@ -130,6 +130,11 @@ def build_dashboard(
         snapshot = session.rate_limit_usage
         if snapshot is None:
             continue
+        # Provider-origin projections are represented once by the provider's own
+        # account bucket; excluding them here also avoids a ValidationError, since
+        # a provider type is not a valid BackendId for SessionUsageDashboardBucket.
+        if snapshot.origin != "plugin":
+            continue
         key, label = account_bucket_for(
             snapshot,
             session_id=session.id,

@@ -73,7 +73,9 @@ Set one up once, before selecting the profile:
 
 - **Claude** — run `CLAUDE_CONFIG_DIR=<config_dir> claude` interactively and finish
   the first-run wizard (theme, login), or copy an already-onboarded
-  `~/.claude.json` into `<config_dir>/.claude.json`. Waypoint refuses to launch or
+  `~/.claude.json` into `<config_dir>/.claude.json`. The wizard runs even for a
+  dir that authenticates by token rather than by login, so this step applies to
+  those too. Waypoint refuses to launch or
   switch an **interactive** session (the `claude_tty` / tmux transports) onto a
   profile whose `<config_dir>/.claude.json` hasn't completed onboarding — the TUI
   would relaunch into the wizard and a headless-driven turn can't dismiss it, so it
@@ -83,6 +85,66 @@ Set one up once, before selecting the profile:
   has no onboarding wizard: its default app-server transport fails fast on an
   unauthenticated home (surfaced error, no hang), so profiles aren't guarded the
   way Claude's are.
+
+### Profiles that carry their own credential (Claude)
+
+A profile dir does not have to hold an interactive login. Writing an `env` block
+into `<config_dir>/settings.json` points the CLI at a gateway or a separate
+credential, and the CLI applies that block **over** the inherited process
+environment, so it is what the agent authenticates as:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://gateway.example.com",
+    "ANTHROPIC_AUTH_TOKEN": "..."
+  }
+}
+```
+
+Such a dir has no OAuth credentials, so the account probe that normally
+identifies a profile finds nothing. Waypoint therefore identifies it from the
+dir's own configuration: the account key is
+`claude_code:endpoint:<host>:<digest>`, where `<host>` is the endpoint's hostname
+(and port) and `<digest>` is the first 12 hex characters of a SHA-256 over the
+declared credential material and the normalized endpoint URL. Neither the key nor
+the label ever contains the credential itself. Read the key the same way as any
+other:
+
+```bash
+waypoint accounts probe claude_code pool --show-key
+```
+
+Rotating the credential changes the digest, so refresh `expected_account_key`
+after a rotation.
+
+Two profiles that declare the *same* endpoint and credential resolve to the same
+key — correctly, since they are one account — so a switch between them is refused
+as a no-op unless both carry a matching `expected_account_key`.
+
+The identity is recognized from `ANTHROPIC_AUTH_TOKEN` or
+`CLAUDE_CODE_OAUTH_TOKEN` (what `claude setup-token` writes) declared in **that
+profile dir's** `settings.json`. The deliberate exclusions:
+
+- A token in `plugin_configs.<agent>.env` reaches every session of every profile,
+  so it cannot distinguish accounts — put it in the profile dir's `settings.json`.
+- `ANTHROPIC_API_KEY` is not recognized: the CLI's use of an environment API key
+  depends on whether the session is interactive, and on an approval recorded in
+  `.claude.json`, so it is not a reliable account signal. It still contributes to
+  the digest.
+- A custom `ANTHROPIC_BASE_URL` alone, `ANTHROPIC_CUSTOM_HEADERS` alone, and
+  `apiKeyHelper` are not recognized either — a gateway can proxy an ordinary
+  login, so those profiles keep resolving through the account probe.
+- Remote (SSH launch target) profiles resolve through the probe as before; the
+  settings file for a remote profile lives on the remote host.
+
+Two further limits: such a session has no rate-limit snapshot, so it does not
+appear in the usage dashboard, and a dir that holds *both* a login and a declared
+token reports its usage windows under the declared identity — keep a
+credential-carrying profile dir free of interactive logins. To switch a *running*
+session onto a fresh profile dir, pair it with `copy_thread_on_switch` or
+`symlink_shared`; the default `require_existing` policy rejects a dir that cannot
+already see the session's thread (see below).
 
 ### Transcript policies
 

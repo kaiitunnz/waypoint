@@ -168,6 +168,15 @@ class Scheduler:
             account_profile_label = self._runtime._require_account_profile(
                 request.backend, request.account_profile_id, launch_target
             ).label
+        # Validate the usage-limit-source selection up-front; persist the
+        # normalized triple so fire time can re-validate it.
+        usage_source, usage_provider_id, usage_account_key = (
+            self._runtime.validate_usage_limit_selection(
+                request.usage_limit_source,
+                request.usage_provider_id,
+                request.usage_provider_account_key,
+            )
+        )
         cwd = request.cwd
         if launch_target is not None and not cwd:
             cwd = launch_target.default_cwd
@@ -198,6 +207,9 @@ class Scheduler:
             preset_name=preset_name,
             account_profile_id=request.account_profile_id,
             account_profile_label=account_profile_label,
+            usage_limit_source=usage_source,
+            usage_provider_id=usage_provider_id,
+            usage_provider_account_key=usage_account_key,
         )
         self._runtime.storage.create_schedule(record)
         self._wakeup.set()
@@ -427,6 +439,14 @@ class Scheduler:
         await fire(claimed, occurrence)
 
     async def _launch_session(self, schedule: ScheduledSessionRecord) -> str:
+        # Re-validate the stored usage-limit-source selection at fire time so a
+        # provider/account that disappeared since scheduling fails this run with
+        # a safe reason rather than silently launching under the plugin source.
+        self._runtime.validate_usage_limit_selection(
+            schedule.usage_limit_source,
+            schedule.usage_provider_id,
+            schedule.usage_provider_account_key,
+        )
         session = await self._runtime.create_session(
             SessionCreateRequest(
                 backend=schedule.backend,
@@ -443,6 +463,9 @@ class Scheduler:
                 model=schedule.model,
                 effort=schedule.effort,
                 account_profile_id=schedule.account_profile_id,
+                usage_limit_source=schedule.usage_limit_source,
+                usage_provider_id=schedule.usage_provider_id,
+                usage_provider_account_key=schedule.usage_provider_account_key,
             ),
             preset_id=schedule.preset_id,
             preset_name=schedule.preset_name,

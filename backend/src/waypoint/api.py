@@ -101,6 +101,8 @@ from waypoint.schemas import (
     TicketCreateRequest,
     TicketTransitionRequest,
     TicketUpdateRequest,
+    UsageLimitSourceUpdateRequest,
+    UsageProviderOption,
     WakeRegisterRequest,
     WakeSubscriptionListResponse,
 )
@@ -228,6 +230,11 @@ def _default_preset_id(context: "AppContext") -> str | None:
     return default.id if default is not None else None
 
 
+def _usage_provider_options(context: "AppContext") -> list[UsageProviderOption]:
+    providers = context.runtime.usage_providers
+    return providers.options() if providers is not None else []
+
+
 class AppContext:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
@@ -290,6 +297,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
             default_preset_id=_default_preset_id(context),
             telemetry_enabled=context.settings.telemetry_enabled,
+            usage_provider_options=_usage_provider_options(context),
         )
 
     @app.post(
@@ -1119,6 +1127,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.refresh_rate_limit_usage(session_id)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/usage-provider-options")
+    async def get_usage_provider_options(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Current enabled provider/account choices for the settings selector —
+        # computed from cached buckets, no upstream request.
+        return {
+            "usage_provider_options": [
+                option.model_dump(mode="json")
+                for option in _usage_provider_options(context)
+            ]
+        }
+
+    @app.patch("/api/sessions/{session_id}/usage-limit-source")
+    async def set_session_usage_limit_source(
+        session_id: str,
+        body: UsageLimitSourceUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_usage_limit_source(session_id, body)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/usage")

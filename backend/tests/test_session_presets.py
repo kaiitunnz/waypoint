@@ -176,6 +176,55 @@ def test_resolve_scalar_override(tmp_path: Path) -> None:
     assert resolved.model == "gpt-5-mini"  # explicit wins
 
 
+def test_resolve_usage_selection_inherits_triple_from_preset(tmp_path: Path) -> None:
+    # Request omits the source entirely: inherit all three provider fields as a
+    # coupled unit from the preset.
+    storage = _storage(tmp_path)
+    preset = _seed(
+        storage,
+        backend="codex",
+        usage_limit_source="usage_provider",
+        usage_provider_id="lumid",
+        usage_provider_account_key="hmac:v1:abc",
+    )
+    resolved, _ = resolve_session_create_request(
+        storage, SessionLaunchRequest(preset_id=preset.id, cwd="/x")
+    )
+    assert resolved.usage_limit_source == "usage_provider"
+    assert resolved.usage_provider_id == "lumid"
+    assert resolved.usage_provider_account_key == "hmac:v1:abc"
+
+
+def test_resolve_explicit_plugin_overrides_provider_preset(tmp_path: Path) -> None:
+    # Explicit source="plugin" must NOT inherit the preset's provider id — the
+    # coupled-group rule takes the whole triple from the request.
+    storage = _storage(tmp_path)
+    preset = _seed(
+        storage,
+        backend="codex",
+        usage_limit_source="usage_provider",
+        usage_provider_id="lumid",
+        usage_provider_account_key="hmac:v1:abc",
+    )
+    request = SessionLaunchRequest(
+        preset_id=preset.id, cwd="/x", usage_limit_source="plugin"
+    )
+    resolved, _ = resolve_session_create_request(storage, request)
+    assert resolved.usage_limit_source == "plugin"
+    assert resolved.usage_provider_id is None
+    assert resolved.usage_provider_account_key is None
+
+
+def test_resolve_preset_plugin_source_inherits_plugin(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    preset = _seed(storage, backend="codex", usage_limit_source="plugin")
+    resolved, _ = resolve_session_create_request(
+        storage, SessionLaunchRequest(preset_id=preset.id, cwd="/x")
+    )
+    assert resolved.usage_limit_source == "plugin"
+    assert resolved.usage_provider_id is None
+
+
 def test_resolve_list_replaces_not_appends(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     preset = _seed(storage, backend="codex", args=["--a", "--b"])

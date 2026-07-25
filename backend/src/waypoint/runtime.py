@@ -1409,6 +1409,13 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="use attach endpoint for tmux targets",
             )
+        # Validate the usage-limit-source selection before spawning anything so a
+        # bad selection fails fast rather than after a live process exists.
+        usage_selection = self.validate_usage_limit_selection(
+            request.usage_limit_source,
+            request.usage_provider_id,
+            request.usage_provider_account_key,
+        )
         session_id = self._generate_session_id(request.backend)
         launch_target = self._resolve_launch_target(
             request.launch_target_id, request.backend
@@ -1616,6 +1623,27 @@ class SessionRuntime:
                 launch_target=launch_target,
                 cwd=session.cwd,
             )
+        # Usage-limit-source selection: plugins don't read it, so stamp it
+        # generically like preset/account provenance. A provider selection then
+        # projects its cached snapshot immediately (no upstream request).
+        selection_source, selection_provider, selection_account = usage_selection
+        if selection_source == "usage_provider":
+            session = self.storage.update_session(
+                session.id,
+                usage_limit_source=selection_source,
+                usage_provider_id=selection_provider,
+                usage_provider_account_key=selection_account,
+            )
+            if selection_provider is not None and self.usage_providers is not None:
+                buckets = self.usage_providers.provider_buckets(selection_provider)
+                provider_status = self.usage_providers.provider_status(
+                    selection_provider
+                )
+                if provider_status is not None:
+                    await self._project_provider_sessions(
+                        selection_provider, buckets, provider_status
+                    )
+                    session = self.get_session(session.id)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
         return session

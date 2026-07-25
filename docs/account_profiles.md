@@ -73,13 +73,13 @@ Set one up once, before selecting the profile:
 
 - **Claude** — run `CLAUDE_CONFIG_DIR=<config_dir> claude` interactively and finish
   the first-run wizard (theme, login), or copy an already-onboarded
-  `~/.claude.json` into `<config_dir>/.claude.json`. The wizard runs even for a
-  dir that authenticates by token rather than by login, so this step applies to
-  those too. Waypoint refuses to launch or
-  switch an **interactive** session (the `claude_tty` / tmux transports) onto a
-  profile whose `<config_dir>/.claude.json` hasn't completed onboarding — the TUI
-  would relaunch into the wizard and a headless-driven turn can't dismiss it, so it
-  would hang. The rejection is a 400 (`account profile '<id>' is not set up: …`).
+  `~/.claude.json` into `<config_dir>/.claude.json`. The wizard runs even for a dir
+  that authenticates by token rather than by login, so this step applies to those
+  too. Waypoint refuses to launch or switch an **interactive** session (the
+  `claude_tty` / tmux transports) onto a profile whose `<config_dir>/.claude.json`
+  hasn't completed onboarding — the TUI would relaunch into the wizard and a
+  headless-driven turn can't dismiss it, so it would hang. The rejection is a 400
+  (`account profile '<id>' is not set up: …`).
   The headless `claude --print` transport doesn't onboard and isn't blocked.
 - **Codex** — run `CODEX_HOME=<config_dir> codex login` to write `auth.json`. Codex
   has no onboarding wizard: its default app-server transport fails fast on an
@@ -137,14 +137,26 @@ profile dir's** `settings.json`. The deliberate exclusions:
   login, so those profiles keep resolving through the account probe.
 - Remote (SSH launch target) profiles resolve through the probe as before; the
   settings file for a remote profile lives on the remote host.
+- The CLI's project settings (`<cwd>/.claude/settings.json` and
+  `settings.local.json`) outrank the config dir but are not consulted: identity
+  has to be a property of the profile, not of a directory, since `accounts probe`
+  and `accounts doctor` have no session cwd. A token declared in a project's
+  settings is therefore not reflected in the profile's identity.
 
-Two further limits: such a session has no rate-limit snapshot, so it does not
-appear in the usage dashboard, and a dir that holds *both* a login and a declared
-token reports its usage windows under the declared identity — keep a
-credential-carrying profile dir free of interactive logins. To switch a *running*
-session onto a fresh profile dir, pair it with `copy_thread_on_switch` or
-`symlink_shared`; the default `require_existing` policy rejects a dir that cannot
-already see the session's thread (see below).
+Further limits:
+
+- Such a session has no rate-limit snapshot, so it does not appear in the usage
+  dashboard.
+- A dir that holds *both* a login and a declared token reports its usage windows
+  under the declared identity, and its key changes from `claude_code:<org>` to the
+  endpoint form — refresh `expected_account_key` for such a profile after
+  upgrading. Keep a credential-carrying profile dir free of interactive logins.
+- An endpoint key and an OAuth-org key are not comparable, so a `setup-token`
+  profile and an interactive-login profile for the *same* Anthropic account
+  resolve to different keys and a switch between them counts as an account change.
+- To switch a *running* session onto a fresh profile dir, pair it with
+  `copy_thread_on_switch` or `symlink_shared`; the default `require_existing`
+  policy rejects a dir that cannot already see the session's thread (see below).
 
 ### Transcript policies
 

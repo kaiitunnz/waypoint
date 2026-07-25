@@ -191,20 +191,14 @@ def claude_model_family(model: str | None) -> str | None:
 
 
 def claude_context_window_for_model(model: str | None) -> int | None:
+    # normalize_claude_model_id resolves anything family-ish to a catalogue id
+    # (including re-attaching a `[1m]` entitlement) and otherwise returns the
+    # input verbatim, so an unresolved id has no family to fall back on --
+    # don't fabricate a window for it.
     normalized = normalize_claude_model_id(model)
     if normalized is None:
         return None
-    if normalized in CLAUDE_CONTEXT_WINDOWS:
-        return CLAUDE_CONTEXT_WINDOWS[normalized]
-    family = claude_model_family(normalized)
-    if family is None or family not in CLAUDE_CONTEXT_WINDOWS:
-        # No family could be inferred at all (genuine garbage) -- don't
-        # fabricate a window.
-        return None
-    candidate = model.strip() if isinstance(model, str) else ""
-    if normalized.endswith("[1m]") or candidate.endswith("[1m]"):
-        return 1_000_000
-    return CLAUDE_CONTEXT_WINDOWS[family]
+    return CLAUDE_CONTEXT_WINDOWS.get(normalized)
 
 
 def claude_default_model_id() -> str | None:
@@ -235,9 +229,10 @@ def resolve_import_model_id(
 #   2.1.219  Opus 5 introduced as the `opus` alias (native 1M context)
 #
 # Each boundary below swaps an alias's target model, so only the affected
-# family's labels/efforts differ across it. Each builder transforms the
-# next-newer epoch's offering rather than DEFAULT_CLAUDE_MODELS, so an older
-# CLI correctly sees *every* rollback that applies to it.
+# family's labels/efforts differ across it. The rollbacks are applied
+# cumulatively (newest first) rather than each rebuilding from
+# DEFAULT_CLAUDE_MODELS, so an older CLI sees *every* rollback that applies to
+# it, not just the newest one.
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
 OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
 
@@ -254,8 +249,10 @@ _LEGACY_SONNET_LABELS: dict[str, str] = {
 }
 
 
-def _pre_opus5_offering() -> tuple[BackendModelOption, ...]:
-    """The catalogue offered by CLI builds older than OPUS5_MIN_CLI_VERSION.
+def _roll_back_opus5(
+    offering: tuple[BackendModelOption, ...],
+) -> tuple[BackendModelOption, ...]:
+    """``offering`` as CLI builds older than OPUS5_MIN_CLI_VERSION see it.
 
     On these builds the ``opus`` alias resolves to Opus 4.8, which accepts the
     same full effort set as Opus 5 (verified against the 2.1.218 and 2.1.220
@@ -269,30 +266,30 @@ def _pre_opus5_offering() -> tuple[BackendModelOption, ...]:
             if option.id in _LEGACY_OPUS_LABELS
             else option
         )
-        for option in DEFAULT_CLAUDE_MODELS
+        for option in offering
     )
 
 
-def _pre_sonnet5_offering() -> tuple[BackendModelOption, ...]:
-    """The catalogue offered by CLI builds older than SONNET5_MIN_CLI_VERSION.
+def _roll_back_sonnet5(
+    offering: tuple[BackendModelOption, ...],
+) -> tuple[BackendModelOption, ...]:
+    """``offering`` as CLI builds older than SONNET5_MIN_CLI_VERSION see it.
 
     On these builds the ``sonnet`` alias resolves to Sonnet 4.6, which accepts
     ``max`` but not ``xhigh`` (verified in the 2.1.175 / 2.1.195 / 2.1.196
     binaries: Sonnet 4.6's capabilities carry ``max_effort`` but not
-    ``xhigh_effort``). Fable 5 and Haiku are identical to the current
-    catalogue across this boundary, and the opus rollback comes from
-    ``_pre_opus5_offering`` (every build this old also predates Opus 5), so
-    only the sonnet family is transformed here. Derived via ``model_copy`` so
-    unrelated catalogue edits (wording, descriptions, new fields) stay in sync
-    automatically.
+    ``xhigh_effort``). Fable 5 and Haiku are identical across this boundary, so
+    only the sonnet family is transformed. Applied via ``model_copy`` to
+    whatever offering the newer epochs produced, so unrelated catalogue edits
+    (wording, descriptions, new fields) stay in sync automatically.
     """
     sonnet_efforts = [level for level in CLAUDE_EFFORT_LEVELS if level != "xhigh"]
-    offering: list[BackendModelOption] = []
-    for option in _pre_opus5_offering():
+    rolled: list[BackendModelOption] = []
+    for option in offering:
         if option.id.split("[", 1)[0] != "sonnet":
-            offering.append(option)
+            rolled.append(option)
             continue
-        offering.append(
+        rolled.append(
             option.model_copy(
                 update={
                     "label": _LEGACY_SONNET_LABELS.get(option.id, option.label),
@@ -300,17 +297,22 @@ def _pre_sonnet5_offering() -> tuple[BackendModelOption, ...]:
                 }
             )
         )
-    return tuple(offering)
+    return tuple(rolled)
 
 
-# Ordered by descending minimum version so adding a future epoch is a small,
-# obvious edit: prepend a new ``(min_version, builder)`` pair at the front.
-_CLAUDE_MODEL_EPOCHS: tuple[
-    tuple[tuple[int, ...], Callable[[], tuple[BackendModelOption, ...]]], ...
+# Each entry pairs the version a model epoch started at with the rollback that
+# undoes it, i.e. the transform a build *older* than that version needs.
+# Ordered newest first, and applied cumulatively, so introducing a future epoch
+# is exactly one edit: prepend its ``(min_version, rollback)`` pair.
+_CLAUDE_MODEL_EPOCH_ROLLBACKS: tuple[
+    tuple[
+        tuple[int, ...],
+        Callable[[tuple[BackendModelOption, ...]], tuple[BackendModelOption, ...]],
+    ],
+    ...,
 ] = (
-    (OPUS5_MIN_CLI_VERSION, lambda: DEFAULT_CLAUDE_MODELS),
-    (SONNET5_MIN_CLI_VERSION, _pre_opus5_offering),
-    ((0,), _pre_sonnet5_offering),
+    (OPUS5_MIN_CLI_VERSION, _roll_back_opus5),
+    (SONNET5_MIN_CLI_VERSION, _roll_back_sonnet5),
 )
 
 
@@ -325,7 +327,9 @@ def claude_models_for_version(
     """
     if version is None:
         return DEFAULT_CLAUDE_MODELS
-    for min_version, builder in _CLAUDE_MODEL_EPOCHS:
+    offering = DEFAULT_CLAUDE_MODELS
+    for min_version, roll_back in _CLAUDE_MODEL_EPOCH_ROLLBACKS:
         if version >= min_version:
-            return builder()
-    return DEFAULT_CLAUDE_MODELS
+            break
+        offering = roll_back(offering)
+    return offering

@@ -94,6 +94,25 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
     assert "xhigh" in opus_1m.supported_efforts and "max" in opus_1m.supported_efforts
 
 
+@pytest.mark.parametrize(
+    ("version", "opus_label", "sonnet_label"),
+    [
+        ((2, 1, 219), "Opus 5", "Sonnet 5"),
+        ((2, 1, 218), "Opus 4.8", "Sonnet 5"),
+        ((2, 1, 197), "Opus 4.8", "Sonnet 5"),
+        ((2, 1, 196), "Opus 4.8", "Sonnet 4.6"),
+    ],
+)
+def test_rollbacks_apply_cumulatively_at_each_boundary(
+    version, opus_label: str, sonnet_label: str
+) -> None:
+    # Each boundary is inclusive of its own epoch, and a build below several
+    # boundaries gets every rollback rather than only the newest.
+    models = claude_models_for_version(version)
+    assert _by_id(models, "opus").label == opus_label
+    assert _by_id(models, "sonnet").label == sonnet_label
+
+
 @pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 190), (2, 1, 218)])
 def test_legacy_offerings_have_same_model_ids_as_default(version) -> None:
     legacy = claude_models_for_version(version)

@@ -490,9 +490,8 @@ async def test_question_dialog_dismissed_when_stable() -> None:
     await tailer._poll_dialog()  # tick 1: debounce
     runtime.tmux.send_bytes.assert_not_called()
 
-    await tailer._poll_dialog()  # tick 2: stable → Esc + arm
+    await tailer._poll_dialog()  # tick 2: stable → Esc
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
-    assert tailer._normalizer._expect_dismissed_question is True
     assert tailer._question_dismissed is True
     runtime._emit_adapter_event.assert_not_called()
 
@@ -510,13 +509,13 @@ async def test_question_dialog_dismissed_only_once() -> None:
 
 
 async def test_question_drain_registers_pending() -> None:
-    # Once the armed normalizer surfaces the flushed tool_use as a WAITING_INPUT
-    # card, the tailer registers the pending question so an answer can route.
+    # Once the normalizer surfaces the flushed tool_use as a WAITING_INPUT card,
+    # the tailer registers the pending question so an answer can route — no
+    # arming step is required.
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     runtime = _make_runtime(session, _load("ready.txt"))
     tailer = _make_tailer(plugin, runtime)
-    tailer._normalizer.arm_question_dismissal()
 
     record = {
         "type": "assistant",
@@ -539,6 +538,60 @@ async def test_question_drain_registers_pending() -> None:
     await tailer._drain()
 
     assert "sess-1" in plugin._pending_questions
+    assert plugin._pending_questions["sess-1"].tool_use_id == "auq1"
+
+
+async def test_question_drain_stays_answerable_after_rejection() -> None:
+    # A dismissed question drains as an answerable WAITING_INPUT card: its "user
+    # rejected" result is swallowed and the pending question stays registered so
+    # an answer routes.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("ready.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    tool_use = {
+        "type": "assistant",
+        "message": {
+            "id": "m1",
+            "stop_reason": "tool_use",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "auq1",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": [{"question": "Q", "options": []}]},
+                }
+            ],
+        },
+    }
+    rejection = {
+        "type": "user",
+        "toolUseResult": "User rejected tool use",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "auq1",
+                    "content": "The tool use was rejected",
+                    "is_error": True,
+                }
+            ]
+        },
+    }
+    tailer._source = _ScriptedSource(
+        [(json.dumps(tool_use) + "\n" + json.dumps(rejection) + "\n").encode()]
+    )
+
+    await tailer._drain()
+
+    # The question surfaced as WAITING_INPUT and its rejection was swallowed, so
+    # no tool_result event reached the store for it.
+    kinds = [call.args[1] for call in runtime._emit_adapter_event.call_args_list]
+    statuses = [call.args[4] for call in runtime._emit_adapter_event.call_args_list]
+    assert EventKind.TOOL_CALL in kinds
+    assert EventKind.TOOL_RESULT not in kinds
+    assert SessionStatus.WAITING_INPUT in statuses
     assert plugin._pending_questions["sess-1"].tool_use_id == "auq1"
 
 
@@ -585,6 +638,28 @@ async def test_answer_question_delivers_message_and_resolves_card() -> None:
     assert extra["answers"] == answers
     assert extra["tool_use_id"] == "auq1"
     assert "sess-1" not in plugin._pending_questions
+
+
+async def test_answer_question_records_answer_before_synthetic_result() -> None:
+    """FR6: the durable answer event must be persisted before the synthetic
+    tool_result, so a live client never briefly renders the card as
+    closed-unanswered."""
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_questions["sess-1"] = PendingTtyQuestion(
+        approval_id="aid", tool_use_id="auq1"
+    )
+    transport = MagicMock()
+    transport.send_input = AsyncMock()
+    runtime = _make_answer_runtime(session, transport)
+
+    order: list[str] = []
+    runtime._record_user_event.side_effect = lambda *a, **k: order.append("answer")
+    runtime._emit_adapter_event.side_effect = lambda *a, **k: order.append("result")
+
+    await plugin.answer_question(runtime, session, "x", "auq1", None)
+
+    assert order == ["answer", "result"]
 
 
 async def test_answer_question_no_pending_raises() -> None:

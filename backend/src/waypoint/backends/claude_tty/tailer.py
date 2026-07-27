@@ -305,10 +305,10 @@ class TranscriptTailer:
             # The AskUserQuestion popup withholds its structured questions from
             # the transcript until it is resolved, so it is invisible to the
             # tailer while it blocks the turn. Esc dismisses it, which flushes
-            # the full tool_use record to the JSONL; the armed normalizer then
-            # surfaces it as an answerable card (and swallows the resulting
-            # "user rejected" result). The answer is delivered later as a normal
-            # user turn via the plugin's answer_question.
+            # the full tool_use record to the JSONL; the normalizer surfaces it
+            # as an answerable card (and swallows the resulting "user rejected"
+            # result). The answer is delivered later as a normal user turn via
+            # the plugin's answer_question.
             if self._prev_dialog_sig == "question":
                 self._dialog_stable_count += 1
             else:
@@ -323,7 +323,6 @@ class TranscriptTailer:
                     extra={"session_id": self._session_id},
                 )
                 await self._runtime.tmux.send_bytes(pane, b"\x1b")
-                self._normalizer.arm_question_dismissal()
                 self._question_dismissed = True
             return
 

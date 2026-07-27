@@ -111,6 +111,7 @@ import {
   ToolCallRunGroup,
   readToolName,
   type AskAnswerEntry,
+  type AskQuestionResolution,
   type ToolPair,
 } from "@/components/TranscriptCard";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
@@ -3912,9 +3913,49 @@ type TranscriptItem =
   | { kind: "pair"; event: EventRecord; pair: ToolPair }
   | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
+// Positive proof that Waypoint accepted a human answer to an AskUserQuestion:
+// a user_input event tagged ask_user_question_answer carrying the resolved
+// tool_use_id. The latest by sequence wins.
+function indexAskQuestionAnswerEvents(
+  events: EventRecord[],
+): Map<string, EventRecord> {
+  const index = new Map<string, EventRecord>();
+  for (const event of events) {
+    if (event.kind !== "user_input") continue;
+    const metadata = event.metadata ?? {};
+    if (metadata.kind !== "ask_user_question_answer") continue;
+    const toolUseId =
+      typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
+    if (!toolUseId) continue;
+    const existing = index.get(toolUseId);
+    if (!existing || event.sequence >= existing.sequence) {
+      index.set(toolUseId, event);
+    }
+  }
+  return index;
+}
+
+// Resolve one question pair against the answer-evidence index: a correlated
+// answer wins; otherwise a paired result means the question closed without an
+// answer; otherwise it is still pending.
+function resolveAskQuestion(
+  pair: ToolPair,
+  answerIndex: Map<string, EventRecord>,
+): AskQuestionResolution {
+  const answerEvent = answerIndex.get(pair.itemId);
+  if (answerEvent) {
+    return { state: "answered", answerEvent };
+  }
+  if (pair.result) {
+    return { state: "closed_unanswered", resultEvent: pair.result };
+  }
+  return { state: "pending" };
+}
+
 function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
   const pairIndex = new Map<string, number>();
+  const answerIndex = indexAskQuestionAnswerEvents(events);
   for (const event of events) {
     if (event.kind !== "tool_call" && event.kind !== "tool_result") {
       result.push({ kind: "single", event });
@@ -3951,6 +3992,14 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     }
     item.pair.ts = event.ts;
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
+  }
+
+  // Resolve each AskUserQuestion pair's answer state once and attach it so
+  // every card reads the same derivation.
+  for (const item of result) {
+    if (item.kind !== "pair" || !item.pair.call) continue;
+    if (readToolName(item.pair.call) !== "AskUserQuestion") continue;
+    item.pair.askResolution = resolveAskQuestion(item.pair, answerIndex);
   }
 
   // Classify each item so the grouping loop is easy to reason about.

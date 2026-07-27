@@ -696,7 +696,7 @@ class ClaudeCliAdapter:
         session_id: str,
         answer_text: str,
         tool_use_id: str | None = None,
-    ) -> bool:
+    ) -> str | None:
         """Answer an AskUserQuestion parked on a ``can_use_tool`` request.
 
         AskUserQuestion arrives over the same ``can_use_tool`` channel as
@@ -704,10 +704,15 @@ class ClaudeCliAdapter:
         we deny the tool and carry the answer payload as the message — that
         string becomes the tool_result Claude reads, matching the binary's
         own `User has answered your questions: …` shape.
+
+        Returns the resolved ``tool_use_id`` that was answered — including the
+        one selected here when the caller omitted it — so the plugin can record
+        it as durable answer evidence (FR5). Returns ``None`` when no pending
+        question could be resolved.
         """
         state = self._sessions.get(session_id)
         if state is None or not state.pending:
-            return False
+            return None
         pending: ClaudePendingApproval | None = None
         if tool_use_id and tool_use_id in state.pending:
             candidate = state.pending[tool_use_id]
@@ -720,7 +725,7 @@ class ClaudeCliAdapter:
                     pending = candidate
                     break
         if pending is None or tool_use_id is None:
-            return False
+            return None
         # Deny the tool and carry the answer in the message — the binary reads
         # that string as the tool_result, matching its own
         # "User has answered your questions: …" shape.
@@ -739,7 +744,7 @@ class ClaudeCliAdapter:
             ),
         )
         state.pending.pop(tool_use_id, None)
-        return True
+        return tool_use_id
 
     def has_pending_ask_question(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)

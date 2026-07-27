@@ -979,10 +979,10 @@ async def test_ask_user_question_skips_approval_card() -> None:
     assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
     assert not _permission_results(process)
 
-    handled = await adapter.respond_to_ask_question(
+    resolved = await adapter.respond_to_ask_question(
         "sess", "**Plan target**: Trivial wrapper-test plan", "toolu_ask"
     )
-    assert handled is True
+    assert resolved == "toolu_ask"
     assert _permission_results(process)[-1] == {
         "behavior": "deny",
         "message": (
@@ -994,12 +994,31 @@ async def test_ask_user_question_skips_approval_card() -> None:
 
 
 @pytest.mark.asyncio
-async def test_respond_to_ask_question_returns_false_without_pending() -> None:
+async def test_respond_to_ask_question_returns_none_without_pending() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
     _attach_state(adapter)
-    handled = await adapter.respond_to_ask_question("sess", "anything")
-    assert handled is False
+    resolved = await adapter.respond_to_ask_question("sess", "anything")
+    assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_respond_to_ask_question_resolves_id_when_omitted() -> None:
+    """A caller that omits tool_use_id gets back the id the adapter selected,
+    so the plugin can persist it as durable answer evidence (FR5)."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, process = _attach_state(adapter)
+
+    payload = {
+        "tool_use_id": "toolu_ask",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "ok?", "options": []}]},
+    }
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+
+    resolved = await adapter.respond_to_ask_question("sess", "Spaces")
+    assert resolved == "toolu_ask"
 
 
 @pytest.mark.asyncio

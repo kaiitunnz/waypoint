@@ -98,12 +98,10 @@ class TranscriptNormalizer:
         # thinking record then a text record, both stamped end_turn); the note
         # must fire once, not once per record.
         self._result_emitted_ids: set[str] = set()
-        # Set by the tailer right after it Esc-dismisses an AskUserQuestion
-        # popup. The Esc forces the TUI to flush the tool_use record (and a
-        # "user rejected" result) to the transcript; the latch tells the next
-        # AskUserQuestion record to surface as an answerable card rather than a
-        # plain tool_call, and to swallow the synthetic rejection.
-        self._expect_dismissed_question: bool = False
+        # tool_use ids of surfaced AskUserQuestion cards, so the "user rejected"
+        # result Waypoint's Esc-dismissal produces can be swallowed and the card
+        # stays answerable. A non-rejection failure result for the id surfaces
+        # instead.
         self._dismissed_question_ids: set[str] = set()
         # tool_use ids of file-edit calls, so the matching tool_result record
         # (which carries the applied diff in its toolUseResult) can attach a
@@ -120,9 +118,6 @@ class TranscriptNormalizer:
         # permission dialog blocks, so the tailer recovers the tool from here
         # when a tall dialog overflows the pane and drops its label off-screen.
         self._pending_tool_uses: dict[str, tuple[str, dict[str, Any]]] = {}
-
-    def arm_question_dismissal(self) -> None:
-        self._expect_dismissed_question = True
 
     @property
     def pending_tool_use(self) -> tuple[str, dict[str, Any]] | None:
@@ -242,8 +237,10 @@ class TranscriptNormalizer:
                 has_tool_use = True
                 tool_use_id = str(block.get("id") or "")
                 tool_name = str(block.get("name") or "tool")
-                if tool_name == "AskUserQuestion" and self._expect_dismissed_question:
-                    self._expect_dismissed_question = False
+                if tool_name == "AskUserQuestion":
+                    # Every AskUserQuestion surfaces as an answerable card; the
+                    # paired "user rejected" result Waypoint's Esc produces is
+                    # suppressed in _process_user.
                     if tool_use_id:
                         self._dismissed_question_ids.add(tool_use_id)
                     events.append(
@@ -409,13 +406,17 @@ class TranscriptNormalizer:
             if tool_use_id:
                 self._pending_tool_uses.pop(tool_use_id, None)
             if tool_use_id and tool_use_id in self._dismissed_question_ids:
-                # The "user rejected" result the TUI writes when we Esc the
-                # popup to surface it. Drop it so the question card stays
-                # answerable, and skip the abort note below — the session
-                # waits on the user, it has not ended the turn.
                 self._dismissed_question_ids.discard(tool_use_id)
-                dismissed_question = True
-                continue
+                if turn_aborted:
+                    # The "user rejected" result the TUI writes when Waypoint
+                    # Escs the popup to surface it. Drop it so the question card
+                    # stays answerable, and skip the abort note below — the
+                    # session waits on the user, it has not ended the turn.
+                    dismissed_question = True
+                    continue
+                # A genuine terminal failure (InputValidationError, timeout) for
+                # the same question — not a dismissal artifact. Let it surface so
+                # the card renders closed-unanswered rather than falsely open.
             if tool_use_id and tool_use_id in self._pending_task_creates:
                 create_input = self._pending_task_creates.pop(tool_use_id)
                 task_id = extract_created_task_id(block) or tool_use_id

@@ -21,11 +21,9 @@ case-insensitively). Other users returned by the admin endpoint are never shown.
 It maps the row to a 5-hour and a 7-day window with used/limit tokens,
 percentages, and the 7-day request count.
 
-Each window's card shows its rate-limit reset time when Lumid supplies one
-(`five_hour_reset` / `seven_day_reset`). Lumid reports `0001-01-01T00:00:00Z`
-for a window with no usage, meaning no reset is available; that sentinel, an
-omitted field, and an explicit `null` are all treated as no reset and the label
-is hidden, applied independently per window.
+Each window's card shows its reset time when Lumid supplies one. Lumid's
+`0001-01-01T00:00:00Z` sentinel (no usage in the window), an omitted field, and
+`null` are hidden, independently per window.
 
 ### Setup
 

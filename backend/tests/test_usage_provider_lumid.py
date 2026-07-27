@@ -195,7 +195,6 @@ async def test_sentinel_reset_is_hidden_independently(
 ) -> None:
     monkeypatch.setenv("LUMID_TEST_TOKENS", "tok_a")
     storage = _storage(tmp_path)
-    # 5h had no usage (year-1 sentinel) while 7d has a valid reset.
     row = _row(
         five_reset="0001-01-01T00:00:00Z",
         seven_reset="2026-08-01T00:00:00Z",

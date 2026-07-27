@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from waypoint.schemas import (
     ProviderErrorState,
@@ -38,8 +38,7 @@ _FIVE_HOUR_MINUTES = 300
 _SEVEN_DAY_MINUTES = 7 * 24 * 60
 _MAX_CONCURRENCY = 4
 
-# Lumid reports this UTC instant when a window has had no usage, meaning no
-# reset time is available. It must become None rather than a real timestamp.
+# Lumid sends this UTC instant for a window with no usage (no reset available).
 _NO_RESET_SENTINEL = datetime(1, 1, 1, tzinfo=UTC)
 
 
@@ -68,6 +67,11 @@ class _UsageRow(BaseModel):
     last_ts: datetime | None = None
     five_hour_reset: datetime | None = None
     seven_day_reset: datetime | None = None
+
+    @field_validator("five_hour_reset", "seven_day_reset")
+    @classmethod
+    def _drop_no_reset_sentinel(cls, value: datetime | None) -> datetime | None:
+        return None if value == _NO_RESET_SENTINEL else value
 
 
 class _UsageData(BaseModel):
@@ -275,7 +279,7 @@ class LumidUsageProvider:
                 limit_tokens=usage.five_hour_tokens,
                 remaining_tokens=max(usage.five_hour_tokens - row.five_hour_tokens, 0),
                 window_minutes=_FIVE_HOUR_MINUTES,
-                resets_at=_reset_or_none(row.five_hour_reset),
+                resets_at=row.five_hour_reset,
             ),
             UsageWindow(
                 id="lumid-seven-day",
@@ -285,7 +289,7 @@ class LumidUsageProvider:
                 limit_tokens=usage.seven_day_tokens,
                 remaining_tokens=max(usage.seven_day_tokens - row.seven_day_tokens, 0),
                 window_minutes=_SEVEN_DAY_MINUTES,
-                resets_at=_reset_or_none(row.seven_day_reset),
+                resets_at=row.seven_day_reset,
             ),
         ]
         account_key = self._store.account_key_digest(self.id, email)
@@ -353,12 +357,6 @@ class LumidUsageProvider:
             last_success_at=self._status.last_success_at,
             errors=errors,
         )
-
-
-def _reset_or_none(value: datetime | None) -> datetime | None:
-    if value is None or value == _NO_RESET_SENTINEL:
-        return None
-    return value
 
 
 def _select_row(rows: list[_UsageRow], email: str) -> _UsageRow | None:

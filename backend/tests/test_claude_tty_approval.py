@@ -587,6 +587,28 @@ async def test_answer_question_delivers_message_and_resolves_card() -> None:
     assert "sess-1" not in plugin._pending_questions
 
 
+async def test_answer_question_records_answer_before_synthetic_result() -> None:
+    """FR6: the durable answer event must be persisted before the synthetic
+    tool_result, so a live client never briefly renders the card as
+    closed-unanswered."""
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_questions["sess-1"] = PendingTtyQuestion(
+        approval_id="aid", tool_use_id="auq1"
+    )
+    transport = MagicMock()
+    transport.send_input = AsyncMock()
+    runtime = _make_answer_runtime(session, transport)
+
+    order: list[str] = []
+    runtime._record_user_event.side_effect = lambda *a, **k: order.append("answer")
+    runtime._emit_adapter_event.side_effect = lambda *a, **k: order.append("result")
+
+    await plugin.answer_question(runtime, session, "x", "auq1", None)
+
+    assert order == ["answer", "result"]
+
+
 async def test_answer_question_no_pending_raises() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()

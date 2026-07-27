@@ -1263,6 +1263,24 @@ class ClaudeTtyPlugin:
             "You can now continue with the user's answers in mind.",
         )
 
+        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
+        if answers:
+            extra["answers"] = answers
+        if resolved_tool_use_id:
+            extra["tool_use_id"] = resolved_tool_use_id
+        # Flip status to RUNNING before recording the answer so the broadcast
+        # snapshot shows the spinner immediately, matching handle_input.
+        updated = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        # Persist the durable answer event before the synthetic tool_result
+        # (FR6): the transcript derives "answered" from this user event, so a
+        # live client that saw the result first would briefly render the card
+        # as closed-unanswered.
+        await runtime._record_user_event(
+            session.id, answer, submit=True, extra_metadata=extra
+        )
+
         if resolved_tool_use_id:
             await runtime._emit_adapter_event(
                 session.id,
@@ -1277,19 +1295,6 @@ class ClaudeTtyPlugin:
                 SessionStatus.RUNNING,
             )
 
-        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            extra["answers"] = answers
-        if resolved_tool_use_id:
-            extra["tool_use_id"] = resolved_tool_use_id
-        # Flip status to RUNNING before recording the answer so the broadcast
-        # snapshot shows the spinner immediately, matching handle_input.
-        updated = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
-        await runtime._record_user_event(
-            session.id, answer, submit=True, extra_metadata=extra
-        )
         return updated
 
     # ── Thread discovery + import ────────────────────────────────────────────

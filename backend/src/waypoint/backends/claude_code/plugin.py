@@ -1067,14 +1067,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 detail="answer-question is only supported for Claude sessions",
             )
         try:
-            handled = await self.adapter.respond_to_ask_question(
+            resolved_tool_use_id = await self.adapter.respond_to_ask_question(
                 session.id, answer, tool_use_id
             )
         except ClaudeCliError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        if not handled:
+        if resolved_tool_use_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="no pending question for this session",
@@ -1082,12 +1082,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # Stash structured per-question answers + notes so the frontend
         # renders this user_input as a styled "answers" card instead of
         # the raw `"<question>"="<answer>" user notes: …` payload Claude
-        # was tuned around.
+        # was tuned around. Persist the resolved tool_use_id — the id the
+        # adapter actually answered, including when the caller omitted one —
+        # so the transcript can correlate this durable answer to its question.
         extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
         if answers:
             extra["answers"] = answers
-        if tool_use_id:
-            extra["tool_use_id"] = tool_use_id
+        extra["tool_use_id"] = resolved_tool_use_id
         # Same ordering as handle_input: flip status to RUNNING before
         # _record_user_event broadcasts the session_state snapshot,
         # otherwise the spinner stays off until Claude's next chunk.

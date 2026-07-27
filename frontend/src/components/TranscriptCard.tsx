@@ -1118,8 +1118,8 @@ function AskUserQuestionCard({
       {closedUnanswered ? (
         <div className="ask-question-closed">
           <p className="ask-question-closed-note">
-            Closed without an answer — this question was cancelled, timed out, or
-            failed before anyone responded, so it can no longer be answered.
+            This question ended without a recorded answer and can no longer be
+            answered.
           </p>
           {closedResultEvent?.text?.trim() ? (
             <details className="ask-question-diagnostic">

@@ -34,12 +34,23 @@ import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
 
+// Three-state resolution of an AskUserQuestion, derived once over the loaded
+// events from durable answer evidence (a correlated ask_user_question_answer
+// user event) rather than from the mere presence of a paired tool_result.
+export type AskQuestionResolution =
+  | { state: "pending" }
+  | { state: "answered"; answerEvent: EventRecord }
+  | { state: "closed_unanswered"; resultEvent: EventRecord };
+
 export interface ToolPair {
   call: EventRecord | null;
   result: EventRecord | null;
   itemId: string;
   ts: string;
   sequence: number;
+  // Set only for AskUserQuestion pairs; attached by buildTranscriptItems so
+  // grouped runs and ordinary rows agree without re-scanning per card.
+  askResolution?: AskQuestionResolution;
 }
 
 export interface AskQuestionOption {
@@ -265,7 +276,7 @@ function CodexCard({
             event={event}
             questions={ask}
             onAnswer={onAnswerAskQuestion}
-            answered={false}
+            resolution={{ state: "pending" }}
           />
         );
       }
@@ -695,7 +706,7 @@ function ToolPairCard({
           event={call}
           questions={ask}
           onAnswer={onAnswerAskQuestion}
-          answered={Boolean(result)}
+          resolution={pair.askResolution ?? { state: "pending" }}
         />
       );
     }
@@ -839,7 +850,7 @@ function AskUserQuestionCard({
   event,
   questions,
   onAnswer,
-  answered,
+  resolution,
 }: {
   event: EventRecord;
   questions: AskUserQuestion[];
@@ -848,8 +859,12 @@ function AskUserQuestionCard({
     toolUseId?: string,
     answers?: AskAnswerEntry[],
   ) => Promise<boolean> | void;
-  answered: boolean;
+  resolution: AskQuestionResolution;
 }) {
+  const answered = resolution.state === "answered";
+  const closedUnanswered = resolution.state === "closed_unanswered";
+  const closedResultEvent =
+    resolution.state === "closed_unanswered" ? resolution.resultEvent : null;
   const [submitting, setSubmitting] = useState(false);
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -889,7 +904,7 @@ function AskUserQuestionCard({
   }
 
   async function submit() {
-    if (!onAnswer || answered || submitting) return;
+    if (!onAnswer || resolution.state !== "pending" || submitting) return;
     // Match the Claude binary's mapToolResultToToolResultBlockParam shape so
     // the model parses the answer the same way native Claude Code does:
     // `"<question>"="<answer>" user notes: <notes>`, joined by `, ` across
@@ -941,7 +956,7 @@ function AskUserQuestionCard({
     0,
   );
   const totalNotes = Object.values(notes).filter((value) => value.trim()).length;
-  const interactive = Boolean(onAnswer) && !answered;
+  const interactive = Boolean(onAnswer) && resolution.state === "pending";
   const canSubmit = interactive && !submitting && (totalPicked > 0 || totalNotes > 0);
 
   function handleNoteKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -962,6 +977,8 @@ function AskUserQuestionCard({
         <span className="tool-name">Ask you</span>
         {answered ? (
           <span className="badge tool-status complete">answered</span>
+        ) : closedUnanswered ? (
+          <span className="badge tool-status unanswered">not answered</span>
         ) : (
           <span className="badge tool-status pending">awaiting answer</span>
         )}
@@ -1095,6 +1112,20 @@ function AskUserQuestionCard({
             >
               Clear
             </button>
+          ) : null}
+        </div>
+      ) : null}
+      {closedUnanswered ? (
+        <div className="ask-question-closed">
+          <p className="ask-question-closed-note">
+            Closed without an answer — this question was cancelled, timed out, or
+            failed before anyone responded, so it can no longer be answered.
+          </p>
+          {closedResultEvent?.text?.trim() ? (
+            <details className="ask-question-diagnostic">
+              <summary>Provider result</summary>
+              <pre className="output">{closedResultEvent.text}</pre>
+            </details>
           ) : null}
         </div>
       ) : null}

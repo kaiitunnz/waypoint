@@ -4248,6 +4248,16 @@ html[data-theme="light"] .tool-call-run-children {
   border-color: var(--line);
 }
 
+/* Closed-without-answer: a terminally resolved question no one answered. Muted
+   like pending but marked with a dashed edge so it never reads as still
+   awaiting input; the "not answered" label carries the meaning (not color). */
+.badge.tool-status.unanswered {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+  border-style: dashed;
+}
+
 .approval {
   border-color: rgba(200, 169, 106, 0.42);
   box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.16);
@@ -7591,6 +7601,35 @@ html[data-theme="light"] .composer-send {
   gap: 8px;
   justify-content: space-between;
   margin-top: 12px;
+}
+
+.ask-question-closed {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.ask-question-closed-note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.ask-question-diagnostic > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ask-question-diagnostic > summary:hover {
+  color: var(--text);
+}
+
+.ask-question-diagnostic .output {
+  margin-top: 8px;
 }
 
 .ask-answer-summary {

@@ -401,9 +401,10 @@ def _ask_question_block(tool_id: str) -> dict:
     )
 
 
-def test_armed_ask_question_surfaces_as_waiting_input() -> None:
+def test_ask_question_surfaces_as_waiting_input() -> None:
+    # Every AskUserQuestion is an answerable card, regardless of whether the
+    # popup dismissal happened to line up with this exact record.
     norm = TranscriptNormalizer()
-    norm.arm_question_dismissal()
     record = _assistant_record(
         "msg1", [_ask_question_block("auq1")], stop_reason="tool_use"
     )
@@ -419,12 +420,11 @@ def test_armed_ask_question_surfaces_as_waiting_input() -> None:
     )
 
 
-def test_armed_ask_question_swallows_rejection_and_stays_waiting() -> None:
+def test_ask_question_swallows_rejection_and_stays_waiting() -> None:
     # Esc-ing the popup to surface it makes the TUI write a "user rejected"
     # result; it must be dropped so the card stays answerable and the session
-    # does not flip to idle.
+    # does not flip to idle — with no arming step required.
     norm = TranscriptNormalizer()
-    norm.arm_question_dismissal()
     norm.process_record(
         _assistant_record("msg1", [_ask_question_block("auq1")], stop_reason="tool_use")
     )
@@ -436,21 +436,26 @@ def test_armed_ask_question_swallows_rejection_and_stays_waiting() -> None:
     assert events == []
 
 
-def test_unarmed_ask_question_is_a_plain_tool_call() -> None:
-    # Without the dismissal latch (e.g. a historical record), AskUserQuestion
-    # is just a normal tool_call and a genuine rejection still resolves to idle.
+def test_ask_question_genuine_failure_surfaces_as_result() -> None:
+    # A non-dismissal terminal result (validation error, timeout) for a
+    # surfaced question is NOT a "user rejected" artifact: it must surface as a
+    # tool_result so the frontend renders the question closed-unanswered rather
+    # than falsely keeping it open.
     norm = TranscriptNormalizer()
-    events = norm.process_record(
+    norm.process_record(
         _assistant_record("msg1", [_ask_question_block("auq1")], stop_reason="tool_use")
     )
-    assert len(events) == 1
-    assert events[0].status == SessionStatus.RUNNING
-    rejection = _user_record([_tool_result_block("auq1", "rejected")])
-    rejection["toolUseResult"] = "User rejected tool use"
-    note = next(
-        e for e in norm.process_record(rejection) if e.kind == EventKind.SYSTEM_NOTE
+    failure = _user_record(
+        [
+            _tool_result_block(
+                "auq1", "InputValidationError: AskUserQuestion failed", is_error=True
+            )
+        ]
     )
-    assert note.status == SessionStatus.IDLE
+    events = norm.process_record(failure)
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    assert result.metadata["tool_use_id"] == "auq1"
+    assert result.metadata["is_error"] is True
 
 
 def test_injected_task_notification_produces_no_events() -> None:

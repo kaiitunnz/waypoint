@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from waypoint.schemas import (
     ProviderErrorState,
@@ -37,6 +37,9 @@ _USAGE_PATH = "/api/v1/admin/claude-user-usage"
 _FIVE_HOUR_MINUTES = 300
 _SEVEN_DAY_MINUTES = 7 * 24 * 60
 _MAX_CONCURRENCY = 4
+
+# Lumid sends this UTC instant for a window with no usage (no reset available).
+_NO_RESET_SENTINEL = datetime(1, 1, 1, tzinfo=UTC)
 
 
 # ── Lumid response envelopes (extra ignored) ──
@@ -62,8 +65,13 @@ class _UsageRow(BaseModel):
     seven_day_pct: float
     requests_7d: int | None = None
     last_ts: datetime | None = None
-    five_hour_resets_at: datetime | None = None
-    seven_day_resets_at: datetime | None = None
+    five_hour_reset: datetime | None = None
+    seven_day_reset: datetime | None = None
+
+    @field_validator("five_hour_reset", "seven_day_reset")
+    @classmethod
+    def _drop_no_reset_sentinel(cls, value: datetime | None) -> datetime | None:
+        return None if value == _NO_RESET_SENTINEL else value
 
 
 class _UsageData(BaseModel):
@@ -271,7 +279,7 @@ class LumidUsageProvider:
                 limit_tokens=usage.five_hour_tokens,
                 remaining_tokens=max(usage.five_hour_tokens - row.five_hour_tokens, 0),
                 window_minutes=_FIVE_HOUR_MINUTES,
-                resets_at=row.five_hour_resets_at,
+                resets_at=row.five_hour_reset,
             ),
             UsageWindow(
                 id="lumid-seven-day",
@@ -281,7 +289,7 @@ class LumidUsageProvider:
                 limit_tokens=usage.seven_day_tokens,
                 remaining_tokens=max(usage.seven_day_tokens - row.seven_day_tokens, 0),
                 window_minutes=_SEVEN_DAY_MINUTES,
-                resets_at=row.seven_day_resets_at,
+                resets_at=row.seven_day_reset,
             ),
         ]
         account_key = self._store.account_key_digest(self.id, email)

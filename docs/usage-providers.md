@@ -21,6 +21,10 @@ case-insensitively). Other users returned by the admin endpoint are never shown.
 It maps the row to a 5-hour and a 7-day window with used/limit tokens,
 percentages, and the 7-day request count.
 
+Each window's card shows its reset time when Lumid supplies one. Lumid's
+`0001-01-01T00:00:00Z` sentinel (no usage in the window), an omitted field, and
+`null` are hidden, independently per window.
+
 ### Setup
 
 1. **Provide the token(s) by environment variable.** Waypoint never reads a PAT

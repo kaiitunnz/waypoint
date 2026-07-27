@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +36,13 @@ def _usage_ok(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _row(
-    email: str = _EMAIL, five: int = 1_240_000, seven: int = 1_350_000
+    email: str = _EMAIL,
+    five: int = 1_240_000,
+    seven: int = 1_350_000,
+    five_reset: str | None = None,
+    seven_reset: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    row: dict[str, Any] = {
         "email": email,
         "five_hour_tokens": five,
         "seven_day_tokens": seven,
@@ -46,6 +51,11 @@ def _row(
         "requests_7d": 355,
         "last_ts": "2026-07-24T12:33:46.107Z",
     }
+    if five_reset is not None:
+        row["five_hour_reset"] = five_reset
+    if seven_reset is not None:
+        row["seven_day_reset"] = seven_reset
+    return row
 
 
 def _routes(
@@ -155,6 +165,67 @@ async def test_zero_usage_row_is_valid(
     assert result.ok_count == 1
     windows = {w.id: w for w in provider.buckets()[0].snapshot.windows}
     assert windows["lumid-five-hour"].used_tokens == 0
+    await provider.aclose()
+
+
+async def test_valid_resets_projected_to_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LUMID_TEST_TOKENS", "tok_a")
+    storage = _storage(tmp_path)
+    row = _row(
+        five_reset="2026-07-27T05:00:00Z",
+        seven_reset="2026-08-01T00:00:00Z",
+    )
+    provider = _provider(storage, _routes(_user_ok(), _usage_ok([row])))
+    result = await provider.refresh(force=True)
+    assert result.ok_count == 1
+    windows = {w.id: w for w in provider.buckets()[0].snapshot.windows}
+    assert windows["lumid-five-hour"].resets_at == datetime(
+        2026, 7, 27, 5, 0, 0, tzinfo=UTC
+    )
+    assert windows["lumid-seven-day"].resets_at == datetime(
+        2026, 8, 1, 0, 0, 0, tzinfo=UTC
+    )
+    await provider.aclose()
+
+
+async def test_sentinel_reset_is_hidden_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LUMID_TEST_TOKENS", "tok_a")
+    storage = _storage(tmp_path)
+    row = _row(
+        five_reset="0001-01-01T00:00:00Z",
+        seven_reset="2026-08-01T00:00:00Z",
+    )
+    provider = _provider(storage, _routes(_user_ok(), _usage_ok([row])))
+    result = await provider.refresh(force=True)
+    assert result.ok_count == 1
+    windows = {w.id: w for w in provider.buckets()[0].snapshot.windows}
+    assert windows["lumid-five-hour"].resets_at is None
+    assert windows["lumid-seven-day"].resets_at == datetime(
+        2026, 8, 1, 0, 0, 0, tzinfo=UTC
+    )
+    await provider.aclose()
+
+
+@pytest.mark.parametrize("reset", [None, "null"])
+async def test_absent_or_null_reset_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reset: str | None
+) -> None:
+    monkeypatch.setenv("LUMID_TEST_TOKENS", "tok_a")
+    storage = _storage(tmp_path)
+    row = _row()
+    if reset == "null":
+        row["five_hour_reset"] = None
+        row["seven_day_reset"] = None
+    provider = _provider(storage, _routes(_user_ok(), _usage_ok([row])))
+    result = await provider.refresh(force=True)
+    assert result.ok_count == 1
+    windows = {w.id: w for w in provider.buckets()[0].snapshot.windows}
+    assert windows["lumid-five-hour"].resets_at is None
+    assert windows["lumid-seven-day"].resets_at is None
     await provider.aclose()
 
 

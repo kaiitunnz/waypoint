@@ -1082,9 +1082,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # Stash structured per-question answers + notes so the frontend
         # renders this user_input as a styled "answers" card instead of
         # the raw `"<question>"="<answer>" user notes: …` payload Claude
-        # was tuned around. Persist the resolved tool_use_id — the id the
-        # adapter actually answered, including when the caller omitted one —
-        # so the transcript can correlate this durable answer to its question.
+        # was tuned around. Persist resolved_tool_use_id so the transcript
+        # can correlate this answer to its question.
         extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
         if answers:
             extra["answers"] = answers

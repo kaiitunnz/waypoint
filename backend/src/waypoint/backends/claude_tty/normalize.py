@@ -99,10 +99,9 @@ class TranscriptNormalizer:
         # must fire once, not once per record.
         self._result_emitted_ids: set[str] = set()
         # tool_use ids of surfaced AskUserQuestion cards, so the "user rejected"
-        # result Waypoint's Esc-dismissal produces can be swallowed (the card
-        # stays answerable). Populated for every AskUserQuestion, so a question
-        # whose dismissal did not line up with a one-shot arm is still
-        # answerable; a non-rejection failure result for the id surfaces instead.
+        # result Waypoint's Esc-dismissal produces can be swallowed and the card
+        # stays answerable. A non-rejection failure result for the id surfaces
+        # instead.
         self._dismissed_question_ids: set[str] = set()
         # tool_use ids of file-edit calls, so the matching tool_result record
         # (which carries the applied diff in its toolUseResult) can attach a
@@ -239,12 +238,9 @@ class TranscriptNormalizer:
                 tool_use_id = str(block.get("id") or "")
                 tool_name = str(block.get("name") or "tool")
                 if tool_name == "AskUserQuestion":
-                    # Every AskUserQuestion is an answerable card, independent of
-                    # whether _poll_dialog's dismissal happened to line up with
-                    # this record. The paired "user rejected" result Waypoint's
-                    # Esc produces is suppressed in _process_user so the card
-                    # stays answerable; a genuine failure result surfaces there
-                    # instead and renders the question closed-unanswered.
+                    # Every AskUserQuestion surfaces as an answerable card; the
+                    # paired "user rejected" result Waypoint's Esc produces is
+                    # suppressed in _process_user.
                     if tool_use_id:
                         self._dismissed_question_ids.add(tool_use_id)
                     events.append(

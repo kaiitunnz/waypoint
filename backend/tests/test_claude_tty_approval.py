@@ -542,9 +542,9 @@ async def test_question_drain_registers_pending() -> None:
 
 
 async def test_question_drain_stays_answerable_after_rejection() -> None:
-    # A question whose Esc-dismissal did not line up with a one-shot arm still
-    # drains as an answerable WAITING_INPUT card: its "user rejected" result is
-    # swallowed and the pending question stays registered so an answer routes.
+    # A dismissed question drains as an answerable WAITING_INPUT card: its "user
+    # rejected" result is swallowed and the pending question stays registered so
+    # an answer routes.
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     runtime = _make_runtime(session, _load("ready.txt"))

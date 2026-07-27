@@ -3915,9 +3915,7 @@ type TranscriptItem =
 
 // Positive proof that Waypoint accepted a human answer to an AskUserQuestion:
 // a user_input event tagged ask_user_question_answer carrying the resolved
-// tool_use_id. This — never the presence of a paired tool_result — is what
-// promotes a question card to "answered". Keeping the latest by sequence makes
-// replay deterministic if a malformed duplicate answer event exists.
+// tool_use_id. The latest by sequence wins.
 function indexAskQuestionAnswerEvents(
   events: EventRecord[],
 ): Map<string, EventRecord> {
@@ -3996,9 +3994,8 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
 
-  // Resolve each AskUserQuestion pair's answer state once, from durable answer
-  // evidence rather than Boolean(result), and attach it so every card reads the
-  // same derivation.
+  // Resolve each AskUserQuestion pair's answer state once and attach it so
+  // every card reads the same derivation.
   for (const item of result) {
     if (item.kind !== "pair" || !item.pair.call) continue;
     if (readToolName(item.pair.call) !== "AskUserQuestion") continue;

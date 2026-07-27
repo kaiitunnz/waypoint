@@ -35,8 +35,8 @@ import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
 
 // Three-state resolution of an AskUserQuestion, derived once over the loaded
-// events from durable answer evidence (a correlated ask_user_question_answer
-// user event) rather than from the mere presence of a paired tool_result.
+// events from durable answer evidence: a correlated ask_user_question_answer
+// user event.
 export type AskQuestionResolution =
   | { state: "pending" }
   | { state: "answered"; answerEvent: EventRecord }

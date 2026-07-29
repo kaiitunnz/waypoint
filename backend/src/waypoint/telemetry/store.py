@@ -30,6 +30,7 @@ from waypoint.telemetry.facts import (
     TelemetryFilter,
     TelemetryRange,
     ToolCallFact,
+    ToolOutcome,
     TurnFact,
     TurnKind,
 )
@@ -280,7 +281,7 @@ class TelemetryStore:
         existing = self._conn.execute(
             """
             SELECT revision, occurred_at, backend, model_at_turn, repo_name,
-                   src_source, transport, is_child
+                   src_source, transport, is_child, outcome, duration_ms
             FROM telemetry_facts WHERE kind = ? AND source = ? AND fact_id = ?
             """,
             (fact.kind, fact.source, fact.fact_id),
@@ -288,7 +289,10 @@ class TelemetryStore:
         if existing is not None and existing["revision"] > fact.revision:
             return None
         if existing is not None and existing["revision"] == fact.revision:
-            return None
+            upgraded = self._upgraded_tool_outcome(existing, fact)
+            if upgraded is None:
+                return None
+            fact = upgraded
 
         row = _row_from_fact(fact)
         columns = list(row)
@@ -348,6 +352,33 @@ class TelemetryStore:
             )
         )
         return keys_to_recompute
+
+    @staticmethod
+    def _upgraded_tool_outcome(
+        existing: sqlite3.Row, fact: TelemetryFact
+    ) -> TelemetryFact | None:
+        """Resolve a same-revision collision for a tool-call fact.
+
+        A tool call surfaces as several TOOL_RESULT events sharing one id: a
+        preview/streamed chunk with no outcome, then the terminal result that
+        carries one. All map to the same ``(fact_id, revision)``, so without
+        this the first (outcome-less) result would lock the fact at ``UNKNOWN``
+        and the terminal outcome would be dropped as a stale-revision no-op.
+
+        Let the terminal outcome supersede an ``UNKNOWN`` fact at the same
+        revision, carrying the earlier duration forward when the terminal
+        result lacks one (the paired call was already consumed). Every other
+        same-revision case stays a no-op.
+        """
+        if not isinstance(fact, ToolCallFact):
+            return None
+        if existing["outcome"] != ToolOutcome.UNKNOWN.value:
+            return None
+        if fact.outcome == ToolOutcome.UNKNOWN:
+            return None
+        if fact.duration_ms is None and existing["duration_ms"] is not None:
+            return fact.model_copy(update={"duration_ms": existing["duration_ms"]})
+        return fact
 
     # ── maintenance ───────────────────────────────────────────────────────
 

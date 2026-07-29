@@ -310,6 +310,37 @@ def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None
     return None
 
 
+# Codex tool items that carry a terminal ``status`` (and, for commands, an
+# ``exitCode``) on completion. Their outcome maps onto the backend-neutral
+# ``is_error`` metadata flag that telemetry reads, keeping the telemetry path
+# free of any Codex-specific branch.
+_OUTCOME_ITEM_TYPES = frozenset(
+    {"commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall"}
+)
+
+
+def tool_result_is_error(item_type: str | None, item: dict[str, Any]) -> bool | None:
+    """Map a completed Codex tool item to the neutral ``is_error`` flag.
+
+    Returns ``True``/``False`` when the outcome is determinable and ``None``
+    when it is not (still running, or an item type without an outcome), so the
+    adapter only stamps ``is_error`` when there is a real signal — absent data
+    must stay ``UNKNOWN`` in telemetry, never ``SUCCEEDED``.
+    """
+    if item_type not in _OUTCOME_ITEM_TYPES:
+        return None
+    status = item.get("status")
+    if status == "completed":
+        return False
+    if status in {"failed", "declined"}:
+        return True
+    if item_type == "commandExecution":
+        exit_code = item.get("exitCode")
+        if isinstance(exit_code, int):
+            return exit_code != 0
+    return None
+
+
 _PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
 
 

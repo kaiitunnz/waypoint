@@ -315,7 +315,13 @@ def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None
 # ``is_error`` metadata flag that telemetry reads, keeping the telemetry path
 # free of any Codex-specific branch.
 _OUTCOME_ITEM_TYPES = frozenset(
-    {"commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall"}
+    {
+        "commandExecution",
+        "fileChange",
+        "mcpToolCall",
+        "dynamicToolCall",
+        "collabAgentToolCall",
+    }
 )
 
 

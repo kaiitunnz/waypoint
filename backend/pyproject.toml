@@ -12,7 +12,7 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.10.0",
   "croniter>=6.0.0",
-  "fastapi>=0.139.0",
+  "fastapi>=0.141.0",
   "openai-codex==0.144.4",
   "pydantic>=2.11.0",
   "pyte>=0.8.2",

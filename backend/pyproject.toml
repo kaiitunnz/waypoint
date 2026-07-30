@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-  "aiohttp>=3.10.0",
+  "aiohttp>=3.14.3",
   "croniter>=6.0.0",
   "fastapi>=0.141.0",
   "openai-codex==0.144.4",

@@ -22,7 +22,7 @@ from waypoint.backends.codex.normalize import (
     diff_preview_for_notification,
     extract_tool_name,
     plan_metadata_for_item,
-    tool_result_is_error,
+    set_completed_outcome,
 )
 from waypoint.backends.diff_preview import preview_to_metadata
 from waypoint.schemas import EventKind, EventRecord
@@ -103,9 +103,7 @@ def _envelope(
     if tool_name:
         metadata["tool_name"] = tool_name
     if method == "item/completed":
-        is_error = tool_result_is_error(item_type, item_dict)
-        if is_error is not None:
-            metadata["is_error"] = is_error
+        set_completed_outcome(metadata, item_type, item_dict)
     plan_envelope = plan_metadata_for_item(item_dict)
     if plan_envelope is not None:
         metadata["plan"] = plan_envelope

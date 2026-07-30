@@ -357,18 +357,11 @@ class TelemetryStore:
     def _upgraded_tool_outcome(
         existing: sqlite3.Row, fact: TelemetryFact
     ) -> TelemetryFact | None:
-        """Resolve a same-revision collision for a tool-call fact.
-
-        A tool call surfaces as several TOOL_RESULT events sharing one id: a
-        preview/streamed chunk with no outcome, then the terminal result that
-        carries one. All map to the same ``(fact_id, revision)``, so without
-        this the first (outcome-less) result would lock the fact at ``UNKNOWN``
-        and the terminal outcome would be dropped as a stale-revision no-op.
-
-        Let the terminal outcome supersede an ``UNKNOWN`` fact at the same
-        revision, carrying the earlier duration forward when the terminal
-        result lacks one (the paired call was already consumed). Every other
-        same-revision case stays a no-op.
+        """Let a terminal tool outcome supersede an ``UNKNOWN`` result at the
+        same revision (a preview/streamed result and the outcome-bearing one
+        share a ``(fact_id, revision)``), carrying the earlier duration forward
+        when the terminal result has none. Any other same-revision write is a
+        no-op.
         """
         if not isinstance(fact, ToolCallFact):
             return None

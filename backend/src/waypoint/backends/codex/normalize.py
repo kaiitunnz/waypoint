@@ -310,10 +310,8 @@ def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None
     return None
 
 
-# Codex tool items that carry a terminal ``status`` (and, for commands, an
-# ``exitCode``) on completion. Their outcome maps onto the backend-neutral
-# ``is_error`` metadata flag that telemetry reads, keeping the telemetry path
-# free of any Codex-specific branch.
+# Codex item types whose completed form carries a terminal status (commands
+# also carry an exitCode).
 _OUTCOME_ITEM_TYPES = frozenset(
     {
         "commandExecution",
@@ -326,13 +324,8 @@ _OUTCOME_ITEM_TYPES = frozenset(
 
 
 def tool_result_is_error(item_type: str | None, item: dict[str, Any]) -> bool | None:
-    """Map a completed Codex tool item to the neutral ``is_error`` flag.
-
-    Returns ``True``/``False`` when the outcome is determinable and ``None``
-    when it is not (still running, or an item type without an outcome), so the
-    adapter only stamps ``is_error`` when there is a real signal — absent data
-    must stay ``UNKNOWN`` in telemetry, never ``SUCCEEDED``.
-    """
+    """Map a completed Codex tool item's status/exitCode to the neutral
+    ``is_error`` flag, returning ``None`` when the outcome is indeterminate."""
     if item_type not in _OUTCOME_ITEM_TYPES:
         return None
     status = item.get("status")
@@ -345,6 +338,16 @@ def tool_result_is_error(item_type: str | None, item: dict[str, Any]) -> bool | 
         if isinstance(exit_code, int):
             return exit_code != 0
     return None
+
+
+def set_completed_outcome(
+    metadata: dict[str, Any], item_type: str | None, item: dict[str, Any]
+) -> None:
+    """Stamp ``metadata["is_error"]`` for a completed tool item when its
+    outcome is determinable."""
+    is_error = tool_result_is_error(item_type, item)
+    if is_error is not None:
+        metadata["is_error"] = is_error
 
 
 _PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")

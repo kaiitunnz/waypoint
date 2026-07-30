@@ -87,6 +87,10 @@ def test_command_execution_item_synthesizes_paired_tool_call_and_result() -> Non
 
     assert call.metadata["method"] == "item/started"
     assert result.metadata["method"] == "item/completed"
+    # The completed result carries the neutral outcome flag so imported
+    # sessions resolve tool outcomes in telemetry, not just live ones.
+    assert "is_error" not in call.metadata
+    assert result.metadata["is_error"] is False
 
 
 def test_unknown_item_type_becomes_preserved_passthrough_event() -> None:

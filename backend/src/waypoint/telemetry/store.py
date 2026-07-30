@@ -30,6 +30,7 @@ from waypoint.telemetry.facts import (
     TelemetryFilter,
     TelemetryRange,
     ToolCallFact,
+    ToolOutcome,
     TurnFact,
     TurnKind,
 )
@@ -280,7 +281,7 @@ class TelemetryStore:
         existing = self._conn.execute(
             """
             SELECT revision, occurred_at, backend, model_at_turn, repo_name,
-                   src_source, transport, is_child
+                   src_source, transport, is_child, outcome, duration_ms
             FROM telemetry_facts WHERE kind = ? AND source = ? AND fact_id = ?
             """,
             (fact.kind, fact.source, fact.fact_id),
@@ -288,7 +289,10 @@ class TelemetryStore:
         if existing is not None and existing["revision"] > fact.revision:
             return None
         if existing is not None and existing["revision"] == fact.revision:
-            return None
+            upgraded = self._upgraded_tool_outcome(existing, fact)
+            if upgraded is None:
+                return None
+            fact = upgraded
 
         row = _row_from_fact(fact)
         columns = list(row)
@@ -348,6 +352,26 @@ class TelemetryStore:
             )
         )
         return keys_to_recompute
+
+    @staticmethod
+    def _upgraded_tool_outcome(
+        existing: sqlite3.Row, fact: TelemetryFact
+    ) -> TelemetryFact | None:
+        """Let a terminal tool outcome supersede an ``UNKNOWN`` result at the
+        same revision (a preview/streamed result and the outcome-bearing one
+        share a ``(fact_id, revision)``), carrying the earlier duration forward
+        when the terminal result has none. Any other same-revision write is a
+        no-op.
+        """
+        if not isinstance(fact, ToolCallFact):
+            return None
+        if existing["outcome"] != ToolOutcome.UNKNOWN.value:
+            return None
+        if fact.outcome == ToolOutcome.UNKNOWN:
+            return None
+        if fact.duration_ms is None and existing["duration_ms"] is not None:
+            return fact.model_copy(update={"duration_ms": existing["duration_ms"]})
+        return fact
 
     # ── maintenance ───────────────────────────────────────────────────────
 

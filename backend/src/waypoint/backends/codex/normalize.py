@@ -310,6 +310,46 @@ def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None
     return None
 
 
+# Codex item types whose completed form carries a terminal status (commands
+# also carry an exitCode).
+_OUTCOME_ITEM_TYPES = frozenset(
+    {
+        "commandExecution",
+        "fileChange",
+        "mcpToolCall",
+        "dynamicToolCall",
+        "collabAgentToolCall",
+    }
+)
+
+
+def tool_result_is_error(item_type: str | None, item: dict[str, Any]) -> bool | None:
+    """Map a completed Codex tool item's status/exitCode to the neutral
+    ``is_error`` flag, returning ``None`` when the outcome is indeterminate."""
+    if item_type not in _OUTCOME_ITEM_TYPES:
+        return None
+    status = item.get("status")
+    if status == "completed":
+        return False
+    if status in {"failed", "declined"}:
+        return True
+    if item_type == "commandExecution":
+        exit_code = item.get("exitCode")
+        if isinstance(exit_code, int):
+            return exit_code != 0
+    return None
+
+
+def set_completed_outcome(
+    metadata: dict[str, Any], item_type: str | None, item: dict[str, Any]
+) -> None:
+    """Stamp ``metadata["is_error"]`` for a completed tool item when its
+    outcome is determinable."""
+    is_error = tool_result_is_error(item_type, item)
+    if is_error is not None:
+        metadata["is_error"] = is_error
+
+
 _PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
 
 

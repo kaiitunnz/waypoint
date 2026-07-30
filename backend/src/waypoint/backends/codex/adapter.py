@@ -24,6 +24,7 @@ from waypoint.backends.codex.normalize import (
     payload_to_dict,
     plan_metadata_for_item,
     plan_todo_items,
+    set_completed_outcome,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.backends.events import (
@@ -659,6 +660,8 @@ class CodexAppServerAdapter:
                         tool_name = extract_tool_name(item_type, item)
                         if tool_name:
                             metadata["tool_name"] = tool_name
+                        if notification.method == "item/completed":
+                            set_completed_outcome(metadata, item_type, item)
                         plan_envelope = plan_metadata_for_item(item)
                         if plan_envelope is not None:
                             metadata["plan"] = plan_envelope
@@ -677,7 +680,11 @@ class CodexAppServerAdapter:
                         and notification.method == "item/completed"
                         and item_id in state.streamed_tool_result_ids
                         and diff_preview is None
+                        and "is_error" not in metadata
                     ):
+                        # An outcome-bearing completed is kept so telemetry can
+                        # resolve the streamed call; the frontend merges it into
+                        # the delta by item_id.
                         continue
                     await self._emit_event(
                         state.session_id,

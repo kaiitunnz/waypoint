@@ -350,6 +350,121 @@ def test_duplicate_tool_result_event_is_deduped(tmp_path: Path) -> None:
     assert rows["n"] == 1
 
 
+def test_terminal_outcome_supersedes_earlier_unknown_result(tmp_path: Path) -> None:
+    """A tool call whose first result carries no outcome (a streamed chunk or
+    a diff preview) then a terminal result that does — both at revision 1 for
+    the same id — must resolve to the terminal outcome, not stay UNKNOWN."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    call_ts = datetime.now(UTC)
+    result_ts = call_ts + timedelta(milliseconds=180)
+
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=call_ts,
+            kind=EventKind.TOOL_CALL,
+            text="$ pytest",
+            metadata={"item_id": "cmd-1", "tool_name": "Bash"},
+            sequence=1,
+        ),
+    )
+    # Streamed output chunk: shares the id, carries no outcome.
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=call_ts + timedelta(milliseconds=5),
+            kind=EventKind.TOOL_RESULT,
+            text="line one\n",
+            metadata={
+                "item_id": "cmd-1",
+                "method": "item/commandExecution/outputDelta",
+            },
+            sequence=2,
+        ),
+    )
+    # Terminal completed result: carries the outcome.
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=result_ts,
+            kind=EventKind.TOOL_RESULT,
+            text="$ pytest\nline one\n",
+            metadata={
+                "item_id": "cmd-1",
+                "tool_name": "Bash",
+                "method": "item/completed",
+                "is_error": False,
+            },
+            sequence=3,
+        ),
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "tool_call"]
+    assert len(rows) == 1
+    assert rows[0]["fact_id"] == "cmd-1"
+    assert rows[0]["tool_name"] == "Bash"
+    assert rows[0]["outcome"] == "succeeded"
+    # Duration from the earlier chunk (which consumed the paired call) is
+    # carried forward when the terminal result lacks its own.
+    assert rows[0]["duration_ms"] == 5
+
+
+def test_terminal_outcome_is_not_downgraded_by_later_unknown(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.TOOL_CALL,
+            text="$ pytest",
+            metadata={"item_id": "cmd-2", "tool_name": "Bash"},
+            sequence=1,
+        ),
+    )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.TOOL_RESULT,
+            text="ok",
+            metadata={"item_id": "cmd-2", "tool_name": "Bash", "is_error": True},
+            sequence=2,
+        ),
+    )
+    # A stray later result without an outcome must not overwrite the failure.
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.TOOL_RESULT,
+            text="trailing chunk",
+            metadata={
+                "item_id": "cmd-2",
+                "method": "item/commandExecution/outputDelta",
+            },
+            sequence=3,
+        ),
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "tool_call"]
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "failed"
+
+
 def test_approval_request_then_decision_updates_fact(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     session = _make_session(storage, "s1")

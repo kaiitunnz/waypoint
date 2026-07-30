@@ -12,7 +12,36 @@ from waypoint.backends.codex.adapter import (
     CodexSessionState,
     _context_usage_snapshot_from_thread_token_usage,
 )
+from waypoint.backends.codex.normalize import tool_result_is_error
 from waypoint.schemas import EventKind, SessionStatus
+
+
+@pytest.mark.parametrize(
+    ("item_type", "item", "expected"),
+    [
+        ("commandExecution", {"status": "completed", "exitCode": 0}, False),
+        ("commandExecution", {"status": "failed", "exitCode": 1}, True),
+        ("commandExecution", {"status": "declined"}, True),
+        ("commandExecution", {"exitCode": 0}, False),
+        ("commandExecution", {"exitCode": 2}, True),
+        ("commandExecution", {"status": "inProgress"}, None),
+        ("commandExecution", {}, None),
+        ("fileChange", {"status": "completed"}, False),
+        ("fileChange", {"status": "failed"}, True),
+        ("mcpToolCall", {"status": "completed"}, False),
+        ("mcpToolCall", {"status": "failed"}, True),
+        ("dynamicToolCall", {"status": "failed"}, True),
+        ("collabAgentToolCall", {"status": "completed"}, False),
+        ("collabAgentToolCall", {"status": "failed"}, True),
+        ("webSearch", {"status": "completed"}, None),
+        ("agentMessage", {"status": "completed"}, None),
+        (None, {"status": "completed"}, None),
+    ],
+)
+def test_tool_result_is_error_maps_codex_outcomes(
+    item_type: str | None, item: dict[str, Any], expected: bool | None
+) -> None:
+    assert tool_result_is_error(item_type, item) is expected
 
 
 @dataclass
@@ -556,7 +585,7 @@ async def test_terminate_session_returns_false_for_unknown_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> None:
+async def test_streamed_command_completed_carries_outcome_for_telemetry() -> None:
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
     adapter, fake = make_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
@@ -577,6 +606,63 @@ async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> No
                     "command": "pytest",
                     "aggregatedOutput": "line one\n",
                     "status": "completed",
+                    "exitCode": 0,
+                }
+            },
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed",
+            {"turn": {"id": "turn-1", "status": "completed"}},
+        )
+    )
+
+    await adapter.send_input("sess", "run pytest")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    tool_results = [entry for entry in emitted if entry[1] == EventKind.TOOL_RESULT]
+    # The streamed delta still renders output; the completed event is kept
+    # (not suppressed) because it carries the terminal outcome telemetry needs.
+    # The frontend merges the pair by item_id, so this is not a visible dup.
+    assert len(tool_results) == 2
+    assert tool_results[0][2] == "line one\n"
+    assert tool_results[0][3]["method"] == "item/commandExecution/outputDelta"
+    assert "is_error" not in tool_results[0][3]
+    completed = tool_results[1][3]
+    assert completed["method"] == "item/completed"
+    assert completed["item_id"] == "cmd-1"
+    assert completed["is_error"] is False
+    assert fake.turn_notification_ids == ["turn-1", "turn-1", "turn-1"]
+    assert fake.unregistered_turn_notification_ids == ["turn-1"]
+
+
+@pytest.mark.asyncio
+async def test_streamed_command_completed_without_outcome_stays_suppressed() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/commandExecution/outputDelta",
+            {"itemId": "cmd-1", "delta": "line one\n"},
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/completed",
+            {
+                "item": {
+                    "id": "cmd-1",
+                    "type": "commandExecution",
+                    "command": "pytest",
+                    "aggregatedOutput": "line one\n",
+                    # No terminal status/exitCode → no outcome → still a pure
+                    # transcript duplicate, so it stays suppressed.
+                    "status": "inProgress",
                 }
             },
         )
@@ -596,8 +682,6 @@ async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> No
     tool_results = [entry for entry in emitted if entry[1] == EventKind.TOOL_RESULT]
     assert len(tool_results) == 1
     assert tool_results[0][2] == "line one\n"
-    assert fake.turn_notification_ids == ["turn-1", "turn-1", "turn-1"]
-    assert fake.unregistered_turn_notification_ids == ["turn-1"]
 
 
 @pytest.mark.asyncio

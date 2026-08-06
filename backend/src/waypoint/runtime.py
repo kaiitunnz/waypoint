@@ -151,17 +151,13 @@ _USAGE_PROVIDER_HTTP_TIMEOUT = 15.0
 
 @dataclass(frozen=True)
 class CloneLaunchSnapshot:
-    """Runtime-internal effective-settings snapshot for a ``/new`` clone-launch.
+    """A source session's effective launch env and profile label, for ``/new``.
 
-    Carries the source session's already-effective launch environment and
-    account-profile provenance so ``create_session`` reuses them verbatim
-    instead of re-deriving env or re-reading a possibly-edited profile. Never a
-    public request field: it cannot be selected by an HTTP caller, so cloning
-    stays a server-side copy of a private snapshot.
+    Runtime-only — no public request field carries it, so an HTTP caller cannot
+    supply a launch environment.
     """
 
     launch_env: dict[str, str]
-    account_profile_id: str | None
     account_profile_label: str | None
 
 
@@ -1440,10 +1436,9 @@ class SessionRuntime:
             request.launch_target_id, request.backend
         )
         await self._require_live_master(launch_target)
-        # A clone reuses the source's already-effective launch env and profile
-        # provenance verbatim; it must not re-read mutable profile config, so the
-        # remote-home warm (a profile-config read) is skipped along with the
-        # profile-env overlay below.
+        # A clone reuses the source's effective env, so skip the profile-config
+        # reads (remote-home warm here, profile-env overlay and transcript store
+        # below) that would re-resolve a possibly-edited profile.
         if clone_snapshot is None:
             await self._warm_remote_home_for_profile(
                 launch_target, request.backend, request.account_profile_id
@@ -1602,8 +1597,6 @@ class SessionRuntime:
             request.account_profile_id,
             launch_target,
         )
-        # Skipped for a clone: establishing a shared transcript store re-reads the
-        # profile's transcript policy, and the source already owns its store.
         if clone_snapshot is None:
             await self._ensure_new_session_profile_transcript_store(
                 request.backend,
@@ -2369,12 +2362,10 @@ class SessionRuntime:
     async def clone_session_launch(self, session_id: str) -> SessionRecord:
         """Start a fresh managed session from a source session's launch settings.
 
-        Backs the ``/new`` control command: reads the private source record on
-        the server and reuses the ordinary managed-launch pipeline so the child
-        inherits the source's effective launch environment (secrets included),
-        pinned transport, and account-profile provenance without any env value
-        crossing the API boundary. It is not a conversation fork — no events,
-        thread, or transport state are copied. The child gets a new id, a fresh
+        Backs ``/new``: reads the private source record and reuses the managed
+        create pipeline so the child inherits the source's effective launch env
+        (secrets included), pinned transport, and profile provenance. No events,
+        thread, or transport state are copied; the child gets a new id, fresh
         title, and recomputed repo/branch metadata.
         """
         source = self.get_session(session_id)
@@ -2383,10 +2374,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
-        # Copy only the non-secret launch-affecting fields. The transport is
-        # pinned explicitly so ``/new`` reproduces the source's channel rather
-        # than re-deriving a possibly-newer default. launch_env is never placed
-        # on the request; it travels only inside the private snapshot below.
+        # Copy the non-secret launch fields; pin the transport so the child keeps
+        # the source's channel. launch_env travels only in the private snapshot.
         request = SessionCreateRequest(
             backend=source.backend,
             cwd=source.cwd,
@@ -2402,7 +2391,6 @@ class SessionRuntime:
         )
         snapshot = CloneLaunchSnapshot(
             launch_env=dict(source.launch_env),
-            account_profile_id=source.account_profile_id,
             account_profile_label=source.account_profile_label,
         )
         return await self.create_session(request, clone_snapshot=snapshot)

@@ -142,14 +142,13 @@ async def test_clone_builds_request_and_snapshot_from_source(
     assert request.title is None
     assert request.launch_env == {}
     assert "launch_env" not in request.model_fields_set
-    # The snapshot carries the effective env + profile provenance verbatim.
+    # The snapshot carries the effective env + profile label verbatim.
     assert snapshot is not None
     assert snapshot.launch_env == {
         "SECRET_TOKEN": "sk-super-secret",
         "CODEX_HOME": "/snap/dir",
     }
     assert snapshot.launch_env is not source.launch_env
-    assert snapshot.account_profile_id == "work"
     assert snapshot.account_profile_label == "Work"
     assert result.id == "codex-child"
 

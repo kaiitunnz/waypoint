@@ -371,10 +371,9 @@ export async function forkSession(
   return body.session as SessionRecord;
 }
 
-// Clone the source session's launch settings into a fresh managed session.
-// Body-less by design: the source's launch_env (which may hold secrets) is
-// copied server-side and never serialized to the browser, so unlike
-// createSession there is no payload to assemble.
+// Clone a source session's launch settings into a fresh managed session.
+// Body-less: the source's launch_env (which may hold secrets) is copied
+// server-side and never serialized to the browser.
 export async function cloneSession(
   host: string,
   token: string,

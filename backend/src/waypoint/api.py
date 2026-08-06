@@ -1115,10 +1115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        # Server-side clone-launch for ``/new``: no request body, so no
-        # environment mapping ever crosses the API boundary. The source's
-        # private launch_env is copied only within the runtime; the response is
-        # the normal redacted session shape.
+        # Body-less clone-launch for ``/new``: the source's private launch_env is
+        # copied inside the runtime and never crosses the API boundary.
         session = await context.runtime.clone_session_launch(session_id)
         return {"session": session.model_dump(mode="json")}
 

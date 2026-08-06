@@ -1015,9 +1015,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       if (newArgs !== null) {
         try {
           // Clone server-side so the child inherits the source's private
-          // launch_env (env vars, config-dir/account profile) that a public
-          // SessionRecord can't carry. The response is the normal redacted
-          // session shape.
+          // launch_env (env vars, account/config-dir profile) that a public
+          // SessionRecord can't carry.
           const created = await cloneSession(host, token, sessionId);
           if (newArgs) {
             await sendInput(host, token, created.id, newArgs);

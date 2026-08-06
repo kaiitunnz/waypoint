@@ -3597,6 +3597,10 @@ async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
 
     class CodexForkFake(FakeCodexRuntimeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fork_env: dict[str, str] | None = None
+
         async def fork_session(
             self,
             session_id: str,
@@ -3611,11 +3615,15 @@ async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
         ) -> str:
             assert session_id.startswith("codex-")
             assert (cwd, thread_id) == ("/tmp/project", "thread-1")
+            self.fork_env = dict(launch_env or {})
             return "thread-forked"
 
     plugin = _codex_plugin(runtime)
-    plugin.adapter = cast(Any, CodexForkFake())
-    session = make_session(settings)
+    adapter = CodexForkFake()
+    plugin.adapter = cast(Any, adapter)
+    session = make_session(
+        settings, launch_env={"SECRET_TOKEN": "sk-fork", "CODEX_HOME": "/c"}
+    )
     storage.create_session(session)
 
     forked = await runtime.fork_session("sess")
@@ -3623,6 +3631,70 @@ async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
     assert forked.backend == "codex"
     assert forked.title == "Session (fork #1)"
     assert forked.transport_state == {"thread_id": "thread-forked"}
+    # The child inherits the source's private launch env, and the process env
+    # carries the secret with a freshly regenerated WAYPOINT_SESSION_ID.
+    assert forked.launch_env == {"SECRET_TOKEN": "sk-fork", "CODEX_HOME": "/c"}
+    assert adapter.fork_env is not None
+    assert adapter.fork_env["SECRET_TOKEN"] == "sk-fork"
+    assert adapter.fork_env["WAYPOINT_SESSION_ID"] == forked.id
+
+
+@pytest.mark.asyncio
+async def test_runtime_fork_claude_session_propagates_launch_env(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    # Isolate the fork env contract from background command-completion discovery,
+    # which for claude spawns on-disk/subprocess probing off the fake adapter.
+    monkeypatch.setattr(runtime, "_warm_command_completions", lambda *a, **k: None)
+
+    class ClaudeForkFake(FakeClaudeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fork_env: dict[str, str] | None = None
+            self.fork_from: str | None = None
+
+        async def start_session(
+            self,
+            session_id: str,
+            cwd: str,
+            claude_session_id: str,
+            launch_factory_override: Any = None,
+            permission_mode: str | None = None,
+            model: str | None = None,
+            effort: str | None = None,
+            custom_args: list[str] | None = None,
+            launch_env: dict[str, str] | None = None,
+            fork_from_claude_session_id: str | None = None,
+        ) -> str:
+            self.fork_env = dict(launch_env or {})
+            self.fork_from = fork_from_claude_session_id
+            return claude_session_id
+
+    plugin = _claude_plugin(runtime)
+    adapter = ClaudeForkFake()
+    plugin.adapter = cast(Any, adapter)
+    session = make_session(
+        settings,
+        backend="claude_code",
+        transport="claude_cli",
+        launch_env={"SECRET_TOKEN": "sk-claude", "CLAUDE_CONFIG_DIR": "/cfg"},
+    )
+    storage.create_session(session)
+
+    forked = await runtime.fork_session("sess")
+
+    assert forked.backend == "claude_code"
+    # Child persists the source's private env; the fork resumes the source
+    # thread; and the process env carries the secret with the child's own id.
+    assert forked.launch_env == {
+        "SECRET_TOKEN": "sk-claude",
+        "CLAUDE_CONFIG_DIR": "/cfg",
+    }
+    assert adapter.fork_from == "thread-1"
+    assert adapter.fork_env is not None
+    assert adapter.fork_env["SECRET_TOKEN"] == "sk-claude"
+    assert adapter.fork_env["WAYPOINT_SESSION_ID"] == forked.id
 
 
 @pytest.mark.asyncio

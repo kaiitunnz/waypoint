@@ -169,6 +169,7 @@ def _make_session(
     status: SessionStatus = SessionStatus.IDLE,
     launch_target_id: str | None = None,
     transport_state_extra: dict | None = None,
+    launch_env: dict[str, str] | None = None,
 ) -> SessionRecord:
     settings_dir = storage.database_path.parent / "sessions" / session_id
     settings_dir.mkdir(parents=True, exist_ok=True)
@@ -193,6 +194,7 @@ def _make_session(
         transport_state=state,
         raw_log_path=str(settings_dir / "raw.log"),
         structured_log_path=str(settings_dir / "events.jsonl"),
+        launch_env=launch_env or {},
     )
     return storage.create_session(session)
 
@@ -432,7 +434,11 @@ async def test_fork_aside_drops_record_and_brings_up_new_session(
     runtime: Any,
     tmp_path: Path,
 ) -> None:
-    session = _make_session(runtime.storage, thread_id="thread-abc")
+    session = _make_session(
+        runtime.storage,
+        thread_id="thread-abc",
+        launch_env={"SECRET_TOKEN": "sk-btw", "CLAUDE_CONFIG_DIR": "/cfg"},
+    )
     sq = SideQuestion(
         id="sq-ready",
         question="What files changed?",
@@ -475,6 +481,12 @@ async def test_fork_aside_drops_record_and_brings_up_new_session(
 
     # bring_up received the new record and the fork thread id.
     assert bring_up_calls == [("new-sess", "fork-uuid-xyz")]
+
+    # The promoted session inherits the source's private launch env.
+    assert new_sess.launch_env == {
+        "SECRET_TOKEN": "sk-btw",
+        "CLAUDE_CONFIG_DIR": "/cfg",
+    }
 
     # The aside's question and answer were injected into the new transcript.
     injected = [

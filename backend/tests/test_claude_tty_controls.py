@@ -43,6 +43,7 @@ def _make_session(
     permission_mode: str | None = None,
     launch_args: list[str] | None = None,
     thread_id: str | None = "thread-1",
+    launch_env: dict[str, str] | None = None,
 ) -> SessionRecord:
     now = datetime.now(UTC)
     state: dict[str, object] = {
@@ -72,6 +73,7 @@ def _make_session(
         model=model,
         effort=effort,
         permission_mode=permission_mode,
+        launch_env=launch_env or {},
     )
 
 
@@ -509,7 +511,11 @@ async def test_fork_session_inherits_source_agent_backend() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     runtime, created = _launch_runtime()
-    source = _make_session(session_id="src", thread_id="thread-src")
+    source = _make_session(
+        session_id="src",
+        thread_id="thread-src",
+        launch_env={"SECRET_TOKEN": "sk-tty", "CLAUDE_CONFIG_DIR": "/cfg"},
+    )
     source.backend = "claude_code"
 
     forked = await plugin.fork_session(
@@ -524,6 +530,15 @@ async def test_fork_session_inherits_source_agent_backend() -> None:
     assert forked.backend == "claude_code"
     assert forked.transport == "claude_tty"
     assert created["record"].backend == "claude_code"
+    # The child persists the source's private launch env, and the resumed tmux
+    # command is built with that same environment (secret included).
+    assert created["record"].launch_env == {
+        "SECRET_TOKEN": "sk-tty",
+        "CLAUDE_CONFIG_DIR": "/cfg",
+    }
+    assert (
+        runtime._command_for_backend.call_args.kwargs["launch_env"] == source.launch_env
+    )
 
 
 # ── list_threads dedup ────────────────────────────────────────────────────────

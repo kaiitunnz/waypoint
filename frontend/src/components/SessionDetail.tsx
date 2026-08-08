@@ -21,9 +21,9 @@ import {
   answerAskQuestion,
   approvePlan,
   approveSession,
+  cloneSession,
   connectSessionSocket,
   connectTerminalSocket,
-  createSession,
   deleteSession as deleteSessionRequest,
   fetchBackendModels,
   fetchEvents,
@@ -1014,17 +1014,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const newArgs = allowNew ? matchControlCommand(text, "new") : null;
       if (newArgs !== null) {
         try {
-          const created = await createSession(host, token, {
-            backend: session.backend,
-            cwd: session.cwd,
-            launch_target_id: session.launch_target_id,
-            launch_mode: session.launch_mode ?? "auto",
-            model: session.model,
-            effort: session.effort,
-            permission_mode: session.permission_mode,
-            args: session.args,
-            config_overrides: session.config_overrides,
-          });
+          // Clone server-side so the child inherits the source's private
+          // launch_env (env vars, account/config-dir profile) that a public
+          // SessionRecord can't carry.
+          const created = await cloneSession(host, token, sessionId);
           if (newArgs) {
             await sendInput(host, token, created.id, newArgs);
           }

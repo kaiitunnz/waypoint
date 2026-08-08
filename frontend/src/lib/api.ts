@@ -371,6 +371,26 @@ export async function forkSession(
   return body.session as SessionRecord;
 }
 
+// Clone a source session's launch settings into a fresh managed session.
+// Body-less: the source's launch_env (which may hold secrets) is copied
+// server-side and never serialized to the browser.
+export async function cloneSession(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/clone`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+  await ensureOk(response, "failed to clone session");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function attachTmux(
   host: string,
   token: string,

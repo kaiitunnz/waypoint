@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.2](https://github.com/kaiitunnz/waypoint/compare/v0.15.1...v0.15.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* preserve advanced launch settings when cloning /new sessions ([#385](https://github.com/kaiitunnz/waypoint/issues/385)) ([f29092b](https://github.com/kaiitunnz/waypoint/commit/f29092bcb1b452b14862964aaf267c7c6ab2a9cc))
+* resolve Codex tool outcomes in telemetry ([#369](https://github.com/kaiitunnz/waypoint/issues/369)) ([0e7d7b8](https://github.com/kaiitunnz/waypoint/commit/0e7d7b89d409a44cccff992db1bc4c76ce3f8fa0))
+
 ## [0.15.1](https://github.com/kaiitunnz/waypoint/compare/v0.15.0...v0.15.1) (2026-07-27)
 
 

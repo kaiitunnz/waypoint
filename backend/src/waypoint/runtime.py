@@ -147,6 +147,20 @@ from waypoint.usage_providers.registry import build_providers
 TMUX_TRANSPORT_ID = "tmux"
 # Per-request HTTP timeout for usage-provider fetches (NFR2: bounded I/O).
 _USAGE_PROVIDER_HTTP_TIMEOUT = 15.0
+
+
+@dataclass(frozen=True)
+class CloneLaunchSnapshot:
+    """A source session's effective launch env and profile label, for ``/new``.
+
+    Runtime-only — no public request field carries it, so an HTTP caller cannot
+    supply a launch environment.
+    """
+
+    launch_env: dict[str, str]
+    account_profile_label: str | None
+
+
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 # Debounce window for streaming-driven session_state / session_list
 # broadcasts. A burst of streamed events collapses into one broadcast per
@@ -1403,6 +1417,7 @@ class SessionRuntime:
         *,
         preset_id: str | None = None,
         preset_name: str | None = None,
+        clone_snapshot: CloneLaunchSnapshot | None = None,
     ) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
@@ -1421,9 +1436,13 @@ class SessionRuntime:
             request.launch_target_id, request.backend
         )
         await self._require_live_master(launch_target)
-        await self._warm_remote_home_for_profile(
-            launch_target, request.backend, request.account_profile_id
-        )
+        # A clone reuses the source's effective env, so skip the profile-config
+        # reads (remote-home warm here, profile-env overlay and transcript store
+        # below) that would re-resolve a possibly-edited profile.
+        if clone_snapshot is None:
+            await self._warm_remote_home_for_profile(
+                launch_target, request.backend, request.account_profile_id
+            )
         # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
@@ -1431,13 +1450,19 @@ class SessionRuntime:
             local_cwd = request.cwd or launch_target.default_cwd
         else:
             local_cwd = require_existing_local_dir(request.cwd)
-        effective_env = self._effective_launch_env_for_request(request, launch_target)
-        effective_env, account_profile_label = self._apply_account_profile_env(
-            request.backend,
-            effective_env,
-            request.account_profile_id,
-            launch_target,
-        )
+        if clone_snapshot is not None:
+            effective_env = dict(clone_snapshot.launch_env)
+            account_profile_label = clone_snapshot.account_profile_label
+        else:
+            effective_env = self._effective_launch_env_for_request(
+                request, launch_target
+            )
+            effective_env, account_profile_label = self._apply_account_profile_env(
+                request.backend,
+                effective_env,
+                request.account_profile_id,
+                launch_target,
+            )
         request = request.model_copy(
             update={
                 "cwd": local_cwd,
@@ -1572,12 +1597,13 @@ class SessionRuntime:
             request.account_profile_id,
             launch_target,
         )
-        await self._ensure_new_session_profile_transcript_store(
-            request.backend,
-            effective_env,
-            request.account_profile_id,
-            launch_target,
-        )
+        if clone_snapshot is None:
+            await self._ensure_new_session_profile_transcript_store(
+                request.backend,
+                effective_env,
+                request.account_profile_id,
+                launch_target,
+            )
         session = await plugin.create_session(
             self,
             request,
@@ -2332,6 +2358,42 @@ class SessionRuntime:
         self._warm_command_completions(new_session)
         await self._broadcast_session_list()
         return new_session
+
+    async def clone_session_launch(self, session_id: str) -> SessionRecord:
+        """Start a fresh managed session from a source session's launch settings.
+
+        Backs ``/new``: reads the private source record and reuses the managed
+        create pipeline so the child inherits the source's effective launch env
+        (secrets included), pinned transport, and profile provenance. No events,
+        thread, or transport state are copied; the child gets a new id, fresh
+        title, and recomputed repo/branch metadata.
+        """
+        source = self.get_session(session_id)
+        if self.is_assistant_session(source):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="the persistent personal-assistant session cannot be cloned",
+            )
+        # Copy the non-secret launch fields; pin the transport so the child keeps
+        # the source's channel. launch_env travels only in the private snapshot.
+        request = SessionCreateRequest(
+            backend=source.backend,
+            cwd=source.cwd,
+            launch_target_id=source.launch_target_id,
+            launch_mode=source.launch_mode,
+            transport=source.transport,
+            args=list(source.args),
+            config_overrides=list(source.config_overrides),
+            model=source.model,
+            effort=source.effort,
+            permission_mode=source.permission_mode,
+            account_profile_id=source.account_profile_id,
+        )
+        snapshot = CloneLaunchSnapshot(
+            launch_env=dict(source.launch_env),
+            account_profile_label=source.account_profile_label,
+        )
+        return await self.create_session(request, clone_snapshot=snapshot)
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:

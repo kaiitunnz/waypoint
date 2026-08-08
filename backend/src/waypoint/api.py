@@ -1110,6 +1110,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.fork_session(session_id)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/clone")
+    async def session_clone(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Body-less clone-launch for ``/new``: the source's private launch_env is
+        # copied inside the runtime and never crosses the API boundary.
+        session = await context.runtime.clone_session_launch(session_id)
+        return {"session": session.model_dump(mode="json")}
+
     @app.post("/api/sessions/{session_id}/reattach")
     async def session_reattach(
         session_id: str,

@@ -50,6 +50,7 @@ def _session(**overrides: Any) -> SessionRecord:
         effort=overrides.get("effort"),
         args=overrides.get("args", []),
         config_overrides=overrides.get("config_overrides", []),
+        launch_env=overrides.get("launch_env", {}),
     )
 
 
@@ -1006,6 +1007,7 @@ async def test_fork_plan_session_persists_pre_plan_mode(tmp_path) -> None:
             "pre_plan_mode": "allow",
         },
         permission_mode="plan",
+        launch_env={"SECRET_TOKEN": "sk-oc", "OPENCODE_X": "1"},
     )
 
     class FakeAdapter:
@@ -1034,10 +1036,15 @@ async def test_fork_plan_session_persists_pre_plan_mode(tmp_path) -> None:
             return True
 
     fake_adapter = FakeAdapter()
+    captured_env: dict[str, dict[str, str]] = {}
 
     async def fake_get_or_create_adapter(
         *args: object, **kwargs: object
     ) -> FakeAdapter:
+        launch_env = kwargs.get("launch_env")
+        captured_env["launch_env"] = (
+            dict(launch_env) if isinstance(launch_env, dict) else {}
+        )
         return fake_adapter
 
     cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
@@ -1080,6 +1087,10 @@ async def test_fork_plan_session_persists_pre_plan_mode(tmp_path) -> None:
         "agent": "plan",
         "pre_plan_mode": "allow",
     }
+    # The child persists the source's private launch env, and the adapter that
+    # starts the fork is keyed with that same environment (secret included).
+    assert forked.launch_env == {"SECRET_TOKEN": "sk-oc", "OPENCODE_X": "1"}
+    assert captured_env["launch_env"]["SECRET_TOKEN"] == "sk-oc"
 
 
 @pytest.mark.asyncio

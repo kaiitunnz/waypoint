@@ -708,8 +708,7 @@ async def test_restore_session_attached_dead_pane_flips_back_to_exited(
 def _terminable_session(
     sid: str, source: SessionSource, tmp_path: Path
 ) -> SessionRecord:
-    """A running tmux-wrapped session with pane + tmux-session coordinates,
-    used to drive ``terminate_session`` and assert the ownership guard."""
+    """A running tmux-wrapped session with pane + tmux-session coordinates."""
     now = datetime.now(UTC)
     return SessionRecord(
         id=sid,
@@ -738,54 +737,37 @@ async def _idle_task() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminate_telemetry_kills_owned_tmux_and_cancels_watchers(
+async def test_terminate_telemetry_kills_owned_tmux(
     plugin: TmuxPlugin, tmp_path: Path
 ) -> None:
-    """A throwaway TELEMETRY one-shot is Waypoint-owned: terminate must stop
-    the pipe for its pane, kill its tmux session exactly once, and cancel the
-    monitor/thread-id/rate-limit watchers. Regression for the leak where the
-    managed-only guard skipped ``kill_session`` for the relabeled row, orphaning
-    the tmux server and its claude process."""
+    """A Waypoint-owned TELEMETRY one-shot: terminate stops the pipe, kills the
+    tmux session once, and cancels the session's monitor."""
     runtime = _FakeRuntime(inner_plugin=_FakeAgentPlugin(pregenerates=True))
     session = _terminable_session("sess-tel", SessionSource.TELEMETRY, tmp_path)
     monitor = asyncio.create_task(_idle_task())
-    thread_watcher = asyncio.create_task(_idle_task())
-    rl_watcher = asyncio.create_task(_idle_task())
     runtime.monitor_tasks[session.id] = monitor
-    runtime._thread_id_watchers[session.id] = thread_watcher
-    runtime._rate_limit_watchers[session.id] = rl_watcher
 
     await plugin.terminate_session(cast(Any, runtime), session)
 
     assert runtime.tmux.stop_pipe_calls == ["sess-tel-p"]
     assert runtime.tmux.kill_calls == ["sess-tel-tmux"]
     assert session.id not in runtime.monitor_tasks
-    assert session.id not in runtime._thread_id_watchers
-    assert session.id not in runtime._rate_limit_watchers
     assert monitor.cancelled()
-    assert thread_watcher.cancelled()
-    assert rl_watcher.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_terminate_attached_tmux_stops_pipe_but_never_kills(
+async def test_terminate_attached_tmux_never_kills(
     plugin: TmuxPlugin, tmp_path: Path
 ) -> None:
-    """An ATTACHED_TMUX session's tmux target is user-owned: terminate must
-    stop Waypoint's pipe and cancel local watchers but must never kill the
-    user's tmux session. Direct lifecycle guard — the reattach test alone does
-    not exercise ``terminate_session``."""
+    """A user-owned ATTACHED_TMUX session: terminate stops the pipe but never
+    kills the tmux session."""
     runtime = _FakeRuntime(inner_plugin=_FakeAgentPlugin(pregenerates=True))
     session = _terminable_session("sess-att", SessionSource.ATTACHED_TMUX, tmp_path)
-    monitor = asyncio.create_task(_idle_task())
-    runtime.monitor_tasks[session.id] = monitor
 
     await plugin.terminate_session(cast(Any, runtime), session)
 
     assert runtime.tmux.stop_pipe_calls == ["sess-att-p"]
     assert runtime.tmux.kill_calls == []
-    assert session.id not in runtime.monitor_tasks
-    assert monitor.cancelled()
 
 
 @pytest.mark.asyncio

@@ -165,7 +165,11 @@ class TmuxPlugin:
         with suppress(TmuxError):
             await runtime.tmux.stop_pipe(target)
         tmux_session = state.get("tmux_session")
-        if session.source == SessionSource.MANAGED and tmux_session:
+        # Kill the tmux session for every Waypoint-owned source (MANAGED, the
+        # ASSISTANT singleton, throwaway TELEMETRY one-shots). ATTACHED_TMUX is
+        # the sole external-ownership case: its pane belongs to a user-created
+        # tmux target, so we stop our pipe but never kill it.
+        if session.source != SessionSource.ATTACHED_TMUX and tmux_session:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(tmux_session)
         monitor = runtime.monitor_tasks.pop(session.id, None)

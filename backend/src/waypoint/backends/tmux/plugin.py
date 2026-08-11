@@ -165,7 +165,9 @@ class TmuxPlugin:
         with suppress(TmuxError):
             await runtime.tmux.stop_pipe(target)
         tmux_session = state.get("tmux_session")
-        if session.source == SessionSource.MANAGED and tmux_session:
+        # Kill the runtime-owned tmux session for every source except
+        # ATTACHED_TMUX, whose pane belongs to a user-created target.
+        if session.source != SessionSource.ATTACHED_TMUX and tmux_session:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(tmux_session)
         monitor = runtime.monitor_tasks.pop(session.id, None)

@@ -5,6 +5,9 @@ Covers the two pure units of ticket 1405 -- the ``BackendModelOption``
 independent of any transport wiring.
 """
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -14,6 +17,8 @@ from waypoint.backends.claude_code.models import (
     make_context_window_resolver,
     resolve_claude_context_window,
 )
+from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
+from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin, ClaudeTtyPluginConfig
 from waypoint.schemas import BackendModelOption
 
 
@@ -131,3 +136,35 @@ def test_make_resolver_without_overrides_is_the_static_resolver() -> None:
         [BackendModelOption(id="opus", label="Opus")], []
     )
     assert resolver is claude_context_window_for_model
+
+
+# ── claude_tty transport resolves from the DRIVEN agent's config ───────────
+
+
+def test_claude_tty_resolver_reads_driven_agent_config() -> None:
+    # Regression: claude_tty is a transport that also drives the claude_code
+    # agent, and a custom model's context_window lives under the AGENT's config
+    # block. The transport must resolve from the session's backend config, not
+    # its own claude_tty block -- otherwise a claude_code session on its default
+    # claude_tty transport falls back to the static window and the pill is wrong.
+    configs = {
+        "claude_code": ClaudeCodePluginConfig(
+            extra_models=[
+                BackendModelOption(id="kimi-k3[1m]", label="Kimi", context_window="1m")
+            ]
+        ),
+        "claude_tty": ClaudeTtyPluginConfig(),  # no custom models here
+    }
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(plugin_config=lambda pid: configs[pid])
+    )
+    plugin = ClaudeTtyPlugin()
+
+    agent_resolver = plugin._context_window_resolver_for(
+        cast(Any, runtime), "claude_code"
+    )
+    assert agent_resolver("kimi-k3[1m]") == 1_000_000
+
+    # Reading its own (empty) claude_tty config would return None -- the bug.
+    own_resolver = plugin._context_window_resolver_for(cast(Any, runtime), "claude_tty")
+    assert own_resolver("kimi-k3[1m]") is None

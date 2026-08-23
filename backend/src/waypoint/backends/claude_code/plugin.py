@@ -50,8 +50,11 @@ from waypoint.backends.claude_code.history import (
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    ClaudeContextWindowResolver,
+    claude_context_window_for_model,
     claude_default_model_id,
     claude_models_for_version,
+    make_context_window_resolver,
     merge_model_catalogue,
     overridden_builtin_ids,
     resolve_import_model_id,
@@ -326,6 +329,12 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         self.adapter: ClaudeCliAdapter | None = None
         self.support: ClaudeSupportBundle | None = None
         self.thread_enumerator: RemoteClaudeThreadEnumerator | None = None
+        # Rebuilt from the effective config at setup(); the static resolver until
+        # then. rebase_context_usage has no runtime handle, so it reads this
+        # cached value rather than the live Settings.
+        self._context_window_resolver: ClaudeContextWindowResolver = (
+            claude_context_window_for_model
+        )
         self._sq_tasks: dict[str, asyncio.Task[None]] = {}
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
@@ -385,6 +394,10 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # dir, missing scripts, etc.); we log and leave self.adapter=None so
         # the runtime keeps working without Claude support and the tmux
         # fallback path takes over.
+        config = self._config(runtime)
+        self._context_window_resolver = make_context_window_resolver(
+            config.models, config.extra_models
+        )
         try:
             support = ensure_claude_support_bundle(runtime.settings.data_dir)
         except Exception:  # noqa: BLE001
@@ -399,7 +412,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             on_init=runtime.handle_completion_source_init,
             on_session_update=runtime.session_update_callback(),
             on_token_usage=runtime.token_usage_callback(),
-            default_model_id=self._config(runtime).default_model_id,
+            default_model_id=config.default_model_id,
+            context_window_resolver=self._context_window_resolver,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(
             support.thread_enumerator_path
@@ -668,6 +682,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 if self.capabilities.config_dir_env_var
                 else None
             ),
+            context_window_resolver=self._context_window_resolver,
         )
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
@@ -777,7 +792,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # ContextUsageRebasing: dispatched by the runtime on the agent plugin,
         # so this one implementation covers every Claude transport (native,
         # claude_tty, tmux). Pure/data-only — see rebase_claude_context_usage.
-        return rebase_claude_context_usage(session, model=model)
+        return rebase_claude_context_usage(
+            session,
+            model=model,
+            context_window_resolver=self._context_window_resolver,
+        )
 
     async def apply_effort(
         self,
@@ -1729,7 +1748,10 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             )
             if artifacts:
                 seeded_context_usage = await asyncio.to_thread(
-                    seed_context_usage_from_transcript, artifacts[0], effective_model
+                    seed_context_usage_from_transcript,
+                    artifacts[0],
+                    effective_model,
+                    self._context_window_resolver,
                 )
         session = SessionRecord(
             id=session_id,
@@ -1814,7 +1836,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             # is the only source of per-turn model for the imported turns'
             # ledger (mirrors the remote-skip guard above: no cheap remote
             # transcript read exists yet).
-            for token_record in await read_local_claude_token_usage_history(info.id):
+            for token_record in await read_local_claude_token_usage_history(
+                info.id, self._context_window_resolver
+            ):
                 await runtime.publish_token_usage_record(
                     session.id, token_record, publish=False
                 )

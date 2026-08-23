@@ -17,13 +17,22 @@ from waypoint.backends.claude_code.adapter import (
     rebase_claude_context_usage,
     seed_context_usage_from_transcript,
 )
-from waypoint.backends.claude_code.models import resolve_import_model_id
+from waypoint.backends.claude_code.models import (
+    make_context_window_resolver,
+    resolve_import_model_id,
+)
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.schemas import (
+    BackendModelOption,
     SessionContextUsage,
     SessionRecord,
     SessionSource,
     SessionStatus,
+)
+
+# A resolver for a custom gateway model absent from the static Claude table.
+_CUSTOM_RESOLVER = make_context_window_resolver(
+    [], [BackendModelOption(id="kimi-k3[1m]", label="Kimi K3", context_window="1m")]
 )
 
 
@@ -108,6 +117,17 @@ def test_rebase_no_snapshot_returns_none() -> None:
     assert rebase_claude_context_usage(session) is None
 
 
+def test_rebase_uses_configured_custom_window() -> None:
+    # A custom id has no static window; the configured resolver supplies it so a
+    # model/transport swap rebases the pill to the operator-declared capacity.
+    session = _session("kimi-k3[1m]", _usage_snapshot(None))
+    rebased = rebase_claude_context_usage(
+        session, context_window_resolver=_CUSTOM_RESOLVER
+    )
+    assert rebased is not None
+    assert rebased.context_window_tokens == 1_000_000
+
+
 def test_rebase_same_window_returns_unchanged_snapshot() -> None:
     # Idempotency signal: an already-correct window round-trips the same object
     # so the runtime can skip the write/broadcast.
@@ -161,6 +181,22 @@ def test_seed_skips_sidechain_records(tmp_path) -> None:
     assert snapshot is not None
     # The subagent (sidechain) turn is skipped; the main turn wins.
     assert snapshot.used_tokens == 500
+
+
+def test_seed_uses_configured_custom_window(tmp_path) -> None:
+    # Seeding an imported thread whose durable model is a custom id resolves the
+    # denominator from configuration rather than dropping the snapshot.
+    transcript = tmp_path / "thread.jsonl"
+    transcript.write_text(
+        _assistant_line({"input_tokens": 300, "cache_read_input_tokens": 40}),
+        encoding="utf-8",
+    )
+    snapshot = seed_context_usage_from_transcript(
+        transcript, "kimi-k3[1m]", _CUSTOM_RESOLVER
+    )
+    assert snapshot is not None
+    assert snapshot.used_tokens == 340
+    assert snapshot.context_window_tokens == 1_000_000
 
 
 def test_seed_missing_file_returns_none(tmp_path) -> None:
@@ -224,5 +260,41 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
     await tailer._drain()
 
     runtime.update_session_fields.assert_called_once()
+    snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
+    assert snapshot.context_window_tokens == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_tailer_uses_configured_custom_window() -> None:
+    # A custom durable model absent from the static table: the injected resolver
+    # supplies the window on this transport too.
+    session = _session("kimi-k3[1m]", None)
+    runtime = MagicMock()
+    runtime.storage.get_session.return_value = session
+    runtime.update_session_fields = AsyncMock()
+    runtime.publish_token_usage_record = AsyncMock()
+    runtime._emit_adapter_event = AsyncMock()
+
+    record = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "model": "kimi-k3-0711",
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 42, "output_tokens": 1},
+        },
+    }
+    data = (json.dumps(record) + "\n").encode()
+    plugin = MagicMock()
+    plugin._pending_questions = {}
+    tailer = TranscriptTailer(
+        session_id="sess-1",
+        source=_FeedOnceSource(data),
+        runtime=runtime,
+        plugin=plugin,
+        context_window_resolver=_CUSTOM_RESOLVER,
+    )
+    await tailer._drain()
+
     snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
     assert snapshot.context_window_tokens == 1_000_000

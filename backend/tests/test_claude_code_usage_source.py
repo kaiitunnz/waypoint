@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from waypoint.backends.claude_code.models import make_context_window_resolver
 from waypoint.backends.claude_code.usage_source import TranscriptContextUsageSource
+from waypoint.schemas import BackendModelOption
 
 
 def _make_runtime(
@@ -264,6 +266,33 @@ async def test_session_model_overrides_transcript_for_1m_window(tmp_path: Path) 
     record = _assistant_record(
         model="claude-opus-4-8",
         usage={"input_tokens": 20, "cache_read_input_tokens": 5, "output_tokens": 3},
+    )
+    with patch.object(source, "_read_new_bytes", return_value=_jsonl(record)):
+        await source._drain()
+    snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
+    assert snapshot.context_window_tokens == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_configured_custom_model_publishes_declared_window(
+    tmp_path: Path,
+) -> None:
+    # A custom durable model absent from the static table: the injected resolver
+    # supplies the configured window as the pill denominator.
+    runtime = _make_runtime(session_model="kimi-k3[1m]")
+    resolver = make_context_window_resolver(
+        [],
+        [BackendModelOption(id="kimi-k3[1m]", label="Kimi K3", context_window="1m")],
+    )
+    source = TranscriptContextUsageSource(
+        session_id="sess-1",
+        session_uuid="uuid-1",
+        cwd=str(tmp_path),
+        runtime=runtime,
+        context_window_resolver=resolver,
+    )
+    record = _assistant_record(
+        model="kimi-k3-0711", usage={"input_tokens": 20, "output_tokens": 3}
     )
     with patch.object(source, "_read_new_bytes", return_value=_jsonl(record)):
         await source._drain()

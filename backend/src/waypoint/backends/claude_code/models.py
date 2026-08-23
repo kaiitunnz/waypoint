@@ -5,7 +5,7 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 ``model/list`` RPC, Claude does not.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 
 from waypoint.schemas import BackendModelOption
@@ -262,6 +262,60 @@ def claude_context_window_for_model(model: str | None) -> int | None:
     if normalized is None:
         return None
     return CLAUDE_CONTEXT_WINDOWS.get(normalized)
+
+
+# A pure "selected model id -> context window tokens" lookup. The static
+# ``claude_context_window_for_model`` is itself a valid resolver and is the
+# default every usage producer falls back to when no configured override applies.
+ClaudeContextWindowResolver = Callable[[str | None], int | None]
+
+
+def configured_context_windows(
+    models: Iterable[BackendModelOption],
+    extra_models: Iterable[BackendModelOption],
+) -> dict[str, int]:
+    """Map configured model ids to their operator-declared context window.
+
+    Only entries carrying a non-null ``context_window`` contribute; the static
+    built-in catalogue (windows unset) never does. ``extra_models`` is overlaid
+    last so it wins a collision with the replacement-style ``models`` list, the
+    same precedence ``merge_model_catalogue`` uses.
+    """
+    mapping: dict[str, int] = {}
+    for option in (*models, *extra_models):
+        if option.context_window is not None:
+            mapping[option.id.strip()] = option.context_window
+    return mapping
+
+
+def resolve_claude_context_window(
+    model: str | None, configured: Mapping[str, int]
+) -> int | None:
+    """Resolve ``model``'s window: exact configured id first, then static table.
+
+    An exact configured id wins over built-in inference (letting an operator
+    override a built-in through replacement semantics); otherwise the static
+    resolver applies, and an id neither source knows resolves to ``None`` rather
+    than a fabricated default.
+    """
+    if isinstance(model, str):
+        window = configured.get(model.strip())
+        if window is not None:
+            return window
+    return claude_context_window_for_model(model)
+
+
+def make_context_window_resolver(
+    models: Iterable[BackendModelOption],
+    extra_models: Iterable[BackendModelOption],
+) -> ClaudeContextWindowResolver:
+    """A resolver bound to a configuration's declared custom windows."""
+    configured = configured_context_windows(models, extra_models)
+    if not configured:
+        # No operator overrides -> the static resolver is exactly equivalent and
+        # avoids an extra dict lookup on every usage update.
+        return claude_context_window_for_model
+    return lambda model: resolve_claude_context_window(model, configured)
 
 
 def claude_default_model_id() -> str | None:

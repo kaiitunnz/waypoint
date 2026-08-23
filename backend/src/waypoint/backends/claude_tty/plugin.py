@@ -40,7 +40,10 @@ from waypoint.backends.base import (
 )
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
-from waypoint.backends.claude_code.adapter import seed_context_usage_from_transcript
+from waypoint.backends.claude_code.adapter import (
+    rebase_claude_context_usage,
+    seed_context_usage_from_transcript,
+)
 from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.history import (
     read_local_claude_history,
@@ -49,7 +52,10 @@ from waypoint.backends.claude_code.history import (
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    ClaudeContextWindowResolver,
+    claude_context_window_for_model,
     claude_default_model_id,
+    make_context_window_resolver,
     resolve_import_model_id,
 )
 from waypoint.backends.claude_code.plugin import (
@@ -88,6 +94,7 @@ from waypoint.schemas import (
     CompletionDispatch,
     EventKind,
     EventRecord,
+    SessionContextUsage,
     SessionCreateRequest,
     SessionRateLimitUsage,
     SessionRecord,
@@ -207,6 +214,12 @@ class ClaudeTtyPlugin:
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
         self._pending_questions: dict[str, PendingTtyQuestion] = {}
+        # Rebuilt from the effective config at setup(); the static resolver until
+        # then. Threaded into the tailer, import seeding, and rebase so a custom
+        # model's configured window applies on this transport too.
+        self._context_window_resolver: ClaudeContextWindowResolver = (
+            claude_context_window_for_model
+        )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -216,7 +229,10 @@ class ClaudeTtyPlugin:
     # ── Composed transport infrastructure (tmux pane wrapper) ────────────────
 
     def setup(self, runtime: "SessionRuntime") -> None:
-        return None
+        config = self._config(runtime)
+        self._context_window_resolver = make_context_window_resolver(
+            config.models, config.extra_models
+        )
 
     async def start_background_tasks(self, runtime: "SessionRuntime") -> None:
         # claude_code's recovery sweep only covers its own backend id, so legacy
@@ -233,6 +249,19 @@ class ClaudeTtyPlugin:
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
         return None
+
+    def rebase_context_usage(
+        self, session: SessionRecord, *, model: str | None = None
+    ) -> SessionContextUsage | None:
+        # ContextUsageRebasing for backend=claude_tty rows (dispatched on the
+        # agent id, which is this alias — not claude_code). Shares the pure
+        # rebaser with the native transport so a model/transport swap refreshes
+        # the window from the configured custom capacity here too.
+        return rebase_claude_context_usage(
+            session,
+            model=model,
+            context_window_resolver=self._context_window_resolver,
+        )
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None
@@ -545,6 +574,7 @@ class ClaudeTtyPlugin:
             plugin=self,
             start_at_end=start_at_end,
             config_dir=config_dir,
+            context_window_resolver=self._context_window_resolver,
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
 
@@ -1438,7 +1468,10 @@ class ClaudeTtyPlugin:
         artifacts = local_claude_thread_artifacts(request.thread_id, config_dir)
         if artifacts:
             seeded_context_usage = await asyncio.to_thread(
-                seed_context_usage_from_transcript, artifacts[0], effective_model
+                seed_context_usage_from_transcript,
+                artifacts[0],
+                effective_model,
+                self._context_window_resolver,
             )
 
         now = datetime.now(UTC)
@@ -1485,7 +1518,7 @@ class ClaudeTtyPlugin:
             # the resumed tailer starts at EOF (below), so this is the only
             # source of per-turn model/effort for the imported turns' ledger.
             for token_record in await read_local_claude_token_usage_history(
-                request.thread_id
+                request.thread_id, self._context_window_resolver
             ):
                 await runtime.publish_token_usage_record(
                     session.id, token_record, publish=False

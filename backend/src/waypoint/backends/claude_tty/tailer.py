@@ -19,6 +19,10 @@ from waypoint.backends.claude_code.adapter import (
     _context_usage_snapshot_from_message,
     claude_token_usage_record,
 )
+from waypoint.backends.claude_code.models import (
+    ClaudeContextWindowResolver,
+    claude_context_window_for_model,
+)
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
@@ -72,11 +76,15 @@ class TranscriptTailer:
         *,
         start_at_end: bool = False,
         config_dir: str | None = None,
+        context_window_resolver: ClaudeContextWindowResolver = (
+            claude_context_window_for_model
+        ),
     ) -> None:
         self._session_id = session_id
         self._source = source
         self._runtime = runtime
         self._plugin = plugin
+        self._context_window_resolver = context_window_resolver
         self._normalizer = TranscriptNormalizer(config_dir)
         self._pane_check_elapsed = 0.0
         self._dialog_check_elapsed = 0.0
@@ -220,7 +228,9 @@ class TranscriptTailer:
         model = (session.model if session is not None else None) or (
             str(message.get("model") or "") or None
         )
-        snapshot = _context_usage_snapshot_from_message(model, usage)
+        snapshot = _context_usage_snapshot_from_message(
+            model, usage, self._context_window_resolver
+        )
         if snapshot is None:
             return
         # The ledger's model is the concrete resolved id for *this* turn, taken

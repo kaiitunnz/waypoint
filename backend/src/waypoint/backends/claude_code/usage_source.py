@@ -14,6 +14,10 @@ from waypoint.backends.claude_code.adapter import (
     _context_usage_snapshot_from_message,
     claude_token_usage_record,
 )
+from waypoint.backends.claude_code.models import (
+    ClaudeContextWindowResolver,
+    claude_context_window_for_model,
+)
 from waypoint.backends.claude_tty.tailer import transcript_path
 from waypoint.backends.context_usage_source import ContextUsageSource
 
@@ -35,10 +39,14 @@ class TranscriptContextUsageSource(ContextUsageSource):
         cwd: str,
         runtime: "SessionRuntime",
         config_dir: str | None = None,
+        context_window_resolver: ClaudeContextWindowResolver = (
+            claude_context_window_for_model
+        ),
     ) -> None:
         self._session_id = session_id
         self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
+        self._context_window_resolver = context_window_resolver
         self._offset = 0
         self._context_usage_signature: (
             tuple[int, int | None, tuple[tuple[str, int], ...]] | None
@@ -92,7 +100,9 @@ class TranscriptContextUsageSource(ContextUsageSource):
         model = (session.model if session is not None else None) or (
             str(message.get("model") or "") or None
         )
-        snapshot = _context_usage_snapshot_from_message(model, usage)
+        snapshot = _context_usage_snapshot_from_message(
+            model, usage, self._context_window_resolver
+        )
         if snapshot is None:
             return
         # The ledger's model is the concrete resolved id for *this* turn, taken

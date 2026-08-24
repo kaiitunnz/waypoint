@@ -41,6 +41,23 @@ _MAX_BACKOFF = 10.0  # cap on the exponential error backoff
 _READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
 
 
+def resolve_remote_config_root(
+    config_dir: str | None, cwd: str, fs: RemoteTranscriptFilesystem
+) -> str:
+    """Resolve the remote ``CLAUDE_CONFIG_DIR`` root for a session.
+
+    ``None`` defaults to ``~/.claude``; an absolute or ``~``-anchored value is
+    used verbatim; a relative value resolves against the session's remote cwd
+    (not Waypoint's cwd or the SSH login dir).
+    """
+    if config_dir is None:
+        return "~/.claude"
+    if config_dir.startswith("/") or config_dir.startswith("~"):
+        return config_dir
+    base = fs.expanduser(cwd) if cwd.startswith("~") else cwd
+    return posixpath.join(base, config_dir)
+
+
 def transcript_path(cwd: str, session_uuid: str, config_dir: str | None = None) -> Path:
     """Return the Claude TUI's JSONL transcript path for a local session.
 
@@ -214,17 +231,7 @@ class RemoteClaudeTranscriptByteSource:
     def _resolved_config_root(self, cwd: str) -> str:
         if self._config_root is not None:
             return self._config_root
-        cfg = self._config_dir
-        if cfg is None:
-            root = "~/.claude"
-        elif cfg.startswith("/") or cfg.startswith("~"):
-            root = cfg
-        else:
-            # A relative CLAUDE_CONFIG_DIR resolves against the session's remote
-            # cwd, mirroring the launch's ``cd cwd`` before it inherits the env
-            # var — never against Waypoint's cwd or the SSH login dir.
-            base = self._fs.expanduser(cwd) if cwd.startswith("~") else cwd
-            root = posixpath.join(base, cfg)
+        root = resolve_remote_config_root(self._config_dir, cwd, self._fs)
         self._config_root = root
         return root
 

@@ -24,6 +24,7 @@ Output is read by a transcript tailer over ``~/.claude/projects/<cwd>/
 
 import asyncio
 import logging
+import posixpath
 import shutil
 import uuid
 from contextlib import suppress
@@ -81,12 +82,15 @@ from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
     TranscriptByteSource,
+    resolve_remote_config_root,
+    transcript_path,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.plugin import TmuxPlugin
+from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
@@ -871,15 +875,28 @@ class ClaudeTtyPlugin:
         base_args = _scrub_session_args(
             stored_args if isinstance(stored_args, list) else []
         )
+        config_dir = self._config_dir(session)
         new_thread_id = str(uuid.uuid4())
-        launch_args = [
-            "--resume",
-            src_thread_id,
-            "--fork-session",
-            "--session-id",
-            new_thread_id,
-            *base_args,
-        ]
+        # Claude writes a --fork-session transcript only after the first turn.
+        # Copying it under the new thread id lets the resumed pane reopen the
+        # full history now, and clone_events seeds the event DB so the fork
+        # renders on creation; the pane re-reads the copied file, so the tailer
+        # starts at its end. Without a parent transcript to copy, fall back to
+        # the native lazy fork.
+        materialized = await self._materialize_forked_transcript(
+            session, src_thread_id, new_thread_id, config_dir, launch_target
+        )
+        if materialized:
+            launch_args = ["--resume", new_thread_id, *base_args]
+        else:
+            launch_args = [
+                "--resume",
+                src_thread_id,
+                "--fork-session",
+                "--session-id",
+                new_thread_id,
+                *base_args,
+            ]
         try:
             command = runtime._command_for_backend(
                 self.id,
@@ -942,6 +959,8 @@ class ClaudeTtyPlugin:
             account_profile_label=session.account_profile_label,
         )
         runtime.storage.create_session(new_session)
+        if materialized:
+            runtime.storage.clone_events(session.id, new_session_id)
         await runtime._record_system_event(
             new_session_id,
             f"Claude TUI forked from {session.title or session.id} (thread {new_thread_id})",
@@ -952,11 +971,66 @@ class ClaudeTtyPlugin:
             new_session_id,
             new_thread_id,
             session.cwd,
+            start_at_end=materialized,
             config_dir=self._config_dir(new_session),
             launch_target=launch_target,
         )
         self._spawn_rate_limit_watcher(runtime, new_session)
         return runtime.get_session(new_session_id)
+
+    async def _materialize_forked_transcript(
+        self,
+        session: SessionRecord,
+        src_thread_id: str,
+        new_thread_id: str,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
+        """Copy the parent transcript under ``new_thread_id``, returning ``True``
+        on success. Any failure returns ``False`` for the caller's native-fork
+        fallback; runs off the event loop since filesystem and SSH ops block.
+        """
+        try:
+            return await asyncio.to_thread(
+                self._copy_transcript,
+                session,
+                src_thread_id,
+                new_thread_id,
+                config_dir,
+                launch_target,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "failed to materialize forked transcript; falling back to native fork",
+                extra={"session_id": session.id, "thread_id": src_thread_id},
+            )
+            return False
+
+    def _copy_transcript(
+        self,
+        session: SessionRecord,
+        src_thread_id: str,
+        new_thread_id: str,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
+        if launch_target is None:
+            src = transcript_path(session.cwd, src_thread_id, config_dir)
+            if not src.exists():
+                return False
+            dst = transcript_path(session.cwd, new_thread_id, config_dir)
+            shutil.copy2(src, dst)
+            return True
+        fs = RemoteTranscriptFilesystem(launch_target)
+        config_root = resolve_remote_config_root(config_dir, session.cwd, fs)
+        matches = fs.glob_artifacts(session, self, config_root)
+        if len(matches) != 1:
+            return False
+        dst_remote = posixpath.join(
+            posixpath.dirname(matches[0]), f"{new_thread_id}.jsonl"
+        )
+        fs.copy_file(matches[0], dst_remote, 0o600)
+        return True
 
     # ── Control swaps (restart-with-resume) ──────────────────────────────────
 

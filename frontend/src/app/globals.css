@@ -14679,6 +14679,8 @@ html[data-theme="light"] .session-switcher-row.selected {
   );
 }
 
+/* data-density (set in board markup) widens a busy lane so its fixed-width cards
+   wrap into more grid columns. Desktop-only; the ≤720px block resets to one column. */
 .board-lane {
   flex: 0 0 clamp(212px, 24vw, 248px);
   display: flex;
@@ -14688,6 +14690,14 @@ html[data-theme="light"] .session-switcher-row.selected {
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-card-soft);
+}
+
+.board-lane[data-density="med"] {
+  flex-basis: clamp(400px, 42vw, 468px);
+}
+
+.board-lane[data-density="high"] {
+  flex-basis: clamp(560px, 58vw, 720px);
 }
 
 .board-lane.is-empty {
@@ -14722,14 +14732,15 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .board-lane-cards {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
   gap: 8px;
 }
 
 /* Ticket card. */
 .board-ticket {
   position: relative;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -14801,6 +14812,8 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .board-ticket-foot {
+  /* Bottom-align so footers share a baseline across equal-height cards. */
+  margin-top: auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -15156,6 +15169,11 @@ a.board-fact-pr:hover {
   }
   .board-needs-strip {
     grid-template-columns: 1fr;
+  }
+  /* Reset widened lanes to the single-column basis so the board scrolls horizontally. */
+  .board-lane[data-density="med"],
+  .board-lane[data-density="high"] {
+    flex-basis: clamp(212px, 24vw, 248px);
   }
   .board-viewswitch-tab {
     padding: 5px 10px;

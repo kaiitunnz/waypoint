@@ -84,6 +84,13 @@ function shortId(value: string): string {
   return value.length > 16 ? `${value.slice(0, 16)}…` : value;
 }
 
+// Card-volume bucket that widens a lane into more grid columns (see globals.css).
+function laneDensity(count: number): "low" | "med" | "high" {
+  if (count >= 13) return "high";
+  if (count >= 5) return "med";
+  return "low";
+}
+
 // A scalar cell holds a short single-line value (a status flag, a count). It
 // renders as a compact strip row instead of a card so a wall of one-word cells
 // doesn't dominate the board.
@@ -682,6 +689,7 @@ function ManagerBoard({ managerState, onOpenTicket }: ManagerBoardProps) {
             <div
               key={lane.key}
               className={`board-lane${isDone ? " is-done" : ""}`}
+              data-density={laneDensity(laneTickets.length)}
             >
               <div className="board-lane-head">
                 <span className="board-lane-label">{lane.label}</span>

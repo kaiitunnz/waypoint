@@ -14659,7 +14659,9 @@ html[data-theme="light"] .session-switcher-row.selected {
 /* Lifecycle board — lanes scroll horizontally (Trello-style). */
 .board-lanes {
   display: flex;
-  align-items: flex-start;
+  /* Lanes stretch to a common height (default align-items) so every stage reads
+     as a full-height bordered column — the explicit column separation the board
+     relies on. A busy lane sets the height; the rest stretch to match. */
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 6px;

@@ -81,18 +81,16 @@ When the writer posts back, branch on its `kind`. Act on the newest `spec_ready`
 posts in the log.
 
 **`spec_ready`** — move `spec_pending → spec_review` (recording `{{spec_ref}}`) and
-post an **approval** inbox item that **attaches the spec** so the human opens the exact
-RFC/PRD from the gate. On the answer: **approve** → `ready`; **request-changes** →
+post an **approval** inbox item that **attaches the spec**. On the answer: **approve**
+→ `ready`; **request-changes** →
 `spec_pending` (re-spec — see **Re-spec** below); **reject** → `abandoned`. A silent
 latency-timeout is abandoned by the `latency_timeouts` reconcile path in
 `{{templates_dir}}/manager/loop-cycle.md`.
 
-`{{spec_ref}}` must be a local readable regular file for this gate — a symbolic board
-ref (`ticket:<id>`) is not attachable. `--attach` uploads it to your session before the
-post; the runtime pins it against the inbox item so the orphan sweep keeps it while the
-gate is open. If the attach/post fails, **do not** set `--inbox-item`: leave the ticket
-gate-less so the next drain reports the operational failure instead of asking the human
-to approve a spec they cannot open.
+`{{spec_ref}}` must be a local readable regular file for this gate; a symbolic board
+ref (`ticket:<id>`) is not attachable. `--attach` uploads it and pins it against the
+inbox item for the life of the gate. On an attach/post failure, leave `--inbox-item`
+unset so the next drain reports the failure rather than gating on an unopenable spec.
 
 ```bash
 [ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = spec_review ] \

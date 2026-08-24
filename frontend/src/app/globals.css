@@ -14741,7 +14741,10 @@ html[data-theme="light"] .session-switcher-row.selected {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
   gap: 8px;
-  align-items: start;
+  /* Cards in a row share the row's height (grid default) so a short-title card
+     beside a tall one reads as an aligned row rather than a ragged one; the card
+     bottom-aligns its footer to fill the shared height. */
+  align-items: stretch;
 }
 
 /* Ticket card. */
@@ -14819,6 +14822,9 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .board-ticket-foot {
+  /* Pin the footer to the card's bottom so equal-height cards in a grid row keep
+     their metadata baseline aligned instead of floating mid-card. */
+  margin-top: auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;

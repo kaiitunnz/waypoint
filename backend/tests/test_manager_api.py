@@ -381,3 +381,181 @@ async def test_delete_ticket_endpoint_and_404(tmp_path: Path) -> None:
             f"/api/manager/{mid}/tickets/{tid}", headers=_auth(token)
         )
     assert missing.status_code == 404
+
+
+# ── Ticket-list query route (ticket 1504) ──
+
+from datetime import timedelta  # noqa: E402
+
+from waypoint.schemas import (  # noqa: E402
+    ManagerTicket,
+    ManagerTicketScale,
+    ManagerTicketState,
+)
+
+_QS = ManagerTicketState
+
+
+def _seed_ticket(
+    app: Any,
+    mid: str,
+    ticket_id: str,
+    *,
+    title: str = "ticket",
+    priority: str = "p2",
+    state: ManagerTicketState = _QS.BUILDING,
+    scale: ManagerTicketScale | None = None,
+    created_offset: int = 0,
+) -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    now = base + timedelta(minutes=created_offset)
+    app.state.context.storage.create_manager_ticket(
+        ManagerTicket(
+            id=ticket_id,
+            manager_id=mid,
+            title=title,
+            priority=priority,
+            state=state,
+            scale=scale,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
+async def _tickets(
+    client: httpx.AsyncClient, token: str, mid: str, **params: Any
+) -> httpx.Response:
+    return await client.get(
+        f"/api/manager/{mid}/tickets", headers=_auth(token), params=params
+    )
+
+
+async def test_tickets_route_requires_auth(tmp_path: Path) -> None:
+    app, _ = _build(tmp_path)
+    async with _client(app) as client:
+        resp = await client.get("/api/manager/x/tickets")
+    assert resp.status_code == 401
+
+
+async def test_tickets_default_page_and_summary(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        for i in range(3):
+            _seed_ticket(app, mid, f"b{i}", state=_QS.BUILDING, created_offset=i)
+        _seed_ticket(app, mid, "m0", state=_QS.MERGED, created_offset=10)
+        resp = await _tickets(client, token, mid)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["next_cursor"] is None
+    assert len(body["tickets"]) == 4
+    assert body["summary"]["total"] == 4
+    assert body["summary"]["lanes"]["build"] == 3
+    assert body["summary"]["lanes"]["done"] == 1
+    assert body["summary"]["in_flight_count"] == 3
+    assert body["summary"]["merged_count"] == 1
+
+
+async def test_tickets_repeated_filter_params(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        _seed_ticket(app, mid, "b0", state=_QS.BUILDING)
+        _seed_ticket(app, mid, "r0", state=_QS.READY)
+        _seed_ticket(app, mid, "m0", state=_QS.MERGED)
+        # Repeated ?state= params → OR within the facet.
+        resp = await _tickets(client, token, mid, state=["building", "ready"])
+    body = resp.json()
+    assert {t["id"] for t in body["tickets"]} == {"b0", "r0"}
+    assert body["summary"]["total"] == 2
+
+
+async def test_tickets_cursor_pagination_over_http(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        for i in range(12):
+            _seed_ticket(app, mid, f"t{i:02d}", created_offset=i)
+        seen: list[str] = []
+        cursor: str | None = None
+        for _ in range(10):
+            params: dict[str, Any] = {"limit": 5}
+            if cursor:
+                params["cursor"] = cursor
+            resp = await _tickets(client, token, mid, **params)
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            seen.extend(t["id"] for t in body["tickets"])
+            cursor = body["next_cursor"]
+            if cursor is None:
+                break
+    assert len(seen) == 12
+    assert len(set(seen)) == 12
+
+
+async def test_tickets_limit_bounds_are_422(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        too_small = await _tickets(client, token, mid, limit=0)
+        too_big = await _tickets(client, token, mid, limit=101)
+    assert too_small.status_code == 422
+    assert too_big.status_code == 422
+
+
+async def test_tickets_unknown_priority_is_422(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        resp = await _tickets(client, token, mid, priority=["nope"])
+    assert resp.status_code == 422
+
+
+async def test_tickets_invalid_cursor_is_422(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        _seed_ticket(app, mid, "t0")
+        resp = await _tickets(client, token, mid, cursor="tampered.value")
+    assert resp.status_code == 422
+
+
+async def test_tickets_cursor_rejected_after_query_change(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        for i in range(8):
+            _seed_ticket(app, mid, f"t{i}", created_offset=i)
+        first = await _tickets(client, token, mid, limit=3)
+        cursor = first.json()["next_cursor"]
+        assert cursor
+        # Same cursor, different filter → 422, never a silently different page.
+        resp = await _tickets(
+            client, token, mid, limit=3, cursor=cursor, state=["ready"]
+        )
+    assert resp.status_code == 422
+
+
+async def test_tickets_isolated_by_manager(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid_a = await _init(client, token, repo_dir="/repo/a")
+        mid_b = await _init(client, token, repo_dir="/repo/b")
+        _seed_ticket(app, mid_a, "a0")
+        _seed_ticket(app, mid_b, "b0")
+        _seed_ticket(app, mid_b, "b1")
+        resp_a = await _tickets(client, token, mid_a)
+        resp_b = await _tickets(client, token, mid_b)
+    assert {t["id"] for t in resp_a.json()["tickets"]} == {"a0"}
+    assert {t["id"] for t in resp_b.json()["tickets"]} == {"b0", "b1"}
+
+
+async def test_state_route_still_returns_full_list(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        mid = await _init(client, token)
+        for i in range(70):
+            _seed_ticket(app, mid, f"t{i:02d}", created_offset=i)
+        state = await client.get(f"/api/manager/{mid}/state", headers=_auth(token))
+    assert len(state.json()["tickets"]) == 70

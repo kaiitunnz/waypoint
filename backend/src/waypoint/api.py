@@ -73,6 +73,12 @@ from waypoint.schemas import (
     ManagerNextResponse,
     ManagerReconcileReport,
     ManagerStateResponse,
+    ManagerTicketListQuery,
+    ManagerTicketPage,
+    ManagerTicketScale,
+    ManagerTicketSort,
+    ManagerTicketSortDirection,
+    ManagerTicketState,
     MeResponse,
     ProfileDoctorReport,
     ScheduledMessageCreateRequest,
@@ -1998,6 +2004,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> ManagerStateResponse:
         return context.runtime.managers.require(manager_id).state()
+
+    @app.get(
+        "/api/manager/{manager_id}/tickets",
+        response_model=ManagerTicketPage,
+    )
+    async def manager_list_tickets(
+        manager_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        q: str = "",
+        state: Annotated[list[ManagerTicketState] | None, Query()] = None,
+        priority: Annotated[list[str] | None, Query()] = None,
+        scale: Annotated[list[ManagerTicketScale] | None, Query()] = None,
+        sort: ManagerTicketSort = ManagerTicketSort.UPDATED_AT,
+        direction: ManagerTicketSortDirection = ManagerTicketSortDirection.DESC,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: str | None = None,
+    ) -> ManagerTicketPage:
+        query = ManagerTicketListQuery(
+            q=q,
+            state=state or [],
+            priority=priority or [],
+            scale=scale or [],
+            sort=sort,
+            direction=direction,
+        )
+        return context.runtime.managers.require(manager_id).list_tickets_page(
+            query,
+            limit=limit,
+            cursor=cursor,
+            cursor_secret=context.settings.password,
+        )
 
     @app.get("/api/manager/{manager_id}/next", response_model=ManagerNextResponse)
     async def manager_next(

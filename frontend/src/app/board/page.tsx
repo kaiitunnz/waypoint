@@ -678,10 +678,20 @@ function ManagerBoard({ managerState, onOpenTicket }: ManagerBoardProps) {
               </div>
             );
           }
+          // A busy lane widens so its cards wrap into a 2-/3-column grid instead
+          // of one tall single-file stack; sparse lanes stay slim. CSS keys the
+          // lane width off this bucket (disabled at mobile widths).
+          const density =
+            laneTickets.length >= 13
+              ? "high"
+              : laneTickets.length >= 5
+                ? "med"
+                : "low";
           return (
             <div
               key={lane.key}
               className={`board-lane${isDone ? " is-done" : ""}`}
+              data-density={density}
             >
               <div className="board-lane-head">
                 <span className="board-lane-label">{lane.label}</span>

@@ -3946,12 +3946,13 @@ class SessionRuntime:
             raise
 
         service = self.notifications
+        with_notifications = (
+            service is not None
+            and service.has_targets()
+            and self.settings.notifications.allows_intent("inbox")
+        )
         try:
-            if (
-                service is not None
-                and service.has_targets()
-                and self.settings.notifications.allows_intent("inbox")
-            ):
+            if with_notifications and service is not None:
                 item = self.storage.create_inbox_item_with_notifications(
                     from_session_id=request.from_session_id or "",
                     from_label=from_label,
@@ -3962,7 +3963,6 @@ class SessionRuntime:
                     ),
                     item_id=item_id,
                 )
-                service.wake()
             else:
                 item = self.storage.create_inbox_item(
                     from_session_id=request.from_session_id or "",
@@ -3974,6 +3974,11 @@ class SessionRuntime:
         except Exception:
             _release_all()
             raise
+        # Past this point the row is durable and its refs are protected — never
+        # roll back. Waking the notifier is a side effect on already-committed
+        # state, so it stays outside the rollback guard.
+        if with_notifications and service is not None:
+            service.wake()
         # The author (a session filing its own item) is not woken; a human/UI
         # post carries no session id, so its subscribers are woken.
         await self._publish_inbox_update(

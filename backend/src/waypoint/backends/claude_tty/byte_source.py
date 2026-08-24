@@ -47,9 +47,8 @@ def resolve_remote_config_root(
     """Resolve the remote ``CLAUDE_CONFIG_DIR`` root for a session.
 
     ``None`` defaults to ``~/.claude``; an absolute or ``~``-anchored value is
-    used verbatim; a relative value resolves against the session's remote cwd,
-    mirroring the launch's ``cd cwd`` before it inherits the env var — never
-    against Waypoint's cwd or the SSH login dir.
+    used verbatim; a relative value resolves against the session's remote cwd
+    (not Waypoint's cwd or the SSH login dir).
     """
     if config_dir is None:
         return "~/.claude"

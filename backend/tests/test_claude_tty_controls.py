@@ -572,18 +572,16 @@ async def test_fork_session_materializes_transcript_and_seeds_events(
     )
 
     new_thread_id = forked.transport_state["thread_id"]
-    # The parent transcript was copied under the new thread id, so the resumed
-    # pane reopens a complete conversation.
+    # The parent transcript is copied under the new thread id.
     dst_path = transcript_path(cwd, new_thread_id, config_dir)
     assert dst_path.exists()
     assert dst_path.read_text() == src_path.read_text()
-    # A materialized fork resumes the copy directly — no native --fork-session —
-    # and the tailer skips the pre-seeded history by tailing from the end.
+    # A materialized fork resumes the copy and tails from its end; the seeded
+    # history reaches the DB through clone_events, not the tailer.
     built_args = runtime._command_for_backend.call_args.args[1]
     assert built_args == ["--resume", new_thread_id]
     assert "--fork-session" not in built_args
     assert captured["start_at_end"] is True
-    # The parent's events seed the fork's DB so it renders on creation.
     runtime.storage.clone_events.assert_called_once_with("src", "fork-1")
 
 
@@ -592,9 +590,8 @@ async def test_fork_session_falls_back_to_native_fork_without_transcript() -> No
     plugin = ClaudeTtyPlugin()
     captured = _stub_lifecycle(plugin)
     runtime, _ = _launch_runtime()
-    # No transcript on disk (cwd/config point nowhere real), so materialization
-    # fails and the fork degrades to Claude's native lazy fork — never worse
-    # than today's behavior.
+    # No transcript on disk, so materialization fails and the fork uses the
+    # native lazy path.
     source = _make_session(session_id="src", thread_id="thread-src")
 
     forked = await plugin.fork_session(

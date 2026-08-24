@@ -877,16 +877,12 @@ class ClaudeTtyPlugin:
         )
         config_dir = self._config_dir(session)
         new_thread_id = str(uuid.uuid4())
-        # Materialize the fork by copying the parent transcript under the new
-        # thread id, then resume it. Claude's own ``--fork-session`` writes the
-        # forked transcript lazily (only after the first turn), so the pane would
-        # otherwise show no history until the human replies. A materialized copy
-        # is a complete, self-contained conversation the resumed pane reopens
-        # immediately, and ``clone_events`` seeds the event DB so the fork's
-        # transcript renders the instant it is created — mirroring the
-        # promote-side-question path. If the parent transcript cannot be copied
-        # (e.g. a fork before its first turn wrote one), fall back to Claude's
-        # native lazy fork so the behavior never regresses below today's.
+        # Claude writes a --fork-session transcript only after the first turn.
+        # Copying it under the new thread id lets the resumed pane reopen the
+        # full history now, and clone_events seeds the event DB so the fork
+        # renders on creation; the pane re-reads the copied file, so the tailer
+        # starts at its end. Without a parent transcript to copy, fall back to
+        # the native lazy fork.
         materialized = await self._materialize_forked_transcript(
             session, src_thread_id, new_thread_id, config_dir, launch_target
         )
@@ -964,9 +960,6 @@ class ClaudeTtyPlugin:
         )
         runtime.storage.create_session(new_session)
         if materialized:
-            # Seed the fork's transcript from the parent so it renders on
-            # creation; the resumed pane reopens the copied file, so tail from
-            # its end and pick up only turns added from here.
             runtime.storage.clone_events(session.id, new_session_id)
         await runtime._record_system_event(
             new_session_id,
@@ -993,26 +986,15 @@ class ClaudeTtyPlugin:
         config_dir: str | None,
         launch_target: SshLaunchTargetConfig | None,
     ) -> bool:
-        """Copy the parent transcript under ``new_thread_id`` so a resumed pane
-        reopens a complete conversation. Returns ``True`` when the copy landed.
-
-        Best-effort: any failure (a missing parent file, a remote glob miss or
-        copy error) returns ``False`` so the caller falls back to Claude's
-        native ``--fork-session``. Never raises — the copy runs off the event
-        loop since both filesystem and SSH ops block.
+        """Copy the parent transcript under ``new_thread_id``, returning ``True``
+        on success. Any failure returns ``False`` for the caller's native-fork
+        fallback; runs off the event loop since filesystem and SSH ops block.
         """
         try:
-            if launch_target is None:
-                return await asyncio.to_thread(
-                    self._copy_local_transcript,
-                    session.cwd,
-                    src_thread_id,
-                    new_thread_id,
-                    config_dir,
-                )
             return await asyncio.to_thread(
-                self._copy_remote_transcript,
+                self._copy_transcript,
                 session,
+                src_thread_id,
                 new_thread_id,
                 config_dir,
                 launch_target,
@@ -1024,35 +1006,31 @@ class ClaudeTtyPlugin:
             )
             return False
 
-    @staticmethod
-    def _copy_local_transcript(
-        cwd: str, src_thread_id: str, new_thread_id: str, config_dir: str | None
-    ) -> bool:
-        src = transcript_path(cwd, src_thread_id, config_dir)
-        if not src.exists():
-            return False
-        dst = transcript_path(cwd, new_thread_id, config_dir)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        return True
-
-    def _copy_remote_transcript(
+    def _copy_transcript(
         self,
         session: SessionRecord,
+        src_thread_id: str,
         new_thread_id: str,
         config_dir: str | None,
-        launch_target: SshLaunchTargetConfig,
+        launch_target: SshLaunchTargetConfig | None,
     ) -> bool:
+        if launch_target is None:
+            src = transcript_path(session.cwd, src_thread_id, config_dir)
+            if not src.exists():
+                return False
+            dst = transcript_path(session.cwd, new_thread_id, config_dir)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            return True
         fs = RemoteTranscriptFilesystem(launch_target)
         config_root = resolve_remote_config_root(config_dir, session.cwd, fs)
         matches = fs.glob_artifacts(session, self, config_root)
         if len(matches) != 1:
             return False
-        src_remote = matches[0]
         dst_remote = posixpath.join(
-            posixpath.dirname(src_remote), f"{new_thread_id}.jsonl"
+            posixpath.dirname(matches[0]), f"{new_thread_id}.jsonl"
         )
-        fs.copy_file(src_remote, dst_remote, 0o600)
+        fs.copy_file(matches[0], dst_remote, 0o600)
         return True
 
     # ── Control swaps (restart-with-resume) ──────────────────────────────────

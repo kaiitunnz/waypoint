@@ -3849,3 +3849,160 @@ def test_rebuild_telemetry_confirm_prompt_aborts_on_no(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert _fact_count(db_path) == 0
+
+
+def _inbox_attach_client(
+    captured: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wire ``waypoint.cli.WaypointClient`` to a mock transport that records the
+    attachment upload and the inbox post body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/attachments") and request.method == "POST":
+            captured.setdefault("uploads", []).append(request.url.path)
+            return httpx.Response(200, json={"id": "a" * 32, "filename": "rfc.md"})
+        if request.url.path == "/api/inbox" and request.method == "POST":
+            captured["post_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"item": {"id": "item-1", "blocks": []}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+
+
+def test_inbox_post_attach_uploads_and_splices_before_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec_file = tmp_path / "rfc.md"
+    spec_file.write_text("# spec", encoding="utf-8")
+    body = {
+        "subject": "chan: title — spec review",
+        "blocks": [
+            {"type": "markdown", "text": "summary"},
+            {
+                "type": "approval",
+                "prompt": "Approve?",
+                "options": ["approve", "reject"],
+                "required": True,
+            },
+        ],
+    }
+    body_file = tmp_path / "body.json"
+    body_file.write_text(json.dumps(body), encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+    _inbox_attach_client(captured, monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "inbox",
+            "post",
+            "--json",
+            str(body_file),
+            "--from-session-id",
+            "sess-x",
+            "--attach",
+            str(spec_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured["uploads"] == ["/api/sessions/sess-x/attachments"]
+    posted = captured["post_body"]
+    assert posted["from_session_id"] == "sess-x"
+    types = [block["type"] for block in posted["blocks"]]
+    # Attachment spliced immediately before the first interactive (approval) block.
+    assert types == ["markdown", "attachment", "approval"]
+    ref = posted["blocks"][1]["ref"]
+    assert ref == {"session_id": "sess-x", "attachment_id": "a" * 32}
+
+
+def test_inbox_post_attach_appends_when_non_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec_file = tmp_path / "rfc.md"
+    spec_file.write_text("# spec", encoding="utf-8")
+    body_file = tmp_path / "body.json"
+    body_file.write_text(
+        json.dumps({"subject": "s", "blocks": [{"type": "markdown", "text": "fyi"}]}),
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+    _inbox_attach_client(captured, monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "inbox",
+            "post",
+            "--json",
+            str(body_file),
+            "--from-session-id",
+            "sess-x",
+            "--attach",
+            str(spec_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    types = [block["type"] for block in captured["post_body"]["blocks"]]
+    assert types == ["markdown", "attachment"]
+
+
+def test_inbox_post_attach_requires_sender(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("WAYPOINT_SESSION_ID", raising=False)
+    spec_file = tmp_path / "rfc.md"
+    spec_file.write_text("# spec", encoding="utf-8")
+    body_file = tmp_path / "body.json"
+    body_file.write_text(json.dumps({"subject": "s", "blocks": []}), encoding="utf-8")
+    captured: dict[str, Any] = {}
+    _inbox_attach_client(captured, monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "inbox",
+            "post",
+            "--json",
+            str(body_file),
+            "--attach",
+            str(spec_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "sender session" in result.output
+    assert "uploads" not in captured  # failed before any upload/post
+
+
+def test_inbox_post_attach_missing_file_fails_before_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body_file = tmp_path / "body.json"
+    body_file.write_text(json.dumps({"subject": "s", "blocks": []}), encoding="utf-8")
+    captured: dict[str, Any] = {}
+    _inbox_attach_client(captured, monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "inbox",
+            "post",
+            "--json",
+            str(body_file),
+            "--from-session-id",
+            "sess-x",
+            "--attach",
+            str(tmp_path / "does-not-exist.md"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not a readable file" in result.output
+    assert "uploads" not in captured

@@ -17,6 +17,7 @@ from typing import Any
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.claude_code.models import (
+    ClaudeContextWindowResolver,
     claude_context_window_for_model,
     claude_model_family,
     normalize_claude_model_id,
@@ -400,6 +401,9 @@ class ClaudeCliAdapter:
         on_session_update: SessionUpdateCallback | None = None,
         on_token_usage: TokenUsageCallback | None = None,
         default_model_id: str | None = None,
+        context_window_resolver: ClaudeContextWindowResolver = (
+            claude_context_window_for_model
+        ),
     ) -> None:
         self._emit_event = emit_event
         self._binary = binary
@@ -408,6 +412,7 @@ class ClaudeCliAdapter:
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
         self._default_model_id = normalize_claude_model_id(default_model_id)
+        self._context_window_resolver = context_window_resolver
         self._sessions: dict[str, ClaudeSessionState] = {}
         # Folded todo state stashed by terminate_session and consumed by the
         # next resume-spawn, so a respawn (set_effort, reattach) restores the
@@ -1788,6 +1793,7 @@ class ClaudeCliAdapter:
         snapshot = _context_usage_snapshot_from_message(
             state.model,
             usage if isinstance(usage, dict) else {},
+            self._context_window_resolver,
         )
         if snapshot is not None:
             state.context_usage_snapshot = snapshot
@@ -2036,7 +2042,7 @@ class ClaudeCliAdapter:
         model = state.model or self._default_model_id
         if model is None:
             return
-        context_window_tokens = claude_context_window_for_model(model)
+        context_window_tokens = self._context_window_resolver(model)
         if context_window_tokens is None:
             return
         if snapshot.context_window_tokens == context_window_tokens:
@@ -2066,7 +2072,11 @@ class ClaudeCliAdapter:
 
 
 def _context_usage_snapshot_from_message(
-    model: str | None, usage: dict[str, Any]
+    model: str | None,
+    usage: dict[str, Any],
+    context_window_resolver: ClaudeContextWindowResolver = (
+        claude_context_window_for_model
+    ),
 ) -> SessionContextUsage | None:
     input_tokens = _non_negative_int(usage.get("input_tokens"))
     cache_read_input_tokens = _non_negative_int(usage.get("cache_read_input_tokens"))
@@ -2084,11 +2094,15 @@ def _context_usage_snapshot_from_message(
         )
         if value is not None
     )
-    if used_tokens <= 0:
-        return None
 
-    context_window_tokens = claude_context_window_for_model(model)
+    context_window_tokens = context_window_resolver(model)
     if context_window_tokens is None:
+        return None
+    # Surfacing the configured window is the point of the pill, so emit whenever
+    # the turn carries any usage signal — even a custom gateway that reports only
+    # output tokens (input/cache absent → ``used_tokens == 0``). A turn with no
+    # signal at all stays suppressed.
+    if used_tokens <= 0 and (output_tokens or 0) <= 0:
         return None
 
     breakdown = {
@@ -2111,7 +2125,12 @@ def _context_usage_snapshot_from_message(
 
 
 def rebase_claude_context_usage(
-    session: SessionRecord, *, model: str | None = None
+    session: SessionRecord,
+    *,
+    model: str | None = None,
+    context_window_resolver: ClaudeContextWindowResolver = (
+        claude_context_window_for_model
+    ),
 ) -> SessionContextUsage | None:
     """Recompute a stored Claude snapshot's window from the durable model.
 
@@ -2127,14 +2146,18 @@ def rebase_claude_context_usage(
     if snapshot is None:
         return None
     selection = model if model is not None else session.model
-    window = claude_context_window_for_model(selection) if selection else None
+    window = context_window_resolver(selection) if selection else None
     if snapshot.context_window_tokens == window:
         return snapshot
     return snapshot.model_copy(update={"context_window_tokens": window})
 
 
 def seed_context_usage_from_transcript(
-    transcript_path: Path, model: str | None
+    transcript_path: Path,
+    model: str | None,
+    context_window_resolver: ClaudeContextWindowResolver = (
+        claude_context_window_for_model
+    ),
 ) -> SessionContextUsage | None:
     """Initial context snapshot for a freshly-imported thread.
 
@@ -2161,7 +2184,9 @@ def seed_context_usage_from_transcript(
             continue
         message: dict[str, Any] = record.get("message") or {}
         usage: dict[str, Any] = message.get("usage") or {}
-        snapshot = _context_usage_snapshot_from_message(model, usage)
+        snapshot = _context_usage_snapshot_from_message(
+            model, usage, context_window_resolver
+        )
         if snapshot is not None:
             return snapshot
     return None

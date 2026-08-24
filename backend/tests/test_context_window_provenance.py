@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from waypoint.backends.claude_code.adapter import (
+    _context_usage_snapshot_from_message,
     rebase_claude_context_usage,
     seed_context_usage_from_transcript,
 )
@@ -298,3 +299,80 @@ async def test_tailer_uses_configured_custom_window() -> None:
 
     snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
     assert snapshot.context_window_tokens == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_tailer_emits_window_on_output_only_gateway_turn() -> None:
+    # A custom gateway reports only output tokens (input/cache all zero). The
+    # snapshot must still publish so the configured window surfaces; previously
+    # the ``used_tokens <= 0`` gate discarded it and the pill stayed empty.
+    session = _session("kimi-k3[1m]", None)
+    runtime = MagicMock()
+    runtime.storage.get_session.return_value = session
+    runtime.update_session_fields = AsyncMock()
+    runtime.publish_token_usage_record = AsyncMock()
+    runtime._emit_adapter_event = AsyncMock()
+
+    record = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "model": "kimi-k3-0711",
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 0, "output_tokens": 176},
+        },
+    }
+    data = (json.dumps(record) + "\n").encode()
+    plugin = MagicMock()
+    plugin._pending_questions = {}
+    tailer = TranscriptTailer(
+        session_id="sess-1",
+        source=_FeedOnceSource(data),
+        runtime=runtime,
+        plugin=plugin,
+        context_window_resolver=_CUSTOM_RESOLVER,
+    )
+    await tailer._drain()
+
+    runtime.update_session_fields.assert_called_once()
+    snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
+    assert snapshot.context_window_tokens == 1_000_000
+    assert snapshot.used_tokens == 0
+    assert snapshot.breakdown.get("output_tokens") == 176
+
+
+# ── Snapshot emits on an output-only turn so a custom window still surfaces ─
+
+
+def test_snapshot_output_only_usage_still_emits_window() -> None:
+    snapshot = _context_usage_snapshot_from_message(
+        "kimi-k3[1m]",
+        {"input_tokens": 0, "output_tokens": 176},
+        _CUSTOM_RESOLVER,
+    )
+    assert snapshot is not None
+    assert snapshot.context_window_tokens == 1_000_000
+    assert snapshot.used_tokens == 0
+    assert snapshot.breakdown.get("output_tokens") == 176
+
+
+def test_snapshot_no_usage_signal_returns_none() -> None:
+    # A turn with no signal at all (every count zero) stays suppressed.
+    assert (
+        _context_usage_snapshot_from_message(
+            "kimi-k3[1m]",
+            {"input_tokens": 0, "output_tokens": 0},
+            _CUSTOM_RESOLVER,
+        )
+        is None
+    )
+
+
+def test_snapshot_output_only_without_window_returns_none() -> None:
+    # No resolvable window → no denominator, so nothing to publish.
+    assert (
+        _context_usage_snapshot_from_message(
+            "unknown-model", {"input_tokens": 0, "output_tokens": 176}
+        )
+        is None
+    )

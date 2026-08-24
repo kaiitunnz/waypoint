@@ -2094,11 +2094,15 @@ def _context_usage_snapshot_from_message(
         )
         if value is not None
     )
-    if used_tokens <= 0:
-        return None
 
     context_window_tokens = context_window_resolver(model)
     if context_window_tokens is None:
+        return None
+    # Surfacing the configured window is the point of the pill, so emit whenever
+    # the turn carries any usage signal — even a custom gateway that reports only
+    # output tokens (input/cache absent → ``used_tokens == 0``). A turn with no
+    # signal at all stays suppressed.
+    if used_tokens <= 0 and (output_tokens or 0) <= 0:
         return None
 
     breakdown = {

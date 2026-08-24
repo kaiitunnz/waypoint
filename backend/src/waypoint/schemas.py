@@ -1072,6 +1072,72 @@ class ManagerListResponse(BaseModel):
     managers: list[ManagerSummary] = Field(default_factory=list)
 
 
+class ManagerTicketSort(StrEnum):
+    UPDATED_AT = "updated_at"
+    CREATED_AT = "created_at"
+    PRIORITY = "priority"
+    ID = "id"
+
+
+class ManagerTicketSortDirection(StrEnum):
+    ASC = "asc"
+    DESC = "desc"
+
+
+class ManagerTicketListQuery(BaseModel):
+    # The board query. Filters combine with AND; an empty collection or ``q`` is
+    # no filter. ``normalized()`` canonicalizes the values so an identical query
+    # yields an identical cursor binding.
+    q: str = ""
+    state: list[ManagerTicketState] = Field(default_factory=list)
+    priority: list[str] = Field(default_factory=list)
+    scale: list[ManagerTicketScale] = Field(default_factory=list)
+    sort: ManagerTicketSort = ManagerTicketSort.UPDATED_AT
+    direction: ManagerTicketSortDirection = ManagerTicketSortDirection.DESC
+
+    def normalized(self) -> "ManagerTicketListQuery":
+        return ManagerTicketListQuery(
+            q=self.q.strip(),
+            state=sorted({str(s) for s in self.state}),
+            priority=sorted(set(self.priority)),
+            scale=sorted({str(s) for s in self.scale}),
+            sort=self.sort,
+            direction=self.direction,
+        )
+
+    def fingerprint(self) -> str:
+        # Deterministic canonical string bound into the cursor so a continuation
+        # token can only be replayed against the exact same query.
+        n = self.normalized()
+        return "|".join(
+            [
+                n.q,
+                ",".join(n.state),
+                ",".join(n.priority),
+                ",".join(n.scale),
+                str(n.sort),
+                str(n.direction),
+            ]
+        )
+
+
+class ManagerTicketSummary(BaseModel):
+    # Aggregates over the ENTIRE matching result, independent of the page limit,
+    # so the board can distinguish an empty lane from an unloaded one.
+    total: int = 0
+    lanes: dict[str, int] = Field(default_factory=dict)
+    awaiting_count: int = 0
+    in_flight_count: int = 0
+    blocked_count: int = 0
+    merged_count: int = 0
+
+
+class ManagerTicketPage(BaseModel):
+    tickets: list[ManagerTicket] = Field(default_factory=list)
+    next_cursor: str | None = None
+    summary: ManagerTicketSummary = Field(default_factory=ManagerTicketSummary)
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"

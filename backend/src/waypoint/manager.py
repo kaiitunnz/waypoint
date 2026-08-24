@@ -20,10 +20,15 @@ events with one ``(from, to)`` pair (reject vs latency-timeout into
 in ``reason``/meta, not a separate table key.
 """
 
+import base64
+import hashlib
+import hmac
+import json
 import secrets
 import sqlite3
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -37,8 +42,12 @@ from waypoint.schemas import (
     ManagerStateResponse,
     ManagerSummary,
     ManagerTicket,
+    ManagerTicketListQuery,
+    ManagerTicketPage,
     ManagerTicketScale,
+    ManagerTicketSort,
     ManagerTicketState,
+    ManagerTicketSummary,
     ManagerTicketTransitions,
     ManagerTreeState,
     ReconcileDeadLead,
@@ -103,6 +112,116 @@ _RESUMABLE_STATES: frozenset[ManagerTicketState] = frozenset(
         _S.REVIEW_REQUESTED,
     }
 )
+
+# In-flight work: the active build states, for the board rollup's "in flight".
+_IN_FLIGHT_STATES: frozenset[ManagerTicketState] = frozenset(
+    {_S.DELEGATED, _S.BUILDING, _S.REVISING}
+)
+
+# The lifecycle-lane taxonomy the board groups cards by. The keys and their
+# state membership mirror ``frontend/src/lib/board.ts`` (LANES); the backend owns
+# this copy so the query summary can report lane counts without importing the
+# frontend. The dict order is the canonical lane order.
+_LANES: dict[str, tuple[ManagerTicketState, ...]] = {
+    "intake": (_S.INTAKE, _S.TRIAGED),
+    "spec": (_S.SPEC_PENDING, _S.SPEC_REVIEW),
+    "ready": (_S.READY,),
+    "build": (_S.DELEGATED, _S.BUILDING, _S.REVISING),
+    "blocked": (_S.BLOCKED,),
+    "review": (_S.REVIEW_REQUESTED,),
+    "done": (_S.MERGED, _S.DEFERRED, _S.ABANDONED),
+}
+
+
+def _summarize_states(state_counts: dict[str, int]) -> ManagerTicketSummary:
+    """Fold per-state counts into the board's lane and rollup aggregates."""
+    lanes = {
+        lane: sum(state_counts.get(str(state), 0) for state in states)
+        for lane, states in _LANES.items()
+    }
+    return ManagerTicketSummary(
+        total=sum(state_counts.values()),
+        lanes=lanes,
+        awaiting_count=sum(
+            state_counts.get(str(state), 0) for state in _AWAITING_STATES
+        ),
+        in_flight_count=sum(
+            state_counts.get(str(state), 0) for state in _IN_FLIGHT_STATES
+        ),
+        blocked_count=state_counts.get(str(_S.BLOCKED), 0),
+        merged_count=state_counts.get(str(_S.MERGED), 0),
+    )
+
+
+# ─── Ticket-page cursor ───
+
+_CURSOR_VERSION = 1
+
+
+class ManagerCursorError(Exception):
+    """A malformed, tampered, or query-mismatched continuation cursor (→ 422)."""
+
+
+def _priority_rank(priority: str, priority_order: Sequence[str]) -> int:
+    # Mirror ``Storage._priority_case``: configured order first, unknown after.
+    try:
+        return list(priority_order).index(priority)
+    except ValueError:
+        return len(priority_order)
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _cursor_signature(payload: bytes, secret: str) -> bytes:
+    return hmac.new(secret.encode(), payload, hashlib.sha256).digest()
+
+
+def encode_ticket_cursor(
+    query: ManagerTicketListQuery, boundary: list[Any], secret: str
+) -> str:
+    """A signed, query-bound continuation token for the row at ``boundary``."""
+    body = {"v": _CURSOR_VERSION, "fp": query.fingerprint(), "k": boundary}
+    payload = json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+    signature = _cursor_signature(payload, secret)
+    return f"{_b64url_encode(payload)}.{_b64url_encode(signature)}"
+
+
+def decode_ticket_cursor(
+    cursor: str, query: ManagerTicketListQuery, secret: str
+) -> tuple[Any, ...]:
+    """Validate ``cursor`` against ``query`` and return its keyset boundary.
+
+    Raises ``ManagerCursorError`` for any malformed, tampered, version-stale, or
+    query-mismatched token — the boundary is never guessed.
+    """
+    try:
+        payload_b64, signature_b64 = cursor.split(".", 1)
+        payload = _b64url_decode(payload_b64)
+        signature = _b64url_decode(signature_b64)
+    except (ValueError, TypeError):
+        raise ManagerCursorError("malformed cursor") from None
+    if not hmac.compare_digest(signature, _cursor_signature(payload, secret)):
+        raise ManagerCursorError("bad cursor signature")
+    try:
+        body = json.loads(payload)
+    except json.JSONDecodeError:
+        raise ManagerCursorError("malformed cursor") from None
+    if not isinstance(body, dict) or body.get("v") != _CURSOR_VERSION:
+        raise ManagerCursorError("unsupported cursor version")
+    if body.get("fp") != query.fingerprint():
+        raise ManagerCursorError("cursor does not match query")
+    keyset = body.get("k")
+    if not isinstance(keyset, list) or not keyset:
+        raise ManagerCursorError("malformed cursor")
+    return tuple(keyset)
+
 
 # The transition table as data: legal ``to`` states for each ``from`` state.
 # Self-loops on the six resumable states are the lead/writer-died resume edge.
@@ -391,6 +510,88 @@ class ManagerManager:
 
     def list_tickets(self) -> list[ManagerTicket]:
         return self._storage.list_manager_tickets(manager_id=self._manager_id)
+
+    def list_tickets_page(
+        self,
+        query: ManagerTicketListQuery,
+        *,
+        limit: int,
+        cursor: str | None,
+        cursor_secret: str,
+    ) -> ManagerTicketPage:
+        """One board page for ``query`` plus its full-result summary.
+
+        Priority filter/sort resolve against this manager's configured
+        ``priority_levels``. An out-of-config requested priority raises 422
+        (a typo must not read as an empty board); the cursor is validated and
+        bound to the exact normalized query.
+        """
+        query = query.normalized()
+        config = self.config()
+        priority_order = config.priority_levels
+        unknown = [p for p in query.priority if p not in priority_order]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"unknown priority {unknown!r}; "
+                    f"expected one of {priority_order}"
+                ),
+            )
+        keyset: tuple[Any, ...] | None = None
+        if cursor:
+            try:
+                keyset = decode_ticket_cursor(cursor, query, cursor_secret)
+            except ManagerCursorError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=str(exc),
+                ) from exc
+        rows, state_counts = self._storage.query_manager_tickets(
+            manager_id=self._manager_id,
+            q=query.q,
+            states=query.state,
+            priorities=query.priority,
+            scales=query.scale,
+            sort=query.sort,
+            direction=query.direction,
+            priority_order=priority_order,
+            limit=limit,
+            keyset=keyset,
+        )
+        has_more = len(rows) > limit
+        page = rows[:limit]
+        next_cursor: str | None = None
+        if has_more and page:
+            boundary = self._ticket_boundary(page[-1], query.sort, priority_order)
+            next_cursor = encode_ticket_cursor(query, boundary, cursor_secret)
+        return ManagerTicketPage(
+            tickets=page,
+            next_cursor=next_cursor,
+            summary=_summarize_states(state_counts),
+        )
+
+    @staticmethod
+    def _ticket_boundary(
+        ticket: ManagerTicket,
+        sort: ManagerTicketSort,
+        priority_order: Sequence[str],
+    ) -> list[Any]:
+        # The keyset values for ``ticket`` under ``sort``; the timestamp forms use
+        # ``isoformat`` so the boundary is byte-identical to the stored column.
+        if sort == ManagerTicketSort.ID:
+            return [ticket.id]
+        if sort == ManagerTicketSort.PRIORITY:
+            # (unknown-group flag, rank, id) — the three ordering columns.
+            unknown = 0 if ticket.priority in priority_order else 1
+            return [
+                unknown,
+                _priority_rank(ticket.priority, priority_order),
+                ticket.id,
+            ]
+        if sort == ManagerTicketSort.CREATED_AT:
+            return [ticket.created_at.isoformat(), ticket.id]
+        return [ticket.updated_at.isoformat(), ticket.id]
 
     def get_ticket(self, ticket_id: str) -> ManagerTicket:
         ticket = self._storage.get_manager_ticket(

@@ -12,12 +12,14 @@ from fastapi import HTTPException
 
 from waypoint.manager import (
     _ADJACENCY,
+    ManagerCursorError,
     ManagerManager,
     ManagerRegistry,
     ManagerStateError,
     apply_transition,
     check_invariants,
     compute_next,
+    decode_ticket_cursor,
     legal_targets,
     tree_state,
 )
@@ -28,7 +30,10 @@ from waypoint.schemas import (
     ManagerInitRequest,
     ManagerRenderContext,
     ManagerTicket,
+    ManagerTicketListQuery,
     ManagerTicketScale,
+    ManagerTicketSort,
+    ManagerTicketSortDirection,
     ManagerTicketState,
     TicketCreateRequest,
     TicketTransitionRequest,
@@ -1202,3 +1207,474 @@ def test_init_preserves_owner_when_not_resupplied(tmp_path: Path) -> None:
         )
     )
     assert reg.get(first.id).config().owner_session_id == "mgr2"
+
+
+# ── Ticket-list query: paging, filters, sort, cursor, summary (ticket 1504) ──
+
+Sort = ManagerTicketSort
+Dir = ManagerTicketSortDirection
+_SECRET = "cursor-secret"
+
+
+def _seed_query_manager(
+    tmp_path: Path,
+    priority_levels: list[str] | None = None,
+) -> ManagerManager:
+    levels = priority_levels or ["p0", "p1", "p2", "p3"]
+    return _init(
+        _storage(tmp_path),
+        ManagerConfig(priority_levels=levels),
+    )
+
+
+def _seed(mgr: ManagerManager, tickets: list[ManagerTicket]) -> None:
+    for ticket in tickets:
+        mgr._storage.create_manager_ticket(ticket)
+
+
+def _drain(
+    mgr: ManagerManager, query: ManagerTicketListQuery, *, limit: int
+) -> list[str]:
+    """All ticket ids across a full cursor walk of ``query``."""
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(100):  # generous guard against a non-terminating walk
+        page = mgr.list_tickets_page(
+            query, limit=limit, cursor=cursor, cursor_secret=_SECRET
+        )
+        seen.extend(t.id for t in page.tickets)
+        if page.next_cursor is None:
+            return seen
+        cursor = page.next_cursor
+    raise AssertionError("cursor walk did not terminate")
+
+
+def test_query_default_sort_is_updated_desc_id_tiebreak(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    # Two share an updated_at so the id tie-break is exercised.
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, "b", created_at=base).model_copy(
+                update={"updated_at": base + timedelta(hours=2)}
+            ),
+            mk(S.BUILDING, "a", created_at=base).model_copy(
+                update={"updated_at": base + timedelta(hours=2)}
+            ),
+            mk(S.BUILDING, "c", created_at=base).model_copy(
+                update={"updated_at": base + timedelta(hours=1)}
+            ),
+        ],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(), limit=50, cursor=None, cursor_secret=_SECRET
+    )
+    # updated_at desc; equal updated_at → id ASC always.
+    assert [t.id for t in page.tickets] == ["a", "b", "c"]
+
+
+def test_query_pagination_covers_all_without_duplicates(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    ids = [f"t{i:03d}" for i in range(23)]
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, tid, created_at=base + timedelta(minutes=i))
+            for i, tid in enumerate(ids)
+        ],
+    )
+    seen = _drain(mgr, ManagerTicketListQuery(), limit=10)
+    assert len(seen) == 23
+    assert set(seen) == set(ids)
+    assert len(seen) == len(set(seen))  # no duplicates across the stable walk
+
+
+def test_query_no_trailing_empty_page(tmp_path: Path) -> None:
+    # A result that is an exact multiple of the limit must not emit a cursor for
+    # an empty final page.
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, f"t{i}", created_at=base + timedelta(minutes=i))
+            for i in range(10)
+        ],
+    )
+    page1 = mgr.list_tickets_page(
+        ManagerTicketListQuery(), limit=5, cursor=None, cursor_secret=_SECRET
+    )
+    assert page1.next_cursor is not None
+    page2 = mgr.list_tickets_page(
+        ManagerTicketListQuery(),
+        limit=5,
+        cursor=page1.next_cursor,
+        cursor_secret=_SECRET,
+    )
+    assert len(page2.tickets) == 5
+    assert page2.next_cursor is None
+
+
+def test_query_priority_sort_uses_config_order_not_lexicographic(
+    tmp_path: Path,
+) -> None:
+    # A non-lexicographic configured order: "high" must sort before "low".
+    mgr = _seed_query_manager(tmp_path, priority_levels=["high", "medium", "low"])
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, "lo", priority="low", created_at=base),
+            mk(S.BUILDING, "hi", priority="high", created_at=base),
+            mk(S.BUILDING, "me", priority="medium", created_at=base),
+        ],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(sort=Sort.PRIORITY, direction=Dir.ASC),
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert [t.id for t in page.tickets] == ["hi", "me", "lo"]
+
+
+def test_query_priority_sort_unknown_legacy_sorts_after(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path, priority_levels=["p0", "p1"])
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, "legacy", priority="p9", created_at=base),
+            mk(S.BUILDING, "top", priority="p0", created_at=base),
+        ],
+    )
+    # Unknown "p9" ranks after configured values in ascending order.
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(sort=Sort.PRIORITY, direction=Dir.ASC),
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert [t.id for t in page.tickets] == ["top", "legacy"]
+    # ...and still after in descending order (unknown never floats to the top).
+    page_desc = mgr.list_tickets_page(
+        ManagerTicketListQuery(sort=Sort.PRIORITY, direction=Dir.DESC),
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert page_desc.tickets[-1].id == "legacy"
+
+
+def test_query_priority_sort_paginates_by_config_order(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path, priority_levels=["p0", "p1", "p2", "p3"])
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(
+                S.BUILDING,
+                f"t{i:02d}",
+                priority=f"p{i % 4}",
+                created_at=base + timedelta(minutes=i),
+            )
+            for i in range(12)
+        ],
+    )
+    query = ManagerTicketListQuery(sort=Sort.PRIORITY, direction=Dir.ASC)
+    walked = _drain(mgr, query, limit=5)
+    full = mgr.list_tickets_page(query, limit=50, cursor=None, cursor_secret=_SECRET)
+    assert walked == [t.id for t in full.tickets]  # keyset walk matches one-shot order
+    assert len(walked) == 12
+
+
+def test_query_title_filter_is_literal_substring(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, "a", created_at=base).model_copy(
+                update={"title": "add lazy loading"}
+            ),
+            mk(S.BUILDING, "b", created_at=base).model_copy(
+                update={"title": "Lazy sort order"}
+            ),
+            mk(S.BUILDING, "c", created_at=base).model_copy(
+                update={"title": "unrelated"}
+            ),
+        ],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(q="lazy"),  # case-insensitive
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert {t.id for t in page.tickets} == {"a", "b"}
+
+
+def test_query_title_filter_escapes_like_wildcards(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, "pct", created_at=base).model_copy(
+                update={"title": "100% done"}
+            ),
+            mk(S.BUILDING, "und", created_at=base).model_copy(
+                update={"title": "a_b names"}
+            ),
+            mk(S.BUILDING, "plain", created_at=base).model_copy(
+                update={"title": "1000 done"}
+            ),
+        ],
+    )
+    # "%" is a literal, not a wildcard: "% done" must not match "1000 done".
+    pct = mgr.list_tickets_page(
+        ManagerTicketListQuery(q="% done"), limit=50, cursor=None, cursor_secret=_SECRET
+    )
+    assert {t.id for t in pct.tickets} == {"pct"}
+    # "_" is literal: "a_b" must not match via single-char wildcard.
+    und = mgr.list_tickets_page(
+        ManagerTicketListQuery(q="a_b"), limit=50, cursor=None, cursor_secret=_SECRET
+    )
+    assert {t.id for t in und.tickets} == {"und"}
+
+
+def test_query_filters_combine_with_and(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(
+                S.BUILDING,
+                "hit",
+                priority="p0",
+                scale=ManagerTicketScale.SUBSTANTIAL,
+                created_at=base,
+            ).model_copy(update={"title": "alpha"}),
+            mk(
+                S.BUILDING,
+                "wrongstate",
+                priority="p0",
+                scale=ManagerTicketScale.SUBSTANTIAL,
+                created_at=base,
+            ),
+            mk(
+                S.BUILDING,
+                "wrongprio",
+                priority="p3",
+                scale=ManagerTicketScale.SUBSTANTIAL,
+                created_at=base,
+            ).model_copy(update={"title": "alpha"}),
+            mk(
+                S.READY,
+                "wrongstate2",
+                priority="p0",
+                scale=ManagerTicketScale.SUBSTANTIAL,
+                created_at=base,
+            ).model_copy(update={"title": "alpha"}),
+        ],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(
+            q="alpha",
+            state=[S.BUILDING],
+            priority=["p0"],
+            scale=[ManagerTicketScale.SUBSTANTIAL],
+        ),
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert {t.id for t in page.tickets} == {"hit"}
+
+
+def test_query_summary_covers_full_result_not_page(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    seed = (
+        [
+            mk(S.INTAKE, f"i{i}", created_at=base + timedelta(minutes=i))
+            for i in range(4)
+        ]
+        + [mk(S.SPEC_REVIEW, f"sr{i}", created_at=base) for i in range(2)]
+        + [mk(S.BUILDING, f"b{i}", created_at=base) for i in range(3)]
+        + [mk(S.BLOCKED, "bl0", created_at=base)]
+        + [mk(S.REVIEW_REQUESTED, "rr0", created_at=base)]
+        + [mk(S.MERGED, f"m{i}", branch=None, created_at=base) for i in range(5)]
+    )
+    _seed(mgr, seed)
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(), limit=3, cursor=None, cursor_secret=_SECRET
+    )
+    assert len(page.tickets) == 3  # page is bounded
+    s = page.summary
+    assert s.total == 16
+    assert s.lanes == {
+        "intake": 4,
+        "spec": 2,
+        "ready": 0,
+        "build": 3,
+        "blocked": 1,
+        "review": 1,
+        "done": 5,
+    }
+    assert s.awaiting_count == 2 + 1 + 1  # spec_review + blocked + review_requested
+    assert s.in_flight_count == 3
+    assert s.blocked_count == 1
+    assert s.merged_count == 5
+
+
+def test_query_summary_reflects_filter(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [mk(S.BUILDING, f"b{i}", created_at=base) for i in range(3)]
+        + [mk(S.MERGED, f"m{i}", created_at=base) for i in range(4)],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(state=[S.BUILDING]),
+        limit=50,
+        cursor=None,
+        cursor_secret=_SECRET,
+    )
+    assert page.summary.total == 3
+    assert page.summary.lanes["build"] == 3
+    assert page.summary.lanes["done"] == 0
+
+
+def test_query_all_sorts_walk_matches_one_shot(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(
+                S.BUILDING,
+                f"t{i:02d}",
+                priority=f"p{i % 4}",
+                created_at=base + timedelta(minutes=i),
+            ).model_copy(update={"updated_at": base + timedelta(minutes=(i * 7) % 13)})
+            for i in range(14)
+        ],
+    )
+    for sort in Sort:
+        for direction in (Dir.ASC, Dir.DESC):
+            query = ManagerTicketListQuery(sort=sort, direction=direction)
+            walked = _drain(mgr, query, limit=4)
+            full = [
+                t.id
+                for t in mgr.list_tickets_page(
+                    query, limit=100, cursor=None, cursor_secret=_SECRET
+                ).tickets
+            ]
+            assert walked == full, f"{sort}/{direction} keyset walk diverged"
+            assert len(walked) == 14
+
+
+def test_query_unknown_priority_filter_is_422(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path, priority_levels=["p0", "p1"])
+    with pytest.raises(HTTPException) as exc:
+        mgr.list_tickets_page(
+            ManagerTicketListQuery(priority=["p9"]),
+            limit=50,
+            cursor=None,
+            cursor_secret=_SECRET,
+        )
+    assert exc.value.status_code == 422
+
+
+def test_query_cursor_signature_and_query_binding(tmp_path: Path) -> None:
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, f"t{i}", created_at=base + timedelta(minutes=i))
+            for i in range(6)
+        ],
+    )
+    page = mgr.list_tickets_page(
+        ManagerTicketListQuery(), limit=3, cursor=None, cursor_secret=_SECRET
+    )
+    cursor = page.next_cursor
+    assert cursor is not None
+
+    # Tampered signature → 422.
+    with pytest.raises(HTTPException) as exc_sig:
+        mgr.list_tickets_page(
+            ManagerTicketListQuery(),
+            limit=3,
+            cursor=cursor + "x",
+            cursor_secret=_SECRET,
+        )
+    assert exc_sig.value.status_code == 422
+
+    # Wrong secret → 422.
+    with pytest.raises(HTTPException) as exc_secret:
+        mgr.list_tickets_page(
+            ManagerTicketListQuery(), limit=3, cursor=cursor, cursor_secret="other"
+        )
+    assert exc_secret.value.status_code == 422
+
+    # Cursor bound to the original query: replaying it under a different query is 422.
+    with pytest.raises(HTTPException) as exc_query:
+        mgr.list_tickets_page(
+            ManagerTicketListQuery(state=[S.BUILDING]),
+            limit=3,
+            cursor=cursor,
+            cursor_secret=_SECRET,
+        )
+    assert exc_query.value.status_code == 422
+
+
+def test_query_malformed_cursor_raises(tmp_path: Path) -> None:
+    with pytest.raises(ManagerCursorError):
+        decode_ticket_cursor("not-a-cursor", ManagerTicketListQuery(), _SECRET)
+
+
+def test_query_isolation_by_manager(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    mgr_a = _init(storage, ManagerConfig(), mid="mgr-a")
+    mgr_b = _init(storage, ManagerConfig(), mid="mgr-b")
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    storage.create_manager_ticket(
+        mk(S.BUILDING, "a1", manager_id="mgr-a", created_at=base)
+    )
+    storage.create_manager_ticket(
+        mk(S.BUILDING, "b1", manager_id="mgr-b", created_at=base)
+    )
+    storage.create_manager_ticket(
+        mk(S.BUILDING, "b2", manager_id="mgr-b", created_at=base)
+    )
+    page_a = mgr_a.list_tickets_page(
+        ManagerTicketListQuery(), limit=50, cursor=None, cursor_secret=_SECRET
+    )
+    assert {t.id for t in page_a.tickets} == {"a1"}
+    assert page_a.summary.total == 1
+    page_b = mgr_b.list_tickets_page(
+        ManagerTicketListQuery(), limit=50, cursor=None, cursor_secret=_SECRET
+    )
+    assert {t.id for t in page_b.tickets} == {"b1", "b2"}
+    assert page_b.summary.total == 2
+
+
+def test_state_full_list_unchanged_by_query_addition(tmp_path: Path) -> None:
+    # The /state contract still returns the complete ticket list, unpaged.
+    mgr = _seed_query_manager(tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _seed(
+        mgr,
+        [
+            mk(S.BUILDING, f"t{i}", created_at=base + timedelta(minutes=i))
+            for i in range(60)
+        ],
+    )
+    assert len(mgr.state().tickets) == 60  # no page bound on /state

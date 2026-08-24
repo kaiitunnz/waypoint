@@ -30,6 +30,7 @@ import {
   fetchBoardChannels,
   fetchManagers,
   fetchManagerState,
+  fetchManagerTickets,
   isAuthError,
   postBoardEntry,
   updateBoardEntry,
@@ -38,16 +39,21 @@ import {
   CHANNEL_GROUP_COLLAPSED_DEFAULT,
   CHANNEL_GROUP_LABELS,
   CHANNEL_GROUP_ORDER,
+  DEFAULT_TICKET_QUERY,
   groupChannels,
   isAwaiting,
+  isFilteredQuery,
   kindTone,
   laneForState,
   LANES,
   priorityTone,
-  rollupTickets,
+  SCALE_OPTIONS,
+  SORT_OPTIONS,
+  STATE_FACET_GROUPS,
   stateLabel,
   stateTone,
   ticketIdFromChannel,
+  TICKET_PAGE_LIMIT,
 } from "@/lib/board";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
@@ -57,6 +63,12 @@ import {
   ManagerStateResponse,
   ManagerSummary,
   ManagerTicket,
+  ManagerTicketListQuery,
+  ManagerTicketScale,
+  ManagerTicketSort,
+  ManagerTicketSortDirection,
+  ManagerTicketState,
+  ManagerTicketSummary,
   SessionEnvelope,
 } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/usage";
@@ -82,6 +94,13 @@ interface PostConfirm {
 
 function shortId(value: string): string {
   return value.length > 16 ? `${value.slice(0, 16)}…` : value;
+}
+
+// Toggle a value in a list.
+function toggleInList<T>(list: T[], value: T): T[] {
+  return list.includes(value)
+    ? list.filter((entry) => entry !== value)
+    : [...list, value];
 }
 
 // Card-volume bucket that widens a lane into more grid columns (see globals.css).
@@ -605,21 +624,272 @@ function TicketCard({ ticket, onOpen }: TicketCardProps) {
   );
 }
 
+// ─── Board query controls ───
+
+interface FacetGroup {
+  heading?: string;
+  options: { value: string; label: string }[];
+}
+
+// Multi-select facet popover; closes on Escape or an outside click.
+function FacetSelect({
+  label,
+  groups,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  groups: FacetGroup[];
+  selected: Set<string>;
+  onToggle: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const count = selected.size;
+  return (
+    <div className="board-facet" ref={rootRef}>
+      <button
+        type="button"
+        className={`board-facet-trigger${count > 0 ? " is-active" : ""}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="board-facet-label">{label}</span>
+        {count > 0 ? <span className="board-facet-count">{count}</span> : null}
+        <span className="board-facet-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <div className="board-facet-menu" role="group" aria-label={label}>
+          {groups.map((group, index) => (
+            <div key={group.heading ?? index} className="board-facet-group">
+              {group.heading ? (
+                <p className="board-facet-heading">{group.heading}</p>
+              ) : null}
+              {group.options.map((option) => {
+                const checked = selected.has(option.value);
+                return (
+                  <label key={option.value} className="board-facet-option">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onToggle(option.value)}
+                    />
+                    <span className="board-facet-option-label">
+                      {option.label}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface QueryBarProps {
+  query: ManagerTicketListQuery;
+  priorityLevels: string[];
+  searchInput: string;
+  onSearchInput: (value: string) => void;
+  onToggleState: (state: ManagerTicketState) => void;
+  onTogglePriority: (priority: string) => void;
+  onToggleScale: (scale: ManagerTicketScale) => void;
+  onSort: (sort: ManagerTicketSort) => void;
+  onDirection: (direction: ManagerTicketSortDirection) => void;
+  onClearFilters: () => void;
+}
+
+function QueryBar({
+  query,
+  priorityLevels,
+  searchInput,
+  onSearchInput,
+  onToggleState,
+  onTogglePriority,
+  onToggleScale,
+  onSort,
+  onDirection,
+  onClearFilters,
+}: QueryBarProps) {
+  const stateSet = useMemo(() => new Set<string>(query.state), [query.state]);
+  const prioritySet = useMemo(
+    () => new Set<string>(query.priority),
+    [query.priority],
+  );
+  const scaleSet = useMemo(() => new Set<string>(query.scale), [query.scale]);
+  const filtered = isFilteredQuery(query);
+
+  return (
+    <div className="board-query" role="search">
+      <div className="board-query-search">
+        <span className="board-query-search-cue" aria-hidden="true">
+          ⌕
+        </span>
+        <input
+          className="board-query-search-input"
+          type="search"
+          placeholder="Filter tickets by title"
+          value={searchInput}
+          onChange={(event) => onSearchInput(event.target.value)}
+          aria-label="Filter tickets by title"
+        />
+      </div>
+
+      <div className="board-query-facets">
+        <FacetSelect
+          label="State"
+          selected={stateSet}
+          onToggle={(value) => onToggleState(value as ManagerTicketState)}
+          groups={STATE_FACET_GROUPS.map((group) => ({
+            heading: group.lane,
+            options: group.states.map((state) => ({
+              value: state,
+              label: stateLabel(state),
+            })),
+          }))}
+        />
+        <FacetSelect
+          label="Priority"
+          selected={prioritySet}
+          onToggle={onTogglePriority}
+          groups={[
+            {
+              options: priorityLevels.map((level) => ({
+                value: level,
+                label: level,
+              })),
+            },
+          ]}
+        />
+        <FacetSelect
+          label="Scale"
+          selected={scaleSet}
+          onToggle={(value) => onToggleScale(value as ManagerTicketScale)}
+          groups={[
+            {
+              options: SCALE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+              })),
+            },
+          ]}
+        />
+      </div>
+
+      <div className="board-query-sort">
+        <label className="board-query-sort-field">
+          <span className="board-query-sort-label">Sort</span>
+          <select
+            value={query.sort}
+            onChange={(event) => onSort(event.target.value as ManagerTicketSort)}
+            aria-label="Sort tickets by"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="board-query-dir"
+          onClick={() =>
+            onDirection(query.direction === "asc" ? "desc" : "asc")
+          }
+          aria-label={
+            query.direction === "asc"
+              ? "Sorted ascending; switch to descending"
+              : "Sorted descending; switch to ascending"
+          }
+          title={query.direction === "asc" ? "Ascending" : "Descending"}
+        >
+          <span aria-hidden="true">{query.direction === "asc" ? "↑" : "↓"}</span>
+        </button>
+      </div>
+
+      {filtered ? (
+        <button
+          type="button"
+          className="board-query-clear"
+          onClick={onClearFilters}
+        >
+          Clear filters
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 interface ManagerBoardProps {
-  managerState: ManagerStateResponse;
+  tickets: ManagerTicket[];
+  summary: ManagerTicketSummary | null;
+  needsYou: ManagerTicket[];
+  query: ManagerTicketListQuery;
+  priorityLevels: string[];
+  searchInput: string;
+  onSearchInput: (value: string) => void;
+  onToggleState: (state: ManagerTicketState) => void;
+  onTogglePriority: (priority: string) => void;
+  onToggleScale: (scale: ManagerTicketScale) => void;
+  onSort: (sort: ManagerTicketSort) => void;
+  onDirection: (direction: ManagerTicketSortDirection) => void;
+  onClearFilters: () => void;
+  status: LoadState;
+  onRetry: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMoreError: boolean;
+  onLoadMore: () => void;
   onOpenTicket: (ticket: ManagerTicket) => void;
 }
 
-function ManagerBoard({ managerState, onOpenTicket }: ManagerBoardProps) {
-  const tickets = managerState.tickets;
-  const rollup = useMemo(() => rollupTickets(tickets), [tickets]);
-  const needsYou = useMemo(
-    () =>
-      tickets
-        .filter((ticket) => isAwaiting(ticket.state))
-        .sort((a, b) => a.priority.localeCompare(b.priority)),
-    [tickets],
-  );
+function ManagerBoard({
+  tickets,
+  summary,
+  needsYou,
+  query,
+  priorityLevels,
+  searchInput,
+  onSearchInput,
+  onToggleState,
+  onTogglePriority,
+  onToggleScale,
+  onSort,
+  onDirection,
+  onClearFilters,
+  status,
+  onRetry,
+  hasMore,
+  loadingMore,
+  loadMoreError,
+  onLoadMore,
+  onOpenTicket,
+}: ManagerBoardProps) {
   const byLane = useMemo(() => {
     const map = new Map<string, ManagerTicket[]>();
     for (const lane of LANES) map.set(lane.key, []);
@@ -630,31 +900,63 @@ function ManagerBoard({ managerState, onOpenTicket }: ManagerBoardProps) {
     return map;
   }, [tickets]);
 
+  const filtered = isFilteredQuery(query);
+  const total = summary?.total ?? tickets.length;
+  // Screen-reader announcement of the loaded/total count.
+  const announce =
+    status === "loading"
+      ? "Loading tickets…"
+      : status === "error"
+        ? "Failed to load tickets."
+        : `${tickets.length} of ${total} matching ${
+            total === 1 ? "ticket" : "tickets"
+          } loaded${loadingMore ? ", loading more" : ""}.`;
+
   return (
     <div className="board-manager">
-      <div className="board-rollup" role="status">
+      <div className="board-rollup" role="status" aria-live="off">
         <span className="board-rollup-item board-rollup-need">
-          <strong>{rollup.needYou}</strong> need you
+          <strong>{summary?.awaiting_count ?? 0}</strong> need you
         </span>
         <span className="board-rollup-sep" aria-hidden="true">
           ·
         </span>
         <span className="board-rollup-item">
-          <strong>{rollup.inFlight}</strong> in flight
+          <strong>{summary?.in_flight_count ?? 0}</strong> in flight
         </span>
         <span className="board-rollup-sep" aria-hidden="true">
           ·
         </span>
         <span className="board-rollup-item">
-          <strong>{rollup.blocked}</strong> blocked
+          <strong>{summary?.blocked_count ?? 0}</strong> blocked
         </span>
         <span className="board-rollup-sep" aria-hidden="true">
           ·
         </span>
         <span className="board-rollup-item">
-          <strong>{rollup.merged}</strong> merged
+          <strong>{summary?.merged_count ?? 0}</strong> merged
         </span>
+        {filtered ? (
+          <span className="board-rollup-scope">· filtered</span>
+        ) : null}
       </div>
+
+      <QueryBar
+        query={query}
+        priorityLevels={priorityLevels}
+        searchInput={searchInput}
+        onSearchInput={onSearchInput}
+        onToggleState={onToggleState}
+        onTogglePriority={onTogglePriority}
+        onToggleScale={onToggleScale}
+        onSort={onSort}
+        onDirection={onDirection}
+        onClearFilters={onClearFilters}
+      />
+
+      <p className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </p>
 
       {needsYou.length > 0 ? (
         <section className="board-needs" aria-label="Needs you">
@@ -671,43 +973,112 @@ function ManagerBoard({ managerState, onOpenTicket }: ManagerBoardProps) {
         </section>
       ) : null}
 
-      <section className="board-lanes" aria-label="Lifecycle board">
-        {LANES.map((lane) => {
-          const laneTickets = byLane.get(lane.key) ?? [];
-          const isDone = lane.key === "done";
-          if (laneTickets.length === 0) {
-            return (
-              <div key={lane.key} className="board-lane is-empty">
-                <div className="board-lane-head">
-                  <span className="board-lane-label">{lane.label}</span>
-                  <span className="board-lane-count">0</span>
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div
-              key={lane.key}
-              className={`board-lane${isDone ? " is-done" : ""}`}
-              data-density={laneDensity(laneTickets.length)}
+      {status === "loading" ? (
+        <div className="board-lanes-state" aria-busy="true">
+          <p className="board-log-empty">Loading tickets…</p>
+        </div>
+      ) : status === "error" ? (
+        <div className="board-lanes-state">
+          <p className="board-lanes-state-title">Couldn’t load tickets</p>
+          <p className="muted">The request failed. Retry when ready.</p>
+          <button type="button" className="primary" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      ) : total === 0 ? (
+        <div className="board-lanes-state">
+          <p className="board-lanes-state-title">
+            {filtered ? "No tickets match these filters" : "No tickets yet"}
+          </p>
+          {filtered ? (
+            <button
+              type="button"
+              className="board-query-clear"
+              onClick={onClearFilters}
             >
-              <div className="board-lane-head">
-                <span className="board-lane-label">{lane.label}</span>
-                <span className="board-lane-count">{laneTickets.length}</span>
-              </div>
-              <div className="board-lane-cards">
-                {laneTickets.map((ticket) => (
-                  <TicketCard
-                    key={ticket.id}
-                    ticket={ticket}
-                    onOpen={onOpenTicket}
-                  />
-                ))}
-              </div>
+              Clear filters
+            </button>
+          ) : (
+            <p className="muted">
+              New requests land here once the manager registers them.
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          <section className="board-lanes" aria-label="Lifecycle board">
+            {LANES.map((lane) => {
+              const laneTickets = byLane.get(lane.key) ?? [];
+              const laneTotal = summary?.lanes[lane.key] ?? laneTickets.length;
+              const isDone = lane.key === "done";
+              const loaded = laneTickets.length;
+              const unloaded = Math.max(0, laneTotal - loaded);
+              if (laneTotal === 0) {
+                return (
+                  <div key={lane.key} className="board-lane is-empty">
+                    <div className="board-lane-head">
+                      <span className="board-lane-label">{lane.label}</span>
+                      <span className="board-lane-count">0</span>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={lane.key}
+                  className={`board-lane${isDone ? " is-done" : ""}`}
+                  data-density={laneDensity(Math.max(loaded, 1))}
+                >
+                  <div className="board-lane-head">
+                    <span className="board-lane-label">{lane.label}</span>
+                    <span className="board-lane-count">
+                      {loaded < laneTotal ? `${loaded} / ${laneTotal}` : laneTotal}
+                    </span>
+                  </div>
+                  <div className="board-lane-cards">
+                    {laneTickets.map((ticket) => (
+                      <TicketCard
+                        key={ticket.id}
+                        ticket={ticket}
+                        onOpen={onOpenTicket}
+                      />
+                    ))}
+                  </div>
+                  {/* Summary shows unpaged cards in this lane. */}
+                  {unloaded > 0 ? (
+                    <p className="board-lane-pending">
+                      {loaded === 0
+                        ? `${unloaded} not loaded yet`
+                        : `${unloaded} more not loaded`}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </section>
+
+          {hasMore ? (
+            <div className="board-more">
+              <button
+                type="button"
+                className="board-load-older"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? "Loading…" : "Load more tickets"}
+              </button>
+              <span className="board-log-count">
+                {tickets.length} of {total}
+              </span>
+              {loadMoreError ? (
+                <span className="board-more-error" role="alert">
+                  Load failed — retry
+                </span>
+              ) : null}
             </div>
-          );
-        })}
-      </section>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -940,6 +1311,22 @@ export default function BoardPage() {
   const [managerState, setManagerState] = useState<ManagerStateResponse | null>(
     null,
   );
+  // Board ticket query: the raw search box, the debounced/normalized query the
+  // API sees, and the accumulated page state (cards, summary, cursor).
+  const [ticketSearchInput, setTicketSearchInput] = useState("");
+  const [ticketQuery, setTicketQuery] = useState<ManagerTicketListQuery>(
+    DEFAULT_TICKET_QUERY,
+  );
+  const [ticketCards, setTicketCards] = useState<ManagerTicket[]>([]);
+  const [ticketSummary, setTicketSummary] = useState<ManagerTicketSummary | null>(
+    null,
+  );
+  const [ticketCursor, setTicketCursor] = useState<string | null>(null);
+  const [ticketsStatus, setTicketsStatus] = useState<LoadState>("loading");
+  const [ticketsLoadingMore, setTicketsLoadingMore] = useState(false);
+  const [ticketsLoadMoreError, setTicketsLoadMoreError] = useState(false);
+  // Drops a stale page/summary when the query or manager changed mid-request.
+  const ticketRequestGen = useRef(0);
   const [search, setSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [navOpen, setNavOpen] = useState(false);
@@ -982,6 +1369,11 @@ export default function BoardPage() {
   useEffect(() => {
     selectedManagerRef.current = selectedManagerId;
   }, [selectedManagerId]);
+  // Active query for the socket's board_update refetch, read without re-subscribing.
+  const ticketQueryRef = useRef<ManagerTicketListQuery>(ticketQuery);
+  useEffect(() => {
+    ticketQueryRef.current = ticketQuery;
+  }, [ticketQuery]);
 
   // A `?channel=` deep link selects that channel once it loads.
   const pendingChannelRef = useRef<string | null>(null);
@@ -1109,6 +1501,116 @@ export default function BoardPage() {
     [host, token, handleAuthFailure],
   );
 
+  // Fetch page one; a new generation drops any stale in-flight response.
+  const refreshTicketFirstPage = useCallback(
+    async (managerId: string, query: ManagerTicketListQuery) => {
+      if (!host || !token) return;
+      const gen = ++ticketRequestGen.current;
+      setTicketsStatus("loading");
+      setTicketsLoadingMore(false);
+      setTicketsLoadMoreError(false);
+      try {
+        const page = await fetchManagerTickets(host, token, managerId, query, {
+          limit: TICKET_PAGE_LIMIT,
+        });
+        if (gen !== ticketRequestGen.current) return;
+        setTicketCards(page.tickets);
+        setTicketSummary(page.summary);
+        setTicketCursor(page.next_cursor);
+        setTicketsStatus("ready");
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        if (gen !== ticketRequestGen.current) return;
+        setTicketsStatus("error");
+      }
+    },
+    [host, token, handleAuthFailure],
+  );
+
+  const loadMoreTickets = useCallback(async () => {
+    if (
+      !host ||
+      !token ||
+      !selectedManagerId ||
+      !ticketCursor ||
+      ticketsLoadingMore
+    ) {
+      return;
+    }
+    const gen = ticketRequestGen.current; // only valid for the current query
+    setTicketsLoadingMore(true);
+    setTicketsLoadMoreError(false);
+    try {
+      const page = await fetchManagerTickets(
+        host,
+        token,
+        selectedManagerId,
+        ticketQuery,
+        { limit: TICKET_PAGE_LIMIT, cursor: ticketCursor },
+      );
+      if (gen !== ticketRequestGen.current) return; // query changed mid-flight
+      setTicketCards((prev) => {
+        const seen = new Set(prev.map((ticket) => ticket.id));
+        const fresh = page.tickets.filter((ticket) => !seen.has(ticket.id));
+        return [...prev, ...fresh]; // defensive de-dup across pages
+      });
+      setTicketSummary(page.summary);
+      setTicketCursor(page.next_cursor);
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      if (gen !== ticketRequestGen.current) return;
+      setTicketsLoadMoreError(true);
+    } finally {
+      if (gen === ticketRequestGen.current) setTicketsLoadingMore(false);
+    }
+  }, [
+    host,
+    token,
+    selectedManagerId,
+    ticketCursor,
+    ticketsLoadingMore,
+    ticketQuery,
+    handleAuthFailure,
+  ]);
+
+  const toggleTicketState = useCallback((state: ManagerTicketState) => {
+    setTicketQuery((prev) => ({ ...prev, state: toggleInList(prev.state, state) }));
+  }, []);
+  const toggleTicketPriority = useCallback((priority: string) => {
+    setTicketQuery((prev) => ({
+      ...prev,
+      priority: toggleInList(prev.priority, priority),
+    }));
+  }, []);
+  const toggleTicketScale = useCallback((scale: ManagerTicketScale) => {
+    setTicketQuery((prev) => ({ ...prev, scale: toggleInList(prev.scale, scale) }));
+  }, []);
+  const setTicketSort = useCallback((sort: ManagerTicketSort) => {
+    setTicketQuery((prev) => ({ ...prev, sort }));
+  }, []);
+  const setTicketDirection = useCallback(
+    (direction: ManagerTicketSortDirection) => {
+      setTicketQuery((prev) => ({ ...prev, direction }));
+    },
+    [],
+  );
+  const clearTicketFilters = useCallback(() => {
+    setTicketSearchInput("");
+    setTicketQuery((prev) => ({
+      ...prev,
+      q: "",
+      state: [],
+      priority: [],
+      scale: [],
+    }));
+  }, []);
+
   const refreshEntries = useCallback(
     async (channel: string) => {
       if (!host || !token) return;
@@ -1191,6 +1693,22 @@ export default function BoardPage() {
     void refreshManagerState(selectedManagerId);
   }, [selectedManagerId, refreshManagerState]);
 
+  // Debounce the search box into the query.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const next = ticketSearchInput.trim();
+      setTicketQuery((prev) => (prev.q === next ? prev : { ...prev, q: next }));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [ticketSearchInput]);
+
+  // Refetch page one on any query or manager change; ticketQuery identity changes
+  // only with the result set, so this never double-fetches.
+  useEffect(() => {
+    if (!managerMode || !selectedManagerId) return;
+    void refreshTicketFirstPage(selectedManagerId, ticketQuery);
+  }, [ticketQuery, selectedManagerId, managerMode, refreshTicketFirstPage]);
+
   useEffect(() => {
     setExpandedId(null);
     setEditingId(null);
@@ -1237,7 +1755,11 @@ export default function BoardPage() {
         // without a reload: refresh the switcher and the selected manager.
         void refreshManagers();
         const manager = selectedManagerRef.current;
-        if (manager) void refreshManagerState(manager);
+        if (manager) {
+          void refreshManagerState(manager);
+          // Refetch page one; the generation guard drops stale responses.
+          void refreshTicketFirstPage(manager, ticketQueryRef.current);
+        }
         if (entriesDirty) {
           entriesDirty = false;
           const current = activeChannelRef.current;
@@ -1296,6 +1818,7 @@ export default function BoardPage() {
     refreshChannels,
     refreshManagers,
     refreshManagerState,
+    refreshTicketFirstPage,
     refreshEntries,
     handleAuthFailure,
   ]);
@@ -1655,6 +2178,15 @@ export default function BoardPage() {
     managerStateForSelection?.config?.priority_levels ?? [];
   const defaultUpdateChannel = activeChannel ?? channels[0]?.channel ?? null;
 
+  // Global decision queue from the full snapshot; not narrowed by board filters.
+  const needsYou = useMemo(
+    () =>
+      (managerStateForSelection?.tickets ?? [])
+        .filter((ticket) => isAwaiting(ticket.state))
+        .sort((a, b) => a.priority.localeCompare(b.priority)),
+    [managerStateForSelection],
+  );
+
   // Toolbar Post follows the view: Ticket on a manager Board, Update on
   // Channels. Update opens directly for a channel shortcut or the empty state.
   const openPost = useCallback(() => {
@@ -1920,13 +2452,33 @@ export default function BoardPage() {
                   </div>
                 </div>
 
-                {managerMode && managerState ? (
+                {managerMode ? (
                   <ManagerBoard
-                    managerState={managerState}
+                    tickets={ticketCards}
+                    summary={ticketSummary}
+                    needsYou={needsYou}
+                    query={ticketQuery}
+                    priorityLevels={priorityLevels}
+                    searchInput={ticketSearchInput}
+                    onSearchInput={setTicketSearchInput}
+                    onToggleState={toggleTicketState}
+                    onTogglePriority={toggleTicketPriority}
+                    onToggleScale={toggleTicketScale}
+                    onSort={setTicketSort}
+                    onDirection={setTicketDirection}
+                    onClearFilters={clearTicketFilters}
+                    status={ticketsStatus}
+                    onRetry={() => {
+                      if (selectedManagerId) {
+                        void refreshTicketFirstPage(selectedManagerId, ticketQuery);
+                      }
+                    }}
+                    hasMore={ticketCursor !== null}
+                    loadingMore={ticketsLoadingMore}
+                    loadMoreError={ticketsLoadMoreError}
+                    onLoadMore={() => void loadMoreTickets()}
                     onOpenTicket={openTicket}
                   />
-                ) : managerMode ? (
-                  <p className="board-log-empty">Loading manager board…</p>
                 ) : (
                   <ChannelsOverview
                     channels={channels}

@@ -5,7 +5,7 @@ import secrets
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,9 @@ from waypoint.schemas import (
     InboxStatus,
     ManagerConfig,
     ManagerTicket,
+    ManagerTicketScale,
+    ManagerTicketSort,
+    ManagerTicketSortDirection,
     ManagerTicketState,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
@@ -573,6 +576,15 @@ class Storage:
                 ON manager_tickets(state);
             CREATE INDEX IF NOT EXISTS idx_manager_tickets_priority
                 ON manager_tickets(priority);
+            -- Manager-leading composite indexes for the paged board query's
+            -- keyset sorts (ticket 1504). The trailing id matches the stable
+            -- (sort_value, id) tie-breaker so a page scan is index-ordered.
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_updated
+                ON manager_tickets(manager_id, updated_at, id);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_created
+                ON manager_tickets(manager_id, created_at, id);
+            CREATE INDEX IF NOT EXISTS idx_manager_tickets_mgr_priority
+                ON manager_tickets(manager_id, priority);
             """)
         self.telemetry.init_schema()
         self.usage_providers.init_schema()
@@ -2515,6 +2527,183 @@ class Storage:
         sql += " ORDER BY created_at ASC, id ASC"
         rows = self.connection.execute(sql, params).fetchall()
         return [self._manager_ticket_from_row(row) for row in rows]
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        # Make ``q`` a literal substring: neutralize the escape char first, then
+        # the LIKE wildcards, so a title search never behaves as a pattern.
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _priority_case(priority_order: Sequence[str]) -> tuple[str, list[Any]]:
+        # Rank priority text by the manager's configured order (first = highest);
+        # any value outside the configuration ranks after all configured ones.
+        parts = ["CASE priority"]
+        params: list[Any] = []
+        for rank, prio in enumerate(priority_order):
+            parts.append("WHEN ? THEN ?")
+            params.extend([prio, rank])
+        parts.append("ELSE ? END")
+        params.append(len(priority_order))
+        return " ".join(parts), params
+
+    def _manager_ticket_filter(
+        self,
+        manager_id: str,
+        q: str,
+        states: Sequence[ManagerTicketState],
+        priorities: Sequence[str],
+        scales: Sequence[ManagerTicketScale],
+    ) -> tuple[str, list[Any]]:
+        conditions = ["manager_id = ?"]
+        params: list[Any] = [manager_id]
+        if q:
+            conditions.append("title LIKE ? ESCAPE '\\'")
+            params.append(f"%{self._escape_like(q)}%")
+        if states:
+            placeholders = ",".join("?" for _ in states)
+            conditions.append(f"state IN ({placeholders})")
+            params.extend(str(state) for state in states)
+        if priorities:
+            placeholders = ",".join("?" for _ in priorities)
+            conditions.append(f"priority IN ({placeholders})")
+            params.extend(priorities)
+        if scales:
+            placeholders = ",".join("?" for _ in scales)
+            conditions.append(f"scale IN ({placeholders})")
+            params.extend(str(scale) for scale in scales)
+        return " AND ".join(conditions), params
+
+    def _order_terms(
+        self,
+        sort: ManagerTicketSort,
+        direction: ManagerTicketSortDirection,
+        priority_order: Sequence[str],
+    ) -> list[tuple[str, list[Any], str]]:
+        # The ordered list of (sql_expr, params, "ASC"|"DESC") columns the page is
+        # sorted by. ``id ASC`` is always the final deterministic tie-breaker.
+        primary_dir = "DESC" if direction == ManagerTicketSortDirection.DESC else "ASC"
+        if sort == ManagerTicketSort.ID:
+            return [("id", [], primary_dir)]  # id is unique — its own tie-break
+        if sort == ManagerTicketSort.PRIORITY:
+            known = list(priority_order)
+            if known:
+                placeholders = ",".join("?" for _ in known)
+                unknown_sql = (
+                    f"CASE WHEN priority IN ({placeholders}) THEN 0 ELSE 1 END"
+                )
+                unknown_params: list[Any] = list(known)
+            else:
+                unknown_sql = "1"  # nothing is configured, so everything is unknown
+                unknown_params = []
+            rank_sql, rank_params = self._priority_case(priority_order)
+            # Unknown priorities sort after configured ones in EITHER direction —
+            # the group flag is always ascending, only the rank flips with it.
+            return [
+                (unknown_sql, unknown_params, "ASC"),
+                (rank_sql, rank_params, primary_dir),
+                ("id", [], "ASC"),
+            ]
+        column = "updated_at" if sort == ManagerTicketSort.UPDATED_AT else "created_at"
+        return [(column, [], primary_dir), ("id", [], "ASC")]
+
+    def _manager_ticket_order(
+        self,
+        sort: ManagerTicketSort,
+        direction: ManagerTicketSortDirection,
+        priority_order: Sequence[str],
+    ) -> tuple[str, list[Any]]:
+        terms = self._order_terms(sort, direction, priority_order)
+        sql = ", ".join(f"({expr}) {order}" for expr, _params, order in terms)
+        params = [
+            param for _expr, term_params, _order in terms for param in term_params
+        ]
+        return sql, params
+
+    def _manager_ticket_keyset(
+        self,
+        sort: ManagerTicketSort,
+        direction: ManagerTicketSortDirection,
+        priority_order: Sequence[str],
+        keyset: tuple[Any, ...],
+    ) -> tuple[str, list[Any]]:
+        # Strict lexicographic "rows after this boundary" predicate matching the
+        # ordering terms: for terms t0..tn with boundary b0..bn,
+        #   (e0 OP0 b0) OR (e0=b0 AND e1 OP1 b1) OR ...
+        # where OPk is ``>`` for an ASC term and ``<`` for a DESC one.
+        terms = self._order_terms(sort, direction, priority_order)
+        disjuncts: list[str] = []
+        params: list[Any] = []
+        for level in range(len(terms)):
+            conjuncts: list[str] = []
+            for prior in range(level):
+                expr, term_params, _order = terms[prior]
+                conjuncts.append(f"({expr}) = ?")
+                params.extend(term_params)
+                params.append(keyset[prior])
+            expr, term_params, order = terms[level]
+            op = ">" if order == "ASC" else "<"
+            conjuncts.append(f"({expr}) {op} ?")
+            params.extend(term_params)
+            params.append(keyset[level])
+            disjuncts.append("(" + " AND ".join(conjuncts) + ")")
+        return " OR ".join(disjuncts), params
+
+    @_synchronized
+    def query_manager_tickets(
+        self,
+        *,
+        manager_id: str,
+        q: str = "",
+        states: Sequence[ManagerTicketState] = (),
+        priorities: Sequence[str] = (),
+        scales: Sequence[ManagerTicketScale] = (),
+        sort: ManagerTicketSort = ManagerTicketSort.UPDATED_AT,
+        direction: ManagerTicketSortDirection = ManagerTicketSortDirection.DESC,
+        priority_order: Sequence[str] = (),
+        limit: int = 50,
+        keyset: tuple[Any, ...] | None = None,
+    ) -> tuple[list[ManagerTicket], dict[str, int]]:
+        """One page of tickets plus per-state counts for the same filter.
+
+        Returns ``(rows, state_counts)`` where ``rows`` holds up to ``limit + 1``
+        ticket payloads — the extra row, when present, signals a further page —
+        ordered by the requested sort with a stable ``id`` tie-breaker, and
+        ``state_counts`` maps each present state to its count across the whole
+        filtered set (independent of ``limit``).
+        """
+        where, params = self._manager_ticket_filter(
+            manager_id, q, states, priorities, scales
+        )
+
+        count_sql = (
+            f"SELECT state, COUNT(*) AS n FROM manager_tickets "
+            f"WHERE {where} GROUP BY state"
+        )
+        state_counts = {
+            str(row["state"]): int(row["n"])
+            for row in self.connection.execute(count_sql, params).fetchall()
+        }
+
+        order_sql, order_params = self._manager_ticket_order(
+            sort, direction, priority_order
+        )
+        page_where = where
+        page_params = list(params)
+        if keyset is not None:
+            keyset_sql, keyset_params = self._manager_ticket_keyset(
+                sort, direction, priority_order, keyset
+            )
+            page_where = f"{page_where} AND ({keyset_sql})"
+            page_params.extend(keyset_params)
+        page_sql = (
+            f"SELECT * FROM manager_tickets WHERE {page_where} "
+            f"ORDER BY {order_sql} LIMIT ?"
+        )
+        page_params.extend(order_params)
+        page_params.append(limit + 1)
+        rows = self.connection.execute(page_sql, page_params).fetchall()
+        return [self._manager_ticket_from_row(row) for row in rows], state_counts
 
     @_synchronized
     def update_manager_ticket(self, ticket: ManagerTicket) -> ManagerTicket:

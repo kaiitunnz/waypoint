@@ -20,6 +20,8 @@ import {
   LaunchSettingsUpdate,
   ManagerStateResponse,
   ManagerSummary,
+  ManagerTicketListQuery,
+  ManagerTicketPage,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
@@ -1364,7 +1366,36 @@ export async function fetchManagers(
   return (payload.managers ?? []) as ManagerSummary[];
 }
 
-// Tickets come from /state; there is no /tickets list route.
+// Board cards come from this paged, filtered, sorted route (not /state).
+export async function fetchManagerTickets(
+  host: string,
+  token: string,
+  managerId: string,
+  query: ManagerTicketListQuery,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<ManagerTicketPage> {
+  const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
+  for (const state of query.state) params.append("state", state);
+  for (const priority of query.priority) params.append("priority", priority);
+  for (const scale of query.scale) params.append("scale", scale);
+  params.set("sort", query.sort);
+  params.set("direction", query.direction);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const response = await fetch(
+    `${host}/api/manager/${encodeURIComponent(managerId)}/tickets?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch tickets");
+  return (await response.json()) as ManagerTicketPage;
+}
+
+// Full manager state (config, tree, complete ticket list) — kept for config,
+// the working-tree indicator, and the global Needs-you strip.
 export async function fetchManagerState(
   host: string,
   token: string,

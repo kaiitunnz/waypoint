@@ -1085,10 +1085,9 @@ class ManagerTicketSortDirection(StrEnum):
 
 
 class ManagerTicketListQuery(BaseModel):
-    # The normalized, canonical board query. Filters combine with AND; empty
-    # collections and an empty ``q`` mean "no filter on that field". The values
-    # are canonicalized (trimmed ``q``, deduplicated/sorted facets) so an
-    # identical query always produces an identical cursor binding.
+    # The board query. Filters combine with AND; an empty collection or ``q`` is
+    # no filter. ``normalized()`` canonicalizes the values so an identical query
+    # yields an identical cursor binding.
     q: str = ""
     state: list[ManagerTicketState] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)

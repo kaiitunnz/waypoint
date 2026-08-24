@@ -789,6 +789,36 @@ export interface ManagerSummary {
   attention_count: number;
 }
 
+// Board ticket-list query contract (paged, filtered, sorted).
+export type ManagerTicketSort = "updated_at" | "created_at" | "priority" | "id";
+export type ManagerTicketSortDirection = "asc" | "desc";
+
+export interface ManagerTicketListQuery {
+  q: string;
+  state: ManagerTicketState[];
+  priority: string[];
+  scale: ManagerTicketScale[];
+  sort: ManagerTicketSort;
+  direction: ManagerTicketSortDirection;
+}
+
+// Aggregates over the entire matching result, independent of the current page —
+// lets the board show a lane's true size before all its cards have loaded.
+export interface ManagerTicketSummary {
+  total: number;
+  lanes: Record<string, number>;
+  awaiting_count: number;
+  in_flight_count: number;
+  blocked_count: number;
+  merged_count: number;
+}
+
+export interface ManagerTicketPage {
+  tickets: ManagerTicket[];
+  next_cursor: string | null;
+  summary: ManagerTicketSummary;
+}
+
 export type MessageScheduleStatus = "pending" | "sent" | "cancelled" | "failed";
 
 export interface MessageSchedule {

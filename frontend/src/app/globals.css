@@ -14528,6 +14528,296 @@ html[data-theme="light"] .session-switcher-row.selected {
   color: var(--muted-soft);
 }
 
+.board-rollup-scope {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ─── Board query bar (search / facets / sort) ─── */
+/* In-flow control strip: flat token surfaces, no glass (glass is reserved for
+   the facet popover, which floats). */
+.board-query {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-query-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.board-query-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent-cool) 55%, var(--line-strong));
+}
+
+.board-query-search-cue {
+  color: var(--muted-soft);
+  font-size: 0.9rem;
+}
+
+.board-query-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.board-query-search-input:focus {
+  outline: none;
+}
+
+.board-query-facets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.board-facet {
+  position: relative;
+}
+
+.board-facet-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.board-facet-trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.board-facet-trigger.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card-soft));
+}
+
+.board-facet-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #1d1408;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+
+.board-facet-caret {
+  color: var(--muted-soft);
+  font-size: 0.62rem;
+}
+
+/* The one floating element here → the glass recipe (thick, it carries text). */
+.board-facet-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg-thick);
+  border: 1px solid var(--glass-line);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.board-facet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-facet-group + .board-facet-group {
+  padding-top: 6px;
+  border-top: 1px solid var(--glass-line);
+}
+
+.board-facet-heading {
+  margin: 2px 4px 4px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-facet-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.board-facet-option:hover {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+.board-facet-option input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.board-facet-option-label {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.board-query-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.board-query-sort-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.board-query-sort-label {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.board-query-sort select {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.board-query-dir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+  color: var(--accent-cool);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.14s ease;
+}
+
+.board-query-dir:hover {
+  border-color: var(--line-strong);
+}
+
+.board-query-clear {
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.board-query-clear:hover {
+  text-decoration: underline;
+}
+
+.board-query-search-input:focus-visible,
+.board-facet-trigger:focus-visible,
+.board-facet-option input:focus-visible,
+.board-query-sort select:focus-visible,
+.board-query-dir:focus-visible,
+.board-query-clear:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 60%, transparent);
+  outline-offset: 1px;
+}
+
+/* Board card region states: first-page loading, error/retry, and empty. */
+.board-lanes-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 28px 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.board-lanes-state-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-strong);
+}
+
+/* A lane whose summary count exceeds its loaded cards — states what's not yet
+   paged in, so a partially loaded lane never reads as empty or complete. */
+.board-lane-pending {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+/* Global load-more affordance, mirroring the channel log's "Load older". */
+.board-more {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.board-more-error {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--danger);
+}
+
 /* Needs you — the single glass strip of everything awaiting the human. */
 .board-needs {
   padding: 14px 16px;
@@ -15169,6 +15459,14 @@ a.board-fact-pr:hover {
   }
   .board-needs-strip {
     grid-template-columns: 1fr;
+  }
+  /* The query bar stacks on mobile: search takes its own row, facets + sort
+     wrap onto the next, so nothing is cramped at phone widths. */
+  .board-query-search {
+    flex-basis: 100%;
+  }
+  .board-query-sort {
+    margin-left: auto;
   }
   /* Reset widened lanes to the single-column basis so the board scrolls horizontally. */
   .board-lane[data-density="med"],

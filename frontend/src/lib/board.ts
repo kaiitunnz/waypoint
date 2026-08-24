@@ -1,7 +1,14 @@
 // Board-workspace taxonomy: channel grouping, ticket-state to lane/lamp
 // mapping, and kind/priority tones.
 
-import { BoardChannel, ManagerTicket, ManagerTicketState } from "@/lib/types";
+import {
+  BoardChannel,
+  ManagerTicket,
+  ManagerTicketListQuery,
+  ManagerTicketScale,
+  ManagerTicketSort,
+  ManagerTicketState,
+} from "@/lib/types";
 
 // ─── Channel grouping (navigator) ───
 
@@ -239,4 +246,45 @@ export function rollupTickets(tickets: ManagerTicket[]): BoardRollup {
     if (ticket.state === "merged") rollup.merged += 1;
   }
   return rollup;
+}
+
+// ─── Board query controls ───
+
+export const TICKET_PAGE_LIMIT = 50;
+
+export const DEFAULT_TICKET_QUERY: ManagerTicketListQuery = {
+  q: "",
+  state: [],
+  priority: [],
+  scale: [],
+  sort: "updated_at",
+  direction: "desc",
+};
+
+export const SORT_OPTIONS: { key: ManagerTicketSort; label: string }[] = [
+  { key: "updated_at", label: "Last updated" },
+  { key: "created_at", label: "Created" },
+  { key: "priority", label: "Priority" },
+  { key: "id", label: "ID" },
+];
+
+export const SCALE_OPTIONS: { value: ManagerTicketScale; label: string }[] = [
+  { value: "substantial", label: "Substantial" },
+  { value: "trivial", label: "Trivial" },
+];
+
+// State facet options grouped by lifecycle lane, so the picker reads in the same
+// order the board lanes do rather than as a flat list of 13 states.
+export const STATE_FACET_GROUPS: { lane: string; states: ManagerTicketState[] }[] =
+  LANES.map((lane) => ({ lane: lane.label, states: lane.states }));
+
+// Whether a query narrows the board at all (any active filter). Sort/direction
+// alone do not count as filtering.
+export function isFilteredQuery(query: ManagerTicketListQuery): boolean {
+  return (
+    query.q.trim().length > 0 ||
+    query.state.length > 0 ||
+    query.priority.length > 0 ||
+    query.scale.length > 0
+  );
 }

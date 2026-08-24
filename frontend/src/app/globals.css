@@ -14659,9 +14659,6 @@ html[data-theme="light"] .session-switcher-row.selected {
 /* Lifecycle board — lanes scroll horizontally (Trello-style). */
 .board-lanes {
   display: flex;
-  /* Lanes stretch to a common height (default align-items) so every stage reads
-     as a full-height bordered column — the explicit column separation the board
-     relies on. A busy lane sets the height; the rest stretch to match. */
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 6px;
@@ -14682,11 +14679,8 @@ html[data-theme="light"] .session-switcher-row.selected {
   );
 }
 
-/* A lane holds a single card column by default; a busy lane widens (data-density
-   set in the board markup) so its cards wrap into a 2-/3-column grid instead of a
-   tall single-file stack. Card width stays ~200px across all densities — the lane
-   grows to add columns, the cards don't shrink. The widen is desktop-only; the
-   ≤720px block resets every lane to the slim single-column basis. */
+/* data-density (set in board markup) widens a busy lane so its fixed-width cards
+   wrap into more grid columns. Desktop-only; the ≤720px block resets to one column. */
 .board-lane {
   flex: 0 0 clamp(212px, 24vw, 248px);
   display: flex;
@@ -14741,10 +14735,6 @@ html[data-theme="light"] .session-switcher-row.selected {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
   gap: 8px;
-  /* Cards in a row share the row's height (grid default) so a short-title card
-     beside a tall one reads as an aligned row rather than a ragged one; the card
-     bottom-aligns its footer to fill the shared height. */
-  align-items: stretch;
 }
 
 /* Ticket card. */
@@ -14822,8 +14812,7 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .board-ticket-foot {
-  /* Pin the footer to the card's bottom so equal-height cards in a grid row keep
-     their metadata baseline aligned instead of floating mid-card. */
+  /* Bottom-align so footers share a baseline across equal-height cards. */
   margin-top: auto;
   display: flex;
   align-items: center;
@@ -15181,9 +15170,7 @@ a.board-fact-pr:hover {
   .board-needs-strip {
     grid-template-columns: 1fr;
   }
-  /* On mobile the board scrolls horizontally between narrow lanes as before: a
-     widened multi-column lane would exceed the viewport, so reset busy lanes to
-     the base single-column basis regardless of card volume. */
+  /* Reset widened lanes to the single-column basis so the board scrolls horizontally. */
   .board-lane[data-density="med"],
   .board-lane[data-density="high"] {
     flex-basis: clamp(212px, 24vw, 248px);

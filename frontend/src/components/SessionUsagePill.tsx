@@ -406,7 +406,7 @@ export function SessionUsagePill({
     : "good";
   const rateLimitUsageToneValue = rateLimitUsageTone(rateLimitUsage);
   const contextUsageBreakdown = contextUsage
-    ? Object.entries(contextUsage.breakdown ?? {})
+    ? Object.entries(contextUsage.breakdown ?? {}).filter(([, value]) => value > 0)
     : [];
   const contextUsageHasWindow =
     contextUsage !== null &&
@@ -416,10 +416,18 @@ export function SessionUsagePill({
     ? contextUsage.context_window_tokens
     : null;
   const contextUsageWindowDisplay = contextUsageWindowTokens ?? 0;
+  // The endpoint reported a turn but no prompt/cache tokens, so context fill is
+  // unknown: show the window capacity but no fabricated 0% readout.
+  const contextUsageUnreported =
+    contextUsage !== null && contextUsage.used_tokens <= 0;
   const contextUsageSummary = contextUsage
-    ? contextUsageWindowTokens !== null && contextUsagePercentDisplay !== null
-      ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
-      : formatTokens(contextUsage.used_tokens)
+    ? contextUsageUnreported
+      ? contextUsageWindowTokens !== null
+        ? `${formatTokens(contextUsageWindowDisplay)} window · usage not reported`
+        : "usage not reported"
+      : contextUsageWindowTokens !== null && contextUsagePercentDisplay !== null
+        ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
+        : formatTokens(contextUsage.used_tokens)
     : null;
 
   // Raw per-backend ledger totals overlap (Codex/OpenCode totals already
@@ -612,34 +620,53 @@ export function SessionUsagePill({
                     </header>
                     <div className="usage-block-body">
                       <div
-                        className={`usage-numeral tone-${contextUsageToneValue}`}
+                        className={`usage-numeral tone-${contextUsageToneValue}${
+                          contextUsageUnreported ? " usage-numeral--muted" : ""
+                        }`}
                       >
                         <strong>
                           {contextUsagePercentDisplay !== null
                             ? contextUsagePercentDisplay
                             : "—"}
                         </strong>
-                        <em>%</em>
+                        {contextUsagePercentDisplay !== null ? <em>%</em> : null}
                       </div>
                       <div className="usage-block-stack">
-                        <p className="usage-line">
-                          <span>{formatTokens(contextUsage.used_tokens)}</span>
-                          <em>of</em>
-                          <span>
-                            {contextUsageWindowTokens !== null
-                              ? formatTokens(contextUsageWindowDisplay)
-                              : "—"}
-                          </span>
-                          <em>tokens</em>
-                        </p>
-                        <UsageBar
-                          percent={contextUsagePercentDisplay}
-                          tone={contextUsageToneValue}
-                          disabled={
-                            !contextUsageHasWindow ||
-                            contextUsagePercentDisplay === null
-                          }
-                        />
+                        {contextUsageUnreported ? (
+                          <p className="usage-line">
+                            <span>
+                              {contextUsageWindowTokens !== null
+                                ? formatTokens(contextUsageWindowDisplay)
+                                : "—"}
+                            </span>
+                            <em>token window</em>
+                          </p>
+                        ) : (
+                          <p className="usage-line">
+                            <span>{formatTokens(contextUsage.used_tokens)}</span>
+                            <em>of</em>
+                            <span>
+                              {contextUsageWindowTokens !== null
+                                ? formatTokens(contextUsageWindowDisplay)
+                                : "—"}
+                            </span>
+                            <em>tokens</em>
+                          </p>
+                        )}
+                        {contextUsageUnreported ? (
+                          <p className="usage-context-note">
+                            This endpoint doesn&rsquo;t report context usage
+                          </p>
+                        ) : (
+                          <UsageBar
+                            percent={contextUsagePercentDisplay}
+                            tone={contextUsageToneValue}
+                            disabled={
+                              !contextUsageHasWindow ||
+                              contextUsagePercentDisplay === null
+                            }
+                          />
+                        )}
                         <p className="usage-line-meta">
                           <em>updated</em>
                           <span
@@ -773,6 +800,12 @@ export function SessionUsagePill({
 function contextUsagePercent(usage: SessionContextUsage): number | null {
   const windowTokens = usage.context_window_tokens;
   if (!windowTokens || windowTokens <= 0) {
+    return null;
+  }
+  // A snapshot with no used tokens comes from an endpoint that reports only
+  // output usage (no prompt/cache accounting), so the fill is unknown rather
+  // than genuinely empty — surface it as no percentage, not 0%.
+  if (usage.used_tokens <= 0) {
     return null;
   }
   return Math.round((usage.used_tokens / windowTokens) * 100);

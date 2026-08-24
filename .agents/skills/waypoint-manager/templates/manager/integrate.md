@@ -23,7 +23,7 @@ approval fast-forward {{trunk}} onto {{branch}} — you never merge without that
    [ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
    { "subject": "{{ticket_channel}}: {{ticket_title}} — PR review",
      "blocks": [
-       { "type": "markdown", "text": "<PR link {{pr_url}}, summary, CI state from gh pr view>" },
+       { "type": "markdown", "text": "[Open pull request]({{pr_url}})\n\n<summary and CI state from gh pr view>" },
        { "type": "approval", "prompt": "Merge this PR?",
          "options": ["merge", "request-changes", "abort"], "required": true } ] }
    JSON

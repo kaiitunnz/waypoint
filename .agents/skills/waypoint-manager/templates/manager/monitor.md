@@ -81,25 +81,36 @@ When the writer posts back, branch on its `kind`. Act on the newest `spec_ready`
 posts in the log.
 
 **`spec_ready`** — move `spec_pending → spec_review` (recording `{{spec_ref}}`) and
-post an **approval** inbox item with the spec. On the answer: **approve** → `ready`;
-**request-changes** → `spec_pending` (re-spec — see **Re-spec** below); **reject** →
-`abandoned`. A silent latency-timeout is abandoned by the `latency_timeouts` reconcile
-path in `{{templates_dir}}/manager/loop-cycle.md`.
+post an **approval** inbox item that **attaches the spec** so the human opens the exact
+RFC/PRD from the gate. On the answer: **approve** → `ready`; **request-changes** →
+`spec_pending` (re-spec — see **Re-spec** below); **reject** → `abandoned`. A silent
+latency-timeout is abandoned by the `latency_timeouts` reconcile path in
+`{{templates_dir}}/manager/loop-cycle.md`.
+
+`{{spec_ref}}` must be a local readable regular file for this gate — a symbolic board
+ref (`ticket:<id>`) is not attachable. `--attach` uploads it to your session before the
+post; the runtime pins it against the inbox item so the orphan sweep keeps it while the
+gate is open. If the attach/post fails, **do not** set `--inbox-item`: leave the ticket
+gate-less so the next drain reports the operational failure instead of asking the human
+to approve a spec they cannot open.
 
 ```bash
 [ "$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.state')" = spec_review ] \
   || waypoint manager ticket transition {{ticket_id}} --to spec_review --spec-ref {{spec_ref}}
 item=$(waypoint inbox list --status open --q "{{ticket_channel}}: " \
   | jq -r '[.items[] | select((.subject|startswith("{{ticket_channel}}: ")) and (.subject|endswith("— spec review"))) | .id] | first // empty')   # adopt an open gate a crash left behind
-[ -n "$item" ] || item=$(waypoint inbox post --json - <<'JSON' | jq -r '.item.id'
+if [ -z "$item" ]; then
+  [ -f "{{spec_ref}}" ] || { echo "spec_ref is not a local file: {{spec_ref}}" >&2; exit 1; }   # fail closed; no path-only gate
+  item=$(waypoint inbox post --json - --attach "{{spec_ref}}" <<'JSON' | jq -r '.item.id'
 { "subject": "{{ticket_channel}}: {{ticket_title}} — spec review",
   "blocks": [
-    { "type": "markdown", "text": "<spec summary; ref {{spec_ref}}>" },
+    { "type": "markdown", "text": "<spec summary; the attached file is the full RFC/PRD>" },
     { "type": "approval", "prompt": "Approve this spec?",
       "options": ["approve", "request-changes", "reject"], "required": true } ] }
 JSON
 )
-waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
+fi
+[ -n "$item" ] && waypoint manager ticket update {{ticket_id}} --inbox-item "$item"   # only record a gate that was actually posted
 ```
 
 **`infeasible`** — the writer determined the request cannot be specced. Move

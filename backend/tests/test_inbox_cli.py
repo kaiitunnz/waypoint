@@ -204,3 +204,47 @@ def test_wait_engine_is_awaitable_via_asyncio_run() -> None:
         _wait_for_inbox(client, "i1", frozenset({"resolved"}), None, 1.0)
     )
     assert result.outcome == "resolved"
+
+
+# ── inbox post --attach block splicing ──
+
+
+def test_splice_before_first_interactive_block() -> None:
+    from waypoint.cli import _splice_inbox_attachment_blocks
+
+    blocks = [
+        {"type": "markdown", "text": "m"},
+        {"type": "approval", "prompt": "ok?"},
+    ]
+    attach = [{"type": "attachment", "ref": {"session_id": "s", "attachment_id": "a"}}]
+    merged = _splice_inbox_attachment_blocks(blocks, attach)
+    assert [b["type"] for b in merged] == ["markdown", "attachment", "approval"]
+
+
+def test_splice_appends_when_non_interactive() -> None:
+    from waypoint.cli import _splice_inbox_attachment_blocks
+
+    blocks = [{"type": "markdown", "text": "m"}]
+    attach = [{"type": "attachment", "ref": {"session_id": "s", "attachment_id": "a"}}]
+    merged = _splice_inbox_attachment_blocks(blocks, attach)
+    assert [b["type"] for b in merged] == ["markdown", "attachment"]
+
+
+def test_splice_preserves_attach_order_and_question_target() -> None:
+    from waypoint.cli import _splice_inbox_attachment_blocks
+
+    blocks = [{"type": "question", "question": "q?"}]
+    attach = [
+        {"type": "attachment", "ref": {"session_id": "s", "attachment_id": "a1"}},
+        {"type": "attachment", "ref": {"session_id": "s", "attachment_id": "a2"}},
+    ]
+    merged = _splice_inbox_attachment_blocks(blocks, attach)
+    assert [b["type"] for b in merged] == ["attachment", "attachment", "question"]
+    assert [b["ref"]["attachment_id"] for b in merged[:2]] == ["a1", "a2"]
+
+
+def test_splice_noop_without_attachments() -> None:
+    from waypoint.cli import _splice_inbox_attachment_blocks
+
+    blocks = [{"type": "markdown", "text": "m"}]
+    assert _splice_inbox_attachment_blocks(blocks, []) is blocks

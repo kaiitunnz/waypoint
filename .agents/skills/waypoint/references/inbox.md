@@ -33,6 +33,15 @@ An item **resolves** once every required question/approval block is answered; an
 item with no required blocks is a pure FYI that resolves when the user reads it.
 Post prints the created item (its `id` and per-block `id`s).
 
+**Attach a local file** with repeatable `--attach PATH`: `waypoint inbox post --json -
+--attach ./rfc.md`. Each file uploads to the sender session (`--from-session-id`,
+`WAYPOINT_SESSION_ID`, or the body's `from_session_id`, required with `--attach`) and
+becomes an `attachment` block before the first question/approval block (appended when
+the item is non-interactive), in `--attach` order. The runtime pins each attachment
+against the item so the orphan sweep keeps it while the item exists, and releases the
+pin when the item is deleted. A missing/unreadable `--attach` path or an unresolvable
+`attachment` ref fails the post and creates no item.
+
 ## Block until the user decides
 
 `waypoint inbox wait <item-id> [--until resolved|update] [--timeout 30m]` blocks

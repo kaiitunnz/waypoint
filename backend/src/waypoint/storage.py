@@ -20,6 +20,7 @@ from waypoint.schemas import (
     EventRecord,
     InboxApprovalAnswer,
     InboxApprovalBlock,
+    InboxAttachmentBlock,
     InboxBlock,
     InboxBlockInput,
     InboxItem,
@@ -1259,10 +1260,11 @@ class Storage:
         from_label: str | None,
         subject: str,
         blocks: list[InboxBlockInput],
+        item_id: str | None = None,
     ) -> InboxItem:
         now = datetime.now(UTC)
         item = InboxItem(
-            id=uuid.uuid4().hex,
+            id=item_id or uuid.uuid4().hex,
             from_session_id=from_session_id,
             from_label=from_label,
             subject=subject,
@@ -1305,6 +1307,7 @@ class Storage:
         subject: str,
         blocks: list[InboxBlockInput],
         make_deliveries: Callable[[InboxItem], list[tuple[str, str, str]]],
+        item_id: str | None = None,
     ) -> InboxItem:
         """Create an inbox item and its per-channel outbox rows atomically.
 
@@ -1315,7 +1318,7 @@ class Storage:
         """
         now = datetime.now(UTC)
         item = InboxItem(
-            id=uuid.uuid4().hex,
+            id=item_id or uuid.uuid4().hex,
             from_session_id=from_session_id,
             from_label=from_label,
             subject=subject,
@@ -1677,6 +1680,53 @@ class Storage:
         updated = self.get_inbox_item(item_id)
         assert updated is not None  # just updated it under the lock
         return updated, True
+
+    @_synchronized
+    def inbox_attachment_block_refs(
+        self, item_ids: list[str]
+    ) -> dict[str, list[tuple[str, str]]]:
+        """For each existing item, its display attachment blocks' ``(session_id,
+        attachment_id)`` refs, for the runtime to release after deleting the row.
+        Reply-upload refs are excluded: those are pinned and own their
+        retention independently."""
+        unique_ids = list(dict.fromkeys(item_ids))
+        out: dict[str, list[tuple[str, str]]] = {}
+        for start in range(0, len(unique_ids), 500):
+            chunk = unique_ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            for row in self.connection.execute(
+                f"SELECT id, blocks FROM inbox_items WHERE id IN ({placeholders})",
+                chunk,
+            ).fetchall():
+                refs = [
+                    (block.ref.session_id, block.ref.attachment_id)
+                    for block in self._parse_inbox_blocks(row["blocks"])
+                    if isinstance(block, InboxAttachmentBlock)
+                ]
+                if refs:
+                    out[row["id"]] = refs
+        return out
+
+    @_synchronized
+    def all_inbox_item_ids(self) -> list[str]:
+        """Every inbox item id, for startup reconciliation of the reference
+        index against rows that still exist."""
+        return [
+            row["id"]
+            for row in self.connection.execute("SELECT id FROM inbox_items").fetchall()
+        ]
+
+    @_synchronized
+    def resolved_inbox_item_ids(self) -> list[str]:
+        """Ids of the resolved items, for snapshotting their attachment refs
+        before ``delete_resolved_inbox_items`` removes the rows."""
+        return [
+            row["id"]
+            for row in self.connection.execute(
+                "SELECT id FROM inbox_items WHERE status = ?",
+                (InboxStatus.RESOLVED,),
+            ).fetchall()
+        ]
 
     @_synchronized
     def delete_inbox_item(self, item_id: str) -> bool:

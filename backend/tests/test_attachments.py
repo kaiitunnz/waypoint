@@ -168,6 +168,94 @@ def test_sweep_missing_session_is_noop(tmp_path: Path) -> None:
     assert _store(tmp_path).sweep("never-existed", ttl_seconds=60) == 0
 
 
+def _age(store: AttachmentStore, session_id: str, attachment_id: str) -> None:
+    resolved = store.resolve(session_id, attachment_id)
+    assert resolved is not None
+    os.utime(resolved[1].parent / f"{attachment_id}.json", (1000, 1000))
+
+
+def test_inbox_reference_survives_sweep(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    _age(store, "s", spec.id)
+    store.mark_inbox_references("s", "item-1", [spec.id])
+
+    assert store.inbox_referenced_ids("s") == {spec.id}
+    # Old, unsent, unpinned — but an inbox item references it.
+    assert store.sweep("s", ttl_seconds=60) == 0
+    assert store.resolve("s", spec.id) is not None
+
+
+def test_two_items_share_one_attachment(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    _age(store, "s", spec.id)
+    store.mark_inbox_references("s", "item-1", [spec.id])
+    store.mark_inbox_references("s", "item-2", [spec.id])
+
+    # Releasing one holder does not expose it while the other still references it.
+    store.release_inbox_references("s", "item-1", [spec.id])
+    assert store.inbox_referenced_ids("s") == {spec.id}
+    assert store.sweep("s", ttl_seconds=60) == 0
+
+    # Releasing the last holder re-exposes the unpinned/unsent upload.
+    store.release_inbox_references("s", "item-2", [spec.id])
+    assert store.inbox_referenced_ids("s") == set()
+    assert store.sweep("s", ttl_seconds=60) == 1
+    assert store.resolve("s", spec.id) is None
+
+
+def test_mark_inbox_references_is_idempotent(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    store.mark_inbox_references("s", "item-1", [spec.id])
+    store.mark_inbox_references("s", "item-1", [spec.id])
+    # A single release clears the (deduplicated) membership.
+    store.release_inbox_references("s", "item-1", [spec.id])
+    assert store.inbox_referenced_ids("s") == set()
+
+
+def test_mark_inbox_references_ignores_unresolvable_id(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    # A well-formed but non-existent id is never pinned.
+    store.mark_inbox_references("s", "item-1", ["0" * 32])
+    assert store.inbox_referenced_ids("s") == set()
+
+
+def test_release_tolerates_missing_session(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    # No blow-up releasing against a never-created / already-discarded session.
+    store.release_inbox_references("gone", "item-1", ["0" * 32])
+    assert store.inbox_referenced_ids("gone") == set()
+
+
+def test_discard_removes_inbox_reference_index(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    store.mark_inbox_references("s", "item-1", [spec.id])
+    store.discard("s")
+    assert store.inbox_referenced_ids("s") == set()
+    assert store.resolve("s", spec.id) is None
+
+
+def test_reconcile_drops_dead_inbox_ids(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    a = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    b = store.save("s", data=PNG_BYTES, filename="b.png", content_type="image/png")
+    store.mark_inbox_references("s", "live", [a.id])
+    store.mark_inbox_references("s", "dead", [b.id])
+
+    # Only "live" still exists; "dead"'s stale membership is pruned.
+    removed = store.reconcile_inbox_references({"live"})
+    assert removed == 1
+    assert store.inbox_referenced_ids("s") == {a.id}
+
+
+def test_reconcile_missing_root_is_noop(tmp_path: Path) -> None:
+    assert _store(tmp_path).reconcile_inbox_references({"anything"}) == 0
+
+
 def test_delete_removes_blob_and_sidecar(tmp_path: Path) -> None:
     store = _store(tmp_path)
     spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")

@@ -22,6 +22,10 @@ _SENT_INDEX = "_sent.json"
 # Index of ids the user explicitly pinned to survive the orphan sweep even
 # without being sent. Same transparent-to-sidecars shape as _SENT_INDEX.
 _PINNED_INDEX = "_pinned.json"
+# Maps an attachment id to the inbox item ids that pin it against the sweep:
+# ``{"<attachment-id>": ["<inbox-item-id>", ...]}``. Its stem isn't a uuid, so
+# it's transparent to entries()/sweep like the other indexes.
+_INBOX_REFS_INDEX = "_inbox_refs.json"
 
 
 def _sanitize_component(value: str, *, fallback: str) -> str:
@@ -224,6 +228,111 @@ class AttachmentStore:
             json.dumps(sorted(remaining)), encoding="utf-8"
         )
 
+    def mark_inbox_references(
+        self, session_id: str, item_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Pin each resolvable attachment against ``item_id`` so the sweep keeps
+        it while that inbox item exists. Idempotent."""
+        ids = [
+            aid
+            for aid in attachment_ids
+            if _ATTACHMENT_ID.fullmatch(aid)
+            and self.resolve(session_id, aid) is not None
+        ]
+        if not ids:
+            return
+        session_dir = self._session_dir(session_id)
+        if not session_dir.is_dir():
+            return
+        index = self._read_inbox_refs(session_dir)
+        for aid in ids:
+            members = index.setdefault(aid, [])
+            if item_id not in members:
+                members.append(item_id)
+        self._write_inbox_refs(session_dir, index)
+
+    def release_inbox_references(
+        self, session_id: str, item_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Drop ``item_id``'s pin from each attachment. Idempotent and tolerant
+        of an already-discarded session/attachment; never raises."""
+        ids = {aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)}
+        if not ids:
+            return
+        session_dir = self._session_dir(session_id)
+        if not session_dir.is_dir():
+            return
+        index = self._read_inbox_refs(session_dir)
+        changed = False
+        for aid in ids:
+            members = index.get(aid)
+            if members is None or item_id not in members:
+                continue
+            members.remove(item_id)
+            if not members:
+                del index[aid]
+            changed = True
+        if changed:
+            self._write_inbox_refs(session_dir, index)
+
+    def inbox_referenced_ids(self, session_id: str) -> set[str]:
+        """Attachment ids pinned by one or more inbox items in this session."""
+        session_dir = self._session_dir(session_id)
+        if not session_dir.is_dir():
+            return set()
+        return {
+            aid
+            for aid, members in self._read_inbox_refs(session_dir).items()
+            if members
+        }
+
+    def reconcile_inbox_references(self, live_item_ids: set[str]) -> int:
+        """Drop pins whose inbox item is not in ``live_item_ids``, across every
+        session index, and return how many were removed. Startup repair for a
+        crash that pinned a ref before its row committed; never raises."""
+        if not self._root.is_dir():
+            return 0
+        removed = 0
+        for session_dir in self._root.iterdir():
+            if not session_dir.is_dir():
+                continue
+            index = self._read_inbox_refs(session_dir)
+            changed = False
+            for aid in list(index):
+                members = index[aid]
+                kept = [iid for iid in members if iid in live_item_ids]
+                if len(kept) == len(members):
+                    continue
+                removed += len(members) - len(kept)
+                changed = True
+                if kept:
+                    index[aid] = kept
+                else:
+                    del index[aid]
+            if changed:
+                self._write_inbox_refs(session_dir, index)
+        return removed
+
+    def _read_inbox_refs(self, session_dir: Path) -> dict[str, list[str]]:
+        try:
+            data = json.loads(
+                (session_dir / _INBOX_REFS_INDEX).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            aid: [iid for iid in members if isinstance(iid, str)]
+            for aid, members in data.items()
+            if isinstance(aid, str) and isinstance(members, list)
+        }
+
+    def _write_inbox_refs(self, session_dir: Path, index: dict[str, list[str]]) -> None:
+        (session_dir / _INBOX_REFS_INDEX).write_text(
+            json.dumps(index, sort_keys=True), encoding="utf-8"
+        )
+
     def sweep(self, session_id: str, ttl_seconds: float) -> int:
         """Reap eager uploads that were never sent — blobs older than
         ``ttl_seconds`` that no sent message references and the user hasn't
@@ -231,8 +340,10 @@ class AttachmentStore:
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return 0
-        kept = self._read_id_index(session_dir, _SENT_INDEX) | self._read_id_index(
-            session_dir, _PINNED_INDEX
+        kept = (
+            self._read_id_index(session_dir, _SENT_INDEX)
+            | self._read_id_index(session_dir, _PINNED_INDEX)
+            | self.inbox_referenced_ids(session_id)
         )
         cutoff = time.time() - ttl_seconds
         removed = 0

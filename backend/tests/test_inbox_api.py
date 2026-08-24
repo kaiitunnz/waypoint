@@ -133,27 +133,30 @@ async def test_reply_attachment_ref_is_denormalized(tmp_path: Path) -> None:
     assert reply["attachments"][0]["kind"] == "image"
 
 
-async def test_unresolvable_ref_has_no_denormalized_name(tmp_path: Path) -> None:
+async def test_unresolvable_reply_ref_has_no_denormalized_name(tmp_path: Path) -> None:
+    # A user reply may attach a ref that later can't be resolved; that path still
+    # degrades to no label (the backend never trusts a client-supplied name),
+    # unlike an outbound post block, which fails closed with a 422.
     app, token = _build(tmp_path)
     async with _client(app) as client:
         post = await client.post(
             "/api/inbox",
+            json={"subject": "gate", "blocks": [_question_block()]},
+            headers=_auth(token),
+        )
+        item = post.json()["item"]
+        block_id = item["blocks"][0]["id"]
+        submit = await client.post(
+            f"/api/inbox/{item['id']}/blocks/{block_id}",
             json={
-                "subject": "bogus",
-                "from_session_id": "s1",
-                "blocks": [
-                    {
-                        "type": "attachment",
-                        "ref": {"session_id": "s1", "attachment_id": "0" * 32},
-                    }
-                ],
+                "reply": {
+                    "attachments": [{"session_id": "s1", "attachment_id": "0" * 32}]
+                }
             },
             headers=_auth(token),
         )
-        assert post.status_code == 200
-        ref = post.json()["item"]["blocks"][0]["ref"]
-    # A ref that can't be resolved carries no name — the backend never trusts a
-    # client-supplied label.
+        assert submit.status_code == 200
+        ref = submit.json()["item"]["blocks"][0]["reply"]["attachments"][0]
     assert ref["filename"] is None
     assert ref["kind"] is None
 
@@ -425,3 +428,182 @@ def test_ws_rejects_bad_token(tmp_path: Path) -> None:
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/ws/inbox/x?token=bad") as ws:
                 ws.receive_json()
+
+
+# ── attachment reference indexing (RFC: manager inbox attachments) ──
+
+
+def _approval_block() -> dict[str, Any]:
+    return {
+        "type": "approval",
+        "prompt": "Approve this spec?",
+        "options": ["approve", "reject"],
+        "required": True,
+    }
+
+
+def _seed_attachment(app: Any, session_id: str) -> str:
+    """Store a blob directly (bypassing the session-gated HTTP upload) and return
+    its id."""
+    spec = app.state.context.runtime.attachments.save(
+        session_id, data=b"# rfc", filename="rfc.md", content_type="text/markdown"
+    )
+    return spec.id
+
+
+async def test_post_with_attachment_indexes_and_denormalizes(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    store = app.state.context.runtime.attachments
+    aid = _seed_attachment(app, "mgr")
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "chan: t — spec review",
+                "from_session_id": "mgr",
+                "blocks": [
+                    {"type": "markdown", "text": "review"},
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "mgr", "attachment_id": aid},
+                    },
+                    _approval_block(),
+                ],
+            },
+            headers=_auth(token),
+        )
+    assert post.status_code == 200, post.text
+    item = post.json()["item"]
+    att = next(b for b in item["blocks"] if b["type"] == "attachment")
+    # Runtime denormalized the display name/kind from the resolved spec.
+    assert att["ref"]["filename"] == "rfc.md"
+    assert att["ref"]["kind"] == "file"
+    # And pinned it against this item so the orphan sweep keeps it.
+    assert store.inbox_referenced_ids("mgr") == {aid}
+
+
+async def test_post_with_unresolvable_attachment_is_422_and_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    app, token = _build(tmp_path)
+    store = app.state.context.runtime.attachments
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "bad ref",
+                "from_session_id": "mgr",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "mgr", "attachment_id": "f" * 32},
+                    },
+                    _approval_block(),
+                ],
+            },
+            headers=_auth(token),
+        )
+        assert post.status_code == 422
+        listing = await client.get("/api/inbox", headers=_auth(token))
+    # No item persisted, no membership left behind.
+    assert listing.json()["items"] == []
+    assert store.inbox_referenced_ids("mgr") == set()
+
+
+async def test_delete_item_releases_attachment_ref(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    store = app.state.context.runtime.attachments
+    aid = _seed_attachment(app, "mgr")
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "chan: t — spec review",
+                "from_session_id": "mgr",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "mgr", "attachment_id": aid},
+                    },
+                    _approval_block(),
+                ],
+            },
+            headers=_auth(token),
+        )
+        item_id = post.json()["item"]["id"]
+        assert store.inbox_referenced_ids("mgr") == {aid}
+        await client.delete(f"/api/inbox/{item_id}", headers=_auth(token))
+    # Deleting the item releases the pin; the upload is sweep-eligible again.
+    assert store.inbox_referenced_ids("mgr") == set()
+
+
+async def test_delete_resolved_releases_attachment_refs(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    store = app.state.context.runtime.attachments
+    aid = _seed_attachment(app, "mgr")
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "chan: t — spec review",
+                "from_session_id": "mgr",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "mgr", "attachment_id": aid},
+                    },
+                    _approval_block(),
+                ],
+            },
+            headers=_auth(token),
+        )
+        item = post.json()["item"]
+        block_id = next(b["id"] for b in item["blocks"] if b["type"] == "approval")
+        await client.post(
+            f"/api/inbox/{item['id']}/blocks/{block_id}",
+            json={"answer": {"decision": "approve"}},
+            headers=_auth(token),
+        )
+        assert store.inbox_referenced_ids("mgr") == {aid}
+        resp = await client.post("/api/inbox/delete-resolved", headers=_auth(token))
+        assert resp.status_code == 200
+    assert store.inbox_referenced_ids("mgr") == set()
+
+
+async def test_batch_delete_releases_refs_only_for_deleted(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    store = app.state.context.runtime.attachments
+    kept_aid = _seed_attachment(app, "mgr")
+    gone_aid = _seed_attachment(app, "mgr")
+
+    async def _post(aid: str) -> str:
+        resp = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "chan: t — spec review",
+                "from_session_id": "mgr",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "mgr", "attachment_id": aid},
+                    },
+                    _approval_block(),
+                ],
+            },
+            headers=_auth(token),
+        )
+        return resp.json()["item"]["id"]
+
+    async with _client(app) as client:
+        kept_id = await _post(kept_aid)
+        gone_id = await _post(gone_aid)
+        assert store.inbox_referenced_ids("mgr") == {kept_aid, gone_aid}
+        resp = await client.post(
+            "/api/inbox/batch-delete",
+            json={"item_ids": [gone_id, "ghost"]},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 200
+        assert kept_id  # still present
+    # Only the deleted item's ref is released; the surviving item keeps its pin.
+    assert store.inbox_referenced_ids("mgr") == {kept_aid}

@@ -693,6 +693,27 @@ def _parse_json_object(source: str) -> dict[str, Any]:
     return parsed
 
 
+def _splice_inbox_attachment_blocks(
+    blocks: list[Any], attachment_blocks: list[dict[str, Any]]
+) -> list[Any]:
+    """Insert ``--attach`` blocks immediately before the first interactive
+    (question/approval) block, or append them when the item is non-interactive.
+    JSON-authored blocks keep their explicit order; the uploaded blocks keep the
+    given ``--attach`` order among themselves."""
+    if not attachment_blocks:
+        return blocks
+    interactive = {"question", "approval"}
+    idx = next(
+        (
+            i
+            for i, block in enumerate(blocks)
+            if isinstance(block, dict) and block.get("type") in interactive
+        ),
+        len(blocks),
+    )
+    return [*blocks[:idx], *attachment_blocks, *blocks[idx:]]
+
+
 def _parse_meta(items: list[str] | None) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for item in items or []:
@@ -3236,9 +3257,21 @@ def inbox_post(
             "attachments are pinned into this session's store.",
         ),
     ] = None,
+    attach: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--attach",
+            help="Local file to upload to the sender session and attach as an "
+            "openable block, inserted before the first question/approval block "
+            "(appended when the item is non-interactive). Repeatable; order is "
+            "preserved.",
+            metavar="PATH",
+        ),
+    ] = None,
 ) -> None:
     """Post an inbox item. The body is JSON because a multi-block item is
-    inherently structured; skills build the block list."""
+    inherently structured; skills build the block list. ``--attach`` uploads a
+    local file to the sender session and threads it in as an openable block."""
     body = _parse_json_object(json_source)
     subject = body.get("subject")
     blocks = body.get("blocks", [])
@@ -3246,13 +3279,41 @@ def inbox_post(
         raise typer.BadParameter("--json must include a non-empty 'subject'")
     if not isinstance(blocks, list):
         raise typer.BadParameter("--json 'blocks' must be a list")
-    resolved_session = from_session_id or body.get("from_session_id")
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {
-            "item": c.post_inbox(subject, blocks, from_session_id=resolved_session)
-        },
+    raw_sender = from_session_id or body.get("from_session_id")
+    resolved_session = (
+        raw_sender if isinstance(raw_sender, str) and raw_sender else None
     )
+    # Validate the sender and paths before any upload, so a bad --attach fails
+    # before posting.
+    if attach:
+        if resolved_session is None:
+            raise typer.BadParameter(
+                "--attach requires a sender session: pass --from-session-id, set "
+                "WAYPOINT_SESSION_ID, or include 'from_session_id' in the --json body."
+            )
+        for path in attach:
+            if not path.is_file():
+                raise typer.BadParameter(f"--attach is not a readable file: {path}")
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        attachment_blocks: list[dict[str, Any]] = []
+        if attach:
+            assert resolved_session is not None  # guarded above
+            for path in attach:
+                spec = c.upload_attachment(resolved_session, path)
+                attachment_blocks.append(
+                    {
+                        "type": "attachment",
+                        "ref": {
+                            "session_id": resolved_session,
+                            "attachment_id": spec["id"],
+                        },
+                    }
+                )
+        merged = _splice_inbox_attachment_blocks(blocks, attachment_blocks)
+        return {"item": c.post_inbox(subject, merged, from_session_id=resolved_session)}
+
+    _emit(_settings_from_ctx(ctx), run)
 
 
 @inbox_app.command("get")

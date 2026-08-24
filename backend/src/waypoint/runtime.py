@@ -7,8 +7,9 @@ import re
 import secrets
 import shutil
 import subprocess
+import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -622,6 +623,16 @@ class SessionRuntime:
         if self.usage_providers is not None:
             await self.usage_providers.start()
         self._reconcile_provider_selections()
+        # A crash can pin an attachment ref before its inbox row commits; drop
+        # memberships whose item no longer exists.
+        try:
+            removed = self.attachments.reconcile_inbox_references(
+                set(self.storage.all_inbox_item_ids())
+            )
+            if removed:
+                log.info("reconciled %d stale inbox attachment references", removed)
+        except Exception:
+            log.exception("failed to reconcile inbox attachment references")
 
     def _reconcile_provider_selections(self) -> None:
         """Mark provider-selected sessions whose provider is no longer enabled as
@@ -3895,43 +3906,96 @@ class SessionRuntime:
             session = self.storage.get_session(request.from_session_id)
             if session is not None:
                 from_label = session.title
+        # Resolve every outbound attachment block, then pin each against a
+        # preallocated id before the row is exposed. An unresolvable ref is a 422
+        # that creates no item; a failure after pinning releases what it pinned.
+        item_id = uuid.uuid4().hex
         blocks: list[InboxBlockInput] = [
             (
-                block.model_copy(update={"ref": self._enrich_inbox_ref(block.ref)})
+                block.model_copy(
+                    update={"ref": self._resolve_outbound_inbox_ref(block.ref)}
+                )
                 if isinstance(block, InboxAttachmentBlockInput)
                 else block
             )
             for block in request.blocks
         ]
-        service = self.notifications
-        if (
-            service is not None
-            and service.has_targets()
+        refs_by_session = self._refs_by_session(
+            (block.ref.session_id, block.ref.attachment_id)
+            for block in blocks
+            if isinstance(block, InboxAttachmentBlockInput)
+        )
+        notify = (
+            self.notifications
+            if self.notifications is not None
+            and self.notifications.has_targets()
             and self.settings.notifications.allows_intent("inbox")
-        ):
-            item = self.storage.create_inbox_item_with_notifications(
-                from_session_id=request.from_session_id or "",
-                from_label=from_label,
-                subject=request.subject,
-                blocks=blocks,
-                make_deliveries=lambda created: service.delivery_rows(
-                    intent_from_inbox_item(created)
-                ),
-            )
-            service.wake()
-        else:
-            item = self.storage.create_inbox_item(
-                from_session_id=request.from_session_id or "",
-                from_label=from_label,
-                subject=request.subject,
-                blocks=blocks,
-            )
+            else None
+        )
+        try:
+            for session_id, attachment_ids in refs_by_session.items():
+                self.attachments.mark_inbox_references(
+                    session_id, item_id, attachment_ids
+                )
+            if notify is not None:
+                item = self.storage.create_inbox_item_with_notifications(
+                    from_session_id=request.from_session_id or "",
+                    from_label=from_label,
+                    subject=request.subject,
+                    blocks=blocks,
+                    make_deliveries=lambda created: notify.delivery_rows(
+                        intent_from_inbox_item(created)
+                    ),
+                    item_id=item_id,
+                )
+            else:
+                item = self.storage.create_inbox_item(
+                    from_session_id=request.from_session_id or "",
+                    from_label=from_label,
+                    subject=request.subject,
+                    blocks=blocks,
+                    item_id=item_id,
+                )
+        except Exception:
+            for session_id, attachment_ids in refs_by_session.items():
+                self.attachments.release_inbox_references(
+                    session_id, item_id, attachment_ids
+                )
+            raise
+        # The row is durable and its refs protected past this point; the wake is a
+        # side effect on committed state, so it stays outside the rollback guard.
+        if notify is not None:
+            notify.wake()
         # The author (a session filing its own item) is not woken; a human/UI
         # post carries no session id, so its subscribers are woken.
         await self._publish_inbox_update(
             item, actor_session_id=request.from_session_id or None
         )
         return item
+
+    @staticmethod
+    def _refs_by_session(refs: Iterable[tuple[str, str]]) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = defaultdict(list)
+        for session_id, attachment_id in refs:
+            grouped[session_id].append(attachment_id)
+        return grouped
+
+    def _resolve_outbound_inbox_ref(
+        self, ref: InboxAttachmentRef
+    ) -> InboxAttachmentRef:
+        # An outbound display attachment must resolve at post time; denormalize
+        # filename/kind from the spec for inline rendering.
+        match = self.attachments.resolve(ref.session_id, ref.attachment_id)
+        if match is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "inbox attachment not found: "
+                    f"{ref.session_id}/{ref.attachment_id}"
+                ),
+            )
+        spec = match[0]
+        return ref.model_copy(update={"filename": spec.filename, "kind": spec.kind})
 
     def get_inbox_item(self, item_id: str) -> InboxItem | None:
         return self.storage.get_inbox_item(item_id)
@@ -4001,20 +4065,46 @@ class SessionRuntime:
             )
         return item
 
+    def _release_inbox_attachment_refs(
+        self,
+        refs_by_item: dict[str, list[tuple[str, str]]],
+        deleted_ids: list[str],
+    ) -> None:
+        # Release the pins of the rows actually deleted, re-exposing each source
+        # upload to the sweep once nothing else references it.
+        deleted = set(deleted_ids)
+        for item_id, refs in refs_by_item.items():
+            if item_id not in deleted:
+                continue
+            for session_id, attachment_ids in self._refs_by_session(refs).items():
+                self.attachments.release_inbox_references(
+                    session_id, item_id, attachment_ids
+                )
+
     async def delete_inbox_item(self, item_id: str) -> bool:
+        refs = self.storage.inbox_attachment_block_refs([item_id])
         deleted = self.storage.delete_inbox_item(item_id)
         if deleted:
+            self._release_inbox_attachment_refs(refs, [item_id])
             await self._publish_inbox_deleted(item_id)
         return deleted
 
     async def delete_inbox_items(self, item_ids: list[str]) -> list[str]:
+        refs = self.storage.inbox_attachment_block_refs(item_ids)
         deleted = self.storage.delete_inbox_items(item_ids)
+        self._release_inbox_attachment_refs(refs, deleted)
         for item_id in deleted:
             await self._publish_inbox_deleted(item_id)
         return deleted
 
     async def delete_resolved_inbox_items(self) -> list[str]:
+        # Snapshot refs before deletion: the rows are gone by the time
+        # delete_resolved returns the ids it removed.
+        refs = self.storage.inbox_attachment_block_refs(
+            self.storage.resolved_inbox_item_ids()
+        )
         deleted = self.storage.delete_resolved_inbox_items()
+        self._release_inbox_attachment_refs(refs, deleted)
         for item_id in deleted:
             await self._publish_inbox_deleted(item_id)
         return deleted

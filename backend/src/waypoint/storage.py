@@ -1686,10 +1686,9 @@ class Storage:
         self, item_ids: list[str]
     ) -> dict[str, list[tuple[str, str]]]:
         """For each existing item, its display attachment blocks' ``(session_id,
-        attachment_id)`` refs. The runtime snapshots these before deleting a row
-        so it can release the matching inbox references afterward. Reply-upload
-        refs are excluded: those are pinned into the requester session and own
-        their retention independently."""
+        attachment_id)`` refs, for the runtime to release after deleting the row.
+        Reply-upload refs are excluded: those are pinned and own their
+        retention independently."""
         unique_ids = list(dict.fromkeys(item_ids))
         out: dict[str, list[tuple[str, str]]] = {}
         for start in range(0, len(unique_ids), 500):
@@ -1710,8 +1709,8 @@ class Storage:
 
     @_synchronized
     def all_inbox_item_ids(self) -> list[str]:
-        """Every inbox item id, for startup reconciliation of the attachment
-        reference index against rows that actually exist."""
+        """Every inbox item id, for startup reconciliation of the reference
+        index against rows that still exist."""
         return [
             row["id"]
             for row in self.connection.execute("SELECT id FROM inbox_items").fetchall()
@@ -1719,8 +1718,8 @@ class Storage:
 
     @_synchronized
     def resolved_inbox_item_ids(self) -> list[str]:
-        """Ids of every resolved item, so the runtime can snapshot their
-        attachment refs before ``delete_resolved_inbox_items`` removes the rows."""
+        """Ids of the resolved items, for snapshotting their attachment refs
+        before ``delete_resolved_inbox_items`` removes the rows."""
         return [
             row["id"]
             for row in self.connection.execute(

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -623,8 +623,8 @@ class SessionRuntime:
         if self.usage_providers is not None:
             await self.usage_providers.start()
         self._reconcile_provider_selections()
-        # Drop attachment-reference memberships for inbox ids that no longer
-        # exist — a crash can index a ref before its row commits (FR-5 ordering).
+        # A crash can pin an attachment ref before its inbox row commits; drop
+        # memberships whose item no longer exists.
         try:
             removed = self.attachments.reconcile_inbox_references(
                 set(self.storage.all_inbox_item_ids())
@@ -3906,10 +3906,9 @@ class SessionRuntime:
             session = self.storage.get_session(request.from_session_id)
             if session is not None:
                 from_label = session.title
-        # Preallocate the id so the attachment index can pin refs against it
-        # before the row is exposed (FR-4/FR-5 ordering). Resolve every outbound
-        # attachment block up front: an unresolvable ref is a 422 and creates no
-        # item — no index write, no row.
+        # Resolve every outbound attachment block, then pin each against a
+        # preallocated id before the row is exposed. An unresolvable ref is a 422
+        # that creates no item; a failure after pinning releases what it pinned.
         item_id = uuid.uuid4().hex
         blocks: list[InboxBlockInput] = [
             (
@@ -3921,44 +3920,30 @@ class SessionRuntime:
             )
             for block in request.blocks
         ]
-        refs_by_session: dict[str, list[str]] = defaultdict(list)
-        for block in blocks:
-            if isinstance(block, InboxAttachmentBlockInput):
-                refs_by_session[block.ref.session_id].append(block.ref.attachment_id)
-
-        # Register references before exposing the item. On any failure — here or
-        # at row insertion — release everything registered in this attempt so no
-        # visible item ever points at a source ref that wasn't protected, and no
-        # stale membership survives a fully-failed post.
-        def _release_all() -> None:
-            for session_id, attachment_ids in refs_by_session.items():
-                self.attachments.release_inbox_references(
-                    session_id, item_id, attachment_ids
-                )
-
+        refs_by_session = self._refs_by_session(
+            (block.ref.session_id, block.ref.attachment_id)
+            for block in blocks
+            if isinstance(block, InboxAttachmentBlockInput)
+        )
+        notify = (
+            self.notifications
+            if self.notifications is not None
+            and self.notifications.has_targets()
+            and self.settings.notifications.allows_intent("inbox")
+            else None
+        )
         try:
             for session_id, attachment_ids in refs_by_session.items():
                 self.attachments.mark_inbox_references(
                     session_id, item_id, attachment_ids
                 )
-        except Exception:
-            _release_all()
-            raise
-
-        service = self.notifications
-        with_notifications = (
-            service is not None
-            and service.has_targets()
-            and self.settings.notifications.allows_intent("inbox")
-        )
-        try:
-            if with_notifications and service is not None:
+            if notify is not None:
                 item = self.storage.create_inbox_item_with_notifications(
                     from_session_id=request.from_session_id or "",
                     from_label=from_label,
                     subject=request.subject,
                     blocks=blocks,
-                    make_deliveries=lambda created: service.delivery_rows(
+                    make_deliveries=lambda created: notify.delivery_rows(
                         intent_from_inbox_item(created)
                     ),
                     item_id=item_id,
@@ -3972,13 +3957,15 @@ class SessionRuntime:
                     item_id=item_id,
                 )
         except Exception:
-            _release_all()
+            for session_id, attachment_ids in refs_by_session.items():
+                self.attachments.release_inbox_references(
+                    session_id, item_id, attachment_ids
+                )
             raise
-        # Past this point the row is durable and its refs are protected — never
-        # roll back. Waking the notifier is a side effect on already-committed
-        # state, so it stays outside the rollback guard.
-        if with_notifications and service is not None:
-            service.wake()
+        # The row is durable and its refs protected past this point; the wake is a
+        # side effect on committed state, so it stays outside the rollback guard.
+        if notify is not None:
+            notify.wake()
         # The author (a session filing its own item) is not woken; a human/UI
         # post carries no session id, so its subscribers are woken.
         await self._publish_inbox_update(
@@ -3986,12 +3973,18 @@ class SessionRuntime:
         )
         return item
 
+    @staticmethod
+    def _refs_by_session(refs: Iterable[tuple[str, str]]) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = defaultdict(list)
+        for session_id, attachment_id in refs:
+            grouped[session_id].append(attachment_id)
+        return grouped
+
     def _resolve_outbound_inbox_ref(
         self, ref: InboxAttachmentRef
     ) -> InboxAttachmentRef:
-        # Outbound display attachments must resolve at post time (FR-4): an
-        # unresolvable ref is a client error, not a silently-degraded block.
-        # Denormalize filename/kind from the resolved spec for inline rendering.
+        # An outbound display attachment must resolve at post time; denormalize
+        # filename/kind from the spec for inline rendering.
         match = self.attachments.resolve(ref.session_id, ref.attachment_id)
         if match is None:
             raise HTTPException(
@@ -4077,18 +4070,13 @@ class SessionRuntime:
         refs_by_item: dict[str, list[tuple[str, str]]],
         deleted_ids: list[str],
     ) -> None:
-        # Release the display-attachment refs for the rows actually deleted, so a
-        # source upload the sweep was pinning becomes eligible again once nothing
-        # else references it. Idempotent and tolerant of an already-discarded
-        # source session (FR-6).
+        # Release the pins of the rows actually deleted, re-exposing each source
+        # upload to the sweep once nothing else references it.
         deleted = set(deleted_ids)
         for item_id, refs in refs_by_item.items():
             if item_id not in deleted:
                 continue
-            by_session: dict[str, list[str]] = defaultdict(list)
-            for session_id, attachment_id in refs:
-                by_session[session_id].append(attachment_id)
-            for session_id, attachment_ids in by_session.items():
+            for session_id, attachment_ids in self._refs_by_session(refs).items():
                 self.attachments.release_inbox_references(
                     session_id, item_id, attachment_ids
                 )

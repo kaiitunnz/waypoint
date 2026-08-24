@@ -3283,8 +3283,8 @@ def inbox_post(
     resolved_session = (
         raw_sender if isinstance(raw_sender, str) and raw_sender else None
     )
-    # Validate every --attach path before any upload, so a bad path fails fast
-    # without leaving a half-attached post.
+    # Validate the sender and paths before any upload, so a bad --attach fails
+    # before posting.
     if attach:
         if resolved_session is None:
             raise typer.BadParameter(

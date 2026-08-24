@@ -22,10 +22,9 @@ _SENT_INDEX = "_sent.json"
 # Index of ids the user explicitly pinned to survive the orphan sweep even
 # without being sent. Same transparent-to-sidecars shape as _SENT_INDEX.
 _PINNED_INDEX = "_pinned.json"
-# Maps an attachment id to the inbox item ids that reference it as a display
-# block, so the sweep never reaps an attachment an inbox item still points at.
-# Shape: ``{"<attachment-id>": ["<inbox-item-id>", ...]}``. Its stem isn't a
-# uuid, so it's transparent to entries()/sweep like the other indexes.
+# Maps an attachment id to the inbox item ids that pin it against the sweep:
+# ``{"<attachment-id>": ["<inbox-item-id>", ...]}``. Its stem isn't a uuid, so
+# it's transparent to entries()/sweep like the other indexes.
 _INBOX_REFS_INDEX = "_inbox_refs.json"
 
 
@@ -232,9 +231,8 @@ class AttachmentStore:
     def mark_inbox_references(
         self, session_id: str, item_id: str, attachment_ids: list[str]
     ) -> None:
-        """Record that inbox item ``item_id`` references each attachment, so the
-        sweep keeps it while the item exists. Idempotent; only indexes ids whose
-        blob currently resolves so a bogus ref never pins anything."""
+        """Pin each resolvable attachment against ``item_id`` so the sweep keeps
+        it while that inbox item exists. Idempotent."""
         ids = [
             aid
             for aid in attachment_ids
@@ -256,9 +254,8 @@ class AttachmentStore:
     def release_inbox_references(
         self, session_id: str, item_id: str, attachment_ids: list[str]
     ) -> None:
-        """Drop ``item_id`` from each attachment's reference list, re-exposing an
-        attachment to the sweep once nothing else references it. Idempotent and
-        tolerant of an already-discarded session/attachment; never raises."""
+        """Drop ``item_id``'s pin from each attachment. Idempotent and tolerant
+        of an already-discarded session/attachment; never raises."""
         ids = {aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)}
         if not ids:
             return
@@ -279,7 +276,7 @@ class AttachmentStore:
             self._write_inbox_refs(session_dir, index)
 
     def inbox_referenced_ids(self, session_id: str) -> set[str]:
-        """Attachment ids referenced by one or more inbox items in this session."""
+        """Attachment ids pinned by one or more inbox items in this session."""
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return set()
@@ -290,10 +287,9 @@ class AttachmentStore:
         }
 
     def reconcile_inbox_references(self, live_item_ids: set[str]) -> int:
-        """Drop memberships for inbox ids that no longer exist across every
-        session index. Bounded startup repair for a crash that indexed a ref
-        before its inbox row committed. Returns the count of memberships removed.
-        Best-effort; never raises and never recreates a blob or session."""
+        """Drop pins whose inbox item is not in ``live_item_ids``, across every
+        session index, and return how many were removed. Startup repair for a
+        crash that pinned a ref before its row committed; never raises."""
         if not self._root.is_dir():
             return 0
         removed = 0
@@ -301,14 +297,14 @@ class AttachmentStore:
             if not session_dir.is_dir():
                 continue
             index = self._read_inbox_refs(session_dir)
-            if not index:
-                continue
             changed = False
             for aid in list(index):
-                kept = [iid for iid in index[aid] if iid in live_item_ids]
-                if len(kept) != len(index[aid]):
-                    removed += len(index[aid]) - len(kept)
-                    changed = True
+                members = index[aid]
+                kept = [iid for iid in members if iid in live_item_ids]
+                if len(kept) == len(members):
+                    continue
+                removed += len(members) - len(kept)
+                changed = True
                 if kept:
                     index[aid] = kept
                 else:

@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
 from waypoint.backends.claude_tty import plugin as plugin_mod
+from waypoint.backends.claude_tty.byte_source import transcript_path
 from waypoint.backends.claude_tty.plugin import (
     ClaudeTtyPlugin,
     _scrub_session_args,
@@ -539,6 +540,83 @@ async def test_fork_session_inherits_source_agent_backend() -> None:
     assert (
         runtime._command_for_backend.call_args.kwargs["launch_env"] == source.launch_env
     )
+
+
+@pytest.mark.asyncio
+async def test_fork_session_materializes_transcript_and_seeds_events(
+    tmp_path: Path,
+) -> None:
+    plugin = ClaudeTtyPlugin()
+    captured = _stub_lifecycle(plugin)
+    runtime, created = _launch_runtime()
+    cwd = str(tmp_path / "work")
+    config_dir = str(tmp_path / "cfg")
+    source = _make_session(
+        session_id="src",
+        thread_id="thread-src",
+        launch_env={"CLAUDE_CONFIG_DIR": config_dir},
+    )
+    source.cwd = cwd
+    # Give the parent a real transcript so the fork can be materialized.
+    src_path = transcript_path(cwd, "thread-src", config_dir)
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+    src_path.write_text('{"type":"user","sessionId":"thread-src"}\n')
+
+    forked = await plugin.fork_session(
+        runtime,
+        source,
+        new_session_id="fork-1",
+        title="forked",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+    )
+
+    new_thread_id = forked.transport_state["thread_id"]
+    # The parent transcript was copied under the new thread id, so the resumed
+    # pane reopens a complete conversation.
+    dst_path = transcript_path(cwd, new_thread_id, config_dir)
+    assert dst_path.exists()
+    assert dst_path.read_text() == src_path.read_text()
+    # A materialized fork resumes the copy directly — no native --fork-session —
+    # and the tailer skips the pre-seeded history by tailing from the end.
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args == ["--resume", new_thread_id]
+    assert "--fork-session" not in built_args
+    assert captured["start_at_end"] is True
+    # The parent's events seed the fork's DB so it renders on creation.
+    runtime.storage.clone_events.assert_called_once_with("src", "fork-1")
+
+
+@pytest.mark.asyncio
+async def test_fork_session_falls_back_to_native_fork_without_transcript() -> None:
+    plugin = ClaudeTtyPlugin()
+    captured = _stub_lifecycle(plugin)
+    runtime, _ = _launch_runtime()
+    # No transcript on disk (cwd/config point nowhere real), so materialization
+    # fails and the fork degrades to Claude's native lazy fork — never worse
+    # than today's behavior.
+    source = _make_session(session_id="src", thread_id="thread-src")
+
+    forked = await plugin.fork_session(
+        runtime,
+        source,
+        new_session_id="fork-1",
+        title="forked",
+        raw_log=Path("/tmp/raw.log"),
+        structured_log=Path("/tmp/events.jsonl"),
+    )
+
+    new_thread_id = forked.transport_state["thread_id"]
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args == [
+        "--resume",
+        "thread-src",
+        "--fork-session",
+        "--session-id",
+        new_thread_id,
+    ]
+    assert captured["start_at_end"] is False
+    runtime.storage.clone_events.assert_not_called()
 
 
 # ── list_threads dedup ────────────────────────────────────────────────────────

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.16.0](https://github.com/kaiitunnz/waypoint/compare/v0.15.2...v0.16.0) (2026-08-24)
+
+
+### Features
+
+* add optional context window for custom Claude models ([#401](https://github.com/kaiitunnz/waypoint/issues/401)) ([ad0e6c9](https://github.com/kaiitunnz/waypoint/commit/ad0e6c9091c9787a39aeda14923e75b8f77f6660))
+* attach the spec to manager inbox review gates ([#405](https://github.com/kaiitunnz/waypoint/issues/405)) ([1035fcb](https://github.com/kaiitunnz/waypoint/commit/1035fcb6d172d8fb62b438e95de96945d2df64d3))
+* lazy-load, filter, and sort the ticket board ([#406](https://github.com/kaiitunnz/waypoint/issues/406)) ([2e147a6](https://github.com/kaiitunnz/waypoint/commit/2e147a63688286fc0c6f6df6b30c47f103f04161))
+* multi-column ticket board lanes for dense stages ([#404](https://github.com/kaiitunnz/waypoint/issues/404)) ([655a060](https://github.com/kaiitunnz/waypoint/commit/655a060573a554065e6d9607ad909496b2d73b75))
+
+
+### Bug Fixes
+
+* reap telemetry one-shot tmux sessions on teardown ([#386](https://github.com/kaiitunnz/waypoint/issues/386)) ([b002dbf](https://github.com/kaiitunnz/waypoint/commit/b002dbfc6015c05906af476d25d0cdb74d9c23a0))
+* seed forked claude_tty transcript on creation ([#403](https://github.com/kaiitunnz/waypoint/issues/403)) ([25688db](https://github.com/kaiitunnz/waypoint/commit/25688db8622781329bd020a2cfd46114b2c8fe66))
+* surface custom context window when a gateway reports only output tokens ([#402](https://github.com/kaiitunnz/waypoint/issues/402)) ([f9f5946](https://github.com/kaiitunnz/waypoint/commit/f9f59463278cbab0dd1886bb28bbb622f01ed0b8))
+
 ## [0.15.2](https://github.com/kaiitunnz/waypoint/compare/v0.15.1...v0.15.2) (2026-08-08)
 
 

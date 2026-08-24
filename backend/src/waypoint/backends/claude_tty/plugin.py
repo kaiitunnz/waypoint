@@ -1019,7 +1019,6 @@ class ClaudeTtyPlugin:
             if not src.exists():
                 return False
             dst = transcript_path(session.cwd, new_thread_id, config_dir)
-            dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             return True
         fs = RemoteTranscriptFilesystem(launch_target)

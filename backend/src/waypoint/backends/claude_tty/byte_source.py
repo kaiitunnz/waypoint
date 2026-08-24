@@ -42,7 +42,7 @@ _READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
 
 
 def resolve_remote_config_root(
-    config_dir: str | None, cwd: str, fs: "RemoteTranscriptFilesystem"
+    config_dir: str | None, cwd: str, fs: RemoteTranscriptFilesystem
 ) -> str:
     """Resolve the remote ``CLAUDE_CONFIG_DIR`` root for a session.
 

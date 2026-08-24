@@ -3,7 +3,6 @@
 
 import {
   BoardChannel,
-  ManagerTicket,
   ManagerTicketListQuery,
   ManagerTicketScale,
   ManagerTicketSort,
@@ -222,32 +221,6 @@ export function priorityTone(priority: string | null | undefined): PriorityTone 
   }
 }
 
-// ─── Board rollup ───
-
-export interface BoardRollup {
-  needYou: number;
-  inFlight: number;
-  blocked: number;
-  merged: number;
-}
-
-const IN_FLIGHT_STATES: ReadonlySet<ManagerTicketState> = new Set([
-  "delegated",
-  "building",
-  "revising",
-]);
-
-export function rollupTickets(tickets: ManagerTicket[]): BoardRollup {
-  const rollup: BoardRollup = { needYou: 0, inFlight: 0, blocked: 0, merged: 0 };
-  for (const ticket of tickets) {
-    if (isAwaiting(ticket.state)) rollup.needYou += 1;
-    if (IN_FLIGHT_STATES.has(ticket.state)) rollup.inFlight += 1;
-    if (ticket.state === "blocked") rollup.blocked += 1;
-    if (ticket.state === "merged") rollup.merged += 1;
-  }
-  return rollup;
-}
-
 // ─── Board query controls ───
 
 export const TICKET_PAGE_LIMIT = 50;
@@ -273,13 +246,11 @@ export const SCALE_OPTIONS: { value: ManagerTicketScale; label: string }[] = [
   { value: "trivial", label: "Trivial" },
 ];
 
-// State facet options grouped by lifecycle lane, so the picker reads in the same
-// order the board lanes do rather than as a flat list of 13 states.
+// State facet options grouped by lifecycle lane.
 export const STATE_FACET_GROUPS: { lane: string; states: ManagerTicketState[] }[] =
   LANES.map((lane) => ({ lane: lane.label, states: lane.states }));
 
-// Whether a query narrows the board at all (any active filter). Sort/direction
-// alone do not count as filtering.
+// True when any filter is active; sort and direction do not count.
 export function isFilteredQuery(query: ManagerTicketListQuery): boolean {
   return (
     query.q.trim().length > 0 ||

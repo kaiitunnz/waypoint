@@ -96,7 +96,7 @@ function shortId(value: string): string {
   return value.length > 16 ? `${value.slice(0, 16)}…` : value;
 }
 
-// Add or remove a facet value, preserving the rest — the multi-select toggle.
+// Toggle a value in a list.
 function toggleInList<T>(list: T[], value: T): T[] {
   return list.includes(value)
     ? list.filter((entry) => entry !== value)
@@ -631,9 +631,7 @@ interface FacetGroup {
   options: { value: string; label: string }[];
 }
 
-// A multi-select facet as a glass popover of checkboxes. The trigger states the
-// facet and its active count; the panel closes on Escape or an outside click and
-// stays fully keyboard-operable.
+// Multi-select facet popover; closes on Escape or an outside click.
 function FacetSelect({
   label,
   groups,
@@ -904,8 +902,7 @@ function ManagerBoard({
 
   const filtered = isFilteredQuery(query);
   const total = summary?.total ?? tickets.length;
-  // A truthful live announcement: what is loaded of what matches, and whether a
-  // fetch is in flight — announced without moving focus.
+  // Screen-reader announcement of the loaded/total count.
   const announce =
     status === "loading"
       ? "Loading tickets…"
@@ -961,8 +958,6 @@ function ManagerBoard({
         {announce}
       </p>
 
-      {/* Needs-you is the global decision queue from the manager state snapshot,
-          so board filters never make an awaiting gate disappear. */}
       {needsYou.length > 0 ? (
         <section className="board-needs" aria-label="Needs you">
           <h3 className="board-needs-title">Needs you</h3>
@@ -1049,8 +1044,7 @@ function ManagerBoard({
                       />
                     ))}
                   </div>
-                  {/* A lane the summary says has cards we haven't paged in yet is
-                      not empty — say how many remain instead of reading as done. */}
+                  {/* Summary shows unpaged cards in this lane. */}
                   {unloaded > 0 ? (
                     <p className="board-lane-pending">
                       {loaded === 0
@@ -1331,8 +1325,7 @@ export default function BoardPage() {
   const [ticketsStatus, setTicketsStatus] = useState<LoadState>("loading");
   const [ticketsLoadingMore, setTicketsLoadingMore] = useState(false);
   const [ticketsLoadMoreError, setTicketsLoadMoreError] = useState(false);
-  // Monotonic request generation: a page/summary from an older query or manager
-  // is ignored, so a slow response can never overwrite a newer one.
+  // Drops a stale page/summary when the query or manager changed mid-request.
   const ticketRequestGen = useRef(0);
   const [search, setSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -1376,8 +1369,7 @@ export default function BoardPage() {
   useEffect(() => {
     selectedManagerRef.current = selectedManagerId;
   }, [selectedManagerId]);
-  // The live socket refetches the board's first page on a board_update without
-  // re-subscribing per query change, so it reads the active query from a ref.
+  // Active query for the socket's board_update refetch, read without re-subscribing.
   const ticketQueryRef = useRef<ManagerTicketListQuery>(ticketQuery);
   useEffect(() => {
     ticketQueryRef.current = ticketQuery;
@@ -1509,8 +1501,7 @@ export default function BoardPage() {
     [host, token, handleAuthFailure],
   );
 
-  // Reset and fetch the first board page for a query. Every fetch claims a new
-  // generation so a slow response for an old query/manager is dropped.
+  // Fetch page one; a new generation drops any stale in-flight response.
   const refreshTicketFirstPage = useCallback(
     async (managerId: string, query: ManagerTicketListQuery) => {
       if (!host || !token) return;
@@ -1702,7 +1693,7 @@ export default function BoardPage() {
     void refreshManagerState(selectedManagerId);
   }, [selectedManagerId, refreshManagerState]);
 
-  // Debounce the search box into the query so typing doesn't refetch per keystroke.
+  // Debounce the search box into the query.
   useEffect(() => {
     const handle = setTimeout(() => {
       const next = ticketSearchInput.trim();
@@ -1711,9 +1702,8 @@ export default function BoardPage() {
     return () => clearTimeout(handle);
   }, [ticketSearchInput]);
 
-  // Any query change (filter, sort, direction, or debounced text) or manager
-  // switch clears the loaded cards and fetches page one. ``ticketQuery`` identity
-  // changes exactly when the result set would, so this never double-fetches.
+  // Refetch page one on any query or manager change; ticketQuery identity changes
+  // only with the result set, so this never double-fetches.
   useEffect(() => {
     if (!managerMode || !selectedManagerId) return;
     void refreshTicketFirstPage(selectedManagerId, ticketQuery);
@@ -1767,8 +1757,7 @@ export default function BoardPage() {
         const manager = selectedManagerRef.current;
         if (manager) {
           void refreshManagerState(manager);
-          // Invalidate the loaded pages and refetch page one with the active
-          // query; the generation guard drops any in-flight stale response.
+          // Refetch page one; the generation guard drops stale responses.
           void refreshTicketFirstPage(manager, ticketQueryRef.current);
         }
         if (entriesDirty) {
@@ -2189,8 +2178,7 @@ export default function BoardPage() {
     managerStateForSelection?.config?.priority_levels ?? [];
   const defaultUpdateChannel = activeChannel ?? channels[0]?.channel ?? null;
 
-  // The global decision queue, from the full manager snapshot — never narrowed
-  // by board-card filters, so an awaiting gate can't be filtered out of view.
+  // Global decision queue from the full snapshot; not narrowed by board filters.
   const needsYou = useMemo(
     () =>
       (managerStateForSelection?.tickets ?? [])

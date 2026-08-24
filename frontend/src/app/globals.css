@@ -14559,7 +14559,8 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .board-query-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent-cool) 55%, var(--line-strong));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .board-query-search-cue {
@@ -14765,13 +14766,14 @@ html[data-theme="light"] .session-switcher-row.selected {
   text-decoration: underline;
 }
 
-.board-query-search-input:focus-visible,
+/* The search wrapper shows focus via its accent ring; the discrete controls take
+   a matching accent keyboard-focus outline. */
 .board-facet-trigger:focus-visible,
 .board-facet-option input:focus-visible,
 .board-query-sort select:focus-visible,
 .board-query-dir:focus-visible,
 .board-query-clear:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-cool) 60%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 1px;
 }
 
@@ -15460,13 +15462,17 @@ a.board-fact-pr:hover {
   .board-needs-strip {
     grid-template-columns: 1fr;
   }
-  /* The query bar stacks on mobile: search takes its own row, facets + sort
-     wrap onto the next, so nothing is cramped at phone widths. */
-  .board-query-search {
+  /* Stack the query bar into three full-width rows — search, facets, sort — each
+     left-aligned so nothing floats to a ragged edge. The sort select grows to
+     fill its row with the direction toggle pinned at the end. */
+  .board-query-search,
+  .board-query-facets,
+  .board-query-sort {
     flex-basis: 100%;
   }
-  .board-query-sort {
-    margin-left: auto;
+  .board-query-sort-field,
+  .board-query-sort select {
+    flex: 1;
   }
   /* Reset widened lanes to the single-column basis so the board scrolls horizontally. */
   .board-lane[data-density="med"],

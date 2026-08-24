@@ -26,6 +26,10 @@ from waypoint.backends.claude_code.adapter import (
     _context_usage_snapshot_from_message,
     claude_token_usage_record,
 )
+from waypoint.backends.claude_code.models import (
+    ClaudeContextWindowResolver,
+    claude_context_window_for_model,
+)
 from waypoint.backends.claude_code.normalize import (
     is_injected_user_turn,
     iter_content_blocks,
@@ -48,10 +52,13 @@ async def read_local_claude_history(
 
 async def read_local_claude_token_usage_history(
     thread_id: str,
+    context_window_resolver: ClaudeContextWindowResolver = (
+        claude_context_window_for_model
+    ),
 ) -> list[TokenUsageRecord]:
     """Read a local Claude transcript's per-turn ledger rows for thread-history import."""
     records = await asyncio.to_thread(read_local_claude_transcript, thread_id)
-    return token_usage_records_from_history(records)
+    return token_usage_records_from_history(records, context_window_resolver)
 
 
 def convert_transcript_records(
@@ -78,6 +85,9 @@ def convert_transcript_records(
 
 def token_usage_records_from_history(
     records: list[dict[str, Any]],
+    context_window_resolver: ClaudeContextWindowResolver = (
+        claude_context_window_for_model
+    ),
 ) -> list[TokenUsageRecord]:
     """Per-turn ledger rows recoverable from a replayed Claude transcript.
 
@@ -95,7 +105,9 @@ def token_usage_records_from_history(
         message: dict[str, Any] = record.get("message") or {}
         model = str(message.get("model") or "") or None
         usage: dict[str, Any] = message.get("usage") or {}
-        snapshot = _context_usage_snapshot_from_message(model, usage)
+        snapshot = _context_usage_snapshot_from_message(
+            model, usage, context_window_resolver
+        )
         if snapshot is None:
             continue
         record_id = str(message.get("id") or record.get("uuid") or "")

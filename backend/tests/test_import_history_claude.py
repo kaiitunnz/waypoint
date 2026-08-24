@@ -7,8 +7,9 @@ from waypoint.backends.claude_code.history import (
     read_local_claude_token_usage_history,
     token_usage_records_from_history,
 )
+from waypoint.backends.claude_code.models import make_context_window_resolver
 from waypoint.backends.claude_code.threads import read_local_claude_transcript
-from waypoint.schemas import EventKind
+from waypoint.schemas import BackendModelOption, EventKind
 
 
 def _assistant_text(
@@ -213,6 +214,25 @@ def test_token_usage_records_from_history_threads_model_no_effort() -> None:
     # turn always surfaces it as unknown rather than guessed.
     assert record.effort is None
     assert record.totals == {"input_tokens": 10, "output_tokens": 5}
+
+
+def test_token_usage_records_from_history_records_configured_custom_model() -> None:
+    # A custom transcript model id absent from the static table would drop as
+    # unresolvable; the configured resolver records it instead of skipping it.
+    records = [
+        _assistant_with_usage(
+            "msg1", "kimi-k3-0711", {"input_tokens": 10, "output_tokens": 5}
+        )
+    ]
+    resolver = make_context_window_resolver(
+        [],
+        [BackendModelOption(id="kimi-k3-0711", label="Kimi K3", context_window="1m")],
+    )
+
+    token_records = token_usage_records_from_history(records, resolver)
+
+    assert len(token_records) == 1
+    assert token_records[0].model == "kimi-k3-0711"
 
 
 def test_token_usage_records_from_history_skips_unresolvable_model() -> None:

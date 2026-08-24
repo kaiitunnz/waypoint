@@ -77,6 +77,12 @@ plugin_configs:
     #   - id: kimi-k3[1m]
     #     label: Kimi K3 (1M context)
     #     description: Custom gateway model
+    #     context_window: 1m               # token capacity for the context pill;
+    #                                      # int (1000000) or "256k"/"1m". Custom
+    #                                      # models aren't in the built-in table,
+    #                                      # so set this to give the pill a
+    #                                      # denominator. Reporting-only -- never
+    #                                      # passed to the CLI as a launch option.
     #     # supported_efforts omitted -> efforts unknown: the picker offers the
     #     # full ladder (low..max) and forwards the choice unvalidated. Set an
     #     # explicit list to enforce it; set [] for a model with no effort knob.
@@ -87,6 +93,7 @@ plugin_configs:
     #   - id: opus
     #     label: Opus 4.7
     #     is_default: true
+    #     context_window: 256k             # valid on replacement entries too
     # account_profiles:                      # named CLAUDE_CONFIG_DIR profiles; see docs/account_profiles.md
     #   personal:
     #     label: Personal

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
@@ -1298,6 +1299,44 @@ class LaunchSettingsResponse(BaseModel):
     requires_restart: bool = True
 
 
+_CONTEXT_WINDOW_UNITS: dict[str, int] = {"": 1, "k": 1_000, "m": 1_000_000}
+_CONTEXT_WINDOW_RE = re.compile(r"([0-9]+)([kKmM]?)")
+
+
+def _parse_context_window(value: Any) -> int | None:
+    """Normalize an operator ``context_window`` into a positive token count.
+
+    Accepts a positive YAML integer or a string of a positive decimal integer
+    optionally suffixed with case-insensitive ``k`` (×1,000) or ``m``
+    (×1,000,000). Rejects booleans, non-positive values, decimals, embedded
+    whitespace, and unknown units rather than guessing.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("context_window must be a token count, not a boolean")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("context_window must be a positive integer token count")
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        match = _CONTEXT_WINDOW_RE.fullmatch(text)
+        if match is None:
+            raise ValueError(
+                f"invalid context_window {value!r}: expected a positive integer "
+                "optionally suffixed with 'k' or 'm' (e.g. 200000, '256k', '1m')"
+            )
+        tokens = int(match.group(1)) * _CONTEXT_WINDOW_UNITS[match.group(2).lower()]
+        if tokens <= 0:
+            raise ValueError("context_window must be greater than zero")
+        return tokens
+    raise ValueError(
+        f"invalid context_window {value!r}: expected an integer or a string "
+        "like '256k' or '1m'"
+    )
+
+
 class BackendModelOption(BaseModel):
     id: str
     label: str
@@ -1310,6 +1349,11 @@ class BackendModelOption(BaseModel):
     #   list -> the accepted set; membership is enforced
     supported_efforts: list[str] | None = None
     default_effort: str | None = None
+    # Operator-declared context capacity in tokens for a custom model whose id
+    # is absent from the static Claude catalogue. Accepts an int or a compact
+    # "256k"/"1m" string, normalized to a positive token count; reporting-only,
+    # never passed to the CLI.
+    context_window: Annotated[int | None, BeforeValidator(_parse_context_window)] = None
 
 
 class BackendModelListResponse(BaseModel):

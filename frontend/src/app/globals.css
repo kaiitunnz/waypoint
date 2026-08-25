@@ -4368,10 +4368,33 @@ html[data-theme="light"] .tool-call-run-children {
   word-break: break-word;
 }
 
+/* display: block makes the table its own horizontal scroll box, so a wide
+ * table scrolls within the message instead of crushing its columns. */
 .markdown-message table {
   display: block;
   max-width: 100%;
   overflow-x: auto;
+  border-collapse: collapse;
+}
+
+/* Reset the prose overflow-wrap/word-break inherited from .markdown-message,
+ * which otherwise breaks cell text per character and collapses columns; the
+ * width floor/cap keeps labels legible while long prose wraps. */
+.markdown-message th,
+.markdown-message td {
+  min-width: 5rem;
+  max-width: 22rem;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.markdown-message thead th {
+  background: var(--bg-card-soft);
+  font-weight: 600;
 }
 
 .markdown-message > :first-child {

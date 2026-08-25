@@ -4368,27 +4368,18 @@ html[data-theme="light"] .tool-call-run-children {
   word-break: break-word;
 }
 
-/* Tables are the one markdown block that must stay dense: reflowing rows into
- * cards loses the column comparison and needs a header→cell map react-markdown
- * doesn't give us. Instead the table stays a table and scrolls horizontally
- * inside its own box. `display: block` makes the table its own scroll viewport
- * (max-width: 100% keeps that box inside the message, so the document never
- * gains horizontal overflow); the th/td rules below stop the columns from
- * crushing so the inner content actually overflows and the scroll engages. */
+/* display: block makes the table its own horizontal scroll box, so a wide
+ * table scrolls within the message instead of crushing its columns. */
 .markdown-message table {
   display: block;
   max-width: 100%;
   overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   border-collapse: collapse;
 }
 
-/* `.markdown-message` sets overflow-wrap: anywhere / word-break: break-word for
- * prose; left to cascade it breaks every cell word per character, collapsing
- * columns to ~1ch (headers stack as K/i/n/d) so nothing overflows and the
- * scroll never triggers. Reset it here: keep words whole, break only genuinely
- * unbreakable tokens, and floor/cap the column width so labels stay legible
- * while long prose wraps instead of ballooning the row. */
+/* Reset the prose overflow-wrap/word-break inherited from .markdown-message,
+ * which otherwise breaks cell text per character and collapses columns; the
+ * width floor/cap keeps labels legible while long prose wraps. */
 .markdown-message th,
 .markdown-message td {
   min-width: 5rem;
@@ -4397,7 +4388,6 @@ html[data-theme="light"] .tool-call-run-children {
   border: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
-  white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
 }

@@ -7542,6 +7542,14 @@ html[data-theme="light"] .composer-send {
   color: var(--accent);
 }
 
+/* Bare mono count in the card's own hue — a label, not a status pill. */
+.send-user-file-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
 .send-user-file-caption {
   margin: 10px 0 0;
   color: var(--text);

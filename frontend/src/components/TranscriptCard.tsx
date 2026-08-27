@@ -821,7 +821,7 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
           ↧
         </span>
         <span className="tool-name">Sent you</span>
-        <span className="badge tool-status complete">
+        <span className="send-user-file-count">
           {count} file{count === 1 ? "" : "s"}
         </span>
         <span className="role-time">{formatTime(event.ts)}</span>

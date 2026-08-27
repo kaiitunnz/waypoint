@@ -348,8 +348,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // `events` and win the max-sequence comparison in `currentTaskEvent`.
   const [loadedTodoEvent, setLoadedTodoEvent] = useState<EventRecord | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  // Owned here (not in ReplyComposer) so a transcript SendUserFile card can open
-  // the same Files browser the composer renders.
+  // Owned here so a transcript SendUserFile card can open the Files browser the
+  // composer renders.
   const [filesOpen, setFilesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
@@ -2473,8 +2473,7 @@ interface ReplyComposerProps {
   assistantControls: AssistantControls | null;
   workspacePreviewEnabled: boolean;
   onBrowseWorkspace: () => void;
-  // Files-browser open state, lifted to SessionDetail so a transcript card
-  // (SendUserFile) can open the same panel the composer owns.
+  // Files browser open state, owned by SessionDetail (see filesOpen there).
   filesOpen: boolean;
   onFilesOpenChange: (open: boolean) => void;
 }
@@ -4116,9 +4115,8 @@ function isTodoListEvent(event: EventRecord): boolean {
   return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
 }
 
-// Tool calls that render as their own standalone card rather than folding into
-// a collapsed tool run: interactive asks and deliberate file hand-offs. Kept in
-// sync with the dedicated cards in TranscriptCard.
+// Tool calls that render as their own card instead of folding into a collapsed
+// tool run — the dedicated cards in TranscriptCard.
 function isStandaloneToolCard(toolName: string | null): boolean {
   return toolName === "AskUserQuestion" || toolName === "SendUserFile";
 }

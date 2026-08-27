@@ -2,9 +2,8 @@
 
 import { createContext, useContext } from "react";
 
-// Lets transcript-deep cards open the session Files browser, which is owned by
-// the composer. Mirrors WorkspaceFileLinkContext so a card doesn't prop-drill
-// through the transcript tree.
+// Lets a transcript card open the session Files browser without prop-drilling
+// through the transcript tree. Mirrors WorkspaceFileLinkContext.
 export interface SessionFilesLinkHandler {
   openFilesBrowser: () => void;
 }

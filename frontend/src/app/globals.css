@@ -7530,15 +7530,21 @@ html[data-theme="light"] .composer-send {
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--bg-card));
 }
 
-/* SendUserFile hand-off: a deliberate delivery from the agent to the human.
- * Tinted in the warm accent (distinct from the cool ask card) so it reads as a
- * highlight rather than an ordinary recessed tool run. */
+/* SendUserFile hand-off: a warm-accent-tinted delivery card, denser than a
+ * content card so the files and shortcut read at a glance. */
 .send-user-file {
+  padding: 11px 13px;
   border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
 }
 
+.send-user-file .transcript-role {
+  margin-bottom: 0;
+}
+
 .send-user-file .tool-glyph {
+  width: 22px;
+  height: 22px;
   color: var(--accent);
 }
 
@@ -7551,30 +7557,31 @@ html[data-theme="light"] .composer-send {
 }
 
 .send-user-file-caption {
-  margin: 10px 0 0;
+  margin: 7px 0 0;
   color: var(--text);
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.82rem;
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 .send-user-file .message-attachments {
-  margin-top: 10px;
+  margin-top: 8px;
+  gap: 6px;
 }
 
 .send-user-file-names {
   list-style: none;
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .send-user-file-name {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text);
-  padding: 6px 10px;
+  padding: 5px 9px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-card-soft);
@@ -7582,17 +7589,17 @@ html[data-theme="light"] .composer-send {
 }
 
 .send-user-file-open {
-  margin-top: 12px;
+  margin-top: 9px;
   display: inline-flex;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   letter-spacing: 0.04em;
   color: var(--accent);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   border-radius: var(--radius-sm);
-  padding: 6px 12px;
+  padding: 4px 10px;
   cursor: pointer;
   transition:
     border-color 160ms ease,

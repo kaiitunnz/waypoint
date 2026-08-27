@@ -35,9 +35,7 @@ import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
 
-// Claude Code's tool for handing local files to the human. The backend copies
-// the files into the session's attachment store and exposes their specs on
-// metadata.attachments; this card surfaces them as a deliberate hand-off.
+// Claude Code's tool for handing local files to the human.
 const SEND_USER_FILE_TOOL = "SendUserFile";
 
 // Three-state resolution of an AskUserQuestion, derived once over the loaded
@@ -286,8 +284,8 @@ function CodexCard({
           />
         );
       }
-      // Defensive: a SendUserFile call is normally paired (routed via
-      // ToolPairCard); this handles an unpaired/import-path render.
+      // A SendUserFile call is normally paired (ToolPairCard); this covers the
+      // unpaired import-path render.
       if (readToolName(event) === SEND_USER_FILE_TOOL) {
         return <SendUserFileCard event={event} />;
       }
@@ -508,8 +506,6 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
       return { glyph: "☑", variant: "todo", label: "Todo" };
     case "AskUserQuestion":
       return { glyph: "?", variant: "task", label: "Ask" };
-    case SEND_USER_FILE_TOOL:
-      return { glyph: "↧", variant: "task", label: "Sent you" };
     default:
       if (toolName) {
         return { glyph: "ƒ", variant: "default", label: toolName };
@@ -785,35 +781,31 @@ function ToolPairCard({
   );
 }
 
-function sentFileBasenames(event: EventRecord): string[] {
-  const payload = event.metadata?.payload as { input?: unknown } | undefined;
-  const input = payload?.input as { files?: unknown } | undefined;
-  const files = input?.files;
-  if (!Array.isArray(files)) return [];
-  return files
-    .filter((path): path is string => typeof path === "string" && path.length > 0)
-    .map((path) => path.split(/[\\/]/).pop() || path);
+function sendUserFileInput(event: EventRecord): {
+  files: string[];
+  caption: string | null;
+} {
+  const input = (event.metadata?.payload as { input?: unknown } | undefined)
+    ?.input as { files?: unknown; caption?: unknown } | undefined;
+  const files = Array.isArray(input?.files)
+    ? input.files.filter((p): p is string => typeof p === "string" && p.length > 0)
+    : [];
+  const caption =
+    typeof input?.caption === "string" && input.caption.trim()
+      ? input.caption
+      : null;
+  return { files, caption };
 }
 
-function sentFileCaption(event: EventRecord): string | null {
-  const payload = event.metadata?.payload as { input?: unknown } | undefined;
-  const input = payload?.input as { caption?: unknown } | undefined;
-  return typeof input?.caption === "string" && input.caption.trim()
-    ? input.caption
-    : null;
-}
-
-// A deliberate hand-off: the agent sent file(s) to the human. Stands alone
-// (classified "content") rather than folding into a collapsed tool run, and
-// opens the session Files browser where every sent/uploaded file lives.
+// The agent's SendUserFile hand-off. Rendered standalone (classified "content")
+// with the sent files and a shortcut to the Files browser.
 function SendUserFileCard({ event }: { event: EventRecord }) {
   const filesLink = useSessionFilesLink();
   const specs = Array.isArray(event.metadata?.attachments)
-    ? (event.metadata?.attachments as unknown[])
+    ? (event.metadata.attachments as unknown[])
     : [];
-  const basenames = sentFileBasenames(event);
-  const caption = sentFileCaption(event);
-  const count = specs.length || basenames.length;
+  const { files, caption } = sendUserFileInput(event);
+  const count = specs.length || files.length;
   return (
     <article className="panel transcript codex tool_call send-user-file">
       <div className="transcript-role">
@@ -829,11 +821,11 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
       {caption ? <p className="send-user-file-caption">{caption}</p> : null}
       {specs.length > 0 ? (
         <MessageAttachments event={event} />
-      ) : basenames.length > 0 ? (
+      ) : files.length > 0 ? (
         <ul className="send-user-file-names">
-          {basenames.map((name, index) => (
-            <li key={`${name}-${index}`} className="send-user-file-name">
-              {name}
+          {files.map((path, index) => (
+            <li key={`${path}-${index}`} className="send-user-file-name">
+              {path.split(/[\\/]/).pop() || path}
             </li>
           ))}
         </ul>

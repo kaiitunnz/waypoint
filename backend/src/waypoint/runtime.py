@@ -5660,14 +5660,12 @@ class SessionRuntime:
     async def _capture_host_files(
         self, session_id: str, metadata: dict[str, Any]
     ) -> None:
-        """Copy the host files named in the transient ``capture_host_files``
-        metadata into the session's attachment store (pinned so the orphan sweep
-        keeps them) and replace it with a persisted ``attachments`` spec list.
+        """Turn the transient ``capture_host_files`` paths into pinned session
+        attachments exposed on ``metadata["attachments"]``.
 
-        Backend-neutral: any normalizer can tag a TOOL_CALL with resolved-or-cwd
-        relative host paths and have them surfaced in the Files browser. The key
-        is always removed so it never reaches the persisted event. Best-effort —
-        never raises into the emit path.
+        A backend-neutral seam: any normalizer can tag a TOOL_CALL with host
+        paths and have them surface in the Files browser. The transient key is
+        always removed; best-effort, never raises into the emit path.
         """
         raw = metadata.pop("capture_host_files", None)
         if not isinstance(raw, list):
@@ -5683,9 +5681,9 @@ class SessionRuntime:
     def _persist_host_files(
         self, session_id: str, base: str | None, raw_paths: list[Any]
     ) -> list[AttachmentSpec]:
-        """Read each host path and save it as a pinned attachment. Runs off the
-        event loop. Skips (with a warning) anything missing, oversized, or
-        unreadable; de-duplicates by resolved path so one file is saved once."""
+        """Save each readable host path as a pinned attachment, deduped by
+        resolved path. Skips missing, oversized, or unreadable files. Blocking;
+        run off the event loop."""
         max_bytes = self.settings.max_upload_bytes
         base_dir = Path(base).expanduser() if base else None
         out: list[AttachmentSpec] = []

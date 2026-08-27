@@ -1783,9 +1783,8 @@ class ClaudeCliAdapter:
                             question.to_metadata()
                         )
                 elif tool_name == SEND_USER_FILE_TOOL:
-                    # Copy the sent files into the session's attachment store (the
-                    # runtime sink consumes ``capture_host_files``), and suppress
-                    # the ack tool_result so the SendUserFile card stands alone.
+                    # Tag the files for the runtime capture sink; suppress the ack
+                    # result so the card stands alone.
                     files = sent_user_file_paths(block.get("input") or {})
                     if files:
                         tool_call_metadata["capture_host_files"] = files

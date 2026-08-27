@@ -286,10 +286,8 @@ class TranscriptNormalizer:
                             self._suppressed_result_tool_use_ids.add(tool_use_id)
                     continue
                 if tool_name == SEND_USER_FILE_TOOL:
-                    # Copy the sent files into the attachment store (runtime sink
-                    # consumes ``capture_host_files``) and suppress the ack result
-                    # so the card stands alone — mirrors AskUserQuestion/Task by
-                    # not registering a pending tool_use.
+                    # Tag the files for the runtime capture sink; suppress the ack
+                    # result and skip pending registration (like AskUserQuestion).
                     files = sent_user_file_paths(block.get("input") or {})
                     if tool_use_id:
                         self._suppressed_result_tool_use_ids.add(tool_use_id)

@@ -28,11 +28,15 @@ import {
   type TodoEntry,
 } from "@/lib/todos";
 import { MessageAttachments } from "@/components/AttachmentTray";
+import { useSessionFilesLink } from "@/components/SessionFilesLinkContext";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
+
+// Claude Code's tool for handing local files to the human.
+const SEND_USER_FILE_TOOL = "SendUserFile";
 
 // Three-state resolution of an AskUserQuestion, derived once over the loaded
 // events from durable answer evidence: a correlated ask_user_question_answer
@@ -279,6 +283,11 @@ function CodexCard({
             resolution={{ state: "pending" }}
           />
         );
+      }
+      // A SendUserFile call is normally paired (ToolPairCard); this covers the
+      // unpaired import-path render.
+      if (readToolName(event) === SEND_USER_FILE_TOOL) {
+        return <SendUserFileCard event={event} />;
       }
       if (isTodoToolEvent(event)) {
         return <TodoToolCard event={event} />;
@@ -711,6 +720,13 @@ function ToolPairCard({
       );
     }
   }
+  const sendUserFileEvent =
+    readToolName(call ?? result ?? ({} as EventRecord)) === SEND_USER_FILE_TOOL
+      ? (call ?? result)
+      : null;
+  if (sendUserFileEvent) {
+    return <SendUserFileCard event={sendUserFileEvent} />;
+  }
   if (isTodoToolEvent(call) || isTodoToolEvent(result)) {
     return <TodoToolPairCard pair={pair} />;
   }
@@ -762,6 +778,68 @@ function ToolPairCard({
         )}
       </div>
     </details>
+  );
+}
+
+function sendUserFileInput(event: EventRecord): {
+  files: string[];
+  caption: string | null;
+} {
+  const input = (event.metadata?.payload as { input?: unknown } | undefined)
+    ?.input as { files?: unknown; caption?: unknown } | undefined;
+  const files = Array.isArray(input?.files)
+    ? input.files.filter((p): p is string => typeof p === "string" && p.length > 0)
+    : [];
+  const caption =
+    typeof input?.caption === "string" && input.caption.trim()
+      ? input.caption
+      : null;
+  return { files, caption };
+}
+
+// The agent's SendUserFile hand-off. Rendered standalone (classified "content")
+// with the sent files and a shortcut to the Files browser.
+function SendUserFileCard({ event }: { event: EventRecord }) {
+  const filesLink = useSessionFilesLink();
+  const specs = Array.isArray(event.metadata?.attachments)
+    ? (event.metadata.attachments as unknown[])
+    : [];
+  const { files, caption } = sendUserFileInput(event);
+  const count = specs.length || files.length;
+  return (
+    <article className="panel transcript codex tool_call send-user-file">
+      <div className="transcript-role">
+        <span className="tool-glyph task" aria-hidden>
+          ↧
+        </span>
+        <span className="tool-name">Sent you</span>
+        <span className="send-user-file-count">
+          {count} file{count === 1 ? "" : "s"}
+        </span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+      </div>
+      {caption ? <p className="send-user-file-caption">{caption}</p> : null}
+      {specs.length > 0 ? (
+        <MessageAttachments event={event} />
+      ) : files.length > 0 ? (
+        <ul className="send-user-file-names">
+          {files.map((path, index) => (
+            <li key={`${path}-${index}`} className="send-user-file-name">
+              {path.split(/[\\/]/).pop() || path}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {filesLink ? (
+        <button
+          type="button"
+          className="send-user-file-open"
+          onClick={filesLink.openFilesBrowser}
+        >
+          Open in Files
+        </button>
+      ) : null}
+    </article>
   );
 }
 

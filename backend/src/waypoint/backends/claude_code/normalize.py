@@ -161,7 +161,18 @@ def stringify_tool_result(content: Any) -> str:
 
 TASK_TOOL_NAMES = frozenset({"TaskCreate", "TaskUpdate", "TaskGet", "TaskList"})
 
+# Claude Code's tool for sending local files to the human.
+SEND_USER_FILE_TOOL = "SendUserFile"
+
 _VALID_TASK_STATUSES = frozenset({"pending", "in_progress", "completed"})
+
+
+def sent_user_file_paths(tool_input: dict[str, Any]) -> list[str]:
+    """The non-empty ``str`` entries of a ``SendUserFile`` input's ``files``."""
+    raw = tool_input.get("files")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, str) and item]
 
 
 def normalize_task_status(value: Any) -> str:

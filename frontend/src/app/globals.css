@@ -3084,7 +3084,7 @@ details[open] > .transcript-summary::after {
  * shadow), inset them slightly, and quiet the typography so they read as
  * sidenotes that the eye can skip when scanning.
  * ──────────────────────────────────────────────────────────────────────── */
-.transcript.codex.tool_call:not(.ask-user-question),
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file),
 .transcript.codex.tool_result,
 .transcript.codex.tool_pair {
   padding: 9px 12px;
@@ -3103,7 +3103,7 @@ details[open] > .transcript-summary::after {
 }
 
 @media (max-width: 720px) {
-  .transcript.codex.tool_call:not(.ask-user-question),
+  .transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file),
   .transcript.codex.tool_result,
   .transcript.codex.tool_pair {
     margin: 0;
@@ -3111,7 +3111,7 @@ details[open] > .transcript-summary::after {
   }
 }
 
-.transcript.codex.tool_call:not(.ask-user-question):hover,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file):hover,
 .transcript.codex.tool_result:hover,
 .transcript.codex.tool_pair:hover {
   border-color: var(--line-strong);
@@ -3123,13 +3123,13 @@ details.tool-disclosure[open] {
   background: var(--bg-card-soft);
 }
 
-.transcript.codex.tool_call:not(.ask-user-question) .transcript-role,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .transcript-role,
 .transcript.codex.tool_result .transcript-role,
 .transcript.codex.tool_pair .transcript-role {
   margin-bottom: 0;
 }
 
-.transcript.codex.tool_call:not(.ask-user-question) .transcript-role .role-time,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .transcript-role .role-time,
 .transcript.codex.tool_result .transcript-role .role-time,
 .transcript.codex.tool_pair .transcript-role .role-time {
   margin-left: auto;
@@ -3140,7 +3140,7 @@ details.tool-disclosure[open] {
  * (so the user can spot a Bash among Reads at a glance), but the saturated
  * background fill is dropped so the chip reads as a small marker rather
  * than a competing badge. */
-.transcript.codex.tool_call:not(.ask-user-question) .tool-glyph,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .tool-glyph,
 .transcript.codex.tool_result .tool-glyph,
 .transcript.codex.tool_pair .tool-glyph {
   width: 20px;
@@ -3149,7 +3149,7 @@ details.tool-disclosure[open] {
   background: transparent;
 }
 
-.transcript.codex.tool_call:not(.ask-user-question) .tool-name,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .tool-name,
 .transcript.codex.tool_result .tool-name,
 .transcript.codex.tool_pair .tool-name {
   font-size: 0.74rem;
@@ -3209,7 +3209,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 /* Status pill is loud against the recessed card; trim it to a fine label. */
-.transcript.codex.tool_call:not(.ask-user-question) .badge.tool-status,
+.transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .badge.tool-status,
 .transcript.codex.tool_result .badge.tool-status,
 .transcript.codex.tool_pair .badge.tool-status {
   background: transparent;
@@ -3225,7 +3225,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 @media (max-width: 540px) {
-  .transcript.codex.tool_call:not(.ask-user-question),
+  .transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file),
   .transcript.codex.tool_result,
   .transcript.codex.tool_pair {
     margin: 0 8px;
@@ -7528,6 +7528,87 @@ html[data-theme="light"] .composer-send {
 .ask-user-question {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, var(--line));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--bg-card));
+}
+
+/* SendUserFile hand-off: a warm-accent-tinted delivery card, denser than a
+ * content card so the files and shortcut read at a glance. */
+.send-user-file {
+  padding: 11px 13px;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+}
+
+.send-user-file .transcript-role {
+  margin-bottom: 0;
+}
+
+.send-user-file .tool-glyph {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+/* Bare mono count in the card's own hue — a label, not a status pill. */
+.send-user-file-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.send-user-file-caption {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.send-user-file .message-attachments {
+  margin-top: 8px;
+  gap: 6px;
+}
+
+.send-user-file-names {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.send-user-file-name {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+  overflow-wrap: anywhere;
+}
+
+.send-user-file-open {
+  margin-top: 9px;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.send-user-file-open:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .ask-question + .ask-question {

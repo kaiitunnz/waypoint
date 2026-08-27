@@ -2,6 +2,7 @@ import asyncio
 import fnmatch
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -5624,6 +5625,8 @@ class SessionRuntime:
         metadata: dict[str, Any],
         status: SessionStatus,
     ) -> None:
+        if kind == EventKind.TOOL_CALL and metadata.get("capture_host_files"):
+            await self._capture_host_files(session_id, metadata)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -5653,6 +5656,73 @@ class SessionRuntime:
             persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
+
+    async def _capture_host_files(
+        self, session_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Turn the transient ``capture_host_files`` paths into pinned session
+        attachments exposed on ``metadata["attachments"]``.
+
+        A backend-neutral seam: any normalizer can tag a TOOL_CALL with host
+        paths and have them surface in the Files browser. The transient key is
+        always removed; best-effort, never raises into the emit path.
+        """
+        raw = metadata.pop("capture_host_files", None)
+        if not isinstance(raw, list):
+            return
+        session = self.storage.get_session(session_id)
+        if session is None:
+            return
+        base = session.worktree_path or session.cwd
+        specs = await asyncio.to_thread(self._persist_host_files, session_id, base, raw)
+        if specs:
+            metadata["attachments"] = [spec.model_dump(mode="json") for spec in specs]
+
+    def _persist_host_files(
+        self, session_id: str, base: str | None, raw_paths: list[Any]
+    ) -> list[AttachmentSpec]:
+        """Save each readable host path as a pinned attachment, deduped by
+        resolved path. Skips missing, oversized, or unreadable files. Blocking;
+        run off the event loop."""
+        max_bytes = self.settings.max_upload_bytes
+        base_dir = Path(base).expanduser() if base else None
+        out: list[AttachmentSpec] = []
+        seen: set[str] = set()
+        for raw in raw_paths:
+            if not isinstance(raw, str) or not raw:
+                continue
+            path = Path(raw).expanduser()
+            if not path.is_absolute() and base_dir is not None:
+                path = base_dir / path
+            try:
+                path = path.resolve()
+            except OSError:
+                log.warning("send_user_file: cannot resolve %r", raw)
+                continue
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if not path.is_file():
+                    log.warning("send_user_file: not a file: %s", path)
+                    continue
+                if path.stat().st_size > max_bytes:
+                    log.warning(
+                        "send_user_file: %s exceeds %d byte limit", path, max_bytes
+                    )
+                    continue
+                data = path.read_bytes()
+            except OSError:
+                log.warning("send_user_file: cannot read %s", path, exc_info=True)
+                continue
+            mime = mimetypes.guess_type(path.name)[0]
+            spec = self.attachments.save(
+                session_id, data=data, filename=path.name, content_type=mime
+            )
+            self.attachments.mark_pinned(session_id, [spec.id])
+            out.append(spec)
+        return out
 
     def handle_completion_source_init(
         self, session_id: str, payload: dict[str, Any]

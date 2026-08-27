@@ -1233,3 +1233,38 @@ def test_pending_tool_use_cleared_on_turn_complete() -> None:
         _assistant_record("m2", [_text_block("done")], stop_reason="end_turn")
     )
     assert norm.pending_tool_use is None
+
+
+def test_send_user_file_tags_capture_and_suppresses_result() -> None:
+    norm = TranscriptNormalizer()
+    block = _tool_use_block(
+        "tu-suf",
+        "SendUserFile",
+        {"files": ["out/report.md", "chart.png"], "caption": "here"},
+    )
+    events = norm.process_record(
+        _assistant_record("m1", [block], stop_reason="tool_use")
+    )
+    calls = [e for e in events if e.kind == EventKind.TOOL_CALL]
+    assert len(calls) == 1
+    ev = calls[0]
+    assert ev.metadata["tool_name"] == "SendUserFile"
+    assert ev.metadata["capture_host_files"] == ["out/report.md", "chart.png"]
+    # Result is suppressed; the tool_use is not registered as pending.
+    assert norm.pending_tool_use is None
+
+    result_events = norm.process_record(
+        _user_record([_tool_result_block("tu-suf", "sent")])
+    )
+    assert not any(e.kind == EventKind.TOOL_RESULT for e in result_events)
+
+
+def test_send_user_file_without_files_omits_capture_key() -> None:
+    norm = TranscriptNormalizer()
+    block = _tool_use_block("tu-suf2", "SendUserFile", {"caption": "no files"})
+    events = norm.process_record(
+        _assistant_record("m1", [block], stop_reason="tool_use")
+    )
+    calls = [e for e in events if e.kind == EventKind.TOOL_CALL]
+    assert len(calls) == 1
+    assert "capture_host_files" not in calls[0].metadata

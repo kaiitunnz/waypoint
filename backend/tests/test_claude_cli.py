@@ -1662,3 +1662,43 @@ async def test_read_stream_line_skips_oversized_line() -> None:
     assert await _read_stream_line(reader, "s", "stdout") is None
     assert await _read_stream_line(reader, "s", "stdout") == b'{"type":"result"}\n'
     assert await _read_stream_line(reader, "s", "stdout") == b""
+
+
+@pytest.mark.asyncio
+async def test_dispatch_send_user_file_tags_capture_and_suppresses_result() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_suf",
+                    "name": "SendUserFile",
+                    "input": {"files": ["report.md", "chart.png"], "caption": "fyi"},
+                },
+            ],
+        },
+    }
+    await adapter._dispatch(state, event)
+    tool_calls = [item for item in emitted if item[1] == EventKind.TOOL_CALL]
+    assert len(tool_calls) == 1
+    metadata = tool_calls[0][3]
+    assert metadata["tool_name"] == "SendUserFile"
+    assert metadata["capture_host_files"] == ["report.md", "chart.png"]
+    # The ack tool_result is suppressed so the card stands alone.
+    assert "toolu_suf" in state.suppressed_result_tool_use_ids
+    result_event = {
+        "type": "user",
+        "message": {
+            "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_suf", "content": "sent"}
+            ]
+        },
+    }
+    await adapter._dispatch(state, result_event)
+    assert not any(item[1] == EventKind.TOOL_RESULT for item in emitted)
+    assert "toolu_suf" not in state.suppressed_result_tool_use_ids

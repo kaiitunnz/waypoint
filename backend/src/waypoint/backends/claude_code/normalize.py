@@ -161,7 +161,24 @@ def stringify_tool_result(content: Any) -> str:
 
 TASK_TOOL_NAMES = frozenset({"TaskCreate", "TaskUpdate", "TaskGet", "TaskList"})
 
+# Claude Code's tool for sending local files to the human. Its files are copied
+# into the session's attachment store (surfaced in the Files browser) via the
+# backend-neutral ``capture_host_files`` metadata contract the runtime consumes.
+SEND_USER_FILE_TOOL = "SendUserFile"
+
 _VALID_TASK_STATUSES = frozenset({"pending", "in_progress", "completed"})
+
+
+def sent_user_file_paths(tool_input: dict[str, Any]) -> list[str]:
+    """The non-empty ``str`` paths from a ``SendUserFile`` tool input's ``files``.
+
+    Paths may be absolute or relative to the session cwd; resolution happens in
+    the runtime sink, so this is a pure coercion (drops non-str/empty entries).
+    """
+    raw = tool_input.get("files")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, str) and item]
 
 
 def normalize_task_status(value: Any) -> str:

@@ -33,12 +33,14 @@ from typing import Any
 
 from waypoint.backends.claude_code.adapter import _apply_plan_edit, _is_plan_file_path
 from waypoint.backends.claude_code.normalize import (
+    SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
     extract_created_task_id,
     format_task_snapshot,
     is_injected_user_turn,
     iter_content_blocks,
+    sent_user_file_paths,
     stringify_tool_result,
 )
 from waypoint.backends.diff_preview import (
@@ -282,6 +284,34 @@ class TranscriptNormalizer:
                         # TaskGet / TaskList: suppress result, emit nothing
                         if tool_use_id:
                             self._suppressed_result_tool_use_ids.add(tool_use_id)
+                    continue
+                if tool_name == SEND_USER_FILE_TOOL:
+                    # Copy the sent files into the attachment store (runtime sink
+                    # consumes ``capture_host_files``) and suppress the ack result
+                    # so the card stands alone — mirrors AskUserQuestion/Task by
+                    # not registering a pending tool_use.
+                    files = sent_user_file_paths(block.get("input") or {})
+                    if tool_use_id:
+                        self._suppressed_result_tool_use_ids.add(tool_use_id)
+                    metadata: dict[str, Any] = {
+                        "method": "assistant.tool_use",
+                        "item_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_use_id,
+                        "payload": block,
+                        "status": SessionStatus.RUNNING,
+                    }
+                    if files:
+                        metadata["capture_host_files"] = files
+                    events.append(
+                        NormalizedEvent(
+                            kind=EventKind.TOOL_CALL,
+                            text=f"{tool_name}\n"
+                            f"{json.dumps(block.get('input') or {}, indent=2)}",
+                            metadata=metadata,
+                            status=SessionStatus.RUNNING,
+                        )
+                    )
                     continue
                 if tool_name in FILE_EDIT_TOOL_NAMES:
                     self._maybe_capture_plan(tool_name, block.get("input") or {})

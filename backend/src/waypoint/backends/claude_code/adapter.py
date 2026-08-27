@@ -23,6 +23,7 @@ from waypoint.backends.claude_code.models import (
     normalize_claude_model_id,
 )
 from waypoint.backends.claude_code.normalize import (
+    SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
     extract_created_task_id,
@@ -32,6 +33,7 @@ from waypoint.backends.claude_code.normalize import (
     format_status_event,
     format_task_snapshot,
     iter_content_blocks,
+    sent_user_file_paths,
     stringify_tool_result,
 )
 
@@ -1780,6 +1782,15 @@ class ClaudeCliAdapter:
                         tool_call_metadata[INTERACTION_METADATA_KEY] = (
                             question.to_metadata()
                         )
+                elif tool_name == SEND_USER_FILE_TOOL:
+                    # Copy the sent files into the session's attachment store (the
+                    # runtime sink consumes ``capture_host_files``), and suppress
+                    # the ack tool_result so the SendUserFile card stands alone.
+                    files = sent_user_file_paths(block.get("input") or {})
+                    if files:
+                        tool_call_metadata["capture_host_files"] = files
+                    if tool_use_id:
+                        state.suppressed_result_tool_use_ids.add(tool_use_id)
                 await self._emit_event(
                     state.session_id,
                     EventKind.TOOL_CALL,

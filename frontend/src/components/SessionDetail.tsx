@@ -98,6 +98,7 @@ import {
   WorkspaceFileLinkProvider,
   type WorkspaceLinkHandler,
 } from "@/components/WorkspaceFileLinkContext";
+import { SessionFilesLinkProvider } from "@/components/SessionFilesLinkContext";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -347,6 +348,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // `events` and win the max-sequence comparison in `currentTaskEvent`.
   const [loadedTodoEvent, setLoadedTodoEvent] = useState<EventRecord | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  // Owned here (not in ReplyComposer) so a transcript SendUserFile card can open
+  // the same Files browser the composer renders.
+  const [filesOpen, setFilesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
   const [workspaceInitialDir, setWorkspaceInitialDir] = useState<string | undefined>(undefined);
@@ -1789,6 +1793,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => (workspacePreviewEnabled ? { openWorkspacePath } : null),
     [workspacePreviewEnabled, openWorkspacePath],
   );
+  const filesLink = useMemo(
+    () => ({ openFilesBrowser: () => setFilesOpen(true) }),
+    [],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1821,6 +1829,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
   return (
     <WorkspaceFileLinkProvider value={workspaceLink}>
+    <SessionFilesLinkProvider value={filesLink}>
     <section className="stack" ref={sectionRef}>
       {!terminalOnly && activeView === "chat" && showScrollToTop ? (
         <div className="scroll-top-floater" aria-hidden={false}>
@@ -2369,6 +2378,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           assistantControls={assistantControls}
           workspacePreviewEnabled={workspacePreviewEnabled}
           onBrowseWorkspace={openWorkspaceRoot}
+          filesOpen={filesOpen}
+          onFilesOpenChange={setFilesOpen}
         />
       ) : null}
       {workspacePreviewEnabled ? (
@@ -2399,6 +2410,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         />
       ) : null}
     </section>
+    </SessionFilesLinkProvider>
     </WorkspaceFileLinkProvider>
   );
 }
@@ -2461,6 +2473,10 @@ interface ReplyComposerProps {
   assistantControls: AssistantControls | null;
   workspacePreviewEnabled: boolean;
   onBrowseWorkspace: () => void;
+  // Files-browser open state, lifted to SessionDetail so a transcript card
+  // (SendUserFile) can open the same panel the composer owns.
+  filesOpen: boolean;
+  onFilesOpenChange: (open: boolean) => void;
 }
 
 const ReplyComposer = memo(function ReplyComposer({
@@ -2513,12 +2529,13 @@ const ReplyComposer = memo(function ReplyComposer({
   assistantControls,
   workspacePreviewEnabled,
   onBrowseWorkspace,
+  filesOpen,
+  onFilesOpenChange,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
-  const [filesOpen, setFilesOpen] = useState(false);
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -3564,7 +3581,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       className="composer-overflow-item"
                       onClick={() => {
                         setOverflowOpen(false);
-                        setFilesOpen(true);
+                        onFilesOpenChange(true);
                       }}
                     >
                       <span className="glyph">▤</span>
@@ -3690,7 +3707,7 @@ const ReplyComposer = memo(function ReplyComposer({
           token={token}
           sessionId={sessionId}
           open={filesOpen}
-          onClose={() => setFilesOpen(false)}
+          onClose={() => onFilesOpenChange(false)}
           onReference={attachments.referenceExisting}
           referencedIds={attachments.attachedIds}
         />
@@ -4009,7 +4026,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     if (item.kind === "pair") {
       const { call, result } = item.pair;
       const isSpecial = (e: EventRecord | null) =>
-        e !== null && readToolName(e) === "AskUserQuestion";
+        e !== null && isStandaloneToolCard(readToolName(e));
       return isSpecial(call) || isSpecial(result) ? "content" : "tool";
     }
     const { event } = item;
@@ -4020,7 +4037,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
         return "content";
       case "tool_call":
       case "tool_result":
-        return readToolName(event) === "AskUserQuestion" ? "content" : "tool";
+        return isStandaloneToolCard(readToolName(event)) ? "content" : "tool";
       default:
         return isPlanEvent(event) ? "content" : "absorbed";
     }
@@ -4097,6 +4114,13 @@ function isToolResultDelta(event: EventRecord): boolean {
 
 function isTodoListEvent(event: EventRecord): boolean {
   return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
+}
+
+// Tool calls that render as their own standalone card rather than folding into
+// a collapsed tool run: interactive asks and deliberate file hand-offs. Kept in
+// sync with the dedicated cards in TranscriptCard.
+function isStandaloneToolCard(toolName: string | null): boolean {
+  return toolName === "AskUserQuestion" || toolName === "SendUserFile";
 }
 
 function isAgentBusy(

@@ -28,11 +28,17 @@ import {
   type TodoEntry,
 } from "@/lib/todos";
 import { MessageAttachments } from "@/components/AttachmentTray";
+import { useSessionFilesLink } from "@/components/SessionFilesLinkContext";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
+
+// Claude Code's tool for handing local files to the human. The backend copies
+// the files into the session's attachment store and exposes their specs on
+// metadata.attachments; this card surfaces them as a deliberate hand-off.
+const SEND_USER_FILE_TOOL = "SendUserFile";
 
 // Three-state resolution of an AskUserQuestion, derived once over the loaded
 // events from durable answer evidence: a correlated ask_user_question_answer
@@ -280,6 +286,11 @@ function CodexCard({
           />
         );
       }
+      // Defensive: a SendUserFile call is normally paired (routed via
+      // ToolPairCard); this handles an unpaired/import-path render.
+      if (readToolName(event) === SEND_USER_FILE_TOOL) {
+        return <SendUserFileCard event={event} />;
+      }
       if (isTodoToolEvent(event)) {
         return <TodoToolCard event={event} />;
       }
@@ -497,6 +508,8 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
       return { glyph: "☑", variant: "todo", label: "Todo" };
     case "AskUserQuestion":
       return { glyph: "?", variant: "task", label: "Ask" };
+    case SEND_USER_FILE_TOOL:
+      return { glyph: "↧", variant: "task", label: "Sent you" };
     default:
       if (toolName) {
         return { glyph: "ƒ", variant: "default", label: toolName };
@@ -711,6 +724,13 @@ function ToolPairCard({
       );
     }
   }
+  const sendUserFileEvent =
+    readToolName(call ?? result ?? ({} as EventRecord)) === SEND_USER_FILE_TOOL
+      ? (call ?? result)
+      : null;
+  if (sendUserFileEvent) {
+    return <SendUserFileCard event={sendUserFileEvent} />;
+  }
   if (isTodoToolEvent(call) || isTodoToolEvent(result)) {
     return <TodoToolPairCard pair={pair} />;
   }
@@ -762,6 +782,72 @@ function ToolPairCard({
         )}
       </div>
     </details>
+  );
+}
+
+function sentFileBasenames(event: EventRecord): string[] {
+  const payload = event.metadata?.payload as { input?: unknown } | undefined;
+  const input = payload?.input as { files?: unknown } | undefined;
+  const files = input?.files;
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((path): path is string => typeof path === "string" && path.length > 0)
+    .map((path) => path.split(/[\\/]/).pop() || path);
+}
+
+function sentFileCaption(event: EventRecord): string | null {
+  const payload = event.metadata?.payload as { input?: unknown } | undefined;
+  const input = payload?.input as { caption?: unknown } | undefined;
+  return typeof input?.caption === "string" && input.caption.trim()
+    ? input.caption
+    : null;
+}
+
+// A deliberate hand-off: the agent sent file(s) to the human. Stands alone
+// (classified "content") rather than folding into a collapsed tool run, and
+// opens the session Files browser where every sent/uploaded file lives.
+function SendUserFileCard({ event }: { event: EventRecord }) {
+  const filesLink = useSessionFilesLink();
+  const specs = Array.isArray(event.metadata?.attachments)
+    ? (event.metadata?.attachments as unknown[])
+    : [];
+  const basenames = sentFileBasenames(event);
+  const caption = sentFileCaption(event);
+  const count = specs.length || basenames.length;
+  return (
+    <article className="panel transcript codex tool_call send-user-file">
+      <div className="transcript-role">
+        <span className="tool-glyph task" aria-hidden>
+          ↧
+        </span>
+        <span className="tool-name">Sent you</span>
+        <span className="badge tool-status complete">
+          {count} file{count === 1 ? "" : "s"}
+        </span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+      </div>
+      {caption ? <p className="send-user-file-caption">{caption}</p> : null}
+      {specs.length > 0 ? (
+        <MessageAttachments event={event} />
+      ) : basenames.length > 0 ? (
+        <ul className="send-user-file-names">
+          {basenames.map((name, index) => (
+            <li key={`${name}-${index}`} className="send-user-file-name">
+              {name}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {filesLink ? (
+        <button
+          type="button"
+          className="send-user-file-open"
+          onClick={filesLink.openFilesBrowser}
+        >
+          Open in Files
+        </button>
+      ) : null}
+    </article>
   );
 }
 

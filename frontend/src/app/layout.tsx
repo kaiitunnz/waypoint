@@ -3,8 +3,8 @@ import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 
 import { SwitcherProvider } from "@/components/SwitcherProvider";
 import { ThemeProvider } from "@/lib/theme";
-// KaTeX ships its own bundled stylesheet and fonts; import it before globals.css
-// so Next bundles the assets locally (no CDN) and token-aware rules can refine it.
+// Bundles KaTeX's stylesheet and fonts locally; precedes globals.css so token
+// rules can refine it.
 import "katex/dist/katex.min.css";
 import "./globals.css";
 

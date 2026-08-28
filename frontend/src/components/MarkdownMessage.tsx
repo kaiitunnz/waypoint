@@ -24,8 +24,8 @@ interface MarkdownMessageProps {
 // Hoisted to module scope so the plugin array and component overrides keep a
 // stable identity across renders — combined with the memo() below, an
 // unchanged `text` skips the remark parse entirely during streaming.
-// remarkLinkifyPaths runs after remarkMath so a path-like TeX fragment is
-// already a math node and cannot be turned into a workspace link.
+// remarkLinkifyPaths runs after remarkMath so a path-like TeX fragment is a
+// math node, not a workspace link.
 const REMARK_PLUGINS = [...COMMON_REMARK_PLUGINS, remarkLinkifyPaths];
 
 // react-markdown renders fenced blocks as <pre><code>…</code></pre>; the pre

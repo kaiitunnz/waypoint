@@ -3,9 +3,8 @@
 import { useId, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 
+import { COMMON_REHYPE_PLUGINS, COMMON_REMARK_PLUGINS } from "@/lib/markdown";
 import { confidenceLabel } from "@/lib/telemetry";
 import {
   NLGenerationStatus,
@@ -13,10 +12,6 @@ import {
   NLInsightResponse,
 } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/usage";
-
-// The summarizer returns markdown (a "- " bullet list, occasional **bold**);
-// render it so inline formatting resolves instead of showing literal "**".
-const NL_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 interface NLInsightCardProps {
   nlEnabled: boolean;
@@ -122,7 +117,8 @@ export function NLInsightCard({
 
       <div className="tm-nl-prose">
         <ReactMarkdown
-          remarkPlugins={NL_REMARK_PLUGINS}
+          remarkPlugins={COMMON_REMARK_PLUGINS}
+          rehypePlugins={COMMON_REHYPE_PLUGINS}
           components={{
             ul: (props) => <ul className="tm-nl-prose-list" {...props} />,
             // Flatten stray paragraphs the model may emit between bullets.

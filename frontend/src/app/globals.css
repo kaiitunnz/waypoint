@@ -4423,6 +4423,23 @@ html[data-theme="light"] .tool-call-run-children {
   text-underline-offset: 0.16em;
 }
 
+/* KaTeX math: rehype-katex renders inline `$…$` as `.katex` inline flow and
+ * display `$$…$$` as a block `.katex-display`; both inherit message color and
+ * are already themed by the bundled katex stylesheet. A long display formula
+ * must scroll inside its own box so it never widens the viewport on mobile;
+ * the .markdown-message grid gap already spaces block children, so drop
+ * KaTeX's own vertical margin there. */
+.markdown-message .katex-display,
+.tm-nl-prose .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-message .katex-display {
+  margin: 0;
+}
+
 .inline-code {
   padding: 0.1rem 0.32rem;
   border-radius: 6px;

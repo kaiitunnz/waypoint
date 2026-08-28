@@ -10,12 +10,11 @@ import {
 } from "react";
 
 import ReactMarkdown, { type Components } from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 
 import { CopyCodeButton } from "@/components/CopyCodeButton";
 import { useWorkspaceFileLink } from "@/components/WorkspaceFileLinkContext";
 import { highlightFenceToLines, type HighlightToken } from "@/lib/highlight";
+import { COMMON_REHYPE_PLUGINS, COMMON_REMARK_PLUGINS } from "@/lib/markdown";
 import { isWorkspacePathHref, remarkLinkifyPaths } from "@/lib/workspacePaths";
 
 interface MarkdownMessageProps {
@@ -25,7 +24,9 @@ interface MarkdownMessageProps {
 // Hoisted to module scope so the plugin array and component overrides keep a
 // stable identity across renders — combined with the memo() below, an
 // unchanged `text` skips the remark parse entirely during streaming.
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkLinkifyPaths];
+// remarkLinkifyPaths runs after remarkMath so a path-like TeX fragment is
+// already a math node and cannot be turned into a workspace link.
+const REMARK_PLUGINS = [...COMMON_REMARK_PLUGINS, remarkLinkifyPaths];
 
 // react-markdown renders fenced blocks as <pre><code>…</code></pre>; the pre
 // override only receives the rendered tree, so recover the raw code by walking
@@ -176,7 +177,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({
 }: MarkdownMessageProps) {
   return (
     <div className="markdown-message">
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={COMMON_REHYPE_PLUGINS}
+        components={COMPONENTS}
+      >
         {text}
       </ReactMarkdown>
     </div>

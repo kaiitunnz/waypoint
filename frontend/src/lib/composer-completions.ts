@@ -34,19 +34,16 @@ export const SLASH_NEW_FALLBACK: CommandCompletion = {
   metadata: {},
 };
 
-// A `./`-triggered workspace path candidate. Frontend-only: unlike a
-// ``CommandCompletion`` it never dispatches, so it carries no id/kind/dispatch
-// contract — selecting it just edits the draft text.
+// A `./` workspace path candidate; selecting it edits the draft, never dispatches.
 export interface WorkspacePathSuggestion {
   type: "workspace_path";
-  label: string; // e.g. "./src/components/"
-  replacement: string; // identical to label
+  label: string;
+  replacement: string;
   description: "Directory" | "File" | "Symlink";
 }
 
-// The menu renders a mix of backend commands and local path suggestions. A
-// discriminated union keeps a filesystem path from ever masquerading as a
-// ``CommandCompletion`` (which would let it reach command dispatch).
+// A menu row: a backend command or a workspace path. The discriminated union
+// keeps a path from reaching command dispatch.
 export type SuggestionRow =
   | { type: "command"; command: CommandCompletion }
   | WorkspacePathSuggestion;
@@ -73,10 +70,9 @@ export function rowHint(row: SuggestionRow): string | null {
   return row.type === "command" ? row.command.argument_hint ?? null : null;
 }
 
-// Parse a `./`-prefixed caret token into the directory to list and the leaf
-// name being typed. Returns null when the token isn't a `./` path or contains a
-// `.`/`..` traversal segment — `./` is the only supported relative-root marker,
-// so an out-of-scope prefix must never be normalized into a valid query.
+// Split a `./` caret token into the directory to list and the leaf being typed.
+// Null when the token isn't `./`-rooted or a directory segment is `.`/`..`, so
+// an out-of-scope prefix never becomes a valid query.
 export function parseWorkspacePathToken(
   head: string,
 ): { dir: string; leaf: string } | null {
@@ -116,11 +112,9 @@ interface UseCommandCompletionsOptions {
   sessionId: string;
   draft: string;
   setDraft: (next: string) => void;
-  // Gates `/` and `$` command/skill completions (the structured-transport
-  // surface). Path completion has its own gate.
+  // Gates `/` and `$` completions.
   enabled: boolean;
-  // Gates `./` workspace-path completion. Defaults to ``enabled``; chat gates it
-  // on the composer being usable rather than on structured transport.
+  // Gates `./` path completion. Defaults to ``enabled``.
   pathEnabled?: boolean;
   // Override the local fallback list. Chat composer uses ``/new``; the
   // tmux composer passes ``[]`` because its backend doesn't accept it.
@@ -157,8 +151,8 @@ export function useCommandCompletions({
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [backendCompletions, setBackendCompletions] = useState<CommandCompletion[]>([]);
-  // The last workspace directory page, tagged with the directory it lists so a
-  // late response for a different token can be ignored in the memo.
+  // The last workspace directory page, tagged with its directory so a stale
+  // response for another token is ignored.
   const [pathPage, setPathPage] = useState<{
     dir: string;
     entries: WorkspaceTreeEntry[];
@@ -214,8 +208,7 @@ export function useCommandCompletions({
 
   const suggestions = useMemo<ReadonlyArray<SuggestionRow>>(() => {
     if (suggestionsDismissed) return [];
-    // `./` paths and `/`/`$` commands can't share a caret token (different lead
-    // char), so a single branch decides which source, if any, is eligible.
+    // A token can't be both `./` and `/`/`$`, so at most one source is eligible.
     if (isPathHead) {
       if (!pathCompletionEnabled) return [];
       const parsed = parseWorkspacePathToken(completionHead);
@@ -322,9 +315,8 @@ export function useCommandCompletions({
           if (error instanceof DOMException && error.name === "AbortError") {
             return;
           }
-          // Remote session, disabled preview, 404, denied path: stay silent and
-          // preserve the draft. Drop only a stale page for this same directory
-          // so a different open token's candidates are never overwritten.
+          // Remote, disabled, 404, or denied: stay silent. Drop only this
+          // directory's own stale page, never another token's.
           setPathPage((current) => (current?.dir === dir ? null : current));
         });
     }, COMPLETION_FETCH_DEBOUNCE_MS);
@@ -362,8 +354,7 @@ export function useCommandCompletions({
   }, [activeIndex, suggestionsOpen, suggestions.length]);
 
   useEffect(() => {
-    // Re-arm once the caret leaves the completable word, so a fresh
-    // ``/``/``$``/``./`` re-opens the list after a prior Escape.
+    // Re-arm when the caret leaves the token, so a new trigger reopens the list.
     if (!onCompletableToken) {
       setSuggestionsDismissed(false);
     }
@@ -387,9 +378,8 @@ export function useCommandCompletions({
     const [start, end] = wordRangeAt(draft, pos);
     const replacement =
       chosen.type === "command" ? chosen.command.replacement : chosen.replacement;
-    // Command replacements carry a trailing space; drop a redundant one from the
-    // tail so completing inside "see /to|do here" doesn't double the gap. Path
-    // replacements carry no trailing blank, so this never applies to them.
+    // Command replacements carry a trailing space; drop a redundant one so
+    // completing inside "see /to|do here" doesn't double the gap.
     const tail = draft.slice(end);
     const joinedTail =
       chosen.type === "command" &&
@@ -405,10 +395,9 @@ export function useCommandCompletions({
       setSelectedCompletion(chosen.command);
       setSuggestionsDismissed(true);
     } else {
-      // A directory's trailing slash leaves the caret on a fresh `./dir/` token,
-      // so keep the menu armed to offer its children; a file is complete, so
-      // dismiss until the caret leaves the token.
-      setSuggestionsDismissed(chosen.description !== "Directory");
+      // Keep the menu armed after a directory (trailing slash) to offer its
+      // children; dismiss after a file.
+      setSuggestionsDismissed(!replacement.endsWith("/"));
     }
     if (textareaRef) {
       requestAnimationFrame(() => {

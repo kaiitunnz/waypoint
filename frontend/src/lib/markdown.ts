@@ -38,13 +38,10 @@ function rehypePreserveMathFences() {
   };
 }
 
-// throwOnError renders KaTeX's own error in place so malformed streamed TeX
-// can't crash a message; trust and maxExpand bound untrusted input; errorColor
-// is a token so the error resolves per theme.
+// rehype-katex renders KaTeX's own error markup in place of throwing, so
+// malformed streamed TeX can't crash a message. trust and maxExpand bound
+// untrusted input; errorColor is a token so the error resolves per theme.
 export const COMMON_REHYPE_PLUGINS: PluggableList = [
   rehypePreserveMathFences,
-  [
-    rehypeKatex,
-    { throwOnError: false, trust: false, maxExpand: 1000, errorColor: "var(--danger)" },
-  ],
+  [rehypeKatex, { trust: false, maxExpand: 1000, errorColor: "var(--danger)" }],
 ];

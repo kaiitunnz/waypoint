@@ -2615,6 +2615,7 @@ const ReplyComposer = memo(function ReplyComposer({
     draft,
     setDraft,
     enabled: supportsSlash,
+    pathEnabled: !disabled,
     textareaRef,
   });
 

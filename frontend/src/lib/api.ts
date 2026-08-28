@@ -1626,7 +1626,7 @@ export async function fetchWorkspaceTree(
   token: string,
   sessionId: string,
   relPath = "",
-  opts: { offset?: number; limit?: number } = {},
+  opts: { offset?: number; limit?: number; signal?: AbortSignal } = {},
 ): Promise<WorkspaceTreePage> {
   const params = new URLSearchParams();
   if (relPath) params.set("path", relPath);
@@ -1638,6 +1638,7 @@ export async function fetchWorkspaceTree(
     {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
+      signal: opts.signal,
     },
   );
   await ensureOk(response, "failed to fetch workspace tree");

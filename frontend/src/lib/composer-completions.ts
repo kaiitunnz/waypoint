@@ -37,7 +37,6 @@ export const SLASH_NEW_FALLBACK: CommandCompletion = {
 // A `./` workspace path candidate; selecting it edits the draft, never dispatches.
 export interface WorkspacePathSuggestion {
   type: "workspace_path";
-  label: string;
   replacement: string;
   description: "Directory" | "File" | "Symlink";
 }
@@ -57,7 +56,7 @@ export function rowKey(row: SuggestionRow): string {
 }
 
 export function rowLabel(row: SuggestionRow): string {
-  return row.type === "command" ? commandLabel(row.command) : row.label;
+  return row.type === "command" ? commandLabel(row.command) : row.replacement;
 }
 
 export function rowDescription(row: SuggestionRow): string | null {
@@ -93,17 +92,18 @@ function workspacePathRow(
   entry: WorkspaceTreeEntry,
 ): WorkspacePathSuggestion {
   const prefix = dir ? `./${dir}/` : "./";
-  const isDir = entry.kind === "dir";
-  const replacement = isDir
-    ? `${prefix}${entry.name}/`
-    : `${prefix}${entry.name}`;
+  const suffix = entry.kind === "dir" ? "/" : "";
   const description =
     entry.kind === "dir"
       ? "Directory"
       : entry.kind === "symlink"
         ? "Symlink"
         : "File";
-  return { type: "workspace_path", label: replacement, replacement, description };
+  return {
+    type: "workspace_path",
+    replacement: `${prefix}${entry.name}${suffix}`,
+    description,
+  };
 }
 
 interface UseCommandCompletionsOptions {
@@ -205,6 +205,13 @@ export function useCommandCompletions({
       : null;
   const isPathHead = completionHead.startsWith("./");
   const onCompletableToken = completionTrigger !== null || isPathHead;
+  // The directory a `./` token would list, or null when no query should run.
+  // Keyed on the directory (not the whole token) so typing the leaf filters the
+  // loaded page client-side instead of re-fetching the same listing.
+  const pathQueryDir =
+    pathCompletionEnabled && !suggestionsDismissed
+      ? parseWorkspacePathToken(completionHead)?.dir ?? null
+      : null;
 
   const suggestions = useMemo<ReadonlyArray<SuggestionRow>>(() => {
     if (suggestionsDismissed) return [];
@@ -295,12 +302,8 @@ export function useCommandCompletions({
   }, [host, token, sessionId, enabled, completionTrigger, completionHead]);
 
   useEffect(() => {
-    const parsed =
-      pathCompletionEnabled && !suggestionsDismissed
-        ? parseWorkspacePathToken(completionHead)
-        : null;
-    if (!parsed) return;
-    const { dir } = parsed;
+    if (pathQueryDir === null) return;
+    const dir = pathQueryDir;
     const controller = new AbortController();
     const debounceTimer = window.setTimeout(() => {
       fetchWorkspaceTree(host, token, sessionId, dir, {
@@ -324,14 +327,7 @@ export function useCommandCompletions({
       controller.abort();
       window.clearTimeout(debounceTimer);
     };
-  }, [
-    host,
-    token,
-    sessionId,
-    pathCompletionEnabled,
-    suggestionsDismissed,
-    completionHead,
-  ]);
+  }, [host, token, sessionId, pathQueryDir]);
 
   useEffect(() => {
     setSuggestionIndex(0);

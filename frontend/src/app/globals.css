@@ -4423,6 +4423,20 @@ html[data-theme="light"] .tool-call-run-children {
   text-underline-offset: 0.16em;
 }
 
+/* A long display formula scrolls inside its own box instead of widening the
+ * mobile viewport; the .markdown-message grid gap spaces block children, so
+ * KaTeX's own vertical margin is dropped there. */
+.markdown-message .katex-display,
+.tm-nl-prose .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-message .katex-display {
+  margin: 0;
+}
+
 .inline-code {
   padding: 0.1rem 0.32rem;
   border-radius: 6px;

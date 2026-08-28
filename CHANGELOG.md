@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/kaiitunnz/waypoint/compare/v0.16.0...v0.17.0) (2026-08-28)
+
+
+### Features
+
+* add workspace path completion to session composers ([#417](https://github.com/kaiitunnz/waypoint/issues/417)) ([73a7e67](https://github.com/kaiitunnz/waypoint/commit/73a7e67e998fa09e0473529a00b7d76f010c27f9))
+* render LaTeX math in all markdown surfaces ([#416](https://github.com/kaiitunnz/waypoint/issues/416)) ([2430cbb](https://github.com/kaiitunnz/waypoint/commit/2430cbb489d6d2ded6b9e117244ebf48b9990cae))
+* surface Claude Code SendUserFile hand-offs in the session ([#409](https://github.com/kaiitunnz/waypoint/issues/409)) ([b5c97d7](https://github.com/kaiitunnz/waypoint/commit/b5c97d74cce8080e5ba410aa58db121570a16799))
+
+
+### Bug Fixes
+
+* keep markdown tables readable on mobile ([#407](https://github.com/kaiitunnz/waypoint/issues/407)) ([45d4585](https://github.com/kaiitunnz/waypoint/commit/45d45859683b0bdec9d98cd9d240442b108ad01d))
+
 ## [0.16.0](https://github.com/kaiitunnz/waypoint/compare/v0.15.2...v0.16.0) (2026-08-24)
 
 

@@ -3,6 +3,9 @@ import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 
 import { SwitcherProvider } from "@/components/SwitcherProvider";
 import { ThemeProvider } from "@/lib/theme";
+// Bundles KaTeX's stylesheet and fonts locally; precedes globals.css so token
+// rules can refine it.
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const displaySerif = Source_Serif_4({

@@ -3,8 +3,11 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { commandLabel } from "@/components/CommandSuggestions";
-import { fetchSessionCompletionsResponse } from "@/lib/api";
+import {
+  fetchSessionCompletionsResponse,
+  fetchWorkspaceTree,
+  type WorkspaceTreeEntry,
+} from "@/lib/api";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type {
   CommandCompletion,
@@ -13,6 +16,7 @@ import type {
 
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 const COMPLETION_REFRESH_POLL_MS = 750;
+const WORKSPACE_PATH_PAGE_LIMIT = 200;
 
 // `/new` works on every structured backend so we surface it locally
 // while the debounced fetch is in flight or if the request fails. Tmux
@@ -30,13 +34,94 @@ export const SLASH_NEW_FALLBACK: CommandCompletion = {
   metadata: {},
 };
 
+// A `./`-triggered workspace path candidate. Frontend-only: unlike a
+// ``CommandCompletion`` it never dispatches, so it carries no id/kind/dispatch
+// contract — selecting it just edits the draft text.
+export interface WorkspacePathSuggestion {
+  type: "workspace_path";
+  label: string; // e.g. "./src/components/"
+  replacement: string; // identical to label
+  description: "Directory" | "File" | "Symlink";
+}
+
+// The menu renders a mix of backend commands and local path suggestions. A
+// discriminated union keeps a filesystem path from ever masquerading as a
+// ``CommandCompletion`` (which would let it reach command dispatch).
+export type SuggestionRow =
+  | { type: "command"; command: CommandCompletion }
+  | WorkspacePathSuggestion;
+
+export function commandLabel(entry: CommandCompletion): string {
+  return `${entry.trigger}${entry.name}`;
+}
+
+export function rowKey(row: SuggestionRow): string {
+  return row.type === "command" ? row.command.id : row.replacement;
+}
+
+export function rowLabel(row: SuggestionRow): string {
+  return row.type === "command" ? commandLabel(row.command) : row.label;
+}
+
+export function rowDescription(row: SuggestionRow): string | null {
+  return row.type === "command"
+    ? row.command.description ?? null
+    : row.description;
+}
+
+export function rowHint(row: SuggestionRow): string | null {
+  return row.type === "command" ? row.command.argument_hint ?? null : null;
+}
+
+// Parse a `./`-prefixed caret token into the directory to list and the leaf
+// name being typed. Returns null when the token isn't a `./` path or contains a
+// `.`/`..` traversal segment — `./` is the only supported relative-root marker,
+// so an out-of-scope prefix must never be normalized into a valid query.
+export function parseWorkspacePathToken(
+  head: string,
+): { dir: string; leaf: string } | null {
+  if (!head.startsWith("./")) return null;
+  const fragment = head.slice(2);
+  const lastSlash = fragment.lastIndexOf("/");
+  const dir = lastSlash === -1 ? "" : fragment.slice(0, lastSlash);
+  const leaf = lastSlash === -1 ? fragment : fragment.slice(lastSlash + 1);
+  const segments = dir.split("/").filter((segment) => segment.length > 0);
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    return null;
+  }
+  return { dir, leaf };
+}
+
+function workspacePathRow(
+  dir: string,
+  entry: WorkspaceTreeEntry,
+): WorkspacePathSuggestion {
+  const prefix = dir ? `./${dir}/` : "./";
+  const isDir = entry.kind === "dir";
+  const replacement = isDir
+    ? `${prefix}${entry.name}/`
+    : `${prefix}${entry.name}`;
+  const description =
+    entry.kind === "dir"
+      ? "Directory"
+      : entry.kind === "symlink"
+        ? "Symlink"
+        : "File";
+  return { type: "workspace_path", label: replacement, replacement, description };
+}
+
 interface UseCommandCompletionsOptions {
   host: string;
   token: string;
   sessionId: string;
   draft: string;
   setDraft: (next: string) => void;
+  // Gates `/` and `$` command/skill completions (the structured-transport
+  // surface). Path completion has its own gate.
   enabled: boolean;
+  // Gates `./` workspace-path completion. Defaults to ``enabled``; chat gates it
+  // on the composer being usable rather than on structured transport.
+  pathEnabled?: boolean;
   // Override the local fallback list. Chat composer uses ``/new``; the
   // tmux composer passes ``[]`` because its backend doesn't accept it.
   localFallback?: ReadonlyArray<CommandCompletion>;
@@ -44,7 +129,7 @@ interface UseCommandCompletionsOptions {
 }
 
 export interface CommandCompletionsState {
-  suggestions: ReadonlyArray<CommandCompletion>;
+  suggestions: ReadonlyArray<SuggestionRow>;
   suggestionsOpen: boolean;
   activeIndex: number;
   setActiveIndex: (index: number) => void;
@@ -64,12 +149,20 @@ export function useCommandCompletions({
   draft,
   setDraft,
   enabled,
+  pathEnabled,
   localFallback = [SLASH_NEW_FALLBACK],
   textareaRef,
 }: UseCommandCompletionsOptions): CommandCompletionsState {
+  const pathCompletionEnabled = pathEnabled ?? enabled;
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [backendCompletions, setBackendCompletions] = useState<CommandCompletion[]>([]);
+  // The last workspace directory page, tagged with the directory it lists so a
+  // late response for a different token can be ignored in the memo.
+  const [pathPage, setPathPage] = useState<{
+    dir: string;
+    entries: WorkspaceTreeEntry[];
+  } | null>(null);
   const [selectedCompletion, setSelectedCompletion] =
     useState<CommandCompletion | null>(null);
 
@@ -116,27 +209,44 @@ export function useCommandCompletions({
     : completionHead.startsWith("$")
       ? "$"
       : null;
+  const isPathHead = completionHead.startsWith("./");
+  const onCompletableToken = completionTrigger !== null || isPathHead;
 
-  const suggestions = useMemo<ReadonlyArray<CommandCompletion>>(() => {
-    if (!enabled || suggestionsDismissed || completionTrigger === null) {
-      return [];
+  const suggestions = useMemo<ReadonlyArray<SuggestionRow>>(() => {
+    if (suggestionsDismissed) return [];
+    // `./` paths and `/`/`$` commands can't share a caret token (different lead
+    // char), so a single branch decides which source, if any, is eligible.
+    if (isPathHead) {
+      if (!pathCompletionEnabled) return [];
+      const parsed = parseWorkspacePathToken(completionHead);
+      if (!parsed || !pathPage || pathPage.dir !== parsed.dir) return [];
+      const leaf = parsed.leaf.toLowerCase();
+      return pathPage.entries
+        .filter((entry) => entry.name.toLowerCase().startsWith(leaf))
+        .map((entry) => workspacePathRow(parsed.dir, entry));
     }
+    if (!enabled || completionTrigger === null) return [];
     const pool =
       completionTrigger === "/"
         ? mergeLocalFallback(backendCompletions, localFallback)
         : backendCompletions;
-    return pool.filter((entry) => commandLabel(entry).startsWith(completionHead));
+    return pool
+      .filter((entry) => commandLabel(entry).startsWith(completionHead))
+      .map((command) => ({ type: "command", command }) as const);
   }, [
     backendCompletions,
     completionHead,
     completionTrigger,
     enabled,
+    isPathHead,
     localFallback,
+    pathCompletionEnabled,
+    pathPage,
     suggestionsDismissed,
   ]);
 
-  // ``suggestions`` is already empty unless the caret sits on a ``/``/``$``
-  // word, so its presence is the open condition — no whole-draft test that
+  // ``suggestions`` is already empty unless the caret sits on a completable
+  // token, so its presence is the open condition — no whole-draft test that
   // would suppress mid-prompt triggers.
   const suggestionsOpen = suggestions.length > 0;
   const activeIndex = Math.min(
@@ -192,6 +302,46 @@ export function useCommandCompletions({
   }, [host, token, sessionId, enabled, completionTrigger, completionHead]);
 
   useEffect(() => {
+    const parsed =
+      pathCompletionEnabled && !suggestionsDismissed
+        ? parseWorkspacePathToken(completionHead)
+        : null;
+    if (!parsed) return;
+    const { dir } = parsed;
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(() => {
+      fetchWorkspaceTree(host, token, sessionId, dir, {
+        limit: WORKSPACE_PATH_PAGE_LIMIT,
+        signal: controller.signal,
+      })
+        .then((page) => {
+          if (controller.signal.aborted) return;
+          setPathPage({ dir, entries: page.entries });
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          // Remote session, disabled preview, 404, denied path: stay silent and
+          // preserve the draft. Drop only a stale page for this same directory
+          // so a different open token's candidates are never overwritten.
+          setPathPage((current) => (current?.dir === dir ? null : current));
+        });
+    }, COMPLETION_FETCH_DEBOUNCE_MS);
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounceTimer);
+    };
+  }, [
+    host,
+    token,
+    sessionId,
+    pathCompletionEnabled,
+    suggestionsDismissed,
+    completionHead,
+  ]);
+
+  useEffect(() => {
     setSuggestionIndex(0);
   }, [completionHead]);
 
@@ -212,12 +362,12 @@ export function useCommandCompletions({
   }, [activeIndex, suggestionsOpen, suggestions.length]);
 
   useEffect(() => {
-    // Re-arm once the caret leaves the trigger word, so a fresh ``/``/``$``
-    // re-opens the list after a prior Escape.
-    if (completionTrigger === null) {
+    // Re-arm once the caret leaves the completable word, so a fresh
+    // ``/``/``$``/``./`` re-opens the list after a prior Escape.
+    if (!onCompletableToken) {
       setSuggestionsDismissed(false);
     }
-  }, [completionTrigger]);
+  }, [onCompletableToken]);
 
   useEffect(() => {
     if (
@@ -234,18 +384,32 @@ export function useCommandCompletions({
     // Replace the whole word the caret is in (its run on both sides), not the
     // entire draft, so mid-prompt completions leave surrounding text intact.
     const pos = textareaRef ? Math.min(caret, draft.length) : draft.length;
-    const [wordStart, wordEnd] = wordRangeAt(draft, pos);
-    // Replacements carry a trailing space; drop a redundant one from the tail
-    // so completing inside "see /to|do here" doesn't double the gap.
-    const tail = draft.slice(wordEnd);
+    const [start, end] = wordRangeAt(draft, pos);
+    const replacement =
+      chosen.type === "command" ? chosen.command.replacement : chosen.replacement;
+    // Command replacements carry a trailing space; drop a redundant one from the
+    // tail so completing inside "see /to|do here" doesn't double the gap. Path
+    // replacements carry no trailing blank, so this never applies to them.
+    const tail = draft.slice(end);
     const joinedTail =
-      chosen.replacement.endsWith(" ") && tail.startsWith(" ") ? tail.slice(1) : tail;
-    const next = draft.slice(0, wordStart) + chosen.replacement + joinedTail;
-    const nextCaret = wordStart + chosen.replacement.length;
+      chosen.type === "command" &&
+      replacement.endsWith(" ") &&
+      tail.startsWith(" ")
+        ? tail.slice(1)
+        : tail;
+    const next = draft.slice(0, start) + replacement + joinedTail;
+    const nextCaret = start + replacement.length;
     setDraft(next);
     setCaret(nextCaret);
-    setSelectedCompletion(chosen);
-    setSuggestionsDismissed(true);
+    if (chosen.type === "command") {
+      setSelectedCompletion(chosen.command);
+      setSuggestionsDismissed(true);
+    } else {
+      // A directory's trailing slash leaves the caret on a fresh `./dir/` token,
+      // so keep the menu armed to offer its children; a file is complete, so
+      // dismiss until the caret leaves the token.
+      setSuggestionsDismissed(chosen.description !== "Directory");
+    }
     if (textareaRef) {
       requestAnimationFrame(() => {
         const el = textareaRef.current;

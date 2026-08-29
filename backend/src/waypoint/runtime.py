@@ -3292,6 +3292,11 @@ class SessionRuntime:
             and request.account_profile_id != session.account_profile_id
             and request.account_profile_id is not None
         )
+        clearing_profile = (
+            "account_profile_id" in fields
+            and request.account_profile_id is None
+            and session.account_profile_id is not None
+        )
         if profile_changing and not gate_caps.supports_account_profile_with_restart:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -3375,6 +3380,11 @@ class SessionRuntime:
             session.backend, new_env, selected_profile_id, launch_target
         )
         new_profile_label = resolved_label if selected_profile_id is not None else None
+        # ``_apply_account_profile_env`` leaves the config-dir key untouched for
+        # no profile, so a cleared profile's key would otherwise persist and
+        # keep resolving to that account. Drop it to fall back to the default.
+        if clearing_profile and caps.config_dir_env_var is not None:
+            new_env.pop(caps.config_dir_env_var, None)
         # Reject before the destructive terminate/restore if the target profile's
         # config dir would strand this session on an interactive first-run prompt
         # (``caps`` is the session's composed transport capability).
@@ -3538,16 +3548,10 @@ class SessionRuntime:
                             )
                         fresh_thread_restarter = plugin
 
-        # Clearing the profile (set -> None) is not ``profile_changing``, but a
-        # de-profiled session must not keep stale provenance, so null the
-        # triple explicitly here; ``profile_changing`` already set the triple
-        # above from the probe just run, and any other update (model/args-only)
-        # leaves it empty so the persisted values are untouched.
-        if not profile_changing and (
-            "account_profile_id" in fields
-            and request.account_profile_id is None
-            and session.account_profile_id is not None
-        ):
+        # A cleared profile must not keep stale provenance; null the triple
+        # here. A profile change stamps it from the probe above; other edits
+        # leave it empty, so persisted values stay untouched.
+        if clearing_profile:
             verified_account_fields = {
                 "verified_account_key": None,
                 "verified_account_label": None,

@@ -521,8 +521,7 @@ export function useSessionSettings(
   );
   const profileChanged = Boolean(
     session &&
-      (accountProfileId ?? null) !== (session.account_profile_id ?? null) &&
-      accountProfileId !== null,
+      (accountProfileId ?? null) !== (session.account_profile_id ?? null),
   );
   const argsChanged = Boolean(
     launchSettings && !sameStringList(stagedArgs, launchSettings.args),

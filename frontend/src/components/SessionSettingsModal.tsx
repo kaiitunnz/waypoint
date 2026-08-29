@@ -522,15 +522,11 @@ export function SessionSettingsModal({
                       }
                       disabled={busy || assistantReplacementStaged}
                     >
-                      {/* A session may currently run under no profile; show a
-                          disabled placeholder so the value isn't orphaned.
-                          Clearing a profile to none is out of scope, so it
-                          can't be re-selected once a real profile is chosen. */}
-                      {accountProfileId === null ? (
-                        <option value="" disabled>
-                          No profile
-                        </option>
-                      ) : null}
+                      {/* The default no-profile option (the agent's own
+                          config/account). Always selectable so a session
+                          running under a real profile can be switched back to
+                          no profile. */}
+                      <option value="">No profile</option>
                       {accountProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>
                           {profile.label}

@@ -522,10 +522,6 @@ export function SessionSettingsModal({
                       }
                       disabled={busy || assistantReplacementStaged}
                     >
-                      {/* The default no-profile option (the agent's own
-                          config/account). Always selectable so a session
-                          running under a real profile can be switched back to
-                          no profile. */}
                       <option value="">No profile</option>
                       {accountProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>

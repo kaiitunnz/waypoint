@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/kaiitunnz/waypoint/compare/v0.17.0...v0.17.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* allow switching a session back to no profile in settings ([#418](https://github.com/kaiitunnz/waypoint/issues/418)) ([62b4f25](https://github.com/kaiitunnz/waypoint/commit/62b4f2512f26eb813904ba3196efa573929261e7))
+
 ## [0.17.0](https://github.com/kaiitunnz/waypoint/compare/v0.16.0...v0.17.0) (2026-08-28)
 
 

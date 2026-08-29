@@ -258,6 +258,42 @@ async def test_switch_clearing_profile_nulls_verified_fields(
     assert refreshed.verified_account_probed_at is None
 
 
+async def test_switch_clearing_profile_strips_config_dir_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Clearing a profile must revert the session to the agent's default config
+    # dir: the profile-owned config-dir key is dropped from launch_env so the
+    # restored session no longer resolves to the (now unselected) profile.
+    runtime = _runtime(tmp_path, codex=_codex_profiles())
+    _session(
+        runtime,
+        account_profile_id="work",
+        account_profile_label="Work",
+        launch_env={
+            "CODEX_HOME": "/home/u/.codex-work",
+            "WAYPOINT_SESSION_ID": "s1",
+        },
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_restore(_rt: Any, session: SessionRecord) -> None:
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+
+    refreshed = await runtime.update_launch_settings(
+        "s1",
+        LaunchSettingsUpdateRequest(account_profile_id=None, restart=True),
+    )
+    assert refreshed.account_profile_id is None
+    assert "CODEX_HOME" not in refreshed.launch_env
+    assert refreshed.launch_env.get("WAYPOINT_SESSION_ID") == "s1"
+
+
 async def test_switch_model_only_edit_leaves_verified_fields_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

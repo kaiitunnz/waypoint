@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/kaiitunnz/waypoint/compare/v0.17.0...v0.18.0) (2026-09-12)
+
+
+### Features
+
+* add Fable 5.1 to the Claude Code model catalogue ([#436](https://github.com/kaiitunnz/waypoint/issues/436)) ([9589008](https://github.com/kaiitunnz/waypoint/commit/9589008bced0d1530a9ff10b8622c69b191baef8))
+
+
+### Bug Fixes
+
+* allow switching a session back to no profile in settings ([#418](https://github.com/kaiitunnz/waypoint/issues/418)) ([62b4f25](https://github.com/kaiitunnz/waypoint/commit/62b4f2512f26eb813904ba3196efa573929261e7))
+* warn before a model change restarts a claude_tty session ([#438](https://github.com/kaiitunnz/waypoint/issues/438)) ([37b2921](https://github.com/kaiitunnz/waypoint/commit/37b2921283120112249f96039b2dad286403782b))
+
 ## [0.17.0](https://github.com/kaiitunnz/waypoint/compare/v0.16.0...v0.17.0) (2026-08-28)
 
 

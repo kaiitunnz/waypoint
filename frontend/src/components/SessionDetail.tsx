@@ -2339,6 +2339,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
+          modelRequiresConfirm={
+            // Whether a model swap restarts is transport-specific — claude_tty
+            // respawns the pane, the structured adapter changes it inline — so
+            // resolve the capability against the session's actual (agent,
+            // transport) pair, not the agent descriptor's default transport
+            // (unlike effort, which restarts on every Claude transport). Falls
+            // back to false until the catalog hydrates so a fresh load doesn't
+            // gate the picker.
+            Boolean(
+              session?.transport &&
+                catalog.capsFor(session.backend, session.transport)
+                  ?.supports_set_model_with_restart,
+            )
+          }
           effortRequiresConfirm={
             // The plugin advertises "effort swap requires a restart"
             // (Claude does, Codex doesn't) and we surface the confirm
@@ -2446,6 +2460,11 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
+  // True when the backend's model swap requires a session restart
+  // (claude_tty respawns the pane). Drives the same "confirm before
+  // applying" UX as effort so the user knows the session will restart,
+  // vs. the structured adapter which changes the model inline.
+  modelRequiresConfirm: boolean;
   // True when the backend's effort swap requires a session restart
   // (Claude respawns the CLI). Drives the "confirm before applying"
   // UX so the user knows the session will restart, vs. Codex which
@@ -2506,6 +2525,7 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   catalog,
+  modelRequiresConfirm,
   effortRequiresConfirm,
   hasToolRuns,
   toolRunsExpanded,
@@ -2562,6 +2582,10 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
+  // Pending model for backends that need a session restart to apply
+  // (claude_tty) — staged here until the user confirms via the Apply button.
+  // `null` means no pending change.
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -2828,6 +2852,36 @@ const ReplyComposer = memo(function ReplyComposer({
         ),
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
+  const modelDisplayValue = pendingModel ?? (currentModel ?? "");
+  const modelPendingDiffers =
+    modelRequiresConfirm &&
+    pendingModel !== null &&
+    pendingModel !== (currentModel ?? "");
+  const pendingModelLabel =
+    pendingModel === ""
+      ? defaultModelLabel
+        ? `Default (${defaultModelLabel})`
+        : "Default"
+      : (modelEntries.find((option) => option.id === pendingModel)?.label ??
+        pendingModel);
+  const handleModelSelect = (next: string) => {
+    if (modelRequiresConfirm) {
+      // Stage the pick locally; the parent's onModelChange only fires after
+      // explicit confirm so the user knows the session will restart.
+      setPendingModel(next === (currentModel ?? "") ? null : next);
+      return;
+    }
+    void onModelChange(next);
+  };
+
+  const applyPendingModel = async () => {
+    if (pendingModel === null) return;
+    const value = pendingModel;
+    setPendingModel(null);
+    setTuneOpen(false);
+    await onModelChange(value);
+  };
+
   const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
@@ -3007,7 +3061,7 @@ const ReplyComposer = memo(function ReplyComposer({
                 {"⚙︎"}
               </span>
               <span className="composer-tune-summary">{tuneSummary}</span>
-              {effortPendingDiffers ? (
+              {modelPendingDiffers || effortPendingDiffers ? (
                 <span
                   className="composer-tune-pending"
                   aria-label="Pending change"
@@ -3168,8 +3222,8 @@ const ReplyComposer = memo(function ReplyComposer({
                   <label className="composer-tune-field">
                     <span>Model</span>
                     <select
-                      value={currentModel ?? ""}
-                      onChange={(event) => void onModelChange(event.target.value)}
+                      value={modelDisplayValue}
+                      onChange={(event) => handleModelSelect(event.target.value)}
                       disabled={modelBusy || disabled}
                     >
                        <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
@@ -3180,6 +3234,23 @@ const ReplyComposer = memo(function ReplyComposer({
                       ))}
                     </select>
                   </label>
+                ) : null}
+                {modelPendingDiffers && pendingModel !== null ? (
+                  <div className="composer-tune-restart">
+                    <p>
+                      Restart Claude with <strong>{pendingModelLabel}</strong>?
+                      The current turn is interrupted and the session resumes on
+                      the new model.
+                    </p>
+                    <button
+                      type="button"
+                      className="composer-tune-restart-apply"
+                      onClick={() => void applyPendingModel()}
+                      disabled={modelBusy}
+                    >
+                      {modelBusy ? "Restarting…" : "Apply restart"}
+                    </button>
+                  </div>
                 ) : null}
                 {hasEffortPicker ? (
                   <label className="composer-tune-field">

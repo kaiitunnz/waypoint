@@ -82,15 +82,12 @@ function selectedOf(
 }
 
 // A spec snapshot of the current launch form — the payload a save/update
-// captures. Excludes cwd and title: those are per-launch, not preset defaults.
-function formSpec(
-  form: LaunchForm,
-  launchTargetId: string | null,
-): SessionPresetSpec {
+// captures. Excludes cwd, title, and launch target: those are per-launch, not
+// preset defaults.
+function formSpec(form: LaunchForm): SessionPresetSpec {
   const { args, configOverrides, launchEnv } = form.collectArgs();
   return {
     backend: form.backend,
-    launch_target_id: launchTargetId,
     transport: form.transport || null,
     model: form.model.trim() || null,
     effort: form.effortSupported ? form.effort.trim() || null : null,
@@ -201,7 +198,6 @@ interface PresetSaveActionsProps {
   form: LaunchForm;
   presets: SessionPresetSummary[];
   selectedPresetId: string | null;
-  launchTargetId: string | null;
   savePreset: (
     payload: SessionPresetWriteRequest,
     presetId: string | null,
@@ -218,7 +214,6 @@ export function PresetSaveActions({
   form,
   presets,
   selectedPresetId,
-  launchTargetId,
   savePreset,
   setDefaultPreset,
   onSelectPreset,
@@ -244,7 +239,7 @@ export function PresetSaveActions({
     setBusy(true);
     try {
       // PATCH the spec only; name/description (and tags) are preserved server-side.
-      await savePreset({ spec: formSpec(form, launchTargetId) }, selected.id);
+      await savePreset({ spec: formSpec(form) }, selected.id);
       setFlashed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to update preset");
@@ -328,7 +323,7 @@ export function PresetSaveActions({
       {saveOpen ? (
         <PresetSaveModal
           seedDefault={seedDefault}
-          spec={formSpec(form, launchTargetId)}
+          spec={formSpec(form)}
           profiles={form.accountProfiles}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload) => {

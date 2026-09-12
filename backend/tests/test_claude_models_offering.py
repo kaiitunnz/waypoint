@@ -13,7 +13,7 @@ import pytest
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
-    OPUS5_MIN_CLI_VERSION,
+    FABLE51_MIN_CLI_VERSION,
     SONNET5_MIN_CLI_VERSION,
     claude_models_for_version,
     merge_model_catalogue,
@@ -30,7 +30,7 @@ def _by_id(models: tuple, model_id: str):
     return next(opt for opt in models if opt.id == model_id)
 
 
-@pytest.mark.parametrize("version", [None, OPUS5_MIN_CLI_VERSION, (2, 2, 0)])
+@pytest.mark.parametrize("version", [None, FABLE51_MIN_CLI_VERSION, (2, 2, 0)])
 def test_current_offering_for_none_or_recent_version(version) -> None:
     models = claude_models_for_version(version)
     assert models == DEFAULT_CLAUDE_MODELS
@@ -42,6 +42,11 @@ def test_current_offering_for_none_or_recent_version(version) -> None:
     assert opus.label == "Opus 5"
     assert "xhigh" in opus.supported_efforts and "max" in opus.supported_efforts
     assert _by_id(models, "opus[1m]").label == "Opus 5 (1M context)"
+
+    fable = _by_id(models, "fable")
+    assert fable.label == "Fable 5.1"
+    assert "xhigh" in fable.supported_efforts and "max" in fable.supported_efforts
+    assert _by_id(models, "fable[1m]").label == "Fable 5.1 (1M context)"
 
 
 def test_legacy_offering_below_opus5_min_version() -> None:
@@ -62,6 +67,28 @@ def test_legacy_offering_below_opus5_min_version() -> None:
     assert "xhigh" in sonnet.supported_efforts
 
 
+def test_legacy_offering_below_fable51_min_version() -> None:
+    models = claude_models_for_version((2, 1, 256))
+
+    # Only the fable labels roll back across the 2.1.257 boundary.
+    fable = _by_id(models, "fable")
+    assert fable.label == "Fable 5"
+    assert fable.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+
+    fable_1m = _by_id(models, "fable[1m]")
+    assert fable_1m.label == "Fable 5 (1M context)"
+    assert fable_1m.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+
+    # The pin the rolled-back alias now duplicates is dropped.
+    ids = {opt.id for opt in models}
+    assert "claude-fable-5" not in ids
+    assert "claude-fable-5[1m]" not in ids
+
+    # Opus 5 and Sonnet 5 already shipped by 2.1.256.
+    assert _by_id(models, "opus").label == "Opus 5"
+    assert _by_id(models, "sonnet").label == "Sonnet 5"
+
+
 def test_legacy_offering_below_sonnet5_min_version() -> None:
     models = claude_models_for_version((2, 1, 190))
 
@@ -79,7 +106,9 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
     assert opus.label == "Opus 4.8"
     assert "xhigh" in opus.supported_efforts and "max" in opus.supported_efforts
 
+    # This build also predates Fable 5.1, so `fable` rolls back to Fable 5.
     fable = _by_id(models, "fable")
+    assert fable.label == "Fable 5"
     assert "xhigh" in fable.supported_efforts and "max" in fable.supported_efforts
 
     haiku = _by_id(models, "haiku")
@@ -110,7 +139,9 @@ def test_rollbacks_apply_cumulatively_at_each_boundary(
     assert _by_id(models, "sonnet").label == sonnet_label
 
 
-@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220)])
+@pytest.mark.parametrize(
+    "version", [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260)]
+)
 def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
     # A rollback may drop a redundant pin, so an older offering is a subset -- never a
     # superset, never reordered, always exactly one default.
@@ -123,7 +154,9 @@ def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
     assert sum(opt.is_default for opt in offering) == 1
 
 
-@pytest.mark.parametrize("version", [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220)])
+@pytest.mark.parametrize(
+    "version", [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260)]
+)
 def test_no_offering_lists_a_label_twice(version) -> None:
     # Below 2.1.219 the `opus` alias is itself labelled "Opus 4.8"; likewise `sonnet`
     # below 2.1.197.
@@ -146,6 +179,12 @@ def test_rollbacks_drop_the_pin_the_alias_makes_redundant() -> None:
     assert "claude-sonnet-4-6[1m]" not in below_sonnet5
     assert "claude-sonnet-4-5" in below_sonnet5
 
+    below_fable51 = {opt.id for opt in claude_models_for_version((2, 1, 256))}
+    assert "claude-fable-5" not in below_fable51
+    assert "claude-fable-5[1m]" not in below_fable51
+    # At the current epoch the Fable 5 pin is a distinct model from the alias.
+    assert "claude-fable-5" in {opt.id for opt in DEFAULT_CLAUDE_MODELS}
+
 
 # --- pinned legacy models -------------------------------------------------
 
@@ -157,6 +196,7 @@ _LEGACY_IDS = (
     "claude-opus-4-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
+    "claude-fable-5",
 )
 
 
@@ -190,6 +230,7 @@ def test_legacy_models_forward_effort_unvalidated(model_id: str) -> None:
         "claude-opus-4-6",
         "claude-sonnet-4-6",
         "claude-sonnet-4-5",
+        "claude-fable-5",
     ],
 )
 def test_legacy_models_with_a_1m_variant_are_paired(model_id: str) -> None:

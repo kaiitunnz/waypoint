@@ -159,6 +159,106 @@ def test_storage_defaults_tags_for_legacy_rows(tmp_path) -> None:
     assert loaded.tags == {}
 
 
+def _insert_raw_preset(
+    db,
+    preset_id: str,
+    spec_json: str,
+    *,
+    created: str = "2020-01-01T00:00:00+00:00",
+    updated: str = "2020-01-02T00:00:00+00:00",
+) -> None:
+    import sqlite3
+
+    raw = sqlite3.connect(db)
+    raw.execute(
+        "INSERT INTO session_presets "
+        "(id, name, description, spec, is_default, created_at, updated_at) "
+        "VALUES (?, ?, NULL, ?, 0, ?, ?)",
+        (preset_id, preset_id, spec_json, created, updated),
+    )
+    raw.commit()
+    raw.close()
+
+
+def _raw_preset_row(db, preset_id: str):
+    import sqlite3
+
+    raw = sqlite3.connect(db)
+    row = raw.execute(
+        "SELECT spec, created_at, updated_at FROM session_presets WHERE id = ?",
+        (preset_id,),
+    ).fetchone()
+    raw.close()
+    return row
+
+
+def test_preset_migration_strips_launch_target_id(tmp_path) -> None:
+    """A legacy preset carrying launch_target_id has the key scrubbed on startup,
+    keeping every other field and both timestamps untouched (ticket 1613)."""
+    import json
+
+    db = tmp_path / "waypoint.db"
+    Storage(db).close()  # create the schema
+    _insert_raw_preset(
+        db,
+        "legacy",
+        json.dumps({"backend": "codex", "launch_target_id": "ssh-s0", "model": "m"}),
+    )
+    Storage(db).close()  # migration runs on open
+    spec, created, updated = _raw_preset_row(db, "legacy")
+    parsed = json.loads(spec)
+    assert "launch_target_id" not in parsed
+    assert parsed == {"backend": "codex", "model": "m"}
+    assert (created, updated) == (
+        "2020-01-01T00:00:00+00:00",
+        "2020-01-02T00:00:00+00:00",
+    )
+
+
+def test_preset_migration_noop_without_key(tmp_path) -> None:
+    import json
+
+    db = tmp_path / "waypoint.db"
+    Storage(db).close()
+    _insert_raw_preset(db, "clean", json.dumps({"backend": "codex"}))
+    Storage(db).close()
+    spec, created, updated = _raw_preset_row(db, "clean")
+    assert json.loads(spec) == {"backend": "codex"}
+    assert (created, updated) == (
+        "2020-01-01T00:00:00+00:00",
+        "2020-01-02T00:00:00+00:00",
+    )
+
+
+def test_preset_migration_tolerates_malformed_and_non_object_json(tmp_path) -> None:
+    """Malformed or non-object spec JSON is left as-is and never blocks startup."""
+    db = tmp_path / "waypoint.db"
+    Storage(db).close()
+    _insert_raw_preset(db, "broken", "not json{")
+    _insert_raw_preset(db, "array", "[1, 2, 3]")
+    Storage(db).close()  # must not raise
+    assert _raw_preset_row(db, "broken")[0] == "not json{"
+    assert _raw_preset_row(db, "array")[0] == "[1, 2, 3]"
+
+
+def test_preset_migration_is_idempotent(tmp_path) -> None:
+    import json
+
+    db = tmp_path / "waypoint.db"
+    Storage(db).close()
+    _insert_raw_preset(
+        db, "legacy", json.dumps({"backend": "codex", "launch_target_id": "ssh-s0"})
+    )
+    Storage(db).close()  # first open strips
+    Storage(db).close()  # second open finds no key, writes nothing
+    spec, created, updated = _raw_preset_row(db, "legacy")
+    assert json.loads(spec) == {"backend": "codex"}
+    assert (created, updated) == (
+        "2020-01-01T00:00:00+00:00",
+        "2020-01-02T00:00:00+00:00",
+    )
+
+
 def test_storage_round_trips_pinned_at(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)

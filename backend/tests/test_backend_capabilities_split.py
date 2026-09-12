@@ -59,6 +59,25 @@ def test_live_terminal_flag_is_tmux_only() -> None:
         assert plugin.capabilities.transport_capabilities().live_terminal is expected
 
 
+def test_model_swap_restart_is_claude_tty_only() -> None:
+    """Only claude_tty changes the model by restarting the pane; every other
+    transport that can set a model does so inline. The two flags are mutually
+    exclusive per backend, and the frontend reads ``with_restart`` to confirm
+    before the restart (mirrors the effort-restart contract)."""
+    registry = build_default_registry()
+    for plugin in registry.all():
+        caps = plugin.capabilities
+        with_restart = plugin.id == "claude_tty"
+        assert caps.supports_set_model_with_restart is with_restart
+        # claude_tty's swap is restart-only, so it must not also claim inline;
+        # tmux supports neither. No backend claims both.
+        assert not (
+            caps.supports_set_model_inline and caps.supports_set_model_with_restart
+        )
+        if with_restart:
+            assert caps.supports_set_model_inline is False
+
+
 def test_terminal_pane_caps() -> None:
     """has_terminal_pane is set for tmux (interactive+resizable) and claude_tty
     (read-only, fixed-size); all other plugins leave all three False."""

@@ -314,6 +314,7 @@ export interface TransportCapabilities {
   supports_reattach_after_exit: boolean;
   supports_terminate: boolean;
   supports_set_model_inline: boolean;
+  supports_set_model_with_restart: boolean;
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
@@ -353,6 +354,7 @@ export interface BackendCapabilities {
   supports_resume: boolean;
   supports_terminate: boolean;
   supports_set_model_inline: boolean;
+  supports_set_model_with_restart: boolean;
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;

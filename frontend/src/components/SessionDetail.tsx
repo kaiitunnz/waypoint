@@ -2339,6 +2339,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
+          modelRequiresConfirm={
+            // A model swap restarts on some transports (claude_tty) and is
+            // inline on others, so resolve against the (agent, transport) pair.
+            Boolean(
+              session?.transport &&
+                catalog.capsFor(session.backend, session.transport)
+                  ?.supports_set_model_with_restart,
+            )
+          }
           effortRequiresConfirm={
             // The plugin advertises "effort swap requires a restart"
             // (Claude does, Codex doesn't) and we surface the confirm
@@ -2446,6 +2455,9 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
+  // The model swap restarts the session (claude_tty), so it stages behind the
+  // restart pill like effort rather than applying inline.
+  modelRequiresConfirm: boolean;
   // True when the backend's effort swap requires a session restart
   // (Claude respawns the CLI). Drives the "confirm before applying"
   // UX so the user knows the session will restart, vs. Codex which
@@ -2506,6 +2518,7 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   catalog,
+  modelRequiresConfirm,
   effortRequiresConfirm,
   hasToolRuns,
   toolRunsExpanded,
@@ -2562,9 +2575,9 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // Pending effort for backends that need a session restart to apply (Claude)
-  // — staged here until the user confirms via the Apply button. `null` means
-  // no pending change.
+  // Staged model/effort picks awaiting the restart-confirm Apply; `null` is no
+  // pending change. Only used by transports that restart to apply them.
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
   // CSS (:focus-within) so focusing the field never triggers a React re-render
@@ -2828,27 +2841,57 @@ const ReplyComposer = memo(function ReplyComposer({
         ),
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
+  const modelDisplayValue = pendingModel ?? (currentModel ?? "");
+  const modelPendingDiffers =
+    modelRequiresConfirm &&
+    pendingModel !== null &&
+    pendingModel !== (currentModel ?? "");
   const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
+  // Model and effort both relaunch the pane (claude_tty), so a pick is staged
+  // and applied only on explicit confirm via the shared restart pill below.
+  const handleModelSelect = (next: string) => {
+    if (modelRequiresConfirm) {
+      setPendingModel(next === (currentModel ?? "") ? null : next);
+      return;
+    }
+    void onModelChange(next);
+  };
   const handleEffortSelect = (next: string) => {
     if (effortRequiresConfirm) {
-      // Stage the pick locally; the parent's onEffortChange only fires after
-      // explicit confirm so the user knows the session will restart.
       setPendingEffort(next === (currentEffort ?? "") ? null : next);
       return;
     }
     void onEffortChange(next);
   };
-
-  const applyPendingEffort = async () => {
-    if (pendingEffort === null) return;
-    const value = pendingEffort;
+  // Which staged changes the restart pill names — model, effort, or both.
+  const pendingRestartLabel = [
+    modelPendingDiffers
+      ? pendingModel
+        ? (modelEntries.find((option) => option.id === pendingModel)?.label ??
+          pendingModel)
+        : "the default model"
+      : null,
+    effortPendingDiffers
+      ? pendingEffort
+        ? `${effortLabel(pendingEffort)} effort`
+        : "the default effort"
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const applyPendingRestart = async () => {
+    const model = pendingModel;
+    const effort = pendingEffort;
+    setPendingModel(null);
     setPendingEffort(null);
     setTuneOpen(false);
-    await onEffortChange(value);
+    // Model before effort so effort's relaunch resumes on the new model.
+    if (model !== null) await onModelChange(model);
+    if (effort !== null) await onEffortChange(effort);
   };
 
   const assistantOps = assistant ? assistantControls : null;
@@ -3007,7 +3050,7 @@ const ReplyComposer = memo(function ReplyComposer({
                 {"⚙︎"}
               </span>
               <span className="composer-tune-summary">{tuneSummary}</span>
-              {effortPendingDiffers ? (
+              {modelPendingDiffers || effortPendingDiffers ? (
                 <span
                   className="composer-tune-pending"
                   aria-label="Pending change"
@@ -3168,8 +3211,8 @@ const ReplyComposer = memo(function ReplyComposer({
                   <label className="composer-tune-field">
                     <span>Model</span>
                     <select
-                      value={currentModel ?? ""}
-                      onChange={(event) => void onModelChange(event.target.value)}
+                      value={modelDisplayValue}
+                      onChange={(event) => handleModelSelect(event.target.value)}
                       disabled={modelBusy || disabled}
                     >
                        <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
@@ -3203,21 +3246,20 @@ const ReplyComposer = memo(function ReplyComposer({
                     </select>
                   </label>
                 ) : null}
-                {effortPendingDiffers && pendingEffort ? (
+                {modelPendingDiffers || effortPendingDiffers ? (
                   <div className="composer-tune-restart">
                     <p>
-                      Restart Claude with{" "}
-                      <strong>{effortLabel(pendingEffort)}</strong> effort?
-                      The current turn is interrupted and the session resumes at the new
-                      level.
+                      Restart Claude with <strong>{pendingRestartLabel}</strong>?
+                      The current turn is interrupted and the session resumes with
+                      the new settings.
                     </p>
                     <button
                       type="button"
                       className="composer-tune-restart-apply"
-                      onClick={() => void applyPendingEffort()}
-                      disabled={effortBusy}
+                      onClick={() => void applyPendingRestart()}
+                      disabled={modelBusy || effortBusy}
                     >
-                      {effortBusy ? "Restarting…" : "Apply restart"}
+                      {modelBusy || effortBusy ? "Restarting…" : "Apply restart"}
                     </button>
                   </div>
                 ) : null}

@@ -87,6 +87,13 @@ class TransportCapabilities(_FrozenModel):
     supports_reattach_after_exit: bool = False
     supports_terminate: bool = True
     supports_set_model_inline: bool = False
+    # The transport can change the model by restarting the protocol process
+    # (claude_tty respawns the pane with a new ``--model``) rather than applying
+    # it mid-stream. Mirrors ``supports_set_effort_with_restart``; widens the
+    # gate around ``apply_model`` so a restart-only transport need not also
+    # claim ``supports_set_model_inline`` (which would misreport the swap as
+    # free). The frontend reads it to confirm before the restart.
+    supports_set_model_with_restart: bool = False
     supports_set_effort_inline: bool = False
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
@@ -146,6 +153,13 @@ class BackendCapabilities(_FrozenModel):
     supports_reattach_after_exit: bool = False
     supports_terminate: bool = True
     supports_set_model_inline: bool = False
+    # The plugin can change the model by restarting the protocol process
+    # (claude_tty: stop the pane + respawn with a new --model) rather than
+    # applying it mid-stream. Mirrors ``supports_set_effort_with_restart`` and
+    # widens the gate around ``apply_model`` so a restart-only transport need
+    # not also claim ``supports_set_model_inline`` (which would misreport the
+    # swap as free). The frontend reads it to confirm before the restart.
+    supports_set_model_with_restart: bool = False
     supports_set_effort_inline: bool = False
     # The plugin can change effort by restarting the protocol process
     # (Claude: stop CLI + respawn with a new --effort) rather than
@@ -279,6 +293,7 @@ class BackendCapabilities(_FrozenModel):
             supports_reattach_after_exit=self.supports_reattach_after_exit,
             supports_terminate=self.supports_terminate,
             supports_set_model_inline=self.supports_set_model_inline,
+            supports_set_model_with_restart=self.supports_set_model_with_restart,
             supports_set_effort_inline=self.supports_set_effort_inline,
             supports_set_effort_with_restart=self.supports_set_effort_with_restart,
             supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,

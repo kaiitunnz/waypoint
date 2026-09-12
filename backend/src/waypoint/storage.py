@@ -590,11 +590,40 @@ class Storage:
         self.usage_providers.init_schema()
         if token_usage_column_is_new:
             self._mark_sessions_pretracked()
+        self._strip_launch_target_from_session_presets()
         self.connection.commit()
 
     def _has_column(self, table: str, column: str) -> bool:
         rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
         return any(row["name"] == column for row in rows)
+
+    def _strip_launch_target_from_session_presets(self) -> None:
+        """Remove a stale top-level ``launch_target_id`` key from stored preset
+        specs (ticket 1613).
+
+        A launch target is a per-launch execution location, not reusable preset
+        state, so the contract no longer persists it. This is compatibility
+        cleanup, not a user edit: it parses each spec defensively, touches only
+        object-valued JSON carrying the exact key, preserves every other key
+        plus the row's timestamps, and skips malformed or non-object JSON so it
+        never blocks startup. Idempotent — a second open finds no matching key
+        and writes nothing.
+        """
+        rows = self.connection.execute(
+            "SELECT id, spec FROM session_presets"
+        ).fetchall()
+        for row in rows:
+            try:
+                spec = json.loads(row["spec"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(spec, dict) or "launch_target_id" not in spec:
+                continue
+            del spec["launch_target_id"]
+            self.connection.execute(
+                "UPDATE session_presets SET spec = ? WHERE id = ?",
+                (json.dumps(spec), row["id"]),
+            )
 
     def _mark_sessions_pretracked(self) -> None:
         """Flag sessions that predate the ledger so their coverage reports

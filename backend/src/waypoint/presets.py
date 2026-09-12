@@ -44,7 +44,6 @@ from waypoint.storage import Storage
 # default launch env.
 _SCALAR_FIELDS = (
     "backend",
-    "launch_target_id",
     "launch_mode",
     "transport",
     "permission_mode",
@@ -75,7 +74,6 @@ def redact_preset(record: SessionPresetRecord) -> SessionPresetSummary:
     spec = record.spec
     summary_spec = SessionPresetSpecSummary(
         backend=spec.backend,
-        launch_target_id=spec.launch_target_id,
         launch_mode=spec.launch_mode,
         transport=spec.transport,
         args=list(spec.args),

@@ -388,7 +388,6 @@ export function LaunchPanel({
             form={form}
             presets={presets}
             selectedPresetId={selectedPresetId}
-            launchTargetId={launchTargetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}
@@ -492,7 +491,6 @@ export function LaunchPanel({
             form={form}
             presets={presets}
             selectedPresetId={selectedPresetId}
-            launchTargetId={launchTargetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}

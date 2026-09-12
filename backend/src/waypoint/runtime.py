@@ -4389,7 +4389,11 @@ class SessionRuntime:
         session = self.get_session(session_id)
         cleaned = model.strip() if isinstance(model, str) and model.strip() else None
         plugin = self.registry.plugin_for(session)
-        if not plugin.capabilities.supports_set_model_inline:
+        caps = plugin.capabilities
+        # Model can be applied inline (native adapter) or via a session restart
+        # (claude_tty respawns the pane with the new --model). Mirror the
+        # set_effort gate so a restart-only transport isn't rejected here.
+        if not (caps.supports_set_model_inline or caps.supports_set_model_with_restart):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"model selection is not supported for {session.backend}",

@@ -263,7 +263,9 @@ export function SessionSettingsModal({
     permissionModes.length > 0;
   const showModel =
     !transportChanged &&
-    Boolean(caps?.supports_set_model_inline) &&
+    Boolean(
+      caps?.supports_set_model_inline || caps?.supports_set_model_with_restart,
+    ) &&
     (models.length > 0 || model !== null);
   // Mirror the launch panel's ModelPicker: surface a pre-existing custom model
   // (from an older session/schedule) that isn't in the discovered list.

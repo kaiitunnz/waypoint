@@ -174,11 +174,14 @@ class ClaudeTtyPlugin:
         supports_fork=True,
         supports_attachments=True,
         # All control swaps restart the pane with `--resume <thread>` and a
-        # rebuilt flag set; none of them mutate a live process inline. The
-        # ``*_inline`` flags here gate whether the change is *allowed* at all
-        # (the runtime's only knob), not whether it skips a restart, so they
-        # read True; ``settings_change_interrupts_turn`` records the real cost.
-        supports_set_model_inline=True,
+        # rebuilt flag set; none of them mutate a live process inline. Model and
+        # effort advertise the ``*_with_restart`` variant so the swap is not
+        # misreported as free (the frontend confirms the restart); permission
+        # mode has no such variant yet, so its ``*_inline`` flag reads True to
+        # gate that the change is *allowed*. ``settings_change_interrupts_turn``
+        # records the real cost when it lands mid-turn.
+        supports_set_model_inline=False,
+        supports_set_model_with_restart=True,
         supports_set_effort_inline=False,
         supports_set_effort_with_restart=True,
         supports_set_permission_mode_inline=True,

@@ -2090,12 +2090,11 @@ def sessions_start(
         eff_backend = backend or spec.get("backend")
         eff_model = model or spec.get("model")
         eff_permission = permission_mode or spec.get("permission_mode")
-        eff_target = launch_target_id or spec.get("launch_target_id")
         if eff_backend:
             if eff_permission is not None:
                 _validate_launch_permission_mode(c, eff_backend, eff_permission)
             if eff_model is not None:
-                _warn_unknown_model(c, eff_backend, eff_model, eff_target)
+                _warn_unknown_model(c, eff_backend, eff_model, launch_target_id)
         return {
             "session": c.create_session(
                 backend=backend,
@@ -3626,12 +3625,11 @@ def schedule_create(
         eff_backend = backend or spec.get("backend")
         eff_model = model or spec.get("model")
         eff_permission = permission_mode or spec.get("permission_mode")
-        eff_target = launch_target_id or spec.get("launch_target_id")
         if eff_backend:
             if eff_permission is not None:
                 _validate_launch_permission_mode(c, eff_backend, eff_permission)
             if eff_model is not None:
-                _warn_unknown_model(c, eff_backend, eff_model, eff_target)
+                _warn_unknown_model(c, eff_backend, eff_model, launch_target_id)
         return {
             "schedule": c.create_schedule(
                 backend=backend,
@@ -3683,7 +3681,6 @@ def schedule_clear_history(ctx: typer.Context) -> None:
 def _preset_spec_payload(
     *,
     backend: str | None,
-    launch_target_id: str | None,
     launch_mode: str | None,
     transport: str | None,
     model: str | None,
@@ -3698,12 +3695,12 @@ def _preset_spec_payload(
     """Build a preset spec body from launch options, including only the fields the
     caller supplied so update PATCH-merges instead of clobbering omitted fields.
 
-    Presets deliberately omit cwd/title (per-launch specifics), so those are not
-    accepted here — they stay on ``sessions start`` / ``schedule create``."""
+    Presets deliberately omit cwd/title/launch_target_id (per-launch specifics),
+    so those are not accepted here — they stay on ``sessions start`` /
+    ``schedule create``."""
     spec: dict[str, Any] = {}
     for key, value in (
         ("backend", backend),
-        ("launch_target_id", launch_target_id),
         ("launch_mode", launch_mode),
         ("transport", transport),
         ("model", model),
@@ -3784,7 +3781,6 @@ def presets_create(
         bool, typer.Option("--default", help="Mark this preset as the default.")
     ] = False,
     backend: _PresetBackendOption = None,
-    launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
     transport: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
@@ -3799,7 +3795,6 @@ def presets_create(
     """Create a session preset from launch options (cwd/title are per-launch)."""
     spec = _preset_spec_payload(
         backend=backend,
-        launch_target_id=launch_target_id,
         launch_mode=launch_mode,
         transport=transport,
         model=model,
@@ -3827,7 +3822,6 @@ def presets_update(
     name: Annotated[str | None, typer.Option()] = None,
     description: Annotated[str | None, typer.Option()] = None,
     backend: _PresetBackendOption = None,
-    launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
     transport: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
@@ -3842,7 +3836,6 @@ def presets_update(
     """Update a preset. Only the fields you pass change; the rest are preserved."""
     spec = _preset_spec_payload(
         backend=backend,
-        launch_target_id=launch_target_id,
         launch_mode=launch_mode,
         transport=transport,
         model=model,

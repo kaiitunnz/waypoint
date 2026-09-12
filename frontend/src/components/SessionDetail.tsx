@@ -2340,13 +2340,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           transport={session?.transport ?? null}
           catalog={catalog}
           modelRequiresConfirm={
-            // Whether a model swap restarts is transport-specific — claude_tty
-            // respawns the pane, the structured adapter changes it inline — so
-            // resolve the capability against the session's actual (agent,
-            // transport) pair, not the agent descriptor's default transport
-            // (unlike effort, which restarts on every Claude transport). Falls
-            // back to false until the catalog hydrates so a fresh load doesn't
-            // gate the picker.
+            // A model swap restarts on some transports (claude_tty) and is
+            // inline on others, so resolve against the (agent, transport) pair.
             Boolean(
               session?.transport &&
                 catalog.capsFor(session.backend, session.transport)
@@ -2460,10 +2455,8 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
-  // True when the backend's model swap requires a session restart
-  // (claude_tty respawns the pane). Drives the same "confirm before
-  // applying" UX as effort so the user knows the session will restart,
-  // vs. the structured adapter which changes the model inline.
+  // The model swap restarts the session (claude_tty), so it stages behind the
+  // restart pill like effort rather than applying inline.
   modelRequiresConfirm: boolean;
   // True when the backend's effort swap requires a session restart
   // (Claude respawns the CLI). Drives the "confirm before applying"
@@ -2582,13 +2575,9 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // Pending model for backends that need a session restart to apply
-  // (claude_tty) — staged here until the user confirms via the Apply button.
-  // `null` means no pending change.
+  // Staged model/effort picks awaiting the restart-confirm Apply; `null` is no
+  // pending change. Only used by transports that restart to apply them.
   const [pendingModel, setPendingModel] = useState<string | null>(null);
-  // Pending effort for backends that need a session restart to apply (Claude)
-  // — staged here until the user confirms via the Apply button. `null` means
-  // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
   // CSS (:focus-within) so focusing the field never triggers a React re-render
@@ -2857,52 +2846,52 @@ const ReplyComposer = memo(function ReplyComposer({
     modelRequiresConfirm &&
     pendingModel !== null &&
     pendingModel !== (currentModel ?? "");
-  const pendingModelLabel =
-    pendingModel === ""
-      ? defaultModelLabel
-        ? `Default (${defaultModelLabel})`
-        : "Default"
-      : (modelEntries.find((option) => option.id === pendingModel)?.label ??
-        pendingModel);
-  const handleModelSelect = (next: string) => {
-    if (modelRequiresConfirm) {
-      // Stage the pick locally; the parent's onModelChange only fires after
-      // explicit confirm so the user knows the session will restart.
-      setPendingModel(next === (currentModel ?? "") ? null : next);
-      return;
-    }
-    void onModelChange(next);
-  };
-
-  const applyPendingModel = async () => {
-    if (pendingModel === null) return;
-    const value = pendingModel;
-    setPendingModel(null);
-    setTuneOpen(false);
-    await onModelChange(value);
-  };
-
   const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
+  // Model and effort both relaunch the pane (claude_tty), so a pick is staged
+  // and applied only on explicit confirm via the shared restart pill below.
+  const handleModelSelect = (next: string) => {
+    if (modelRequiresConfirm) {
+      setPendingModel(next === (currentModel ?? "") ? null : next);
+      return;
+    }
+    void onModelChange(next);
+  };
   const handleEffortSelect = (next: string) => {
     if (effortRequiresConfirm) {
-      // Stage the pick locally; the parent's onEffortChange only fires after
-      // explicit confirm so the user knows the session will restart.
       setPendingEffort(next === (currentEffort ?? "") ? null : next);
       return;
     }
     void onEffortChange(next);
   };
-
-  const applyPendingEffort = async () => {
-    if (pendingEffort === null) return;
-    const value = pendingEffort;
+  // Which staged changes the restart pill names — model, effort, or both.
+  const pendingRestartLabel = [
+    modelPendingDiffers
+      ? pendingModel
+        ? (modelEntries.find((option) => option.id === pendingModel)?.label ??
+          pendingModel)
+        : "the default model"
+      : null,
+    effortPendingDiffers
+      ? pendingEffort
+        ? `${effortLabel(pendingEffort)} effort`
+        : "the default effort"
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const applyPendingRestart = async () => {
+    const model = pendingModel;
+    const effort = pendingEffort;
+    setPendingModel(null);
     setPendingEffort(null);
     setTuneOpen(false);
-    await onEffortChange(value);
+    // Model before effort so effort's relaunch resumes on the new model.
+    if (model !== null) await onModelChange(model);
+    if (effort !== null) await onEffortChange(effort);
   };
 
   const assistantOps = assistant ? assistantControls : null;
@@ -3235,23 +3224,6 @@ const ReplyComposer = memo(function ReplyComposer({
                     </select>
                   </label>
                 ) : null}
-                {modelPendingDiffers && pendingModel !== null ? (
-                  <div className="composer-tune-restart">
-                    <p>
-                      Restart Claude with <strong>{pendingModelLabel}</strong>?
-                      The current turn is interrupted and the session resumes on
-                      the new model.
-                    </p>
-                    <button
-                      type="button"
-                      className="composer-tune-restart-apply"
-                      onClick={() => void applyPendingModel()}
-                      disabled={modelBusy}
-                    >
-                      {modelBusy ? "Restarting…" : "Apply restart"}
-                    </button>
-                  </div>
-                ) : null}
                 {hasEffortPicker ? (
                   <label className="composer-tune-field">
                     <span>Reasoning effort</span>
@@ -3274,21 +3246,20 @@ const ReplyComposer = memo(function ReplyComposer({
                     </select>
                   </label>
                 ) : null}
-                {effortPendingDiffers && pendingEffort ? (
+                {modelPendingDiffers || effortPendingDiffers ? (
                   <div className="composer-tune-restart">
                     <p>
-                      Restart Claude with{" "}
-                      <strong>{effortLabel(pendingEffort)}</strong> effort?
-                      The current turn is interrupted and the session resumes at the new
-                      level.
+                      Restart Claude with <strong>{pendingRestartLabel}</strong>?
+                      The current turn is interrupted and the session resumes with
+                      the new settings.
                     </p>
                     <button
                       type="button"
                       className="composer-tune-restart-apply"
-                      onClick={() => void applyPendingEffort()}
-                      disabled={effortBusy}
+                      onClick={() => void applyPendingRestart()}
+                      disabled={modelBusy || effortBusy}
                     >
-                      {effortBusy ? "Restarting…" : "Apply restart"}
+                      {modelBusy || effortBusy ? "Restarting…" : "Apply restart"}
                     </button>
                   </div>
                 ) : null}

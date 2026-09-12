@@ -314,6 +314,7 @@ export interface TransportCapabilities {
   supports_reattach_after_exit: boolean;
   supports_terminate: boolean;
   supports_set_model_inline: boolean;
+  supports_set_model_with_restart: boolean;
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
@@ -353,6 +354,7 @@ export interface BackendCapabilities {
   supports_resume: boolean;
   supports_terminate: boolean;
   supports_set_model_inline: boolean;
+  supports_set_model_with_restart: boolean;
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
@@ -453,11 +455,11 @@ export interface MeResponse {
 
 // Full preset spec (with launch_env values); returned only from the
 // include_secret_values single-preset fetch and used to hydrate the form.
-// cwd and title are intentionally absent — they are per-launch specifics, not
-// reusable launch defaults, so the launch surfaces always supply them directly.
+// cwd, title, and launch_target_id are intentionally absent — they are
+// per-launch specifics, not reusable launch defaults, so the launch surfaces
+// always supply them directly.
 export interface SessionPresetSpec {
   backend?: Backend | null;
-  launch_target_id?: string | null;
   launch_mode?: LaunchMode | null;
   transport?: SessionTransport | null;
   args?: string[];
@@ -477,7 +479,6 @@ export interface SessionPresetSpec {
 // only the keys are exposed.
 export interface SessionPresetSpecSummary {
   backend?: Backend | null;
-  launch_target_id?: string | null;
   launch_mode?: LaunchMode | null;
   transport?: SessionTransport | null;
   args?: string[];

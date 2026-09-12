@@ -693,12 +693,12 @@ class SessionPresetSpec(BaseModel):
     # a preset stays listable/editable/deletable after a plugin is removed or
     # renamed; the resolver validates them only when applying the preset.
     #
-    # Deliberately excludes ``cwd`` and ``title``: those are per-launch specifics
-    # (which repo, what to call this run), not reusable launch defaults, so the
-    # launch surfaces always supply them explicitly. ``extra="ignore"`` (Pydantic
-    # default) means presets persisted with older cwd/title keys drop them on load.
+    # Deliberately excludes ``cwd``, ``title``, and ``launch_target_id``: those are
+    # per-launch specifics (which repo, what to call this run, where it runs), not
+    # reusable launch defaults, so the launch surfaces always supply them
+    # explicitly. ``extra="ignore"`` (Pydantic default) means presets persisted
+    # with older cwd/title/launch_target_id keys drop them on load.
     backend: str | None = None
-    launch_target_id: str | None = None
     launch_mode: LaunchMode | None = None
     transport: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -733,7 +733,6 @@ class SessionPresetSpecSummary(BaseModel):
     # the keys are exposed, so preset secrets never ride in list / bootstrap
     # payloads. Full values come from GET .../{id}?include_secret_values=true.
     backend: str | None = None
-    launch_target_id: str | None = None
     launch_mode: LaunchMode | None = None
     transport: str | None = None
     args: list[str] = Field(default_factory=list)

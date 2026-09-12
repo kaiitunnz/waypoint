@@ -130,6 +130,17 @@ def test_preset_spec_excludes_cwd_and_title() -> None:
     assert "title" not in spec.model_dump()
 
 
+def test_preset_spec_excludes_launch_target_id() -> None:
+    # launch_target_id is a per-launch execution location, not a preset field; a
+    # spec built from a legacy payload carrying it silently drops it (ticket 1613).
+    spec = SessionPresetSpec.model_validate(
+        {"backend": "codex", "launch_target_id": "ssh-s0", "model": "m"}
+    )
+    assert not hasattr(spec, "launch_target_id")
+    assert spec.model == "m"
+    assert "launch_target_id" not in spec.model_dump()
+
+
 def test_manager_rejects_reserved_default_name(tmp_path: Path) -> None:
     manager = PresetManager(_storage(tmp_path))
     with pytest.raises(HTTPException) as exc:
@@ -174,6 +185,42 @@ def test_resolve_scalar_override(tmp_path: Path) -> None:
     assert matched is not None
     assert resolved.backend == "codex"  # from preset
     assert resolved.model == "gpt-5-mini"  # explicit wins
+
+
+def test_resolve_preset_never_supplies_target(tmp_path: Path) -> None:
+    # Even a legacy preset whose raw JSON still carries launch_target_id must not
+    # overlay it: the resolver drops the unknown field on load and never merges a
+    # target. A request with no explicit target resolves to no target.
+    storage = _storage(tmp_path)
+    preset = _seed(storage, backend="codex")
+    storage.connection.execute(
+        "UPDATE session_presets SET spec = ? WHERE id = ?",
+        (json.dumps({"backend": "codex", "launch_target_id": "ssh-s0"}), preset.id),
+    )
+    storage.connection.commit()
+    resolved, _ = resolve_session_create_request(
+        storage, SessionLaunchRequest(preset_id=preset.id, cwd="/x")
+    )
+    assert resolved.launch_target_id is None
+
+
+def test_resolve_explicit_target_survives_preset(tmp_path: Path) -> None:
+    # The active target still flows from the request itself for both sessions and
+    # schedules; the preset does not touch it.
+    storage = _storage(tmp_path)
+    preset = _seed(storage, backend="codex")
+    resolved, _ = resolve_session_create_request(
+        storage,
+        SessionLaunchRequest(preset_id=preset.id, cwd="/x", launch_target_id="ssh-s0"),
+    )
+    assert resolved.launch_target_id == "ssh-s0"
+    sched, _ = resolve_schedule_create_request(
+        storage,
+        ScheduleLaunchRequest(
+            preset_id=preset.id, cwd="/x", delay_seconds=60, launch_target_id="ssh-s0"
+        ),
+    )
+    assert sched.launch_target_id == "ssh-s0"
 
 
 def test_resolve_usage_selection_inherits_triple_from_preset(tmp_path: Path) -> None:
@@ -332,6 +379,12 @@ def test_redact_drops_env_values_keeps_keys(tmp_path: Path) -> None:
     assert not hasattr(summary.spec, "launch_env")
 
 
+def test_redact_omits_launch_target_id(tmp_path: Path) -> None:
+    summary = redact_preset(_record("W", backend="codex"))
+    assert not hasattr(summary.spec, "launch_target_id")
+    assert "launch_target_id" not in summary.spec.model_dump()
+
+
 # ── API ──────────────────────────────────────────────────────────────────────
 
 
@@ -401,6 +454,31 @@ async def test_api_crud_and_redaction(tmp_path: Path) -> None:
             f"/api/session-presets/{preset_id}", headers=_auth(token)
         )
         assert missing.status_code == 404
+
+
+async def test_api_ignores_legacy_launch_target_id(tmp_path: Path) -> None:
+    # An old client that still sends spec.launch_target_id is tolerated (no 4xx),
+    # and the field is dropped on every response — full, redacted, and list.
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        create = await client.post(
+            "/api/session-presets",
+            headers=_auth(token),
+            json={
+                "name": "Legacy",
+                "spec": {"backend": "codex", "launch_target_id": "ssh-s0"},
+            },
+        )
+        assert create.status_code == 200
+        preset_id = create.json()["preset"]["id"]
+        assert "launch_target_id" not in create.json()["preset"]["spec"]
+        full = await client.get(
+            f"/api/session-presets/{preset_id}?include_secret_values=true",
+            headers=_auth(token),
+        )
+        assert "launch_target_id" not in full.json()["preset"]["spec"]
+        listing = await client.get("/api/session-presets", headers=_auth(token))
+        assert "launch_target_id" not in listing.json()["presets"][0]["spec"]
 
 
 async def test_api_default_lifecycle_and_me(tmp_path: Path) -> None:
@@ -539,6 +617,62 @@ def test_cli_presets_create_sends_spec(
     assert body["name"] == "Worker"
     assert body["spec"]["backend"] == "codex"
     assert body["spec"]["launch_env"] == {"A": "1"}
+    assert "launch_target_id" not in body["spec"]
+
+
+def test_cli_presets_create_rejects_launch_target_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mock_cli(monkeypatch, lambda r: httpx.Response(200, json={"preset": {"id": "1"}}))
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "presets",
+            "create",
+            "--name",
+            "Worker",
+            "--backend",
+            "codex",
+            "--launch-target-id",
+            "ssh-s0",
+        ],
+    )
+    # The option is gone; typer reports it as unknown and exits non-zero.
+    assert result.exit_code != 0
+
+
+def test_cli_sessions_start_still_sends_launch_target_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions":
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "codex-1"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    _mock_cli(monkeypatch, handler)
+    result = runner.invoke(
+        cli_app,
+        [
+            "--config",
+            str(_cli_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp",
+            "--no-preset",
+            "--launch-target-id",
+            "ssh-s0",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured["body"]["launch_target_id"] == "ssh-s0"
 
 
 def test_cli_sessions_start_sends_preset(

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -49,10 +50,19 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WAYPOINT_CORS_ORIGIN_REGEX",
     ):
         monkeypatch.delenv(var, raising=False)
-    # Pin a wide render width so an assertion on a CLI error message is not
-    # fragile to the terminal width: Rich wraps a BadParameter panel at the
-    # detected width, which differs between a local shell and CI.
-    monkeypatch.setenv("COLUMNS", "200")
+
+
+def _error_text(output: str) -> str:
+    """CliRunner output with ANSI, Rich panel borders, and wrapping removed.
+
+    Rich wraps a BadParameter panel at the detected terminal width, so a message
+    can span box lines at a narrow width (CI) but not a wide one (local shell).
+    Stripping the borders and collapsing whitespace makes a substring assertion
+    independent of the render width.
+    """
+    text = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    text = re.sub(r"[│╭╮╰╯─]", " ", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _config(tmp_path: Path) -> Path:
@@ -2850,7 +2860,7 @@ def test_set_permission_mode_rejects_unknown_mode_locally(
         ["--config", str(_config(tmp_path)), "sessions", "mode", "s1", "bogus"],
     )
     assert result.exit_code != 0
-    assert "unknown permission mode" in result.output
+    assert "unknown permission mode" in _error_text(result.output)
     # Validation is local — the server is never asked to set a bad mode.
     assert posted == []
 
@@ -2875,7 +2885,7 @@ def test_set_permission_mode_rejects_unsupported_backend(
         ],
     )
     assert result.exit_code != 0
-    assert "does not support" in result.output
+    assert "does not support" in _error_text(result.output)
     assert posted == []
 
 
@@ -3548,7 +3558,7 @@ def _settings_invoke(tmp_path: Path, *args: str) -> Any:
 def test_sessions_settings_requires_a_mutation_option(tmp_path: Path) -> None:
     result = _settings_invoke(tmp_path)
     assert result.exit_code == 2
-    assert "no settings to change" in result.output
+    assert "no settings to change" in _error_text(result.output)
 
 
 def test_sessions_settings_title_only_applies_inline(
@@ -3645,13 +3655,13 @@ def test_sessions_settings_rejects_transport_with_tuning(
         tmp_path, "--transport", "tmux", "--model", "m", "--restart"
     )
     assert result.exit_code == 2
-    assert "cannot combine --transport" in result.output
+    assert "cannot combine --transport" in _error_text(result.output)
 
 
 def test_sessions_settings_rejects_contradictory_model_flags(tmp_path: Path) -> None:
     result = _settings_invoke(tmp_path, "--model", "m", "--clear-model")
     assert result.exit_code == 2
-    assert "only one of" in result.output
+    assert "only one of" in _error_text(result.output)
 
 
 def test_sessions_settings_inline_model_change_no_restart(
@@ -3753,7 +3763,7 @@ def test_sessions_settings_rejects_attached_tmux_launch_edit(
     monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(attached))
     result = _settings_invoke(tmp_path, "--arg", "--foo", "--restart")
     assert result.exit_code == 2
-    assert "attached tmux" in result.output
+    assert "attached tmux" in _error_text(result.output)
 
 
 def test_sessions_settings_rejects_assistant(
@@ -3783,7 +3793,7 @@ def test_sessions_settings_rejects_assistant(
     monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
     result = _settings_invoke(tmp_path, "--title", "x")
     assert result.exit_code == 2
-    assert "personal assistant" in result.output
+    assert "personal assistant" in _error_text(result.output)
 
 
 def test_sessions_launch_settings_emits_get(

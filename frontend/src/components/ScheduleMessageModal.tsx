@@ -27,16 +27,18 @@ type Timing = "delay" | "datetime";
 type Trigger = "time" | "idle";
 type IdleBatch = "with_previous" | "next_cycle";
 
+// Labels and hints mirror the composer send popover's idle options
+// (SessionDetail idleActions) so the same mode reads identically in both.
 const IDLE_BATCHES: { value: IdleBatch; label: string; hint: string }[] = [
   {
     value: "with_previous",
-    label: "With queued messages",
-    hint: "Delivers at the next idle point, together with any already-queued idle messages.",
+    label: "Send when idle",
+    hint: "Joins the next idle batch.",
   },
   {
     value: "next_cycle",
-    label: "Next idle cycle",
-    hint: "Waits for the idle point after the current batch.",
+    label: "Send next idle cycle",
+    hint: "Waits for the following idle point.",
   },
 ];
 

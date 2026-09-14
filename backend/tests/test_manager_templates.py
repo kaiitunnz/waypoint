@@ -99,9 +99,9 @@ def test_triage_reuses_the_live_writer_before_spawning() -> None:
         triage = _read(path)
         assert "**two-path** operation" in triage, path
         # The liveness gate: a recorded exited/errored/missing writer is dropped
-        # and re-spawned; a live one is reused.
+        # and re-spawned; a live one is reused without a fresh spawn.
         assert 'case "$st" in ""|exited|error) sid="";;' in triage, path
-        assert "Reuse a retained live writer" in triage, path
+        assert "Do **not** start a session" in triage, path
 
 
 def test_skill_states_the_two_writer_lifecycles() -> None:

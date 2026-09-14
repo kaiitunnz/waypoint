@@ -177,9 +177,8 @@ spec-gate ticket always does (it stayed alive through `spec_review`), and a bran
 approval-for-handoff, rejection, abandonment, or the human taking over with their own
 spec — reaps that writer and clears the ref **before** the `ready`/terminal transition,
 so a later `{{templates_dir}}/manager/delegate.md` records the tech-lead without
-overwriting the only reference to a live session. Re-spec dispositions do the opposite —
-they **keep** the writer (see **Re-spec** below). The reap is idempotent: it tolerates an
-already-deleted session and an already-empty id, so a crash between the delete and the
+overwriting the only reference to a live session. Re-spec dispositions **keep** the writer
+(see **Re-spec** below). The reap is idempotent, so a crash between the delete and the
 transition replays safely:
 
 ```bash
@@ -222,9 +221,9 @@ lead re-applies it once).
 ## Re-spec — a request-changes or a blocked re-spec
 
 `spec_review → spec_pending` (request-changes) and `blocked → spec_pending` both send
-the ticket back for a fresh spec. Do **not** reap the writer on this path — the session
-that authored the spec holds the design context that best interprets the human's review
-notes, so it is retained as `lead_session_id` and reused. `spec_pending` holds the single
+the ticket back for a fresh spec. Do **not** reap the writer on this path — it is retained
+as `lead_session_id` and reused; the authoring session best interprets the human's review
+notes. `spec_pending` holds the single
 spec slot (≤1 at a time), so re-spec only when the slot is free; another ticket holding it
 defers this one to a later drain — the resolved gate item keeps the human's notes until
 then, so nothing is lost. When the slot is free, lift the human's requested changes from

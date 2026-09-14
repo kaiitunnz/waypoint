@@ -119,14 +119,11 @@ writing only its spec doc under `{{spec_dir}}/`. This step is a **two-path** ope
 | A recorded live writer owes a re-spec (a request-changes round) | Do **not** start a session — render and send `write` to the recorded writer, which revises from its own context plus the newest `kind=respec` note. |
 
 The `role` (the title suffix reconcile matches) is the `spec_route`; its `--role` render
-key is the underscore form. "Live" means the recorded `lead_session_id` still resolves to
-a session that is not `exited`/`error`:
+key is the underscore form:
 
 ```bash
 role=<prd-writer|rfc-writer>          # from spec_route; the reconcile title suffix
 render_role=<prd_writer|rfc_writer>   # its manifest key (underscore) for --role
-# Reuse a retained live writer (re-spec), else start a fresh one (initial route or
-# dead-writer recovery).
 sid=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
 if [ -n "$sid" ]; then
   st=$(waypoint sessions show "$sid" 2>/dev/null | jq -r '.session.status // empty')
@@ -167,10 +164,9 @@ and re-specs, on **abandon** it ends.
 
 The same two-path step serves a **re-spec** routed here from
 `{{templates_dir}}/manager/monitor.md` (a request-changes or a blocked re-spec):
-re-derive `role`/`render_role` from the ticket cell's `spec_route`. The writer that
-authored the spec is retained as `lead_session_id`, so the reuse path re-sends it `write`
-and it revises from its own context plus the newest `kind=respec` note on the channel;
-only if that writer has died does the fresh-spawn path run. A `spec_route` of
+re-derive `role`/`render_role` from the ticket cell's `spec_route`; the step above reuses
+the retained writer and revises from the newest `kind=respec` note, spawning a replacement
+only if it has died. A `spec_route` of
 `direct`/`passthrough` carries no writer; choose a writer route, stamp it
 (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge --meta
 spec_route=<prd-writer|rfc-writer>`), then spawn the matching writer.

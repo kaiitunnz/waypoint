@@ -22,6 +22,22 @@ from waypoint.settings import Settings
 CLI_TOKEN_FILENAME = "cli-token"
 
 
+class _Unset:
+    """Sentinel distinguishing an omitted argument from an explicit ``None``.
+
+    A launch-settings PATCH must be able to send ``account_profile_id: null`` to
+    *clear* a profile, separately from omitting the field to leave it unchanged
+    — the runtime keys that decision off ``model_fields_set``. A plain ``None``
+    default can't express both, so callers pass ``_UNSET`` for "leave unchanged".
+    """
+
+    def __repr__(self) -> str:
+        return "_UNSET"
+
+
+_UNSET: Any = _Unset()
+
+
 class WaypointError(RuntimeError):
     """Raised for transport failures and non-2xx API responses.
 
@@ -544,6 +560,32 @@ class WaypointClient:
         ).json()["session"]
         return data
 
+    def set_title(self, session_id: str, title: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "PATCH",
+            f"/api/sessions/{session_id}/title",
+            json={"title": title},
+        ).json()["session"]
+        return data
+
+    def set_model(self, session_id: str, model: str | None) -> dict[str, Any]:
+        # ``model: null`` clears an explicit override back to the launch default.
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/model",
+            json={"model": model},
+        ).json()["session"]
+        return data
+
+    def set_effort(self, session_id: str, effort: str | None) -> dict[str, Any]:
+        # ``effort: null`` clears an explicit override back to the launch default.
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/effort",
+            json={"effort": effort},
+        ).json()["session"]
+        return data
+
     def get_launch_settings(self, session_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "GET", f"/api/sessions/{session_id}/launch-settings"
@@ -554,17 +596,23 @@ class WaypointClient:
         self,
         session_id: str,
         *,
-        account_profile_id: str | None = None,
+        transport: str | None = _UNSET,
+        account_profile_id: str | None = _UNSET,
         args: list[str] | None = None,
         config_overrides: list[str] | None = None,
         env_set: dict[str, str] | None = None,
         env_unset: list[str] | None = None,
         restart: bool = False,
     ) -> dict[str, Any]:
-        # Omitted args/config_overrides are left unchanged server-side; only send
-        # the fields the caller set so the PATCH is a true partial update.
+        # Omitted fields are left unchanged server-side; only send the fields the
+        # caller set so the PATCH is a true partial update. ``transport`` and
+        # ``account_profile_id`` default to ``_UNSET`` so an explicit ``None``
+        # serialises as JSON ``null`` (clear the profile / no-op transport),
+        # distinct from omission — the runtime keys that off ``model_fields_set``.
         body: dict[str, Any] = {"restart": restart}
-        if account_profile_id is not None:
+        if transport is not _UNSET:
+            body["transport"] = transport
+        if account_profile_id is not _UNSET:
             body["account_profile_id"] = account_profile_id
         if args is not None:
             body["args"] = args

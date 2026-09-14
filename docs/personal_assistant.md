@@ -137,12 +137,19 @@ waypoint sessions show <id>
 waypoint sessions events <id> [--messages N] [--before-sequence S]
 waypoint sessions start --backend <id> --cwd <path> [--model M] [--effort E]
 waypoint sessions send <id> <text>
+waypoint sessions settings <id> [--title T] [--model M] [--effort E] [--account-profile P] [--restart] [--dry-run]
 waypoint sessions interrupt|terminate <id>
 waypoint sessions approve <id> <decision> [--text T] [--approval-id A]
 ```
 
 Output is JSON. The same `WaypointClient` (in `waypoint.client`) backs the CLI
 and can be imported directly.
+
+`sessions settings` changes a non-assistant session's settings from the same
+capability-aware plan as the web editor. A restart-required change is refused
+without `--restart` (exit `4`, no mutation); inspect the plan with `--dry-run`
+first, then re-run with `--restart`. See the `waypoint` skill's
+`sessions-settings` reference.
 
 ### Authentication
 

@@ -75,16 +75,23 @@ posture — but widening is a deliberate act, not a default. Guidance:
 ## Fix a posture without respawning
 
 If a worker is already stalling on `default`, you do **not** have to reap and
-respawn it. On structured agents (claude_code / codex / opencode), including
-over the Emulated (`claude_tty`) transport, you can widen its mode in place:
+respawn it. On structured agents (claude_code / codex / opencode) you can widen
+its mode in place — but only after the run's existing authorization rule for
+widening permissions is satisfied:
 
 ```bash
-waypoint sessions set-permission-mode <child-id> <mode>   # alias: sessions mode
+waypoint sessions mode <child-id> <mode>   # alias: sessions set-permission-mode
 ```
 
 The command validates `<mode>` against the backend's advertised ids and reports
 them on a mismatch. Backends that can't change mode live are rejected cleanly —
 for those, reap and respawn remains the only path.
+
+Structured pairs apply the mode inline. An Emulated (`claude_tty`) child applies
+it by restarting the pane, which interrupts a running turn, so there the command
+is refused without `--restart` (exit `4`, no mutation) — inspect with
+`--dry-run`, then re-run with `--restart`. See the `waypoint` skill's
+`references/sessions-settings.md`.
 
 ## Service a child's approvals
 

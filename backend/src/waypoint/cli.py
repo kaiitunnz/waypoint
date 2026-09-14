@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
@@ -30,6 +31,7 @@ from waypoint.backends.account_profiles import (
 )
 from waypoint.backends.registry import get_registry
 from waypoint.client import (
+    _UNSET,
     WaypointClient,
     WaypointError,
     base_url,
@@ -43,6 +45,7 @@ from waypoint.schemas import (
     LaunchMode,
     SessionAttachRequest,
     SessionLaunchRequest,
+    SessionSource,
     SessionStatus,
 )
 from waypoint.settings import Settings, load_settings
@@ -2340,25 +2343,700 @@ def _validate_permission_mode(
         )
 
 
+# `sessions settings` mirrors the frontend editor (frontend/src/lib/
+# useSessionSettings.ts): the restart count, turn-interruption, and execution
+# order are computed the same way. The runtime stays authoritative; the CLI
+# plan is conservative validation only.
+
+# Exit code for a restart-required plan run without --restart, distinct from a
+# usage error (2) and a runtime failure (1).
+_SETTINGS_CONFIRM_EXIT = 4
+
+
+@dataclass
+class _SettingsOptions:
+    """Parsed, validated mutation options for ``sessions settings``.
+
+    ``_UNSET`` means "leave unchanged"; an explicit ``None`` on ``model`` /
+    ``effort`` / ``account_profile_id`` means "clear back to the launch default".
+    ``args`` / ``config_overrides`` use ``None`` for unchanged and ``[]`` for an
+    explicit clear (they can't be nulled).
+    """
+
+    title: str | None = None
+    permission_mode: str | None = None
+    model: Any = _UNSET
+    effort: Any = _UNSET
+    transport: str | None = None
+    account_profile_id: Any = _UNSET
+    args: list[str] | None = None
+    config_overrides: list[str] | None = None
+    env_set: dict[str, str] = field(default_factory=dict)
+    env_unset: list[str] = field(default_factory=list)
+    usage_source: str | None = None
+    usage_provider_id: str | None = None
+    usage_provider_account_key: str | None = None
+
+    def any_mutation(self) -> bool:
+        return any(
+            (
+                self.title is not None,
+                self.permission_mode is not None,
+                self.model is not _UNSET,
+                self.effort is not _UNSET,
+                self.transport is not None,
+                self.account_profile_id is not _UNSET,
+                self.args is not None,
+                self.config_overrides is not None,
+                bool(self.env_set),
+                bool(self.env_unset),
+                self.usage_source is not None,
+            )
+        )
+
+
+@dataclass
+class _SettingsPlan:
+    """The capability-aware plan for a ``sessions settings`` invocation."""
+
+    restart_count: int
+    will_interrupt_turn: bool
+    warnings: list[str]
+    requires_restart: bool
+    # Op names in execution order; also the successful-apply ``applied`` list.
+    applied_order: list[str]
+    title: str | None = None
+    launch_update: dict[str, Any] | None = None
+    permission_mode: str | None = None
+    model: Any = _UNSET
+    effort: Any = _UNSET
+    usage: tuple[str, str | None, str | None] | None = None
+
+    def to_public(self) -> dict[str, Any]:
+        return {
+            "restart_count": self.restart_count,
+            "will_interrupt_turn": self.will_interrupt_turn,
+            "warnings": self.warnings,
+        }
+
+
+def _tri_state(name: str, value: str | None, clear: bool) -> Any:
+    """Resolve a ``--x``/``--clear-x`` pair to ``_UNSET`` / ``None`` / value."""
+    if clear and value is not None:
+        raise typer.BadParameter(f"pass only one of {name}")
+    if clear:
+        return None
+    if value is not None:
+        return value
+    return _UNSET
+
+
+def _list_or_clear(
+    name: str, values: list[str] | None, clear: bool
+) -> list[str] | None:
+    """Resolve a repeatable ``--x``/``--clear-x`` pair to unchanged/[]/list."""
+    if clear and values:
+        raise typer.BadParameter(f"pass only one of {name}")
+    if clear:
+        return []
+    if values:
+        return list(values)
+    return None
+
+
+def _parse_env_pairs(pairs: list[str] | None) -> dict[str, str]:
+    """Parse repeatable ``KEY=VALUE`` ``--env`` flags (split on first ``=``)."""
+    out: dict[str, str] = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise typer.BadParameter(
+                f"--env expects KEY=VALUE, got: {item}", param_hint="--env"
+            )
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise typer.BadParameter(
+                f"--env expects a non-empty key, got: {item}", param_hint="--env"
+            )
+        if key in out:
+            raise typer.BadParameter(
+                f"--env sets duplicate key {key!r}", param_hint="--env"
+            )
+        out[key] = value
+    return out
+
+
+def _compose_caps(
+    backends: list[dict[str, Any]], backend: str | None, transport: str | None
+) -> dict[str, Any]:
+    """Merge the agent and transport capabilities for a session's pair.
+
+    Transport caps (keyed by ``transport_id``) win over agent caps, mirroring the
+    frontend catalog's ``capsFor``. A transport not found falls back to the agent
+    descriptor's own transport caps.
+    """
+    by_id = {b.get("id"): b for b in backends}
+    by_transport = {b.get("transport_id"): b for b in backends}
+    agent_desc = by_id.get(backend)
+    agent = dict(agent_desc.get("agent_capabilities", {})) if agent_desc else {}
+    transport_desc = by_transport.get(transport) or agent_desc
+    transport_caps = (
+        dict(transport_desc.get("transport_capabilities", {})) if transport_desc else {}
+    )
+    return {**agent, **transport_caps}
+
+
+def _current_usage_selection(
+    session: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    if session.get("usage_limit_source") == "usage_provider":
+        return (
+            "usage_provider",
+            session.get("usage_provider_id"),
+            session.get("usage_provider_account_key"),
+        )
+    return ("plugin", None, None)
+
+
+def _build_settings_plan(
+    session: dict[str, Any],
+    backends: list[dict[str, Any]],
+    launch: dict[str, Any] | None,
+    opts: _SettingsOptions,
+) -> _SettingsPlan:
+    """Build the capability-aware plan, rejecting unsupported edits locally.
+
+    Every local preflight failure raises ``typer.BadParameter`` (exit 2); the
+    runtime remains authoritative for races, profile eligibility, and lifecycle
+    locks.
+    """
+    source = session.get("source")
+    if source == SessionSource.ASSISTANT:
+        raise typer.BadParameter(
+            "the personal assistant is edited through its own controls, not "
+            "`sessions settings`"
+        )
+    backend = session.get("backend")
+    current_transport = session.get("transport")
+    status = session.get("status")
+
+    transport_changing = (
+        opts.transport is not None and opts.transport != current_transport
+    )
+    target_transport = opts.transport if transport_changing else current_transport
+
+    # An interface switch can't share a command with live tuning: the target
+    # pair may not support it, and it can't apply in the same restart.
+    tuning_requested = (
+        opts.permission_mode is not None
+        or opts.model is not _UNSET
+        or opts.effort is not _UNSET
+    )
+    if transport_changing and tuning_requested:
+        raise typer.BadParameter(
+            "cannot combine --transport with --permission-mode/--model/--effort; "
+            "switch the interface first, then tune in a second command"
+        )
+
+    caps = _compose_caps(backends, backend, target_transport)
+    transport_options = (launch or {}).get("transport_options", [])
+    option_by_id = {o.get("id"): o for o in transport_options}
+
+    if transport_changing and opts.transport not in option_by_id:
+        raise typer.BadParameter(
+            f"cannot switch to interface {opts.transport!r}: not an offered "
+            "switch target for this session"
+        )
+
+    # ── tuning capability gates ─────────────────────────────────────────────
+    if opts.permission_mode is not None:
+        if not caps.get("supports_set_permission_mode_inline"):
+            raise typer.BadParameter(
+                f"backend {backend!r} does not support setting the permission mode"
+            )
+        valid = [spec.get("id") for spec in caps.get("permission_modes", [])]
+        if valid and opts.permission_mode not in valid:
+            raise typer.BadParameter(
+                f"unknown permission mode {opts.permission_mode!r} for backend "
+                f"{backend!r}; choose one of: {', '.join(valid)}"
+            )
+    if opts.model is not _UNSET and not (
+        caps.get("supports_set_model_inline")
+        or caps.get("supports_set_model_with_restart")
+    ):
+        raise typer.BadParameter(f"{backend} does not support changing the model")
+    if opts.effort is not _UNSET and not (
+        caps.get("supports_set_effort_inline")
+        or caps.get("supports_set_effort_with_restart")
+    ):
+        raise typer.BadParameter(
+            f"{backend} does not support changing the reasoning effort"
+        )
+
+    # ── launch-scoped edits ─────────────────────────────────────────────────
+    launch_requested = (
+        opts.account_profile_id is not _UNSET
+        or opts.args is not None
+        or opts.config_overrides is not None
+        or bool(opts.env_set)
+        or bool(opts.env_unset)
+    )
+    if transport_changing:
+        target_option = option_by_id[opts.transport]
+        launch_available = bool(
+            target_option.get("supports_launch_settings_with_restart")
+        )
+        profile_cap = bool(target_option.get("supports_account_profile_with_restart"))
+    else:
+        launch_available = bool(
+            (launch or {}).get("supports_launch_settings_with_restart")
+        )
+        profile_cap = bool((launch or {}).get("supports_account_profile_with_restart"))
+
+    if launch_requested:
+        if launch is None:
+            raise typer.BadParameter("launch settings are unavailable for this session")
+        if not launch_available:
+            if source == SessionSource.ATTACHED_TMUX:
+                raise typer.BadParameter(
+                    "cannot change launch settings for an attached tmux session"
+                )
+            raise typer.BadParameter(
+                f"{backend} does not support restart-applied launch settings"
+            )
+        protected = set((launch or {}).get("protected_launch_env_keys", []))
+        touched = set(opts.env_set) | set(opts.env_unset)
+        clashing = protected & touched
+        if clashing:
+            raise typer.BadParameter(
+                "these env keys are runtime/profile-owned and can't be edited: "
+                f"{', '.join(sorted(clashing))}"
+            )
+
+    profile_field_changed = (
+        opts.account_profile_id is not _UNSET
+        and opts.account_profile_id != session.get("account_profile_id")
+    )
+    if (
+        profile_field_changed
+        and opts.account_profile_id is not None
+        and not profile_cap
+    ):
+        raise typer.BadParameter(
+            f"{backend} does not support account-profile switching"
+        )
+    args_changed = opts.args is not None and opts.args != (launch or {}).get("args", [])
+    config_changed = opts.config_overrides is not None and opts.config_overrides != (
+        launch or {}
+    ).get("config_overrides", [])
+    env_changed = bool(opts.env_set) or bool(opts.env_unset)
+    launch_changed = launch_available and (
+        profile_field_changed or args_changed or config_changed or env_changed
+    )
+    restart_launch_changed = launch_changed or transport_changing
+
+    # ── inline tuning change detection ──────────────────────────────────────
+    perm_changed = (
+        opts.permission_mode is not None
+        and opts.permission_mode != session.get("permission_mode")
+    )
+    model_changed = opts.model is not _UNSET and opts.model != session.get("model")
+    effort_changed = opts.effort is not _UNSET and opts.effort != session.get("effort")
+
+    # ── restart-count formula ───────────────────────────────────────────────
+    interrupts = bool(caps.get("settings_change_interrupts_turn"))
+    if interrupts:
+        tune_restarts = (
+            (1 if model_changed else 0)
+            + (1 if effort_changed else 0)
+            + (1 if perm_changed else 0)
+        )
+    else:
+        tune_restarts = 0
+        if (
+            effort_changed
+            and caps.get("supports_set_effort_with_restart")
+            and not caps.get("supports_set_effort_inline")
+        ):
+            tune_restarts += 1
+    restart_count = (1 if restart_launch_changed else 0) + tune_restarts
+    running = status in (SessionStatus.RUNNING, SessionStatus.WAITING_INPUT)
+    will_interrupt = restart_count > 0 and running
+
+    warnings: list[str] = []
+    if transport_changing:
+        warnings.append("The session will be restarted, keeping its conversation.")
+    elif restart_count > 1:
+        warnings.append(
+            f"Applying these changes will restart the session {restart_count} "
+            "times and resume it."
+        )
+    elif restart_count == 1:
+        warnings.append("The session process will restart and resume.")
+    if will_interrupt:
+        warnings.append("The current turn will be interrupted.")
+    if profile_field_changed:
+        warnings.append(
+            "Switching account profile restarts the session under the new "
+            "profile. For Codex, a thread with no persisted transcript starts "
+            "fresh."
+        )
+
+    # ── usage-limit source ──────────────────────────────────────────────────
+    usage: tuple[str, str | None, str | None] | None = None
+    usage_changed = False
+    if opts.usage_source is not None:
+        candidate = (
+            opts.usage_source,
+            opts.usage_provider_id,
+            opts.usage_provider_account_key,
+        )
+        if candidate != _current_usage_selection(session):
+            usage = candidate
+            usage_changed = True
+
+    # ── ordered op list + resolved payloads ─────────────────────────────────
+    title = opts.title.strip() if opts.title is not None else None
+    title_changed = bool(title) and title != session.get("title")
+
+    launch_update: dict[str, Any] | None = None
+    if restart_launch_changed:
+        launch_update = {"restart": True}
+        if transport_changing:
+            launch_update["transport"] = opts.transport
+        if profile_field_changed:
+            launch_update["account_profile_id"] = opts.account_profile_id
+        if args_changed:
+            launch_update["args"] = opts.args
+        if config_changed:
+            launch_update["config_overrides"] = opts.config_overrides
+        if opts.env_set:
+            launch_update["env_set"] = opts.env_set
+        if opts.env_unset:
+            launch_update["env_unset"] = opts.env_unset
+
+    applied_order: list[str] = []
+    if title_changed:
+        applied_order.append("title")
+    if restart_launch_changed:
+        applied_order.append("launch_settings")
+    if perm_changed:
+        applied_order.append("permission_mode")
+    if model_changed:
+        applied_order.append("model")
+    if effort_changed:
+        applied_order.append("effort")
+    if usage_changed:
+        applied_order.append("usage_limit_source")
+
+    return _SettingsPlan(
+        restart_count=restart_count,
+        will_interrupt_turn=will_interrupt,
+        warnings=warnings,
+        requires_restart=restart_count > 0,
+        applied_order=applied_order,
+        title=title if title_changed else None,
+        launch_update=launch_update,
+        permission_mode=opts.permission_mode if perm_changed else None,
+        model=opts.model if model_changed else _UNSET,
+        effort=opts.effort if effort_changed else _UNSET,
+        usage=usage,
+    )
+
+
+def _execute_settings_plan(
+    client: WaypointClient,
+    session_id: str,
+    plan: _SettingsPlan,
+    applied: list[str],
+    state: dict[str, Any],
+) -> None:
+    """Run the plan in frontend order, recording progress into ``applied``.
+
+    On a later failure the caller keeps the earlier successes (``applied`` and
+    ``state['session']`` are mutated as it goes) and never rolls back.
+    """
+    for op in plan.applied_order:
+        if op == "title" and plan.title is not None:
+            state["session"] = client.set_title(session_id, plan.title)
+        elif op == "launch_settings" and plan.launch_update is not None:
+            state["session"] = client.update_launch_settings(
+                session_id, **plan.launch_update
+            )
+        elif op == "permission_mode" and plan.permission_mode is not None:
+            state["session"] = client.set_permission_mode(
+                session_id, plan.permission_mode
+            )
+        elif op == "model":
+            state["session"] = client.set_model(session_id, plan.model)
+        elif op == "effort":
+            state["session"] = client.set_effort(session_id, plan.effort)
+        elif op == "usage_limit_source" and plan.usage is not None:
+            source_value, provider_id, account_key = plan.usage
+            state["session"] = client.set_usage_limit_source(
+                session_id,
+                usage_limit_source=source_value,
+                usage_provider_id=provider_id,
+                usage_provider_account_key=account_key,
+            )
+        applied.append(op)
+
+
+def _run_settings(
+    settings: Settings,
+    session_id: str,
+    opts: _SettingsOptions,
+    *,
+    restart: bool,
+    dry_run: bool,
+    legacy_output: bool = False,
+) -> None:
+    """Fetch, plan, consent-gate, and (unless dry-run) execute a settings change.
+
+    Emits one JSON object. ``legacy_output`` keeps the pre-existing
+    ``{"session": …}`` shape for the ``mode`` / ``set-account`` compatibility
+    commands on a successful apply; the plan/refusal JSON is uniform.
+    """
+    if not opts.any_mutation():
+        raise typer.BadParameter(
+            "no settings to change; pass at least one mutation option"
+        )
+
+    def _run(client: WaypointClient) -> dict[str, Any] | None:
+        session = client.get_session(session_id)
+        backends = client.list_backends()
+        try:
+            launch: dict[str, Any] | None = client.get_launch_settings(session_id)
+        except WaypointError:
+            launch = None
+        plan = _build_settings_plan(session, backends, launch, opts)
+
+        if dry_run:
+            return {"plan": plan.to_public(), "dry_run": True}
+        if plan.requires_restart and not restart:
+            typer.echo(
+                json.dumps(
+                    {
+                        "plan": plan.to_public(),
+                        "confirmation_required": True,
+                        "remediation": "rerun with --restart",
+                    },
+                    indent=2,
+                )
+            )
+            raise typer.Exit(code=_SETTINGS_CONFIRM_EXIT)
+
+        applied: list[str] = []
+        state: dict[str, Any] = {"session": session}
+        try:
+            _execute_settings_plan(client, session_id, plan, applied, state)
+        except WaypointError as exc:
+            typer.echo(
+                json.dumps(
+                    {
+                        "plan": plan.to_public(),
+                        "session": state["session"],
+                        "applied": applied,
+                        "error": str(exc),
+                    },
+                    indent=2,
+                )
+            )
+            raise typer.Exit(code=1) from exc
+
+        if legacy_output:
+            return {"session": state["session"]}
+        return {
+            "plan": plan.to_public(),
+            "session": state["session"],
+            "applied": applied,
+        }
+
+    result = _run_client(settings, _run)
+    if result is not None:
+        typer.echo(json.dumps(result, indent=2))
+
+
+@sessions_app.command("settings")
+def sessions_settings(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    title: Annotated[
+        str | None, typer.Option("--title", help="New session title.")
+    ] = None,
+    permission_mode: Annotated[
+        str | None,
+        typer.Option("--permission-mode", help="Set the permission mode."),
+    ] = None,
+    model: Annotated[str | None, typer.Option("--model", help="Set the model.")] = None,
+    clear_model: Annotated[
+        bool,
+        typer.Option(
+            "--clear-model", help="Clear the model back to the launch default."
+        ),
+    ] = False,
+    effort: Annotated[
+        str | None, typer.Option("--effort", help="Set the reasoning effort.")
+    ] = None,
+    clear_effort: Annotated[
+        bool,
+        typer.Option(
+            "--clear-effort",
+            help="Clear the reasoning effort back to the launch default.",
+        ),
+    ] = False,
+    transport: Annotated[
+        str | None,
+        typer.Option("--transport", help="Switch the session's interface (restart)."),
+    ] = None,
+    account_profile: Annotated[
+        str | None,
+        typer.Option("--account-profile", help="Switch the account/config profile."),
+    ] = None,
+    clear_account_profile: Annotated[
+        bool,
+        typer.Option(
+            "--clear-account-profile", help="Clear the account/config profile."
+        ),
+    ] = False,
+    arg: Annotated[
+        list[str] | None,
+        typer.Option("--arg", help="Launch arg; repeat to set the full list."),
+    ] = None,
+    clear_args: Annotated[
+        bool, typer.Option("--clear-args", help="Clear all launch args.")
+    ] = False,
+    config_override: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--config-override", help="Config override; repeat to set the full list."
+        ),
+    ] = None,
+    clear_config_overrides: Annotated[
+        bool,
+        typer.Option("--clear-config-overrides", help="Clear all config overrides."),
+    ] = False,
+    env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            help="Set a launch env var as KEY=VALUE (repeatable). Value is "
+            "visible in shell history/process inspection.",
+        ),
+    ] = None,
+    unset_env: Annotated[
+        list[str] | None,
+        typer.Option("--unset-env", help="Remove a launch env key (repeatable)."),
+    ] = None,
+    usage_limit_source: Annotated[
+        str | None,
+        typer.Option(
+            "--usage-limit-source", help="Usage-limit source: plugin | usage_provider."
+        ),
+    ] = None,
+    usage_provider: Annotated[
+        str | None, typer.Option("--usage-provider", help="Usage provider id.")
+    ] = None,
+    usage_provider_account: Annotated[
+        str | None,
+        typer.Option("--usage-provider-account", help="Usage provider account key."),
+    ] = None,
+    restart: Annotated[
+        bool,
+        typer.Option(
+            "--restart",
+            help="Consent to a restart-required plan. Refused (exit 4) without it.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Emit the plan without mutating (exit 0)."),
+    ] = False,
+) -> None:
+    """Change a non-assistant session's settings, non-interactively.
+
+    Builds the same capability-aware plan as the frontend editor. A plan that
+    restarts or interrupts the session is refused unless ``--restart`` is given:
+    the command prints ``confirmation_required`` and exits 4 without mutating, so
+    an agent can route the restart decision through its own approval flow.
+    ``--dry-run`` prints the plan and never mutates. Env values are never echoed
+    in the plan or applied output.
+    """
+    opts = _SettingsOptions(
+        title=title,
+        permission_mode=permission_mode,
+        model=_tri_state("--model/--clear-model", model, clear_model),
+        effort=_tri_state("--effort/--clear-effort", effort, clear_effort),
+        transport=transport,
+        account_profile_id=_tri_state(
+            "--account-profile/--clear-account-profile",
+            account_profile,
+            clear_account_profile,
+        ),
+        args=_list_or_clear("--arg/--clear-args", arg, clear_args),
+        config_overrides=_list_or_clear(
+            "--config-override/--clear-config-overrides",
+            config_override,
+            clear_config_overrides,
+        ),
+        env_set=_parse_env_pairs(env),
+        env_unset=list(unset_env or []),
+    )
+    clashing = set(opts.env_set) & set(opts.env_unset)
+    if clashing:
+        raise typer.BadParameter(
+            f"--env and --unset-env target the same key(s): {', '.join(sorted(clashing))}"
+        )
+    source, provider_id, account_key = _resolve_usage_selection(
+        usage_limit_source, usage_provider, usage_provider_account
+    )
+    opts.usage_source = source
+    opts.usage_provider_id = provider_id
+    opts.usage_provider_account_key = account_key
+
+    _run_settings(
+        _settings_from_ctx(ctx),
+        session_id,
+        opts,
+        restart=restart,
+        dry_run=dry_run,
+    )
+
+
 @sessions_app.command("set-permission-mode")
 @sessions_app.command("mode")
 def sessions_set_permission_mode(
     ctx: typer.Context,
     session_id: Annotated[str, typer.Argument()],
     mode: Annotated[str, typer.Argument()],
+    restart: Annotated[
+        bool,
+        typer.Option(
+            "--restart",
+            help="Consent to a restart if the interface applies the mode by "
+            "restarting (e.g. a Claude TTY session). Refused (exit 4) without it.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Emit the plan without mutating (exit 0)."),
+    ] = False,
 ) -> None:
-    """Change a running session's permission mode in place.
+    """Change a session's permission mode.
 
-    Only structured backends that apply the change live accept it; others are
-    rejected with the accepted ids. Avoids reap + respawn just to widen a
-    stalled worker's auto-approval posture.
+    Inline pairs (Claude structured, Codex, OpenCode, tmux) apply it live with no
+    friction. A pair that applies the mode by restarting — a Claude TTY session
+    interrupts and resumes — is refused without ``--restart`` (exit 4), matching
+    the frontend's consent gate. Use ``sessions settings`` for batched edits.
     """
-
-    def _run(c: WaypointClient) -> dict[str, Any]:
-        _validate_permission_mode(c, c.get_session(session_id), mode)
-        return {"session": c.set_permission_mode(session_id, mode)}
-
-    _emit(_settings_from_ctx(ctx), _run)
+    _run_settings(
+        _settings_from_ctx(ctx),
+        session_id,
+        _SettingsOptions(permission_mode=mode),
+        restart=restart,
+        dry_run=dry_run,
+        legacy_output=True,
+    )
 
 
 @sessions_app.command("launch-settings")
@@ -2377,27 +3055,43 @@ def sessions_set_account(
     restart: Annotated[
         bool,
         typer.Option(
-            "--restart/--no-restart",
-            help="Restart the session to apply the switch (required in phase 1).",
+            "--restart",
+            help="Consent to the restart the switch requires. Refused (exit 4) "
+            "without it.",
         ),
-    ] = True,
+    ] = False,
+    no_restart: Annotated[
+        bool,
+        typer.Option(
+            "--no-restart",
+            hidden=True,
+            help="Deprecated synonym for the safe default (refuse without "
+            "--restart).",
+        ),
+    ] = False,
 ) -> None:
     """Switch a session's account/config profile via restart-and-resume.
 
-    Accepted when the session's agent maps a config-dir env var and its
-    transport can restart-and-resume — Claude's native and emulated transports,
-    Codex's app-server, and the generic tmux wrapper around either agent. A pure
-    attached-tmux pane (no wrapped agent) or a backend without a config-dir env
-    var (OpenCode) is rejected. The session terminates and resumes its thread
-    under the new profile's config dir.
+    The switch always restarts the session, so it is refused without ``--restart``
+    (exit 4) rather than blocking or sending a doomed request. ``--no-restart`` is
+    a deprecated synonym for that safe default. Accepted when the agent maps a
+    config-dir env var and its transport can restart-and-resume; an attached-tmux
+    pane or a backend without a config-dir env var (OpenCode) is rejected. Use
+    ``sessions settings`` for batched edits.
     """
-    _emit(
+    if no_restart:
+        typer.echo(
+            "warning: --no-restart is deprecated; omit it for the same safe "
+            "default (refused without --restart)",
+            err=True,
+        )
+    _run_settings(
         _settings_from_ctx(ctx),
-        lambda c: {
-            "session": c.update_launch_settings(
-                session_id, account_profile_id=account_profile_id, restart=restart
-            )
-        },
+        session_id,
+        _SettingsOptions(account_profile_id=account_profile_id),
+        restart=restart,
+        dry_run=False,
+        legacy_output=True,
     )
 
 

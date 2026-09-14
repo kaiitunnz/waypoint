@@ -2740,12 +2740,27 @@ def _permission_mode_handler(
     backend: str,
     supports_inline: bool,
     modes: list[str],
+    transport: str | None = None,
+    interrupts: bool = False,
+    status: str = "idle",
 ) -> Any:
+    transport = transport or backend
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/sessions/s1":
             return httpx.Response(
-                200, json={"session": {"id": "s1", "backend": backend}}
+                200,
+                json={
+                    "session": {
+                        "id": "s1",
+                        "backend": backend,
+                        "transport": transport,
+                        "source": "managed",
+                        "status": status,
+                        "permission_mode": "default",
+                    }
+                },
             )
         if path == "/api/backends":
             return httpx.Response(
@@ -2754,12 +2769,26 @@ def _permission_mode_handler(
                     "backends": [
                         {
                             "id": backend,
-                            "capabilities": {
-                                "supports_set_permission_mode_inline": supports_inline,
+                            "transport_id": transport,
+                            "agent_capabilities": {
                                 "permission_modes": [{"id": m} for m in modes],
+                            },
+                            "transport_capabilities": {
+                                "supports_set_permission_mode_inline": supports_inline,
+                                "settings_change_interrupts_turn": interrupts,
                             },
                         }
                     ]
+                },
+            )
+        if path == "/api/sessions/s1/launch-settings":
+            return httpx.Response(
+                200,
+                json={
+                    "backend": backend,
+                    "transport": transport,
+                    "supports_launch_settings_with_restart": False,
+                    "transport_options": [],
                 },
             )
         if path == "/api/sessions/s1/mode":
@@ -3334,25 +3363,116 @@ def test_sessions_import_account_profile_in_body(
     assert body["account_profile_id"] == "work"
 
 
+def _launch_capable_handler(
+    state: dict[str, Any],
+    *,
+    backend: str = "codex",
+    transport: str = "codex_app_server",
+    account_profile_id: str | None = None,
+    status: str = "idle",
+    supports_launch: bool = True,
+    supports_account_profile: bool = True,
+    transport_options: list[dict[str, Any]] | None = None,
+    extra_caps: dict[str, Any] | None = None,
+    launch_view: dict[str, Any] | None = None,
+) -> Any:
+    """Handler serving the fetch trio + mutation endpoints `sessions settings`
+    (and its `set-account`/`mode` shims) drive against a launch-capable session.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/sessions/s1" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "session": {
+                        "id": "s1",
+                        "backend": backend,
+                        "transport": transport,
+                        "source": "managed",
+                        "status": status,
+                        "account_profile_id": account_profile_id,
+                        "permission_mode": "default",
+                        "model": None,
+                        "effort": None,
+                        "title": "t",
+                        "usage_limit_source": "plugin",
+                    }
+                },
+            )
+        if path == "/api/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "backends": [
+                        {
+                            "id": backend,
+                            "transport_id": transport,
+                            "agent_capabilities": {"permission_modes": []},
+                            "transport_capabilities": {**(extra_caps or {})},
+                        }
+                    ]
+                },
+            )
+        if path == "/api/sessions/s1/launch-settings" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json=launch_view
+                or {
+                    "backend": backend,
+                    "transport": transport,
+                    "account_profile_id": account_profile_id,
+                    "args": [],
+                    "config_overrides": [],
+                    "launch_env_keys": [],
+                    "protected_launch_env_keys": [],
+                    "supports_launch_settings_with_restart": supports_launch,
+                    "supports_account_profile_with_restart": supports_account_profile,
+                    "transport_options": transport_options or [],
+                },
+            )
+        if path == "/api/sessions/s1/launch-settings" and request.method == "PATCH":
+            body = json.loads(request.content)
+            state["patch_body"] = body
+            # The real API returns a redacted SessionRecord — env values never
+            # round-trip back to the client.
+            echoed = {
+                k: v
+                for k, v in body.items()
+                if k not in ("env_set", "env_unset", "restart")
+            }
+            return httpx.Response(
+                200,
+                json={"session": {"id": "s1", **echoed}},
+            )
+        if path == "/api/sessions/s1/title":
+            state["title_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "title": "new"}})
+        if path == "/api/sessions/s1/model":
+            state["model_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "model": "m"}})
+        if path == "/api/sessions/s1/effort":
+            state["effort_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "effort": "high"}})
+        if path == "/api/sessions/s1/usage-limit-source":
+            state["usage_body"] = json.loads(request.content)
+            return httpx.Response(
+                200, json={"session": {"id": "s1", "usage_limit_source": "plugin"}}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    return handler
+
+
 def test_sessions_set_account_patches_launch_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    state: dict[str, object] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if (
-            request.url.path == "/api/sessions/s1/launch-settings"
-            and request.method == "PATCH"
-        ):
-            body = json.loads(request.content)
-            state["patch_body"] = body
-            return httpx.Response(
-                200,
-                json={"session": {"id": "s1", "account_profile_id": "work"}},
-            )
-        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
-
-    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
     result = runner.invoke(
         app,
         [
@@ -3362,6 +3482,7 @@ def test_sessions_set_account_patches_launch_settings(
             "set-account",
             "s1",
             "work",
+            "--restart",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -3369,18 +3490,33 @@ def test_sessions_set_account_patches_launch_settings(
     assert json.loads(result.stdout)["session"]["account_profile_id"] == "work"
 
 
-def test_sessions_set_account_no_restart_flag(
+def test_sessions_set_account_without_restart_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    state: dict[str, object] = {}
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "set-account", "s1", "work"],
+    )
+    # A profile switch always restarts, so without --restart it is refused.
+    assert result.exit_code == 4
+    payload = json.loads(result.stdout)
+    assert payload["confirmation_required"] is True
+    assert "patch_body" not in state
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/sessions/s1/launch-settings":
-            state["patch_body"] = json.loads(request.content)
-            return httpx.Response(200, json={"session": {"id": "s1"}})
-        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
 
-    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+def test_sessions_set_account_no_restart_flag_is_deprecated_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
     result = runner.invoke(
         app,
         [
@@ -3393,10 +3529,257 @@ def test_sessions_set_account_no_restart_flag(
             "--no-restart",
         ],
     )
+    assert result.exit_code == 4
+    assert "deprecated" in result.output
+    assert "patch_body" not in state
+
+
+def _settings_invoke(tmp_path: Path, *args: str) -> Any:
+    return runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "settings", "s1", *args],
+    )
+
+
+def test_sessions_settings_requires_a_mutation_option(tmp_path: Path) -> None:
+    result = _settings_invoke(tmp_path)
+    assert result.exit_code == 2
+    assert "no settings to change" in result.output
+
+
+def test_sessions_settings_title_only_applies_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = _settings_invoke(tmp_path, "--title", "renamed")
     assert result.exit_code == 0, result.output
-    body = state["patch_body"]
-    assert isinstance(body, dict)
-    assert body["restart"] is False
+    payload = json.loads(result.stdout)
+    assert payload["applied"] == ["title"]
+    assert payload["plan"]["restart_count"] == 0
+    assert state["title_body"] == {"title": "renamed"}
+
+
+def test_sessions_settings_dry_run_never_mutates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = _settings_invoke(tmp_path, "--account-profile", "work", "--dry-run")
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["dry_run"] is True
+    assert payload["plan"]["restart_count"] == 1
+    assert "session" not in payload
+    assert "patch_body" not in state
+
+
+def test_sessions_settings_restart_required_refused_without_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = _settings_invoke(tmp_path, "--account-profile", "work")
+    assert result.exit_code == 4
+    payload = json.loads(result.stdout)
+    assert payload["confirmation_required"] is True
+    assert payload["remediation"] == "rerun with --restart"
+    assert "session" not in payload
+    assert "patch_body" not in state
+
+
+def test_sessions_settings_batches_restart_scoped_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = _settings_invoke(
+        tmp_path,
+        "--account-profile",
+        "work",
+        "--arg",
+        "--foo",
+        "--env",
+        "SECRET=topsecret",
+        "--restart",
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["applied"] == ["launch_settings"]
+    # One batched PATCH carries every restart-scoped edit.
+    assert state["patch_body"] == {
+        "restart": True,
+        "account_profile_id": "work",
+        "args": ["--foo"],
+        "env_set": {"SECRET": "topsecret"},
+    }
+    # The env VALUE never appears in the emitted JSON (plan/session/applied).
+    assert "topsecret" not in result.stdout
+
+
+def test_sessions_settings_rejects_transport_with_tuning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_launch_capable_handler(state)),
+    )
+    result = _settings_invoke(
+        tmp_path, "--transport", "tmux", "--model", "m", "--restart"
+    )
+    assert result.exit_code == 2
+    assert "cannot combine --transport" in result.output
+
+
+def test_sessions_settings_rejects_contradictory_model_flags(tmp_path: Path) -> None:
+    result = _settings_invoke(tmp_path, "--model", "m", "--clear-model")
+    assert result.exit_code == 2
+    assert "only one of" in result.output
+
+
+def test_sessions_settings_inline_model_change_no_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    handler = _launch_capable_handler(
+        state, extra_caps={"supports_set_model_inline": True}
+    )
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = _settings_invoke(tmp_path, "--model", "gpt-5.4")
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["applied"] == ["model"]
+    assert payload["plan"]["restart_count"] == 0
+    assert state["model_body"] == {"model": "gpt-5.4"}
+
+
+def test_sessions_settings_interrupting_pair_model_needs_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    handler = _launch_capable_handler(
+        state,
+        status="running",
+        extra_caps={
+            "supports_set_model_with_restart": True,
+            "settings_change_interrupts_turn": True,
+        },
+    )
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    refused = _settings_invoke(tmp_path, "--model", "gpt-5.4")
+    assert refused.exit_code == 4
+    refused_payload = json.loads(refused.stdout)
+    assert refused_payload["plan"]["will_interrupt_turn"] is True
+    assert "model_body" not in state
+
+    applied = _settings_invoke(tmp_path, "--model", "gpt-5.4", "--restart")
+    assert applied.exit_code == 0, applied.output
+    assert state["model_body"] == {"model": "gpt-5.4"}
+
+
+def test_sessions_settings_partial_success_reports_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    base = _launch_capable_handler(
+        state, extra_caps={"supports_set_model_inline": True}
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/model":
+            return httpx.Response(400, json={"detail": "model rejected"})
+        return base(request)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = _settings_invoke(tmp_path, "--title", "renamed", "--model", "bad")
+    # Title succeeded, model failed; earlier success is preserved, no rollback.
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["applied"] == ["title"]
+    assert "error" in payload
+    assert state["title_body"] == {"title": "renamed"}
+
+
+def test_sessions_settings_rejects_attached_tmux_launch_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+    handler = _launch_capable_handler(
+        state,
+        supports_launch=False,
+        launch_view={
+            "backend": "codex",
+            "transport": "tmux",
+            "supports_launch_settings_with_restart": False,
+            "transport_options": [],
+        },
+    )
+
+    def attached(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "session": {
+                        "id": "s1",
+                        "backend": "codex",
+                        "transport": "tmux",
+                        "source": "attached_tmux",
+                        "status": "idle",
+                        "account_profile_id": None,
+                        "title": "t",
+                    }
+                },
+            )
+        return handler(request)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(attached))
+    result = _settings_invoke(tmp_path, "--arg", "--foo", "--restart")
+    assert result.exit_code == 2
+    assert "attached tmux" in result.output
+
+
+def test_sessions_settings_rejects_assistant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "session": {
+                        "id": "s1",
+                        "backend": "claude_code",
+                        "transport": "claude_code",
+                        "source": "assistant",
+                        "status": "idle",
+                        "title": "t",
+                    }
+                },
+            )
+        if request.url.path == "/api/backends":
+            return httpx.Response(200, json={"backends": []})
+        if request.url.path == "/api/sessions/s1/launch-settings":
+            return httpx.Response(200, json={"transport_options": []})
+        return httpx.Response(404, json={"detail": "x"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = _settings_invoke(tmp_path, "--title", "x")
+    assert result.exit_code == 2
+    assert "personal assistant" in result.output
 
 
 def test_sessions_launch_settings_emits_get(

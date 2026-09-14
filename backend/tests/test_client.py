@@ -53,6 +53,15 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                     200,
                     json={"session": {"id": "s1", "account_profile_id": "work"}},
                 )
+        if request.url.path == "/api/sessions/s1/title" and request.method == "PATCH":
+            state["title_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "title": "new"}})
+        if request.url.path == "/api/sessions/s1/model" and request.method == "POST":
+            state["model_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "model": "m"}})
+        if request.url.path == "/api/sessions/s1/effort" and request.method == "POST":
+            state["effort_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "effort": "e"}})
         if request.url.path == "/api/backends" and request.method == "GET":
             return httpx.Response(
                 200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
@@ -479,6 +488,48 @@ def test_update_launch_settings_sends_only_set_fields(
         "account_profile_id": "work",
     }
     assert session["account_profile_id"] == "work"
+
+
+def test_update_launch_settings_omits_unset_account_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.update_launch_settings("s1", args=["--x"], restart=True)
+    # No account_profile_id argument ⇒ the key is absent (leave unchanged), not
+    # sent as null.
+    assert "account_profile_id" not in state["launch_settings_body"]
+    assert state["launch_settings_body"] == {"restart": True, "args": ["--x"]}
+
+
+def test_update_launch_settings_sends_explicit_null_account_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.update_launch_settings("s1", account_profile_id=None, restart=True)
+    # An explicit None clears the profile: the key is present with a JSON null,
+    # distinct from omission (the runtime keys the clear off model_fields_set).
+    assert "account_profile_id" in state["launch_settings_body"]
+    assert state["launch_settings_body"]["account_profile_id"] is None
+
+
+def test_set_title_model_effort_post_bodies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.set_title("s1", "new")
+        client.set_model("s1", "gpt-5.4")
+        client.set_model("s1", None)
+        client.set_effort("s1", None)
+    assert state["title_body"] == {"title": "new"}
+    # A None model/effort serialises as JSON null to clear the override.
+    assert state["model_body"] == {"model": None}
+    assert state["effort_body"] == {"effort": None}
 
 
 def test_send_input_uploads_attachments_and_sends_ids(

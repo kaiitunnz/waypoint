@@ -1140,6 +1140,10 @@ export async function createMessageSchedule(
     cron?: string | null;
     timezone?: string | null;
     startAt?: string | null;
+    trigger?: "time" | "idle" | null;
+    idleBatchMode?: "with_previous" | "next_cycle" | null;
+    command?: SessionCommandInvocation | null;
+    attachments?: string[] | null;
   } = {},
 ): Promise<MessageSchedule> {
   const body: Record<string, unknown> = { text, submit: options.submit ?? true };
@@ -1148,6 +1152,11 @@ export async function createMessageSchedule(
   if (options.cron != null) body.cron = options.cron;
   if (options.timezone != null) body.timezone = options.timezone;
   if (options.startAt != null) body.start_at = options.startAt;
+  if (options.trigger != null) body.trigger = options.trigger;
+  if (options.idleBatchMode != null) body.idle_batch_mode = options.idleBatchMode;
+  if (options.command != null) body.command = options.command;
+  if (options.attachments != null && options.attachments.length)
+    body.attachments = options.attachments;
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/message-schedules`,
     {

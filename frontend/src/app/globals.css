@@ -7347,6 +7347,83 @@ html[data-theme="light"] .composer-send {
   box-shadow: none;
 }
 
+/* Delayed-hover / long-press send menu. The send button keeps its click =
+ * Send now; a short hold (or ArrowDown/Space with the button focused) opens a
+ * floating glass menu above it with the idle-delivery choices. The wrap takes
+ * over the button's absolute anchoring so hovering the button or the menu is
+ * one region (no gap that would dismiss it). */
+.composer-send-wrap {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+}
+.composer-send-wrap .composer-send {
+  position: static;
+}
+.composer-send-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  min-width: 236px;
+  max-width: min(300px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  display: grid;
+  gap: 3px;
+  z-index: 40;
+}
+/* Invisible bridge across the 8px gap so moving the pointer from the button up
+ * into the menu stays within one hover region (no dismiss mid-transit). */
+.composer-send-menu::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+}
+.composer-send-menu-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.composer-send-menu-item:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.composer-send-menu-item:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-line));
+}
+.composer-send-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.composer-send-menu-title {
+  font-size: 0.9rem;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+.composer-send-menu-desc {
+  font-size: 0.76rem;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
 /* On phones the ⊕ menu and the control popover become full-width sheets that
  * rise from just above the composer. They must anchor to `.composer` (not the
  * trigger), so the trigger wrappers go `position: static` and the sheet is

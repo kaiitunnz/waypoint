@@ -6,6 +6,7 @@ import {
   ClipboardEvent,
   DragEvent,
   KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
   memo,
   startTransition,
   useCallback,
@@ -24,6 +25,7 @@ import {
   cloneSession,
   connectSessionSocket,
   connectTerminalSocket,
+  createMessageSchedule,
   deleteSession as deleteSessionRequest,
   fetchBackendModels,
   fetchEvents,
@@ -2550,6 +2552,14 @@ const ReplyComposer = memo(function ReplyComposer({
   const attachments = useAttachments({ host, token, sessionId, onError });
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  // Delayed-hover / long-press send menu (Send now / idle-delivery choices).
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const [idleSending, setIdleSending] = useState(false);
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sendMenuRef = useRef<HTMLDivElement | null>(null);
+  const sendMenuItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const sendHoverTimer = useRef<number | null>(null);
+  const sendTouchLongPress = useRef(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
@@ -2714,6 +2724,31 @@ const ReplyComposer = memo(function ReplyComposer({
     };
   }, [tuneOpen]);
 
+  // A touch-opened send menu has no pointerleave to dismiss it; close on an
+  // outside pointerdown. Escape is handled on the trigger/menu directly.
+  useEffect(() => {
+    if (!sendMenuOpen) {
+      return;
+    }
+    function onPointer(event: PointerEvent) {
+      const wrap = sendButtonRef.current?.parentElement;
+      if (wrap && wrap.contains(event.target as Node)) return;
+      setSendMenuOpen(false);
+    }
+    window.addEventListener("pointerdown", onPointer);
+    return () => window.removeEventListener("pointerdown", onPointer);
+  }, [sendMenuOpen]);
+
+  // Drop a pending hover/long-press timer if the composer unmounts mid-delay.
+  useEffect(
+    () => () => {
+      if (sendHoverTimer.current !== null) {
+        window.clearTimeout(sendHoverTimer.current);
+      }
+    },
+    [],
+  );
+
   async function handleSend() {
     const text = draft.trim();
     const attachmentIds = attachments.readyIds;
@@ -2739,6 +2774,164 @@ const ReplyComposer = memo(function ReplyComposer({
       }
     } finally {
       setSending(false);
+    }
+  }
+
+  // Queue the current draft as an idle-triggered message. Mirrors handleSend's
+  // command + ready-attachment resolution, but the composer only clears on a
+  // successful create so a failed queue keeps the draft intact.
+  async function handleIdleSend(mode: "with_previous" | "next_cycle") {
+    const text = draft.trim();
+    const attachmentIds = attachments.readyIds;
+    if ((!text && attachmentIds.length === 0) || attachments.uploading) {
+      return;
+    }
+    setSendMenuOpen(false);
+    setIdleSending(true);
+    const invocation = selectedCommandInvocation(text);
+    try {
+      await createMessageSchedule(host, token, sessionId, text, {
+        submit: true,
+        trigger: "idle",
+        idleBatchMode: mode,
+        command: invocation ?? null,
+        attachments: attachmentIds,
+      });
+      setDraft("");
+      resetCompletions();
+      attachments.clear();
+      onScheduled?.();
+    } catch (err) {
+      onError(
+        err instanceof Error ? err.message : "failed to queue idle message",
+      );
+    } finally {
+      setIdleSending(false);
+      textareaRef.current?.focus();
+    }
+  }
+
+  const idleActions = [
+    {
+      key: "now" as const,
+      title: "Send now",
+      desc: "Send immediately.",
+      run: () => void handleSend(),
+    },
+    {
+      key: "with_previous" as const,
+      title: "Send with queued messages",
+      desc: "Join the next idle batch.",
+      run: () => void handleIdleSend("with_previous"),
+    },
+    {
+      key: "next_cycle" as const,
+      title: "Send next idle cycle",
+      desc: "Wait for the following idle point.",
+      run: () => void handleIdleSend("next_cycle"),
+    },
+  ];
+
+  const sendDisabled =
+    disabled ||
+    sending ||
+    idleSending ||
+    attachments.uploading ||
+    (!draft.trim() && attachments.readyIds.length === 0);
+
+  function openSendMenu(focusFirst: boolean) {
+    if (sendDisabled) {
+      return;
+    }
+    setSendMenuOpen(true);
+    if (focusFirst) {
+      // Defer to after the menu mounts, then focus its first action.
+      requestAnimationFrame(() => sendMenuItemRefs.current[0]?.focus());
+    }
+  }
+
+  function closeSendMenu(refocusTrigger: boolean) {
+    setSendMenuOpen(false);
+    if (refocusTrigger) {
+      sendButtonRef.current?.focus();
+    }
+  }
+
+  function clearHoverTimer() {
+    if (sendHoverTimer.current !== null) {
+      window.clearTimeout(sendHoverTimer.current);
+      sendHoverTimer.current = null;
+    }
+  }
+
+  function handleSendPointerEnter(event: ReactPointerEvent<HTMLDivElement>) {
+    // Hover-to-reveal is a mouse affordance; touch uses the long-press below.
+    if (event.pointerType !== "mouse" || sendDisabled) {
+      return;
+    }
+    clearHoverTimer();
+    sendHoverTimer.current = window.setTimeout(() => openSendMenu(false), 450);
+  }
+
+  function handleSendPointerLeave(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+    clearHoverTimer();
+    setSendMenuOpen(false);
+  }
+
+  function handleSendPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.pointerType !== "touch" || sendDisabled) {
+      return;
+    }
+    sendTouchLongPress.current = false;
+    clearHoverTimer();
+    sendHoverTimer.current = window.setTimeout(() => {
+      // A held touch opens the menu and suppresses this gesture's tap-send.
+      sendTouchLongPress.current = true;
+      openSendMenu(false);
+    }, 450);
+  }
+
+  function handleSendPointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+    clearHoverTimer();
+  }
+
+  function handleSendClick() {
+    // Swallow the click that ends a long-press (it already opened the menu).
+    if (sendTouchLongPress.current) {
+      sendTouchLongPress.current = false;
+      return;
+    }
+    void handleSend();
+  }
+
+  function handleSendButtonKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === " ") {
+      event.preventDefault();
+      openSendMenu(true);
+    } else if (event.key === "Escape" && sendMenuOpen) {
+      event.preventDefault();
+      closeSendMenu(true);
+    }
+  }
+
+  function handleSendMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const items = sendMenuItemRefs.current.filter(Boolean);
+    const current = items.findIndex((el) => el === document.activeElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSendMenu(true);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      items[(current + 1 + items.length) % items.length]?.focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(current - 1 + items.length) % items.length]?.focus();
     }
   }
 
@@ -3455,23 +3648,57 @@ const ReplyComposer = memo(function ReplyComposer({
             <span>Drop to attach</span>
           </div>
         ) : null}
-        <button
-          type="button"
-          className="composer-send"
-          onClick={() => void handleSend()}
-          disabled={
-            disabled ||
-            sending ||
-            attachments.uploading ||
-            (!draft.trim() && attachments.readyIds.length === 0)
-          }
-          aria-label="Send"
-          title="Send (⌘/Ctrl + ↵)"
+        <div
+          className="composer-send-wrap"
+          onPointerEnter={handleSendPointerEnter}
+          onPointerLeave={handleSendPointerLeave}
         >
-          <span className="composer-send-glyph" aria-hidden>
-            {sending ? "…" : "↑"}
-          </span>
-        </button>
+          <button
+            ref={sendButtonRef}
+            type="button"
+            className="composer-send"
+            onClick={handleSendClick}
+            onPointerDown={handleSendPointerDown}
+            onPointerUp={handleSendPointerUp}
+            onPointerCancel={handleSendPointerUp}
+            onKeyDown={handleSendButtonKeyDown}
+            disabled={sendDisabled}
+            aria-label="Send"
+            aria-haspopup="menu"
+            aria-expanded={sendMenuOpen}
+            title="Send (⌘/Ctrl + ↵) — hold for delivery options"
+          >
+            <span className="composer-send-glyph" aria-hidden>
+              {sending || idleSending ? "…" : "↑"}
+            </span>
+          </button>
+          {sendMenuOpen ? (
+            <div
+              ref={sendMenuRef}
+              className="composer-send-menu"
+              role="menu"
+              aria-label="Send options"
+              onKeyDown={handleSendMenuKeyDown}
+            >
+              {idleActions.map((action, index) => (
+                <button
+                  key={action.key}
+                  ref={(el) => {
+                    sendMenuItemRefs.current[index] = el;
+                  }}
+                  type="button"
+                  role="menuitem"
+                  className="composer-send-menu-item"
+                  onClick={action.run}
+                  disabled={sendDisabled}
+                >
+                  <span className="composer-send-menu-title">{action.title}</span>
+                  <span className="composer-send-menu-desc">{action.desc}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
         {suggestionsOpen ? (
           <CommandSuggestions
             ref={suggestionsRef}

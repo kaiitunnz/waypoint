@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.19.0](https://github.com/kaiitunnz/waypoint/compare/v0.18.0...v0.19.0) (2026-09-14)
+
+
+### Features
+
+* add agent-safe sessions settings CLI command ([#441](https://github.com/kaiitunnz/waypoint/issues/441)) ([0feec4f](https://github.com/kaiitunnz/waypoint/commit/0feec4f50ec0f91761e7a1c43e12ef64a22824d1))
+* send a message at the next idle point ([#444](https://github.com/kaiitunnz/waypoint/issues/444)) ([d95cd04](https://github.com/kaiitunnz/waypoint/commit/d95cd0421249615aa4ea1dfcbc97df0823af8d0b))
+
+
+### Bug Fixes
+
+* auto-dismiss Claude auto-mode teaching popup in claude_tty ([#443](https://github.com/kaiitunnz/waypoint/issues/443)) ([e36626a](https://github.com/kaiitunnz/waypoint/commit/e36626a756c8bb632e51db054453833f1d48728e))
+* retain manager spec writer until spec approval ([#442](https://github.com/kaiitunnz/waypoint/issues/442)) ([b851cfb](https://github.com/kaiitunnz/waypoint/commit/b851cfbab56aba91e3846793bdb8ada5b0a9a4cb))
+* tolerate completed Codex sub-agent activity kind on restore ([#439](https://github.com/kaiitunnz/waypoint/issues/439)) ([4a1999e](https://github.com/kaiitunnz/waypoint/commit/4a1999e13298151cc9cc5c618494f62048c1d08f))
+
 ## [0.18.0](https://github.com/kaiitunnz/waypoint/compare/v0.17.0...v0.18.0) (2026-09-12)
 
 

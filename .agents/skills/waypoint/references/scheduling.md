@@ -62,6 +62,38 @@ The target session must already exist. `--no-submit` queues the text into the
 session's input without auto-submitting it (the default submits). A record moves
 `pending → sent | cancelled | failed`.
 
+## Send at the next idle point
+
+Instead of a clock time, a message can wait until the target session is next
+idle — for a follow-up that should be considered only after the current turn
+finishes, rather than interrupting it.
+
+```bash
+waypoint schedule message create <session-id> "run the focused tests" --when-idle --idle-batch with-previous
+waypoint schedule message create <session-id> "review the result after that" --when-idle --idle-batch next-cycle
+```
+
+`--when-idle` holds the message until the session's canonical status is `idle`,
+delivering immediately when it already is. It is mutually exclusive with every
+timing flag (`--delay-seconds`, `--scheduled-at`, `--cron`, `--timezone`,
+`--start-at`); `--idle-batch` requires `--when-idle`.
+
+Delivery is server-owned and FIFO by batch. `--idle-batch` chooses which batch
+this message joins:
+
+- `with-previous` — join the imminent next-idle batch (or start it when none is
+  pending). All messages in a batch are offered together at that one idle point,
+  in creation order.
+- `next-cycle` (default) — queue a batch after the current one, so it waits for
+  the *following* idle point. Requested while the session is already idle, it
+  waits for the next fresh idle transition rather than the current one.
+
+`idle` is never `waiting_input`: an approval or question is not a safe idle
+point and never receives a queued message. A message for an `exited`/`error`
+session is refused (409). Pending idle records show as **When idle** in the
+schedule dock and panel — their listed timestamp is the enqueue time, not a
+delivery estimate.
+
 ## Notes
 
 - Prefer JSON output and read back the assigned schedule id from the response

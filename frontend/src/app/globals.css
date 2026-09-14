@@ -7325,6 +7325,11 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   color: #0c0f15;
   background: var(--accent);
   font-size: 0.98rem;
+  /* A long-press to open the send menu must not text-select the glyph or fire
+   * the mobile callout menu. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   transition:
     background 200ms ease,
     filter 140ms ease,
@@ -11481,13 +11486,24 @@ html[data-theme="light"] .schedule-msg-preview {
   padding: 0 12px;
   font-size: 0.7rem;
 }
+/* The idle-batch group mirrors the timed mode's .recurrence__section — a
+ * bordered card holding a full-width, equal-split picker — so the two trigger
+ * modes read as siblings. */
 .schedule-msg-idle {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+}
+.schedule-msg-idle-batch {
+  display: flex;
+  width: 100%;
+  background: transparent;
 }
 .schedule-msg-idle-batch .segmented-item {
-  min-height: 30px;
-  font-size: 0.78rem;
+  flex: 1;
 }
 .schedule-msg-idle-hint {
   margin: 0;

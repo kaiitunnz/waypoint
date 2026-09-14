@@ -145,12 +145,11 @@ waypoint sessions approve <id> <decision> [--text T] [--approval-id A]
 Output is JSON. The same `WaypointClient` (in `waypoint.client`) backs the CLI
 and can be imported directly.
 
-`sessions settings` mirrors the Session settings editor for a non-assistant
-session: it builds the same capability-aware plan and refuses a restart-required
-change without explicit `--restart` (exit `4`, no mutation) rather than blocking
-on a prompt. Run it with `--dry-run` first to inspect the plan (restart count,
-whether a running turn is interrupted), then re-run with `--restart` once the
-restart is approved. See the `waypoint` skill's `sessions-settings` reference.
+`sessions settings` changes a non-assistant session's settings from the same
+capability-aware plan as the web editor. A restart-required change is refused
+without `--restart` (exit `4`, no mutation); inspect the plan with `--dry-run`
+first, then re-run with `--restart`. See the `waypoint` skill's
+`sessions-settings` reference.
 
 ### Authentication
 

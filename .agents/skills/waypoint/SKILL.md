@@ -29,9 +29,8 @@ trusting any flag list reproduced in this skill.
   `references/sessions-steer.md`.
 - Change a session's settings (title, permission mode, model/effort, account
   profile, launch args/config/env, usage source) with `waypoint sessions
-  settings` — a non-interactive, capability-aware change that refuses a
-  restart-required plan without `--restart` (exit 4) instead of blocking: see
-  `references/sessions-settings.md`.
+  settings` — non-interactive, and refuses a restart-required plan without
+  `--restart` (exit 4): see `references/sessions-settings.md`.
 - Schedule a session launch or a message for later (deferred, server-side): see
   `references/scheduling.md`.
 - Respond to approval requests or answer a session's question: see

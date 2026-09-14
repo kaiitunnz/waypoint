@@ -87,19 +87,11 @@ The command validates `<mode>` against the backend's advertised ids and reports
 them on a mismatch. Backends that can't change mode live are rejected cleanly —
 for those, reap and respawn remains the only path.
 
-**The Emulated (`claude_tty`) transport applies the mode by restarting the
-pane**, which interrupts a running turn. There the command is capability-aware:
-without `--restart` it prints a `confirmation_required` plan and exits `4`
-without mutating. Inspect it first, then apply once the restart is acceptable:
-
-```bash
-waypoint sessions mode <child-id> <mode> --dry-run   # inspect: restart_count, will_interrupt_turn
-waypoint sessions mode <child-id> <mode> --restart   # apply (restarts a claude_tty child)
-```
-
-Structured (non-TTY) pairs still apply the mode inline with no `--restart`. See
-the `waypoint` skill's `references/sessions-settings.md` for the full settings
-surface and exit-code table.
+Structured pairs apply the mode inline. An Emulated (`claude_tty`) child applies
+it by restarting the pane, which interrupts a running turn, so there the command
+is refused without `--restart` (exit `4`, no mutation) — inspect with
+`--dry-run`, then re-run with `--restart`. See the `waypoint` skill's
+`references/sessions-settings.md`.
 
 ## Service a child's approvals
 

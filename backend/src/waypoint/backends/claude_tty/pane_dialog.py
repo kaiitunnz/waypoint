@@ -26,6 +26,7 @@ class PaneScreen(StrEnum):
     TRUST = "trust"
     MODEL_SELECTOR = "model_selector"
     EFFORT_POPUP = "effort_popup"
+    AUTO_MODE_TEACHING = "auto_mode_teaching"
     OTHER = "other"
 
 
@@ -61,6 +62,16 @@ _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
 _EFFORT_MARKER = "Effort"
+# The first-run "Teach auto mode about your environment?" consent modal. Its
+# footer resembles the effort popup's ("←/→ … · Enter … · Esc to cancel") but
+# reads "change usage" / "continue", and it gates on consent to scan shell
+# history and other repos — so it must stay a distinct screen with its own Esc
+# handling, never folded into EFFORT_POPUP. Both the title and the complete
+# footer are required: the exact dual anchor is the safety boundary that keeps
+# an adjacent TUI screen (or a transcript that merely quotes one line) from
+# being cancelled by accident.
+_AUTO_MODE_TEACHING_TITLE = "Teach auto mode about your environment?"
+_AUTO_MODE_TEACHING_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
 _TRUST_MARKER = "Is this a project you created or one you trust?"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
@@ -290,6 +301,10 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _EFFORT_MARKER
     ):
         return PaneScreen.EFFORT_POPUP
+    if _contains(region, compact, _AUTO_MODE_TEACHING_TITLE) and _contains(
+        region, compact, _AUTO_MODE_TEACHING_FOOTER
+    ):
+        return PaneScreen.AUTO_MODE_TEACHING
     return PaneScreen.OTHER
 
 

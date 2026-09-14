@@ -53,11 +53,8 @@ _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
-# Popups the tailer cancels with a single Escape after the stability debounce.
-# The AskUserQuestion Esc flushes the withheld tool_use to the transcript so the
-# normalizer can surface it; the auto-mode teaching Esc simply cancels a consent
-# modal (there is nothing to surface). Messages are fixed and never interpolate
-# pane contents, which can reference personal environment data.
+# Popups cancelled with one Escape after the debounce. The message is fixed —
+# never interpolate pane contents, which can hold personal environment data.
 _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
     pane_dialog.PaneScreen.QUESTION: "dismissing AskUserQuestion popup to surface it",
     pane_dialog.PaneScreen.AUTO_MODE_TEACHING: (
@@ -117,12 +114,9 @@ class TranscriptTailer:
         # until the dialog leaves the screen so a response that clears pending
         # before the pane redraws cannot trigger a duplicate emit.
         self._surfaced_sig: str | None = None
-        # The screen kind we have already Esc-dismissed for its current
-        # appearance (AskUserQuestion or the auto-mode teaching popup), so the
-        # dismissal fires once per appearance; reset when the pane leaves that
-        # screen. Keying on the screen kind (rather than a per-screen bool) lets
-        # one popup replace another without a stale latch suppressing the second
-        # Escape.
+        # Screen kind already Esc-dismissed this appearance. Keyed on the kind
+        # (not a bool) so one popup replacing another does not suppress the next
+        # Escape; reset when the pane leaves the screen.
         self._dismissed_screen: pane_dialog.PaneScreen | None = None
 
     async def _drain(self, *, force: bool = False) -> None:
@@ -326,20 +320,10 @@ class TranscriptTailer:
             return
 
         if screen_type in _ESC_DISMISS_LOG:
-            # Two popups are auto-cancelled with a single Escape after the
-            # stability debounce, sharing one lifecycle:
-            #   - AskUserQuestion withholds its structured questions from the
-            #     transcript until resolved, so it is invisible to the tailer
-            #     while it blocks the turn. Esc flushes the full tool_use record
-            #     to the JSONL; the normalizer surfaces it as an answerable card
-            #     (and swallows the resulting "user rejected" result). The answer
-            #     is delivered later as a normal user turn via answer_question.
-            #   - The auto-mode teaching consent modal blocks message injection
-            #     until dismissed; Esc takes its explicit cancel path without
-            #     consenting to any environment scan. Nothing is surfaced.
-            # The screen's ``value`` is the stable debounce signature, so a
-            # changed screen resets the count; the per-appearance latch keys on
-            # the screen kind so one Esc fires per appearance.
+            # Esc both popups once, after the debounce. For AskUserQuestion the
+            # Esc flushes the withheld tool_use so the normalizer can surface it
+            # as a card; for the auto-mode modal it takes the modal's cancel
+            # path. Neither consents to anything nor is surfaced further.
             sig = screen_type.value
             if self._prev_dialog_sig == sig:
                 self._dialog_stable_count += 1

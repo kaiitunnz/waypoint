@@ -62,14 +62,9 @@ _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
 _EFFORT_MARKER = "Effort"
-# The first-run "Teach auto mode about your environment?" consent modal. Its
-# footer resembles the effort popup's ("←/→ … · Enter … · Esc to cancel") but
-# reads "change usage" / "continue", and it gates on consent to scan shell
-# history and other repos — so it must stay a distinct screen with its own Esc
-# handling, never folded into EFFORT_POPUP. Both the title and the complete
-# footer are required: the exact dual anchor is the safety boundary that keeps
-# an adjacent TUI screen (or a transcript that merely quotes one line) from
-# being cancelled by accident.
+# The first-run auto-mode consent modal. Title and full footer are both required
+# to classify: the footer's "Esc to cancel" is shared with other dialogs, so the
+# title is what keeps an adjacent screen from being cancelled by a partial match.
 _AUTO_MODE_TEACHING_TITLE = "Teach auto mode about your environment?"
 _AUTO_MODE_TEACHING_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
 _TRUST_MARKER = "Is this a project you created or one you trust?"

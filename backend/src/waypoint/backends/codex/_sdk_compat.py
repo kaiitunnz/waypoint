@@ -19,18 +19,32 @@ The ``ReasoningEffort`` enum grows in practice (codex 0.144.0 added ``max`` and
 ``ultra``), but the SDK's own ``ReasoningEffort`` is now an open ``str`` enum
 whose ``_missing_`` preserves any unknown string value, so no shim is needed.
 
+``SubAgentActivityKind`` -- the nested enum of the *known* ``subAgentActivity``
+item type. A newer CLI persists activities with ``kind: "completed"``, a member
+the pinned closed enum (``started``/``interacted``/``interrupted``) lacks. Since
+the item type itself is modeled, the ``ThreadItem`` union tolerance above does
+not (and must not) catch it -- it deliberately rejects known type literals -- so
+the stale enum alone fails ``thread/resume`` validation and reattach returns 400.
+We tolerate the single evidenced value ``completed`` via an enum ``_missing_``
+fallback; every other unknown value stays rejected. This is distinct from the
+unknown-item-*type* tolerance: it widens one nested enum of a known item, not the
+item union.
+
 The shim is scoped deliberately -- a genuinely malformed response still fails
-loudly. Remove this module once the pinned SDK's ``ThreadItem`` union catches up
-to the CLI.
+loudly. Remove the ``ThreadItem`` widening once the pinned SDK's union catches up
+to the CLI, and the ``SubAgentActivityKind`` fallback once the pinned SDK models
+``completed`` natively (the installer is already inert in that case).
 """
 
 import typing
 
 import openai_codex.generated.v2_all as _v2
-from openai_codex.generated.v2_all import ThreadItem
+from openai_codex.generated.v2_all import SubAgentActivityKind, ThreadItem
 from pydantic import BaseModel, ConfigDict, model_validator
 
 _THREAD_ITEM_SENTINEL = "_waypoint_thread_item_tolerant"
+_ACTIVITY_KIND_SENTINEL = "_waypoint_activity_kind_tolerant"
+_TOLERATED_ACTIVITY_KIND = "completed"
 
 
 def _known_thread_item_types(union: typing.Any) -> frozenset[str]:
@@ -194,4 +208,39 @@ def install_thread_item_tolerance() -> None:
     setattr(ThreadItem, _THREAD_ITEM_SENTINEL, True)
 
 
+def install_activity_kind_tolerance() -> None:
+    """Tolerate ``SubAgentActivityKind.completed`` from a CLI ahead of the SDK.
+
+    Idempotent and inert when the pinned SDK already models ``completed``. The
+    fallback mints a valid enum member *only* for the exact string
+    ``"completed"`` and delegates every other value to the SDK's original
+    ``_missing_`` (base ``Enum._missing_`` -> ``None`` -> ``ValueError``), so all
+    other unknown, empty, and non-string kinds stay strictly rejected. Enum
+    membership is consulted at validation time, so no generated-model rebuild is
+    needed -- unlike the ``ThreadItem`` union widening above.
+    """
+    if any(member.value == _TOLERATED_ACTIVITY_KIND for member in SubAgentActivityKind):
+        return
+    if getattr(SubAgentActivityKind, _ACTIVITY_KIND_SENTINEL, False):
+        return
+
+    original_missing = SubAgentActivityKind._missing_.__func__  # type: ignore[attr-defined]
+
+    def _missing_(cls: type[SubAgentActivityKind], value: object) -> object:
+        if value == _TOLERATED_ACTIVITY_KIND:
+            # ``SubAgentActivityKind`` is a plain (non-str) ``Enum``, so a pseudo
+            # member is built with ``object.__new__`` rather than ``str.__new__``.
+            # ``_value_`` carries the wire string so ``model_dump(mode="json")``
+            # re-emits ``"completed"``.
+            member = object.__new__(cls)
+            member._name_ = _TOLERATED_ACTIVITY_KIND
+            member._value_ = _TOLERATED_ACTIVITY_KIND
+            return member
+        return original_missing(cls, value)
+
+    SubAgentActivityKind._missing_ = classmethod(_missing_)  # type: ignore[assignment]
+    setattr(SubAgentActivityKind, _ACTIVITY_KIND_SENTINEL, True)
+
+
 install_thread_item_tolerance()
+install_activity_kind_tolerance()

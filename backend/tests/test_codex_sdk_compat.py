@@ -17,6 +17,8 @@ from openai_codex.generated.v2_all import (
     ItemStartedNotification,
     ModelListResponse,
     ReasoningEffort,
+    SubAgentActivityKind,
+    ThreadReadResponse,
     ThreadResumeResponse,
     ThreadStartResponse,
     Turn,
@@ -24,7 +26,10 @@ from openai_codex.generated.v2_all import (
 from pydantic import ValidationError
 
 import waypoint.backends.codex  # noqa: F401  (installs the shim on import)
-from waypoint.backends.codex._sdk_compat import install_thread_item_tolerance
+from waypoint.backends.codex._sdk_compat import (
+    install_activity_kind_tolerance,
+    install_thread_item_tolerance,
+)
 from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.codex.plugin import CodexPlugin, CodexPluginConfig
 
@@ -232,3 +237,84 @@ def test_unknown_notification_method_still_falls_back_to_unknown() -> None:
     # The shim must not tighten the notification method dispatch: a genuinely
     # unknown method still has no model and degrades to UnknownNotification.
     assert "waypoint/nonexistent/method" not in NOTIFICATION_MODELS
+
+
+# ── SubAgentActivityKind.completed tolerance ────────────────────────────────
+# A codex CLI ahead of the pinned SDK persists ``subAgentActivity`` items with
+# ``kind: "completed"`` -- a value the pinned closed enum
+# (started/interacted/interrupted) lacks. Because the item *type* is modeled,
+# the ThreadItem union tolerance above deliberately does not catch it, so the
+# stale enum alone failed ``thread/resume`` validation and made reattach 400.
+
+_COMPLETED_ACTIVITY = {
+    "type": "subAgentActivity",
+    "id": "item-subagent-1",
+    "agentPath": "/root/note21_grounding",
+    "agentThreadId": "thread-subagent-1",
+    "kind": "completed",
+}
+
+
+def test_completed_activity_kind_resolves_and_preserves_value() -> None:
+    assert SubAgentActivityKind("completed").value == "completed"
+
+
+def test_thread_resume_with_completed_activity_validates_and_round_trips() -> None:
+    # The exact response shape that raised ValidationError in production.
+    response = ThreadResumeResponse.model_validate(
+        _thread_resume_payload([_COMPLETED_ACTIVITY])
+    )
+    item = response.thread.turns[0].items[0]
+    assert type(item.root).__name__ == "SubAgentActivityThreadItem"
+    dumped = item.model_dump(mode="json", by_alias=True)
+    assert dumped["kind"] == "completed"
+    assert dumped["type"] == "subAgentActivity"
+
+
+def test_completed_activity_validates_in_thread_read_history() -> None:
+    # ThreadItem is embedded by every history-bearing response, not only resume.
+    payload = _thread_resume_payload([_COMPLETED_ACTIVITY])
+    response = ThreadReadResponse.model_validate({"thread": payload["thread"]})
+    item = response.thread.turns[0].items[0]
+    assert type(item.root).__name__ == "SubAgentActivityThreadItem"
+    assert item.model_dump(mode="json", by_alias=True)["kind"] == "completed"
+
+
+def test_completed_activity_validates_in_live_notification() -> None:
+    # ``item/started`` carries a ThreadItem and drives every live turn.
+    notification = ItemStartedNotification.model_validate(
+        {
+            "itemId": "item-subagent-1",
+            "startedAtMs": 1,
+            "threadId": "th-1",
+            "turnId": "turn-1",
+            "item": _COMPLETED_ACTIVITY,
+        }
+    )
+    dumped = notification.model_dump(mode="json", by_alias=True)
+    assert dumped["item"]["kind"] == "completed"
+
+
+def test_unknown_activity_kind_still_fails_loudly() -> None:
+    # Only ``completed`` is tolerated; other unmodeled kinds stay rejected so a
+    # genuine schema mismatch is not silently accepted.
+    bad = {**_COMPLETED_ACTIVITY, "kind": "paused"}
+    with pytest.raises(ValidationError):
+        Turn.model_validate({"id": "t", "status": "completed", "items": [bad]})
+    for value in ("paused", "", "COMPLETED"):
+        with pytest.raises(ValueError):
+            SubAgentActivityKind(value)
+
+
+def test_completed_activity_missing_required_field_still_fails() -> None:
+    # The known item model stays strict: dropping a required field must fail,
+    # not degrade to the unknown-item fallback.
+    incomplete = {k: v for k, v in _COMPLETED_ACTIVITY.items() if k != "agentPath"}
+    with pytest.raises(ValidationError):
+        Turn.model_validate({"id": "t", "status": "completed", "items": [incomplete]})
+
+
+def test_activity_kind_tolerance_is_idempotent() -> None:
+    install_activity_kind_tolerance()
+    install_activity_kind_tolerance()
+    assert SubAgentActivityKind("completed").value == "completed"

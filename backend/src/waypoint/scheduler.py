@@ -394,8 +394,7 @@ class Scheduler:
 
     def _register_attachment_references(self, record: ScheduledMessageRecord) -> None:
         """Pin a pending schedule's attachments against the orphan sweep until it
-        resolves. Applies to every message schedule, closing the durability gap
-        for the API's ``attachments`` field, not only idle ones."""
+        resolves."""
         if not record.attachments:
             return
         self._runtime.attachments.mark_schedule_references(
@@ -408,10 +407,6 @@ class Scheduler:
         self._runtime.attachments.release_schedule_references(
             record.session_id, record.id, list(record.attachments)
         )
-
-    def wake(self) -> None:
-        """Backend-neutral scheduler wake used by runtime idle notifications."""
-        self._wakeup.set()
 
     def notify_idle(self, session_id: str, idle_at: datetime) -> None:
         """A normalized event reports ``session_id`` is idle at ``idle_at``.
@@ -476,8 +471,6 @@ class Scheduler:
         delta = (soonest - datetime.now(UTC)).total_seconds()
         if delta <= 0:
             return 0.5
-        # A pending idle record already caps the wait at POLL_INTERVAL below, so
-        # no separate branch is needed once at least one timed record exists.
         return min(delta, POLL_INTERVAL_SECONDS)
 
     async def _fire_due_schedules(self) -> None:

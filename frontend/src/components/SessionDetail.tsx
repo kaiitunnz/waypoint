@@ -2556,7 +2556,6 @@ const ReplyComposer = memo(function ReplyComposer({
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [idleSending, setIdleSending] = useState(false);
   const sendButtonRef = useRef<HTMLButtonElement | null>(null);
-  const sendMenuRef = useRef<HTMLDivElement | null>(null);
   const sendMenuItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const sendHoverTimer = useRef<number | null>(null);
   const sendTouchLongPress = useRef(false);
@@ -2811,10 +2810,8 @@ const ReplyComposer = memo(function ReplyComposer({
     }
   }
 
-  // Icons are drawn from the app's existing glyph vocabulary: ↑ for an
-  // immediate send (matching the send button), ◷ for an idle-triggered one
-  // (matching the schedule dock/modal). One clause per row; the batch nuance
-  // lives in the hover/focus tooltip rather than a second line.
+  // ↑ marks the immediate send, ◷ the idle-triggered ones; the batch nuance is
+  // in each row's tooltip.
   const idleActions = [
     {
       key: "now" as const,
@@ -3681,7 +3678,6 @@ const ReplyComposer = memo(function ReplyComposer({
           </button>
           {sendMenuOpen ? (
             <div
-              ref={sendMenuRef}
               className="composer-send-menu"
               role="menu"
               aria-label="Send options"

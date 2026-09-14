@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
-import { cronToLabel, isRecurring } from "@/lib/recurrence";
+import { cronToLabel, isIdle, isRecurring } from "@/lib/recurrence";
 import { MessageSchedule } from "@/lib/types";
 
 // A single chevron glyph (pointing up); orientation handled with a CSS rotation,
@@ -172,6 +172,11 @@ export function ScheduledMessagesDock({
 }
 
 function relativeFromNow(schedule: MessageSchedule): string {
+  // An idle schedule delivers on session state, not a clock; its scheduled_at
+  // is only the enqueue time, so it must never render as a countdown.
+  if (isIdle(schedule)) {
+    return "When idle";
+  }
   if (!schedule.scheduled_at) {
     return "";
   }

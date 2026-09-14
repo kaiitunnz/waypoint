@@ -15,16 +15,20 @@ from waypoint.recurrence import (
     resolve_recurrence_base,
 )
 from waypoint.schemas import (
+    IdleMessageBatchMode,
     ScheduleCreateRequest,
     ScheduledMessageCreateRequest,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
+    ScheduledMessageTrigger,
     ScheduledSessionRecord,
     ScheduleStatus,
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
+    SessionRecord,
     SessionSource,
+    SessionStatus,
 )
 
 if TYPE_CHECKING:
@@ -258,6 +262,13 @@ class Scheduler:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="message schedule must have text, command, items, or attachments",
             )
+        if request.trigger == ScheduledMessageTrigger.IDLE:
+            return self._create_idle_message_schedule(session, request)
+        if request.idle_batch_mode is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="idle_batch_mode is only valid with trigger=idle",
+            )
         scheduled_at = self._resolve_scheduled_at(request)
         now = datetime.now(UTC)
         if request.scheduled_at is not None and scheduled_at <= now:
@@ -280,6 +291,54 @@ class Scheduler:
             timezone=request.timezone,
         )
         self._runtime.storage.create_scheduled_message(record)
+        self._register_attachment_references(record)
+        self._wakeup.set()
+        asyncio.create_task(self._publish_update())
+        return record
+
+    def _create_idle_message_schedule(
+        self, session: SessionRecord, request: ScheduledMessageCreateRequest
+    ) -> ScheduledMessageRecord:
+        if any(
+            field is not None
+            for field in (
+                request.delay_seconds,
+                request.scheduled_at,
+                request.cron,
+                request.timezone,
+                request.start_at,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="trigger=idle cannot be combined with any timing/recurrence field",
+            )
+        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"session {session.id} is {session.status} and cannot queue an idle message",
+            )
+        mode = request.idle_batch_mode or IdleMessageBatchMode.NEXT_CYCLE
+        now = datetime.now(UTC)
+        record = ScheduledMessageRecord(
+            id=self._generate_id(),
+            session_id=session.id,
+            text=request.text,
+            submit=request.submit,
+            command=request.command,
+            items=request.items,
+            attachments=list(request.attachments),
+            # Enqueue timestamp only — an idle record renders from ``trigger``,
+            # never from ``scheduled_at``.
+            scheduled_at=now,
+            created_at=now,
+            status=ScheduledMessageStatus.PENDING,
+            trigger=ScheduledMessageTrigger.IDLE,
+        )
+        self._runtime.storage.create_idle_scheduled_message(record, mode)
+        self._register_attachment_references(record)
+        # An already-idle with_previous (new batch) delivers now; the wake lets
+        # the loop pick it up without waiting for the fallback poll.
         self._wakeup.set()
         asyncio.create_task(self._publish_update())
         return record
@@ -291,6 +350,7 @@ class Scheduler:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="message schedule not found",
             )
+        self._release_attachment_references(existing)
         if existing.status == ScheduledMessageStatus.PENDING:
             updated = self._runtime.storage.update_scheduled_message(
                 message_id, status=ScheduledMessageStatus.CANCELLED
@@ -302,12 +362,24 @@ class Scheduler:
         return existing
 
     async def purge_session_messages(self, session_id: str) -> int:
+        # The session's attachment dir (and its schedule-reference index) is
+        # discarded wholesale when the session is deleted, so no per-record
+        # release is needed here.
         removed = self._runtime.storage.delete_scheduled_messages_by_session(session_id)
         if removed:
             await self._publish_update()
         return removed
 
     def clear_message_history(self, session_id: str | None = None) -> int:
+        for record in self._runtime.storage.list_scheduled_messages(
+            [
+                ScheduledMessageStatus.SENT,
+                ScheduledMessageStatus.CANCELLED,
+                ScheduledMessageStatus.FAILED,
+            ],
+            session_id=session_id,
+        ):
+            self._release_attachment_references(record)
         removed = self._runtime.storage.delete_scheduled_messages_by_status(
             [
                 ScheduledMessageStatus.SENT,
@@ -319,6 +391,35 @@ class Scheduler:
         if removed:
             asyncio.create_task(self._publish_update())
         return removed
+
+    def _register_attachment_references(self, record: ScheduledMessageRecord) -> None:
+        """Pin a pending schedule's attachments against the orphan sweep until it
+        resolves."""
+        if not record.attachments:
+            return
+        self._runtime.attachments.mark_schedule_references(
+            record.session_id, record.id, list(record.attachments)
+        )
+
+    def _release_attachment_references(self, record: ScheduledMessageRecord) -> None:
+        if not record.attachments:
+            return
+        self._runtime.attachments.release_schedule_references(
+            record.session_id, record.id, list(record.attachments)
+        )
+
+    def notify_idle(self, session_id: str, idle_at: datetime) -> None:
+        """A normalized event reports ``session_id`` is idle at ``idle_at``.
+
+        Release the oldest pending idle batch's transition wait (only when that
+        batch predates this idle point) and wake the loop so it delivers on the
+        next turn instead of waiting for the bounded fallback poll.
+        """
+        try:
+            self._runtime.storage.release_idle_wait_for_transition(session_id, idle_at)
+        except Exception:  # noqa: BLE001
+            log.exception("idle wait release failed", extra={"session_id": session_id})
+        self._wakeup.set()
 
     def clear_history(self) -> int:
         removed = self._runtime.storage.delete_schedules_by_status(
@@ -352,10 +453,20 @@ class Scheduler:
         pending_msgs = self._runtime.storage.list_scheduled_messages(
             [ScheduledMessageStatus.PENDING]
         )
-        if not pending and not pending_msgs:
-            return 60.0
+        # Only timed records feed the absolute due time. Idle records carry a
+        # past enqueue timestamp; they wake on normalized idle events and fall
+        # back to bounded polling, so they never drive the wait toward 0.
+        has_idle = any(
+            item.trigger == ScheduledMessageTrigger.IDLE for item in pending_msgs
+        )
         all_times = [item.scheduled_at for item in pending]
-        all_times.extend(item.scheduled_at for item in pending_msgs)
+        all_times.extend(
+            item.scheduled_at
+            for item in pending_msgs
+            if item.trigger != ScheduledMessageTrigger.IDLE
+        )
+        if not all_times:
+            return POLL_INTERVAL_SECONDS if has_idle else 60.0
         soonest = min(all_times)
         delta = (soonest - datetime.now(UTC)).total_seconds()
         if delta <= 0:
@@ -384,6 +495,10 @@ class Scheduler:
             [ScheduledMessageStatus.PENDING]
         )
         for msg in pending_msgs:
+            # Idle records carry an enqueue timestamp in the past; they must not
+            # be treated as time-due. They fire from the idle pass below.
+            if msg.trigger == ScheduledMessageTrigger.IDLE:
+                continue
             if msg.scheduled_at > now:
                 continue
             if msg.cron is not None:
@@ -396,6 +511,69 @@ class Scheduler:
                 )
             else:
                 await self._fire_message(msg)
+        await self._fire_due_idle_messages()
+
+    async def _fire_due_idle_messages(self) -> None:
+        """Deliver at most the oldest eligible idle batch per idle session.
+
+        Groups pending idle records by session and, for each session, delivers
+        only its smallest batch number (in creation order) when the session is
+        exactly IDLE and the batch is not waiting for a fresh idle transition.
+        A later batch never dispatches in the same idle point.
+        """
+        pending = self._runtime.storage.list_pending_idle_messages()
+        if not pending:
+            return
+        by_session: dict[str, list[ScheduledMessageRecord]] = {}
+        for record in pending:
+            by_session.setdefault(record.session_id, []).append(record)
+        for session_id, records in by_session.items():
+            session = self._runtime.storage.get_session(session_id)
+            if session is None:
+                for record in records:
+                    self._runtime.storage.update_scheduled_message(
+                        record.id,
+                        status=ScheduledMessageStatus.FAILED,
+                        failure_reason="session not found",
+                    )
+                    self._release_attachment_references(record)
+                await self._publish_update()
+                continue
+            if session.status != SessionStatus.IDLE:
+                continue
+            # ``records`` is already FIFO by (batch, created_at, id); the first
+            # record's batch is the smallest for this session.
+            selected_batch = records[0].idle_batch
+            batch = [r for r in records if r.idle_batch == selected_batch]
+            if batch[0].wait_for_idle_transition:
+                # Still waiting for a later idle transition (a next_cycle created
+                # while already idle, or a batch armed after an earlier delivery).
+                continue
+            for record in batch:
+                await self._fire_idle_message(record)
+            # Consume this idle point regardless of per-message outcome so a
+            # later batch cannot leak into the same cycle.
+            self._runtime.storage.arm_wait_for_oldest_idle_batch(session_id)
+            await self._publish_update()
+
+    async def _fire_idle_message(self, record: ScheduledMessageRecord) -> None:
+        try:
+            await self._send_input(record)
+            self._runtime.storage.update_scheduled_message(
+                record.id, status=ScheduledMessageStatus.SENT
+            )
+            self._release_attachment_references(record)
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "idle message fire failed",
+                extra={"msg_id": record.id, "session_id": record.session_id},
+            )
+            self._runtime.storage.update_scheduled_message(
+                record.id,
+                status=ScheduledMessageStatus.FAILED,
+                failure_reason=str(exc),
+            )
+            self._release_attachment_references(record)
 
     async def _claim_and_fire(
         self,

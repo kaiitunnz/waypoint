@@ -290,6 +290,99 @@ def test_models_rejects_unknown_backend(tmp_path: Path) -> None:
     assert "unknown backend" in result.output
 
 
+def test_schedule_message_idle_batch_requires_when_idle(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "sess-1",
+            "hi",
+            "--idle-batch",
+            "with-previous",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--idle-batch requires --when-idle" in _error_text(result.output)
+
+
+def test_schedule_message_when_idle_rejects_timing(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "sess-1",
+            "hi",
+            "--when-idle",
+            "--delay-seconds",
+            "60",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--when-idle cannot be combined with --delay-seconds" in _error_text(
+        result.output
+    )
+
+
+def test_schedule_message_when_idle_rejects_bad_batch(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "sess-1",
+            "hi",
+            "--when-idle",
+            "--idle-batch",
+            "whenever",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "with-previous" in _error_text(result.output)
+
+
+def test_schedule_message_when_idle_sends_idle_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_create(self, session_id, text, **kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        captured["session_id"] = session_id
+        captured["text"] = text
+        return {"id": "ms1"}
+
+    monkeypatch.setattr(WaypointClient, "create_message_schedule", fake_create)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "sess-1",
+            "run tests",
+            "--when-idle",
+            "--idle-batch",
+            "with-previous",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["trigger"] == "idle"
+    assert captured["idle_batch_mode"] == "with_previous"
+
+
 def test_models_sweep_skips_fallback_and_isolates_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

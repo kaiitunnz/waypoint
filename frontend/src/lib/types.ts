@@ -834,6 +834,11 @@ export interface MessageSchedule {
   status: MessageScheduleStatus;
   created_at: string;
   failure_reason?: string | null;
+  // Delivery trigger. For "idle", scheduled_at is only the enqueue timestamp —
+  // render "When idle" from this field, never a countdown from scheduled_at.
+  trigger?: "time" | "idle";
+  idle_batch?: number | null;
+  wait_for_idle_transition?: boolean;
   // Recurrence — see ScheduledSession.
   cron?: string | null;
   timezone?: string | null;

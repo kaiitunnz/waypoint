@@ -191,3 +191,9 @@ export function isRecurring(
 ): boolean {
   return Boolean(schedule?.cron);
 }
+
+export function isIdle(
+  schedule: { trigger?: "time" | "idle" } | null | undefined,
+): boolean {
+  return schedule?.trigger === "idle";
+}

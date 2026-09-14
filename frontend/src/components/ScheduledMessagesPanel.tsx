@@ -9,6 +9,7 @@ import { formatClock, formatRelative } from "@/lib/scheduleTime";
 import {
   cronToLabel,
   formatInZone,
+  isIdle,
   isRecurring,
   timezoneAbbrev,
 } from "@/lib/recurrence";
@@ -123,14 +124,22 @@ function MessageRow({
       ? new Date(schedule.created_at)
       : null;
   const recurring = isRecurring(schedule);
+  const idle = isIdle(schedule);
   const zone = schedule.timezone ?? undefined;
-  const absolute = when
-    ? recurring
-      ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
-      : formatClock(when)
-    : "";
+  const queuedAt = schedule.created_at ? new Date(schedule.created_at) : null;
+  const absolute = idle
+    ? queuedAt
+      ? `Queued ${formatClock(queuedAt)}`
+      : ""
+    : when
+      ? recurring
+        ? `${formatInZone(when, zone)} ${timezoneAbbrev(when, zone)}`
+        : formatClock(when)
+      : "";
   const isPending = schedule.status === "pending";
-  const relative = isPending && when && !recurring ? formatRelative(when) : null;
+  // Idle and recurring schedules render from their trigger, never a countdown.
+  const relative =
+    isPending && when && !recurring && !idle ? formatRelative(when) : null;
   const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
   const label = sessionTitle?.trim() || shortSessionId(schedule.session_id);
 
@@ -144,6 +153,14 @@ function MessageRow({
         {recurring ? (
           <span className="badge schedule-recurrence" title="Recurring message">
             {cronToLabel(schedule.cron, schedule.timezone)}
+          </span>
+        ) : null}
+        {idle ? (
+          <span
+            className="badge schedule-recurrence"
+            title="Delivered at the session's next idle point"
+          >
+            When idle
           </span>
         ) : null}
         <a

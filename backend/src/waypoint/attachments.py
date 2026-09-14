@@ -26,6 +26,10 @@ _PINNED_INDEX = "_pinned.json"
 # ``{"<attachment-id>": ["<inbox-item-id>", ...]}``. Its stem isn't a uuid, so
 # it's transparent to entries()/sweep like the other indexes.
 _INBOX_REFS_INDEX = "_inbox_refs.json"
+# Same shape as _INBOX_REFS_INDEX, but keyed by message-schedule id: a pending
+# schedule's attachments must survive the orphan sweep until the schedule
+# resolves (an idle queue can outlive the normal TTL).
+_SCHEDULE_REFS_INDEX = "_schedule_refs.json"
 
 
 def _sanitize_component(value: str, *, fallback: str) -> str:
@@ -233,6 +237,60 @@ class AttachmentStore:
     ) -> None:
         """Pin each resolvable attachment against ``item_id`` so the sweep keeps
         it while that inbox item exists. Idempotent."""
+        self._mark_owner_references(
+            session_id, item_id, attachment_ids, _INBOX_REFS_INDEX
+        )
+
+    def release_inbox_references(
+        self, session_id: str, item_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Drop ``item_id``'s pin from each attachment. Idempotent and tolerant
+        of an already-discarded session/attachment; never raises."""
+        self._release_owner_references(
+            session_id, item_id, attachment_ids, _INBOX_REFS_INDEX
+        )
+
+    def inbox_referenced_ids(self, session_id: str) -> set[str]:
+        """Attachment ids pinned by one or more inbox items in this session."""
+        return self._owner_referenced_ids(session_id, _INBOX_REFS_INDEX)
+
+    def reconcile_inbox_references(self, live_item_ids: set[str]) -> int:
+        """Drop pins whose inbox item is not in ``live_item_ids``, across every
+        session index, and return how many were removed. Startup repair for a
+        crash that pinned a ref before its row committed; never raises."""
+        return self._reconcile_owner_references(live_item_ids, _INBOX_REFS_INDEX)
+
+    def mark_schedule_references(
+        self, session_id: str, schedule_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Pin each resolvable attachment against ``schedule_id`` so the sweep
+        keeps it while that message schedule is pending. Idempotent."""
+        self._mark_owner_references(
+            session_id, schedule_id, attachment_ids, _SCHEDULE_REFS_INDEX
+        )
+
+    def release_schedule_references(
+        self, session_id: str, schedule_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Drop ``schedule_id``'s pin from each attachment on delivery, failure,
+        cancellation, or history clearing. Idempotent; never raises."""
+        self._release_owner_references(
+            session_id, schedule_id, attachment_ids, _SCHEDULE_REFS_INDEX
+        )
+
+    def schedule_referenced_ids(self, session_id: str) -> set[str]:
+        """Attachment ids pinned by one or more message schedules in this
+        session."""
+        return self._owner_referenced_ids(session_id, _SCHEDULE_REFS_INDEX)
+
+    def reconcile_schedule_references(self, live_schedule_ids: set[str]) -> int:
+        """Drop pins whose schedule is not in ``live_schedule_ids``, across every
+        session index. Startup repair mirroring inbox-ref reconciliation."""
+        return self._reconcile_owner_references(live_schedule_ids, _SCHEDULE_REFS_INDEX)
+
+    def _mark_owner_references(
+        self, session_id: str, owner_id: str, attachment_ids: list[str], index_name: str
+    ) -> None:
         ids = [
             aid
             for aid in attachment_ids
@@ -244,63 +302,59 @@ class AttachmentStore:
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return
-        index = self._read_inbox_refs(session_dir)
+        index = self._read_owner_refs(session_dir, index_name)
         for aid in ids:
             members = index.setdefault(aid, [])
-            if item_id not in members:
-                members.append(item_id)
-        self._write_inbox_refs(session_dir, index)
+            if owner_id not in members:
+                members.append(owner_id)
+        self._write_owner_refs(session_dir, index_name, index)
 
-    def release_inbox_references(
-        self, session_id: str, item_id: str, attachment_ids: list[str]
+    def _release_owner_references(
+        self, session_id: str, owner_id: str, attachment_ids: list[str], index_name: str
     ) -> None:
-        """Drop ``item_id``'s pin from each attachment. Idempotent and tolerant
-        of an already-discarded session/attachment; never raises."""
         ids = {aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)}
         if not ids:
             return
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return
-        index = self._read_inbox_refs(session_dir)
+        index = self._read_owner_refs(session_dir, index_name)
         changed = False
         for aid in ids:
             members = index.get(aid)
-            if members is None or item_id not in members:
+            if members is None or owner_id not in members:
                 continue
-            members.remove(item_id)
+            members.remove(owner_id)
             if not members:
                 del index[aid]
             changed = True
         if changed:
-            self._write_inbox_refs(session_dir, index)
+            self._write_owner_refs(session_dir, index_name, index)
 
-    def inbox_referenced_ids(self, session_id: str) -> set[str]:
-        """Attachment ids pinned by one or more inbox items in this session."""
+    def _owner_referenced_ids(self, session_id: str, index_name: str) -> set[str]:
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return set()
         return {
             aid
-            for aid, members in self._read_inbox_refs(session_dir).items()
+            for aid, members in self._read_owner_refs(session_dir, index_name).items()
             if members
         }
 
-    def reconcile_inbox_references(self, live_item_ids: set[str]) -> int:
-        """Drop pins whose inbox item is not in ``live_item_ids``, across every
-        session index, and return how many were removed. Startup repair for a
-        crash that pinned a ref before its row committed; never raises."""
+    def _reconcile_owner_references(
+        self, live_owner_ids: set[str], index_name: str
+    ) -> int:
         if not self._root.is_dir():
             return 0
         removed = 0
         for session_dir in self._root.iterdir():
             if not session_dir.is_dir():
                 continue
-            index = self._read_inbox_refs(session_dir)
+            index = self._read_owner_refs(session_dir, index_name)
             changed = False
             for aid in list(index):
                 members = index[aid]
-                kept = [iid for iid in members if iid in live_item_ids]
+                kept = [oid for oid in members if oid in live_owner_ids]
                 if len(kept) == len(members):
                     continue
                 removed += len(members) - len(kept)
@@ -310,26 +364,28 @@ class AttachmentStore:
                 else:
                     del index[aid]
             if changed:
-                self._write_inbox_refs(session_dir, index)
+                self._write_owner_refs(session_dir, index_name, index)
         return removed
 
-    def _read_inbox_refs(self, session_dir: Path) -> dict[str, list[str]]:
+    def _read_owner_refs(
+        self, session_dir: Path, index_name: str
+    ) -> dict[str, list[str]]:
         try:
-            data = json.loads(
-                (session_dir / _INBOX_REFS_INDEX).read_text(encoding="utf-8")
-            )
+            data = json.loads((session_dir / index_name).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
         if not isinstance(data, dict):
             return {}
         return {
-            aid: [iid for iid in members if isinstance(iid, str)]
+            aid: [oid for oid in members if isinstance(oid, str)]
             for aid, members in data.items()
             if isinstance(aid, str) and isinstance(members, list)
         }
 
-    def _write_inbox_refs(self, session_dir: Path, index: dict[str, list[str]]) -> None:
-        (session_dir / _INBOX_REFS_INDEX).write_text(
+    def _write_owner_refs(
+        self, session_dir: Path, index_name: str, index: dict[str, list[str]]
+    ) -> None:
+        (session_dir / index_name).write_text(
             json.dumps(index, sort_keys=True), encoding="utf-8"
         )
 
@@ -344,6 +400,7 @@ class AttachmentStore:
             self._read_id_index(session_dir, _SENT_INDEX)
             | self._read_id_index(session_dir, _PINNED_INDEX)
             | self.inbox_referenced_ids(session_id)
+            | self.schedule_referenced_ids(session_id)
         )
         cutoff = time.time() - ttl_seconds
         removed = 0

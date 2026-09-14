@@ -5642,12 +5642,55 @@ def schedule_message_create(
         str | None,
         typer.Option(help=_START_AT_HELP),
     ] = None,
+    when_idle: Annotated[
+        bool,
+        typer.Option(
+            "--when-idle",
+            help=(
+                "Hold the message until the session is next idle (or now if it "
+                "already is). Mutually exclusive with all timing/recurrence flags."
+            ),
+        ),
+    ] = False,
+    idle_batch: Annotated[
+        str | None,
+        typer.Option(
+            "--idle-batch",
+            help=(
+                "With --when-idle, which idle batch to join: 'with-previous' "
+                "joins the imminent next-idle batch, 'next-cycle' (default) waits "
+                "for the following idle point."
+            ),
+        ),
+    ] = None,
     no_submit: Annotated[
         bool,
         typer.Option("--no-submit", help="Do not auto-submit the message."),
     ] = False,
 ) -> None:
-    """Schedule a message to be sent to a session, once or on a recurring cron."""
+    """Schedule a message to be sent to a session, once, on a recurring cron, or
+    at the next idle point."""
+    if idle_batch is not None and not when_idle:
+        raise typer.BadParameter("--idle-batch requires --when-idle")
+    trigger: str | None = None
+    idle_batch_mode: str | None = None
+    if when_idle:
+        for name, value in (
+            ("--delay-seconds", delay_seconds),
+            ("--scheduled-at", scheduled_at),
+            ("--cron", cron),
+            ("--timezone", timezone),
+            ("--start-at", start_at),
+        ):
+            if value is not None:
+                raise typer.BadParameter(f"--when-idle cannot be combined with {name}")
+        trigger = "idle"
+        choice = idle_batch or "next-cycle"
+        if choice not in {"with-previous", "next-cycle"}:
+            raise typer.BadParameter(
+                "--idle-batch must be 'with-previous' or 'next-cycle'"
+            )
+        idle_batch_mode = choice.replace("-", "_")
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
@@ -5660,6 +5703,8 @@ def schedule_message_create(
                 cron=cron,
                 timezone=timezone,
                 start_at=start_at,
+                trigger=trigger,
+                idle_batch_mode=idle_batch_mode,
             )
         },
     )

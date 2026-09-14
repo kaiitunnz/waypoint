@@ -1564,6 +1564,20 @@ class ScheduledMessageStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ScheduledMessageTrigger(StrEnum):
+    # ``time`` is the backward-compatible default (delay/absolute/recurring);
+    # ``idle`` holds the message until its target session is canonically IDLE.
+    TIME = "time"
+    IDLE = "idle"
+
+
+class IdleMessageBatchMode(StrEnum):
+    # Creation-time choice for an idle message: join the imminent next-idle
+    # batch, or start a batch that waits for a later idle point.
+    WITH_PREVIOUS = "with_previous"
+    NEXT_CYCLE = "next_cycle"
+
+
 class ScheduledMessageRecord(BaseModel):
     id: str
     session_id: str
@@ -1576,6 +1590,15 @@ class ScheduledMessageRecord(BaseModel):
     created_at: datetime
     status: ScheduledMessageStatus = ScheduledMessageStatus.PENDING
     failure_reason: str | None = None
+    # Delivery trigger. ``time`` uses ``scheduled_at`` (and cron); ``idle`` holds
+    # until the session is IDLE and renders from ``trigger`` — for an idle record
+    # ``scheduled_at`` is only the enqueue timestamp, never a promised time.
+    trigger: ScheduledMessageTrigger = ScheduledMessageTrigger.TIME
+    # Server-owned idle delivery state (clients never set these). ``idle_batch``
+    # is an opaque per-session FIFO sequence number; ``wait_for_idle_transition``
+    # forces the batch to wait for a fresh idle transition, not the current one.
+    idle_batch: int | None = None
+    wait_for_idle_transition: bool = False
     # Recurrence — see ScheduledSessionRecord.
     cron: str | None = None
     timezone: str | None = None
@@ -1596,6 +1619,10 @@ class ScheduledMessageCreateRequest(BaseModel):
     cron: str | None = None
     timezone: str | None = None
     start_at: str | None = None
+    # Delivery trigger and, for ``idle``, the batch choice. ``idle`` is mutually
+    # exclusive with every timing/recurrence field.
+    trigger: ScheduledMessageTrigger = ScheduledMessageTrigger.TIME
+    idle_batch_mode: IdleMessageBatchMode | None = None
 
 
 class SideQuestionStatus(StrEnum):

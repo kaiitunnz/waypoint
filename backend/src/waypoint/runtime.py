@@ -101,6 +101,7 @@ from waypoint.schemas import (
     ProfileDoctorReport,
     ProviderUsageSnapshot,
     ProviderUsageStatus,
+    ScheduledMessageStatus,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCommandInvocation,
@@ -634,6 +635,22 @@ class SessionRuntime:
                 log.info("reconciled %d stale inbox attachment references", removed)
         except Exception:
             log.exception("failed to reconcile inbox attachment references")
+        # A crash between pinning a scheduled attachment ref and committing its
+        # schedule row leaves a dangling pin; drop refs whose schedule is no
+        # longer pending (a resolved schedule releases its own refs).
+        try:
+            removed = self.attachments.reconcile_schedule_references(
+                {
+                    r.id
+                    for r in self.storage.list_scheduled_messages(
+                        [ScheduledMessageStatus.PENDING]
+                    )
+                }
+            )
+            if removed:
+                log.info("reconciled %d stale schedule attachment references", removed)
+        except Exception:
+            log.exception("failed to reconcile schedule attachment references")
 
     def _reconcile_provider_selections(self) -> None:
         """Mark provider-selected sessions whose provider is no longer enabled as
@@ -4974,6 +4991,12 @@ class SessionRuntime:
         )
         self._derive_telemetry_from_event(event)
         self._publish_session_state(event.session_id)
+        # Backend-neutral idle wake: the just-persisted event's canonical status
+        # already updated the session record (see Storage._insert_event), so a
+        # status of ``idle`` means an idle message batch may now be deliverable.
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        if metadata.get("status") == SessionStatus.IDLE:
+            self.scheduler.notify_idle(event.session_id, event.ts)
         if event.kind == EventKind.APPROVAL_REQUEST:
             await self._maybe_auto_approve_oneshot(event)
 

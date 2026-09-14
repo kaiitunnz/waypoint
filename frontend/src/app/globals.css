@@ -7325,6 +7325,11 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   color: #0c0f15;
   background: var(--accent);
   font-size: 0.98rem;
+  /* A long-press to open the send menu must not text-select the glyph or fire
+   * the mobile callout menu. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   transition:
     background 200ms ease,
     filter 140ms ease,
@@ -7345,6 +7350,86 @@ html[data-theme="light"] .composer-send {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
+}
+
+/* Delayed-hover / long-press send menu. The send button keeps its click =
+ * Send now; a short hold (or ArrowDown/Space with the button focused) opens a
+ * floating glass menu above it with the idle-delivery choices. The wrap takes
+ * over the button's absolute anchoring so hovering the button or the menu is
+ * one region (no gap that would dismiss it). */
+.composer-send-wrap {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+}
+.composer-send-wrap .composer-send {
+  position: static;
+}
+.composer-send-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  min-width: 236px;
+  max-width: min(300px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  display: grid;
+  gap: 3px;
+  z-index: 40;
+}
+/* Invisible bridge across the 8px gap so moving the pointer from the button up
+ * into the menu stays within one hover region (no dismiss mid-transit). */
+.composer-send-menu::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+}
+.composer-send-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  text-align: left;
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.composer-send-menu-item:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.composer-send-menu-item:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-line));
+}
+.composer-send-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Consistent leading glyph: same width, size, and muted hue for every row so
+ * the icon column reads as one set (↑ immediate, ◷ idle-triggered). */
+.composer-send-menu-icon {
+  flex: none;
+  width: 1.1em;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--muted);
 }
 
 /* On phones the ⊕ menu and the control popover become full-width sheets that
@@ -11384,6 +11469,47 @@ html[data-theme="light"] .schedule-msg-preview {
   min-height: 28px;
   padding: 0 12px;
   font-size: 0.7rem;
+}
+
+/* Trigger axis (Timed / When idle) sits above the timing or idle-batch
+ * controls; it reuses the submit-row layout and label so the pane reads as one
+ * set of controls. */
+.schedule-msg-trigger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.schedule-msg-trigger .segmented-item {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 0.7rem;
+}
+/* The idle-batch group mirrors the timed mode's .recurrence__section — a
+ * bordered card holding a full-width, equal-split picker — so the two trigger
+ * modes read as siblings. */
+.schedule-msg-idle {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+}
+.schedule-msg-idle-batch {
+  display: flex;
+  width: 100%;
+  background: transparent;
+}
+.schedule-msg-idle-batch .segmented-item {
+  flex: 1;
+}
+.schedule-msg-idle-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .schedule-msg-dialog-error {

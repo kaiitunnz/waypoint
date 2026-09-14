@@ -162,8 +162,14 @@ you read your own steps, by `manager render` for a child: `{{ticket_id}}`,
 - **The human owns every merge.** Autonomy runs up to each PR; the substantial-spec
   gate and the per-PR review-until-merge loop always route through the inbox.
 - **Own and reap only your subtree.** Every role carries `--spawner-session-id` and a
-  `subagent:ticket-<id>:<role>` title; reap a ticket's whole subtree only after
-  integration, and only what this manager spawned.
+  `subagent:ticket-<id>:<role>` title; reap only what this manager spawned. The two
+  ephemeral roles have distinct lifecycles: retain a read-only PRD/RFC **writer** through
+  its `spec_review` gate — reusing that same session for re-spec so it keeps its design
+  context — and reap it only when the spec is finally approved for handoff or
+  rejected/abandoned; retain the **tech-lead** build subtree through integration, and
+  Finalize reaps it only after merge or a terminal build disposition. Never reap either
+  role merely for reaching a pre-approval human gate (`spec_review`, or a branch-less
+  `blocked`).
 - **One tree, strictly serial; the human owns the merge.** Every ticket builds on
   its own branch in your one shared tree, one at a time — a ticket holds the tree from
   `delegated` through a terminal state (parked `blocked`/`review_requested` included).

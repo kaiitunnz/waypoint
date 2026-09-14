@@ -135,26 +135,6 @@ JSON
 waypoint manager ticket update {{ticket_id}} --inbox-item "$item"
 ```
 
-## Reap the delivered writer
-
-A `spec_review` ticket (from `spec_ready`) or a branch-less `blocked` ticket (from
-`infeasible`) still carries the ephemeral writer as its `lead_session_id`. Reap it
-(read-only in your tree, no worktree) and clear the ref before
-`{{templates_dir}}/manager/delegate.md` records the tech-lead. The guard on the two
-post-writer states keeps a tech-lead — carried on a `delegated`/`building`/`revising`/
-`review_requested` or blocked-with-branch ticket — from being reaped:
-
-```bash
-info=$(waypoint manager ticket show {{ticket_id}})
-state=$(echo "$info" | jq -r '.ticket.state')
-branch=$(echo "$info" | jq -r '.ticket.branch // empty')
-writer=$(echo "$info" | jq -r '.ticket.lead_session_id // empty')
-if { [ "$state" = spec_review ] || { [ "$state" = blocked ] && [ -z "$branch" ]; }; } && [ -n "$writer" ]; then
-  waypoint sessions delete "$writer" --force
-  waypoint manager ticket update {{ticket_id}} --lead-session-id ""
-fi
-```
-
 ## Relay a human answer back to the lead — durably
 
 The answer lands on a later wake, so recover the gate item from the ticket's recorded
@@ -191,17 +171,36 @@ fi
 
 Then, once the gate item has resolved (the same `.item.status` check above gates every
 shape), a branch-less blocker or the spec gate transitions out of the awaiting state by
-the block's shape:
+the block's shape. Both may still carry the ephemeral writer as `lead_session_id` — a
+spec-gate ticket always does (it stayed alive through `spec_review`), and a branch-less
+`blocked` infeasible ticket does too. Any disposition that **ends** writer ownership —
+approval-for-handoff, rejection, abandonment, or the human taking over with their own
+spec — reaps that writer and clears the ref **before** the `ready`/terminal transition,
+so a later `{{templates_dir}}/manager/delegate.md` records the tech-lead without
+overwriting the only reference to a live session. Re-spec dispositions do the opposite —
+they **keep** the writer (see **Re-spec** below). The reap is idempotent: it tolerates an
+already-deleted session and an already-empty id, so a crash between the delete and the
+transition replays safely:
+
+```bash
+# reap the parked writer before a handoff/terminal transition (idempotent)
+writer=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
+if [ -n "$writer" ]; then
+  waypoint sessions delete "$writer" --force || true   # tolerate an already-deleted session
+  waypoint manager ticket update {{ticket_id}} --lead-session-id ""
+fi
+```
 
 - **branch-less blocker** (an infeasible or writer-restart-exhausted `spec_pending →
   blocked`, or a delegate-budget-exhausted `delegated → blocked`, with no lead to relay
   to) — for these, `$selected` is your transition directly: `proceed on a human-supplied
-  spec` → `blocked → ready`, recording `--spec-ref` from the ref the human gave in
-  `reply.notes`, else the `ticket:{{ticket_id}}` cell (the body as the spec), `re-spec` →
-  `blocked → spec_pending` (see **Re-spec** below), `abandon` → `blocked → abandoned`.
+  spec` → reap the writer (above), then `blocked → ready`, recording `--spec-ref` from
+  the ref the human gave in `reply.notes`, else the `ticket:{{ticket_id}}` cell (the body
+  as the spec); `re-spec` → `blocked → spec_pending` (see **Re-spec** below — keeps the
+  writer); `abandon` → reap the writer (above), then `blocked → abandoned`.
   `retry` splits on `attempts` (a writer/spec ticket never delegated, `attempts == 0`; a
   delegate-exhaustion block has `attempts >= 1`): for `attempts == 0` (writer-restart
-  exhaustion), when the spec slot is free
+  exhaustion, whose writer already died — nothing to reap), when the spec slot is free
   (`waypoint manager state --json | jq '[.tickets[]|select(.state=="spec_pending")]|length'`
   is `0`) reset the writer budget
   (`waypoint manager ticket update {{ticket_id}} --reset-lead-restarts`) and return
@@ -210,8 +209,9 @@ the block's shape:
   1` (delegate exhaustion), reset the delegate budget
   (`waypoint manager ticket update {{ticket_id}} --reset-attempts`) and return
   `blocked → ready`;
-- **spec gate** — branch on `$decision`: `approve` → `spec_review → ready`;
-  `request-changes` → `spec_review → spec_pending` (see **Re-spec**); `reject` →
+- **spec gate** — branch on `$decision`: `approve` → reap the writer (above), then
+  `spec_review → ready`; `request-changes` → `spec_review → spec_pending` (see
+  **Re-spec** — keeps the writer); `reject` → reap the writer (above), then
   `spec_review → abandoned`.
 
 `awaiting_since` clears automatically on exit. For the relayed cases, each relay is a
@@ -222,27 +222,31 @@ lead re-applies it once).
 ## Re-spec — a request-changes or a blocked re-spec
 
 `spec_review → spec_pending` (request-changes) and `blocked → spec_pending` both send
-the ticket back for a fresh spec. `spec_pending` holds the single spec slot (≤1 at a
-time), so re-spec only when the slot is free; another ticket holding it defers this one
-to a later drain — the resolved gate item keeps the human's notes until then, so nothing
-is lost. When the slot is free, lift the human's requested changes from the resolved
-gate item's `reply.notes` into a durable `kind=respec` note **before** the transition,
-then re-spawn the writer per `{{templates_dir}}/manager/triage.md` (Spawn the writer),
-which re-derives the writer role from the ticket cell's `spec_route`:
+the ticket back for a fresh spec. Do **not** reap the writer on this path — the session
+that authored the spec holds the design context that best interprets the human's review
+notes, so it is retained as `lead_session_id` and reused. `spec_pending` holds the single
+spec slot (≤1 at a time), so re-spec only when the slot is free; another ticket holding it
+defers this one to a later drain — the resolved gate item keeps the human's notes until
+then, so nothing is lost. When the slot is free, lift the human's requested changes from
+the resolved gate item's `reply.notes` into a durable `kind=respec` note **before** the
+transition, then hand off to `{{templates_dir}}/manager/triage.md` (Spawn the writer),
+which re-derives the writer role from the ticket cell's `spec_route` and **re-sends the
+`write` step to the retained live writer** (spawning a replacement only if it has died):
 
 ```bash
 if [ "$(waypoint manager state --json | jq '[.tickets[] | select(.state == "spec_pending")] | length')" = 0 ]; then
   notes=$(waypoint inbox get "$item" | jq -r '[.item.blocks[].reply.notes // empty] | join("\n")')
   waypoint board post {{ticket_channel}} "${notes:-revise per the review}" --meta kind=respec
   waypoint manager ticket transition {{ticket_id}} --to spec_pending --reason respec
-  # then re-spawn the writer: {{templates_dir}}/manager/triage.md, "Spawn the writer"
+  # then re-send `write` to the retained writer (re-spawns only if it died):
+  # {{templates_dir}}/manager/triage.md, "Spawn the writer"
 fi
 ```
 
-The re-spawned writer reads the newest `kind=respec` note and revises the prior
-`{{spec_ref}}`. A crash before the re-spawn leaves a `spec_pending` ticket whose reaped
-writer the `dead_leads` reconcile re-spawns; the note is durable, so the revision still
-runs.
+The writer reads the newest `kind=respec` note and revises the prior `{{spec_ref}}` from
+its own conversation context. If that writer has died while parked, the `dead_leads`
+reconcile path re-spawns a replacement that reads the same durable note; the note is the
+recovery source, so the revision runs either way.
 
 ## Done / partial
 

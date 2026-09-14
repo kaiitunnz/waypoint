@@ -109,26 +109,43 @@ one of `prd-writer|rfc-writer|passthrough|direct`. Take the matching edge:
 
 ## Spawn the writer (spec_pending routes only)
 
-For a `prd-writer` or `rfc-writer` route, spawn the matching writer — ephemeral,
-owner-scoped, titled for reconcile; read-only in your tree ({{repo_dir}}), writing
-only its spec doc under `{{spec_dir}}/`. The `role` (the title suffix reconcile
-matches) is the `spec_route`; its `--role` render key is the underscore form:
+For a `prd-writer` or `rfc-writer` route, hand the ticket to the matching writer —
+ephemeral, owner-scoped, titled for reconcile; read-only in your tree ({{repo_dir}}),
+writing only its spec doc under `{{spec_dir}}/`. This step is a **two-path** operation:
+
+| Condition in `spec_pending` | Action |
+| --- | --- |
+| No recorded live writer (initial route, or dead-writer recovery) | Start and record the route-selected writer, then send `write`. |
+| A recorded live writer owes a re-spec (a request-changes round) | Do **not** start a session — render and send `write` to the recorded writer, which revises from its own context plus the newest `kind=respec` note. |
+
+The `role` (the title suffix reconcile matches) is the `spec_route`; its `--role` render
+key is the underscore form. "Live" means the recorded `lead_session_id` still resolves to
+a session that is not `exited`/`error`:
 
 ```bash
 role=<prd-writer|rfc-writer>          # from spec_route; the reconcile title suffix
 render_role=<prd_writer|rfc_writer>   # its manifest key (underscore) for --role
-# Launch args per route (baked from the manifest at init): prd-writer uses the
-# first, rfc-writer the second.
-if [ "$render_role" = prd_writer ]; then
-  sid=$(waypoint sessions start {{prd_writer_launch}} \
-    --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
-    --spawner-session-id {{manager_session_id}} | jq -r .session.id)
-else
-  sid=$(waypoint sessions start {{rfc_writer_launch}} \
-    --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
-    --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+# Reuse a retained live writer (re-spec), else start a fresh one (initial route or
+# dead-writer recovery).
+sid=$(waypoint manager ticket show {{ticket_id}} | jq -r '.ticket.lead_session_id // empty')
+if [ -n "$sid" ]; then
+  st=$(waypoint sessions show "$sid" 2>/dev/null | jq -r '.session.status // empty')
+  case "$st" in ""|exited|error) sid="";; esac   # missing/dead → drop it and re-spawn
 fi
-waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
+if [ -z "$sid" ]; then
+  # Launch args per route (baked from the manifest at init): prd-writer uses the
+  # first, rfc-writer the second.
+  if [ "$render_role" = prd_writer ]; then
+    sid=$(waypoint sessions start {{prd_writer_launch}} \
+      --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
+      --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+  else
+    sid=$(waypoint sessions start {{rfc_writer_launch}} \
+      --cwd {{repo_dir}} --title "subagent:ticket-{{ticket_id}}:$role" \
+      --spawner-session-id {{manager_session_id}} | jq -r .session.id)
+  fi
+  waypoint manager ticket update {{ticket_id}} --lead-session-id "$sid"
+fi
 waypoint sessions send "$sid" "$(waypoint manager render --role $render_role --step write --ticket {{ticket_id}})"
 ```
 
@@ -148,10 +165,12 @@ The next drain reconstructs the retry/abandon gate from that entry
 (`{{templates_dir}}/manager/monitor.md`); on **retry** the gate resets the writer budget
 and re-specs, on **abandon** it ends.
 
-The same spawn serves a **re-spec** routed here from
+The same two-path step serves a **re-spec** routed here from
 `{{templates_dir}}/manager/monitor.md` (a request-changes or a blocked re-spec):
-re-derive `role`/`render_role` from the ticket cell's `spec_route`, and the writer
-revises from the newest `kind=respec` note on the channel. A `spec_route` of
+re-derive `role`/`render_role` from the ticket cell's `spec_route`. The writer that
+authored the spec is retained as `lead_session_id`, so the reuse path re-sends it `write`
+and it revises from its own context plus the newest `kind=respec` note on the channel;
+only if that writer has died does the fresh-spawn path run. A `spec_route` of
 `direct`/`passthrough` carries no writer; choose a writer route, stamp it
 (`board set-meta {{tickets_channel}} --key ticket:{{ticket_id}} --merge --meta
 spec_route=<prd-writer|rfc-writer>`), then spawn the matching writer.
@@ -162,6 +181,7 @@ concrete technical design. The writer posts the
 spec ref back and recommends an execution strategy, or posts `infeasible` when the
 request cannot be specced; you then drive the matching edge (`spec_pending →
 spec_review` for a spec, `→ blocked` for infeasible) per
-`{{templates_dir}}/manager/monitor.md`, which covers both branches, reaps the ephemeral
-writer, and drives the relay. Pass-through and trivial routes skip this
+`{{templates_dir}}/manager/monitor.md`, which covers both branches, keeps the writer alive
+through its human gate (reaping it only at the approval/reject/abandon disposition), and
+drives the relay. Pass-through and trivial routes skip this
 section; `{{templates_dir}}/manager/delegate.md` picks them up when the tree frees.

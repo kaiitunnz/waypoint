@@ -61,8 +61,12 @@ waypoint board set-meta job:$job --key status:$n --meta state=doing --meta assig
 waypoint sessions show "$sid"   # expect running/working, not exited/error on turn 1
 ```
 
-A stalled worker isn't a respawn: widen its mode in place with
-`waypoint sessions set-permission-mode <sid> <mode>`.
+A stalled worker isn't a respawn: once the run's authorization rule for widening
+permissions is satisfied, widen its mode in place with `waypoint sessions mode
+<sid> <mode>`. Structured workers apply it inline; an Emulated (`claude_tty`)
+worker applies it by restarting, so there the command needs `--restart` and
+otherwise exits `4` with a `confirmation_required` plan — run `--dry-run` first,
+then `--restart`. See the `waypoint` skill's `references/sessions-settings.md`.
 
 `--worktree` removes the whole class of plumbing this step used to need: it picks
 a sibling path outside the working tree (so nothing shows up as untracked) and

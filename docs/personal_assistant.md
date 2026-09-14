@@ -137,12 +137,20 @@ waypoint sessions show <id>
 waypoint sessions events <id> [--messages N] [--before-sequence S]
 waypoint sessions start --backend <id> --cwd <path> [--model M] [--effort E]
 waypoint sessions send <id> <text>
+waypoint sessions settings <id> [--title T] [--model M] [--effort E] [--account-profile P] [--restart] [--dry-run]
 waypoint sessions interrupt|terminate <id>
 waypoint sessions approve <id> <decision> [--text T] [--approval-id A]
 ```
 
 Output is JSON. The same `WaypointClient` (in `waypoint.client`) backs the CLI
 and can be imported directly.
+
+`sessions settings` mirrors the Session settings editor for a non-assistant
+session: it builds the same capability-aware plan and refuses a restart-required
+change without explicit `--restart` (exit `4`, no mutation) rather than blocking
+on a prompt. Run it with `--dry-run` first to inspect the plan (restart count,
+whether a running turn is interrupted), then re-run with `--restart` once the
+restart is approved. See the `waypoint` skill's `sessions-settings` reference.
 
 ### Authentication
 

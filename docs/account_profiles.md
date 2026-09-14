@@ -259,11 +259,23 @@ waypoint sessions launch-settings <session-id>
 ```
 
 Switch a running session onto a different profile. This restarts the session
-and resumes its thread under the new config dir, so it is confirmed by default:
+and resumes its thread under the new config dir, so it requires explicit
+`--restart` consent — without it the command prints a `confirmation_required`
+plan and exits `4` without mutating, so an automated caller can route the
+restart decision through its own approval flow instead of blocking:
 
 ```bash
-waypoint sessions set-account <session-id> work
-waypoint sessions set-account <session-id> work --no-restart   # rejected in phase 1
+waypoint sessions set-account <session-id> work --restart
+waypoint sessions set-account <session-id> work              # confirmation_required, exit 4
+```
+
+`--no-restart` is a deprecated synonym for that safe default (it warns and
+returns the same refusal). Prefer `sessions settings` for the full,
+capability-aware settings surface:
+
+```bash
+waypoint sessions settings <session-id> --account-profile work --dry-run   # inspect the plan
+waypoint sessions settings <session-id> --account-profile work --restart   # apply
 ```
 
 ## Using profiles in the web UI

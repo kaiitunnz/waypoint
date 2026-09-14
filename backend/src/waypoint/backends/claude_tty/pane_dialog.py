@@ -26,6 +26,7 @@ class PaneScreen(StrEnum):
     TRUST = "trust"
     MODEL_SELECTOR = "model_selector"
     EFFORT_POPUP = "effort_popup"
+    AUTO_MODE_TEACHING = "auto_mode_teaching"
     OTHER = "other"
 
 
@@ -61,6 +62,11 @@ _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
 _EFFORT_MARKER = "Effort"
+# The first-run auto-mode consent modal. Title and full footer are both required
+# to classify: the footer's "Esc to cancel" is shared with other dialogs, so the
+# title is what keeps an adjacent screen from being cancelled by a partial match.
+_AUTO_MODE_TEACHING_TITLE = "Teach auto mode about your environment?"
+_AUTO_MODE_TEACHING_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
 _TRUST_MARKER = "Is this a project you created or one you trust?"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
@@ -290,6 +296,10 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _EFFORT_MARKER
     ):
         return PaneScreen.EFFORT_POPUP
+    if _contains(region, compact, _AUTO_MODE_TEACHING_TITLE) and _contains(
+        region, compact, _AUTO_MODE_TEACHING_FOOTER
+    ):
+        return PaneScreen.AUTO_MODE_TEACHING
     return PaneScreen.OTHER
 
 

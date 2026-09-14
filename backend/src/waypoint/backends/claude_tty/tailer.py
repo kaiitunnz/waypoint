@@ -53,6 +53,14 @@ _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
+# Popups cancelled with one Escape after the debounce. The message is fixed —
+# never interpolate pane contents, which can hold personal environment data.
+_ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
+    pane_dialog.PaneScreen.QUESTION: "dismissing AskUserQuestion popup to surface it",
+    pane_dialog.PaneScreen.AUTO_MODE_TEACHING: (
+        "dismissing Claude auto-mode teaching popup"
+    ),
+}
 # Protective cap on the unparsed trailing buffer: a JSONL record that never
 # completes past this size is dropped rather than grown without bound.
 _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
@@ -106,10 +114,10 @@ class TranscriptTailer:
         # until the dialog leaves the screen so a response that clears pending
         # before the pane redraws cannot trigger a duplicate emit.
         self._surfaced_sig: str | None = None
-        # True once we have Esc-dismissed the current AskUserQuestion popup, so
-        # the dismissal fires once per appearance; reset when the pane leaves
-        # the question screen.
-        self._question_dismissed: bool = False
+        # Screen kind already Esc-dismissed this appearance. Keyed on the kind
+        # (not a bool) so one popup replacing another does not suppress the next
+        # Escape; reset when the pane leaves the screen.
+        self._dismissed_screen: pane_dialog.PaneScreen | None = None
 
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body) so start-at-end
@@ -311,29 +319,27 @@ class TranscriptTailer:
             await self._runtime.tmux.send_input(pane, "", submit=True)
             return
 
-        if screen_type is pane_dialog.PaneScreen.QUESTION:
-            # The AskUserQuestion popup withholds its structured questions from
-            # the transcript until it is resolved, so it is invisible to the
-            # tailer while it blocks the turn. Esc dismisses it, which flushes
-            # the full tool_use record to the JSONL; the normalizer surfaces it
-            # as an answerable card (and swallows the resulting "user rejected"
-            # result). The answer is delivered later as a normal user turn via
-            # the plugin's answer_question.
-            if self._prev_dialog_sig == "question":
+        if screen_type in _ESC_DISMISS_LOG:
+            # Esc both popups once, after the debounce. For AskUserQuestion the
+            # Esc flushes the withheld tool_use so the normalizer can surface it
+            # as a card; for the auto-mode modal it takes the modal's cancel
+            # path. Neither consents to anything nor is surfaced further.
+            sig = screen_type.value
+            if self._prev_dialog_sig == sig:
                 self._dialog_stable_count += 1
             else:
-                self._prev_dialog_sig = "question"
+                self._prev_dialog_sig = sig
                 self._dialog_stable_count = 1
             if (
                 self._dialog_stable_count >= _DIALOG_STABLE_TICKS
-                and not self._question_dismissed
+                and self._dismissed_screen is not screen_type
             ):
                 log.info(
-                    "dismissing AskUserQuestion popup to surface it",
+                    _ESC_DISMISS_LOG[screen_type],
                     extra={"session_id": self._session_id},
                 )
                 await self._runtime.tmux.send_bytes(pane, b"\x1b")
-                self._question_dismissed = True
+                self._dismissed_screen = screen_type
             return
 
         if screen_type is pane_dialog.PaneScreen.PLAN:
@@ -346,7 +352,7 @@ class TranscriptTailer:
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             self._surfaced_sig = None
-            self._question_dismissed = False
+            self._dismissed_screen = None
             return
 
         dialog = pane_dialog.parse_approval(snapshot)

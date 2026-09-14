@@ -27,6 +27,7 @@ from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     TranscriptRead,
 )
+from waypoint.backends.claude_tty.pane_dialog import PaneScreen
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -492,7 +493,7 @@ async def test_question_dialog_dismissed_when_stable() -> None:
 
     await tailer._poll_dialog()  # tick 2: stable → Esc
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
-    assert tailer._question_dismissed is True
+    assert tailer._dismissed_screen is PaneScreen.QUESTION
     runtime._emit_adapter_event.assert_not_called()
 
 
@@ -506,6 +507,107 @@ async def test_question_dialog_dismissed_only_once() -> None:
         await tailer._poll_dialog()
 
     runtime.tmux.send_bytes.assert_called_once()
+
+
+# ── tailer: auto-mode teaching popup ─────────────────────────────────────────
+
+
+async def test_auto_mode_teaching_dismissed_when_stable() -> None:
+    # The first-run consent modal blocks message injection until dismissed. The
+    # tailer cancels it with a single Esc after the debounce — no consent to any
+    # environment scan, and nothing is surfaced as an approval or question.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("auto_mode_teaching.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # tick 1: debounce
+    runtime.tmux.send_bytes.assert_not_called()
+
+    await tailer._poll_dialog()  # tick 2: stable → Esc
+    runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+    assert tailer._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
+    runtime._emit_adapter_event.assert_not_called()
+    assert "sess-1" not in plugin._pending_approvals
+
+
+async def test_auto_mode_teaching_dismissed_only_once_per_appearance() -> None:
+    # An unchanged capture after the Esc must not draw a second key: the
+    # per-appearance latch holds until the popup leaves the pane.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("auto_mode_teaching.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    for _ in range(5):
+        await tailer._poll_dialog()
+
+    runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+    runtime._emit_adapter_event.assert_not_called()
+
+
+async def test_auto_mode_teaching_reesc_after_screen_clears() -> None:
+    # Once the pane redraws away, the latch resets, so a genuinely later
+    # appearance is cancelled once again.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    modal = _load("auto_mode_teaching.txt")
+    ready = _load("ready.txt")
+    screens = [modal, modal, ready, modal, modal]
+    idx = [0]
+
+    async def _side_effect(pane: str) -> str:
+        screen = screens[min(idx[0], len(screens) - 1)]
+        idx[0] += 1
+        return screen
+
+    runtime = _make_runtime(session, modal)
+    runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # modal debounce
+    await tailer._poll_dialog()  # modal stable → Esc (1)
+    await tailer._poll_dialog()  # ready: latch resets
+    assert tailer._dismissed_screen is None
+    await tailer._poll_dialog()  # modal debounce again
+    await tailer._poll_dialog()  # modal stable → Esc (2)
+
+    assert runtime.tmux.send_bytes.call_count == 2
+    runtime._emit_adapter_event.assert_not_called()
+
+
+async def test_esc_fires_per_kind_on_direct_popup_swap() -> None:
+    # The reason the latch keys on the screen kind (not a single bool): one
+    # popup replacing another with no intervening non-dialog screen must still
+    # be cancelled once per kind. A question dismissed, then immediately an
+    # auto-mode modal, gets its own Esc — a bool latch would suppress it.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    question = _load("question_dialog.txt")
+    modal = _load("auto_mode_teaching.txt")
+    screens = [question, question, modal, modal]
+    idx = [0]
+
+    async def _side_effect(pane: str) -> str:
+        screen = screens[min(idx[0], len(screens) - 1)]
+        idx[0] += 1
+        return screen
+
+    runtime = _make_runtime(session, question)
+    runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # question debounce
+    await tailer._poll_dialog()  # question stable → Esc (1)
+    assert tailer._dismissed_screen is PaneScreen.QUESTION
+    await tailer._poll_dialog()  # auto-mode debounce (sig changed, count resets)
+    await tailer._poll_dialog()  # auto-mode stable → Esc (2)
+    assert tailer._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
+
+    assert runtime.tmux.send_bytes.call_count == 2
+    for call in runtime.tmux.send_bytes.call_args_list:
+        assert call.args == ("%0", b"\x1b")
+    runtime._emit_adapter_event.assert_not_called()
 
 
 async def test_question_drain_registers_pending() -> None:

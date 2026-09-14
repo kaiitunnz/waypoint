@@ -42,6 +42,7 @@ def _load(name: str) -> str:
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
+        ("auto_mode_teaching.txt", PaneScreen.AUTO_MODE_TEACHING),
         ("ready.txt", PaneScreen.OTHER),
         ("slash_menu.txt", PaneScreen.OTHER),
     ],
@@ -64,6 +65,7 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("trust_dialog.txt", True),
         ("model_selector.txt", True),
         ("effort_popup.txt", True),
+        ("auto_mode_teaching.txt", True),
         ("ready.txt", False),
         ("slash_menu.txt", False),
     ],
@@ -97,6 +99,51 @@ def test_question_dialog_not_mistaken_for_approval() -> None:
     # not a permission prompt; parse_approval must reject it so the tailer Escs
     # it rather than firing an approve/decline digit at it.
     assert parse_approval(_load("question_dialog.txt")) is None
+
+
+_AUTO_MODE_TITLE = "Teach auto mode about your environment?"
+_AUTO_MODE_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
+
+
+def test_auto_mode_teaching_requires_both_anchors() -> None:
+    # The consent modal is cancelled with Esc, so it must be anchored exactly:
+    # either anchor alone stays OTHER, and only title + complete footer together
+    # classify. The footer shares "Esc to cancel" with several dialogs, so it
+    # cannot stand alone.
+    assert classify(f"│ {_AUTO_MODE_TITLE} │") is PaneScreen.OTHER
+    assert classify(f"  {_AUTO_MODE_FOOTER}") is PaneScreen.OTHER
+    assert classify(f"{_AUTO_MODE_TITLE}\n{_AUTO_MODE_FOOTER}") is (
+        PaneScreen.AUTO_MODE_TEACHING
+    )
+
+
+def test_auto_mode_teaching_not_merged_with_effort_popup() -> None:
+    # The effort popup shares the arrow/Enter/Esc affordance but reads
+    # "to adjust"/"confirm"; the two screens have different Esc semantics and
+    # must not collapse into one classification.
+    assert classify(_load("effort_popup.txt")) is PaneScreen.EFFORT_POPUP
+    assert classify(_load("auto_mode_teaching.txt")) is PaneScreen.AUTO_MODE_TEACHING
+
+
+def test_auto_mode_teaching_quoted_in_transcript_is_other() -> None:
+    # Both anchors quoted in settled transcript above a live composer must stay
+    # OTHER: active-region scoping is the false-positive guard.
+    bar = "─" * 80
+    screen = "\n".join(
+        [
+            "  I hit this popup earlier:",
+            f"  {_AUTO_MODE_TITLE}",
+            f"  {_AUTO_MODE_FOOTER}",
+            "",
+            "✻ Cogitated for 2m 20s",
+            "",
+            bar,
+            "❯ implement the fix with a captured fixture and tests",
+            bar,
+            "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
 
 
 def test_parse_write_approval() -> None:

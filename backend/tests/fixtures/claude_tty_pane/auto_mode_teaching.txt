@@ -1,0 +1,18 @@
+● Committed the change and opened the pull request.
+  ↳ Cooked for 19m 19s · done 6:36 PM
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Teach auto mode about your environment?                                        │
+│                                                                                │
+│ Claude Code reads this project, your recent Claude sessions, and optionally    │
+│ your shell history and other repositories. Claude analyzes this data and       │
+│ customizes auto mode to make better decisions.                                 │
+│                                                                                │
+│   How you use Claude here    ◄ Mixed ►                                         │
+│ › Also scan shell history    [✓]                                               │
+│   Also scan your other repos [ ]                                               │
+│                                                                                │
+│   Continue                                                                     │
+│                                                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ←/→ to change usage · Enter to continue · Esc to cancel

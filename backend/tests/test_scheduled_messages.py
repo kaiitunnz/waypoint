@@ -5,9 +5,11 @@ from fastapi import HTTPException
 
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    IdleMessageBatchMode,
     ScheduledMessageCreateRequest,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
+    ScheduledMessageTrigger,
     SessionInputItem,
     SessionRecord,
     SessionSource,
@@ -567,3 +569,406 @@ def test_message_schedule_create_request_schema() -> None:
     assert req.items is None
     assert req.attachments == []
     assert req.submit is True
+
+
+# ── Idle-triggered messages ──────────────────────────────────────────────────
+
+
+def _record_sends(runtime, monkeypatch) -> list[tuple[str, str]]:
+    """Patch handle_input to record (session_id, text) and no-op the send."""
+    sends: list[tuple[str, str]] = []
+
+    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+        sends.append((session_id, request.text))
+        return runtime.get_session(session_id)
+
+    monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
+    return sends
+
+
+def _set_status(runtime, session_id: str, status: SessionStatus) -> None:
+    runtime.storage.update_session(session_id, status=status)
+
+
+@pytest.mark.asyncio
+async def test_idle_schedule_allocates_batch_and_defaults_time(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="after this turn",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    assert record.trigger == ScheduledMessageTrigger.IDLE
+    assert record.idle_batch == 1
+    # with_previous on an empty queue creates the imminent batch (no wait).
+    assert record.wait_for_idle_transition is False
+
+    loaded = runtime.storage.get_scheduled_message(record.id)
+    assert loaded is not None
+    assert loaded.trigger == ScheduledMessageTrigger.IDLE
+    assert loaded.wait_for_idle_transition is False
+
+
+@pytest.mark.asyncio
+async def test_idle_delivers_when_already_idle(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")  # IDLE by default
+    runtime.storage.create_session(session)
+    sends = _record_sends(runtime, monkeypatch)
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="go now",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    await runtime.scheduler._fire_due_schedules()
+
+    assert sends == [("sess-1", "go now")]
+    refreshed = runtime.storage.get_scheduled_message(record.id)
+    assert refreshed is not None
+    assert refreshed.status == ScheduledMessageStatus.SENT
+
+
+@pytest.mark.asyncio
+async def test_idle_holds_through_running_and_waiting_input(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    _set_status(runtime, "sess-1", SessionStatus.RUNNING)
+    sends = _record_sends(runtime, monkeypatch)
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="later",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == []
+    _set_status(runtime, "sess-1", SessionStatus.WAITING_INPUT)
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == []  # an approval/question is not a safe idle point
+
+    _set_status(runtime, "sess-1", SessionStatus.IDLE)
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == [("sess-1", "later")]
+    refreshed = runtime.storage.get_scheduled_message(record.id)
+    assert refreshed is not None
+    assert refreshed.status == ScheduledMessageStatus.SENT
+
+
+@pytest.mark.asyncio
+async def test_idle_not_treated_as_time_due(tmp_path, monkeypatch) -> None:
+    # An idle record's enqueue timestamp is in the past, but the timed pass must
+    # never fire it while the session is busy.
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    _set_status(runtime, "sess-1", SessionStatus.RUNNING)
+    sends = _record_sends(runtime, monkeypatch)
+
+    runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="held", trigger=ScheduledMessageTrigger.IDLE
+        ),
+    )
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == []
+
+
+@pytest.mark.asyncio
+async def test_with_previous_batches_deliver_together(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    _set_status(runtime, "sess-1", SessionStatus.RUNNING)
+    sends = _record_sends(runtime, monkeypatch)
+
+    first = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="one",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    second = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="two",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    assert first.idle_batch == second.idle_batch  # shared batch
+
+    _set_status(runtime, "sess-1", SessionStatus.IDLE)
+    await runtime.scheduler._fire_due_schedules()
+    # Both delivered in creation order at one idle point.
+    assert sends == [("sess-1", "one"), ("sess-1", "two")]
+
+
+@pytest.mark.asyncio
+async def test_next_cycle_queues_behind_batch(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    _set_status(runtime, "sess-1", SessionStatus.RUNNING)
+    sends = _record_sends(runtime, monkeypatch)
+
+    imminent = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="first cycle",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    later = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="second cycle",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.NEXT_CYCLE,
+        ),
+    )
+    assert imminent.idle_batch is not None
+    assert later.idle_batch == imminent.idle_batch + 1
+
+    _set_status(runtime, "sess-1", SessionStatus.IDLE)
+    await runtime.scheduler._fire_due_schedules()
+    # Only the imminent batch dispatches at this idle point.
+    assert sends == [("sess-1", "first cycle")]
+    behind = runtime.storage.get_scheduled_message(later.id)
+    assert behind is not None
+    assert behind.status == ScheduledMessageStatus.PENDING
+
+    # The later batch is now armed to wait for a fresh transition; still idle is
+    # not enough.
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == [("sess-1", "first cycle")]
+
+    # A later idle transition releases it.
+    runtime.scheduler.notify_idle("sess-1", datetime.now(UTC) + timedelta(seconds=1))
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == [("sess-1", "first cycle"), ("sess-1", "second cycle")]
+
+
+@pytest.mark.asyncio
+async def test_next_cycle_on_idle_waits_for_transition(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")  # IDLE
+    runtime.storage.create_session(session)
+    sends = _record_sends(runtime, monkeypatch)
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="next idle",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.NEXT_CYCLE,
+        ),
+    )
+    assert record.wait_for_idle_transition is True
+
+    # Currently idle from a prior turn is not a fresh transition.
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == []
+
+    # An idle event that predates the record does not release it.
+    runtime.scheduler.notify_idle("sess-1", record.created_at - timedelta(seconds=1))
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == []
+
+    # A later idle transition does.
+    runtime.scheduler.notify_idle("sess-1", record.created_at + timedelta(seconds=1))
+    await runtime.scheduler._fire_due_schedules()
+    assert sends == [("sess-1", "next idle")]
+
+
+@pytest.mark.asyncio
+async def test_separate_sessions_each_deliver_in_one_pass(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    for sid in ("sess-a", "sess-b"):
+        runtime.storage.create_session(make_session(runtime.settings, sid))
+    sends = _record_sends(runtime, monkeypatch)
+    for sid in ("sess-a", "sess-b"):
+        runtime.scheduler.create_message_schedule(
+            sid,
+            ScheduledMessageCreateRequest(
+                text=f"hi {sid}",
+                trigger=ScheduledMessageTrigger.IDLE,
+                idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+            ),
+        )
+    await runtime.scheduler._fire_due_schedules()
+    assert set(sends) == {("sess-a", "hi sess-a"), ("sess-b", "hi sess-b")}
+
+
+def test_idle_rejects_timing_fields(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "sess-1"))
+    for kwargs in (
+        {"delay_seconds": 60},
+        {"scheduled_at": datetime.now(UTC) + timedelta(minutes=5)},
+        {"cron": "0 9 * * *", "timezone": "UTC"},
+    ):
+        with pytest.raises(HTTPException) as exc:
+            runtime.scheduler.create_message_schedule(
+                "sess-1",
+                ScheduledMessageCreateRequest(
+                    text="x", trigger=ScheduledMessageTrigger.IDLE, **kwargs
+                ),
+            )
+        assert exc.value.status_code == 400
+
+
+def test_idle_batch_mode_requires_idle_trigger(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "sess-1"))
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_message_schedule(
+            "sess-1",
+            ScheduledMessageCreateRequest(
+                text="x",
+                delay_seconds=60,
+                idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+            ),
+        )
+    assert exc.value.status_code == 400
+
+
+def test_idle_rejected_for_terminal_session(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "sess-1"))
+    _set_status(runtime, "sess-1", SessionStatus.EXITED)
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_message_schedule(
+            "sess-1",
+            ScheduledMessageCreateRequest(
+                text="x", trigger=ScheduledMessageTrigger.IDLE
+            ),
+        )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_idle_missing_session_marked_failed(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    now = datetime.now(UTC)
+    runtime.storage.create_scheduled_message(
+        ScheduledMessageRecord(
+            id="msg-idle-orphan",
+            session_id="gone",
+            text="hi",
+            scheduled_at=now,
+            created_at=now,
+            status=ScheduledMessageStatus.PENDING,
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch=1,
+        )
+    )
+    await runtime.scheduler._fire_due_schedules()
+    refreshed = runtime.storage.get_scheduled_message("msg-idle-orphan")
+    assert refreshed is not None
+    assert refreshed.status == ScheduledMessageStatus.FAILED
+    assert refreshed.failure_reason == "session not found"
+
+
+@pytest.mark.asyncio
+async def test_idle_delivery_failure_arms_next_batch(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")  # IDLE
+    runtime.storage.create_session(session)
+
+    async def boom(_session_id, _request) -> SessionRecord:
+        raise RuntimeError("send failed")
+
+    monkeypatch.setattr(runtime, "handle_input", boom)
+
+    failing = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="oops",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.WITH_PREVIOUS,
+        ),
+    )
+    queued = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="behind",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.NEXT_CYCLE,
+        ),
+    )
+    await runtime.scheduler._fire_due_schedules()
+    # The failing batch consumed the idle point; the next batch is armed to wait.
+    failed = runtime.storage.get_scheduled_message(failing.id)
+    assert failed is not None
+    assert failed.status == ScheduledMessageStatus.FAILED
+    behind = runtime.storage.get_scheduled_message(queued.id)
+    assert behind is not None
+    assert behind.status == ScheduledMessageStatus.PENDING
+    assert behind.wait_for_idle_transition is True
+
+
+def test_idle_legacy_row_defaults_to_time(tmp_path) -> None:
+    # A row written before the trigger column existed reads back as time.
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    storage.connection.execute(
+        """
+        INSERT INTO scheduled_messages (id, session_id, text, submit,
+            attachments, scheduled_at, created_at, status)
+        VALUES ('legacy', 'sess-1', 'hi', 1, '[]', ?, ?, 'pending')
+        """,
+        (now.isoformat(), now.isoformat()),
+    )
+    storage.connection.commit()
+    loaded = storage.get_scheduled_message("legacy")
+    assert loaded is not None
+    assert loaded.trigger == ScheduledMessageTrigger.TIME
+    assert loaded.idle_batch is None
+    assert loaded.wait_for_idle_transition is False
+
+
+@pytest.mark.asyncio
+async def test_idle_attachment_reference_retained_then_released(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "sess-1")
+    runtime.storage.create_session(session)
+    spec = runtime.attachments.save(
+        "sess-1", data=b"hello", filename="note.txt", content_type="text/plain"
+    )
+
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="see file",
+            attachments=[spec.id],
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.NEXT_CYCLE,
+        ),
+    )
+    assert spec.id in runtime.attachments.schedule_referenced_ids("sess-1")
+
+    runtime.scheduler.cancel_message_schedule(record.id)
+    assert spec.id not in runtime.attachments.schedule_referenced_ids("sess-1")

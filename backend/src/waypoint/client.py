@@ -1155,6 +1155,8 @@ class WaypointClient:
         timezone: str | None = None,
         start_at: str | None = None,
         attachments: list[str] | None = None,
+        trigger: str | None = None,
+        idle_batch_mode: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "submit": submit}
         if delay_seconds is not None:
@@ -1169,6 +1171,10 @@ class WaypointClient:
             body["start_at"] = start_at
         if attachments:
             body["attachments"] = attachments
+        if trigger is not None:
+            body["trigger"] = trigger
+        if idle_batch_mode is not None:
+            body["idle_batch_mode"] = idle_batch_mode
         data: dict[str, Any] = self._request(
             "POST",
             f"/api/sessions/{session_id}/message-schedules",

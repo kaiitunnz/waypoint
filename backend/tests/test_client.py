@@ -393,6 +393,27 @@ def test_answer_question_sends_body(
     ]
 
 
+def test_create_message_schedule_idle_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_message_schedule(
+            "s1", "later", trigger="idle", idle_batch_mode="with_previous"
+        )
+    body = state["msg_schedule_create"]
+    assert body["trigger"] == "idle"
+    assert body["idle_batch_mode"] == "with_previous"
+    # A timed create omits the idle fields entirely.
+    with _client(_settings(tmp_path), state) as client:
+        client.create_message_schedule("s1", "soon", delay_seconds=60)
+    body = state["msg_schedule_create"]
+    assert "trigger" not in body
+    assert "idle_batch_mode" not in body
+    assert body["delay_seconds"] == 60
+
+
 def test_delete_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
     state: dict = {}

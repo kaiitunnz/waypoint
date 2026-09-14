@@ -18,6 +18,7 @@ from waypoint.schemas import (
     BoardEntry,
     EventKind,
     EventRecord,
+    IdleMessageBatchMode,
     InboxApprovalAnswer,
     InboxApprovalBlock,
     InboxAttachmentBlock,
@@ -354,6 +355,9 @@ class Storage:
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 failure_reason TEXT,
+                trigger TEXT NOT NULL DEFAULT 'time',
+                idle_batch INTEGER,
+                wait_for_idle_transition INTEGER NOT NULL DEFAULT 0,
                 cron TEXT,
                 timezone TEXT,
                 last_run_at TEXT,
@@ -539,6 +543,17 @@ class Storage:
             self._ensure_column(_sched_table, "last_run_at", "TEXT")
             self._ensure_column(_sched_table, "last_run_status", "TEXT")
             self._ensure_column(_sched_table, "last_failure_reason", "TEXT")
+        # Idle-triggered messages (ticket 1699): additive, existing rows default
+        # to timed delivery. ``idle_batch`` is a per-session FIFO sequence number.
+        self._ensure_column(
+            "scheduled_messages", "trigger", "TEXT NOT NULL DEFAULT 'time'"
+        )
+        self._ensure_column("scheduled_messages", "idle_batch", "INTEGER")
+        self._ensure_column(
+            "scheduled_messages",
+            "wait_for_idle_transition",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -560,6 +575,8 @@ class Storage:
                 ON board_entries(author_session_id);
             CREATE INDEX IF NOT EXISTS idx_scheduled_status
                 ON scheduled_sessions(status);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_messages_idle
+                ON scheduled_messages(status, trigger, session_id, idle_batch, created_at);
             CREATE INDEX IF NOT EXISTS idx_inbox_status
                 ON inbox_items(status);
             CREATE INDEX IF NOT EXISTS idx_inbox_updated
@@ -2892,13 +2909,67 @@ class Storage:
     def create_scheduled_message(
         self, record: ScheduledMessageRecord
     ) -> ScheduledMessageRecord:
+        self._insert_scheduled_message_locked(record)
+        self.connection.commit()
+        return record
+
+    @_synchronized
+    def create_idle_scheduled_message(
+        self, record: ScheduledMessageRecord, mode: IdleMessageBatchMode
+    ) -> ScheduledMessageRecord:
+        """Allocate a FIFO idle batch and persist ``record`` atomically.
+
+        Runs the read (oldest/tail pending batch + current session status) and
+        the insert inside one storage lock so two simultaneous API requests
+        cannot both create a first batch or attach behind a later batch. Mutates
+        ``record.idle_batch`` and ``record.wait_for_idle_transition`` in place.
+        """
+        row = self.connection.execute(
+            """
+            SELECT MIN(idle_batch) AS oldest, MAX(idle_batch) AS tail
+            FROM scheduled_messages
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch IS NOT NULL
+            """,
+            (record.session_id,),
+        ).fetchone()
+        oldest = row["oldest"] if row is not None else None
+        tail = row["tail"] if row is not None else None
+        session_row = self.connection.execute(
+            "SELECT status FROM sessions WHERE id = ?", (record.session_id,)
+        ).fetchone()
+        session_idle = (
+            session_row is not None and session_row["status"] == SessionStatus.IDLE
+        )
+        if mode == IdleMessageBatchMode.WITH_PREVIOUS and oldest is not None:
+            # Join the imminent batch; it delivers together at the next idle point.
+            record.idle_batch = int(oldest)
+            record.wait_for_idle_transition = False
+        elif tail is not None:
+            # A batch already waits ahead of us; queue one cycle behind it.
+            record.idle_batch = int(tail) + 1
+            record.wait_for_idle_transition = False
+        else:
+            # Empty queue: this is the session's next idle batch. A next_cycle
+            # request on an already-idle session must wait for a *later* idle
+            # transition rather than the current, pre-existing idle period.
+            record.idle_batch = 1
+            record.wait_for_idle_transition = (
+                mode == IdleMessageBatchMode.NEXT_CYCLE and session_idle
+            )
+        self._insert_scheduled_message_locked(record)
+        self.connection.commit()
+        return record
+
+    def _insert_scheduled_message_locked(self, record: ScheduledMessageRecord) -> None:
         self.connection.execute(
             """
             INSERT INTO scheduled_messages (
                 id, session_id, text, submit, command, items, attachments,
                 scheduled_at, created_at, status, failure_reason,
+                trigger, idle_batch, wait_for_idle_transition,
                 cron, timezone, last_run_at, last_run_status, last_failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -2920,6 +2991,9 @@ class Storage:
                 record.created_at.isoformat(),
                 record.status,
                 record.failure_reason,
+                record.trigger,
+                record.idle_batch,
+                1 if record.wait_for_idle_transition else 0,
                 record.cron,
                 record.timezone,
                 record.last_run_at.isoformat() if record.last_run_at else None,
@@ -2927,8 +3001,81 @@ class Storage:
                 record.last_failure_reason,
             ),
         )
+
+    @_synchronized
+    def list_pending_idle_messages(
+        self, session_id: str | None = None
+    ) -> list[ScheduledMessageRecord]:
+        """Pending idle-trigger messages, FIFO by (session, batch, created_at)."""
+        query = (
+            "SELECT * FROM scheduled_messages "
+            "WHERE trigger = 'idle' AND status = 'pending'"
+        )
+        params: list[Any] = []
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        query += " ORDER BY session_id ASC, idle_batch ASC, created_at ASC, id ASC"
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._scheduled_message_from_row(row) for row in rows]
+
+    @_synchronized
+    def release_idle_wait_for_transition(
+        self, session_id: str, idle_at: datetime
+    ) -> bool:
+        """Clear the wait flag on the session's oldest pending idle batch, but
+        only when that batch predates ``idle_at``.
+
+        Guards against a previously persisted idle event (whose async publish
+        races a new next_cycle request) unlocking that request's own cycle: a
+        record created after this idle transition keeps waiting for the next one.
+        """
+        row = self.connection.execute(
+            """
+            SELECT MIN(idle_batch) AS oldest FROM scheduled_messages
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch IS NOT NULL
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None or row["oldest"] is None:
+            return False
+        cursor = self.connection.execute(
+            """
+            UPDATE scheduled_messages SET wait_for_idle_transition = 0
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch = ? AND wait_for_idle_transition = 1
+              AND created_at < ?
+            """,
+            (session_id, int(row["oldest"]), idle_at.isoformat()),
+        )
         self.connection.commit()
-        return record
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def arm_wait_for_oldest_idle_batch(self, session_id: str) -> None:
+        """After a batch resolves, force the newly-oldest pending idle batch to
+        wait for a fresh idle transition, so it cannot leak into the same cycle.
+        """
+        row = self.connection.execute(
+            """
+            SELECT MIN(idle_batch) AS oldest FROM scheduled_messages
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch IS NOT NULL
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None or row["oldest"] is None:
+            return
+        self.connection.execute(
+            """
+            UPDATE scheduled_messages SET wait_for_idle_transition = 1
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch = ?
+            """,
+            (session_id, int(row["oldest"])),
+        )
+        self.connection.commit()
 
     @_synchronized
     def list_scheduled_messages(
@@ -3297,6 +3444,9 @@ class Storage:
             payload["last_run_at"] = datetime.fromisoformat(payload["last_run_at"])
         payload["status"] = ScheduledMessageStatus(payload.get("status", "pending"))
         payload["submit"] = bool(payload.get("submit", 1))
+        payload["wait_for_idle_transition"] = bool(
+            payload.get("wait_for_idle_transition", 0)
+        )
         raw_command = payload.pop("command", None)
         if raw_command:
             try:

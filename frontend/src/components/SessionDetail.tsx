@@ -2811,23 +2811,30 @@ const ReplyComposer = memo(function ReplyComposer({
     }
   }
 
+  // Icons are drawn from the app's existing glyph vocabulary: ↑ for an
+  // immediate send (matching the send button), ◷ for an idle-triggered one
+  // (matching the schedule dock/modal). One clause per row; the batch nuance
+  // lives in the hover/focus tooltip rather than a second line.
   const idleActions = [
     {
       key: "now" as const,
-      title: "Send now",
-      desc: "Send immediately.",
+      icon: "↑",
+      label: "Send now",
+      hint: "Send immediately",
       run: () => void handleSend(),
     },
     {
       key: "with_previous" as const,
-      title: "Send with queued messages",
-      desc: "Join the next idle batch.",
+      icon: "◷",
+      label: "Send when idle",
+      hint: "Joins the next idle batch",
       run: () => void handleIdleSend("with_previous"),
     },
     {
       key: "next_cycle" as const,
-      title: "Send next idle cycle",
-      desc: "Wait for the following idle point.",
+      icon: "◷",
+      label: "Send next idle cycle",
+      hint: "Waits for the following idle point",
       run: () => void handleIdleSend("next_cycle"),
     },
   ];
@@ -3691,9 +3698,12 @@ const ReplyComposer = memo(function ReplyComposer({
                   className="composer-send-menu-item"
                   onClick={action.run}
                   disabled={sendDisabled}
+                  title={action.hint}
                 >
-                  <span className="composer-send-menu-title">{action.title}</span>
-                  <span className="composer-send-menu-desc">{action.desc}</span>
+                  <span className="composer-send-menu-icon" aria-hidden>
+                    {action.icon}
+                  </span>
+                  <span className="composer-send-menu-label">{action.label}</span>
                 </button>
               ))}
             </div>

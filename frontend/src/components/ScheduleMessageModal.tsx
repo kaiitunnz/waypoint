@@ -24,6 +24,21 @@ interface ScheduleMessageModalProps {
 }
 
 type Timing = "delay" | "datetime";
+type Trigger = "time" | "idle";
+type IdleBatch = "with_previous" | "next_cycle";
+
+const IDLE_BATCHES: { value: IdleBatch; label: string; hint: string }[] = [
+  {
+    value: "with_previous",
+    label: "With queued messages",
+    hint: "Delivers at the next idle point, together with any already-queued idle messages.",
+  },
+  {
+    value: "next_cycle",
+    label: "Next idle cycle",
+    hint: "Waits for the idle point after the current batch.",
+  },
+];
 
 const DELAY_PRESETS: { label: string; minutes: number }[] = [
   { label: "5m", minutes: 5 },
@@ -47,6 +62,8 @@ export function ScheduleMessageModal({
   onError,
 }: ScheduleMessageModalProps) {
   const [draft, setDraft] = useState(initialDraft);
+  const [trigger, setTrigger] = useState<Trigger>("time");
+  const [idleBatch, setIdleBatch] = useState<IdleBatch>("next_cycle");
   const [timing, setTiming] = useState<Timing>("delay");
   const [delay, setDelay] = useState("15");
   const [at, setAt] = useState(defaultScheduledAt);
@@ -101,8 +118,13 @@ export function ScheduleMessageModal({
       cron?: string;
       timezone?: string;
       startAt?: string;
+      trigger?: "idle";
+      idleBatchMode?: IdleBatch;
     } = { submit };
-    if (timingMode === "repeat") {
+    if (trigger === "idle") {
+      options.trigger = "idle";
+      options.idleBatchMode = idleBatch;
+    } else if (timingMode === "repeat") {
       const cron = cronFromState(recurrence);
       if (!cron) {
         setError("Enter a valid recurrence.");
@@ -182,15 +204,63 @@ export function ScheduleMessageModal({
           placeholder="Message text…"
           aria-label="Message text"
         />
-        <RecurrenceControl
-          host={host}
-          token={token}
-          timing={timingMode}
-          onTimingChange={setTimingMode}
-          state={recurrence}
-          onStateChange={setRecurrence}
-          onValidChange={setRecurrenceValid}
-        >
+        <div className="schedule-msg-trigger-row">
+          <span className="schedule-msg-submit-label">Trigger</span>
+          <div className="segmented schedule-msg-trigger" role="tablist" aria-label="Trigger">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={trigger === "time"}
+              className={`segmented-item${trigger === "time" ? " active" : ""}`}
+              onClick={() => setTrigger("time")}
+            >
+              Timed
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={trigger === "idle"}
+              className={`segmented-item${trigger === "idle" ? " active" : ""}`}
+              onClick={() => setTrigger("idle")}
+            >
+              When idle
+            </button>
+          </div>
+        </div>
+        {trigger === "idle" ? (
+          <div className="schedule-msg-idle">
+            <div
+              className="segmented schedule-msg-idle-batch"
+              role="tablist"
+              aria-label="Idle batch"
+            >
+              {IDLE_BATCHES.map((batch) => (
+                <button
+                  key={batch.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={idleBatch === batch.value}
+                  className={`segmented-item${idleBatch === batch.value ? " active" : ""}`}
+                  onClick={() => setIdleBatch(batch.value)}
+                >
+                  {batch.label}
+                </button>
+              ))}
+            </div>
+            <p className="schedule-msg-idle-hint">
+              {IDLE_BATCHES.find((b) => b.value === idleBatch)?.hint}
+            </p>
+          </div>
+        ) : (
+          <RecurrenceControl
+            host={host}
+            token={token}
+            timing={timingMode}
+            onTimingChange={setTimingMode}
+            state={recurrence}
+            onStateChange={setRecurrence}
+            onValidChange={setRecurrenceValid}
+          >
           <div className="segmented schedule-msg-modes" role="tablist">
             <button
               type="button"
@@ -266,7 +336,8 @@ export function ScheduleMessageModal({
               </span>
             </p>
           ) : null}
-        </RecurrenceControl>
+          </RecurrenceControl>
+        )}
         <div className="schedule-msg-submit-row">
           <span className="schedule-msg-submit-label">On delivery</span>
           <div className="segmented segmented-quiet schedule-msg-submit">
@@ -302,7 +373,7 @@ export function ScheduleMessageModal({
             disabled={
               !draft.trim() ||
               sending ||
-              (timingMode === "repeat" && !recurrenceValid)
+              (trigger === "time" && timingMode === "repeat" && !recurrenceValid)
             }
           >
             {sending ? "Scheduling…" : "Schedule"}

@@ -49,6 +49,10 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WAYPOINT_CORS_ORIGIN_REGEX",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Pin a wide render width so an assertion on a CLI error message is not
+    # fragile to the terminal width: Rich wraps a BadParameter panel at the
+    # detected width, which differs between a local shell and CI.
+    monkeypatch.setenv("COLUMNS", "200")
 
 
 def _config(tmp_path: Path) -> Path:

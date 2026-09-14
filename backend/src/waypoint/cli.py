@@ -2343,18 +2343,13 @@ def _validate_permission_mode(
         )
 
 
-# ── sessions settings: agent-safe batch settings mutation ───────────────────
-#
-# `sessions settings` mirrors the frontend session-settings editor
-# (frontend/src/lib/useSessionSettings.ts): it builds the same capability-aware
-# plan (restart count, turn-interruption, execution order), refuses a
-# restart-required plan without explicit `--restart` (exit 4, zero mutations),
-# and never blocks on a terminal prompt. The runtime stays authoritative — the
-# CLI plan is conservative UX validation only.
+# `sessions settings` mirrors the frontend editor (frontend/src/lib/
+# useSessionSettings.ts): the restart count, turn-interruption, and execution
+# order are computed the same way. The runtime stays authoritative; the CLI
+# plan is conservative validation only.
 
-# A restart-required plan run without --restart exits with this documented code
-# so an agent can distinguish "approval needed" from usage errors (2) and
-# HTTP/runtime failures (1).
+# Exit code for a restart-required plan run without --restart, distinct from a
+# usage error (2) and a runtime failure (1).
 _SETTINGS_CONFIRM_EXIT = 4
 
 
@@ -2474,13 +2469,11 @@ def _parse_env_pairs(pairs: list[str] | None) -> dict[str, str]:
 def _compose_caps(
     backends: list[dict[str, Any]], backend: str | None, transport: str | None
 ) -> dict[str, Any]:
-    """Compose the (agent, transport) capability view, mirroring the frontend.
+    """Merge the agent and transport capabilities for a session's pair.
 
-    ``buildCatalog.capsFor`` merges the agent descriptor's ``agent_capabilities``
-    with the transport descriptor's ``transport_capabilities`` (transport wins).
-    Transport caps are keyed by ``transport_id`` so a session whose transport is
-    not its agent's native one resolves the right pair; a stale/unknown transport
-    falls back to the agent descriptor's own transport caps.
+    Transport caps (keyed by ``transport_id``) win over agent caps, mirroring the
+    frontend catalog's ``capsFor``. A transport not found falls back to the agent
+    descriptor's own transport caps.
     """
     by_id = {b.get("id"): b for b in backends}
     by_transport = {b.get("transport_id"): b for b in backends}
@@ -2513,10 +2506,9 @@ def _build_settings_plan(
 ) -> _SettingsPlan:
     """Build the capability-aware plan, rejecting unsupported edits locally.
 
-    Mirrors ``useSessionSettings.ts`` exactly for the restart count, interrupt
-    rule, and execution order. Every local preflight failure raises
-    ``typer.BadParameter`` (exit 2); the runtime remains authoritative for
-    races, profile eligibility, and lifecycle locks.
+    Every local preflight failure raises ``typer.BadParameter`` (exit 2); the
+    runtime remains authoritative for races, profile eligibility, and lifecycle
+    locks.
     """
     source = session.get("source")
     if source == SessionSource.ASSISTANT:
@@ -2533,8 +2525,8 @@ def _build_settings_plan(
     )
     target_transport = opts.transport if transport_changing else current_transport
 
-    # FR5: an interface switch can't share a command with live tuning — the
-    # target pair may not support it and it can't apply in the same restart.
+    # An interface switch can't share a command with live tuning: the target
+    # pair may not support it, and it can't apply in the same restart.
     tuning_requested = (
         opts.permission_mode is not None
         or opts.model is not _UNSET
@@ -2556,7 +2548,7 @@ def _build_settings_plan(
             "switch target for this session"
         )
 
-    # ── tuning capability gates (matrix) ────────────────────────────────────
+    # ── tuning capability gates ─────────────────────────────────────────────
     if opts.permission_mode is not None:
         if not caps.get("supports_set_permission_mode_inline"):
             raise typer.BadParameter(
@@ -2651,7 +2643,7 @@ def _build_settings_plan(
     model_changed = opts.model is not _UNSET and opts.model != session.get("model")
     effort_changed = opts.effort is not _UNSET and opts.effort != session.get("effort")
 
-    # ── restart-count formula (mirrors useSessionSettings.ts:560-616) ───────
+    # ── restart-count formula ───────────────────────────────────────────────
     interrupts = bool(caps.get("settings_change_interrupts_turn"))
     if interrupts:
         tune_restarts = (

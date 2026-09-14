@@ -576,6 +576,40 @@ async def test_auto_mode_teaching_reesc_after_screen_clears() -> None:
     runtime._emit_adapter_event.assert_not_called()
 
 
+async def test_esc_fires_per_kind_on_direct_popup_swap() -> None:
+    # The reason the latch keys on the screen kind (not a single bool): one
+    # popup replacing another with no intervening non-dialog screen must still
+    # be cancelled once per kind. A question dismissed, then immediately an
+    # auto-mode modal, gets its own Esc — a bool latch would suppress it.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    question = _load("question_dialog.txt")
+    modal = _load("auto_mode_teaching.txt")
+    screens = [question, question, modal, modal]
+    idx = [0]
+
+    async def _side_effect(pane: str) -> str:
+        screen = screens[min(idx[0], len(screens) - 1)]
+        idx[0] += 1
+        return screen
+
+    runtime = _make_runtime(session, question)
+    runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # question debounce
+    await tailer._poll_dialog()  # question stable → Esc (1)
+    assert tailer._dismissed_screen is PaneScreen.QUESTION
+    await tailer._poll_dialog()  # auto-mode debounce (sig changed, count resets)
+    await tailer._poll_dialog()  # auto-mode stable → Esc (2)
+    assert tailer._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
+
+    assert runtime.tmux.send_bytes.call_count == 2
+    for call in runtime.tmux.send_bytes.call_args_list:
+        assert call.args == ("%0", b"\x1b")
+    runtime._emit_adapter_event.assert_not_called()
+
+
 async def test_question_drain_registers_pending() -> None:
     # Once the normalizer surfaces the flushed tool_use as a WAITING_INPUT card,
     # the tailer registers the pending question so an answer can route — no

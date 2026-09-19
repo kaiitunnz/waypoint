@@ -5771,7 +5771,7 @@ class SessionRuntime:
     ) -> tuple[list[dict[str, str]], list[AttachmentSpec]]:
         """Split host paths into renderable text and must-be-attached blobs.
         Blocking; run off the event loop."""
-        limit = self.settings.attachment_preview_max_bytes
+        limit = self.settings.inline_capture_max_bytes
         texts: list[dict[str, str]] = []
         attach: list[AttachmentSpec] = []
         base_dir = Path(base).expanduser() if base else None

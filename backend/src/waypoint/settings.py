@@ -319,6 +319,11 @@ class Settings(BaseModel):
     # transcript card into a multi-megabyte JSON transfer. Override with
     # ``WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES``.
     attachment_preview_max_bytes: int = Field(default=64 * 1024, ge=1, le=1024 * 1024)
+    # Largest captured text kept in the event itself, which every client
+    # receives whether or not the card is expanded. Larger output becomes an
+    # attachment read back on demand. Override with
+    # ``WAYPOINT_INLINE_CAPTURE_MAX_BYTES``.
+    inline_capture_max_bytes: int = Field(default=4 * 1024, ge=1)
     # Capture task-notification output as pinned session attachments: the
     # agent's ``output-file`` report and any notification body too large to
     # keep inline. Off means such reports are not retained. Override with
@@ -460,6 +465,17 @@ class Settings(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_inline_capture_limit(self) -> "Settings":
+        if self.inline_capture_max_bytes <= self.attachment_preview_max_bytes:
+            return self
+        if "inline_capture_max_bytes" in self.model_fields_set:
+            raise ValueError(
+                "inline_capture_max_bytes must not exceed attachment_preview_max_bytes"
+            )
+        self.inline_capture_max_bytes = self.attachment_preview_max_bytes
+        return self
+
+    @model_validator(mode="after")
     def _require_master_switch_for_nl(self) -> "Settings":
         if self.telemetry_nl.enabled and not self.telemetry_enabled:
             raise ValueError("telemetry_nl.enabled requires telemetry_enabled: true")
@@ -561,6 +577,10 @@ def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     if "WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES" in os.environ:
         overrides["attachment_preview_max_bytes"] = int(
             os.environ["WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES"]
+        )
+    if "WAYPOINT_INLINE_CAPTURE_MAX_BYTES" in os.environ:
+        overrides["inline_capture_max_bytes"] = int(
+            os.environ["WAYPOINT_INLINE_CAPTURE_MAX_BYTES"]
         )
     if "WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED" in os.environ:
         overrides["task_output_capture_enabled"] = os.environ[

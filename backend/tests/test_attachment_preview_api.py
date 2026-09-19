@@ -263,3 +263,15 @@ def test_settings_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = load_settings(None)
     assert settings.attachment_preview_max_bytes == 4096
     assert settings.task_output_capture_enabled is False
+
+
+def test_inline_budget_clamps_to_a_lowered_preview_ceiling() -> None:
+    # Lowering only the preview ceiling must not fail on an eager budget the
+    # operator never chose.
+    settings = Settings(attachment_preview_max_bytes=1024)
+    assert settings.inline_capture_max_bytes == 1024
+
+
+def test_inline_budget_may_not_exceed_the_preview_ceiling() -> None:
+    with pytest.raises(ValidationError):
+        Settings(attachment_preview_max_bytes=1024, inline_capture_max_bytes=4096)

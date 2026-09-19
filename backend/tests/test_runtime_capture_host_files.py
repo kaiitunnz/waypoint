@@ -326,11 +326,11 @@ async def _capture_text(fake: SimpleNamespace, metadata: dict[str, Any]) -> None
     )
 
 
-def _text_runtime(tmp_path: Path, preview_limit: int = 64 * 1024) -> SimpleNamespace:
+def _text_runtime(tmp_path: Path, inline_limit: int = 4 * 1024) -> SimpleNamespace:
     fake = _fake_runtime(tmp_path)
     fake.settings = SimpleNamespace(
         max_upload_bytes=25 * 1024 * 1024,
-        attachment_preview_max_bytes=preview_limit,
+        inline_capture_max_bytes=inline_limit,
     )
     return fake
 
@@ -352,7 +352,7 @@ async def test_small_report_is_inlined_and_never_attached(tmp_path: Path) -> Non
 
 
 async def test_oversized_report_falls_back_to_an_attachment(tmp_path: Path) -> None:
-    fake = _text_runtime(tmp_path, preview_limit=32)
+    fake = _text_runtime(tmp_path, inline_limit=32)
     report = tmp_path / "big.output"
     report.write_text("z" * 4096, encoding="utf-8")
     metadata: dict[str, Any] = {"capture_host_text": [str(report)]}
@@ -385,3 +385,17 @@ async def test_missing_report_yields_nothing(tmp_path: Path) -> None:
 
     assert "captured_text" not in metadata
     assert "attachments" not in metadata
+
+
+async def test_capture_inlines_only_within_the_eager_budget(tmp_path: Path) -> None:
+    # The budget bounds what every client receives whether or not the card is
+    # expanded, so it tracks the body cap, not the on-demand preview ceiling.
+    fake = _text_runtime(tmp_path)
+    report = tmp_path / "run.output"
+    report.write_text("y" * 8192, encoding="utf-8")
+    metadata: dict[str, Any] = {"capture_host_text": [str(report)]}
+
+    await _capture_text(fake, metadata)
+
+    assert "captured_text" not in metadata
+    assert metadata["attachments"][0]["size"] == 8192

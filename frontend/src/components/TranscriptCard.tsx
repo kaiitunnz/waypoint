@@ -1173,10 +1173,10 @@ function TaskNotificationCard({
   );
 
   if (!hasBody) {
+    // No body means no `event`, and the teaser is only ever `event`.
     return (
       <article className="panel transcript codex task-notification">
         {header}
-        {preview ? <p className="transcript-preview">{preview}</p> : null}
       </article>
     );
   }

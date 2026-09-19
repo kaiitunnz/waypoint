@@ -19,6 +19,10 @@ cors_origins: []
 #                                      #   this much plus a link to the full file.
 #                                      #   Capped at 1 MiB and at max_upload_bytes.
 #                                      #   Env: WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES
+# inline_capture_max_bytes: 4096       # captured output up to this size rides in
+#                                      #   the event itself; larger output becomes
+#                                      #   an attachment read back on demand.
+#                                      #   Env: WAYPOINT_INLINE_CAPTURE_MAX_BYTES
 # task_output_capture_enabled: true    # keep task-notification output as pinned
 #                                      #   session attachments: the agent's
 #                                      #   output-file report, and any notification

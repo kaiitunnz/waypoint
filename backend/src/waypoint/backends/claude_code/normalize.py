@@ -137,16 +137,16 @@ def is_injected_user_turn(content: Any) -> bool:
 # Claude records subagent/Agent completion, Monitor events and terminal state,
 # and background-command completion as a synthetic ``user`` record with
 # ``origin.kind == "task-notification"`` and a ``<task-notification>…</…>``
-# string payload. These are not human turns; the live tailer and history import
-# both dropped them before this change. We normalize them into a standalone
-# SYSTEM_NOTE event carrying a versioned, backend-private metadata contract.
+# string payload. These are not human turns. Both the live tailer and history
+# import normalize them into a standalone SYSTEM_NOTE event carrying a versioned,
+# backend-private metadata contract.
 
 TASK_NOTIFICATION_METHOD = "claude.task_notification"
 TASK_NOTIFICATION_ITEM_TYPE = "task_notification"
 TASK_NOTIFICATION_VERSION = 1
 # Largest inline ``result`` kept verbatim in the event metadata. A larger report
 # is captured as a session attachment (from Claude's ``output-file``) and only a
-# bounded preview is stored. A named constant with tests, not a user knob.
+# bounded preview is stored.
 TASK_NOTIFICATION_INLINE_LIMIT = 64 * 1024
 
 
@@ -234,12 +234,7 @@ def parse_task_notification(content: Any) -> ParsedTaskNotification | None:
     """Parse a ``<task-notification>`` payload into known fields, stdlib-only and
     non-throwing (NFR1: no XML parser, no external-entity resolution).
 
-    Every free-text field body (``result``/``summary``/``event``/``note``) is
-    excised before the remainder is scanned for ``output-file`` and the short
-    scalars — so a tag quoted inside any of those bodies can never fabricate a
-    scalar, a fake usage block, or (critically) an ``output-file`` path that
-    would make the capture sink read an arbitrary host file. Returns ``None`` for
-    a missing wrapper or a wrapper with no meaningful recognized field, so a
+    Returns ``None`` for a missing wrapper or one with no recognized field, so a
     contentless or malformed record stays suppressed rather than becoming an
     empty card.
     """

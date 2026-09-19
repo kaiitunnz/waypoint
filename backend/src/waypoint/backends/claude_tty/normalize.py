@@ -424,7 +424,6 @@ class TranscriptNormalizer:
         if injected == "task_notification":
             parsed = parse_task_notification(content)
             if parsed is None:
-                # A contentless or unrecognized wrapper stays suppressed.
                 return []
             text, note_metadata = build_task_notification_metadata(
                 parsed,

@@ -465,7 +465,12 @@ class CodexAppServerAdapter:
         skills: list[dict[str, Any]] = []
         for entry in response.data:
             for skill in entry.skills:
-                skills.append(skill.model_dump(mode="json", by_alias=True))
+                payload = skill.model_dump(mode="json", by_alias=True)
+                # openai-codex 0.154 adds this optional field. Keep the
+                # established Waypoint contract when the server has no plugin.
+                if payload.get("pluginId") is None:
+                    payload.pop("pluginId", None)
+                skills.append(payload)
         return skills
 
     def _build_turn_params(

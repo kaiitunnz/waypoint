@@ -31,8 +31,10 @@ from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
 )
 from waypoint.backends.claude_code.normalize import (
-    is_injected_user_turn,
+    build_task_notification_metadata,
+    classify_injected_user_turn,
     iter_content_blocks,
+    parse_task_notification,
     stringify_tool_result,
 )
 from waypoint.backends.claude_code.threads import (
@@ -170,7 +172,19 @@ def _convert_user(
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     content = message.get("content")
-    if is_injected_user_turn(content):
+    injected = classify_injected_user_turn(record, content)
+    if injected == "task_notification":
+        parsed = parse_task_notification(content)
+        if parsed is None:
+            return []
+        text, metadata = build_task_notification_metadata(
+            parsed,
+            record_uuid=record.get("uuid"),
+            allow_output_capture=False,
+            ts=ts,
+        )
+        return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
+    if injected == "continuation":
         return []
     blocks = iter_content_blocks(content)
     tool_result_blocks = [b for b in blocks if b.get("type") == "tool_result"]

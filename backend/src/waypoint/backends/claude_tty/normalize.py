@@ -15,8 +15,10 @@ Key invariants (all verified against real transcripts in Phase 0):
 - A synthesized result (SYSTEM_NOTE, status=IDLE) is emitted when the last
   assistant record in a turn has a terminal ``stop_reason`` (anything other than
   ``tool_use``) and contains no ``tool_use`` blocks.
-- Injected harness user turns (``<task-notification>`` and context-window
-  summaries beginning with "This session is being continued") are dropped.
+- ``<task-notification>`` injected user turns (subagent/Agent completion,
+  Monitor events and terminal state, background-command completion) are
+  normalized into a standalone SYSTEM_NOTE task-notification event; context-window
+  summaries beginning with "This session is being continued" are still dropped.
 - A manual ``/compact`` produces only a ``compact_boundary`` system record and
   an injected continuation summary, with no terminal assistant record, so a
   synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
@@ -36,10 +38,12 @@ from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
+    build_task_notification_metadata,
+    classify_injected_user_turn,
     extract_created_task_id,
     format_task_snapshot,
-    is_injected_user_turn,
     iter_content_blocks,
+    parse_task_notification,
     sent_user_file_paths,
     stringify_tool_result,
 )
@@ -416,7 +420,26 @@ class TranscriptNormalizer:
         message: dict[str, Any] = record.get("message") or {}
         content = message.get("content")
 
-        if is_injected_user_turn(content):
+        injected = classify_injected_user_turn(record, content)
+        if injected == "task_notification":
+            parsed = parse_task_notification(content)
+            if parsed is None:
+                # A contentless or unrecognized wrapper stays suppressed.
+                return []
+            text, note_metadata = build_task_notification_metadata(
+                parsed,
+                record_uuid=record.get("uuid"),
+                allow_output_capture=True,
+            )
+            return [
+                NormalizedEvent(
+                    kind=EventKind.SYSTEM_NOTE,
+                    text=text,
+                    metadata=note_metadata,
+                    status=SessionStatus.RUNNING,
+                )
+            ]
+        if injected == "continuation":
             return []
 
         turn_aborted = _is_user_rejection(record)

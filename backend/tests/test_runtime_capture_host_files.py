@@ -10,6 +10,7 @@ import pytest
 
 from waypoint.attachments import AttachmentStore
 from waypoint.runtime import SessionRuntime
+from waypoint.schemas import EventKind, EventRecord, SessionStatus
 
 
 def _fake_runtime(
@@ -135,3 +136,53 @@ async def test_capture_missing_session_is_noop(tmp_path: Path) -> None:
 
     assert "capture_host_files" not in metadata
     assert "attachments" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_emit_adapter_event_captures_for_non_tool_call_kind(
+    tmp_path: Path,
+) -> None:
+    # The capture seam was broadened from TOOL_CALL-only to any adapter event
+    # carrying the transient key, so a task-notification SYSTEM_NOTE captures its
+    # report attachment. This drives the real _emit_adapter_event gate.
+    fake = _fake_runtime(tmp_path)
+    (tmp_path / "report.md").write_text("the full report")
+    persisted: list[EventRecord] = []
+
+    def _append(event: EventRecord) -> EventRecord:
+        persisted.append(event)
+        return event
+
+    fake.storage = SimpleNamespace(
+        get_session=lambda _sid: SimpleNamespace(worktree_path=None, cwd=str(tmp_path)),
+        next_sequence=lambda _sid: 1,
+        append_event=_append,
+    )
+    fake.notifications = None
+    fake._append_structured_log = lambda _sid, _ev: None
+
+    async def _publish(_event: EventRecord) -> None:
+        return None
+
+    fake._publish_event = _publish
+    fake._capture_host_files = types.MethodType(
+        SessionRuntime._capture_host_files, fake
+    )
+
+    metadata: dict[str, Any] = {
+        "method": "claude.task_notification",
+        "capture_host_files": [str(tmp_path / "report.md")],
+    }
+    await SessionRuntime._emit_adapter_event(
+        cast(SessionRuntime, fake),
+        "sess-1",
+        EventKind.SYSTEM_NOTE,
+        "Agent finished",
+        metadata,
+        SessionStatus.RUNNING,
+    )
+
+    assert len(persisted) == 1
+    saved = persisted[0].metadata
+    assert "capture_host_files" not in saved
+    assert saved["attachments"][0]["filename"] == "report.md"

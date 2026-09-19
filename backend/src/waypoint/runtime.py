@@ -5669,7 +5669,7 @@ class SessionRuntime:
         metadata: dict[str, Any],
         status: SessionStatus,
     ) -> None:
-        if kind == EventKind.TOOL_CALL and metadata.get("capture_host_files"):
+        if metadata.get("capture_host_files"):
             await self._capture_host_files(session_id, metadata)
         event = EventRecord(
             session_id=session_id,
@@ -5707,9 +5707,10 @@ class SessionRuntime:
         """Turn the transient ``capture_host_files`` paths into pinned session
         attachments exposed on ``metadata["attachments"]``.
 
-        A backend-neutral seam: any normalizer can tag a TOOL_CALL with host
-        paths and have them surface in the Files browser. The transient key is
-        always removed; best-effort, never raises into the emit path.
+        A backend-neutral seam: any normalizer can tag an adapter event (of any
+        kind) with host paths and have them surface in the Files browser. The
+        transient key is always removed; best-effort, never raises into the emit
+        path.
         """
         raw = metadata.pop("capture_host_files", None)
         if not isinstance(raw, list):

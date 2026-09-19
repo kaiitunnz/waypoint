@@ -14,7 +14,8 @@ import {
   type BackendCatalog,
 } from "@/lib/backends";
 import { isModifiedEnterShortcut } from "@/lib/keyboard";
-import { EventRecord, SessionTransport } from "@/lib/types";
+import { BackendModelOption, EventRecord, SessionTransport } from "@/lib/types";
+import { formatResolvedModelLabel } from "@/lib/modelDisplay";
 import {
   normalizeToolName,
   parseEvent,
@@ -166,6 +167,7 @@ interface TranscriptCardProps {
   transport: SessionTransport;
   catalog?: BackendCatalog;
   pair?: ToolPair;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -179,6 +181,7 @@ export const TranscriptCard = memo(function TranscriptCard({
   transport,
   catalog,
   pair,
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: TranscriptCardProps) {
@@ -197,6 +200,7 @@ export const TranscriptCard = memo(function TranscriptCard({
         event={event}
         transport={transport}
         catalog={catalog}
+        modelOptions={modelOptions}
         onAnswerAskQuestion={onAnswerAskQuestion}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
       />
@@ -209,12 +213,14 @@ function StructuredCard({
   event,
   transport,
   catalog,
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   transport: SessionTransport;
   catalog?: BackendCatalog;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -233,6 +239,7 @@ function StructuredCard({
     <CodexCard
       event={event}
       agentLabel={agentLabel}
+      modelOptions={modelOptions}
       onAnswerAskQuestion={onAnswerAskQuestion}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
@@ -242,11 +249,13 @@ function StructuredCard({
 function CodexCard({
   event,
   agentLabel = "codex",
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   agentLabel?: string;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -334,11 +343,44 @@ function CodexCard({
       if (event.metadata?.builtin_command === "/status") {
         return <CommandStatusCard event={event} agentLabel={agentLabel} />;
       }
+      if (event.metadata?.method === "model.change") {
+        // A mid-session switch reads as an inline divider; a launch-time
+        // mismatch surfaces only as the notice toast (no divider here).
+        return event.metadata?.reason === "switch" ? (
+          <ModelChangeDivider event={event} modelOptions={modelOptions} />
+        ) : null;
+      }
       return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
     }
     default:
       return <HeuristicCard event={event} />;
   }
+}
+
+function ModelChangeDivider({
+  event,
+  modelOptions,
+}: {
+  event: EventRecord;
+  modelOptions?: BackendModelOption[];
+}) {
+  const current =
+    typeof event.metadata?.current_model === "string"
+      ? event.metadata.current_model
+      : "";
+  const label =
+    formatResolvedModelLabel(current, null, modelOptions ?? []) ?? current;
+  return (
+    <div className="system-rule model-change" role="note">
+      <span className="system-rule-body">
+        <span className="system-rule-time">{formatTime(event.ts)}</span>
+        <span className="model-change-glyph" aria-hidden="true">
+          ⇄
+        </span>
+        <span className="system-rule-text">Switched to {label}</span>
+      </span>
+    </div>
+  );
 }
 
 function UserMessageBubble({ event }: { event: EventRecord }) {

@@ -244,7 +244,7 @@ def test_html_entities_decoded() -> None:
     assert parsed.summary == "A & B <x>"
 
 
-def test_build_metadata_agent_live_tags_capture() -> None:
+def test_build_metadata_agent_keeps_the_report_not_the_transcript() -> None:
     parsed = parse_task_notification(AGENT_COMPLETION)
     assert parsed is not None
     text, metadata = build_task_notification_metadata(
@@ -254,13 +254,17 @@ def test_build_metadata_agent_live_tags_capture() -> None:
     assert metadata["method"] == TASK_NOTIFICATION_METHOD
     assert metadata["item_type"] == TASK_NOTIFICATION_ITEM_TYPE
     assert metadata["status"] == SessionStatus.RUNNING
-    assert metadata["capture_host_files"] == ["/tmp/tasks/a9af42717082ba876.output"]
+    # An agent's output-file is its sidechain transcript, whose report already
+    # rides inline; pinning hundreds of KB of tool churn buys nothing.
+    assert "capture_host_files" not in metadata
     payload = metadata["task_notification"]
     assert payload["version"] == 1
     assert payload["id"] == "rec-1"
     assert payload["kind"] == "agent"
     assert payload["status"] == "completed"
-    assert payload["output_available"] is True
+    # No separate artifact is promised: the report is the inline body.
+    assert payload["output_available"] is False
+    assert payload["output_unavailable_reason"] is None
     assert payload["output_unavailable_reason"] is None
     assert payload["result_preview"] == "The full subagent report body."
     assert payload["result_truncated"] is False
@@ -283,7 +287,7 @@ def test_build_metadata_monitor_text_appends_event() -> None:
 
 
 def test_build_metadata_import_skips_capture_with_reason() -> None:
-    parsed = parse_task_notification(AGENT_COMPLETION)
+    parsed = parse_task_notification(BACKGROUND_COMPLETED)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
         parsed, record_uuid="rec-3", allow_output_capture=False, ts=datetime.now(UTC)
@@ -292,8 +296,34 @@ def test_build_metadata_import_skips_capture_with_reason() -> None:
     payload = metadata["task_notification"]
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] == "full output not captured on import"
-    # The preview still rides the event.
+
+
+def test_build_metadata_agent_import_claims_nothing_missing() -> None:
+    # The report is inline, so an imported agent card has no absent artifact to
+    # apologise for.
+    parsed = parse_task_notification(AGENT_COMPLETION)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-3b", allow_output_capture=False, ts=datetime.now(UTC)
+    )
+    payload = metadata["task_notification"]
+    assert payload["output_available"] is False
+    assert payload["output_unavailable_reason"] is None
     assert payload["result_preview"] == "The full subagent report body."
+
+
+def test_build_metadata_agent_without_a_report_still_captures() -> None:
+    # Defensive: only the *inline report* makes the transcript redundant.
+    content = AGENT_COMPLETION.replace(
+        "<result>The full subagent report body.</result>\n", ""
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-3c", allow_output_capture=True
+    )
+    assert metadata["capture_host_files"] == ["/tmp/tasks/a9af42717082ba876.output"]
+    assert metadata["task_notification"]["output_available"] is True
 
 
 def test_build_metadata_oversized_inline_without_output_file() -> None:
@@ -415,7 +445,7 @@ def test_build_metadata_capture_disabled_keeps_bounded_text_and_says_why() -> No
 
 
 def test_build_metadata_capture_disabled_does_not_claim_an_import() -> None:
-    parsed = parse_task_notification(AGENT_COMPLETION)
+    parsed = parse_task_notification(BACKGROUND_COMPLETED)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
         parsed, record_uuid="rec-d2", allow_output_capture=True, capture_enabled=False
@@ -427,7 +457,7 @@ def test_build_metadata_capture_disabled_does_not_claim_an_import() -> None:
 
 
 def test_build_metadata_import_still_reports_an_import() -> None:
-    parsed = parse_task_notification(AGENT_COMPLETION)
+    parsed = parse_task_notification(BACKGROUND_COMPLETED)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
         parsed, record_uuid="rec-i", allow_output_capture=False, capture_enabled=True

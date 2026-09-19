@@ -986,6 +986,12 @@ function reportUnavailableText(view: TaskNotificationView): string | null {
   }
 }
 
+// Collapse whitespace so a containment test is not defeated by wrapping or a
+// trailing newline the capture adds.
+function squash(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 type ReportPreviewState =
   | { status: "loading" }
   | { status: "ready"; preview: AttachmentPreview }
@@ -994,23 +1000,21 @@ type ReportPreviewState =
 // Lazily reads a bounded text prefix of a captured report once its card is
 // expanded. The request is abandoned when the card collapses or unmounts, and
 // a failure only ever costs the preview — the attachment link stays.
-function TaskReportPreview({
-  spec,
-  open,
-}: {
-  spec: AttachmentSpec;
-  open: boolean;
-}) {
+function useReportPreview(
+  spec: AttachmentSpec | null,
+  open: boolean,
+): ReportPreviewState | null {
   const ctx = useAttachmentContext();
   const [state, setState] = useState<ReportPreviewState | null>(null);
+  const attachmentId = spec?.id ?? null;
 
   useEffect(() => {
-    if (!open || !ctx) {
+    if (!open || !ctx || !attachmentId) {
       return;
     }
     const controller = new AbortController();
     setState({ status: "loading" });
-    fetchAttachmentPreview(ctx.host, ctx.token, ctx.sessionId, spec.id, {
+    fetchAttachmentPreview(ctx.host, ctx.token, ctx.sessionId, attachmentId, {
       signal: controller.signal,
     })
       .then((preview) => {
@@ -1026,8 +1030,12 @@ function TaskReportPreview({
         }
       });
     return () => controller.abort();
-  }, [open, ctx, spec.id]);
+  }, [open, ctx, attachmentId]);
 
+  return state;
+}
+
+function TaskReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") {
     return <p className="task-note-preview-loading">Loading report…</p>;
   }
@@ -1081,6 +1089,17 @@ function TaskNotificationCard({
   const reportSpec = specs.find((spec) => !inlineIds.has(spec.id)) ?? null;
   const hasReport = reportSpec !== null;
   const captureFailed = inlineCaptureFailed(event);
+  const previewState = useReportPreview(reportSpec, open);
+  const previewText =
+    previewState?.status === "ready" && !previewState.preview.binary
+      ? previewState.preview.content
+      : null;
+  // The captured output is often the fuller version of a body the event also
+  // carries inline (a monitor's final lines vs. its whole log). When the loaded
+  // report literally contains that body, it supersedes it and the duplicate is
+  // dropped — measured, rather than assumed for every attachment.
+  const supersedes = (body: string | null) =>
+    Boolean(body && previewText && squash(previewText).includes(squash(body)));
   const usageParts = taskUsageParts(view.usage);
   const unavailable = hasReport ? null : reportUnavailableText(view);
   const retained = specs.length > 0;
@@ -1142,11 +1161,13 @@ function TaskNotificationCard({
         {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
       <div className="task-note-body">
-        {view.resultPreview ? (
+        {view.resultPreview && !supersedes(view.resultPreview) ? (
           <pre className="task-note-result">{view.resultPreview}</pre>
         ) : null}
         {cutCaption(view.resultTruncated)}
-        {view.event ? <pre className="task-note-result">{view.event}</pre> : null}
+        {view.event && !supersedes(view.event) ? (
+          <pre className="task-note-result">{view.event}</pre>
+        ) : null}
         {cutCaption(view.eventTruncated)}
         {view.note ? <p className="task-note-text">{view.note}</p> : null}
         {cutCaption(view.noteTruncated)}
@@ -1158,9 +1179,7 @@ function TaskNotificationCard({
             <span className="task-note-report-label">
               {hasReport ? "Full report" : "Full output"}
             </span>
-            {reportSpec ? (
-              <TaskReportPreview spec={reportSpec} open={open} />
-            ) : null}
+            {reportSpec ? <TaskReportPreview state={previewState} /> : null}
             <MessageAttachments event={event} />
           </div>
         ) : unavailable ? (

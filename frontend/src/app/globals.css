@@ -7998,6 +7998,12 @@ details.transcript.codex.task-notification > summary .transcript-role {
   gap: 6px;
 }
 
+/* The teaser exists so a collapsed card can be scanned; once open, the body
+ * below renders the same text in full, so repeating it is pure noise. */
+.transcript.codex.task-notification[open] > summary .transcript-preview {
+  display: none;
+}
+
 .task-note-preview-loading,
 .task-note-preview-error {
   margin: 0;

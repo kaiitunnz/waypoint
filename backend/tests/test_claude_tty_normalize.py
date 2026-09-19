@@ -125,8 +125,8 @@ def test_task_notification_emits_one_system_note() -> None:
     assert payload["kind"] == "agent"
     assert payload["id"] == "rec-uuid"
     assert payload["status"] == "completed"
-    # Live path tags the output file for the runtime capture sink.
-    assert ev.metadata["capture_host_files"] == ["/tmp/tasks/t1.output"]
+    # An agent's output-file is its transcript; the report rides inline.
+    assert "capture_host_files" not in ev.metadata
 
 
 def test_task_notification_monitor_event_has_no_capture() -> None:

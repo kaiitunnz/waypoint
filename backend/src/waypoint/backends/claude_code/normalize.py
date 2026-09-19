@@ -354,6 +354,7 @@ def build_task_notification_metadata(
     """
     capture_allowed = allow_output_capture and capture_enabled
     notification_id = record_uuid or _stable_task_notification_id(parsed, ts)
+    kind = infer_task_notification_kind(parsed)
 
     result_preview, result_truncated = _bounded(parsed.result)
     event_text, event_truncated = _bounded(parsed.event)
@@ -382,7 +383,17 @@ def build_task_notification_metadata(
     output_unavailable_reason: str | None = None
     capture_path: str | None = None
     output_file = parsed.output_file
-    if output_file and os.path.isabs(output_file):
+    if output_file and kind == "agent" and parsed.result is not None:
+        # An Agent's ``output-file`` is its whole sidechain transcript (a
+        # symlink into Claude's own project dir), whose report is the last
+        # record -- and that report already rides inline on ``result``, spilled
+        # in full when oversized. Pinning it would cost hundreds of KB whose
+        # only unique content is intermediate tool churn, and a leading preview
+        # of it shows the task prompt rather than the outcome. Conditioned on
+        # the inline report actually being present, so an agent notification
+        # that carries only a file is still captured.
+        pass
+    elif output_file and os.path.isabs(output_file):
         if capture_allowed:
             capture_path = output_file
             output_available = True
@@ -409,7 +420,7 @@ def build_task_notification_metadata(
         "id": notification_id,
         "task_id": parsed.task_id,
         "tool_use_id": parsed.tool_use_id,
-        "kind": infer_task_notification_kind(parsed),
+        "kind": kind,
         "status": parsed.status,
         "summary": summary_text,
         "event": event_text,

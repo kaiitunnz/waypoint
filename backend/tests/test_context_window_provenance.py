@@ -231,8 +231,10 @@ class _FeedOnceSource:
 
 @pytest.mark.asyncio
 async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> None:
-    # The transcript's resolved id is a base family (claude-opus-4-8 → 200K),
-    # but the session's durable model is opus[1m]; the published window is 1M.
+    # The transcript's resolved id normalizes to a base family (claude-opus-5 →
+    # 200K), but the session's durable model is opus[1m]; the published window is
+    # 1M. This is the alias→concrete resolution of the same model, so no model
+    # adoption occurs — only the context-usage snapshot is published.
     session = _session("opus[1m]", None)
     runtime = MagicMock()
     runtime.storage.get_session.return_value = session
@@ -244,7 +246,7 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
         "type": "assistant",
         "message": {
             "id": "msg_1",
-            "model": "claude-opus-4-8",
+            "model": "claude-opus-5",
             "content": [{"type": "text", "text": "hi"}],
             "usage": {"input_tokens": 42, "output_tokens": 1},
         },
@@ -260,8 +262,15 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
     )
     await tailer._drain()
 
-    runtime.update_session_fields.assert_called_once()
-    snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
+    # resolved_model is recorded and the context-usage snapshot is published;
+    # both go through update_session_fields, so filter to the snapshot write.
+    usage_calls = [
+        call
+        for call in runtime.update_session_fields.call_args_list
+        if "context_usage" in call.kwargs
+    ]
+    assert len(usage_calls) == 1
+    snapshot = usage_calls[-1].kwargs["context_usage"]
     assert snapshot.context_window_tokens == 1_000_000
 
 

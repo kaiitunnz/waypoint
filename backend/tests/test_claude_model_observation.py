@@ -106,6 +106,24 @@ def test_no_selection_adopts_without_toast() -> None:
     assert obs.reason is None
 
 
+def test_custom_gateway_model_is_not_observed() -> None:
+    # A custom durable selection whose gateway reports a non-Claude concrete id
+    # must be left untouched (adopting it would corrupt the custom config).
+    assert observe_claude_model("kimi-k3-0711", "kimi-k3[1m]", prev_base=None) is None
+    # Even a Claude concrete id is left alone under a custom selection.
+    assert observe_claude_model("claude-opus-5", "kimi-k3[1m]", prev_base=None) is None
+    # A non-Claude concrete id under a Claude selection is also ignored.
+    assert observe_claude_model("kimi-k3-0711", "opus", prev_base=None) is None
+
+
+def test_uncatalogued_claude_model_still_observed() -> None:
+    obs = observe_claude_model("claude-opus-9", "opus", prev_base=None)
+    assert obs is not None
+    assert obs.resolved_base == "claude-opus-9"
+    assert obs.adopt_selection == "claude-opus-9"
+    assert obs.toast is True
+
+
 def test_one_m_not_reattached_for_family_without_variant() -> None:
     # haiku has no [1m] catalogue entry; the suffix must resolve away.
     obs = observe_claude_model("claude-haiku-4-5", "opus[1m]", prev_base="opus")

@@ -285,6 +285,28 @@ def is_claude_plan_switching_model(model: str | None) -> bool:
     return _strip_one_m(model.strip().lower()) in CLAUDE_PLAN_SWITCHING_MODELS
 
 
+def is_claude_model_id(model: str | None) -> bool:
+    """True when ``model`` is a recognizable Claude model id.
+
+    Confines model observation/adoption to Claude's own catalogue: a custom
+    gateway model (``kimi-k3-0711`` running under a durable ``kimi-k3[1m]``
+    selection) reports a concrete id that does not map to any Claude entry, and
+    adopting it would corrupt the custom selection and its configured context
+    window. Matches a catalogue id, a known alias, or the ``claude-`` prefix (so
+    a not-yet-catalogued Claude model still qualifies).
+    """
+    if not isinstance(model, str):
+        return False
+    base = _strip_one_m(model.strip())
+    if not base:
+        return False
+    return (
+        base in _BUILTIN_MODEL_IDS
+        or base in CLAUDE_MODEL_ALIASES
+        or base.startswith("claude-")
+    )
+
+
 def map_observed_model_id(concrete: str | None) -> str | None:
     """Map a transcript's concrete ``message.model`` to a base catalogue id.
 
@@ -340,9 +362,15 @@ def observe_claude_model(
 
     ``prev_base`` is the base id of the previous real reply in this pane's
     lifetime (``None`` on the first reply). Returns ``None`` when ``concrete``
-    maps to nothing. Callers skip synthetic records and plan-switching
-    selections before calling.
+    maps to nothing, when it is not a Claude model, or when the selection is a
+    custom (non-Claude) model — in those cases the running model must be left
+    untouched. Callers skip synthetic records and plan-switching selections
+    before calling.
     """
+    if not is_claude_model_id(concrete):
+        return None
+    if selection is not None and not is_claude_model_id(selection):
+        return None
     resolved_base = map_observed_model_id(concrete)
     if resolved_base is None:
         return None

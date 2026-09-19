@@ -266,6 +266,114 @@ def claude_model_family(model: str | None) -> str | None:
     return normalized.split("[", 1)[0]
 
 
+# Selections that legitimately run different concrete models across a turn (e.g.
+# ``opusplan`` runs Opus while planning, Sonnet otherwise). These are free-form
+# ``--model`` values, not catalogue entries, so a name set — not a catalogue flag
+# — is the only way to recognize them. An observed model is never adopted over
+# one of these, since the switch is by design. Extend as the CLI adds more.
+CLAUDE_PLAN_SWITCHING_MODELS: frozenset[str] = frozenset({"opusplan"})
+
+
+def _strip_one_m(model: str) -> str:
+    return model[: -len(_ONE_M_SUFFIX)] if model.endswith(_ONE_M_SUFFIX) else model
+
+
+def is_claude_plan_switching_model(model: str | None) -> bool:
+    """True for a selection that switches the running model by design."""
+    if not isinstance(model, str):
+        return False
+    return _strip_one_m(model.strip().lower()) in CLAUDE_PLAN_SWITCHING_MODELS
+
+
+def map_observed_model_id(concrete: str | None) -> str | None:
+    """Map a transcript's concrete ``message.model`` to a base catalogue id.
+
+    Returns a selectable catalogue id **without** the ``[1m]`` suffix: a pinned
+    legacy id when one matches (``claude-opus-4-8``), else the current-epoch
+    alias (``claude-opus-5`` -> ``opus``), else the concrete id unchanged so an
+    unknown model still round-trips into a picker "Custom" entry. ``None`` for a
+    blank input. The pinned-id check precedes the alias lookup so a legacy id
+    that also aliases to a family (``claude-opus-4-8`` -> ``opus``) keeps its
+    distinct pinned identity rather than collapsing onto the current alias.
+    """
+    if not isinstance(concrete, str):
+        return None
+    candidate = _strip_one_m(concrete.strip())
+    if not candidate:
+        return None
+    if candidate in _BUILTIN_MODEL_IDS:
+        return candidate
+    alias = CLAUDE_MODEL_ALIASES.get(candidate)
+    if alias is not None:
+        return alias
+    return candidate
+
+
+def _has_one_m_variant(base: str) -> bool:
+    with_suffix = f"{base}{_ONE_M_SUFFIX}"
+    return with_suffix in _BUILTIN_MODEL_IDS or with_suffix in CLAUDE_CONTEXT_WINDOWS
+
+
+class ClaudeModelObservation(NamedTuple):
+    """Outcome of observing one concrete model against a session's selection.
+
+    ``resolved_base`` is the base catalogue id to store in ``resolved_model``.
+    ``adopt_selection`` is the catalogue id to write into ``session.model`` when
+    the running model has diverged from the selection (``None`` = leave the
+    selection as-is). ``toast``/``marker`` drive the notice and the transcript
+    divider; ``reason`` is ``"switch"``, ``"initial_mismatch"``, or ``None``.
+    """
+
+    resolved_base: str
+    adopt_selection: str | None
+    toast: bool
+    marker: bool
+    reason: str | None
+
+
+def observe_claude_model(
+    concrete: str,
+    selection: str | None,
+    prev_base: str | None,
+) -> ClaudeModelObservation | None:
+    """Decide adoption + notice/divider for one observed concrete model.
+
+    ``prev_base`` is the base id of the previous real reply in this pane's
+    lifetime (``None`` on the first reply). Returns ``None`` when ``concrete``
+    maps to nothing. Callers skip synthetic records and plan-switching
+    selections before calling.
+    """
+    resolved_base = map_observed_model_id(concrete)
+    if resolved_base is None:
+        return None
+    selection_base = _strip_one_m(selection.strip()) if selection else None
+    first = prev_base is None
+    if first:
+        toast = selection_base is not None and resolved_base != selection_base
+    else:
+        toast = resolved_base != prev_base
+    marker = not first and resolved_base != prev_base
+    reason = "initial_mismatch" if toast and first else "switch" if toast else None
+    if selection is None or resolved_base != selection_base:
+        suffix = (
+            _ONE_M_SUFFIX
+            if selection
+            and selection.strip().endswith(_ONE_M_SUFFIX)
+            and _has_one_m_variant(resolved_base)
+            else ""
+        )
+        adopt_selection: str | None = f"{resolved_base}{suffix}"
+    else:
+        adopt_selection = None
+    return ClaudeModelObservation(
+        resolved_base=resolved_base,
+        adopt_selection=adopt_selection,
+        toast=toast,
+        marker=marker,
+        reason=reason,
+    )
+
+
 def claude_context_window_for_model(model: str | None) -> int | None:
     # An unresolved id normalizes to itself, so it has no window rather than a
     # fabricated default.

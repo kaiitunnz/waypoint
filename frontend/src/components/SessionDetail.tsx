@@ -4542,6 +4542,10 @@ function isImportantEvent(event: EventRecord): boolean {
       if (event.metadata?.method === "approval.invalidated") {
         return true;
       }
+      // A model switch draws an inline divider; keep it in the important view.
+      if (event.metadata?.method === "model.change") {
+        return event.metadata?.reason === "switch";
+      }
       if (isPlanEvent(event)) {
         return true;
       }

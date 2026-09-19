@@ -73,6 +73,30 @@ def test_account_lookup_env_includes_extra_env_not_runtime_keys(
     assert "WAYPOINT_SESSION_ID" not in env
 
 
+def test_account_lookup_env_remote_excludes_process_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A remote lookup runs through the target's login shell (bash -ilc), which
+    # establishes the remote PATH and picks the remote binary. Folding this
+    # host's os.environ would splice the local PATH into the remote
+    # `exec env ... <binary>` prefix and shadow the login shell's, resolving the
+    # wrong remote binary. So the remote branch sends only the deliberate
+    # overlay (launch_env + backend extra_env) — the same env the launch path
+    # sends for a remote session — never os.environ.
+    monkeypatch.setenv("PATH", "/local/only/bin")
+    monkeypatch.setenv("WAYPOINT_LEAK_PROBE", "leaked")
+    runtime = _runtime(tmp_path)
+    env = runtime.account_lookup_env(
+        "claude_code", {"CLAUDE_CONFIG_DIR": "/team"}, launch_target=_ssh_target()
+    )
+    # The deliberate overlay and backend extra_env survive...
+    assert env["CLAUDE_CONFIG_DIR"] == "/team"
+    assert env["CLAUDE_CODE_NO_FLICKER"] == "1"
+    # ...but nothing from the local process env crosses to the remote command.
+    assert "PATH" not in env
+    assert "WAYPOINT_LEAK_PROBE" not in env
+
+
 # ── probe_account_rate_limit threads the config-dir env ─────────────────────
 
 

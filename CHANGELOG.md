@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/kaiitunnz/waypoint/compare/v0.19.0...v0.20.0) (2026-09-19)
+
+
+### Features
+
+* surface Claude task notifications in the transcript ([#456](https://github.com/kaiitunnz/waypoint/issues/456)) ([e1cb300](https://github.com/kaiitunnz/waypoint/commit/e1cb300ae87ff1a7ba916090821820700748d2fd))
+* surface the running model in claude_tty sessions ([#455](https://github.com/kaiitunnz/waypoint/issues/455)) ([826f7cd](https://github.com/kaiitunnz/waypoint/commit/826f7cd9adf1da094df44a07acbcb754c1d4a599))
+
+
+### Bug Fixes
+
+* keep local PATH out of remote account-scoped discovery env ([#453](https://github.com/kaiitunnz/waypoint/issues/453)) ([bd2c817](https://github.com/kaiitunnz/waypoint/commit/bd2c817485891b1857c2eb034db80735fc1a9627))
+
 ## [0.19.0](https://github.com/kaiitunnz/waypoint/compare/v0.18.0...v0.19.0) (2026-09-14)
 
 

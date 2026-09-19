@@ -236,6 +236,9 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
     assert update_kwargs["status"] is SessionStatus.STARTING
     assert update_kwargs["transport_state"]["launch_args"] == built_args
     assert update_kwargs["transport_state"]["thread_id"] == "thread-1"
+    # The respawn clears the observed model so a pre-restart turn cannot confirm
+    # the new selection; the badge dims to the selection until the next reply.
+    assert update_kwargs["resolved_model"] is None
     # Resumed transcript is already populated → tail from the end.
     assert captured["start_at_end"] is True
 

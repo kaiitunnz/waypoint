@@ -1201,8 +1201,17 @@ class ClaudeTtyPlugin:
             )
             if isinstance(pre_plan_mode, str) and pre_plan_mode:
                 new_state["pre_plan_mode"] = pre_plan_mode
+        # Clear the observed model: the pane is being respawned to apply a
+        # settings change, so any model a pre-restart turn ran can no longer
+        # confirm the post-restart selection. The badge falls back to the
+        # (dimmed) selection until the new pane produces a real reply. The
+        # ``merged == current`` early return above means a no-op relaunch never
+        # reaches here, so a benign no-op never dims the badge.
         runtime.storage.update_session(
-            session.id, transport_state=new_state, status=SessionStatus.STARTING
+            session.id,
+            transport_state=new_state,
+            status=SessionStatus.STARTING,
+            resolved_model=None,
         )
         note = (
             f"Interrupted the running turn and restarted Claude TUI session to "

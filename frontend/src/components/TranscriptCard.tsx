@@ -1107,7 +1107,10 @@ function TaskNotificationCard({
   );
   // A spilled body is text this card already shows inline; the report is a
   // separately captured artifact. Only the latter is a "report".
-  const reportSpec = specs.find((spec) => !inlineIds.has(spec.id)) ?? null;
+  // A separately captured report if there is one; otherwise a spilled body,
+  // which holds the text the inline prefix was cut from.
+  const reportSpec =
+    specs.find((spec) => !inlineIds.has(spec.id)) ?? specs[0] ?? null;
   const hasReport = reportSpec !== null;
   const captureFailed = inlineCaptureFailed(event);
   // Report text small enough that the runtime read it straight into the event.

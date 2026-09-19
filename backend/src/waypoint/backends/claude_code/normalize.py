@@ -144,10 +144,10 @@ def is_injected_user_turn(content: Any) -> bool:
 TASK_NOTIFICATION_METHOD = "claude.task_notification"
 TASK_NOTIFICATION_ITEM_TYPE = "task_notification"
 TASK_NOTIFICATION_VERSION = 1
-# Largest inline ``result`` kept verbatim in the event metadata. A larger report
-# is captured as a session attachment (from Claude's ``output-file``) and only a
-# bounded preview is stored.
-TASK_NOTIFICATION_INLINE_LIMIT = 64 * 1024
+# Largest body field (result/event/note) kept verbatim in event metadata, which
+# every client receives whether or not the card is ever expanded. A larger body
+# spills to a session attachment and is read back on demand.
+TASK_NOTIFICATION_INLINE_LIMIT = 4 * 1024
 # A summary is a headline, not a body: bound it hard, and never spill it.
 TASK_NOTIFICATION_SUMMARY_LIMIT = 4 * 1024
 

@@ -234,30 +234,38 @@ def parse_task_notification(content: Any) -> ParsedTaskNotification | None:
     """Parse a ``<task-notification>`` payload into known fields, stdlib-only and
     non-throwing (NFR1: no XML parser, no external-entity resolution).
 
-    The free-text ``result`` body is excised first, then ``output-file`` and
-    ``usage``, then the remainder is scanned for scalar tags — so an angle-token
-    quoted inside a result body can never fabricate a scalar, a fake usage block,
-    or (critically) an ``output-file`` path that would capture an arbitrary host
-    file. Returns ``None`` for a missing wrapper or a wrapper with no meaningful
-    recognized field, so a contentless or malformed record stays suppressed
-    rather than becoming an empty card.
+    Every free-text field body (``result``/``summary``/``event``/``note``) is
+    excised before the remainder is scanned for ``output-file`` and the short
+    scalars — so a tag quoted inside any of those bodies can never fabricate a
+    scalar, a fake usage block, or (critically) an ``output-file`` path that
+    would make the capture sink read an arbitrary host file. Returns ``None`` for
+    a missing wrapper or a wrapper with no meaningful recognized field, so a
+    contentless or malformed record stays suppressed rather than becoming an
+    empty card.
     """
     if not isinstance(content, str) or "<task-notification>" not in content:
         return None
-    # Excise the free-text ``result`` body first (greedy, to the last close) so an
-    # ``<output-file>`` or ``<usage>`` tag quoted inside a report body cannot be
-    # hoisted into a real output-file path (which would capture an arbitrary host
-    # file) or a fake usage block. Scalars all precede ``result`` in the wrapper.
+    # Excise every free-text field body first — greedily, to its last close, so a
+    # body that quotes its own close tag is captured whole — then scan the
+    # leftover structured remainder for ``output-file`` and the short scalars.
+    # This is a security boundary: ``output-file`` feeds the host-file capture
+    # sink, so a tag quoted inside a report/event/summary/note body must never be
+    # hoisted into a real path (which would read an arbitrary host file). The
+    # remainder that reaches the output-file scan holds only the wrapper's own
+    # short fields (task-id, tool-use-id, status).
     result, remainder = _excise_block(content, "result", greedy_close=True)
-    output_file, remainder = _excise_block(remainder, "output-file", greedy_close=False)
+    summary, remainder = _excise_block(remainder, "summary", greedy_close=True)
+    event, remainder = _excise_block(remainder, "event", greedy_close=True)
+    note, remainder = _excise_block(remainder, "note", greedy_close=True)
     usage_inner, remainder = _excise_block(remainder, "usage", greedy_close=False)
+    output_file, remainder = _excise_block(remainder, "output-file", greedy_close=False)
     parsed = ParsedTaskNotification(
         task_id=_scan_scalar(remainder, "task-id"),
         tool_use_id=_scan_scalar(remainder, "tool-use-id"),
         status=_scan_scalar(remainder, "status"),
-        summary=_scan_scalar(remainder, "summary"),
-        event=_scan_scalar(remainder, "event"),
-        note=_scan_scalar(remainder, "note"),
+        summary=summary,
+        event=event,
+        note=note,
         result=result,
         output_file=output_file,
         usage=_parse_usage(usage_inner),

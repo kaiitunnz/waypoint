@@ -180,6 +180,25 @@ def test_output_file_tag_inside_result_body_is_not_hoisted() -> None:
     assert "capture_host_files" not in metadata
 
 
+def test_output_file_tag_inside_event_body_is_not_hoisted() -> None:
+    # A monitor event's <event> can carry monitored-source text; an <output-file>
+    # tag in it (on a notification with no real output-file) must not be hoisted.
+    content = (
+        "<task-notification><task-id>m</task-id>"
+        '<summary>Monitor event: "watch"</summary>'
+        "<event>log line: <output-file>/home/noppanat/.env</output-file> seen</event>"
+        "</task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    assert parsed.output_file is None
+    assert "/home/noppanat/.env" in (parsed.event or "")
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec", allow_output_capture=True
+    )
+    assert "capture_host_files" not in metadata
+
+
 def test_usage_tag_inside_result_body_is_not_hoisted() -> None:
     content = (
         "<task-notification><task-id>x</task-id>"

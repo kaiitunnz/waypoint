@@ -76,6 +76,15 @@ class FakeCodexClient:
         self.start_model: str | None = None
         self.turn_notification_ids: list[str] = []
         self.unregistered_turn_notification_ids: list[str] = []
+        self.skill_payload: dict[str, Any] = {
+            "description": "Humanize prose",
+            "enabled": True,
+            "name": "humanizer",
+            "path": "/tmp/work/.codex/skills/humanizer/SKILL.md",
+            "pluginId": None,
+            "scope": "repo",
+            "shortDescription": "Humanize",
+        }
 
     def start(self) -> None:
         self.started = True
@@ -128,16 +137,7 @@ class FakeCodexClient:
                         {
                             "cwd": "/tmp/work",
                             "errors": [],
-                            "skills": [
-                                {
-                                    "description": "Humanize prose",
-                                    "enabled": True,
-                                    "name": "humanizer",
-                                    "path": "/tmp/work/.codex/skills/humanizer/SKILL.md",
-                                    "scope": "repo",
-                                    "shortDescription": "Humanize",
-                                }
-                            ],
+                            "skills": [self.skill_payload],
                         }
                     ]
                 }
@@ -348,7 +348,9 @@ async def test_send_input_starts_then_steers_turn() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_skills_requests_current_session_cwd() -> None:
+async def test_list_skills_omits_null_plugin_id_and_requests_current_session_cwd() -> (
+    None
+):
     emitted: list = []
     adapter, fake = make_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
@@ -371,6 +373,18 @@ async def test_list_skills_requests_current_session_cwd() -> None:
             "shortDescription": "Humanize",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_skills_preserves_plugin_id() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    fake.skill_payload["pluginId"] = "waypoint-plugin"
+    await adapter.start_session("sess", "/tmp/work")
+
+    skills = await adapter.list_skills("sess")
+
+    assert skills[0]["pluginId"] == "waypoint-plugin"
 
 
 @pytest.mark.asyncio

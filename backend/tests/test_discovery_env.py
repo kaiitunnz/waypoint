@@ -11,6 +11,7 @@ import os
 import pytest
 from fastapi import HTTPException
 
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.settings import Settings
 from waypoint.storage import Storage
@@ -63,6 +64,30 @@ async def test_discovery_env_matches_launch_overlay(tmp_path) -> None:
         "codex", runtime._profile_launch_env("codex", "personal", None)
     )
     assert discovery == launch
+
+
+@pytest.mark.asyncio
+async def test_discovery_env_remote_target_excludes_process_path(
+    tmp_path, monkeypatch
+) -> None:
+    """A remote discovery must not carry the local server's PATH — it would
+    shadow the remote login shell's and resolve the wrong binary (the codex
+    model/thread discovery bug)."""
+    monkeypatch.setenv("PATH", "/local/only/bin")
+    runtime = _runtime(tmp_path)
+    target = SshLaunchTargetConfig(
+        id="rover",
+        name="rover",
+        ssh_destination="user@rover.lan",
+        ssh_args=[],
+        remote_shell="bash -ilc",
+    )
+    env = await runtime.discovery_env("codex", target, None)
+    assert "PATH" not in env
+    # Local discovery still mirrors the process env — the local probe subprocess
+    # needs PATH.
+    local_env = await runtime.discovery_env("codex", None, None)
+    assert local_env["PATH"] == "/local/only/bin"
 
 
 @pytest.mark.asyncio

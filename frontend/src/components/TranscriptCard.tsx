@@ -1097,7 +1097,13 @@ function TaskNotificationCard({
   // under the headline; without one it *is* the headline. Either way the full
   // text is rendered in the expanded body, since both surfaces clamp to a line.
   const preview = view.summary ? view.event : null;
-  const specs = attachmentSpecsFor(event);
+  // Events captured before an Agent's output-file was recognised as its
+  // transcript still carry that attachment. The report is inline, so ignore it
+  // exactly as a freshly captured event would — same predicate the backend
+  // now uses, so old and new cards render identically.
+  const legacyAgentTranscript =
+    view.kind === "agent" && Boolean(view.resultPreview);
+  const specs = legacyAgentTranscript ? [] : attachmentSpecsFor(event);
   const inlineIds = inlineAttachmentIds(event);
   // A spilled body is text this card already shows inline; the report is a
   // separately captured artifact. Only the latter is a "report".
@@ -1118,8 +1124,22 @@ function TaskNotificationCard({
   // dropped — measured, rather than assumed for every attachment.
   const supersedes = (body: string | null) =>
     Boolean(body && previewText && squash(previewText).includes(squash(body)));
+  // A legacy capture whose preview came back whole is already fully on screen,
+  // so its link adds nothing. Only when that single attachment IS the report —
+  // a spilled body alongside it must stay reachable.
+  const previewShowsWholeFile =
+    specs.length === 1 &&
+    reportSpec !== null &&
+    previewState?.status === "ready" &&
+    !previewState.preview.truncated &&
+    !previewState.preview.binary &&
+    previewState.preview.content !== null;
   const usageParts = taskUsageParts(view.usage);
-  const unavailable = hasReport ? null : reportUnavailableText(view);
+  // Nothing is missing when a legacy transcript is ignored on purpose — the
+  // report is on screen. Those events were stored with output_available set,
+  // so without this the card claims an absent report while showing it.
+  const unavailable =
+    hasReport || legacyAgentTranscript ? null : reportUnavailableText(view);
   const retained = specs.length > 0 || inlineReports.length > 0;
   const hasBody = Boolean(
     view.resultPreview ||
@@ -1205,7 +1225,9 @@ function TaskNotificationCard({
               </pre>
             ))}
             {reportSpec ? <TaskReportPreview state={previewState} /> : null}
-            {specs.length > 0 ? <MessageAttachments event={event} /> : null}
+            {specs.length > 0 && !previewShowsWholeFile ? (
+              <MessageAttachments event={event} />
+            ) : null}
           </div>
         ) : unavailable ? (
           <p className="task-note-unavailable">{unavailable}</p>

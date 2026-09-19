@@ -186,3 +186,131 @@ async def test_emit_adapter_event_captures_for_non_tool_call_kind(
     saved = persisted[0].metadata
     assert "capture_host_files" not in saved
     assert saved["attachments"][0]["filename"] == "report.md"
+
+
+# ─── inline blob capture ───
+
+
+async def _capture_inline(fake: SimpleNamespace, metadata: dict[str, Any]) -> None:
+    fake._persist_inline_blobs = types.MethodType(
+        SessionRuntime._persist_inline_blobs, fake
+    )
+    await SessionRuntime._capture_inline_blobs(
+        cast(SessionRuntime, fake), "sess-1", metadata
+    )
+
+
+async def test_inline_blobs_are_saved_and_pinned(tmp_path: Path) -> None:
+    fake = _fake_runtime(tmp_path)
+    metadata: dict[str, Any] = {
+        "capture_inline_blobs": [
+            {"filename": "task-1-result.txt", "text": "the tail", "mime": "text/plain"}
+        ]
+    }
+
+    await _capture_inline(fake, metadata)
+
+    assert "capture_inline_blobs" not in metadata
+    (spec,) = metadata["attachments"]
+    assert spec["filename"] == "task-1-result.txt"
+    assert metadata["inline_attachment_ids"] == [spec["id"]]
+    assert fake.attachments.pinned_ids("sess-1") == {spec["id"]}
+    resolved = fake.attachments.resolve("sess-1", spec["id"])
+    assert resolved is not None
+    assert resolved[1].read_text(encoding="utf-8") == "the tail"
+
+
+async def test_inline_blobs_append_to_existing_attachments(tmp_path: Path) -> None:
+    fake = _fake_runtime(tmp_path)
+    metadata: dict[str, Any] = {
+        "attachments": [{"id": "pre-existing", "filename": "report.md"}],
+        "capture_inline_blobs": [{"filename": "spill.txt", "text": "x"}],
+    }
+
+    await _capture_inline(fake, metadata)
+
+    ids = [entry["id"] for entry in metadata["attachments"]]
+    assert ids[0] == "pre-existing"
+    assert len(ids) == 2
+    # Only the spill is marked inline, so a consumer can still find the report.
+    assert metadata["inline_attachment_ids"] == [ids[1]]
+
+
+async def test_inline_blobs_refuse_oversized_text(tmp_path: Path) -> None:
+    fake = _fake_runtime(tmp_path, max_upload_bytes=16)
+    metadata: dict[str, Any] = {
+        "capture_inline_blobs": [{"filename": "big.txt", "text": "y" * 64}]
+    }
+
+    await _capture_inline(fake, metadata)
+
+    assert "attachments" not in metadata
+    assert metadata["inline_capture_failed"] is True
+
+
+async def test_inline_blobs_skip_malformed_entries(tmp_path: Path) -> None:
+    fake = _fake_runtime(tmp_path)
+    metadata: dict[str, Any] = {
+        "capture_inline_blobs": ["nope", {"text": "no filename"}, {"filename": "a.txt"}]
+    }
+
+    await _capture_inline(fake, metadata)
+
+    assert "attachments" not in metadata
+    assert metadata["inline_capture_failed"] is True
+
+
+@pytest.mark.asyncio
+async def test_emit_adapter_event_never_persists_transient_capture_keys(
+    tmp_path: Path,
+) -> None:
+    # A transient capture key is an input to the sinks, never event content. A
+    # malformed one whose sink saved nothing must still be stripped, or the full
+    # body it carries is written to SQLite and broadcast to every client.
+    fake = _fake_runtime(tmp_path)
+    persisted: list[EventRecord] = []
+
+    def _append(event: EventRecord) -> EventRecord:
+        persisted.append(event)
+        return event
+
+    fake.storage = SimpleNamespace(
+        get_session=lambda _sid: SimpleNamespace(worktree_path=None, cwd=str(tmp_path)),
+        next_sequence=lambda _sid: 1,
+        append_event=_append,
+    )
+    fake.notifications = None
+    fake._append_structured_log = lambda _sid, _ev: None
+
+    async def _publish(_event: EventRecord) -> None:
+        return None
+
+    fake._publish_event = _publish
+    fake._capture_host_files = types.MethodType(
+        SessionRuntime._capture_host_files, fake
+    )
+    fake._capture_inline_blobs = types.MethodType(
+        SessionRuntime._capture_inline_blobs, fake
+    )
+    fake._persist_inline_blobs = types.MethodType(
+        SessionRuntime._persist_inline_blobs, fake
+    )
+
+    metadata: dict[str, Any] = {
+        "method": "claude.task_notification",
+        "capture_host_files": [str(tmp_path / "gone.md")],
+        "capture_inline_blobs": [{"filename": "spill.txt", "text": "the whole tail"}],
+    }
+    await SessionRuntime._emit_adapter_event(
+        cast(SessionRuntime, fake),
+        "sess-1",
+        EventKind.SYSTEM_NOTE,
+        "Agent finished",
+        metadata,
+        SessionStatus.RUNNING,
+    )
+
+    saved = persisted[0].metadata
+    assert "capture_host_files" not in saved
+    assert "capture_inline_blobs" not in saved
+    assert saved["attachments"][0]["filename"] == "spill.txt"

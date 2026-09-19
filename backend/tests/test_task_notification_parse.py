@@ -310,13 +310,17 @@ def test_build_metadata_oversized_inline_without_output_file() -> None:
     )
     assert "capture_host_files" not in metadata
     payload = metadata["task_notification"]
-    # Bounded preview by design: truncated, no durable report, no "unavailable".
+    # Bounded preview inline; the full body spills to an attachment so the tail
+    # survives even without an output-file.
     assert payload["result_truncated"] is True
     assert (
         len(payload["result_preview"].encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT
     )
-    assert payload["output_available"] is False
+    assert payload["output_available"] is True
     assert payload["output_unavailable_reason"] is None
+    spills = metadata["capture_inline_blobs"]
+    assert [entry["filename"] for entry in spills] == ["task-rec-4-result.txt"]
+    assert spills[0]["text"] == big
 
 
 def test_build_metadata_stable_id_without_uuid_is_deterministic() -> None:
@@ -331,3 +335,104 @@ def test_build_metadata_stable_id_without_uuid_is_deterministic() -> None:
     )
     assert m1["task_notification"]["id"] == m2["task_notification"]["id"]
     assert m1["task_notification"]["id"]
+
+
+def test_build_metadata_bounds_event_and_note_and_spills_them() -> None:
+    big_event = "e" * (TASK_NOTIFICATION_INLINE_LIMIT + 50)
+    big_note = "n" * (TASK_NOTIFICATION_INLINE_LIMIT + 50)
+    content = (
+        "<task-notification><task-id>m9</task-id>"
+        '<summary>Monitor event: "loud"</summary>'
+        f"<event>{big_event}</event><note>{big_note}</note>"
+        "</task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-9", allow_output_capture=True
+    )
+    payload = metadata["task_notification"]
+    assert payload["event_truncated"] is True
+    assert payload["note_truncated"] is True
+    for key in ("event", "note"):
+        assert len(payload[key].encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT
+    # The event's own text is bounded too: it reaches SQLite and every client.
+    assert len(text.encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT + 1024
+    spills = {
+        entry["filename"]: entry["text"] for entry in metadata["capture_inline_blobs"]
+    }
+    assert spills == {
+        "task-rec-9-event.txt": big_event,
+        "task-rec-9-note.txt": big_note,
+    }
+
+
+def test_build_metadata_bounds_a_huge_summary_without_spilling_it() -> None:
+    big = "s" * 20_000
+    content = (
+        f"<task-notification><task-id>s1</task-id><summary>{big}</summary>"
+        "<event>ok</event></task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-s", allow_output_capture=True
+    )
+    payload = metadata["task_notification"]
+    assert len(payload["summary"]) < len(big)
+    assert "capture_inline_blobs" not in metadata
+
+
+def test_build_metadata_omits_the_spill_key_when_nothing_overflows() -> None:
+    parsed = parse_task_notification(MONITOR_EVENT)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-s", allow_output_capture=True
+    )
+    assert "capture_inline_blobs" not in metadata
+
+
+def test_build_metadata_capture_disabled_keeps_bounded_text_and_says_why() -> None:
+    big = "x" * (TASK_NOTIFICATION_INLINE_LIMIT + 100)
+    content = (
+        "<task-notification><task-id>x</task-id><status>completed</status>"
+        f'<summary>Agent "Big" finished</summary><result>{big}</result>'
+        "</task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-d", allow_output_capture=True, capture_enabled=False
+    )
+    payload = metadata["task_notification"]
+    assert "capture_inline_blobs" not in metadata
+    assert payload["result_truncated"] is True
+    assert (
+        len(payload["result_preview"].encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT
+    )
+    assert payload["output_available"] is False
+    assert payload["output_unavailable_reason"] == "output capture is disabled"
+
+
+def test_build_metadata_capture_disabled_does_not_claim_an_import() -> None:
+    parsed = parse_task_notification(AGENT_COMPLETION)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-d2", allow_output_capture=True, capture_enabled=False
+    )
+    payload = metadata["task_notification"]
+    assert "capture_host_files" not in metadata
+    # A live session with capture off must not be explained as an import.
+    assert payload["output_unavailable_reason"] == "output capture is disabled"
+
+
+def test_build_metadata_import_still_reports_an_import() -> None:
+    parsed = parse_task_notification(AGENT_COMPLETION)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-i", allow_output_capture=False, capture_enabled=True
+    )
+    payload = metadata["task_notification"]
+    assert "capture_host_files" not in metadata
+    assert "capture_inline_blobs" not in metadata
+    assert payload["output_unavailable_reason"] == "full output not captured on import"

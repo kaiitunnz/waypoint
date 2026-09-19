@@ -5671,6 +5671,14 @@ class SessionRuntime:
     ) -> None:
         if metadata.get("capture_host_files"):
             await self._capture_host_files(session_id, metadata)
+        if metadata.get("capture_inline_blobs"):
+            await self._capture_inline_blobs(session_id, metadata)
+        # Transient capture keys are inputs to the sinks above, never event
+        # content: a blob key that survived (empty, malformed, or from a
+        # normalizer whose sink did not run) would otherwise be persisted and
+        # broadcast verbatim.
+        metadata.pop("capture_host_files", None)
+        metadata.pop("capture_inline_blobs", None)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -5722,6 +5730,70 @@ class SessionRuntime:
         specs = await asyncio.to_thread(self._persist_host_files, session_id, base, raw)
         if specs:
             metadata["attachments"] = [spec.model_dump(mode="json") for spec in specs]
+
+    async def _capture_inline_blobs(
+        self, session_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Turn the transient ``capture_inline_blobs`` entries into pinned
+        session attachments appended to ``metadata["attachments"]``.
+
+        The sibling of :meth:`_capture_host_files` for text a normalizer already
+        holds in memory rather than on disk — a notification body too large to
+        keep inline. The ids created here are also recorded on
+        ``metadata["inline_attachment_ids"]`` so a consumer can tell a spilled
+        body apart from a separately captured report. Backend-neutral, gated on
+        the transient key alone; best-effort, never raises into the emit path.
+        """
+        raw = metadata.pop("capture_inline_blobs", None)
+        if not isinstance(raw, list):
+            return
+        specs = await asyncio.to_thread(self._persist_inline_blobs, session_id, raw)
+        if len(specs) < len(raw):
+            # Generic signal that some declared text was not retained, so a
+            # consumer can say so instead of promising a report that is not
+            # there. Deliberately carries no per-backend vocabulary.
+            metadata["inline_capture_failed"] = True
+        if not specs:
+            return
+        attachments = metadata.setdefault("attachments", [])
+        attachments.extend(spec.model_dump(mode="json") for spec in specs)
+        ids = metadata.setdefault("inline_attachment_ids", [])
+        ids.extend(spec.id for spec in specs)
+
+    def _persist_inline_blobs(
+        self, session_id: str, entries: list[Any]
+    ) -> list[AttachmentSpec]:
+        """Save each in-memory text blob as a pinned attachment. Skips malformed
+        or oversized entries. Blocking; run off the event loop."""
+        max_bytes = self.settings.max_upload_bytes
+        out: list[AttachmentSpec] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            text = entry.get("text")
+            filename = entry.get("filename")
+            if not isinstance(text, str) or not isinstance(filename, str):
+                continue
+            if not text or not filename:
+                continue
+            data = text.encode("utf-8")
+            if len(data) > max_bytes:
+                log.warning(
+                    "capture_inline_blobs: %s exceeds %d byte limit",
+                    filename,
+                    max_bytes,
+                )
+                continue
+            mime = entry.get("mime")
+            spec = self.attachments.save(
+                session_id,
+                data=data,
+                filename=filename,
+                content_type=mime if isinstance(mime, str) else None,
+            )
+            self.attachments.mark_pinned(session_id, [spec.id])
+            out.append(spec)
+        return out
 
     def _persist_host_files(
         self, session_id: str, base: str | None, raw_paths: list[Any]

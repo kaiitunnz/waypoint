@@ -90,10 +90,15 @@ class TranscriptNormalizer:
     ``process_record``.  Usage deduplication state is accumulated across calls.
     """
 
-    def __init__(self, config_dir: str | None = None) -> None:
+    def __init__(
+        self, config_dir: str | None = None, *, capture_enabled: bool = True
+    ) -> None:
         # The session's CLAUDE_CONFIG_DIR (an account profile's), so plan-file
         # detection anchors to the profile's plans/ dir rather than the default.
         self._config_dir = config_dir
+        # Operator switch (``task_output_capture_enabled``) for keeping task
+        # output as session attachments.
+        self._capture_enabled = capture_enabled
         self._seen_message_ids: set[str] = set()
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
@@ -429,6 +434,7 @@ class TranscriptNormalizer:
                 parsed,
                 record_uuid=record.get("uuid"),
                 allow_output_capture=True,
+                capture_enabled=self._capture_enabled,
             )
             return [
                 NormalizedEvent(

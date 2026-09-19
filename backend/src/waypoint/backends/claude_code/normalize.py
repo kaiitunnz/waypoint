@@ -148,6 +148,8 @@ TASK_NOTIFICATION_VERSION = 1
 # is captured as a session attachment (from Claude's ``output-file``) and only a
 # bounded preview is stored.
 TASK_NOTIFICATION_INLINE_LIMIT = 64 * 1024
+# A summary is a headline, not a body: bound it hard, and never spill it.
+TASK_NOTIFICATION_SUMMARY_LIMIT = 4 * 1024
 
 
 @dataclass
@@ -297,6 +299,15 @@ def _truncate_utf8(text: str, limit: int) -> str:
     return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
 
 
+def _bounded(
+    text: str | None, limit: int = TASK_NOTIFICATION_INLINE_LIMIT
+) -> tuple[str | None, bool]:
+    """Cap ``text`` to ``limit`` bytes, reporting whether anything was cut."""
+    if text is None or len(text.encode("utf-8")) <= limit:
+        return text, False
+    return _truncate_utf8(text, limit), True
+
+
 def _stable_task_notification_id(
     parsed: ParsedTaskNotification, ts: datetime | None
 ) -> str:
@@ -311,8 +322,11 @@ def _stable_task_notification_id(
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
-def _compact_task_notification_text(parsed: ParsedTaskNotification) -> str:
-    parts = [part for part in (parsed.summary, parsed.event) if part]
+def _compact_task_notification_text(summary: str | None, event: str | None) -> str:
+    # Built from the *bounded* summary/event: this string becomes
+    # ``EventRecord.text``, which is written to SQLite and broadcast to every
+    # websocket client, so an unbounded monitor body must not reach it.
+    parts = [part for part in (summary, event) if part]
     return " — ".join(parts) if parts else "Task notification"
 
 
@@ -321,51 +335,89 @@ def build_task_notification_metadata(
     *,
     record_uuid: str | None,
     allow_output_capture: bool,
+    capture_enabled: bool = True,
     ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.
 
     ``allow_output_capture`` is True for the live tailer (Claude's ``output-file``
-    still exists) and False for history import (the temp file is long gone). When
-    True and an absolute ``output-file`` is present, the transient
-    ``capture_host_files`` key is tagged for the runtime capture sink.
+    still exists) and False for history import (the temp file is long gone).
+    ``capture_enabled`` is the operator's ``task_output_capture_enabled`` switch.
+    Both must hold to capture; they are separate because they explain themselves
+    differently to the user -- an imported transcript never had the file, whereas
+    a live session with capture off is a configuration choice.
+
+    When capture is allowed, an absolute ``output-file`` is tagged on the
+    transient ``capture_host_files`` key, and any body field too large to keep
+    inline spills its full text on ``capture_inline_blobs``; the runtime sinks
+    turn both into pinned session attachments.
     """
-    result = parsed.result
-    result_preview: str | None = None
-    result_truncated = False
-    if result is not None:
-        if len(result.encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT:
-            result_preview = result
-        else:
-            result_preview = _truncate_utf8(result, TASK_NOTIFICATION_INLINE_LIMIT)
-            result_truncated = True
+    capture_allowed = allow_output_capture and capture_enabled
+    notification_id = record_uuid or _stable_task_notification_id(parsed, ts)
+
+    result_preview, result_truncated = _bounded(parsed.result)
+    event_text, event_truncated = _bounded(parsed.event)
+    note_text, note_truncated = _bounded(parsed.note)
+    summary_text, _ = _bounded(parsed.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
+
+    # Every body field that overflowed spills its *full* text to an attachment,
+    # so the tail is preserved rather than dropped on the floor.
+    spills: list[dict[str, Any]] = []
+    if capture_allowed:
+        for name, text, truncated in (
+            ("result", parsed.result, result_truncated),
+            ("event", parsed.event, event_truncated),
+            ("note", parsed.note, note_truncated),
+        ):
+            if truncated and text is not None:
+                spills.append(
+                    {
+                        "filename": f"task-{notification_id}-{name}.txt",
+                        "text": text,
+                        "mime": "text/plain; charset=utf-8",
+                    }
+                )
 
     output_available = False
     output_unavailable_reason: str | None = None
     capture_path: str | None = None
     output_file = parsed.output_file
     if output_file and os.path.isabs(output_file):
-        if allow_output_capture:
+        if capture_allowed:
             capture_path = output_file
             output_available = True
-        else:
+        elif not allow_output_capture:
+            # An imported transcript never had the file; that explanation wins
+            # over the operator switch, which was irrelevant at capture time.
             output_unavailable_reason = "full output not captured on import"
-    # An oversized inline result with no output-file is shown as a bounded
-    # preview by design (``result_truncated`` conveys it); there is no separate
-    # durable report to mark unavailable.
+        else:
+            output_unavailable_reason = "output capture is disabled"
+    elif spills:
+        output_available = True
+    elif not capture_allowed and (
+        result_truncated or event_truncated or note_truncated
+    ):
+        # A body was cut with nothing durable kept for the tail.
+        output_unavailable_reason = (
+            "full output not captured on import"
+            if not allow_output_capture
+            else "output capture is disabled"
+        )
 
     payload: dict[str, Any] = {
         "version": TASK_NOTIFICATION_VERSION,
-        "id": record_uuid or _stable_task_notification_id(parsed, ts),
+        "id": notification_id,
         "task_id": parsed.task_id,
         "tool_use_id": parsed.tool_use_id,
         "kind": infer_task_notification_kind(parsed),
         "status": parsed.status,
-        "summary": parsed.summary,
-        "event": parsed.event,
-        "note": parsed.note,
+        "summary": summary_text,
+        "event": event_text,
+        "note": note_text,
         "result_preview": result_preview,
         "result_truncated": result_truncated,
+        "event_truncated": event_truncated,
+        "note_truncated": note_truncated,
         "output_available": output_available,
         "output_unavailable_reason": output_unavailable_reason,
     }
@@ -380,7 +432,11 @@ def build_task_notification_metadata(
     }
     if capture_path is not None:
         metadata["capture_host_files"] = [capture_path]
-    return _compact_task_notification_text(parsed), metadata
+    # Tagged only when non-empty: the sink gates on truthiness, so an empty
+    # list would never be popped and would persist as junk metadata.
+    if spills:
+        metadata["capture_inline_blobs"] = spills
+    return _compact_task_notification_text(summary_text, event_text), metadata
 
 
 def stringify_tool_result(content: Any) -> str:

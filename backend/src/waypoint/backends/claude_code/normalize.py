@@ -170,12 +170,17 @@ def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
     ``origin.kind`` is authoritative when present; otherwise the trimmed string
     content is matched. Only a plain-string user turn is ever injected.
     """
-    origin = record.get("origin")
-    if isinstance(origin, dict) and origin.get("kind") == "task-notification":
-        return "task_notification"
+    # A task notification is always a string payload. Requiring string content
+    # even when ``origin.kind`` matches means an anomalous record with list
+    # (tool_result) content still flows through normal tool-result handling
+    # rather than being dropped.
     if isinstance(content, str):
+        origin = record.get("origin")
+        origin_says_notification = (
+            isinstance(origin, dict) and origin.get("kind") == "task-notification"
+        )
         stripped = content.lstrip()
-        if stripped.startswith("<task-notification>"):
+        if origin_says_notification or stripped.startswith("<task-notification>"):
             return "task_notification"
         if stripped.startswith("This session is being continued"):
             return "continuation"
@@ -229,17 +234,22 @@ def parse_task_notification(content: Any) -> ParsedTaskNotification | None:
     """Parse a ``<task-notification>`` payload into known fields, stdlib-only and
     non-throwing (NFR1: no XML parser, no external-entity resolution).
 
-    Block bodies (``output-file``, ``result``, ``usage``) are excised before
-    scanning the remainder for scalar tags, so an angle-token embedded in a
-    result body can never fabricate a status/summary/event. Returns ``None`` for
-    a missing wrapper or a wrapper with no meaningful recognized field, so a
-    contentless or malformed record stays suppressed rather than becoming an
-    empty card.
+    The free-text ``result`` body is excised first, then ``output-file`` and
+    ``usage``, then the remainder is scanned for scalar tags — so an angle-token
+    quoted inside a result body can never fabricate a scalar, a fake usage block,
+    or (critically) an ``output-file`` path that would capture an arbitrary host
+    file. Returns ``None`` for a missing wrapper or a wrapper with no meaningful
+    recognized field, so a contentless or malformed record stays suppressed
+    rather than becoming an empty card.
     """
     if not isinstance(content, str) or "<task-notification>" not in content:
         return None
-    output_file, remainder = _excise_block(content, "output-file", greedy_close=False)
-    result, remainder = _excise_block(remainder, "result", greedy_close=True)
+    # Excise the free-text ``result`` body first (greedy, to the last close) so an
+    # ``<output-file>`` or ``<usage>`` tag quoted inside a report body cannot be
+    # hoisted into a real output-file path (which would capture an arbitrary host
+    # file) or a fake usage block. Scalars all precede ``result`` in the wrapper.
+    result, remainder = _excise_block(content, "result", greedy_close=True)
+    output_file, remainder = _excise_block(remainder, "output-file", greedy_close=False)
     usage_inner, remainder = _excise_block(remainder, "usage", greedy_close=False)
     parsed = ParsedTaskNotification(
         task_id=_scan_scalar(remainder, "task-id"),
@@ -337,8 +347,9 @@ def build_task_notification_metadata(
             output_available = True
         else:
             output_unavailable_reason = "full output not captured on import"
-    elif result_truncated:
-        output_unavailable_reason = "report too large to inline"
+    # An oversized inline result with no output-file is shown as a bounded
+    # preview by design (``result_truncated`` conveys it); there is no separate
+    # durable report to mark unavailable.
 
     payload: dict[str, Any] = {
         "version": TASK_NOTIFICATION_VERSION,

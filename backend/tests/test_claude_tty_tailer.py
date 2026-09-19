@@ -88,11 +88,8 @@ def _make_runtime(session: SessionRecord) -> MagicMock:
 
 
 def _context_usage_calls(runtime: MagicMock) -> list:
-    """The update_session_fields calls that publish a context-usage snapshot.
-
-    Model observation also writes through update_session_fields, so the
-    context-usage tests filter to their own writes rather than a raw call count.
-    """
+    """update_session_fields calls that publish a context-usage snapshot (model
+    observation also writes through it)."""
     return [
         call
         for call in runtime.update_session_fields.call_args_list
@@ -499,6 +496,5 @@ async def test_observe_emits_note_with_current_session_status() -> None:
         for call in runtime._emit_adapter_event.call_args_list
         if call.args[3].get("method") == "model.change"
     )
-    # The note carries the session's current status so the event-insert COALESCE
-    # is a no-op and the lifecycle is not flipped mid-turn.
+    # session.status keeps the event-insert COALESCE a no-op mid-turn.
     assert change_call.args[4] is SessionStatus.RUNNING

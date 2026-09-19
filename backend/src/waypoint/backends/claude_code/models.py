@@ -266,11 +266,8 @@ def claude_model_family(model: str | None) -> str | None:
     return normalized.split("[", 1)[0]
 
 
-# Selections that legitimately run different concrete models across a turn (e.g.
-# ``opusplan`` runs Opus while planning, Sonnet otherwise). These are free-form
-# ``--model`` values, not catalogue entries, so a name set — not a catalogue flag
-# — is the only way to recognize them. An observed model is never adopted over
-# one of these, since the switch is by design. Extend as the CLI adds more.
+# Free-form --model selections that switch the running model across a turn (e.g.
+# opusplan), never a catalogue entry, so an observed model is never adopted over them.
 CLAUDE_PLAN_SWITCHING_MODELS: frozenset[str] = frozenset({"opusplan"})
 
 
@@ -288,12 +285,8 @@ def is_claude_plan_switching_model(model: str | None) -> bool:
 def is_claude_model_id(model: str | None) -> bool:
     """True when ``model`` is a recognizable Claude model id.
 
-    Confines model observation/adoption to Claude's own catalogue: a custom
-    gateway model (``kimi-k3-0711`` running under a durable ``kimi-k3[1m]``
-    selection) reports a concrete id that does not map to any Claude entry, and
-    adopting it would corrupt the custom selection and its configured context
-    window. Matches a catalogue id, a known alias, or the ``claude-`` prefix (so
-    a not-yet-catalogued Claude model still qualifies).
+    A custom gateway model's concrete id matches no Claude entry; adopting it
+    would corrupt the custom selection's context window.
     """
     if not isinstance(model, str):
         return False
@@ -310,13 +303,9 @@ def is_claude_model_id(model: str | None) -> bool:
 def map_observed_model_id(concrete: str | None) -> str | None:
     """Map a transcript's concrete ``message.model`` to a base catalogue id.
 
-    Returns a selectable catalogue id **without** the ``[1m]`` suffix: a pinned
-    legacy id when one matches (``claude-opus-4-8``), else the current-epoch
-    alias (``claude-opus-5`` -> ``opus``), else the concrete id unchanged so an
-    unknown model still round-trips into a picker "Custom" entry. ``None`` for a
-    blank input. The pinned-id check precedes the alias lookup so a legacy id
-    that also aliases to a family (``claude-opus-4-8`` -> ``opus``) keeps its
-    distinct pinned identity rather than collapsing onto the current alias.
+    Returns a selectable catalogue id without the ``[1m]`` suffix; ``None`` for a
+    blank input, and an unrecognized id round-trips unchanged. The pinned-id
+    check precedes the alias lookup so a legacy id keeps its distinct identity.
     """
     if not isinstance(concrete, str):
         return None
@@ -339,17 +328,13 @@ def _has_one_m_variant(base: str) -> bool:
 class ClaudeModelObservation(NamedTuple):
     """Outcome of observing one concrete model against a session's selection.
 
-    ``resolved_base`` is the base catalogue id to store in ``resolved_model``.
-    ``adopt_selection`` is the catalogue id to write into ``session.model`` when
-    the running model has diverged from the selection (``None`` = leave the
-    selection as-is). ``toast``/``marker`` drive the notice and the transcript
-    divider; ``reason`` is ``"switch"``, ``"initial_mismatch"``, or ``None``.
+    ``resolved_base`` is stored in ``resolved_model``; ``adopt_selection`` is the
+    id to write into ``session.model`` when the model diverged (else ``None``);
+    ``reason`` is ``"switch"``, ``"initial_mismatch"``, or ``None``.
     """
 
     resolved_base: str
     adopt_selection: str | None
-    toast: bool
-    marker: bool
     reason: str | None
 
 
@@ -358,14 +343,11 @@ def observe_claude_model(
     selection: str | None,
     prev_base: str | None,
 ) -> ClaudeModelObservation | None:
-    """Decide adoption + notice/divider for one observed concrete model.
+    """Decide adoption and notice for one observed concrete model.
 
-    ``prev_base`` is the base id of the previous real reply in this pane's
-    lifetime (``None`` on the first reply). Returns ``None`` when ``concrete``
-    maps to nothing, when it is not a Claude model, or when the selection is a
-    custom (non-Claude) model — in those cases the running model must be left
-    untouched. Callers skip synthetic records and plan-switching selections
-    before calling.
+    ``prev_base`` is the previous real reply's base id in this pane's lifetime
+    (``None`` on the first reply). Returns ``None`` when ``concrete`` or
+    ``selection`` isn't a Claude model id.
     """
     if not is_claude_model_id(concrete):
         return None
@@ -375,13 +357,11 @@ def observe_claude_model(
     if resolved_base is None:
         return None
     selection_base = _strip_one_m(selection.strip()) if selection else None
-    first = prev_base is None
-    if first:
-        toast = selection_base is not None and resolved_base != selection_base
+    if prev_base is None:
+        changed = selection_base is not None and resolved_base != selection_base
+        reason = "initial_mismatch" if changed else None
     else:
-        toast = resolved_base != prev_base
-    marker = not first and resolved_base != prev_base
-    reason = "initial_mismatch" if toast and first else "switch" if toast else None
+        reason = "switch" if resolved_base != prev_base else None
     if selection is None or resolved_base != selection_base:
         suffix = (
             _ONE_M_SUFFIX
@@ -396,8 +376,6 @@ def observe_claude_model(
     return ClaudeModelObservation(
         resolved_base=resolved_base,
         adopt_selection=adopt_selection,
-        toast=toast,
-        marker=marker,
         reason=reason,
     )
 

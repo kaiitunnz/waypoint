@@ -947,8 +947,7 @@ async def test_reconnect_new_thread_tails_from_start() -> None:
 
 
 async def test_exited_reconnect_clears_resolved_model() -> None:
-    # The respawned pane has not confirmed its running model yet, so the observed
-    # model is cleared and the badge dims to the selection until the next reply.
+    # Respawn clears resolved_model; badge dims until the next reply.
     plugin = ClaudeTtyPlugin()
     session = _make_session(status=SessionStatus.EXITED)
 

@@ -112,11 +112,9 @@ class TranscriptTailer:
         self._context_usage_signature: (
             tuple[int, int | None, tuple[tuple[str, int], ...]] | None
         ) = None
-        # Model observation state. ``_last_observed_base`` is the base catalogue
-        # id of the previous real reply in *this pane's lifetime* — reset to None
-        # each construction (launch/relaunch/restore), so the first reply after a
-        # boundary is treated as such regardless of the persisted resolved_model.
-        # ``_model_seen_ids`` dedups streamed same-id records of one turn.
+        # Previous reply's model for this pane, reset per construction so the
+        # first reply after a boundary reads as first. Dedup for repeated records
+        # of one message.
         self._last_observed_base: str | None = None
         self._model_seen_ids: set[str] = set()
         # Dialog debounce state
@@ -215,8 +213,7 @@ class TranscriptTailer:
                 )
                 continue
             if record.get("type") == "assistant":
-                # Observe the model before the turn's content events so a
-                # ``model.change`` divider lands above the new-model turn.
+                # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
             for ev in self._normalizer.process_record(record):
                 if (
@@ -242,14 +239,9 @@ class TranscriptTailer:
                 await self._maybe_publish_context_usage(record)
 
     async def _maybe_observe_model(self, record: dict[str, Any]) -> None:
-        """Observe a real assistant reply's concrete model.
-
-        Records the model that actually ran (``resolved_model``), adopts it into
-        the session selection when it has diverged (no restart — the pane is
-        already running it), and emits a ``model.change`` note that the frontend
-        surfaces as a transcript divider (an unexpected mid-session switch) and a
-        one-shot notice. Synthetic records, repeated same-id records, and
-        plan-switching selections (e.g. ``opusplan``) are skipped.
+        """Record a real assistant reply's model, adopt it into the selection
+        when diverged (no restart), and emit a ``model.change`` note. Synthetic,
+        repeated same-id, and plan-switching selections are skipped.
         """
         message: dict[str, Any] = record.get("message") or {}
         concrete = str(message.get("model") or "")
@@ -287,9 +279,8 @@ class TranscriptTailer:
             text = f"Running {current} (selected {selection})"
         else:
             text = f"Model changed to {current}"
-        # Carry raw catalogue ids; the frontend renders labels from its catalogue.
-        # Pass the session's current status so the COALESCE in the event insert is
-        # a no-op — this note fires mid-turn and must not flip the lifecycle.
+        # session.status keeps the event-insert COALESCE a no-op; this note fires
+        # mid-turn and must not flip the lifecycle.
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.SYSTEM_NOTE,

@@ -232,9 +232,7 @@ class _FeedOnceSource:
 @pytest.mark.asyncio
 async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> None:
     # The transcript's resolved id normalizes to a base family (claude-opus-5 →
-    # 200K), but the session's durable model is opus[1m]; the published window is
-    # 1M. This is the alias→concrete resolution of the same model, so no model
-    # adoption occurs — only the context-usage snapshot is published.
+    # 200K), but the session's durable model is opus[1m]; the published window is 1M.
     session = _session("opus[1m]", None)
     runtime = MagicMock()
     runtime.storage.get_session.return_value = session
@@ -262,8 +260,8 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
     )
     await tailer._drain()
 
-    # resolved_model is recorded and the context-usage snapshot is published;
-    # both go through update_session_fields, so filter to the snapshot write.
+    # resolved_model and the snapshot both go through update_session_fields;
+    # filter to the snapshot write.
     usage_calls = [
         call
         for call in runtime.update_session_fields.call_args_list

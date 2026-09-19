@@ -51,8 +51,6 @@ def test_alias_resolution_first_reply_no_toast() -> None:
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection is None
-    assert obs.toast is False
-    assert obs.marker is False
     assert obs.reason is None
 
 
@@ -62,8 +60,6 @@ def test_first_reply_intra_family_fallback_adopts_and_toasts() -> None:
     assert obs is not None
     assert obs.resolved_base == "claude-opus-4-8"
     assert obs.adopt_selection == "claude-opus-4-8"
-    assert obs.toast is True
-    assert obs.marker is False  # no prior turn to divide from
     assert obs.reason == "initial_mismatch"
 
 
@@ -72,7 +68,6 @@ def test_first_reply_family_mismatch() -> None:
     assert obs is not None
     assert obs.resolved_base == "sonnet"
     assert obs.adopt_selection == "sonnet[1m]"  # [1m] preserved from selection
-    assert obs.toast is True
     assert obs.reason == "initial_mismatch"
 
 
@@ -81,8 +76,6 @@ def test_mid_session_switch_toasts_and_marks() -> None:
     assert obs is not None
     assert obs.resolved_base == "sonnet"
     assert obs.adopt_selection == "sonnet"
-    assert obs.toast is True
-    assert obs.marker is True
     assert obs.reason == "switch"
 
 
@@ -91,8 +84,6 @@ def test_stable_model_no_notice() -> None:
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection is None
-    assert obs.toast is False
-    assert obs.marker is False
     assert obs.reason is None
 
 
@@ -102,13 +93,11 @@ def test_no_selection_adopts_without_toast() -> None:
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection == "opus"
-    assert obs.toast is False
     assert obs.reason is None
 
 
 def test_custom_gateway_model_is_not_observed() -> None:
-    # A custom durable selection whose gateway reports a non-Claude concrete id
-    # must be left untouched (adopting it would corrupt the custom config).
+    # A custom selection's gateway id must be left untouched.
     assert observe_claude_model("kimi-k3-0711", "kimi-k3[1m]", prev_base=None) is None
     # Even a Claude concrete id is left alone under a custom selection.
     assert observe_claude_model("claude-opus-5", "kimi-k3[1m]", prev_base=None) is None
@@ -121,7 +110,7 @@ def test_uncatalogued_claude_model_still_observed() -> None:
     assert obs is not None
     assert obs.resolved_base == "claude-opus-9"
     assert obs.adopt_selection == "claude-opus-9"
-    assert obs.toast is True
+    assert obs.reason == "initial_mismatch"
 
 
 def test_one_m_not_reattached_for_family_without_variant() -> None:

@@ -24,6 +24,7 @@ import {
 } from "@/lib/types";
 import { modelLabelFor } from "@/lib/modelDisplay";
 import {
+  capturedTexts,
   inlineAttachmentIds,
   inlineCaptureFailed,
   isModelChangeEvent,
@@ -1000,16 +1001,29 @@ type ReportPreviewState =
 // Lazily reads a bounded text prefix of a captured report once its card is
 // expanded. The request is abandoned when the card collapses or unmounts, and
 // a failure only ever costs the preview — the attachment link stays.
+// Previews are immutable for an attachment id, so one fetch per id per page
+// life is enough. Without this, every expand re-requests and the body flickers
+// through its loading state again.
+const reportPreviewCache = new Map<string, AttachmentPreview>();
+
 function useReportPreview(
   spec: AttachmentSpec | null,
   open: boolean,
 ): ReportPreviewState | null {
   const ctx = useAttachmentContext();
-  const [state, setState] = useState<ReportPreviewState | null>(null);
   const attachmentId = spec?.id ?? null;
+  const cached = attachmentId ? reportPreviewCache.get(attachmentId) : undefined;
+  const [state, setState] = useState<ReportPreviewState | null>(
+    cached ? { status: "ready", preview: cached } : null,
+  );
 
   useEffect(() => {
     if (!open || !ctx || !attachmentId) {
+      return;
+    }
+    const hit = reportPreviewCache.get(attachmentId);
+    if (hit) {
+      setState({ status: "ready", preview: hit });
       return;
     }
     const controller = new AbortController();
@@ -1018,6 +1032,7 @@ function useReportPreview(
       signal: controller.signal,
     })
       .then((preview) => {
+        reportPreviewCache.set(attachmentId, preview);
         if (!controller.signal.aborted) {
           setState({ status: "ready", preview });
         }
@@ -1089,11 +1104,14 @@ function TaskNotificationCard({
   const reportSpec = specs.find((spec) => !inlineIds.has(spec.id)) ?? null;
   const hasReport = reportSpec !== null;
   const captureFailed = inlineCaptureFailed(event);
+  // Report text small enough that the runtime read it straight into the event.
+  // It has no attachment, so it renders immediately with no request at all.
+  const inlineReports = capturedTexts(event);
   const previewState = useReportPreview(reportSpec, open);
   const previewText =
     previewState?.status === "ready" && !previewState.preview.binary
       ? previewState.preview.content
-      : null;
+      : (inlineReports[0] ?? null);
   // The captured output is often the fuller version of a body the event also
   // carries inline (a monitor's final lines vs. its whole log). When the loaded
   // report literally contains that body, it supersedes it and the duplicate is
@@ -1102,7 +1120,7 @@ function TaskNotificationCard({
     Boolean(body && previewText && squash(previewText).includes(squash(body)));
   const usageParts = taskUsageParts(view.usage);
   const unavailable = hasReport ? null : reportUnavailableText(view);
-  const retained = specs.length > 0;
+  const retained = specs.length > 0 || inlineReports.length > 0;
   const hasBody = Boolean(
     view.resultPreview ||
       view.event ||
@@ -1174,13 +1192,20 @@ function TaskNotificationCard({
         {usageParts.length > 0 ? (
           <p className="task-note-usage">{usageParts.join(" · ")}</p>
         ) : null}
-        {specs.length > 0 ? (
+        {inlineReports.length > 0 || specs.length > 0 ? (
           <div className="task-note-report">
             <span className="task-note-report-label">
-              {hasReport ? "Full report" : "Full output"}
+              {hasReport || inlineReports.length > 0
+                ? "Full report"
+                : "Full output"}
             </span>
+            {inlineReports.map((text, i) => (
+              <pre className="task-note-result" key={i}>
+                {text}
+              </pre>
+            ))}
             {reportSpec ? <TaskReportPreview state={previewState} /> : null}
-            <MessageAttachments event={event} />
+            {specs.length > 0 ? <MessageAttachments event={event} /> : null}
           </div>
         ) : unavailable ? (
           <p className="task-note-unavailable">{unavailable}</p>

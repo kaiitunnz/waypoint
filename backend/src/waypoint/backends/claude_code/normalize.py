@@ -348,7 +348,7 @@ def build_task_notification_metadata(
     a live session with capture off is a configuration choice.
 
     When capture is allowed, an absolute ``output-file`` is tagged on the
-    transient ``capture_host_files`` key, and any body field too large to keep
+    transient ``capture_host_text`` key, and any body field too large to keep
     inline spills its full text on ``capture_inline_blobs``; the runtime sinks
     turn both into pinned session attachments.
     """
@@ -442,7 +442,10 @@ def build_task_notification_metadata(
         "status": SessionStatus.RUNNING,
     }
     if capture_path is not None:
-        metadata["capture_host_files"] = [capture_path]
+        # Captured as *text*: a report small enough to render whole rides in
+        # the event itself, so the card needs no attachment and no fetch. Only
+        # an oversized one becomes a pinned attachment with a bounded preview.
+        metadata["capture_host_text"] = [capture_path]
     # Tagged only when non-empty: the sink gates on truthiness, so an empty
     # list would never be popped and would persist as junk metadata.
     if spills:

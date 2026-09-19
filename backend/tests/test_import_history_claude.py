@@ -154,6 +154,7 @@ def test_import_task_notification_emits_system_note_without_capture() -> None:
     assert payload["id"] == "rec-uuid"
     # Import never re-runs ephemeral output-file capture.
     assert "capture_host_files" not in ev.metadata
+    assert "capture_host_text" not in ev.metadata
     assert payload["output_available"] is False
     # The report is the inline body, so nothing durable is missing to explain.
     assert payload["output_unavailable_reason"] is None
@@ -174,6 +175,7 @@ def test_import_task_notification_matches_live_contract() -> None:
     assert payload["kind"] == "monitor"
     assert payload["event"] == "FAIL"
     assert "capture_host_files" not in events[0].metadata
+    assert "capture_host_text" not in events[0].metadata
 
 
 def test_import_contentless_task_notification_still_suppressed() -> None:

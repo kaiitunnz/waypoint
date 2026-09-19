@@ -424,6 +424,24 @@ export function inlineAttachmentIds(event: EventRecord): ReadonlySet<string> {
   return new Set(raw.filter((id): id is string => typeof id === "string"));
 }
 
+/**
+ * Report text the runtime read straight into the event because it was small
+ * enough to render whole. Such a report has no attachment to link or fetch.
+ */
+export function capturedTexts(event: EventRecord): string[] {
+  const raw = event.metadata?.captured_text;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) =>
+      entry && typeof entry === "object"
+        ? (entry as { text?: unknown }).text
+        : null,
+    )
+    .filter((text): text is string => typeof text === "string" && text !== "");
+}
+
 export function inlineCaptureFailed(event: EventRecord): boolean {
   return event.metadata?.inline_capture_failed === true;
 }

@@ -178,6 +178,7 @@ def test_output_file_tag_inside_result_body_is_not_hoisted() -> None:
         parsed, record_uuid="rec", allow_output_capture=True
     )
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
 
 
 def test_output_file_tag_inside_event_body_is_not_hoisted() -> None:
@@ -197,6 +198,7 @@ def test_output_file_tag_inside_event_body_is_not_hoisted() -> None:
         parsed, record_uuid="rec", allow_output_capture=True
     )
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
 
 
 def test_usage_tag_inside_result_body_is_not_hoisted() -> None:
@@ -257,6 +259,7 @@ def test_build_metadata_agent_keeps_the_report_not_the_transcript() -> None:
     # An agent's output-file is its sidechain transcript, whose report already
     # rides inline; pinning hundreds of KB of tool churn buys nothing.
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     payload = metadata["task_notification"]
     assert payload["version"] == 1
     assert payload["id"] == "rec-1"
@@ -281,6 +284,7 @@ def test_build_metadata_monitor_text_appends_event() -> None:
         text == 'Monitor event: "e2e results" — FAIL: the traced workflow reached DONE'
     )
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     payload = metadata["task_notification"]
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] is None
@@ -293,6 +297,7 @@ def test_build_metadata_import_skips_capture_with_reason() -> None:
         parsed, record_uuid="rec-3", allow_output_capture=False, ts=datetime.now(UTC)
     )
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     payload = metadata["task_notification"]
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] == "full output not captured on import"
@@ -322,7 +327,7 @@ def test_build_metadata_agent_without_a_report_still_captures() -> None:
     _text, metadata = build_task_notification_metadata(
         parsed, record_uuid="rec-3c", allow_output_capture=True
     )
-    assert metadata["capture_host_files"] == ["/tmp/tasks/a9af42717082ba876.output"]
+    assert metadata["capture_host_text"] == ["/tmp/tasks/a9af42717082ba876.output"]
     assert metadata["task_notification"]["output_available"] is True
 
 
@@ -339,6 +344,7 @@ def test_build_metadata_oversized_inline_without_output_file() -> None:
         parsed, record_uuid="rec-4", allow_output_capture=True
     )
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     payload = metadata["task_notification"]
     # Bounded preview inline; the full body spills to an attachment so the tail
     # survives even without an output-file.
@@ -452,6 +458,7 @@ def test_build_metadata_capture_disabled_does_not_claim_an_import() -> None:
     )
     payload = metadata["task_notification"]
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     # A live session with capture off must not be explained as an import.
     assert payload["output_unavailable_reason"] == "output capture is disabled"
 
@@ -464,5 +471,6 @@ def test_build_metadata_import_still_reports_an_import() -> None:
     )
     payload = metadata["task_notification"]
     assert "capture_host_files" not in metadata
+    assert "capture_host_text" not in metadata
     assert "capture_inline_blobs" not in metadata
     assert payload["output_unavailable_reason"] == "full output not captured on import"

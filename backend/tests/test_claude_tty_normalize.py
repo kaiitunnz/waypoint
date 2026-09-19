@@ -127,6 +127,7 @@ def test_task_notification_emits_one_system_note() -> None:
     assert payload["status"] == "completed"
     # An agent's output-file is its transcript; the report rides inline.
     assert "capture_host_files" not in ev.metadata
+    assert "capture_host_text" not in ev.metadata
 
 
 def test_task_notification_monitor_event_has_no_capture() -> None:
@@ -140,6 +141,7 @@ def test_task_notification_monitor_event_has_no_capture() -> None:
     assert len(events) == 1
     assert events[0].metadata["task_notification"]["kind"] == "monitor"
     assert "capture_host_files" not in events[0].metadata
+    assert "capture_host_text" not in events[0].metadata
 
 
 def test_contentless_task_notification_stays_suppressed() -> None:

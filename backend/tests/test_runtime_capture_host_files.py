@@ -314,3 +314,74 @@ async def test_emit_adapter_event_never_persists_transient_capture_keys(
     assert "capture_host_files" not in saved
     assert "capture_inline_blobs" not in saved
     assert saved["attachments"][0]["filename"] == "spill.txt"
+
+
+# ─── host text capture ───
+
+
+async def _capture_text(fake: SimpleNamespace, metadata: dict[str, Any]) -> None:
+    fake._read_host_text = types.MethodType(SessionRuntime._read_host_text, fake)
+    await SessionRuntime._capture_host_text(
+        cast(SessionRuntime, fake), "sess-1", metadata
+    )
+
+
+def _text_runtime(tmp_path: Path, preview_limit: int = 64 * 1024) -> SimpleNamespace:
+    fake = _fake_runtime(tmp_path)
+    fake.settings = SimpleNamespace(
+        max_upload_bytes=25 * 1024 * 1024,
+        attachment_preview_max_bytes=preview_limit,
+    )
+    return fake
+
+
+async def test_small_report_is_inlined_and_never_attached(tmp_path: Path) -> None:
+    fake = _text_runtime(tmp_path)
+    report = tmp_path / "run.output"
+    report.write_text("all checks passed\n[exited with code 0]", encoding="utf-8")
+    metadata: dict[str, Any] = {"capture_host_text": [str(report)]}
+
+    await _capture_text(fake, metadata)
+
+    assert "capture_host_text" not in metadata
+    # Renderable in full, so there is nothing for a link or a fetch to add.
+    assert "attachments" not in metadata
+    assert metadata["captured_text"] == [
+        {"filename": "run.output", "text": "all checks passed\n[exited with code 0]"}
+    ]
+
+
+async def test_oversized_report_falls_back_to_an_attachment(tmp_path: Path) -> None:
+    fake = _text_runtime(tmp_path, preview_limit=32)
+    report = tmp_path / "big.output"
+    report.write_text("z" * 4096, encoding="utf-8")
+    metadata: dict[str, Any] = {"capture_host_text": [str(report)]}
+
+    await _capture_text(fake, metadata)
+
+    assert "captured_text" not in metadata
+    (spec,) = metadata["attachments"]
+    assert spec["filename"] == "big.output"
+    assert fake.attachments.pinned_ids("sess-1") == {spec["id"]}
+
+
+async def test_binary_report_falls_back_to_an_attachment(tmp_path: Path) -> None:
+    fake = _text_runtime(tmp_path)
+    report = tmp_path / "shot.bin"
+    report.write_bytes(b"\x89PNG\x00\r\n")
+    metadata: dict[str, Any] = {"capture_host_text": [str(report)]}
+
+    await _capture_text(fake, metadata)
+
+    assert "captured_text" not in metadata
+    assert len(metadata["attachments"]) == 1
+
+
+async def test_missing_report_yields_nothing(tmp_path: Path) -> None:
+    fake = _text_runtime(tmp_path)
+    metadata: dict[str, Any] = {"capture_host_text": [str(tmp_path / "gone.output")]}
+
+    await _capture_text(fake, metadata)
+
+    assert "captured_text" not in metadata
+    assert "attachments" not in metadata

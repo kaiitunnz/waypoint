@@ -21,7 +21,11 @@ from typing import Any, TextIO, cast
 from fastapi import HTTPException, status
 
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
-from waypoint.attachments import AttachmentStore, ResolvedAttachment
+from waypoint.attachments import (
+    AttachmentStore,
+    ResolvedAttachment,
+    read_text_prefix,
+)
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.account_profiles import (
     account_profile_static_checks,
@@ -5671,6 +5675,8 @@ class SessionRuntime:
     ) -> None:
         if metadata.get("capture_host_files"):
             await self._capture_host_files(session_id, metadata)
+        if metadata.get("capture_host_text"):
+            await self._capture_host_text(session_id, metadata)
         if metadata.get("capture_inline_blobs"):
             await self._capture_inline_blobs(session_id, metadata)
         # Transient capture keys are inputs to the sinks above, never event
@@ -5678,6 +5684,7 @@ class SessionRuntime:
         # normalizer whose sink did not run) would otherwise be persisted and
         # broadcast verbatim.
         metadata.pop("capture_host_files", None)
+        metadata.pop("capture_host_text", None)
         metadata.pop("capture_inline_blobs", None)
         event = EventRecord(
             session_id=session_id,
@@ -5730,6 +5737,80 @@ class SessionRuntime:
         specs = await asyncio.to_thread(self._persist_host_files, session_id, base, raw)
         if specs:
             metadata["attachments"] = [spec.model_dump(mode="json") for spec in specs]
+
+    async def _capture_host_text(
+        self, session_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Capture host paths whose content is meant to be *read* in place.
+
+        A file small enough to render whole is inlined on
+        ``metadata["captured_text"]`` and never becomes an attachment: there is
+        nothing for a link to add, and no request for a card to wait on.
+        Anything larger, binary, or unreadable falls back to a pinned
+        attachment exactly as :meth:`_capture_host_files` would, so a card can
+        still show a bounded preview and link the rest. Backend-neutral;
+        best-effort, never raises into the emit path.
+        """
+        raw = metadata.pop("capture_host_text", None)
+        if not isinstance(raw, list):
+            return
+        session = self.storage.get_session(session_id)
+        base = session.worktree_path or session.cwd if session else None
+        texts, attach = await asyncio.to_thread(
+            self._read_host_text, session_id, base, raw
+        )
+        if texts:
+            metadata.setdefault("captured_text", []).extend(texts)
+        if attach:
+            metadata.setdefault("attachments", []).extend(
+                spec.model_dump(mode="json") for spec in attach
+            )
+
+    def _read_host_text(
+        self, session_id: str, base: str | None, raw_paths: list[Any]
+    ) -> tuple[list[dict[str, str]], list[AttachmentSpec]]:
+        """Split host paths into renderable text and must-be-attached blobs.
+        Blocking; run off the event loop."""
+        limit = self.settings.attachment_preview_max_bytes
+        texts: list[dict[str, str]] = []
+        attach: list[AttachmentSpec] = []
+        base_dir = Path(base).expanduser() if base else None
+        seen: set[str] = set()
+        for entry in raw_paths:
+            if not isinstance(entry, str) or not entry:
+                continue
+            path = Path(entry).expanduser()
+            if not path.is_absolute() and base_dir is not None:
+                path = base_dir / path
+            try:
+                path = path.resolve()
+                if not path.is_file():
+                    continue
+                key = str(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if path.stat().st_size > self.settings.max_upload_bytes:
+                    continue
+                content, truncated, binary, _ = read_text_prefix(path, limit)
+            except OSError:
+                log.warning("capture_host_text: cannot read %s", path, exc_info=True)
+                continue
+            if content is not None and not truncated and not binary:
+                texts.append({"filename": path.name, "text": content})
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                log.warning("capture_host_text: cannot read %s", path, exc_info=True)
+                continue
+            mime = mimetypes.guess_type(path.name)[0]
+            spec = self.attachments.save(
+                session_id, data=data, filename=path.name, content_type=mime
+            )
+            self.attachments.mark_pinned(session_id, [spec.id])
+            attach.append(spec)
+        return texts, attach
 
     async def _capture_inline_blobs(
         self, session_id: str, metadata: dict[str, Any]

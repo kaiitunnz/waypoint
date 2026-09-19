@@ -314,6 +314,16 @@ class Settings(BaseModel):
     # Hard ceiling on a single uploaded attachment. Defaults to 25 MiB;
     # override with ``WAYPOINT_MAX_UPLOAD_BYTES``.
     max_upload_bytes: int = 25 * 1024 * 1024
+    # Ceiling on the text an attachment-preview response may carry. Bounded
+    # absolutely (not just by ``max_upload_bytes``) so an operator cannot turn a
+    # transcript card into a multi-megabyte JSON transfer. Override with
+    # ``WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES``.
+    attachment_preview_max_bytes: int = Field(default=64 * 1024, ge=1, le=1024 * 1024)
+    # Capture task-notification output as pinned session attachments: the
+    # agent's ``output-file`` report and any notification body too large to
+    # keep inline. Off means such reports are not retained. Override with
+    # ``WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED``.
+    task_output_capture_enabled: bool = True
     # Eager uploads that are never sent (e.g. attached then the page closed
     # before send) are reaped once their blob is older than this, unless a sent
     # message references them. Defaults to 24h; override with
@@ -437,6 +447,14 @@ class Settings(BaseModel):
         return dispatched
 
     @model_validator(mode="after")
+    def _validate_attachment_preview_limit(self) -> "Settings":
+        if self.attachment_preview_max_bytes > self.max_upload_bytes:
+            raise ValueError(
+                "attachment_preview_max_bytes must not exceed max_upload_bytes"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_master_switch_for_nl(self) -> "Settings":
         if self.telemetry_nl.enabled and not self.telemetry_enabled:
             raise ValueError("telemetry_nl.enabled requires telemetry_enabled: true")
@@ -535,6 +553,14 @@ def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
         ).expanduser()
     if "WAYPOINT_MAX_UPLOAD_BYTES" in os.environ:
         overrides["max_upload_bytes"] = int(os.environ["WAYPOINT_MAX_UPLOAD_BYTES"])
+    if "WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES" in os.environ:
+        overrides["attachment_preview_max_bytes"] = int(
+            os.environ["WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES"]
+        )
+    if "WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED" in os.environ:
+        overrides["task_output_capture_enabled"] = os.environ[
+            "WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED"
+        ].lower() not in {"0", "false", "no", ""}
     if "WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS" in os.environ:
         overrides["attachment_orphan_ttl_seconds"] = int(
             os.environ["WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS"]

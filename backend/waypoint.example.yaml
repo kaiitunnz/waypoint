@@ -13,6 +13,20 @@ cors_origins: []
                           # tool_call+tool_result pair) into one unit so
                           # a page of N reliably surfaces N bubbles.
 
+# Attachments and task output.
+# attachment_preview_max_bytes: 65536  # text a transcript card may inline from a
+#                                      #   stored attachment. Larger reports show
+#                                      #   this much plus a link to the full file.
+#                                      #   Capped at 1 MiB and at max_upload_bytes.
+#                                      #   Env: WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES
+# task_output_capture_enabled: true    # keep task-notification output as pinned
+#                                      #   session attachments: the agent's
+#                                      #   output-file report, and any notification
+#                                      #   body too large to keep inline. Off means
+#                                      #   oversized reports are shown truncated and
+#                                      #   not retained.
+#                                      #   Env: WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED
+
 # Workspace file preview (the file explorer in the chat window). Reads files
 # under each *local* session's working dir; remote (SSH) sessions are excluded.
 # workspace_preview_enabled: true

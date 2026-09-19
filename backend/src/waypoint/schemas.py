@@ -134,6 +134,21 @@ class AttachmentSpec(BaseModel):
     kind: AttachmentKind
 
 
+class AttachmentPreviewResponse(BaseModel):
+    # A bounded text prefix of a stored attachment, so a transcript card can
+    # show a report inline without transferring the whole blob. ``content`` is
+    # null when the inspected prefix is binary or not valid UTF-8; ``truncated``
+    # says the attachment is larger than the preview ceiling, whether or not any
+    # text came back. ``size`` is the attachment's full size, not the prefix's.
+    filename: str
+    mime: str
+    size: int
+    encoding: str
+    binary: bool
+    truncated: bool
+    content: str | None = None
+
+
 class SessionCompletionsResponse(BaseModel):
     completions: list[CommandCompletion] = Field(default_factory=list)
     refreshing: bool = False

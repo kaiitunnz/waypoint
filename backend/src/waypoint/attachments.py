@@ -66,6 +66,33 @@ class ResolvedAttachment:
         return f"data:{self.spec.mime};base64,{self.read_base64()}"
 
 
+def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool, str]:
+    """Read at most ``max_bytes`` of UTF-8 text from the head of ``path``.
+
+    Returns ``(content, truncated, binary, encoding)``. Unlike
+    ``workspace_preview.read_text_capped`` this yields a *leading prefix* for an
+    oversized file rather than no content at all, and never reads the whole blob
+    -- an attachment may be as large as ``max_upload_bytes``. One extra byte is
+    read purely to detect truncation. When the ceiling splits a multi-byte
+    character the incomplete tail is trimmed rather than treated as binary.
+    """
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
+    if b"\x00" in data:
+        return None, truncated, True, "utf-8"
+    for trim in range(min(3, len(data)) + 1):
+        try:
+            return data[: len(data) - trim].decode("utf-8"), truncated, False, "utf-8"
+        except UnicodeDecodeError:
+            # Only a split trailing character is recoverable; a decode error
+            # earlier in the buffer survives every trim and falls through.
+            if not truncated:
+                break
+    return None, truncated, True, "utf-8"
+
+
 def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) -> str:
     """Append absolute attachment paths to ``text`` for text-only transports.
 

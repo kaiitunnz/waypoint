@@ -829,8 +829,16 @@ class ClaudeTtyPlugin:
             "thread_id": new_thread_id,
             "launch_args": launch_args,
         }
+        # Clear the observed model: this is a brand-new pane (and, when the old
+        # thread can't be resumed, a fresh conversation), so a model an
+        # exited-session turn ran no longer confirms what the respawn runs. The
+        # badge falls back to the (dimmed) selection until the new pane produces
+        # a real reply — mirroring the settings-restart path.
         runtime.storage.update_session(
-            session.id, transport_state=new_state, status=SessionStatus.STARTING
+            session.id,
+            transport_state=new_state,
+            status=SessionStatus.STARTING,
+            resolved_model=None,
         )
         message = (
             f"Session reconnected (resumed thread {new_thread_id})"

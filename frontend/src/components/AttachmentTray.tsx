@@ -409,7 +409,13 @@ interface AttachmentContextValue {
 const AttachmentContext = createContext<AttachmentContextValue | null>(null);
 export const AttachmentContextProvider = AttachmentContext.Provider;
 
-function attachmentSpecsFor(event: EventRecord): AttachmentSpec[] {
+// Read the transcript subtree's attachment credentials. The context object
+// stays private so callers can only take the whole value, never redefine it.
+export function useAttachmentContext(): AttachmentContextValue | null {
+  return useContext(AttachmentContext);
+}
+
+export function attachmentSpecsFor(event: EventRecord): AttachmentSpec[] {
   const raw = event.metadata?.attachments;
   return Array.isArray(raw) ? (raw as AttachmentSpec[]) : [];
 }

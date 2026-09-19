@@ -7998,6 +7998,19 @@ details.transcript.codex.task-notification > summary .transcript-role {
   gap: 6px;
 }
 
+.task-note-preview-loading,
+.task-note-preview-error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-soft);
+}
+
+.task-note-preview-error {
+  color: var(--muted);
+}
+
 .task-note-unavailable {
   margin: 0;
   font-size: 0.78rem;

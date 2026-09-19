@@ -341,6 +341,8 @@ export interface TaskNotificationView {
   toolUseId: string | null;
   resultPreview: string | null;
   resultTruncated: boolean;
+  eventTruncated: boolean;
+  noteTruncated: boolean;
   outputAvailable: boolean;
   outputUnavailableReason: string | null;
   usage: TaskNotificationUsage | null;
@@ -401,10 +403,29 @@ export function parseTaskNotification(
     toolUseId: readString(payload, "tool_use_id"),
     resultPreview: readString(payload, "result_preview"),
     resultTruncated: payload.result_truncated === true,
+    eventTruncated: payload.event_truncated === true,
+    noteTruncated: payload.note_truncated === true,
     outputAvailable: payload.output_available === true,
     outputUnavailableReason: readString(payload, "output_unavailable_reason"),
     usage,
   };
+}
+
+/**
+ * Ids of attachments the runtime created from text the event already carried
+ * inline (an oversized body spilled to a file), as opposed to a separately
+ * captured report. Lets a card tell the two apart in ``metadata.attachments``.
+ */
+export function inlineAttachmentIds(event: EventRecord): ReadonlySet<string> {
+  const raw = event.metadata?.inline_attachment_ids;
+  if (!Array.isArray(raw)) {
+    return new Set();
+  }
+  return new Set(raw.filter((id): id is string => typeof id === "string"));
+}
+
+export function inlineCaptureFailed(event: EventRecord): boolean {
+  return event.metadata?.inline_capture_failed === true;
 }
 
 export function itemIdForEvent(event: EventRecord): string | null {

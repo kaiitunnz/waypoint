@@ -1184,8 +1184,10 @@ function TaskNotificationCard({
   // Keyed on whether anything was retained at all, never on the card-wide
   // failure flag: a notification can spill several fields, and one failing must
   // not make the caption disown a sibling that is attached right below.
-  const cutCaption = (truncated: boolean) =>
-    truncated ? (
+  // Belongs to the inline block: once a loaded report supersedes that block,
+  // the text on screen is the whole body and nothing was cut from it.
+  const cutCaption = (body: string | null, truncated: boolean) =>
+    truncated && !supersedes(body) ? (
       <p className="task-note-caption">
         {retained
           ? "Preview shown — full output attached below"
@@ -1206,13 +1208,13 @@ function TaskNotificationCard({
         {view.resultPreview && !supersedes(view.resultPreview) ? (
           <pre className="task-note-result">{view.resultPreview}</pre>
         ) : null}
-        {cutCaption(view.resultTruncated)}
+        {cutCaption(view.resultPreview, view.resultTruncated)}
         {view.event && !supersedes(view.event) ? (
           <pre className="task-note-result">{view.event}</pre>
         ) : null}
-        {cutCaption(view.eventTruncated)}
+        {cutCaption(view.event, view.eventTruncated)}
         {view.note ? <p className="task-note-text">{view.note}</p> : null}
-        {cutCaption(view.noteTruncated)}
+        {cutCaption(view.note, view.noteTruncated)}
         {usageParts.length > 0 ? (
           <p className="task-note-usage">{usageParts.join(" · ")}</p>
         ) : null}

@@ -7965,6 +7965,14 @@ details.transcript.codex.task-notification > summary::-webkit-details-marker {
   color: var(--muted-soft);
 }
 
+.task-note-caption {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted-soft);
+}
+
 .task-note-report {
   display: grid;
   gap: 6px;

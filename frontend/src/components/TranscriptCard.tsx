@@ -968,8 +968,6 @@ function reportUnavailableText(view: TaskNotificationView): string | null {
   switch (view.outputUnavailableReason) {
     case null:
       return null;
-    case "report too large to inline":
-      return "Report too large to show here";
     case "full output not captured on import":
       return "Full report wasn't captured on import";
     default:
@@ -1042,6 +1040,13 @@ function TaskNotificationCard({
             {view.resultPreview}
             {view.resultTruncated ? "\n…" : ""}
           </pre>
+        ) : null}
+        {view.resultTruncated ? (
+          <p className="task-note-caption">
+            {hasReport
+              ? "Preview shown — full report attached below"
+              : "Preview — first 64 KB of the report"}
+          </p>
         ) : null}
         {view.note ? <p className="task-note-text">{view.note}</p> : null}
         {usageParts.length > 0 ? (

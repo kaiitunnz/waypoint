@@ -268,7 +268,6 @@ def test_build_metadata_agent_keeps_the_report_not_the_transcript() -> None:
     # No separate artifact is promised: the report is the inline body.
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] is None
-    assert payload["output_unavailable_reason"] is None
     assert payload["result_preview"] == "The full subagent report body."
     assert payload["result_truncated"] is False
     assert payload["usage"]["tool_uses"] == 21
@@ -474,3 +473,28 @@ def test_build_metadata_import_still_reports_an_import() -> None:
     assert "capture_host_text" not in metadata
     assert "capture_inline_blobs" not in metadata
     assert payload["output_unavailable_reason"] == "full output not captured on import"
+
+
+def test_build_metadata_agent_spills_an_oversized_report() -> None:
+    # The transcript is skipped, so the spill is the only durable copy of the
+    # tail; it must survive that skip.
+    big = "R" * (TASK_NOTIFICATION_INLINE_LIMIT + 5000)
+    content = (
+        "<task-notification><task-id>t</task-id>"
+        "<output-file>/tmp/tasks/t.output</output-file><status>completed</status>"
+        f'<summary>Agent "Big" finished</summary><result>{big}</result>'
+        "</task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-big", allow_output_capture=True
+    )
+    assert "capture_host_text" not in metadata
+    (spill,) = metadata["capture_inline_blobs"]
+    assert spill["filename"] == "task-rec-big-result.txt"
+    assert spill["text"] == big
+    payload = metadata["task_notification"]
+    assert payload["result_truncated"] is True
+    assert payload["output_available"] is True
+    assert payload["output_unavailable_reason"] is None

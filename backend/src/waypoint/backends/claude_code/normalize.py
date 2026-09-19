@@ -383,17 +383,10 @@ def build_task_notification_metadata(
     output_unavailable_reason: str | None = None
     capture_path: str | None = None
     output_file = parsed.output_file
-    if output_file and kind == "agent" and parsed.result is not None:
-        # An Agent's ``output-file`` is its whole sidechain transcript (a
-        # symlink into Claude's own project dir), whose report is the last
-        # record -- and that report already rides inline on ``result``, spilled
-        # in full when oversized. Pinning it would cost hundreds of KB whose
-        # only unique content is intermediate tool churn, and a leading preview
-        # of it shows the task prompt rather than the outcome. Conditioned on
-        # the inline report actually being present, so an agent notification
-        # that carries only a file is still captured.
-        pass
-    elif output_file and os.path.isabs(output_file):
+    # An Agent's ``output-file`` is its sidechain transcript, whose report is
+    # the last record and already rides inline on ``result``.
+    report_is_inline = kind == "agent" and parsed.result is not None
+    if output_file and os.path.isabs(output_file) and not report_is_inline:
         if capture_allowed:
             capture_path = output_file
             output_available = True

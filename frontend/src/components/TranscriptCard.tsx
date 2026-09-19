@@ -1097,14 +1097,14 @@ function TaskNotificationCard({
   // under the headline; without one it *is* the headline. Either way the full
   // text is rendered in the expanded body, since both surfaces clamp to a line.
   const preview = view.summary ? view.event : null;
-  // Events captured before an Agent's output-file was recognised as its
-  // transcript still carry that attachment. The report is inline, so ignore it
-  // exactly as a freshly captured event would — same predicate the backend
-  // now uses, so old and new cards render identically.
-  const legacyAgentTranscript =
-    view.kind === "agent" && Boolean(view.resultPreview);
-  const specs = legacyAgentTranscript ? [] : attachmentSpecsFor(event);
   const inlineIds = inlineAttachmentIds(event);
+  // An Agent's report is inline, so a captured output-file is its transcript.
+  // Older events still carry one; drop it, but keep spilled bodies — those hold
+  // report text this card cannot show in full.
+  const reportIsInline = view.kind === "agent" && Boolean(view.resultPreview);
+  const specs = attachmentSpecsFor(event).filter(
+    (spec) => !reportIsInline || inlineIds.has(spec.id),
+  );
   // A spilled body is text this card already shows inline; the report is a
   // separately captured artifact. Only the latter is a "report".
   const reportSpec = specs.find((spec) => !inlineIds.has(spec.id)) ?? null;
@@ -1139,7 +1139,7 @@ function TaskNotificationCard({
   // report is on screen. Those events were stored with output_available set,
   // so without this the card claims an absent report while showing it.
   const unavailable =
-    hasReport || legacyAgentTranscript ? null : reportUnavailableText(view);
+    hasReport || reportIsInline ? null : reportUnavailableText(view);
   const retained = specs.length > 0 || inlineReports.length > 0;
   const hasBody = Boolean(
     view.resultPreview ||
@@ -1147,6 +1147,7 @@ function TaskNotificationCard({
       view.note ||
       usageParts.length > 0 ||
       specs.length > 0 ||
+      inlineReports.length > 0 ||
       unavailable,
   );
 

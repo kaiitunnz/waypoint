@@ -124,6 +124,62 @@ def test_convert_transcript_records_skips_injected_turns() -> None:
     assert [e.kind for e in events] == [EventKind.AGENT_OUTPUT]
 
 
+def _task_notification_record(
+    content: str, ts: str = "2026-04-29T15:47:12.000Z", uuid: str = "rec-uuid"
+) -> dict:
+    return {
+        "type": "user",
+        "timestamp": ts,
+        "uuid": uuid,
+        "origin": {"kind": "task-notification"},
+        "message": {"content": content},
+    }
+
+
+def test_import_task_notification_emits_system_note_without_capture() -> None:
+    content = (
+        "<task-notification><task-id>t1</task-id>"
+        "<output-file>/tmp/tasks/t1.output</output-file><status>completed</status>"
+        '<summary>Agent "Review" finished</summary><result>report</result>'
+        "</task-notification>"
+    )
+    events = convert_transcript_records("sess-1", [_task_notification_record(content)])
+
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.SYSTEM_NOTE
+    assert ev.metadata["method"] == "claude.task_notification"
+    payload = ev.metadata["task_notification"]
+    assert payload["kind"] == "agent"
+    assert payload["id"] == "rec-uuid"
+    # Import never re-runs ephemeral output-file capture.
+    assert "capture_host_files" not in ev.metadata
+    assert payload["output_available"] is False
+    assert payload["output_unavailable_reason"] == "full output not captured on import"
+    # The preview is still carried, and the source timestamp is preserved.
+    assert payload["result_preview"] == "report"
+    assert ev.ts == datetime(2026, 4, 29, 15, 47, 12, tzinfo=UTC)
+
+
+def test_import_task_notification_matches_live_contract() -> None:
+    content = (
+        "<task-notification><task-id>m1</task-id>"
+        '<summary>Monitor event: "watch"</summary><event>FAIL</event>'
+        "</task-notification>"
+    )
+    events = convert_transcript_records("sess-1", [_task_notification_record(content)])
+    assert len(events) == 1
+    payload = events[0].metadata["task_notification"]
+    assert payload["kind"] == "monitor"
+    assert payload["event"] == "FAIL"
+    assert "capture_host_files" not in events[0].metadata
+
+
+def test_import_contentless_task_notification_still_suppressed() -> None:
+    records = [_task_notification_record("<task-notification>ping</task-notification>")]
+    assert convert_transcript_records("sess-1", records) == []
+
+
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
     records = [_user_text("hello", ts="2026-01-01T00:00:00Z")]
 

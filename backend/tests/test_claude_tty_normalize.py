@@ -93,6 +93,70 @@ def test_not_injected_none() -> None:
     assert not is_injected_user_turn(None)
 
 
+# ── TranscriptNormalizer: task notifications ───────────────────────────────────
+
+
+def _task_notification_record(content: str, uuid: str = "rec-uuid") -> dict:
+    return {
+        "type": "user",
+        "uuid": uuid,
+        "origin": {"kind": "task-notification"},
+        "message": {"content": content},
+    }
+
+
+def test_task_notification_emits_one_system_note() -> None:
+    norm = TranscriptNormalizer()
+    content = (
+        "<task-notification><task-id>t1</task-id>"
+        "<output-file>/tmp/tasks/t1.output</output-file><status>completed</status>"
+        '<summary>Agent "Review" finished</summary><result>report</result>'
+        "</task-notification>"
+    )
+    events = norm.process_record(_task_notification_record(content))
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.SYSTEM_NOTE
+    assert ev.text == 'Agent "Review" finished'
+    assert ev.status == SessionStatus.RUNNING
+    assert ev.metadata["method"] == "claude.task_notification"
+    assert ev.metadata["item_type"] == "task_notification"
+    payload = ev.metadata["task_notification"]
+    assert payload["kind"] == "agent"
+    assert payload["id"] == "rec-uuid"
+    assert payload["status"] == "completed"
+    # Live path tags the output file for the runtime capture sink.
+    assert ev.metadata["capture_host_files"] == ["/tmp/tasks/t1.output"]
+
+
+def test_task_notification_monitor_event_has_no_capture() -> None:
+    norm = TranscriptNormalizer()
+    content = (
+        "<task-notification><task-id>m1</task-id>"
+        '<summary>Monitor event: "watch"</summary><event>FAIL</event>'
+        "</task-notification>"
+    )
+    events = norm.process_record(_task_notification_record(content))
+    assert len(events) == 1
+    assert events[0].metadata["task_notification"]["kind"] == "monitor"
+    assert "capture_host_files" not in events[0].metadata
+
+
+def test_contentless_task_notification_stays_suppressed() -> None:
+    norm = TranscriptNormalizer()
+    content = "<task-notification>ping</task-notification>"
+    assert norm.process_record(_task_notification_record(content)) == []
+
+
+def test_continuation_summary_still_suppressed() -> None:
+    norm = TranscriptNormalizer()
+    record = {
+        "type": "user",
+        "message": {"content": "This session is being continued from a previous..."},
+    }
+    assert norm.process_record(record) == []
+
+
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────
 
 

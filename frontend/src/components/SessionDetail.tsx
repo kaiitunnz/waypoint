@@ -77,6 +77,7 @@ import {
   isModelChangeEvent,
   isModelSwitchEvent,
   isPlanEvent,
+  isTaskNotificationEvent,
   itemIdForEvent,
   planForEvent,
   type PlanDecision,
@@ -4401,6 +4402,11 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
           // Switch divider stands alone; launch-time mismatch is absorbed.
           return isModelSwitchEvent(event) ? "content" : "absorbed";
         }
+        if (isTaskNotificationEvent(event)) {
+          // A task card is a chronological content boundary, not lifecycle
+          // noise to fold into an adjacent tool run.
+          return "content";
+        }
         return isPlanEvent(event) ? "content" : "absorbed";
     }
   }
@@ -4543,6 +4549,12 @@ function isImportantEvent(event: EventRecord): boolean {
         return isModelSwitchEvent(event);
       }
       if (isPlanEvent(event)) {
+        return true;
+      }
+      if (isTaskNotificationEvent(event)) {
+        // Task cards are first-class chronological events; the keyword regex
+        // below would otherwise include only the ones that happen to say
+        // "failed"/"error" and hide "finished"/"completed" ones.
         return true;
       }
       if (typeof event.metadata?.builtin_command === "string") {

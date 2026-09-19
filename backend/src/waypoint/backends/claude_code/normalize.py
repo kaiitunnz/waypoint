@@ -9,9 +9,13 @@ pending control requests) — those aren't normalisation, they're per
 session bookkeeping.
 """
 
+import hashlib
+import html
 import json
+import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from waypoint.schemas import SessionStatus
@@ -126,6 +130,257 @@ def is_injected_user_turn(content: Any) -> bool:
             "This session is being continued"
         )
     return False
+
+
+# ─── Task notifications (Claude Code native transcript) ──────────────────────
+#
+# Claude records subagent/Agent completion, Monitor events and terminal state,
+# and background-command completion as a synthetic ``user`` record with
+# ``origin.kind == "task-notification"`` and a ``<task-notification>…</…>``
+# string payload. These are not human turns. Both the live tailer and history
+# import normalize them into a standalone SYSTEM_NOTE event carrying a versioned,
+# backend-private metadata contract.
+
+TASK_NOTIFICATION_METHOD = "claude.task_notification"
+TASK_NOTIFICATION_ITEM_TYPE = "task_notification"
+TASK_NOTIFICATION_VERSION = 1
+# Largest inline ``result`` kept verbatim in the event metadata. A larger report
+# is captured as a session attachment (from Claude's ``output-file``) and only a
+# bounded preview is stored.
+TASK_NOTIFICATION_INLINE_LIMIT = 64 * 1024
+
+
+@dataclass
+class ParsedTaskNotification:
+    task_id: str | None = None
+    tool_use_id: str | None = None
+    status: str | None = None
+    summary: str | None = None
+    event: str | None = None
+    note: str | None = None
+    result: str | None = None
+    output_file: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+
+
+def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
+    """Classify a harness-injected user turn: ``task_notification`` (normalize
+    it), ``continuation`` (a /compact summary — still dropped), or ``none``.
+
+    ``origin.kind`` is authoritative when present; otherwise the trimmed string
+    content is matched. Only a plain-string user turn is ever injected.
+    """
+    # A task notification is always a string payload. Requiring string content
+    # even when ``origin.kind`` matches means an anomalous record with list
+    # (tool_result) content still flows through normal tool-result handling
+    # rather than being dropped.
+    if isinstance(content, str):
+        origin = record.get("origin")
+        origin_says_notification = (
+            isinstance(origin, dict) and origin.get("kind") == "task-notification"
+        )
+        stripped = content.lstrip()
+        if origin_says_notification or stripped.startswith("<task-notification>"):
+            return "task_notification"
+        if stripped.startswith("This session is being continued"):
+            return "continuation"
+    return "none"
+
+
+def _excise_block(text: str, tag: str, *, greedy_close: bool) -> tuple[str | None, str]:
+    """Cut the first ``<tag>…</tag>`` span out of ``text`` and return
+    ``(inner, remainder)``. ``greedy_close`` matches the *last* ``</tag>`` so a
+    body that itself quotes ``</tag>`` is captured whole. A missing close cuts to
+    the next ``<usage>``/``</task-notification>`` boundary (fail-safe: drop the
+    field, never scan the body for scalars)."""
+    open_tag, close_tag = f"<{tag}>", f"</{tag}>"
+    start = text.find(open_tag)
+    if start == -1:
+        return None, text
+    body_start = start + len(open_tag)
+    end = text.rfind(close_tag) if greedy_close else text.find(close_tag, body_start)
+    if end == -1 or end < body_start:
+        rest = text[body_start:]
+        boundary = re.search(r"<usage>|</task-notification>", rest)
+        cut = boundary.start() if boundary else len(rest)
+        inner = rest[:cut]
+        remainder = text[:start] + rest[cut:]
+        return html.unescape(inner.strip()) or None, remainder
+    inner = text[body_start:end]
+    remainder = text[:start] + text[end + len(close_tag) :]
+    return html.unescape(inner.strip()) or None, remainder
+
+
+def _scan_scalar(text: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
+    return html.unescape(match.group(1).strip()) or None if match else None
+
+
+def _parse_usage(inner: str | None) -> dict[str, int]:
+    if not inner:
+        return {}
+    usage: dict[str, int] = {}
+    for key in ("subagent_tokens", "tool_uses", "duration_ms"):
+        match = re.search(rf"<{key}>(.*?)</{key}>", inner, re.DOTALL)
+        if match:
+            try:
+                usage[key] = int(match.group(1).strip())
+            except ValueError:
+                continue
+    return usage
+
+
+def parse_task_notification(content: Any) -> ParsedTaskNotification | None:
+    """Parse a ``<task-notification>`` payload into known fields, stdlib-only and
+    non-throwing (NFR1: no XML parser, no external-entity resolution).
+
+    Returns ``None`` for a missing wrapper or one with no recognized field, so a
+    contentless or malformed record stays suppressed rather than becoming an
+    empty card.
+    """
+    if not isinstance(content, str) or "<task-notification>" not in content:
+        return None
+    # Excise every free-text field body first — greedily, to its last close, so a
+    # body that quotes its own close tag is captured whole — then scan the
+    # leftover structured remainder for ``output-file`` and the short scalars.
+    # This is a security boundary: ``output-file`` feeds the host-file capture
+    # sink, so a tag quoted inside a report/event/summary/note body must never be
+    # hoisted into a real path (which would read an arbitrary host file). The
+    # remainder that reaches the output-file scan holds only the wrapper's own
+    # short fields (task-id, tool-use-id, status).
+    result, remainder = _excise_block(content, "result", greedy_close=True)
+    summary, remainder = _excise_block(remainder, "summary", greedy_close=True)
+    event, remainder = _excise_block(remainder, "event", greedy_close=True)
+    note, remainder = _excise_block(remainder, "note", greedy_close=True)
+    usage_inner, remainder = _excise_block(remainder, "usage", greedy_close=False)
+    output_file, remainder = _excise_block(remainder, "output-file", greedy_close=False)
+    parsed = ParsedTaskNotification(
+        task_id=_scan_scalar(remainder, "task-id"),
+        tool_use_id=_scan_scalar(remainder, "tool-use-id"),
+        status=_scan_scalar(remainder, "status"),
+        summary=summary,
+        event=event,
+        note=note,
+        result=result,
+        output_file=output_file,
+        usage=_parse_usage(usage_inner),
+    )
+    if not (parsed.summary or parsed.event or parsed.status or parsed.result):
+        return None
+    return parsed
+
+
+def infer_task_notification_kind(parsed: ParsedTaskNotification) -> str:
+    """Infer a presentation kind from the summary. A verbose summary can mention
+    several roles incidentally (e.g. a background-command note that explains an
+    "agent teardown"), so anchor on the reliable leading phrases first, then the
+    distinctive background phrasing, and only then fall back to a bare mention."""
+    summary = (parsed.summary or "").lower()
+    if summary.startswith(('agent "', "agent '")):
+        return "agent"
+    if summary.startswith("monitor"):
+        return "monitor"
+    if (
+        "background command" in summary
+        or "background shell command" in summary
+        or summary.startswith("background")
+    ):
+        return "background_command"
+    if "monitor" in summary:
+        return "monitor"
+    if "agent" in summary:
+        return "agent"
+    return "unknown"
+
+
+def _truncate_utf8(text: str, limit: int) -> str:
+    return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+
+
+def _stable_task_notification_id(
+    parsed: ParsedTaskNotification, ts: datetime | None
+) -> str:
+    basis = "|".join(
+        (
+            ts.isoformat() if ts is not None else "",
+            parsed.task_id or "",
+            parsed.summary or "",
+            parsed.event or (parsed.result or "")[:256],
+        )
+    )
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+
+
+def _compact_task_notification_text(parsed: ParsedTaskNotification) -> str:
+    parts = [part for part in (parsed.summary, parsed.event) if part]
+    return " — ".join(parts) if parts else "Task notification"
+
+
+def build_task_notification_metadata(
+    parsed: ParsedTaskNotification,
+    *,
+    record_uuid: str | None,
+    allow_output_capture: bool,
+    ts: datetime | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.
+
+    ``allow_output_capture`` is True for the live tailer (Claude's ``output-file``
+    still exists) and False for history import (the temp file is long gone). When
+    True and an absolute ``output-file`` is present, the transient
+    ``capture_host_files`` key is tagged for the runtime capture sink.
+    """
+    result = parsed.result
+    result_preview: str | None = None
+    result_truncated = False
+    if result is not None:
+        if len(result.encode("utf-8")) <= TASK_NOTIFICATION_INLINE_LIMIT:
+            result_preview = result
+        else:
+            result_preview = _truncate_utf8(result, TASK_NOTIFICATION_INLINE_LIMIT)
+            result_truncated = True
+
+    output_available = False
+    output_unavailable_reason: str | None = None
+    capture_path: str | None = None
+    output_file = parsed.output_file
+    if output_file and os.path.isabs(output_file):
+        if allow_output_capture:
+            capture_path = output_file
+            output_available = True
+        else:
+            output_unavailable_reason = "full output not captured on import"
+    # An oversized inline result with no output-file is shown as a bounded
+    # preview by design (``result_truncated`` conveys it); there is no separate
+    # durable report to mark unavailable.
+
+    payload: dict[str, Any] = {
+        "version": TASK_NOTIFICATION_VERSION,
+        "id": record_uuid or _stable_task_notification_id(parsed, ts),
+        "task_id": parsed.task_id,
+        "tool_use_id": parsed.tool_use_id,
+        "kind": infer_task_notification_kind(parsed),
+        "status": parsed.status,
+        "summary": parsed.summary,
+        "event": parsed.event,
+        "note": parsed.note,
+        "result_preview": result_preview,
+        "result_truncated": result_truncated,
+        "output_available": output_available,
+        "output_unavailable_reason": output_unavailable_reason,
+    }
+    if parsed.usage:
+        payload["usage"] = parsed.usage
+
+    metadata: dict[str, Any] = {
+        "method": TASK_NOTIFICATION_METHOD,
+        "item_type": TASK_NOTIFICATION_ITEM_TYPE,
+        "task_notification": payload,
+        "status": SessionStatus.RUNNING,
+    }
+    if capture_path is not None:
+        metadata["capture_host_files"] = [capture_path]
+    return _compact_task_notification_text(parsed), metadata
 
 
 def stringify_tool_result(content: Any) -> str:

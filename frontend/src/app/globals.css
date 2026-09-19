@@ -7839,6 +7839,172 @@ html[data-theme="light"] .composer-send {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* ─── Task notification card ─── */
+/* A Claude task lifecycle event (subagent/Agent completion, Monitor event or
+ * terminal state, background-command completion). Flat panel in the tool-card
+ * family; kind hue on the glyph, terminal state on the status lamp. */
+.transcript.codex.task-notification {
+  padding: 10px 13px;
+}
+
+details.transcript.codex.task-notification > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.transcript.codex.task-notification > summary::-webkit-details-marker {
+  display: none;
+}
+
+.transcript.codex.task-notification .transcript-role {
+  margin-bottom: 0;
+  gap: 8px;
+}
+
+/* The shared .transcript-summary draws an absolute +/− expand icon at the
+ * top-right; reserve its width in the summary header so the timestamp (the last
+ * item in the flex row) doesn't render underneath it. The non-expandable
+ * <article> variant has no summary and no icon, so it needs no reservation. */
+details.transcript.codex.task-notification > summary .transcript-role {
+  padding-right: 22px;
+}
+
+.transcript.codex.task-notification .tool-glyph {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  font-size: 0.74rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: transparent;
+}
+
+.transcript.codex.task-notification .role-time {
+  flex: 0 0 auto;
+}
+
+.transcript.codex.task-notification .tool-glyph.task {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+
+.transcript.codex.task-notification .tool-glyph.monitor {
+  color: var(--accent-cool);
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--line));
+}
+
+.transcript.codex.task-notification .tool-glyph.bash {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--line));
+}
+
+.transcript.codex.task-notification .tool-name {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* The summary line is the hero — it carries "Agent … finished", the monitor
+ * subject, or the command description. Truncate to keep the row one line. */
+.task-note-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-note-status {
+  flex: 0 0 auto;
+}
+
+.transcript.codex.task-notification .transcript-preview {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.task-note-body {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 9px;
+}
+
+.task-note-result {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 9px 11px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-note-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.task-note-usage {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted-soft);
+}
+
+.task-note-caption {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted-soft);
+}
+
+.task-note-report {
+  display: grid;
+  gap: 6px;
+}
+
+.task-note-report-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.task-note-report .message-attachments {
+  margin: 0;
+  gap: 6px;
+}
+
+.task-note-unavailable {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted-soft);
+  font-style: italic;
+}
+
 .ask-question + .ask-question {
   margin-top: 14px;
   padding-top: 14px;

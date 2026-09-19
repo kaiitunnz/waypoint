@@ -74,6 +74,8 @@ import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
 import { useCopied } from "@/lib/use-copied";
 import {
+  isModelChangeEvent,
+  isModelSwitchEvent,
   isPlanEvent,
   itemIdForEvent,
   planForEvent,
@@ -120,7 +122,11 @@ import {
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
-import { effortLabel, formatResolvedModelLabel } from "@/lib/modelDisplay";
+import {
+  effortLabel,
+  formatResolvedModelLabel,
+  modelLabelFor,
+} from "@/lib/modelDisplay";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   AccountProfile,
@@ -335,6 +341,14 @@ const TASK_DOCK_DISMISSED_STORAGE_PREFIX = "waypoint-task-dock-dismissed:";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
+// A live model-change notice: a mid-session switch or a launch-time mismatch.
+type ModelNotice = {
+  reason: "switch" | "initial_mismatch";
+  previous: string | null;
+  current: string;
+  selection: string | null;
+};
+
 export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false, assistantControls = null }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
@@ -414,6 +428,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
   const [error, setError] = useState("");
+  // Notice from a live model.change event; cleared when resolved_model clears.
+  const [modelNotice, setModelNotice] = useState<ModelNotice | null>(null);
+  const resolvedModel = session?.resolved_model ?? null;
+  useEffect(() => {
+    // resolved_model clearing (relaunch or model change) dismisses the notice.
+    if (!resolvedModel) {
+      setModelNotice(null);
+    }
+  }, [resolvedModel]);
   // Safari rejects ``navigator.clipboard.writeText`` outside a synchronous
   // user-gesture handler, and the ``/copy`` clipboard payload arrives via
   // a WS message (no surviving gesture). When the async write fails we
@@ -839,6 +862,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         (message: SessionEnvelope) => {
           if (message.type === "event") {
             const event = sanitizeEvent(message.payload.event as EventRecord);
+            const md = event.metadata as Record<string, unknown>;
+            // Live only: a replayed model.change must not re-pop the notice.
+            if (isModelChangeEvent(event)) {
+              setModelNotice({
+                reason: md.reason === "switch" ? "switch" : "initial_mismatch",
+                previous:
+                  typeof md.previous_model === "string" ? md.previous_model : null,
+                current: typeof md.current_model === "string" ? md.current_model : "",
+                selection: typeof md.selection === "string" ? md.selection : null,
+              });
+            }
             queueIncomingEvent(event);
           }
           if (message.type === "session_state") {
@@ -1974,6 +2008,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             event={child.event}
                             transport={session.transport}
                             catalog={catalog}
+                            modelOptions={modelOptions}
                             onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
@@ -1998,6 +2033,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     event={item.event}
                     transport={session.transport}
                     catalog={catalog}
+                    modelOptions={modelOptions}
                     onAnswerAskQuestion={submitAskAnswer}
                     onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
@@ -2144,6 +2180,53 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             className="session-error-toast-dismiss"
             onClick={() => setError("")}
             aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {modelNotice ? (
+        <div className="session-notice-toast" role="status">
+          <span className="session-notice-lamp" aria-hidden="true" />
+          <span className="session-notice-body">
+            {modelNotice.reason === "switch" ? (
+              <>
+                <span className="session-notice-label">Model changed</span>
+                <span className="model-transition">
+                  {modelNotice.previous ? (
+                    <span className="model-chip prev">
+                      {modelLabelFor(modelNotice.previous, modelOptions)}
+                    </span>
+                  ) : null}
+                  <span className="model-transition-arrow" aria-hidden="true">
+                    →
+                  </span>
+                  <span className="model-chip current">
+                    {modelLabelFor(modelNotice.current, modelOptions)}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="session-notice-label">Running</span>
+                <span className="model-transition">
+                  <span className="model-chip current">
+                    {modelLabelFor(modelNotice.current, modelOptions)}
+                  </span>
+                  {modelNotice.selection ? (
+                    <span className="model-transition-note">
+                      selected {modelLabelFor(modelNotice.selection, modelOptions)}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            className="session-notice-dismiss"
+            onClick={() => setModelNotice(null)}
+            aria-label="Dismiss notice"
           >
             ×
           </button>
@@ -4314,6 +4397,10 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
       case "tool_result":
         return isStandaloneToolCard(readToolName(event)) ? "content" : "tool";
       default:
+        if (isModelChangeEvent(event)) {
+          // Switch divider stands alone; launch-time mismatch is absorbed.
+          return isModelSwitchEvent(event) ? "content" : "absorbed";
+        }
         return isPlanEvent(event) ? "content" : "absorbed";
     }
   }
@@ -4451,6 +4538,10 @@ function isImportantEvent(event: EventRecord): boolean {
       if (event.metadata?.method === "approval.invalidated") {
         return true;
       }
+      // Switch draws an inline divider; keep it in the important view.
+      if (isModelChangeEvent(event)) {
+        return isModelSwitchEvent(event);
+      }
       if (isPlanEvent(event)) {
         return true;
       }
@@ -4505,7 +4596,12 @@ function SessionHeader({
   const selectionModelLabel =
     modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model;
   const modelBadgeLabel = resolvedModelLabel ?? selectionModelLabel;
-  const modelBadgeTitle = session.resolved_model ?? session.model;
+  // Badge shows the selection provisionally (dimmed) until a reply confirms the
+  // running model.
+  const modelConfirmed = Boolean(session.resolved_model);
+  const modelBadgeTitle = modelConfirmed
+    ? `Model: ${session.resolved_model}`
+    : `Selected model: ${session.model} — awaiting the next reply`;
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
 
@@ -4621,7 +4717,10 @@ function SessionHeader({
           </span>
         ) : null}
         {session.model ? (
-          <span className="badge model" title={`Model: ${modelBadgeTitle}`}>
+          <span
+            className={`badge model${modelConfirmed ? "" : " unconfirmed"}`}
+            title={modelBadgeTitle}
+          >
             {modelBadgeLabel}
           </span>
         ) : null}

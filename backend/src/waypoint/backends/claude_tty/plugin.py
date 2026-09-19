@@ -829,8 +829,12 @@ class ClaudeTtyPlugin:
             "thread_id": new_thread_id,
             "launch_args": launch_args,
         }
+        # The respawned pane hasn't confirmed a model yet.
         runtime.storage.update_session(
-            session.id, transport_state=new_state, status=SessionStatus.STARTING
+            session.id,
+            transport_state=new_state,
+            status=SessionStatus.STARTING,
+            resolved_model=None,
         )
         message = (
             f"Session reconnected (resumed thread {new_thread_id})"
@@ -1201,8 +1205,13 @@ class ClaudeTtyPlugin:
             )
             if isinstance(pre_plan_mode, str) and pre_plan_mode:
                 new_state["pre_plan_mode"] = pre_plan_mode
+        # The respawn may run a different model; the no-op early return above
+        # keeps a benign relaunch from reaching here.
         runtime.storage.update_session(
-            session.id, transport_state=new_state, status=SessionStatus.STARTING
+            session.id,
+            transport_state=new_state,
+            status=SessionStatus.STARTING,
+            resolved_model=None,
         )
         note = (
             f"Interrupted the running turn and restarted Claude TUI session to "

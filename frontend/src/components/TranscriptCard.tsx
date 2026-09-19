@@ -14,8 +14,11 @@ import {
   type BackendCatalog,
 } from "@/lib/backends";
 import { isModifiedEnterShortcut } from "@/lib/keyboard";
-import { EventRecord, SessionTransport } from "@/lib/types";
+import { BackendModelOption, EventRecord, SessionTransport } from "@/lib/types";
+import { modelLabelFor } from "@/lib/modelDisplay";
 import {
+  isModelChangeEvent,
+  isModelSwitchEvent,
   normalizeToolName,
   parseEvent,
   planTextForEvent,
@@ -166,6 +169,7 @@ interface TranscriptCardProps {
   transport: SessionTransport;
   catalog?: BackendCatalog;
   pair?: ToolPair;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -179,6 +183,7 @@ export const TranscriptCard = memo(function TranscriptCard({
   transport,
   catalog,
   pair,
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: TranscriptCardProps) {
@@ -197,6 +202,7 @@ export const TranscriptCard = memo(function TranscriptCard({
         event={event}
         transport={transport}
         catalog={catalog}
+        modelOptions={modelOptions}
         onAnswerAskQuestion={onAnswerAskQuestion}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
       />
@@ -209,12 +215,14 @@ function StructuredCard({
   event,
   transport,
   catalog,
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   transport: SessionTransport;
   catalog?: BackendCatalog;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -233,6 +241,7 @@ function StructuredCard({
     <CodexCard
       event={event}
       agentLabel={agentLabel}
+      modelOptions={modelOptions}
       onAnswerAskQuestion={onAnswerAskQuestion}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
@@ -242,11 +251,13 @@ function StructuredCard({
 function CodexCard({
   event,
   agentLabel = "codex",
+  modelOptions,
   onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   agentLabel?: string;
+  modelOptions?: BackendModelOption[];
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -334,11 +345,50 @@ function CodexCard({
       if (event.metadata?.builtin_command === "/status") {
         return <CommandStatusCard event={event} agentLabel={agentLabel} />;
       }
+      if (isModelChangeEvent(event)) {
+        // Switch renders the divider; launch-time mismatch renders nothing here.
+        return isModelSwitchEvent(event) ? (
+          <ModelChangeDivider event={event} modelOptions={modelOptions} />
+        ) : null;
+      }
       return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
     }
     default:
       return <HeuristicCard event={event} />;
   }
+}
+
+function ModelChangeDivider({
+  event,
+  modelOptions,
+}: {
+  event: EventRecord;
+  modelOptions?: BackendModelOption[];
+}) {
+  const current =
+    typeof event.metadata?.current_model === "string"
+      ? event.metadata.current_model
+      : "";
+  const previous =
+    typeof event.metadata?.previous_model === "string"
+      ? event.metadata.previous_model
+      : "";
+  const opts = modelOptions ?? [];
+  const currentLabel = modelLabelFor(current, opts);
+  const text = previous
+    ? `Model changed from ${modelLabelFor(previous, opts)} to ${currentLabel}`
+    : `Switched to ${currentLabel}`;
+  return (
+    <div className="system-rule model-change" role="note">
+      <span className="system-rule-body">
+        <span className="system-rule-time">{formatTime(event.ts)}</span>
+        <span className="model-change-glyph" aria-hidden="true">
+          ⇄
+        </span>
+        <span className="system-rule-text">{text}</span>
+      </span>
+    </div>
+  );
 }
 
 function UserMessageBubble({ event }: { event: EventRecord }) {

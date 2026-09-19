@@ -266,6 +266,120 @@ def claude_model_family(model: str | None) -> str | None:
     return normalized.split("[", 1)[0]
 
 
+# Free-form --model selections that switch the running model across a turn (e.g.
+# opusplan), never a catalogue entry, so an observed model is never adopted over them.
+CLAUDE_PLAN_SWITCHING_MODELS: frozenset[str] = frozenset({"opusplan"})
+
+
+def _strip_one_m(model: str) -> str:
+    return model[: -len(_ONE_M_SUFFIX)] if model.endswith(_ONE_M_SUFFIX) else model
+
+
+def is_claude_plan_switching_model(model: str | None) -> bool:
+    """True for a selection that switches the running model by design."""
+    if not isinstance(model, str):
+        return False
+    return _strip_one_m(model.strip().lower()) in CLAUDE_PLAN_SWITCHING_MODELS
+
+
+def is_claude_model_id(model: str | None) -> bool:
+    """True when ``model`` is a recognizable Claude model id.
+
+    A custom gateway model's concrete id matches no Claude entry; adopting it
+    would corrupt the custom selection's context window.
+    """
+    if not isinstance(model, str):
+        return False
+    base = _strip_one_m(model.strip())
+    if not base:
+        return False
+    return (
+        base in _BUILTIN_MODEL_IDS
+        or base in CLAUDE_MODEL_ALIASES
+        or base.startswith("claude-")
+    )
+
+
+def map_observed_model_id(concrete: str | None) -> str | None:
+    """Map a transcript's concrete ``message.model`` to a base catalogue id.
+
+    Returns a selectable catalogue id without the ``[1m]`` suffix; ``None`` for a
+    blank input, and an unrecognized id round-trips unchanged. The pinned-id
+    check precedes the alias lookup so a legacy id keeps its distinct identity.
+    """
+    if not isinstance(concrete, str):
+        return None
+    candidate = _strip_one_m(concrete.strip())
+    if not candidate:
+        return None
+    if candidate in _BUILTIN_MODEL_IDS:
+        return candidate
+    alias = CLAUDE_MODEL_ALIASES.get(candidate)
+    if alias is not None:
+        return alias
+    return candidate
+
+
+def _has_one_m_variant(base: str) -> bool:
+    with_suffix = f"{base}{_ONE_M_SUFFIX}"
+    return with_suffix in _BUILTIN_MODEL_IDS or with_suffix in CLAUDE_CONTEXT_WINDOWS
+
+
+class ClaudeModelObservation(NamedTuple):
+    """Outcome of observing one concrete model against a session's selection.
+
+    ``resolved_base`` is stored in ``resolved_model``; ``adopt_selection`` is the
+    id to write into ``session.model`` when the model diverged (else ``None``);
+    ``reason`` is ``"switch"``, ``"initial_mismatch"``, or ``None``.
+    """
+
+    resolved_base: str
+    adopt_selection: str | None
+    reason: str | None
+
+
+def observe_claude_model(
+    concrete: str,
+    selection: str | None,
+    prev_base: str | None,
+) -> ClaudeModelObservation | None:
+    """Decide adoption and notice for one observed concrete model.
+
+    ``prev_base`` is the previous real reply's base id in this pane's lifetime
+    (``None`` on the first reply). Returns ``None`` when ``concrete`` or
+    ``selection`` isn't a Claude model id.
+    """
+    if not is_claude_model_id(concrete):
+        return None
+    if selection is not None and not is_claude_model_id(selection):
+        return None
+    resolved_base = map_observed_model_id(concrete)
+    if resolved_base is None:
+        return None
+    selection_base = _strip_one_m(selection.strip()) if selection else None
+    if prev_base is None:
+        changed = selection_base is not None and resolved_base != selection_base
+        reason = "initial_mismatch" if changed else None
+    else:
+        reason = "switch" if resolved_base != prev_base else None
+    if selection is None or resolved_base != selection_base:
+        suffix = (
+            _ONE_M_SUFFIX
+            if selection
+            and selection.strip().endswith(_ONE_M_SUFFIX)
+            and _has_one_m_variant(resolved_base)
+            else ""
+        )
+        adopt_selection: str | None = f"{resolved_base}{suffix}"
+    else:
+        adopt_selection = None
+    return ClaudeModelObservation(
+        resolved_base=resolved_base,
+        adopt_selection=adopt_selection,
+        reason=reason,
+    )
+
+
 def claude_context_window_for_model(model: str | None) -> int | None:
     # An unresolved id normalizes to itself, so it has no window rather than a
     # fabricated default.

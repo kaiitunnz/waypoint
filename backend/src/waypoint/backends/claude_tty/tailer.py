@@ -22,6 +22,8 @@ from waypoint.backends.claude_code.adapter import (
 from waypoint.backends.claude_code.models import (
     ClaudeContextWindowResolver,
     claude_context_window_for_model,
+    is_claude_plan_switching_model,
+    observe_claude_model,
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
@@ -30,7 +32,10 @@ from waypoint.backends.claude_tty.byte_source import (
     TranscriptByteSource,
     transcript_path,
 )
-from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
+from waypoint.backends.claude_tty.normalize import (
+    SYNTHETIC_MODEL_ID,
+    TranscriptNormalizer,
+)
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionChoice,
@@ -107,6 +112,11 @@ class TranscriptTailer:
         self._context_usage_signature: (
             tuple[int, int | None, tuple[tuple[str, int], ...]] | None
         ) = None
+        # Previous reply's model for this pane, reset per construction so the
+        # first reply after a boundary reads as first. Dedup for repeated records
+        # of one message.
+        self._last_observed_base: str | None = None
+        self._model_seen_ids: set[str] = set()
         # Dialog debounce state
         self._prev_dialog_sig: str | None = None
         self._dialog_stable_count: int = 0
@@ -202,6 +212,9 @@ class TranscriptTailer:
                     extra={"session_id": self._session_id, "line": raw_line[:200]},
                 )
                 continue
+            if record.get("type") == "assistant":
+                # Before the normalizer, so the divider precedes the new-model turn.
+                await self._maybe_observe_model(record)
             for ev in self._normalizer.process_record(record):
                 if (
                     ev.kind == EventKind.TOOL_CALL
@@ -224,6 +237,63 @@ class TranscriptTailer:
                 )
             if record.get("type") == "assistant":
                 await self._maybe_publish_context_usage(record)
+
+    async def _maybe_observe_model(self, record: dict[str, Any]) -> None:
+        """Record a real assistant reply's model, adopt it into the selection
+        when diverged (no restart), and emit a ``model.change`` note. Synthetic,
+        repeated same-id, and plan-switching selections are skipped.
+        """
+        message: dict[str, Any] = record.get("message") or {}
+        concrete = str(message.get("model") or "")
+        if not concrete or concrete == SYNTHETIC_MODEL_ID:
+            return
+        message_id = str(message.get("id") or record.get("uuid") or "")
+        if message_id:
+            if message_id in self._model_seen_ids:
+                return
+            self._model_seen_ids.add(message_id)
+
+        session = self._runtime.storage.get_session(self._session_id)
+        if session is None:
+            return
+        selection = session.model
+        if is_claude_plan_switching_model(selection):
+            return
+
+        previous_base = self._last_observed_base
+        observation = observe_claude_model(concrete, selection, previous_base)
+        if observation is None:
+            return
+        self._last_observed_base = observation.resolved_base
+
+        updates: dict[str, Any] = {"resolved_model": observation.resolved_base}
+        if observation.adopt_selection is not None:
+            updates["model"] = observation.adopt_selection
+        if session.resolved_model != observation.resolved_base or "model" in updates:
+            await self._runtime.update_session_fields(self._session_id, **updates)
+
+        if observation.reason is None:
+            return
+        current = observation.resolved_base
+        if observation.reason == "initial_mismatch":
+            text = f"Running {current} (selected {selection})"
+        else:
+            text = f"Model changed to {current}"
+        # session.status keeps the event-insert COALESCE a no-op; this note fires
+        # mid-turn and must not flip the lifecycle.
+        await self._runtime._emit_adapter_event(
+            self._session_id,
+            EventKind.SYSTEM_NOTE,
+            text,
+            {
+                "method": "model.change",
+                "reason": observation.reason,
+                "previous_model": previous_base,
+                "current_model": current,
+                "selection": selection,
+            },
+            session.status,
+        )
 
     async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:
         message: dict[str, Any] = record.get("message") or {}

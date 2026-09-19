@@ -49,6 +49,7 @@ def _make_session(
     session_id: str = "sess-1",
     resolved_model: str | None = None,
     effort: str | None = None,
+    model: str | None = None,
 ) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
@@ -64,6 +65,7 @@ def _make_session(
         last_event_at=now,
         raw_log_path="/tmp/raw.log",
         structured_log_path="/tmp/structured.log",
+        model=model,
         resolved_model=resolved_model,
         effort=effort,
         transport_state={
@@ -83,6 +85,16 @@ def _make_runtime(session: SessionRecord) -> MagicMock:
     runtime.publish_token_usage_record = AsyncMock()
     runtime._record_system_event = AsyncMock()
     return runtime
+
+
+def _context_usage_calls(runtime: MagicMock) -> list:
+    """update_session_fields calls that publish a context-usage snapshot (model
+    observation also writes through it)."""
+    return [
+        call
+        for call in runtime.update_session_fields.call_args_list
+        if "context_usage" in call.kwargs
+    ]
 
 
 def _make_tailer(
@@ -134,8 +146,8 @@ async def test_drain_publishes_context_usage_on_assistant_record() -> None:
     source.feed(_jsonl(record))
     await tailer._drain()
 
-    runtime.update_session_fields.assert_called_once()
-    call_kwargs = runtime.update_session_fields.call_args
+    assert len(_context_usage_calls(runtime)) == 1
+    call_kwargs = _context_usage_calls(runtime)[-1]
     assert call_kwargs.args[0] == "sess-1"
     snapshot = call_kwargs.kwargs["context_usage"]
     # input_tokens(15) + cache_read_input_tokens(4) = 19 used tokens
@@ -195,7 +207,7 @@ async def test_drain_dedupes_unchanged_context_usage() -> None:
     await tailer._drain()
 
     # Same (used_tokens, context_window_tokens) — only one publish
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
 
 
 @pytest.mark.asyncio
@@ -210,10 +222,8 @@ async def test_drain_publishes_again_when_usage_changes() -> None:
     source.feed(_jsonl(record1))
     await tailer._drain()
 
-    assert runtime.update_session_fields.call_count == 1
-    first_used = runtime.update_session_fields.call_args.kwargs[
-        "context_usage"
-    ].used_tokens
+    assert len(_context_usage_calls(runtime)) == 1
+    first_used = _context_usage_calls(runtime)[-1].kwargs["context_usage"].used_tokens
 
     record2 = _assistant_record(
         message_id="msg_2", usage={"input_tokens": 20, "output_tokens": 8}
@@ -221,10 +231,8 @@ async def test_drain_publishes_again_when_usage_changes() -> None:
     source.feed(_jsonl(record2))
     await tailer._drain()
 
-    assert runtime.update_session_fields.call_count == 2
-    second_used = runtime.update_session_fields.call_args.kwargs[
-        "context_usage"
-    ].used_tokens
+    assert len(_context_usage_calls(runtime)) == 2
+    second_used = _context_usage_calls(runtime)[-1].kwargs["context_usage"].used_tokens
     assert second_used > first_used
 
 
@@ -262,9 +270,9 @@ async def test_partial_record_carries_across_reads() -> None:
         session_id="sess-1", source=source, runtime=runtime, plugin=plugin
     )
     await tailer._drain()  # first half: incomplete record, no emit
-    assert runtime.update_session_fields.call_count == 0
+    assert len(_context_usage_calls(runtime)) == 0
     await tailer._drain()  # second half completes the record
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
 
 
 @pytest.mark.asyncio
@@ -297,9 +305,9 @@ async def test_start_at_end_skips_history_then_emits_append() -> None:
         start_at_end=True,
     )
     await tailer._drain()  # prime: no historical replay
-    assert runtime.update_session_fields.call_count == 0
+    assert len(_context_usage_calls(runtime)) == 0
     await tailer._drain()  # append emitted once
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
 
 
 @pytest.mark.asyncio
@@ -320,11 +328,11 @@ async def test_truncation_records_note_and_skips_replay() -> None:
         session_id="sess-1", source=source, runtime=runtime, plugin=plugin
     )
     await tailer._drain()
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
     await tailer._drain()
     runtime._record_system_event.assert_awaited_once()
     # no re-parse: still exactly one context-usage publish
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
     assert tailer._fetch_offset == 3
 
 
@@ -351,8 +359,142 @@ async def test_replacement_identity_change_skips_replay() -> None:
         session_id="sess-1", source=source, runtime=runtime, plugin=plugin
     )
     await tailer._drain()
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
     await tailer._drain()
     runtime._record_system_event.assert_awaited_once()
-    assert runtime.update_session_fields.call_count == 1
+    assert len(_context_usage_calls(runtime)) == 1
     assert tailer._fetch_offset == 999
+
+
+# ── model observation ───────────────────────────────────────────────────────
+
+
+def _model_change_events(runtime: MagicMock) -> list[dict]:
+    return [
+        call.args[3]
+        for call in runtime._emit_adapter_event.call_args_list
+        if call.args[3].get("method") == "model.change"
+    ]
+
+
+def _resolved_model_updates(runtime: MagicMock) -> list[dict]:
+    return [
+        call.kwargs
+        for call in runtime.update_session_fields.call_args_list
+        if "resolved_model" in call.kwargs
+    ]
+
+
+@pytest.mark.asyncio
+async def test_observe_records_model_without_notice_on_alias_resolution() -> None:
+    session = _make_session(model="opus")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(model="claude-opus-5")))
+    await tailer._drain()
+
+    updates = _resolved_model_updates(runtime)
+    assert len(updates) == 1
+    assert updates[0]["resolved_model"] == "opus"
+    assert "model" not in updates[0]  # same model → no adoption write
+    assert _model_change_events(runtime) == []
+
+
+@pytest.mark.asyncio
+async def test_observe_initial_mismatch_adopts_and_notifies() -> None:
+    session = _make_session(model="opus")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    await tailer._drain()
+
+    updates = _resolved_model_updates(runtime)
+    assert updates[0]["resolved_model"] == "sonnet"
+    assert updates[0]["model"] == "sonnet"
+    events = _model_change_events(runtime)
+    assert len(events) == 1
+    assert events[0]["reason"] == "initial_mismatch"
+    assert events[0]["current_model"] == "sonnet"
+    assert events[0]["previous_model"] is None
+
+
+@pytest.mark.asyncio
+async def test_observe_mid_session_switch_emits_divider() -> None:
+    session = _make_session(model="opus")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(message_id="msg_1", model="claude-opus-5")))
+    await tailer._drain()
+    source.feed(_jsonl(_assistant_record(message_id="msg_2", model="claude-sonnet-5")))
+    await tailer._drain()
+
+    events = _model_change_events(runtime)
+    assert len(events) == 1
+    assert events[0]["reason"] == "switch"
+    assert events[0]["previous_model"] == "opus"
+    assert events[0]["current_model"] == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_observe_skips_synthetic_record() -> None:
+    session = _make_session(model="opus")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(model="<synthetic>")))
+    await tailer._drain()
+
+    assert _model_change_events(runtime) == []
+    assert _resolved_model_updates(runtime) == []
+
+
+@pytest.mark.asyncio
+async def test_observe_dedups_same_message_id() -> None:
+    session = _make_session(model="opus")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    record = _assistant_record(message_id="msg_1", model="claude-sonnet-5")
+    source.feed(_jsonl(record))
+    await tailer._drain()
+    source.feed(_jsonl(record))
+    await tailer._drain()
+
+    # The repeated same-id record must not re-observe or re-notify.
+    assert len(_model_change_events(runtime)) == 1
+    assert len(_resolved_model_updates(runtime)) == 1
+
+
+@pytest.mark.asyncio
+async def test_observe_skips_plan_switching_selection() -> None:
+    session = _make_session(model="opusplan")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    await tailer._drain()
+
+    assert _model_change_events(runtime) == []
+    assert _resolved_model_updates(runtime) == []
+
+
+@pytest.mark.asyncio
+async def test_observe_emits_note_with_current_session_status() -> None:
+    session = _make_session(model="opus")
+    session.status = SessionStatus.RUNNING
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    await tailer._drain()
+
+    change_call = next(
+        call
+        for call in runtime._emit_adapter_event.call_args_list
+        if call.args[3].get("method") == "model.change"
+    )
+    # session.status keeps the event-insert COALESCE a no-op mid-turn.
+    assert change_call.args[4] is SessionStatus.RUNNING

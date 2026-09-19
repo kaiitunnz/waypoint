@@ -946,6 +946,31 @@ async def test_reconnect_new_thread_tails_from_start() -> None:
     assert await _run_exited_reconnect(resumes=False) is False
 
 
+async def test_exited_reconnect_clears_resolved_model() -> None:
+    # Respawn clears resolved_model; badge dims until the next reply.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(status=SessionStatus.EXITED)
+
+    target = MagicMock(session="s", window="0", pane="%9", pane_pid=123)
+    runtime = MagicMock()
+    runtime.tmux.kill_session = AsyncMock()
+    runtime.tmux.start_managed_session = AsyncMock(return_value=target)
+    runtime.tmux.pipe_output = AsyncMock()
+    runtime.tmux.resize_window = AsyncMock()
+    runtime._find_launch_target.return_value = None
+    runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
+    runtime._record_system_event = AsyncMock()
+    runtime.storage.update_session = MagicMock()
+
+    plugin._conversation_exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]
+    plugin._start_tailer = MagicMock()  # type: ignore[method-assign]
+
+    await plugin.restore_session(runtime, session)
+
+    assert runtime.storage.update_session.call_args.kwargs["resolved_model"] is None
+
+
 # ── transport: respond_to_approval ───────────────────────────────────────────
 
 

@@ -1073,25 +1073,20 @@ class SessionRuntime:
 
         The account a probe authenticates as is selected by the config-dir env
         var (``CLAUDE_CONFIG_DIR``/``CODEX_HOME``), which a profile bakes into
-        ``launch_env``. Mirror the env the session process actually sees so a
-        lookup resolves the same account the session runs as. Unlike
-        ``_agent_process_env`` this never adds runtime-only keys (e.g.
-        ``WAYPOINT_SESSION_ID``); it's a read helper, not a launch helper.
-        Dispatches through the registry — no per-backend branching.
+        ``launch_env``, so a lookup resolves the same account the session runs
+        as. Adds no runtime-only keys (e.g. ``WAYPOINT_SESSION_ID``) — a read
+        helper, not a launch helper. Dispatches through the registry — no
+        per-backend branching.
 
-        The mirror differs by where the probe runs, matching how
-        ``_command_for_backend`` assembles the launch:
+        The overlay differs by where the probe runs:
 
-        - **Local** (``launch_target is None``): the probe subprocess is handed
-          an explicit ``env=`` dict, so fold in ``os.environ`` (``PATH`` and the
-          rest) overlaid with ``launch_env`` and the backend's ``extra_env``.
+        - **Local** (``launch_target is None``): the probe subprocess gets an
+          explicit ``env=`` dict, so fold ``os.environ`` under ``launch_env``
+          and ``extra_env``.
         - **Remote** (SSH target): the command runs through the target's login
-          shell, which establishes the remote ``PATH`` and picks the remote
-          binary. Folding this host's ``os.environ`` would splice the local
-          ``PATH`` into the remote ``exec env ... <binary>`` prefix and shadow
-          the login shell's, resolving the wrong remote binary. Send only the
-          deliberate overlay — the same env the launch path sends for a remote
-          session.
+          shell, so send only ``launch_env`` + ``extra_env``. Folding
+          ``os.environ`` here would splice the local ``PATH`` into the remote
+          command and resolve the wrong remote binary.
         """
         plugin = self.registry.get(backend)
         if launch_target is not None:

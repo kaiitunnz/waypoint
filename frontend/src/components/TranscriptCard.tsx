@@ -21,8 +21,10 @@ import {
   isModelSwitchEvent,
   normalizeToolName,
   parseEvent,
+  parseTaskNotification,
   planTextForEvent,
   type EventDiffPreview,
+  type TaskNotificationView,
 } from "@/lib/events";
 import {
   isTodoToolEvent,
@@ -350,6 +352,10 @@ function CodexCard({
         return isModelSwitchEvent(event) ? (
           <ModelChangeDivider event={event} modelOptions={modelOptions} />
         ) : null;
+      }
+      const taskNotification = parseTaskNotification(event);
+      if (taskNotification) {
+        return <TaskNotificationCard view={taskNotification} event={event} />;
       }
       return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
     }
@@ -890,6 +896,167 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
         </button>
       ) : null}
     </article>
+  );
+}
+
+// Claude task lifecycle card: subagent/Agent completion, Monitor events and
+// terminal state, or background-command completion, normalized from the native
+// transcript. Kept in the tool-card family (flat panel, not the accent-tinted
+// send-user-file). Kind reads from the left (glyph + label), terminal state from
+// the right (status lamp — text, never colour alone). The full report, when
+// captured, reuses the shared attachment row.
+const TASK_NOTIFICATION_BADGES: Record<
+  TaskNotificationView["kind"],
+  { glyph: string; variant: string; label: string }
+> = {
+  agent: { glyph: "◇", variant: "task", label: "Agent" },
+  monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
+  background_command: { glyph: "›_", variant: "bash", label: "Command" },
+  unknown: { glyph: "⁂", variant: "default", label: "Task" },
+};
+
+function taskStatusLamp(
+  view: TaskNotificationView,
+): { tone: string; label: string } | null {
+  const status = view.status?.trim();
+  if (status) {
+    switch (status.toLowerCase()) {
+      case "completed":
+        return { tone: "ok", label: "Completed" };
+      case "failed":
+        return { tone: "danger", label: "Failed" };
+      case "stopped":
+        return { tone: "warn", label: "Stopped" };
+      default:
+        return { tone: "off", label: status };
+    }
+  }
+  if (view.kind === "monitor" && view.event) {
+    return { tone: "info", label: "Event" };
+  }
+  return null;
+}
+
+function formatTaskDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
+
+function taskUsageParts(usage: TaskNotificationView["usage"]): string[] {
+  if (!usage) return [];
+  const parts: string[] = [];
+  if (usage.subagentTokens != null) {
+    parts.push(`${usage.subagentTokens.toLocaleString()} tokens`);
+  }
+  if (usage.toolUses != null) {
+    parts.push(`${usage.toolUses} tool ${usage.toolUses === 1 ? "use" : "uses"}`);
+  }
+  if (usage.durationMs != null) {
+    parts.push(formatTaskDuration(usage.durationMs));
+  }
+  return parts;
+}
+
+function reportUnavailableText(view: TaskNotificationView): string | null {
+  if (view.outputAvailable) {
+    // Capture was expected but produced no attachment (file vanished/unreadable).
+    return "Report unavailable";
+  }
+  switch (view.outputUnavailableReason) {
+    case null:
+      return null;
+    case "report too large to inline":
+      return "Report too large to show here";
+    case "full output not captured on import":
+      return "Full report wasn't captured on import";
+    default:
+      return view.outputUnavailableReason;
+  }
+}
+
+function TaskNotificationCard({
+  view,
+  event,
+}: {
+  view: TaskNotificationView;
+  event: EventRecord;
+}) {
+  const badge = TASK_NOTIFICATION_BADGES[view.kind];
+  const lamp = taskStatusLamp(view);
+  const headline = view.summary || view.event || "Task notification";
+  // A Monitor event's `event` line is the real signal; show it under the summary.
+  const preview = view.kind === "monitor" && view.summary ? view.event : null;
+  const specs = Array.isArray(event.metadata?.attachments)
+    ? (event.metadata.attachments as unknown[])
+    : [];
+  const hasReport = specs.length > 0;
+  const usageParts = taskUsageParts(view.usage);
+  const unavailable = hasReport ? null : reportUnavailableText(view);
+  const hasBody = Boolean(
+    view.resultPreview ||
+      view.note ||
+      usageParts.length > 0 ||
+      hasReport ||
+      unavailable,
+  );
+
+  const header = (
+    <div className="transcript-role">
+      <span className={`tool-glyph ${badge.variant}`} aria-hidden>
+        {badge.glyph}
+      </span>
+      <span className="tool-name">{badge.label}</span>
+      <span className="task-note-summary" title={headline}>
+        {headline}
+      </span>
+      {lamp ? (
+        <span className={`inst-lamp tone-${lamp.tone} task-note-status`}>
+          {lamp.label}
+        </span>
+      ) : null}
+      <span className="role-time">{formatTime(event.ts)}</span>
+    </div>
+  );
+
+  if (!hasBody) {
+    return (
+      <article className="panel transcript codex task-notification">
+        {header}
+        {preview ? <p className="transcript-preview">{preview}</p> : null}
+      </article>
+    );
+  }
+
+  return (
+    <details className="panel transcript codex task-notification">
+      <summary className="transcript-summary">
+        {header}
+        {preview ? <p className="transcript-preview">{preview}</p> : null}
+      </summary>
+      <div className="task-note-body">
+        {view.resultPreview ? (
+          <pre className="task-note-result">
+            {view.resultPreview}
+            {view.resultTruncated ? "\n…" : ""}
+          </pre>
+        ) : null}
+        {view.note ? <p className="task-note-text">{view.note}</p> : null}
+        {usageParts.length > 0 ? (
+          <p className="task-note-usage">{usageParts.join(" · ")}</p>
+        ) : null}
+        {hasReport ? (
+          <div className="task-note-report">
+            <span className="task-note-report-label">Full report</span>
+            <MessageAttachments event={event} />
+          </div>
+        ) : unavailable ? (
+          <p className="task-note-unavailable">{unavailable}</p>
+        ) : null}
+      </div>
+    </details>
   );
 }
 

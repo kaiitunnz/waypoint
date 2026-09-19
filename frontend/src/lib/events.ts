@@ -96,6 +96,14 @@ function readNumber(metadata: Record<string, unknown>, key: string): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function readOptionalNumber(
+  metadata: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function readBoolean(metadata: Record<string, unknown>, key: string): boolean {
   return metadata[key] === true;
 }
@@ -308,6 +316,95 @@ export function isModelChangeEvent(event: EventRecord): boolean {
 
 export function isModelSwitchEvent(event: EventRecord): boolean {
   return isModelChangeEvent(event) && event.metadata?.reason === "switch";
+}
+
+export type TaskNotificationKind =
+  | "agent"
+  | "monitor"
+  | "background_command"
+  | "unknown";
+
+export interface TaskNotificationUsage {
+  subagentTokens: number | null;
+  toolUses: number | null;
+  durationMs: number | null;
+}
+
+export interface TaskNotificationView {
+  id: string;
+  kind: TaskNotificationKind;
+  status: string | null;
+  summary: string | null;
+  event: string | null;
+  note: string | null;
+  taskId: string | null;
+  toolUseId: string | null;
+  resultPreview: string | null;
+  resultTruncated: boolean;
+  outputAvailable: boolean;
+  outputUnavailableReason: string | null;
+  usage: TaskNotificationUsage | null;
+}
+
+export function isTaskNotificationEvent(event: EventRecord): boolean {
+  return event.metadata?.method === "claude.task_notification";
+}
+
+const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
+  "agent",
+  "monitor",
+  "background_command",
+  "unknown",
+]);
+
+/**
+ * Read a Claude task-notification event into a typed view model. Accepts only
+ * the v1 backend contract and returns ``null`` for a malformed or future
+ * payload, so the caller can fall back to the generic system-note renderer.
+ */
+export function parseTaskNotification(
+  event: EventRecord,
+): TaskNotificationView | null {
+  const metadata = event.metadata ?? {};
+  if (metadata.method !== "claude.task_notification") {
+    return null;
+  }
+  const payload = asRecord(metadata.task_notification);
+  if (!payload || payload.version !== 1) {
+    return null;
+  }
+  const id = readString(payload, "id");
+  if (!id) {
+    return null;
+  }
+  const kindRaw = readString(payload, "kind");
+  const kind: TaskNotificationKind =
+    kindRaw && TASK_NOTIFICATION_KINDS.has(kindRaw as TaskNotificationKind)
+      ? (kindRaw as TaskNotificationKind)
+      : "unknown";
+  const usageRecord = asRecord(payload.usage);
+  const usage: TaskNotificationUsage | null = usageRecord
+    ? {
+        subagentTokens: readOptionalNumber(usageRecord, "subagent_tokens"),
+        toolUses: readOptionalNumber(usageRecord, "tool_uses"),
+        durationMs: readOptionalNumber(usageRecord, "duration_ms"),
+      }
+    : null;
+  return {
+    id,
+    kind,
+    status: readString(payload, "status"),
+    summary: readString(payload, "summary"),
+    event: readString(payload, "event"),
+    note: readString(payload, "note"),
+    taskId: readString(payload, "task_id"),
+    toolUseId: readString(payload, "tool_use_id"),
+    resultPreview: readString(payload, "result_preview"),
+    resultTruncated: payload.result_truncated === true,
+    outputAvailable: payload.output_available === true,
+    outputUnavailableReason: readString(payload, "output_unavailable_reason"),
+    usage,
+  };
 }
 
 export function itemIdForEvent(event: EventRecord): string | null {

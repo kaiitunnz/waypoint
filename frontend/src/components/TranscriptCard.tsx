@@ -368,8 +368,18 @@ function ModelChangeDivider({
     typeof event.metadata?.current_model === "string"
       ? event.metadata.current_model
       : "";
-  const label =
-    formatResolvedModelLabel(current, null, modelOptions ?? []) ?? current;
+  const previous =
+    typeof event.metadata?.previous_model === "string"
+      ? event.metadata.previous_model
+      : "";
+  const opts = modelOptions ?? [];
+  const currentLabel = formatResolvedModelLabel(current, null, opts) ?? current;
+  const previousLabel = previous
+    ? (formatResolvedModelLabel(previous, null, opts) ?? previous)
+    : "";
+  const text = previousLabel
+    ? `Model changed from ${previousLabel} to ${currentLabel}`
+    : `Switched to ${currentLabel}`;
   return (
     <div className="system-rule model-change" role="note">
       <span className="system-rule-body">
@@ -377,7 +387,7 @@ function ModelChangeDivider({
         <span className="model-change-glyph" aria-hidden="true">
           ⇄
         </span>
-        <span className="system-rule-text">Switched to {label}</span>
+        <span className="system-rule-text">{text}</span>
       </span>
     </div>
   );

@@ -900,11 +900,9 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
 }
 
 // Claude task lifecycle card: subagent/Agent completion, Monitor events and
-// terminal state, or background-command completion, normalized from the native
-// transcript. Kept in the tool-card family (flat panel, not the accent-tinted
-// send-user-file). Kind reads from the left (glyph + label), terminal state from
-// the right (status lamp — text, never colour alone). The full report, when
-// captured, reuses the shared attachment row.
+// terminal state, or background-command completion. Kind reads from the left
+// (glyph + label), terminal state from the right (status lamp — text, never
+// colour alone). A captured full report reuses the shared attachment row.
 const TASK_NOTIFICATION_BADGES: Record<
   TaskNotificationView["kind"],
   { glyph: string; variant: string; label: string }

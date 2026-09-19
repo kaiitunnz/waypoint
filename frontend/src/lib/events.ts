@@ -365,10 +365,10 @@ const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
 export function parseTaskNotification(
   event: EventRecord,
 ): TaskNotificationView | null {
-  const metadata = event.metadata ?? {};
-  if (metadata.method !== "claude.task_notification") {
+  if (!isTaskNotificationEvent(event)) {
     return null;
   }
+  const metadata = event.metadata ?? {};
   const payload = asRecord(metadata.task_notification);
   if (!payload || payload.version !== 1) {
     return null;

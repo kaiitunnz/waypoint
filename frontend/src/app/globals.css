@@ -7861,6 +7861,14 @@ details.transcript.codex.task-notification > summary::-webkit-details-marker {
   gap: 8px;
 }
 
+/* The shared .transcript-summary draws an absolute +/− expand icon at the
+ * top-right; reserve its width in the summary header so the timestamp (the last
+ * item in the flex row) doesn't render underneath it. The non-expandable
+ * <article> variant has no summary and no icon, so it needs no reservation. */
+details.transcript.codex.task-notification > summary .transcript-role {
+  padding-right: 22px;
+}
+
 .transcript.codex.task-notification .tool-glyph {
   flex: 0 0 auto;
   width: 22px;

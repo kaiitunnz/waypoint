@@ -15,8 +15,10 @@ import {
 } from "@/lib/backends";
 import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { BackendModelOption, EventRecord, SessionTransport } from "@/lib/types";
-import { formatResolvedModelLabel } from "@/lib/modelDisplay";
+import { modelLabelFor } from "@/lib/modelDisplay";
 import {
+  isModelChangeEvent,
+  isModelSwitchEvent,
   normalizeToolName,
   parseEvent,
   planTextForEvent,
@@ -343,10 +345,9 @@ function CodexCard({
       if (event.metadata?.builtin_command === "/status") {
         return <CommandStatusCard event={event} agentLabel={agentLabel} />;
       }
-      if (event.metadata?.method === "model.change") {
-        // A mid-session switch reads as an inline divider; a launch-time
-        // mismatch surfaces only as the notice toast (no divider here).
-        return event.metadata?.reason === "switch" ? (
+      if (isModelChangeEvent(event)) {
+        // Switch renders the divider; launch-time mismatch renders nothing here.
+        return isModelSwitchEvent(event) ? (
           <ModelChangeDivider event={event} modelOptions={modelOptions} />
         ) : null;
       }
@@ -373,12 +374,9 @@ function ModelChangeDivider({
       ? event.metadata.previous_model
       : "";
   const opts = modelOptions ?? [];
-  const currentLabel = formatResolvedModelLabel(current, null, opts) ?? current;
-  const previousLabel = previous
-    ? (formatResolvedModelLabel(previous, null, opts) ?? previous)
-    : "";
-  const text = previousLabel
-    ? `Model changed from ${previousLabel} to ${currentLabel}`
+  const currentLabel = modelLabelFor(current, opts);
+  const text = previous
+    ? `Model changed from ${modelLabelFor(previous, opts)} to ${currentLabel}`
     : `Switched to ${currentLabel}`;
   return (
     <div className="system-rule model-change" role="note">

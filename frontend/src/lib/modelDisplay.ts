@@ -68,3 +68,12 @@ export function formatResolvedModelLabel(
   const base = catalogLabel ?? parseClaudeConcreteModelId(resolvedModel) ?? resolvedModel;
   return selectionId?.endsWith("[1m]") ? `${base} (1M context)` : base;
 }
+
+// Display label for a stored model id (alias, pinned, or concrete), falling back
+// to the id itself.
+export function modelLabelFor(
+  id: string,
+  modelOptions: BackendModelOption[],
+): string {
+  return formatResolvedModelLabel(id, null, modelOptions) ?? id;
+}

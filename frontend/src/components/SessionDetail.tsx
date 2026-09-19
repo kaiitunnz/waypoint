@@ -74,6 +74,8 @@ import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
 import { useCopied } from "@/lib/use-copied";
 import {
+  isModelChangeEvent,
+  isModelSwitchEvent,
   isPlanEvent,
   itemIdForEvent,
   planForEvent,
@@ -120,7 +122,11 @@ import {
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
-import { effortLabel, formatResolvedModelLabel } from "@/lib/modelDisplay";
+import {
+  effortLabel,
+  formatResolvedModelLabel,
+  modelLabelFor,
+} from "@/lib/modelDisplay";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   AccountProfile,
@@ -335,18 +341,13 @@ const TASK_DOCK_DISMISSED_STORAGE_PREFIX = "waypoint-task-dock-dismissed:";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-// A live model-change notice: either a mid-session switch (previous → current)
-// or a launch-time reply whose model differs from the selection.
+// A live model-change notice: a mid-session switch or a launch-time mismatch.
 type ModelNotice = {
   reason: "switch" | "initial_mismatch";
   previous: string | null;
   current: string;
   selection: string | null;
 };
-
-function modelLabelFor(id: string, options: BackendModelOption[]): string {
-  return formatResolvedModelLabel(id, null, options) ?? id;
-}
 
 export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false, assistantControls = null }: SessionDetailProps) {
   const router = useRouter();
@@ -427,14 +428,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
   const [error, setError] = useState("");
-  // One-shot notice raised from a live model.change event when the running
-  // model diverges from the selection; auto-dismissed once a Waypoint model
-  // change clears resolved_model (see the effect below).
+  // Notice from a live model.change event; cleared when resolved_model clears.
   const [modelNotice, setModelNotice] = useState<ModelNotice | null>(null);
   const resolvedModel = session?.resolved_model ?? null;
   useEffect(() => {
-    // A Waypoint model change / relaunch clears resolved_model; treat that as
-    // the notice being acted on and dismiss it (no result verification).
+    // resolved_model clearing (relaunch or model change) dismisses the notice.
     if (!resolvedModel) {
       setModelNotice(null);
     }
@@ -865,9 +863,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           if (message.type === "event") {
             const event = sanitizeEvent(message.payload.event as EventRecord);
             const md = event.metadata as Record<string, unknown>;
-            // Live only — a model.change replayed from history renders its
-            // transcript divider but must not re-pop the notice.
-            if (md?.method === "model.change") {
+            // Live only: a replayed model.change must not re-pop the notice.
+            if (isModelChangeEvent(event)) {
               setModelNotice({
                 reason: md.reason === "switch" ? "switch" : "initial_mismatch",
                 previous:
@@ -4400,10 +4397,9 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
       case "tool_result":
         return isStandaloneToolCard(readToolName(event)) ? "content" : "tool";
       default:
-        if (event.metadata?.method === "model.change") {
-          // A switch divider stands on its own between turns; never fold it into
-          // a tool-run group. A launch-time mismatch renders nothing inline.
-          return event.metadata?.reason === "switch" ? "content" : "absorbed";
+        if (isModelChangeEvent(event)) {
+          // Switch divider stands alone; launch-time mismatch is absorbed.
+          return isModelSwitchEvent(event) ? "content" : "absorbed";
         }
         return isPlanEvent(event) ? "content" : "absorbed";
     }
@@ -4542,9 +4538,9 @@ function isImportantEvent(event: EventRecord): boolean {
       if (event.metadata?.method === "approval.invalidated") {
         return true;
       }
-      // A model switch draws an inline divider; keep it in the important view.
-      if (event.metadata?.method === "model.change") {
-        return event.metadata?.reason === "switch";
+      // Switch draws an inline divider; keep it in the important view.
+      if (isModelChangeEvent(event)) {
+        return isModelSwitchEvent(event);
       }
       if (isPlanEvent(event)) {
         return true;
@@ -4600,9 +4596,8 @@ function SessionHeader({
   const selectionModelLabel =
     modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model;
   const modelBadgeLabel = resolvedModelLabel ?? selectionModelLabel;
-  // Until a real reply confirms which model is running (fresh launch, or right
-  // after a model change), the badge shows the selection in a provisional
-  // (dimmed, hollow-lamp) state instead of asserting an unverified model.
+  // Badge shows the selection provisionally (dimmed) until a reply confirms the
+  // running model.
   const modelConfirmed = Boolean(session.resolved_model);
   const modelBadgeTitle = modelConfirmed
     ? `Model: ${session.resolved_model}`

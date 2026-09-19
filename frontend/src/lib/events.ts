@@ -302,6 +302,14 @@ export function isPlanEvent(event: EventRecord): boolean {
   return planTextForEvent(event) !== "";
 }
 
+export function isModelChangeEvent(event: EventRecord): boolean {
+  return event.metadata?.method === "model.change";
+}
+
+export function isModelSwitchEvent(event: EventRecord): boolean {
+  return isModelChangeEvent(event) && event.metadata?.reason === "switch";
+}
+
 export function itemIdForEvent(event: EventRecord): string | null {
   const value = event.metadata.item_id;
   return typeof value === "string" && value ? value : null;

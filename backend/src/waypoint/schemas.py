@@ -147,6 +147,10 @@ class AttachmentPreviewResponse(BaseModel):
     binary: bool
     truncated: bool
     content: str | None = None
+    # Byte length of ``content``. The ceiling is applied in bytes, so a caller
+    # cannot recover it from the decoded string: 64 KiB of CJK text is far
+    # fewer characters than 64 KiB of ASCII.
+    content_bytes: int = 0
 
 
 class SessionCompletionsResponse(BaseModel):

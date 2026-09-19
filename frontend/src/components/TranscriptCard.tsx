@@ -1051,7 +1051,7 @@ function TaskReportPreview({
       <pre className="task-note-result">{preview.content}</pre>
       {preview.truncated ? (
         <p className="task-note-caption">
-          Preview — first {Math.round(preview.content.length / 1024)} KB of the
+          Preview — first {Math.round(preview.content_bytes / 1024)} KB of the
           full report
         </p>
       ) : null}
@@ -1120,15 +1120,15 @@ function TaskNotificationCard({
     );
   }
 
-  // A body was cut with nothing durable kept for the tail, so the card must not
-  // promise a full report the user cannot reach.
-  const spillLost = captureFailed || !retained;
+  // Keyed on whether anything was retained at all, never on the card-wide
+  // failure flag: a notification can spill several fields, and one failing must
+  // not make the caption disown a sibling that is attached right below.
   const cutCaption = (truncated: boolean) =>
     truncated ? (
       <p className="task-note-caption">
-        {spillLost
-          ? "Preview — the rest was not retained"
-          : "Preview shown — full output attached below"}
+        {retained
+          ? "Preview shown — full output attached below"
+          : "Preview — the rest was not retained"}
       </p>
     ) : null;
 
@@ -1165,6 +1165,11 @@ function TaskNotificationCard({
           </div>
         ) : unavailable ? (
           <p className="task-note-unavailable">{unavailable}</p>
+        ) : null}
+        {captureFailed && retained ? (
+          <p className="task-note-unavailable">
+            Some output could not be retained
+          </p>
         ) : null}
       </div>
     </details>

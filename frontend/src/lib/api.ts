@@ -1859,6 +1859,9 @@ export interface AttachmentPreview {
   binary: boolean;
   truncated: boolean;
   content: string | null;
+  // Byte length of `content`; the ceiling is applied in bytes, so it cannot be
+  // recovered from the decoded string's length.
+  content_bytes: number;
 }
 
 // A bounded text prefix of a stored attachment. Unlike `attachmentUrl`, this is

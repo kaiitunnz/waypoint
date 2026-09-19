@@ -448,10 +448,15 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _validate_attachment_preview_limit(self) -> "Settings":
-        if self.attachment_preview_max_bytes > self.max_upload_bytes:
+        if self.attachment_preview_max_bytes <= self.max_upload_bytes:
+            return self
+        if "attachment_preview_max_bytes" in self.model_fields_set:
             raise ValueError(
                 "attachment_preview_max_bytes must not exceed max_upload_bytes"
             )
+        # Only ``max_upload_bytes`` was lowered, past a preview ceiling the
+        # operator never set. Clamp rather than refuse to start on a default.
+        self.attachment_preview_max_bytes = self.max_upload_bytes
         return self
 
     @model_validator(mode="after")

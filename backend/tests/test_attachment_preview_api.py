@@ -158,6 +158,7 @@ async def test_preview_bounds_an_oversized_report(tmp_path: Path) -> None:
     assert body["truncated"] is True
     # ``size`` is the attachment's full size, not the prefix's.
     assert body["size"] == 4096
+    assert body["content_bytes"] == 32
 
 
 async def test_preview_reports_binary_without_content(tmp_path: Path) -> None:
@@ -225,6 +226,28 @@ async def test_preview_404s_for_unknown_session(tmp_path: Path) -> None:
 def test_preview_limit_may_not_exceed_the_upload_limit() -> None:
     with pytest.raises(ValidationError):
         Settings(attachment_preview_max_bytes=4096, max_upload_bytes=1024)
+
+
+async def test_preview_reports_prefix_bytes_not_characters(tmp_path: Path) -> None:
+    app, token = _build(tmp_path, attachment_preview_max_bytes=32)
+    _session(app)
+    # Two bytes per character, so a 32-byte prefix is only 16 characters.
+    attachment_id = _seed(app, "s1", "é".encode() * 64)
+    async with _client(app) as client:
+        resp = await client.get(
+            f"/api/sessions/s1/attachments/{attachment_id}/preview",
+            headers=_auth(token),
+        )
+    body = resp.json()
+    assert len(body["content"]) == 16
+    assert body["content_bytes"] == 32
+
+
+def test_preview_limit_clamps_when_only_the_upload_limit_was_lowered() -> None:
+    # An operator who lowers only max_upload_bytes never chose a preview
+    # ceiling, so the default must not refuse to start.
+    settings = Settings(max_upload_bytes=1024)
+    assert settings.attachment_preview_max_bytes == 1024
 
 
 def test_preview_limit_has_an_absolute_ceiling() -> None:

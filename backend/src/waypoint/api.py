@@ -795,6 +795,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             binary=binary,
             truncated=truncated,
             content=content,
+            content_bytes=len(content.encode("utf-8")) if content else 0,
         )
 
     def _workspace_session(session_id: str) -> SessionRecord:

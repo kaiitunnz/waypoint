@@ -777,7 +777,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         spec, path = resolved
         try:
-            content, truncated, binary, encoding = read_text_prefix(
+            content, truncated, binary = read_text_prefix(
                 path, context.settings.attachment_preview_max_bytes
             )
         except OSError as exc:
@@ -788,7 +788,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=spec.filename,
             mime=spec.mime,
             size=spec.size,
-            encoding=encoding,
             binary=binary,
             truncated=truncated,
             content=content,

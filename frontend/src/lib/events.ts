@@ -433,17 +433,9 @@ export function capturedTexts(event: EventRecord): string[] {
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw
-    .map((entry) =>
-      entry && typeof entry === "object"
-        ? (entry as { text?: unknown }).text
-        : null,
-    )
-    .filter((text): text is string => typeof text === "string" && text !== "");
-}
-
-export function inlineCaptureFailed(event: EventRecord): boolean {
-  return event.metadata?.inline_capture_failed === true;
+  return raw.filter(
+    (text): text is string => typeof text === "string" && text !== "",
+  );
 }
 
 export function itemIdForEvent(event: EventRecord): string | null {

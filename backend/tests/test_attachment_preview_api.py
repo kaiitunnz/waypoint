@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +8,8 @@ from pydantic import ValidationError
 
 from waypoint.api import create_app
 from waypoint.attachments import read_text_prefix
-from waypoint.settings import Settings
+from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+from waypoint.settings import Settings, load_settings
 
 
 def _build(tmp_path: Path, **settings_kw: Any) -> tuple[Any, str]:
@@ -36,10 +38,6 @@ def _seed(app: Any, session_id: str, data: bytes, filename: str = "report.txt") 
 
 
 def _session(app: Any, session_id: str = "s1") -> str:
-    from datetime import UTC, datetime
-
-    from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
-
     now = datetime.now(UTC)
     app.state.context.storage.create_session(
         SessionRecord(
@@ -65,20 +63,20 @@ def _session(app: Any, session_id: str = "s1") -> str:
 def test_prefix_reads_small_text_whole(tmp_path: Path) -> None:
     path = tmp_path / "a.txt"
     path.write_text("hello", encoding="utf-8")
-    assert read_text_prefix(path, 64) == ("hello", False, False, "utf-8")
+    assert read_text_prefix(path, 64) == ("hello", False, False)
 
 
 def test_prefix_at_exact_limit_is_not_truncated(tmp_path: Path) -> None:
     path = tmp_path / "a.txt"
     path.write_text("abcde", encoding="utf-8")
-    content, truncated, binary, _ = read_text_prefix(path, 5)
+    content, truncated, binary = read_text_prefix(path, 5)
     assert (content, truncated, binary) == ("abcde", False, False)
 
 
 def test_prefix_truncates_and_returns_leading_text(tmp_path: Path) -> None:
     path = tmp_path / "a.txt"
     path.write_text("abcdefghij", encoding="utf-8")
-    content, truncated, binary, _ = read_text_prefix(path, 4)
+    content, truncated, binary = read_text_prefix(path, 4)
     assert (content, truncated, binary) == ("abcd", True, False)
 
 
@@ -86,14 +84,14 @@ def test_prefix_trims_split_multibyte_character(tmp_path: Path) -> None:
     path = tmp_path / "a.txt"
     path.write_text("é" * 8, encoding="utf-8")
     # 3 bytes cuts the second 2-byte character in half.
-    content, truncated, binary, _ = read_text_prefix(path, 3)
+    content, truncated, binary = read_text_prefix(path, 3)
     assert (content, truncated, binary) == ("é", True, False)
 
 
 def test_prefix_reports_binary_for_nul_bytes(tmp_path: Path) -> None:
     path = tmp_path / "a.bin"
     path.write_bytes(b"pre\x00post")
-    content, _, binary, _ = read_text_prefix(path, 64)
+    content, _, binary = read_text_prefix(path, 64)
     assert content is None
     assert binary is True
 
@@ -101,7 +99,7 @@ def test_prefix_reports_binary_for_nul_bytes(tmp_path: Path) -> None:
 def test_prefix_reports_binary_for_undecodable_bytes(tmp_path: Path) -> None:
     path = tmp_path / "a.bin"
     path.write_bytes(b"\xff\xfe\xfd")
-    content, _, binary, _ = read_text_prefix(path, 64)
+    content, _, binary = read_text_prefix(path, 64)
     assert content is None
     assert binary is True
 
@@ -109,7 +107,7 @@ def test_prefix_reports_binary_for_undecodable_bytes(tmp_path: Path) -> None:
 def test_prefix_does_not_read_beyond_the_ceiling(tmp_path: Path) -> None:
     path = tmp_path / "big.txt"
     path.write_bytes(b"x" * 10_000)
-    content, truncated, _, _ = read_text_prefix(path, 100)
+    content, truncated, _ = read_text_prefix(path, 100)
     assert content is not None
     assert len(content) == 100
     assert truncated is True
@@ -256,8 +254,6 @@ def test_preview_limit_has_an_absolute_ceiling() -> None:
 
 
 def test_settings_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    from waypoint.settings import load_settings
-
     monkeypatch.setenv("WAYPOINT_ATTACHMENT_PREVIEW_MAX_BYTES", "4096")
     monkeypatch.setenv("WAYPOINT_TASK_OUTPUT_CAPTURE_ENABLED", "false")
     settings = load_settings(None)

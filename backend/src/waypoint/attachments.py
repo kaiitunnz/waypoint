@@ -66,28 +66,28 @@ class ResolvedAttachment:
         return f"data:{self.spec.mime};base64,{self.read_base64()}"
 
 
-def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool, str]:
+def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool]:
     """Read at most ``max_bytes`` of UTF-8 text from the head of ``path``.
 
-    Returns ``(content, truncated, binary, encoding)``, reading one byte past
-    the ceiling to detect truncation and trimming a split multi-byte character
-    from the tail.
+    Returns ``(content, truncated, binary)``, reading one byte past the ceiling
+    to detect truncation and trimming a split multi-byte character from the
+    tail.
     """
     with path.open("rb") as handle:
         data = handle.read(max_bytes + 1)
     truncated = len(data) > max_bytes
     data = data[:max_bytes]
     if b"\x00" in data:
-        return None, truncated, True, "utf-8"
+        return None, truncated, True
     for trim in range(min(3, len(data)) + 1):
         kept = data[: len(data) - trim]
         try:
-            return kept.decode("utf-8"), truncated, False, "utf-8"
+            return kept.decode("utf-8"), truncated, False
         except UnicodeDecodeError:
             # Only a split trailing character is recoverable.
             if not truncated:
                 break
-    return None, truncated, True, "utf-8"
+    return None, truncated, True
 
 
 def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) -> str:

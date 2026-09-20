@@ -26,7 +26,6 @@ import { modelLabelFor } from "@/lib/modelDisplay";
 import {
   capturedTexts,
   inlineAttachmentIds,
-  inlineCaptureFailed,
   isModelChangeEvent,
   isModelSwitchEvent,
   normalizeToolName,
@@ -1106,7 +1105,6 @@ function TaskNotificationCard({
   const reportSpec =
     specs.find((spec) => !inlineIds.has(spec.id)) ?? specs[0] ?? null;
   const hasReport = reportSpec !== null;
-  const captureFailed = inlineCaptureFailed(event);
   // Small enough that the runtime read it into the event; no request needed.
   const inlineReports = capturedTexts(event);
   const previewState = useReportPreview(reportSpec, open);
@@ -1225,11 +1223,6 @@ function TaskNotificationCard({
           </div>
         ) : unavailable ? (
           <p className="task-note-unavailable">{unavailable}</p>
-        ) : null}
-        {captureFailed && retained ? (
-          <p className="task-note-unavailable">
-            Some output could not be retained
-          </p>
         ) : null}
       </div>
     </details>

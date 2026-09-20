@@ -295,8 +295,7 @@ def test_build_metadata_import_skips_capture_with_reason() -> None:
     _text, metadata = build_task_notification_metadata(
         parsed, record_uuid="rec-3", allow_output_capture=False, ts=datetime.now(UTC)
     )
-    assert "capture_host_files" not in metadata
-    assert "capture_host_text" not in metadata
+    assert not [key for key in metadata if key.startswith("capture_")]
     payload = metadata["task_notification"]
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] == "full output not captured on import"
@@ -317,7 +316,7 @@ def test_build_metadata_agent_import_claims_nothing_missing() -> None:
 
 
 def test_build_metadata_agent_without_a_report_still_captures() -> None:
-    # Defensive: only the *inline report* makes the transcript redundant.
+    # Only the inline report makes the transcript redundant.
     content = AGENT_COMPLETION.replace(
         "<result>The full subagent report body.</result>\n", ""
     )
@@ -460,19 +459,6 @@ def test_build_metadata_capture_disabled_does_not_claim_an_import() -> None:
     assert "capture_host_text" not in metadata
     # A live session with capture off must not be explained as an import.
     assert payload["output_unavailable_reason"] == "output capture is disabled"
-
-
-def test_build_metadata_import_still_reports_an_import() -> None:
-    parsed = parse_task_notification(BACKGROUND_COMPLETED)
-    assert parsed is not None
-    _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-i", allow_output_capture=False, capture_enabled=True
-    )
-    payload = metadata["task_notification"]
-    assert "capture_host_files" not in metadata
-    assert "capture_host_text" not in metadata
-    assert "capture_inline_blobs" not in metadata
-    assert payload["output_unavailable_reason"] == "full output not captured on import"
 
 
 def test_build_metadata_agent_spills_an_oversized_report() -> None:

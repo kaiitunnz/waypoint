@@ -159,9 +159,7 @@ async def test_small_report_is_inlined_and_never_attached(tmp_path: Path) -> Non
     await runtime._capture_host_text("sess-1", [str(report)], metadata)
 
     assert "attachments" not in metadata
-    assert metadata["captured_text"] == [
-        {"filename": "run.output", "text": "all checks passed\n[exited with code 0]"}
-    ]
+    assert metadata["captured_text"] == ["all checks passed\n[exited with code 0]"]
 
 
 async def test_capture_inlines_only_within_the_eager_budget(tmp_path: Path) -> None:

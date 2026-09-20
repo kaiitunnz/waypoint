@@ -5839,17 +5839,17 @@ class SessionRuntime:
 
     def _read_host_text(
         self, session_id: str, base: str | None, raw_paths: list[Any]
-    ) -> tuple[list[dict[str, str]], list[AttachmentSpec]]:
+    ) -> tuple[list[str], list[AttachmentSpec]]:
         """Split host paths into text small enough to inline and blobs that must
         be attached. Blocking; run off the event loop."""
         limit = self.settings.inline_capture_max_bytes
-        texts: list[dict[str, str]] = []
+        texts: list[str] = []
         specs: list[AttachmentSpec] = []
         for path in self._iter_host_paths(base, raw_paths, tag="capture_host_text"):
             try:
-                content, truncated, binary, _ = read_text_prefix(path, limit)
+                content, truncated, binary = read_text_prefix(path, limit)
                 if content is not None and not truncated and not binary:
-                    texts.append({"filename": path.name, "text": content})
+                    texts.append(content)
                     continue
                 data = path.read_bytes()
             except OSError:

@@ -624,6 +624,22 @@ shape. The frontend's `lib/events.ts::parseEvent` reads the envelope back out
 bumps its protocol, the change lands inside that agent's `normalize.py`; the
 frontend reader stays put.
 
+### Capture seams
+
+A normalizer can hand the runtime a file or a blob of text by tagging an
+adapter event with one of three transient metadata keys. `_emit_adapter_event`
+pops each one, runs its sink, and never persists the key itself.
+
+| key | value | result |
+| --- | --- | --- |
+| `capture_host_files` | host paths | pinned attachments on `metadata.attachments` |
+| `capture_host_text` | host paths | content within `inline_capture_max_bytes` on `metadata.captured_text`; anything larger, binary, or unreadable becomes an attachment |
+| `capture_inline_blobs` | `{filename, text, mime}` entries | pinned attachments, with their ids listed on `metadata.inline_attachment_ids` so a consumer can tell them from a separately captured report |
+
+Each sink is best-effort and never raises into the emit path: a missing,
+oversized, or unreadable entry is skipped. The seams are backend-neutral —
+they read no plugin id and no per-agent schema.
+
 ## Frontend catalog
 
 `/api/backends` returns every registered plugin's id, label, badges, and

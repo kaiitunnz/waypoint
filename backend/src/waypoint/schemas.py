@@ -140,7 +140,6 @@ class AttachmentPreviewResponse(BaseModel):
     filename: str
     mime: str
     size: int
-    encoding: str
     binary: bool
     truncated: bool
     content: str | None = None

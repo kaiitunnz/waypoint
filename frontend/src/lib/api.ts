@@ -1855,7 +1855,6 @@ export interface AttachmentPreview {
   filename: string;
   mime: string;
   size: number;
-  encoding: string;
   binary: boolean;
   truncated: boolean;
   content: string | null;

@@ -79,9 +79,11 @@ import {
   isPlanEvent,
   isTaskNotificationEvent,
   itemIdForEvent,
+  parseTaskNotification,
   planForEvent,
   type PlanDecision,
   type PlanViewModel,
+  type TaskNotificationKind,
 } from "@/lib/events";
 import { useSessionScheduledMessages } from "@/lib/useSessionScheduledMessages";
 import { useSessionPresence } from "@/lib/useSessionPresence";
@@ -115,6 +117,7 @@ import {
   PendingUserInputCard,
   TranscriptCard,
   ToolCallRunGroup,
+  TaskNotificationRunGroup,
   readToolName,
   type AskAnswerEntry,
   type AskQuestionResolution,
@@ -1426,7 +1429,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [transcriptEventsForDisplay],
   );
   const hasToolRuns = useMemo(
-    () => transcriptItems.some((item) => item.kind === "tool_run"),
+    () =>
+      transcriptItems.some(
+        (item) => item.kind === "tool_run" || item.kind === "notification_run",
+      ),
     [transcriptItems],
   );
   // True for local sessions only; remote sessions return 400 from the workspace
@@ -2017,6 +2023,48 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                         ),
                       )}
                     </ToolCallRunGroup>
+                  );
+                }
+                if (item.kind === "notification_run") {
+                  const kinds = item.items
+                    .map((child): TaskNotificationKind | null => {
+                      const event = child.kind === "pair" ? child.pair.call ?? child.pair.result : child.event;
+                      // Count only notification cards, not absorbed lifecycle
+                      // noise; a malformed one still counts as "unknown".
+                      if (!event || !isTaskNotificationEvent(event)) return null;
+                      return parseTaskNotification(event)?.kind ?? "unknown";
+                    })
+                    .filter((kind): kind is TaskNotificationKind => kind !== null);
+                  return (
+                    <TaskNotificationRunGroup
+                      key={`notification-run-${index}`}
+                      kinds={kinds}
+                      initiallyOpen={toolRunsExpanded || filterMode === "all"}
+                    >
+                      {item.items.map((child) =>
+                        child.kind === "pair" ? (
+                          <TranscriptCard
+                            event={child.pair.call ?? child.pair.result ?? child.event}
+                            pair={child.pair}
+                            transport={session.transport}
+                            catalog={catalog}
+                            onAnswerAskQuestion={submitAskAnswer}
+                            onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
+                            key={`pair-${child.pair.itemId}`}
+                          />
+                        ) : (
+                          <TranscriptCard
+                            event={child.event}
+                            transport={session.transport}
+                            catalog={catalog}
+                            modelOptions={modelOptions}
+                            onAnswerAskQuestion={submitAskAnswer}
+                            onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
+                            key={`${child.event.sequence}-${child.event.id ?? "local"}`}
+                          />
+                        ),
+                      )}
+                    </TaskNotificationRunGroup>
                   );
                 }
                 return item.kind === "pair" ? (
@@ -4280,7 +4328,8 @@ function planDecisionItemId(event: EventRecord): string | null {
 type TranscriptItem =
   | { kind: "single"; event: EventRecord }
   | { kind: "pair"; event: EventRecord; pair: ToolPair }
-  | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
+  | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
+  | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
 // Positive proof that Waypoint accepted a human answer to an AskUserQuestion:
 // a user_input event tagged ask_user_question_answer carrying the resolved
@@ -4381,7 +4430,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   // "absorbed" → system_note / status_update lifecycle noise: silently join
   //              the active run (rendered as quiet separators when expanded),
   //              or fall through as standalone if no run is active yet.
-  function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "absorbed" {
+  function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "notification" | "absorbed" {
     if (item.kind === "pair") {
       const { call, result } = item.pair;
       const isSpecial = (e: EventRecord | null) =>
@@ -4403,38 +4452,48 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
           return isModelSwitchEvent(event) ? "content" : "absorbed";
         }
         if (isTaskNotificationEvent(event)) {
-          // A task card is a chronological content boundary, not lifecycle
-          // noise to fold into an adjacent tool run.
-          return "content";
+          // Consecutive task cards batch into their own run, so they neither
+          // fold into an adjacent tool run nor stand alone one per card.
+          return "notification";
         }
         return isPlanEvent(event) ? "content" : "absorbed";
     }
   }
 
   const grouped: TranscriptItem[] = [];
-  let currentRun: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
+  // At most one run is open at a time: a tool item flushes an open notification
+  // run and vice versa, so the accumulator carries its own kind.
+  let run:
+    | {
+        kind: "tool" | "notification";
+        items: Extract<TranscriptItem, { kind: "single" | "pair" }>[];
+      }
+    | null = null;
+  const flush = () => {
+    if (!run) return;
+    grouped.push({
+      kind: run.kind === "tool" ? "tool_run" : "notification_run",
+      items: run.items,
+    });
+    run = null;
+  };
 
   for (const item of result) {
     const cls = classifyItem(item);
-    if (cls === "tool") {
-      currentRun.push(item);
+    if (cls === "tool" || cls === "notification") {
+      if (run && run.kind !== cls) flush();
+      if (!run) run = { kind: cls, items: [] };
+      run.items.push(item);
     } else if (cls === "absorbed") {
-      if (currentRun.length > 0) {
-        currentRun.push(item);
-      } else {
-        grouped.push(item);
-      }
+      // Lifecycle noise folds into whichever run is active, else stands alone.
+      if (run) run.items.push(item);
+      else grouped.push(item);
     } else {
-      if (currentRun.length >= 1) {
-        grouped.push({ kind: "tool_run", items: currentRun });
-        currentRun = [];
-      }
+      flush();
       grouped.push(item);
     }
   }
-  if (currentRun.length >= 1) {
-    grouped.push({ kind: "tool_run", items: currentRun });
-  }
+  flush();
 
   return grouped;
 }

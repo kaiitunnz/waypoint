@@ -33,6 +33,7 @@ import {
   parseTaskNotification,
   planTextForEvent,
   type EventDiffPreview,
+  type TaskNotificationKind,
   type TaskNotificationView,
 } from "@/lib/events";
 import {
@@ -771,6 +772,74 @@ export function ToolCallRunGroup({
           )}
         </div>
         <span className="tool-run-total">{count} call{count !== 1 ? "s" : ""}</span>
+      </summary>
+      <div className="tool-call-run-children">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+// Consecutive task-notification cards collapse into one run, mirroring
+// ToolCallRunGroup. `kinds` holds one entry per notification (chip colours reuse
+// the tool-run classes, glyphs reuse TASK_NOTIFICATION_BADGES).
+export function TaskNotificationRunGroup({
+  kinds,
+  initiallyOpen,
+  children,
+}: {
+  kinds: TaskNotificationKind[];
+  initiallyOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const count = kinds.length;
+  let agentCount = 0;
+  let monitorCount = 0;
+  let commandCount = 0;
+  let otherCount = 0;
+  for (const kind of kinds) {
+    if (kind === "agent") agentCount++;
+    else if (kind === "monitor") monitorCount++;
+    else if (kind === "background_command") commandCount++;
+    else otherCount++;
+  }
+
+  return (
+    <details className="tool-call-run" open={initiallyOpen}>
+      <summary className="tool-call-run-summary">
+        <div className="tool-run-chips">
+          {agentCount > 0 && (
+            <span className="tool-run-chip agent">
+              <span className="tool-run-glyph">◇</span>
+              <span className="tool-run-label">agent</span>
+              <span className="tool-run-count">×{agentCount}</span>
+            </span>
+          )}
+          {monitorCount > 0 && (
+            <span className="tool-run-chip monitor">
+              <span className="tool-run-glyph">◉</span>
+              <span className="tool-run-label">monitor</span>
+              <span className="tool-run-count">×{monitorCount}</span>
+            </span>
+          )}
+          {commandCount > 0 && (
+            <span className="tool-run-chip bash">
+              <span className="tool-run-glyph">›_</span>
+              <span className="tool-run-label">command</span>
+              <span className="tool-run-count">×{commandCount}</span>
+            </span>
+          )}
+          {otherCount > 0 && (
+            <span className="tool-run-chip other">
+              <span className="tool-run-glyph">⁂</span>
+              <span className="tool-run-label">task</span>
+              <span className="tool-run-count">×{otherCount}</span>
+            </span>
+          )}
+        </div>
+        <span className="tool-run-total">
+          {count} note{count !== 1 ? "s" : ""}
+        </span>
       </summary>
       <div className="tool-call-run-children">
         {children}

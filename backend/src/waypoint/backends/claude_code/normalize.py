@@ -322,6 +322,17 @@ def _stable_task_notification_id(
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
+def task_notification_dedup_key(content: str) -> str:
+    """A content-derived key identifying one task notification across record forms.
+
+    The CLI can persist the same notification twice — as a ``queue-operation``
+    enqueue and as a later ``user`` turn — with byte-identical wrapper content, so
+    a hash of the stripped content collapses those twins while keeping genuinely
+    distinct notifications (different body) apart.
+    """
+    return hashlib.sha1(content.strip().encode("utf-8")).hexdigest()
+
+
 def _compact_task_notification_text(summary: str | None, event: str | None) -> str:
     # Takes the bounded values: this becomes ``EventRecord.text``.
     parts = [part for part in (summary, event) if part]

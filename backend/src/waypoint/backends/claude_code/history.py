@@ -36,6 +36,7 @@ from waypoint.backends.claude_code.normalize import (
     iter_content_blocks,
     parse_task_notification,
     stringify_tool_result,
+    task_notification_dedup_key,
 )
 from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
@@ -74,6 +75,10 @@ def convert_transcript_records(
     """
     events: list[EventRecord] = []
     last_ts = datetime.now(UTC)
+    # Content keys of task notifications already emitted: a mid-turn notification
+    # is recorded as a queue-operation enqueue and (when flushed at an idle
+    # boundary) again as a user turn, so surface each notification once.
+    seen_task_notification_keys: set[str] = set()
     for record in records:
         ts = _record_timestamp(record) or last_ts
         last_ts = ts
@@ -81,7 +86,15 @@ def convert_transcript_records(
         if rec_type == "assistant":
             events.extend(_convert_assistant(session_id, record, ts))
         elif rec_type == "user":
-            events.extend(_convert_user(session_id, record, ts))
+            events.extend(
+                _convert_user(session_id, record, ts, seen_task_notification_keys)
+            )
+        elif rec_type == "queue-operation":
+            events.extend(
+                _convert_queue_operation(
+                    session_id, record, ts, seen_task_notification_keys
+                )
+            )
     return events
 
 
@@ -167,24 +180,55 @@ def _convert_assistant(
     return events
 
 
+def _task_notification_event(
+    session_id: str,
+    content: str,
+    record_uuid: str | None,
+    ts: datetime,
+    seen_keys: set[str],
+) -> list[EventRecord]:
+    parsed = parse_task_notification(content)
+    if parsed is None:
+        return []
+    key = task_notification_dedup_key(content)
+    if key in seen_keys:
+        return []
+    seen_keys.add(key)
+    text, metadata = build_task_notification_metadata(
+        parsed,
+        record_uuid=record_uuid,
+        allow_output_capture=False,
+        capture_enabled=False,
+        ts=ts,
+    )
+    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
+
+
+def _convert_queue_operation(
+    session_id: str, record: dict[str, Any], ts: datetime, seen_keys: set[str]
+) -> list[EventRecord]:
+    # A mid-turn task notification is persisted only as an ``enqueue`` (``remove``
+    # echoes the same content, ``dequeue`` carries none).
+    if record.get("operation") != "enqueue":
+        return []
+    content = record.get("content")
+    if not isinstance(content, str) or "<task-notification>" not in content:
+        return []
+    return _task_notification_event(
+        session_id, content, record.get("uuid"), ts, seen_keys
+    )
+
+
 def _convert_user(
-    session_id: str, record: dict[str, Any], ts: datetime
+    session_id: str, record: dict[str, Any], ts: datetime, seen_keys: set[str]
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     content = message.get("content")
     injected = classify_injected_user_turn(record, content)
-    if injected == "task_notification":
-        parsed = parse_task_notification(content)
-        if parsed is None:
-            return []
-        text, metadata = build_task_notification_metadata(
-            parsed,
-            record_uuid=record.get("uuid"),
-            allow_output_capture=False,
-            capture_enabled=False,
-            ts=ts,
+    if injected == "task_notification" and isinstance(content, str):
+        return _task_notification_event(
+            session_id, content, record.get("uuid"), ts, seen_keys
         )
-        return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
     if injected == "continuation":
         return []
     blocks = iter_content_blocks(content)

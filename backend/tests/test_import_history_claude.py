@@ -183,6 +183,39 @@ def test_import_contentless_task_notification_still_suppressed() -> None:
     assert convert_transcript_records("sess-1", records) == []
 
 
+def _queue_enqueue(content: str, ts: str = "2026-04-29T15:47:12.000Z") -> dict:
+    return {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": ts,
+        "content": content,
+    }
+
+
+def test_import_queue_operation_task_notification_emits_system_note() -> None:
+    content = (
+        "<task-notification><task-id>q1</task-id>"
+        '<summary>Agent "Queued" finished</summary><result>done</result>'
+        "</task-notification>"
+    )
+    events = convert_transcript_records("sess-1", [_queue_enqueue(content)])
+    assert len(events) == 1
+    assert events[0].kind == EventKind.SYSTEM_NOTE
+    assert events[0].metadata["method"] == "claude.task_notification"
+    assert events[0].metadata["task_notification"]["kind"] == "agent"
+
+
+def test_import_enqueue_and_user_turn_of_same_notification_emit_once() -> None:
+    content = (
+        "<task-notification><task-id>q1</task-id>"
+        '<summary>Agent "Queued" finished</summary><result>done</result>'
+        "</task-notification>"
+    )
+    records = [_queue_enqueue(content), _task_notification_record(content)]
+    events = convert_transcript_records("sess-1", records)
+    assert len(events) == 1
+
+
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
     records = [_user_text("hello", ts="2026-01-01T00:00:00Z")]
 

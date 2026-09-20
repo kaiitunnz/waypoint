@@ -131,8 +131,7 @@ def _collab_agent_messages(item: dict[str, Any]) -> list[str]:
     """Subagent report bodies carried by a completed collab-agent tool item.
 
     Codex collaboration mode records each waited-on subagent's reply under
-    ``agentsStates[threadId].message``; ``wait``/``closeAgent`` results are only
-    meaningful because of these, so surface them rather than the bare tool name.
+    ``agentsStates[threadId].message``.
     """
     states = item.get("agentsStates")
     if not isinstance(states, dict):

@@ -546,13 +546,8 @@ interface ToolBadge {
   label: string;
 }
 
-// Visually distinct glyphs help the user scan a long transcript and tell a
-// shell command apart from a file edit or a subagent spawn at a glance. The
-// variant maps to a CSS-only colour theme so we don't ship icon assets: tools
-// in one family share a hue and are told apart by glyph and label. Anything not
-// listed falls through to the plugin heuristic or the neutral default below.
+// variant maps to a CSS-only colour theme, so no icon assets ship.
 const TOOL_BADGES: Record<string, ToolBadge> = {
-  // Shell, files, and search.
   Bash: { glyph: "›_", variant: "bash", label: "Bash" },
   Read: { glyph: "▤", variant: "read", label: "Read" },
   Edit: { glyph: "✎", variant: "edit", label: "Edit" },
@@ -563,20 +558,17 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
   Glob: { glyph: "✱", variant: "glob", label: "Glob" },
   WebFetch: { glyph: "⌖", variant: "web", label: "WebFetch" },
   WebSearch: { glyph: "⌖", variant: "web", label: "WebSearch" },
-  // Subagent orchestration. Claude spawns via Task/Agent; Codex collaboration
-  // mode drives subagents through spawnAgent → wait (the join, whose result
-  // carries the subagent's report) → closeAgent.
+  // Codex collaboration mode drives subagents through spawnAgent → wait (the
+  // join, whose result carries the subagent's report) → closeAgent.
   Task: { glyph: "◇", variant: "task", label: "Task" },
   Agent: { glyph: "◇", variant: "task", label: "Agent" },
   spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
   Wait: { glyph: "◈", variant: "task", label: "Wait" },
   closeAgent: { glyph: "◇", variant: "task", label: "closeAgent" },
   Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
-  // Messaging and notifications.
   SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
   PushNotification: { glyph: "✉", variant: "web", label: "PushNotification" },
   ReadNotifications: { glyph: "✉", variant: "read", label: "ReadNotifications" },
-  // Skills, todos, and questions.
   Skill: { glyph: "❖", variant: "skill", label: "Skill" },
   TodoWrite: { glyph: "☑", variant: "todo", label: "Todo" },
   AskUserQuestion: { glyph: "?", variant: "task", label: "Ask" },
@@ -585,8 +577,6 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
 // MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
 // ``server:tool``); there is an open-ended set of them, so badge them
 // generically and shorten the label to the readable ``server·tool`` tail.
-// Lower-signal harness plumbing (ToolSearch, plan-mode toggles, subagent
-// polling) is intentionally left to the neutral default so badges stay signal.
 function isPluginToolName(toolName: string): boolean {
   return toolName.includes("__") || toolName.includes(":");
 }
@@ -628,10 +618,6 @@ function isFileEditToolName(toolName: string | null | undefined): boolean {
   );
 }
 
-// Subagent orchestration across backends: Claude's Task/Agent and Codex
-// collaboration mode's spawnAgent/wait/closeAgent. Kept in step with the
-// matching ``task``-variant entries in TOOL_BADGES so a run of these reads as
-// the agent chip when collapsed and a ◇/◈ badge when expanded.
 function isAgentToolName(toolName: string | null | undefined): boolean {
   return (
     toolName === "Task" ||

@@ -85,9 +85,8 @@ def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool
 
 
 def read_text_capped(path: Path, max_bytes: int) -> tuple[str | None, bool, bool, str]:
-    # Placeholder-over-limit contract: unlike the prefix reader, an oversized
-    # file yields no content (the workspace endpoint shows a size notice), and a
-    # truncated file is never reported as binary.
+    # An over-limit file yields no content (the workspace endpoint shows a size
+    # notice); a truncated file is never reported as binary.
     content, truncated, binary = read_text_prefix(path, max_bytes)
     if truncated:
         return None, True, False, "utf-8"

@@ -277,6 +277,20 @@ def test_orphan_handback_surfaces_nothing() -> None:
     assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
 
 
+def test_notification_before_handback_keeps_placeholder() -> None:
+    # Reverse of the real ordering (hand-back precedes the notification): the
+    # report can't attach, so the placeholder result stands and a late hand-back
+    # surfaces nothing on its own — graceful degradation, no mis-attach.
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert (
+        events[0].metadata["task_notification"]["result_preview"]
+        == "This agent's report was delivered as a message."
+    )
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+
+
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────
 
 

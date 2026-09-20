@@ -69,12 +69,9 @@ class ResolvedAttachment:
 def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool, str]:
     """Read at most ``max_bytes`` of UTF-8 text from the head of ``path``.
 
-    Returns ``(content, truncated, binary, encoding)``. Unlike
-    ``workspace_preview.read_text_capped`` this yields a *leading prefix* for an
-    oversized file rather than no content at all, and never reads the whole blob
-    -- an attachment may be as large as ``max_upload_bytes``. One extra byte is
-    read purely to detect truncation. When the ceiling splits a multi-byte
-    character the incomplete tail is trimmed rather than treated as binary.
+    Returns ``(content, truncated, binary, encoding)``, reading one byte past
+    the ceiling to detect truncation and trimming a split multi-byte character
+    from the tail.
     """
     with path.open("rb") as handle:
         data = handle.read(max_bytes + 1)
@@ -83,11 +80,11 @@ def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool
     if b"\x00" in data:
         return None, truncated, True, "utf-8"
     for trim in range(min(3, len(data)) + 1):
+        kept = data[: len(data) - trim]
         try:
-            return data[: len(data) - trim].decode("utf-8"), truncated, False, "utf-8"
+            return kept.decode("utf-8"), truncated, False, "utf-8"
         except UnicodeDecodeError:
-            # Only a split trailing character is recoverable; a decode error
-            # earlier in the buffer survives every trim and falls through.
+            # Only a split trailing character is recoverable.
             if not truncated:
                 break
     return None, truncated, True, "utf-8"

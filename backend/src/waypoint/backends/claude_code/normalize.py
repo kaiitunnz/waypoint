@@ -323,9 +323,7 @@ def _stable_task_notification_id(
 
 
 def _compact_task_notification_text(summary: str | None, event: str | None) -> str:
-    # Built from the *bounded* summary/event: this string becomes
-    # ``EventRecord.text``, which is written to SQLite and broadcast to every
-    # websocket client, so an unbounded monitor body must not reach it.
+    # Takes the bounded values: this becomes ``EventRecord.text``.
     parts = [part for part in (summary, event) if part]
     return " — ".join(parts) if parts else "Task notification"
 
@@ -340,19 +338,23 @@ def build_task_notification_metadata(
 ) -> tuple[str, dict[str, Any]]:
     """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.
 
-    ``allow_output_capture`` is True for the live tailer (Claude's ``output-file``
-    still exists) and False for history import (the temp file is long gone).
-    ``capture_enabled`` is the operator's ``task_output_capture_enabled`` switch.
-    Both must hold to capture; they are separate because they explain themselves
-    differently to the user -- an imported transcript never had the file, whereas
-    a live session with capture off is a configuration choice.
+    ``allow_output_capture`` is True for the live tailer and False for history
+    import, whose temp file is long gone; ``capture_enabled`` is the operator's
+    ``task_output_capture_enabled`` switch. Both must hold to capture, and each
+    explains itself differently on the card.
 
-    When capture is allowed, an absolute ``output-file`` is tagged on the
-    transient ``capture_host_text`` key, and any body field too large to keep
-    inline spills its full text on ``capture_inline_blobs``; the runtime sinks
-    turn both into pinned session attachments.
+    When capture is allowed, an absolute ``output-file`` rides the transient
+    ``capture_host_text`` key and any over-long body spills its full text on
+    ``capture_inline_blobs``.
     """
     capture_allowed = allow_output_capture and capture_enabled
+    # An imported transcript never had the file, so that explanation wins over
+    # the operator switch, which was irrelevant at capture time.
+    no_capture_reason = (
+        "full output not captured on import"
+        if not allow_output_capture
+        else "output capture is disabled"
+    )
     notification_id = record_uuid or _stable_task_notification_id(parsed, ts)
     kind = infer_task_notification_kind(parsed)
 
@@ -361,8 +363,6 @@ def build_task_notification_metadata(
     note_text, note_truncated = _bounded(parsed.note)
     summary_text, _ = _bounded(parsed.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
 
-    # Every body field that overflowed spills its *full* text to an attachment,
-    # so the tail is preserved rather than dropped on the floor.
     spills: list[dict[str, Any]] = []
     if capture_allowed:
         for name, text, truncated in (
@@ -383,30 +383,21 @@ def build_task_notification_metadata(
     output_unavailable_reason: str | None = None
     capture_path: str | None = None
     output_file = parsed.output_file
-    # An Agent's ``output-file`` is its sidechain transcript, whose report is
-    # the last record and already rides inline on ``result``.
+    # An Agent's ``output-file`` is its sidechain transcript; its report is the
+    # last record, already inline on ``result``.
     report_is_inline = kind == "agent" and parsed.result is not None
     if output_file and os.path.isabs(output_file) and not report_is_inline:
         if capture_allowed:
             capture_path = output_file
             output_available = True
-        elif not allow_output_capture:
-            # An imported transcript never had the file; that explanation wins
-            # over the operator switch, which was irrelevant at capture time.
-            output_unavailable_reason = "full output not captured on import"
         else:
-            output_unavailable_reason = "output capture is disabled"
+            output_unavailable_reason = no_capture_reason
     elif spills:
         output_available = True
     elif not capture_allowed and (
         result_truncated or event_truncated or note_truncated
     ):
-        # A body was cut with nothing durable kept for the tail.
-        output_unavailable_reason = (
-            "full output not captured on import"
-            if not allow_output_capture
-            else "output capture is disabled"
-        )
+        output_unavailable_reason = no_capture_reason
 
     payload: dict[str, Any] = {
         "version": TASK_NOTIFICATION_VERSION,
@@ -439,8 +430,6 @@ def build_task_notification_metadata(
         # the event itself, so the card needs no attachment and no fetch. Only
         # an oversized one becomes a pinned attachment with a bounded preview.
         metadata["capture_host_text"] = [capture_path]
-    # Tagged only when non-empty: the sink gates on truthiness, so an empty
-    # list would never be popped and would persist as junk metadata.
     if spills:
         metadata["capture_inline_blobs"] = spills
     return _compact_task_notification_text(summary_text, event_text), metadata

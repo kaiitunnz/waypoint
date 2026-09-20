@@ -10,7 +10,14 @@ import shutil
 import subprocess
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -381,6 +388,16 @@ class BroadcastHub:
         if inbox_id is not None:
             for queue in list(self.inbox_queues.get(inbox_id, set())):
                 await queue.put(payload)
+
+
+def _append_attachments(
+    metadata: dict[str, Any], specs: Sequence[AttachmentSpec]
+) -> None:
+    if not specs:
+        return
+    metadata.setdefault("attachments", []).extend(
+        spec.model_dump(mode="json") for spec in specs
+    )
 
 
 class SessionRuntime:
@@ -5673,19 +5690,14 @@ class SessionRuntime:
         metadata: dict[str, Any],
         status: SessionStatus,
     ) -> None:
-        if metadata.get("capture_host_files"):
-            await self._capture_host_files(session_id, metadata)
-        if metadata.get("capture_host_text"):
-            await self._capture_host_text(session_id, metadata)
-        if metadata.get("capture_inline_blobs"):
-            await self._capture_inline_blobs(session_id, metadata)
-        # Transient capture keys are inputs to the sinks above, never event
-        # content: a blob key that survived (empty, malformed, or from a
-        # normalizer whose sink did not run) would otherwise be persisted and
-        # broadcast verbatim.
-        metadata.pop("capture_host_files", None)
-        metadata.pop("capture_host_text", None)
-        metadata.pop("capture_inline_blobs", None)
+        for key, sink in (
+            ("capture_host_files", self._capture_host_files),
+            ("capture_host_text", self._capture_host_text),
+            ("capture_inline_blobs", self._capture_inline_blobs),
+        ):
+            raw = metadata.pop(key, None)
+            if isinstance(raw, list) and raw:
+                await sink(session_id, raw, metadata)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -5717,135 +5729,147 @@ class SessionRuntime:
         await self._publish_event(persisted)
 
     async def _capture_host_files(
-        self, session_id: str, metadata: dict[str, Any]
+        self, session_id: str, paths: list[Any], metadata: dict[str, Any]
     ) -> None:
-        """Turn the transient ``capture_host_files`` paths into pinned session
-        attachments exposed on ``metadata["attachments"]``.
+        """Save host paths as pinned attachments on ``metadata["attachments"]``.
 
-        A backend-neutral seam: any normalizer can tag an adapter event (of any
-        kind) with host paths and have them surface in the Files browser. The
-        transient key is always removed; best-effort, never raises into the emit
-        path.
+        A backend-neutral seam: any normalizer can tag an adapter event with
+        host paths and have them surface in the Files browser.
         """
-        raw = metadata.pop("capture_host_files", None)
-        if not isinstance(raw, list):
-            return
-        session = self.storage.get_session(session_id)
-        if session is None:
-            return
-        base = session.worktree_path or session.cwd
-        specs = await asyncio.to_thread(self._persist_host_files, session_id, base, raw)
-        if specs:
-            metadata["attachments"] = [spec.model_dump(mode="json") for spec in specs]
+        specs = await asyncio.to_thread(
+            self._persist_host_files, session_id, self._session_base(session_id), paths
+        )
+        _append_attachments(metadata, specs)
 
     async def _capture_host_text(
-        self, session_id: str, metadata: dict[str, Any]
+        self, session_id: str, paths: list[Any], metadata: dict[str, Any]
     ) -> None:
-        """Capture host paths whose content is meant to be *read* in place.
+        """Save host paths whose content is meant to be read in place.
 
-        A file small enough to render whole is inlined on
-        ``metadata["captured_text"]`` and never becomes an attachment: there is
-        nothing for a link to add, and no request for a card to wait on.
-        Anything larger, binary, or unreadable falls back to a pinned
-        attachment exactly as :meth:`_capture_host_files` would, so a card can
-        still show a bounded preview and link the rest. Backend-neutral;
-        best-effort, never raises into the emit path.
+        Content within ``inline_capture_max_bytes`` lands on
+        ``metadata["captured_text"]``; anything larger, binary, or unreadable
+        becomes a pinned attachment instead.
         """
-        raw = metadata.pop("capture_host_text", None)
-        if not isinstance(raw, list):
-            return
-        session = self.storage.get_session(session_id)
-        base = session.worktree_path or session.cwd if session else None
-        texts, attach = await asyncio.to_thread(
-            self._read_host_text, session_id, base, raw
+        texts, specs = await asyncio.to_thread(
+            self._read_host_text, session_id, self._session_base(session_id), paths
         )
         if texts:
             metadata.setdefault("captured_text", []).extend(texts)
-        if attach:
-            metadata.setdefault("attachments", []).extend(
-                spec.model_dump(mode="json") for spec in attach
-            )
+        _append_attachments(metadata, specs)
 
-    def _read_host_text(
-        self, session_id: str, base: str | None, raw_paths: list[Any]
-    ) -> tuple[list[dict[str, str]], list[AttachmentSpec]]:
-        """Split host paths into renderable text and must-be-attached blobs.
+    async def _capture_inline_blobs(
+        self, session_id: str, blobs: list[Any], metadata: dict[str, Any]
+    ) -> None:
+        """Save text a normalizer already holds as pinned attachments, listing
+        their ids on ``metadata["inline_attachment_ids"]`` so a consumer can
+        tell them from a separately captured report."""
+        specs = await asyncio.to_thread(self._persist_inline_blobs, session_id, blobs)
+        if not specs:
+            return
+        _append_attachments(metadata, specs)
+        ids = metadata.setdefault("inline_attachment_ids", [])
+        ids.extend(spec.id for spec in specs)
+
+    def _session_base(self, session_id: str) -> str | None:
+        session = self.storage.get_session(session_id)
+        return session.worktree_path or session.cwd if session else None
+
+    def _iter_host_paths(
+        self, base: str | None, raw_paths: list[Any], *, tag: str
+    ) -> Iterator[Path]:
+        """Yield each existing, deduped host path within the upload limit.
         Blocking; run off the event loop."""
-        limit = self.settings.inline_capture_max_bytes
-        texts: list[dict[str, str]] = []
-        attach: list[AttachmentSpec] = []
+        max_bytes = self.settings.max_upload_bytes
         base_dir = Path(base).expanduser() if base else None
         seen: set[str] = set()
-        for entry in raw_paths:
-            if not isinstance(entry, str) or not entry:
+        for raw in raw_paths:
+            if not isinstance(raw, str) or not raw:
                 continue
-            path = Path(entry).expanduser()
+            path = Path(raw).expanduser()
             if not path.is_absolute() and base_dir is not None:
                 path = base_dir / path
             try:
                 path = path.resolve()
-                if not path.is_file():
-                    continue
-                key = str(path)
-                if key in seen:
-                    continue
-                seen.add(key)
-                if path.stat().st_size > self.settings.max_upload_bytes:
-                    continue
-                content, truncated, binary, _ = read_text_prefix(path, limit)
             except OSError:
-                log.warning("capture_host_text: cannot read %s", path, exc_info=True)
+                log.warning("%s: cannot resolve %r", tag, raw)
                 continue
-            if content is not None and not truncated and not binary:
-                texts.append({"filename": path.name, "text": content})
+            if str(path) in seen:
                 continue
+            seen.add(str(path))
             try:
+                if not path.is_file():
+                    log.warning("%s: not a file: %s", tag, path)
+                    continue
+                if path.stat().st_size > max_bytes:
+                    log.warning("%s: %s exceeds %d byte limit", tag, path, max_bytes)
+                    continue
+            except OSError:
+                log.warning("%s: cannot stat %s", tag, path, exc_info=True)
+                continue
+            yield path
+
+    def _save_pinned(
+        self, session_id: str, *, data: bytes, filename: str, mime: str | None
+    ) -> AttachmentSpec:
+        spec = self.attachments.save(
+            session_id, data=data, filename=filename, content_type=mime
+        )
+        self.attachments.mark_pinned(session_id, [spec.id])
+        return spec
+
+    def _persist_host_files(
+        self, session_id: str, base: str | None, raw_paths: list[Any]
+    ) -> list[AttachmentSpec]:
+        out: list[AttachmentSpec] = []
+        for path in self._iter_host_paths(base, raw_paths, tag="send_user_file"):
+            try:
+                data = path.read_bytes()
+            except OSError:
+                log.warning("send_user_file: cannot read %s", path, exc_info=True)
+                continue
+            out.append(
+                self._save_pinned(
+                    session_id,
+                    data=data,
+                    filename=path.name,
+                    mime=mimetypes.guess_type(path.name)[0],
+                )
+            )
+        return out
+
+    def _read_host_text(
+        self, session_id: str, base: str | None, raw_paths: list[Any]
+    ) -> tuple[list[dict[str, str]], list[AttachmentSpec]]:
+        """Split host paths into text small enough to inline and blobs that must
+        be attached. Blocking; run off the event loop."""
+        limit = self.settings.inline_capture_max_bytes
+        texts: list[dict[str, str]] = []
+        specs: list[AttachmentSpec] = []
+        for path in self._iter_host_paths(base, raw_paths, tag="capture_host_text"):
+            try:
+                content, truncated, binary, _ = read_text_prefix(path, limit)
+                if content is not None and not truncated and not binary:
+                    texts.append({"filename": path.name, "text": content})
+                    continue
                 data = path.read_bytes()
             except OSError:
                 log.warning("capture_host_text: cannot read %s", path, exc_info=True)
                 continue
-            mime = mimetypes.guess_type(path.name)[0]
-            spec = self.attachments.save(
-                session_id, data=data, filename=path.name, content_type=mime
+            specs.append(
+                self._save_pinned(
+                    session_id,
+                    data=data,
+                    filename=path.name,
+                    mime=mimetypes.guess_type(path.name)[0],
+                )
             )
-            self.attachments.mark_pinned(session_id, [spec.id])
-            attach.append(spec)
-        return texts, attach
-
-    async def _capture_inline_blobs(
-        self, session_id: str, metadata: dict[str, Any]
-    ) -> None:
-        """Turn the transient ``capture_inline_blobs`` entries into pinned
-        session attachments appended to ``metadata["attachments"]``.
-
-        The sibling of :meth:`_capture_host_files` for text a normalizer already
-        holds in memory rather than on disk — a notification body too large to
-        keep inline. The ids created here are also recorded on
-        ``metadata["inline_attachment_ids"]`` so a consumer can tell a spilled
-        body apart from a separately captured report. Backend-neutral, gated on
-        the transient key alone; best-effort, never raises into the emit path.
-        """
-        raw = metadata.pop("capture_inline_blobs", None)
-        if not isinstance(raw, list):
-            return
-        specs = await asyncio.to_thread(self._persist_inline_blobs, session_id, raw)
-        if len(specs) < len(raw):
-            # Generic signal that some declared text was not retained, so a
-            # consumer can say so instead of promising a report that is not
-            # there. Deliberately carries no per-backend vocabulary.
-            metadata["inline_capture_failed"] = True
-        if not specs:
-            return
-        attachments = metadata.setdefault("attachments", [])
-        attachments.extend(spec.model_dump(mode="json") for spec in specs)
-        ids = metadata.setdefault("inline_attachment_ids", [])
-        ids.extend(spec.id for spec in specs)
+        return texts, specs
 
     def _persist_inline_blobs(
         self, session_id: str, entries: list[Any]
     ) -> list[AttachmentSpec]:
-        """Save each in-memory text blob as a pinned attachment. Skips malformed
-        or oversized entries. Blocking; run off the event loop."""
+        """Save each in-memory text blob as a pinned attachment, skipping
+        malformed or oversized entries. Blocking; run off the event loop."""
         max_bytes = self.settings.max_upload_bytes
         out: list[AttachmentSpec] = []
         for entry in entries:
@@ -5866,60 +5890,14 @@ class SessionRuntime:
                 )
                 continue
             mime = entry.get("mime")
-            spec = self.attachments.save(
-                session_id,
-                data=data,
-                filename=filename,
-                content_type=mime if isinstance(mime, str) else None,
+            out.append(
+                self._save_pinned(
+                    session_id,
+                    data=data,
+                    filename=filename,
+                    mime=mime if isinstance(mime, str) else None,
+                )
             )
-            self.attachments.mark_pinned(session_id, [spec.id])
-            out.append(spec)
-        return out
-
-    def _persist_host_files(
-        self, session_id: str, base: str | None, raw_paths: list[Any]
-    ) -> list[AttachmentSpec]:
-        """Save each readable host path as a pinned attachment, deduped by
-        resolved path. Skips missing, oversized, or unreadable files. Blocking;
-        run off the event loop."""
-        max_bytes = self.settings.max_upload_bytes
-        base_dir = Path(base).expanduser() if base else None
-        out: list[AttachmentSpec] = []
-        seen: set[str] = set()
-        for raw in raw_paths:
-            if not isinstance(raw, str) or not raw:
-                continue
-            path = Path(raw).expanduser()
-            if not path.is_absolute() and base_dir is not None:
-                path = base_dir / path
-            try:
-                path = path.resolve()
-            except OSError:
-                log.warning("send_user_file: cannot resolve %r", raw)
-                continue
-            key = str(path)
-            if key in seen:
-                continue
-            seen.add(key)
-            try:
-                if not path.is_file():
-                    log.warning("send_user_file: not a file: %s", path)
-                    continue
-                if path.stat().st_size > max_bytes:
-                    log.warning(
-                        "send_user_file: %s exceeds %d byte limit", path, max_bytes
-                    )
-                    continue
-                data = path.read_bytes()
-            except OSError:
-                log.warning("send_user_file: cannot read %s", path, exc_info=True)
-                continue
-            mime = mimetypes.guess_type(path.name)[0]
-            spec = self.attachments.save(
-                session_id, data=data, filename=path.name, content_type=mime
-            )
-            self.attachments.mark_pinned(session_id, [spec.id])
-            out.append(spec)
         return out
 
     def handle_completion_source_init(

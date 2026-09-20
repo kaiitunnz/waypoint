@@ -7998,14 +7998,12 @@ details.transcript.codex.task-notification > summary .transcript-role {
   gap: 6px;
 }
 
-/* The teaser exists so a collapsed card can be scanned; once open, the body
- * below renders the same text in full, so repeating it is pure noise. */
+/* An open card renders the body below; the teaser would repeat it. */
 .transcript.codex.task-notification[open] > summary .transcript-preview {
   display: none;
 }
 
-.task-note-preview-loading,
-.task-note-preview-error {
+.task-note-preview-note {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 0.74rem;
@@ -8013,7 +8011,7 @@ details.transcript.codex.task-notification > summary .transcript-role {
   color: var(--muted-soft);
 }
 
-.task-note-preview-error {
+.task-note-preview-note.is-error {
   color: var(--muted);
 }
 

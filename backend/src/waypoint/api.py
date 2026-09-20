@@ -769,9 +769,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         attachment_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> AttachmentPreviewResponse:
-        # Unlike ``serve_attachment`` this is fetched by script, so it takes the
-        # bearer header rather than a query token, and it reads only a bounded
-        # prefix -- an attachment may be as large as ``max_upload_bytes``.
         context.runtime.get_session(session_id)
         resolved = context.runtime.attachments.resolve(session_id, attachment_id)
         if resolved is None:

@@ -987,9 +987,8 @@ function reportUnavailableText(view: TaskNotificationView): string | null {
   }
 }
 
-// Collapse whitespace so a containment test is not defeated by wrapping or a
-// trailing newline the capture adds.
-function squash(text: string): string {
+// Collapse whitespace so containment survives wrapping and trailing newlines.
+function flattenWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -1001,9 +1000,7 @@ type ReportPreviewState =
 // Lazily reads a bounded text prefix of a captured report once its card is
 // expanded. The request is abandoned when the card collapses or unmounts, and
 // a failure only ever costs the preview — the attachment link stays.
-// Previews are immutable for an attachment id, so one fetch per id per page
-// life is enough. Without this, every expand re-requests and the body flickers
-// through its loading state again.
+// Previews are immutable per attachment id; one fetch per id per page life.
 const reportPreviewCache = new Map<string, AttachmentPreview>();
 
 function useReportPreview(
@@ -1038,8 +1035,7 @@ function useReportPreview(
         }
       })
       .catch(() => {
-        // Includes a 404 from a backend without the preview route: the card
-        // keeps its link rather than failing.
+        // A 404 from a backend without the route lands here too.
         if (!controller.signal.aborted) {
           setState({ status: "error" });
         }
@@ -1052,11 +1048,11 @@ function useReportPreview(
 
 function TaskReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") {
-    return <p className="task-note-preview-loading">Loading report…</p>;
+    return <p className="task-note-preview-note">Loading report…</p>;
   }
   if (state.status === "error") {
     return (
-      <p className="task-note-preview-error">
+      <p className="task-note-preview-note is-error">
         Report preview unavailable — open the full file
       </p>
     );
@@ -1064,7 +1060,7 @@ function TaskReportPreview({ state }: { state: ReportPreviewState | null }) {
   const { preview } = state;
   if (preview.binary || preview.content === null) {
     return (
-      <p className="task-note-preview-error">
+      <p className="task-note-preview-note is-error">
         Binary report — open the full file
       </p>
     );
@@ -1093,44 +1089,39 @@ function TaskNotificationCard({
   const badge = TASK_NOTIFICATION_BADGES[view.kind];
   const lamp = taskStatusLamp(view);
   const headline = view.summary || view.event || "Task notification";
-  // With a summary present the `event` line is the real signal, so it rides
-  // under the headline; without one it *is* the headline. Either way the full
-  // text is rendered in the expanded body, since both surfaces clamp to a line.
+  // With a summary present the `event` line rides under the headline; without
+  // one it is the headline. Both surfaces clamp, so the body renders it in full.
   const preview = view.summary ? view.event : null;
   const inlineIds = inlineAttachmentIds(event);
-  // An Agent's report is inline, so a captured output-file is its transcript.
-  // Older events still carry one; drop it, but keep spilled bodies — those hold
-  // report text this card cannot show in full.
+  // An Agent's captured output-file is its transcript, not its report. Older
+  // events still carry one; drop it, but keep spilled bodies.
   const reportIsInline = view.kind === "agent" && Boolean(view.resultPreview);
   const specs = attachmentSpecsFor(event).filter(
     (spec) => !reportIsInline || inlineIds.has(spec.id),
   );
   // A spilled body is text this card already shows inline; the report is a
   // separately captured artifact. Only the latter is a "report".
-  // A separately captured report if there is one; otherwise a spilled body,
-  // which holds the text the inline prefix was cut from.
+  // A separately captured report, else a spilled body holding the text the
+  // inline prefix was cut from.
   const reportSpec =
     specs.find((spec) => !inlineIds.has(spec.id)) ?? specs[0] ?? null;
   const hasReport = reportSpec !== null;
   const captureFailed = inlineCaptureFailed(event);
-  // Report text small enough that the runtime read it straight into the event.
-  // It has no attachment, so it renders immediately with no request at all.
+  // Small enough that the runtime read it into the event; no request needed.
   const inlineReports = capturedTexts(event);
   const previewState = useReportPreview(reportSpec, open);
   const previewText =
     previewState?.status === "ready" && !previewState.preview.binary
       ? previewState.preview.content
       : (inlineReports[0] ?? null);
-  // The captured output is often the fuller version of a body the event also
-  // carries inline (a monitor's final lines vs. its whole log). When the loaded
-  // report literally contains that body, it supersedes it and the duplicate is
-  // dropped — measured, rather than assumed for every attachment.
+  // A captured report is often the fuller version of a body the event carries
+  // inline, so when it contains that body the duplicate is dropped.
   const supersedes = (body: string | null) =>
-    Boolean(body && previewText && squash(previewText).includes(squash(body)));
-  // A legacy capture whose preview came back whole is already fully on screen,
-  // so its link adds nothing. Only when that single attachment IS the report —
-  // a spilled body alongside it must stay reachable.
+    Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
+  // Wholly on screen already, so the link adds nothing. Guarded on there being
+  // no spill alongside it, which must stay reachable.
   const previewShowsWholeFile =
+    inlineIds.size === 0 &&
     specs.length === 1 &&
     reportSpec !== null &&
     previewState?.status === "ready" &&
@@ -1138,9 +1129,8 @@ function TaskNotificationCard({
     !previewState.preview.binary &&
     previewState.preview.content !== null;
   const usageParts = taskUsageParts(view.usage);
-  // Nothing is missing when a legacy transcript is ignored on purpose — the
-  // report is on screen. Those events were stored with output_available set,
-  // so without this the card claims an absent report while showing it.
+  // An ignored transcript leaves nothing missing, but those events were stored
+  // with output_available set.
   const unavailable =
     hasReport || reportIsInline ? null : reportUnavailableText(view);
   const retained = specs.length > 0 || inlineReports.length > 0;
@@ -1181,11 +1171,9 @@ function TaskNotificationCard({
     );
   }
 
-  // Keyed on whether anything was retained at all, never on the card-wide
-  // failure flag: a notification can spill several fields, and one failing must
-  // not make the caption disown a sibling that is attached right below.
-  // Belongs to the inline block: once a loaded report supersedes that block,
-  // the text on screen is the whole body and nothing was cut from it.
+  // Belongs to the inline block: once a loaded report supersedes it, the text
+  // on screen is the whole body. `retained` is card-wide, never the failure
+  // flag, so one failed spill cannot disown a sibling attached below.
   const cutCaption = (body: string | null, truncated: boolean) =>
     truncated && !supersedes(body) ? (
       <p className="task-note-caption">

@@ -135,11 +135,8 @@ class AttachmentSpec(BaseModel):
 
 
 class AttachmentPreviewResponse(BaseModel):
-    # A bounded text prefix of a stored attachment, so a transcript card can
-    # show a report inline without transferring the whole blob. ``content`` is
-    # null when the inspected prefix is binary or not valid UTF-8; ``truncated``
-    # says the attachment is larger than the preview ceiling, whether or not any
-    # text came back. ``size`` is the attachment's full size, not the prefix's.
+    # A bounded text prefix of a stored attachment. ``content`` is null when the
+    # prefix is binary or undecodable; ``size`` is the attachment's full size.
     filename: str
     mime: str
     size: int
@@ -147,9 +144,7 @@ class AttachmentPreviewResponse(BaseModel):
     binary: bool
     truncated: bool
     content: str | None = None
-    # Byte length of ``content``. The ceiling is applied in bytes, so a caller
-    # cannot recover it from the decoded string: 64 KiB of CJK text is far
-    # fewer characters than 64 KiB of ASCII.
+    # The ceiling is applied in bytes, which a decoded string cannot recover.
     content_bytes: int = 0
 
 

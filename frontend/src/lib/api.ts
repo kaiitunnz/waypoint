@@ -1859,14 +1859,10 @@ export interface AttachmentPreview {
   binary: boolean;
   truncated: boolean;
   content: string | null;
-  // Byte length of `content`; the ceiling is applied in bytes, so it cannot be
-  // recovered from the decoded string's length.
   content_bytes: number;
 }
 
-// A bounded text prefix of a stored attachment. Unlike `attachmentUrl`, this is
-// read by script, so it takes the bearer header and never transfers more than
-// the server's preview ceiling — an attachment may be tens of megabytes.
+// A bounded text prefix of a stored attachment, read with the bearer header.
 export async function fetchAttachmentPreview(
   host: string,
   token: string,

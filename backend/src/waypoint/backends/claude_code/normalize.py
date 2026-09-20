@@ -363,11 +363,21 @@ def build_task_notification_metadata(
     note_text, note_truncated = _bounded(parsed.note)
     summary_text, _ = _bounded(parsed.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
 
+    # An Agent's ``output-file`` is its sidechain transcript; its report is the
+    # last record, already inline on ``result``.
+    report_is_inline = kind == "agent" and parsed.result is not None
+    output_file = parsed.output_file
+    captures_output = bool(
+        output_file and os.path.isabs(output_file) and not report_is_inline
+    )
+
     spills: list[dict[str, Any]] = []
     if capture_allowed:
         for name, text, truncated in (
             ("result", parsed.result, result_truncated),
-            ("event", parsed.event, event_truncated),
+            # ``event`` samples the stream the ``output-file`` records, so
+            # capturing that file already keeps the text a spill would store.
+            ("event", parsed.event, event_truncated and not captures_output),
             ("note", parsed.note, note_truncated),
         ):
             if truncated and text is not None:
@@ -382,11 +392,7 @@ def build_task_notification_metadata(
     output_available = False
     output_unavailable_reason: str | None = None
     capture_path: str | None = None
-    output_file = parsed.output_file
-    # An Agent's ``output-file`` is its sidechain transcript; its report is the
-    # last record, already inline on ``result``.
-    report_is_inline = kind == "agent" and parsed.result is not None
-    if output_file and os.path.isabs(output_file) and not report_is_inline:
+    if captures_output:
         if capture_allowed:
             capture_path = output_file
             output_available = True

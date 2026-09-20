@@ -484,3 +484,43 @@ def test_build_metadata_agent_spills_an_oversized_report() -> None:
     assert payload["result_truncated"] is True
     assert payload["output_available"] is True
     assert payload["output_unavailable_reason"] is None
+
+
+def test_build_metadata_does_not_spill_an_event_the_capture_holds() -> None:
+    # A monitor's <event> samples the stream its output-file records, so
+    # spilling it alongside the capture would store the same text twice.
+    big = "E" * (TASK_NOTIFICATION_INLINE_LIMIT + 500)
+    content = (
+        "<task-notification><task-id>m</task-id><tool-use-id>t</tool-use-id>"
+        "<output-file>/tmp/tasks/m.output</output-file><status>completed</status>"
+        '<summary>Monitor "loud" stream ended</summary>'
+        f"<event>{big}</event></task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-m", allow_output_capture=True
+    )
+    assert metadata["capture_host_text"] == ["/tmp/tasks/m.output"]
+    assert "capture_inline_blobs" not in metadata
+    payload = metadata["task_notification"]
+    # The inline body is still bounded and still says so.
+    assert payload["event_truncated"] is True
+    assert len(payload["event"].encode("utf-8")) == TASK_NOTIFICATION_INLINE_LIMIT
+
+
+def test_build_metadata_spills_an_event_with_no_capture_to_hold_it() -> None:
+    big = "E" * (TASK_NOTIFICATION_INLINE_LIMIT + 500)
+    content = (
+        "<task-notification><task-id>m</task-id>"
+        '<summary>Monitor event: "loud"</summary>'
+        f"<event>{big}</event></task-notification>"
+    )
+    parsed = parse_task_notification(content)
+    assert parsed is not None
+    _text, metadata = build_task_notification_metadata(
+        parsed, record_uuid="rec-m2", allow_output_capture=True
+    )
+    assert "capture_host_text" not in metadata
+    (spill,) = metadata["capture_inline_blobs"]
+    assert spill["text"] == big

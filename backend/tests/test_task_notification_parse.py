@@ -175,7 +175,7 @@ def test_output_file_tag_inside_result_body_is_not_hoisted() -> None:
     assert parsed.output_file is None
     assert "/home/noppanat/.ssh/id_rsa" in (parsed.result or "")
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec", allow_output_capture=True
+        parsed, record_uuid="rec", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_host_files" not in metadata
     assert "capture_host_text" not in metadata
@@ -195,7 +195,7 @@ def test_output_file_tag_inside_event_body_is_not_hoisted() -> None:
     assert parsed.output_file is None
     assert "/home/noppanat/.env" in (parsed.event or "")
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec", allow_output_capture=True
+        parsed, record_uuid="rec", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_host_files" not in metadata
     assert "capture_host_text" not in metadata
@@ -250,7 +250,7 @@ def test_build_metadata_agent_keeps_the_report_not_the_transcript() -> None:
     parsed = parse_task_notification(AGENT_COMPLETION)
     assert parsed is not None
     text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-1", allow_output_capture=True
+        parsed, record_uuid="rec-1", allow_output_capture=True, capture_enabled=True
     )
     assert text == 'Agent "Map agent execution" finished'
     assert metadata["method"] == TASK_NOTIFICATION_METHOD
@@ -277,7 +277,7 @@ def test_build_metadata_monitor_text_appends_event() -> None:
     parsed = parse_task_notification(MONITOR_EVENT)
     assert parsed is not None
     text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-2", allow_output_capture=True
+        parsed, record_uuid="rec-2", allow_output_capture=True, capture_enabled=True
     )
     assert (
         text == 'Monitor event: "e2e results" — FAIL: the traced workflow reached DONE'
@@ -293,7 +293,11 @@ def test_build_metadata_import_skips_capture_with_reason() -> None:
     parsed = parse_task_notification(BACKGROUND_COMPLETED)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-3", allow_output_capture=False, ts=datetime.now(UTC)
+        parsed,
+        record_uuid="rec-3",
+        allow_output_capture=False,
+        capture_enabled=True,
+        ts=datetime.now(UTC),
     )
     assert not [key for key in metadata if key.startswith("capture_")]
     payload = metadata["task_notification"]
@@ -307,7 +311,11 @@ def test_build_metadata_agent_import_claims_nothing_missing() -> None:
     parsed = parse_task_notification(AGENT_COMPLETION)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-3b", allow_output_capture=False, ts=datetime.now(UTC)
+        parsed,
+        record_uuid="rec-3b",
+        allow_output_capture=False,
+        capture_enabled=True,
+        ts=datetime.now(UTC),
     )
     payload = metadata["task_notification"]
     assert payload["output_available"] is False
@@ -323,7 +331,7 @@ def test_build_metadata_agent_without_a_report_still_captures() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-3c", allow_output_capture=True
+        parsed, record_uuid="rec-3c", allow_output_capture=True, capture_enabled=True
     )
     assert metadata["capture_host_text"] == ["/tmp/tasks/a9af42717082ba876.output"]
     assert metadata["task_notification"]["output_available"] is True
@@ -339,7 +347,7 @@ def test_build_metadata_oversized_inline_without_output_file() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-4", allow_output_capture=True
+        parsed, record_uuid="rec-4", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_host_files" not in metadata
     assert "capture_host_text" not in metadata
@@ -362,10 +370,10 @@ def test_build_metadata_stable_id_without_uuid_is_deterministic() -> None:
     assert parsed is not None
     ts = datetime(2026, 1, 1, tzinfo=UTC)
     _t1, m1 = build_task_notification_metadata(
-        parsed, record_uuid=None, allow_output_capture=True, ts=ts
+        parsed, record_uuid=None, allow_output_capture=True, capture_enabled=True, ts=ts
     )
     _t2, m2 = build_task_notification_metadata(
-        parsed, record_uuid=None, allow_output_capture=True, ts=ts
+        parsed, record_uuid=None, allow_output_capture=True, capture_enabled=True, ts=ts
     )
     assert m1["task_notification"]["id"] == m2["task_notification"]["id"]
     assert m1["task_notification"]["id"]
@@ -383,7 +391,7 @@ def test_build_metadata_bounds_event_and_note_and_spills_them() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-9", allow_output_capture=True
+        parsed, record_uuid="rec-9", allow_output_capture=True, capture_enabled=True
     )
     payload = metadata["task_notification"]
     assert payload["event_truncated"] is True
@@ -410,7 +418,7 @@ def test_build_metadata_bounds_a_huge_summary_without_spilling_it() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-s", allow_output_capture=True
+        parsed, record_uuid="rec-s", allow_output_capture=True, capture_enabled=True
     )
     payload = metadata["task_notification"]
     assert len(payload["summary"]) < len(big)
@@ -421,7 +429,7 @@ def test_build_metadata_omits_the_spill_key_when_nothing_overflows() -> None:
     parsed = parse_task_notification(MONITOR_EVENT)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-s", allow_output_capture=True
+        parsed, record_uuid="rec-s", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_inline_blobs" not in metadata
 
@@ -474,7 +482,7 @@ def test_build_metadata_agent_spills_an_oversized_report() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-big", allow_output_capture=True
+        parsed, record_uuid="rec-big", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_host_text" not in metadata
     (spill,) = metadata["capture_inline_blobs"]
@@ -499,7 +507,7 @@ def test_build_metadata_does_not_spill_an_event_the_capture_holds() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-m", allow_output_capture=True
+        parsed, record_uuid="rec-m", allow_output_capture=True, capture_enabled=True
     )
     assert metadata["capture_host_text"] == ["/tmp/tasks/m.output"]
     assert "capture_inline_blobs" not in metadata
@@ -519,7 +527,7 @@ def test_build_metadata_spills_an_event_with_no_capture_to_hold_it() -> None:
     parsed = parse_task_notification(content)
     assert parsed is not None
     _text, metadata = build_task_notification_metadata(
-        parsed, record_uuid="rec-m2", allow_output_capture=True
+        parsed, record_uuid="rec-m2", allow_output_capture=True, capture_enabled=True
     )
     assert "capture_host_text" not in metadata
     (spill,) = metadata["capture_inline_blobs"]

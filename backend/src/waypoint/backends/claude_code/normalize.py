@@ -333,7 +333,7 @@ def build_task_notification_metadata(
     *,
     record_uuid: str | None,
     allow_output_capture: bool,
-    capture_enabled: bool = True,
+    capture_enabled: bool,
     ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.

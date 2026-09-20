@@ -181,6 +181,7 @@ def _convert_user(
             parsed,
             record_uuid=record.get("uuid"),
             allow_output_capture=False,
+            capture_enabled=False,
             ts=ts,
         )
         return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]

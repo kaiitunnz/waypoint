@@ -571,6 +571,10 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
     case "Task":
     case "Agent":
       return { glyph: "◇", variant: "task", label: toolName };
+    case "Skill":
+      return { glyph: "❖", variant: "skill", label: toolName };
+    case "Monitor":
+      return { glyph: "◉", variant: "monitor", label: toolName };
     case "TodoWrite":
       return { glyph: "☑", variant: "todo", label: "Todo" };
     case "AskUserQuestion":
@@ -665,12 +669,18 @@ export function ToolCallRunGroup({
   let editCount = 0;
   let readCount = 0;
   let todoCount = 0;
+  let agentCount = 0;
+  let skillCount = 0;
+  let monitorCount = 0;
   let otherCount = 0;
   for (const name of toolNames) {
     if (name === "Bash") bashCount++;
     else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
     else if (name === "TodoWrite") todoCount++;
+    else if (name === "Task" || name === "Agent") agentCount++;
+    else if (name === "Skill") skillCount++;
+    else if (name === "Monitor") monitorCount++;
     else otherCount++;
   }
 
@@ -704,6 +714,27 @@ export function ToolCallRunGroup({
               <span className="tool-run-glyph">☑</span>
               <span className="tool-run-label">todos</span>
               <span className="tool-run-count">×{todoCount}</span>
+            </span>
+          )}
+          {agentCount > 0 && (
+            <span className="tool-run-chip agent">
+              <span className="tool-run-glyph">◇</span>
+              <span className="tool-run-label">agent</span>
+              <span className="tool-run-count">×{agentCount}</span>
+            </span>
+          )}
+          {skillCount > 0 && (
+            <span className="tool-run-chip skill">
+              <span className="tool-run-glyph">❖</span>
+              <span className="tool-run-label">skill</span>
+              <span className="tool-run-count">×{skillCount}</span>
+            </span>
+          )}
+          {monitorCount > 0 && (
+            <span className="tool-run-chip monitor">
+              <span className="tool-run-glyph">◉</span>
+              <span className="tool-run-label">monitor</span>
+              <span className="tool-run-count">×{monitorCount}</span>
             </span>
           )}
           {otherCount > 0 && (

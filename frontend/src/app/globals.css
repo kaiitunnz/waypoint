@@ -17,6 +17,7 @@
   --warn: #d99a4a;
   --success: #6cc99a;
   --todo-glyph: #c8a3eb;
+  --skill-glyph: #d98fb5;
   /* Telemetry categorical series (token categories, backend/model/repo/session
    * groups). Values are the dataviz skill's validated 8-hue reference set,
    * fixed order — never cycled or reassigned by value. Status meaning
@@ -84,6 +85,7 @@ html[data-theme="light"] {
   --warn: #aa6618;
   --success: #257a50;
   --todo-glyph: #7040b0;
+  --skill-glyph: #a83f78;
   --tm-series-1: #2a78d6;
   --tm-series-2: #1baf7a;
   --tm-series-3: #eda100;
@@ -3320,6 +3322,22 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-color: rgba(180, 150, 220, 0.28);
 }
 
+.transcript.codex.tool_call:hover .tool-glyph.skill,
+.transcript.codex.tool_pair:hover .tool-glyph.skill,
+details.tool-disclosure[open] .tool-glyph.skill {
+  background: color-mix(in srgb, var(--skill-glyph) 12%, transparent);
+  color: var(--skill-glyph);
+  border-color: color-mix(in srgb, var(--skill-glyph) 28%, transparent);
+}
+
+.transcript.codex.tool_call:hover .tool-glyph.monitor,
+.transcript.codex.tool_pair:hover .tool-glyph.monitor,
+details.tool-disclosure[open] .tool-glyph.monitor {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
+}
+
 /* Status pill is loud against the recessed card; trim it to a fine label. */
 .transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .badge.tool-status,
 .transcript.codex.tool_result .badge.tool-status,
@@ -3604,6 +3622,18 @@ details.tool-disclosure[open] .tool-glyph.todo {
   background: rgba(180, 150, 220, 0.12);
   color: var(--todo-glyph);
   border-color: rgba(180, 150, 220, 0.28);
+}
+
+.tool-glyph.skill {
+  background: color-mix(in srgb, var(--skill-glyph) 12%, transparent);
+  color: var(--skill-glyph);
+  border-color: color-mix(in srgb, var(--skill-glyph) 28%, transparent);
+}
+
+.tool-glyph.monitor {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
 }
 
 .tool-name {
@@ -4300,6 +4330,24 @@ html[data-theme="light"] .tool-run-chip.todo {
 html[data-theme="light"] .tool-run-chip.other {
   background: rgba(110, 99, 86, 0.1);
   border-color: rgba(110, 99, 86, 0.26);
+}
+
+.tool-run-chip.agent {
+  background: color-mix(in srgb, var(--todo-glyph) 10%, transparent);
+  border-color: color-mix(in srgb, var(--todo-glyph) 24%, transparent);
+  color: var(--todo-glyph);
+}
+
+.tool-run-chip.skill {
+  background: color-mix(in srgb, var(--skill-glyph) 10%, transparent);
+  border-color: color-mix(in srgb, var(--skill-glyph) 24%, transparent);
+  color: var(--skill-glyph);
+}
+
+.tool-run-chip.monitor {
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  color: var(--accent-cool);
 }
 
 .tool-run-glyph {

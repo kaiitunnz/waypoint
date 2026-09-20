@@ -176,6 +176,8 @@ const NORMALIZED_TOOL_NAMES: Record<string, string> = {
   websearch: "WebSearch",
   task: "Task",
   agent: "Agent",
+  skill: "Skill",
+  monitor: "Monitor",
   todowrite: "TodoWrite",
   askuserquestion: "AskUserQuestion",
   question: "AskUserQuestion",

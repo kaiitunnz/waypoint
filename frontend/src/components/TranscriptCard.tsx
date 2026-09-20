@@ -838,7 +838,7 @@ export function TaskNotificationRunGroup({
           )}
         </div>
         <span className="tool-run-total">
-          {count} notification{count !== 1 ? "s" : ""}
+          {count} note{count !== 1 ? "s" : ""}
         </span>
       </summary>
       <div className="tool-call-run-children">

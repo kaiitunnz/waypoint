@@ -697,7 +697,8 @@ export function ToolCallRunGroup({
     else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
     else if (name === "TodoWrite") todoCount++;
-    else if (name === "Task" || name === "Agent") agentCount++;
+    else if (name === "Task" || name === "Agent" || name === "spawnAgent")
+      agentCount++;
     else if (name === "Skill") skillCount++;
     else if (name === "Monitor") monitorCount++;
     else otherCount++;

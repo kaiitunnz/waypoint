@@ -9,8 +9,8 @@ from waypoint.workspace_preview import (
     list_dir,
     rank_files,
     read_text_capped,
+    read_text_prefix,
     resolve_in_base,
-    sniff_text,
     walk_files,
 )
 
@@ -181,9 +181,60 @@ def test_read_text_capped_returns_placeholder_for_binary(tmp_path: Path) -> None
     assert encoding == "utf-8"
 
 
-def test_sniff_text_rejects_invalid_utf8() -> None:
-    assert sniff_text(b"hello") is True
-    assert sniff_text(b"\xff") is False
+# ─── read_text_prefix ───
+
+
+def test_prefix_reads_small_text_whole(tmp_path: Path) -> None:
+    path = tmp_path / "a.txt"
+    path.write_text("hello", encoding="utf-8")
+    assert read_text_prefix(path, 64) == ("hello", False, False)
+
+
+def test_prefix_at_exact_limit_is_not_truncated(tmp_path: Path) -> None:
+    path = tmp_path / "a.txt"
+    path.write_text("abcde", encoding="utf-8")
+    content, truncated, binary = read_text_prefix(path, 5)
+    assert (content, truncated, binary) == ("abcde", False, False)
+
+
+def test_prefix_truncates_and_returns_leading_text(tmp_path: Path) -> None:
+    path = tmp_path / "a.txt"
+    path.write_text("abcdefghij", encoding="utf-8")
+    content, truncated, binary = read_text_prefix(path, 4)
+    assert (content, truncated, binary) == ("abcd", True, False)
+
+
+def test_prefix_trims_split_multibyte_character(tmp_path: Path) -> None:
+    path = tmp_path / "a.txt"
+    path.write_text("é" * 8, encoding="utf-8")
+    # 3 bytes cuts the second 2-byte character in half.
+    content, truncated, binary = read_text_prefix(path, 3)
+    assert (content, truncated, binary) == ("é", True, False)
+
+
+def test_prefix_reports_binary_for_nul_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "a.bin"
+    path.write_bytes(b"pre\x00post")
+    content, _, binary = read_text_prefix(path, 64)
+    assert content is None
+    assert binary is True
+
+
+def test_prefix_reports_binary_for_undecodable_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "a.bin"
+    path.write_bytes(b"\xff\xfe\xfd")
+    content, _, binary = read_text_prefix(path, 64)
+    assert content is None
+    assert binary is True
+
+
+def test_prefix_does_not_read_beyond_the_ceiling(tmp_path: Path) -> None:
+    path = tmp_path / "big.txt"
+    path.write_bytes(b"x" * 10_000)
+    content, truncated, _ = read_text_prefix(path, 100)
+    assert content is not None
+    assert len(content) == 100
+    assert truncated is True
 
 
 def test_env_overrides_parse_workspace_settings(

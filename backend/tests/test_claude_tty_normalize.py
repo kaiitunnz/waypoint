@@ -159,6 +159,138 @@ def test_continuation_summary_still_suppressed() -> None:
     assert norm.process_record(record) == []
 
 
+_QUEUED_NOTIFICATION = (
+    "<task-notification><task-id>q1</task-id>"
+    '<summary>Agent "Queued" finished</summary><result>done</result>'
+    "</task-notification>"
+)
+
+
+def _queue_op(content: str, operation: str = "enqueue") -> dict:
+    return {"type": "queue-operation", "operation": operation, "content": content}
+
+
+def test_queue_operation_enqueue_emits_one_system_note() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_queue_op(_QUEUED_NOTIFICATION))
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.SYSTEM_NOTE
+    assert ev.text == 'Agent "Queued" finished'
+    assert ev.status == SessionStatus.RUNNING
+    assert ev.metadata["method"] == "claude.task_notification"
+
+
+def test_queue_operation_remove_is_ignored() -> None:
+    # ``remove`` echoes the same content but must not surface a second note.
+    norm = TranscriptNormalizer()
+    assert (
+        norm.process_record(_queue_op(_QUEUED_NOTIFICATION, operation="remove")) == []
+    )
+
+
+def test_queue_operation_without_task_notification_is_dropped() -> None:
+    norm = TranscriptNormalizer()
+    assert norm.process_record(_queue_op("some other queued prompt")) == []
+
+
+def test_enqueue_then_user_turn_of_same_notification_emits_once() -> None:
+    # An idle-boundary session records the notification as both an enqueue and a
+    # user turn; the twin must surface exactly once.
+    norm = TranscriptNormalizer()
+    first = norm.process_record(_queue_op(_QUEUED_NOTIFICATION))
+    second = norm.process_record(_task_notification_record(_QUEUED_NOTIFICATION))
+    assert len(first) == 1
+    assert second == []
+
+
+def test_user_turn_then_enqueue_of_same_notification_emits_once() -> None:
+    norm = TranscriptNormalizer()
+    first = norm.process_record(_task_notification_record(_QUEUED_NOTIFICATION))
+    second = norm.process_record(_queue_op(_QUEUED_NOTIFICATION))
+    assert len(first) == 1
+    assert second == []
+
+
+def test_distinct_enqueued_notifications_each_emit() -> None:
+    norm = TranscriptNormalizer()
+    other = _QUEUED_NOTIFICATION.replace(
+        "<result>done</result>", "<result>other</result>"
+    )
+    first = norm.process_record(_queue_op(_QUEUED_NOTIFICATION))
+    second = norm.process_record(_queue_op(other))
+    assert len(first) == 1
+    assert len(second) == 1
+
+
+# ── TranscriptNormalizer: subagent hand-backs ───────────────────────────────────
+
+_HANDBACK_CONTENT = (
+    '<agent-message from="agent-x">\n'
+    "[Subagent hand-back] preamble text. The report follows:\n"
+    "  Line one of the report.\n"
+    "  Line two of the report.\n"
+    "</agent-message>"
+)
+_AGENT_NOTIFICATION = (
+    "<task-notification><task-id>agent-x</task-id><status>completed</status>"
+    '<summary>Agent "X" finished</summary>'
+    "<result>This agent's report was delivered as a message.</result>"
+    "</task-notification>"
+)
+_EXPECTED_REPORT = "Line one of the report.\nLine two of the report."
+
+
+def test_handback_attaches_to_matching_task_notification() -> None:
+    norm = TranscriptNormalizer()
+    # The hand-back itself surfaces nothing; it is buffered for the notification.
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert events[0].metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
+
+
+def test_handback_via_user_turn_also_attaches() -> None:
+    norm = TranscriptNormalizer()
+    user_form = {
+        "type": "user",
+        "message": {
+            "content": "Another Claude session sent a message:\n" + _HANDBACK_CONTENT
+        },
+    }
+    assert norm.process_record(user_form) == []
+    events = norm.process_record(_queue_op(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert events[0].metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
+
+
+def test_task_notification_without_handback_keeps_its_own_result() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    preview = events[0].metadata["task_notification"]["result_preview"]
+    assert preview == "This agent's report was delivered as a message."
+
+
+def test_orphan_handback_surfaces_nothing() -> None:
+    norm = TranscriptNormalizer()
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+
+
+def test_notification_before_handback_keeps_placeholder() -> None:
+    # Reverse of the real ordering (hand-back precedes the notification): the
+    # report can't attach, so the placeholder result stands and a late hand-back
+    # surfaces nothing on its own — graceful degradation, no mis-attach.
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert (
+        events[0].metadata["task_notification"]["result_preview"]
+        == "This agent's report was delivered as a message."
+    )
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+
+
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────
 
 
@@ -556,7 +688,6 @@ def test_plain_text_user_turn_produces_no_events() -> None:
         "permission-mode",
         "file-history-snapshot",
         "last-prompt",
-        "queue-operation",
         "ai-title",
         "attachment",
         "pr-link",

@@ -14,6 +14,7 @@ import html
 import json
 import os
 import re
+import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -322,6 +323,42 @@ def _stable_task_notification_id(
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
+_AGENT_MESSAGE_RE = re.compile(
+    r'<agent-message\s+from="([^"]+)"\s*>\n?(.*?)</agent-message>', re.DOTALL
+)
+_HANDBACK_MARKER = "[Subagent hand-back]"
+_REPORT_FOLLOWS = "The report follows:\n"
+
+
+def parse_agent_handback(content: str) -> tuple[str, str] | None:
+    """Extract ``(sender_id, report)`` from a subagent hand-back message.
+
+    Inter-agent messages are wrapped in ``<agent-message from="id">…</agent-message>``;
+    a hand-back carries the ``[Subagent hand-back]`` preamble, which is stripped
+    down to the report body. Returns ``None`` for a non-hand-back peer message or
+    a record that carries no agent-message block.
+    """
+    match = _AGENT_MESSAGE_RE.search(content)
+    if match is None:
+        return None
+    inner = match.group(2)
+    if _HANDBACK_MARKER not in inner:
+        return None
+    report = inner.split(_REPORT_FOLLOWS, 1)[-1]
+    return match.group(1), textwrap.dedent(report).strip()
+
+
+def task_notification_dedup_key(content: str) -> str:
+    """A content-derived key identifying one task notification across record forms.
+
+    The CLI can persist the same notification twice — as a ``queue-operation``
+    enqueue and as a later ``user`` turn — with byte-identical wrapper content, so
+    a hash of the stripped content collapses those twins while keeping genuinely
+    distinct notifications (different body) apart.
+    """
+    return hashlib.sha1(content.strip().encode("utf-8")).hexdigest()
+
+
 def _compact_task_notification_text(summary: str | None, event: str | None) -> str:
     # Takes the bounded values: this becomes ``EventRecord.text``.
     parts = [part for part in (summary, event) if part]
@@ -333,7 +370,7 @@ def build_task_notification_metadata(
     *,
     record_uuid: str | None,
     allow_output_capture: bool,
-    capture_enabled: bool = True,
+    capture_enabled: bool,
     ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.

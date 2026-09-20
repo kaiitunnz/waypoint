@@ -546,41 +546,60 @@ interface ToolBadge {
   label: string;
 }
 
+// variant maps to a CSS-only colour theme, so no icon assets ship.
+const TOOL_BADGES: Record<string, ToolBadge> = {
+  Bash: { glyph: "›_", variant: "bash", label: "Bash" },
+  Read: { glyph: "▤", variant: "read", label: "Read" },
+  Edit: { glyph: "✎", variant: "edit", label: "Edit" },
+  MultiEdit: { glyph: "✎", variant: "edit", label: "MultiEdit" },
+  NotebookEdit: { glyph: "✎", variant: "edit", label: "NotebookEdit" },
+  Write: { glyph: "✚", variant: "write", label: "Write" },
+  Grep: { glyph: "⌕", variant: "grep", label: "Grep" },
+  Glob: { glyph: "✱", variant: "glob", label: "Glob" },
+  WebFetch: { glyph: "⌖", variant: "web", label: "WebFetch" },
+  WebSearch: { glyph: "⌖", variant: "web", label: "WebSearch" },
+  // Codex collaboration mode drives subagents through spawnAgent → wait (the
+  // join, whose result carries the subagent's report) → closeAgent.
+  Task: { glyph: "◇", variant: "task", label: "Task" },
+  Agent: { glyph: "◇", variant: "task", label: "Agent" },
+  spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
+  Wait: { glyph: "◈", variant: "task", label: "Wait" },
+  closeAgent: { glyph: "◇", variant: "task", label: "closeAgent" },
+  Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
+  SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
+  PushNotification: { glyph: "✉", variant: "web", label: "PushNotification" },
+  ReadNotifications: { glyph: "✉", variant: "read", label: "ReadNotifications" },
+  Skill: { glyph: "❖", variant: "skill", label: "Skill" },
+  TodoWrite: { glyph: "☑", variant: "todo", label: "Todo" },
+  AskUserQuestion: { glyph: "?", variant: "task", label: "Ask" },
+};
+
+// MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
+// ``server:tool``); there is an open-ended set of them, so badge them
+// generically and shorten the label to the readable ``server·tool`` tail.
+function isPluginToolName(toolName: string): boolean {
+  return toolName.includes("__") || toolName.includes(":");
+}
+
+function prettyPluginName(toolName: string): string {
+  const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
+  return stripped.replace(/__/g, "·").replace(/:/g, "·");
+}
+
 function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
-  // Visually distinct glyphs help the user scan a long transcript and tell
-  // a shell command apart from a file edit at a glance. The variant maps to
-  // a CSS-only colour theme so we don't ship icon assets.
-  switch (toolName) {
-    case "Bash":
-      return { glyph: "›_", variant: "bash", label: "Bash" };
-    case "Read":
-      return { glyph: "▤", variant: "read", label: toolName };
-    case "Edit":
-    case "MultiEdit":
-    case "NotebookEdit":
-      return { glyph: "✎", variant: "edit", label: toolName };
-    case "Write":
-      return { glyph: "✚", variant: "write", label: toolName };
-    case "Grep":
-      return { glyph: "⌕", variant: "grep", label: toolName };
-    case "Glob":
-      return { glyph: "✱", variant: "glob", label: toolName };
-    case "WebFetch":
-    case "WebSearch":
-      return { glyph: "⌖", variant: "web", label: toolName };
-    case "Task":
-    case "Agent":
-      return { glyph: "◇", variant: "task", label: toolName };
-    case "TodoWrite":
-      return { glyph: "☑", variant: "todo", label: "Todo" };
-    case "AskUserQuestion":
-      return { glyph: "?", variant: "task", label: "Ask" };
-    default:
-      if (toolName) {
-        return { glyph: "ƒ", variant: "default", label: toolName };
-      }
-      return { glyph: "→", variant: "default", label: "tool" };
+  if (!toolName) {
+    return { glyph: "→", variant: "default", label: "tool" };
   }
+  const known = TOOL_BADGES[toolName];
+  if (known) {
+    return known;
+  }
+  if (isPluginToolName(toolName)) {
+    return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
+  }
+  // Unlisted tools stay neutral by design — badging harness plumbing (waits,
+  // polling, mode toggles) would add glare, not signal.
+  return { glyph: "ƒ", variant: "default", label: toolName };
 }
 
 export function readToolName(event: EventRecord): string | null {
@@ -598,6 +617,16 @@ function isFileEditToolName(toolName: string | null | undefined): boolean {
     toolName === "MultiEdit" ||
     toolName === "Write" ||
     toolName === "NotebookEdit"
+  );
+}
+
+function isAgentToolName(toolName: string | null | undefined): boolean {
+  return (
+    toolName === "Task" ||
+    toolName === "Agent" ||
+    toolName === "spawnAgent" ||
+    toolName === "Wait" ||
+    toolName === "closeAgent"
   );
 }
 
@@ -665,12 +694,18 @@ export function ToolCallRunGroup({
   let editCount = 0;
   let readCount = 0;
   let todoCount = 0;
+  let agentCount = 0;
+  let skillCount = 0;
+  let monitorCount = 0;
   let otherCount = 0;
   for (const name of toolNames) {
     if (name === "Bash") bashCount++;
     else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
     else if (name === "TodoWrite") todoCount++;
+    else if (isAgentToolName(name)) agentCount++;
+    else if (name === "Skill") skillCount++;
+    else if (name === "Monitor") monitorCount++;
     else otherCount++;
   }
 
@@ -704,6 +739,27 @@ export function ToolCallRunGroup({
               <span className="tool-run-glyph">☑</span>
               <span className="tool-run-label">todos</span>
               <span className="tool-run-count">×{todoCount}</span>
+            </span>
+          )}
+          {agentCount > 0 && (
+            <span className="tool-run-chip agent">
+              <span className="tool-run-glyph">◇</span>
+              <span className="tool-run-label">agent</span>
+              <span className="tool-run-count">×{agentCount}</span>
+            </span>
+          )}
+          {skillCount > 0 && (
+            <span className="tool-run-chip skill">
+              <span className="tool-run-glyph">❖</span>
+              <span className="tool-run-label">skill</span>
+              <span className="tool-run-count">×{skillCount}</span>
+            </span>
+          )}
+          {monitorCount > 0 && (
+            <span className="tool-run-chip monitor">
+              <span className="tool-run-glyph">◉</span>
+              <span className="tool-run-label">monitor</span>
+              <span className="tool-run-count">×{monitorCount}</span>
             </span>
           )}
           {otherCount > 0 && (

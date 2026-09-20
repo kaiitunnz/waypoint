@@ -60,24 +60,39 @@ def relative_to_base(base: Path, resolved: Path) -> str:
     return "" if relative == Path(".") else relative.as_posix()
 
 
-def sniff_text(data: bytes) -> bool:
+def read_text_prefix(path: Path, max_bytes: int) -> tuple[str | None, bool, bool]:
+    """Read at most ``max_bytes`` of UTF-8 text from the head of ``path``.
+
+    Returns ``(content, truncated, binary)``, reading one byte past the ceiling
+    to detect truncation and trimming a split multi-byte character from the
+    tail.
+    """
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
     if b"\x00" in data:
-        return False
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True
+        return None, truncated, True
+    for trim in range(min(3, len(data)) + 1):
+        kept = data[: len(data) - trim]
+        try:
+            return kept.decode("utf-8"), truncated, False
+        except UnicodeDecodeError:
+            # Only a split trailing character is recoverable.
+            if not truncated:
+                break
+    return None, truncated, True
 
 
 def read_text_capped(path: Path, max_bytes: int) -> tuple[str | None, bool, bool, str]:
-    size = path.stat().st_size
-    if size > max_bytes:
+    # An over-limit file yields no content (the workspace endpoint shows a size
+    # notice); a truncated file is never reported as binary.
+    content, truncated, binary = read_text_prefix(path, max_bytes)
+    if truncated:
         return None, True, False, "utf-8"
-    data = path.read_bytes()
-    if not sniff_text(data):
+    if binary:
         return None, False, True, "utf-8"
-    return data.decode("utf-8"), False, False, "utf-8"
+    return content, False, False, "utf-8"
 
 
 def list_dir(

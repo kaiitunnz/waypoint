@@ -597,6 +597,8 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
   if (isPluginToolName(toolName)) {
     return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
   }
+  // Unlisted tools stay neutral by design — badging harness plumbing (waits,
+  // polling, mode toggles) would add glare, not signal.
   return { glyph: "ƒ", variant: "default", label: toolName };
 }
 

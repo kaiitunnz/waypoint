@@ -216,6 +216,25 @@ def test_import_enqueue_and_user_turn_of_same_notification_emit_once() -> None:
     assert len(events) == 1
 
 
+def test_import_handback_attaches_to_task_notification() -> None:
+    handback = _queue_enqueue(
+        '<agent-message from="agent-x">\n'
+        "[Subagent hand-back] preamble. The report follows:\n"
+        "  Report line one.\n  Report line two.\n"
+        "</agent-message>"
+    )
+    notif = _task_notification_record(
+        "<task-notification><task-id>agent-x</task-id><status>completed</status>"
+        '<summary>Agent "X" finished</summary>'
+        "<result>This agent's report was delivered as a message.</result>"
+        "</task-notification>"
+    )
+    events = convert_transcript_records("sess-1", [handback, notif])
+    assert len(events) == 1
+    payload = events[0].metadata["task_notification"]
+    assert payload["result_preview"] == "Report line one.\nReport line two."
+
+
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
     records = [_user_text("hello", ts="2026-01-01T00:00:00Z")]
 

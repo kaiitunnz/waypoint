@@ -43,6 +43,7 @@ from waypoint.backends.claude_code.normalize import (
     extract_created_task_id,
     format_task_snapshot,
     iter_content_blocks,
+    parse_agent_handback,
     parse_task_notification,
     sent_user_file_paths,
     stringify_tool_result,
@@ -106,6 +107,11 @@ class TranscriptNormalizer:
         # idle boundary) a ``user`` turn; both are surfaced through here, so this
         # keeps the note from posting twice.
         self._seen_task_notification_keys: set[str] = set()
+        # Report bodies of subagent hand-backs, keyed by sender id, awaiting the
+        # matching "Agent … finished" task notification (which arrives just after
+        # and whose task-id is the sender id). The report has no other home — the
+        # task notification's own result only says "delivered as a message".
+        self._pending_handback_bodies: dict[str, str] = {}
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
         self._suppressed_result_tool_use_ids: set[str] = set()
@@ -439,6 +445,10 @@ class TranscriptNormalizer:
         if key in self._seen_task_notification_keys:
             return []
         self._seen_task_notification_keys.add(key)
+        if parsed.task_id in self._pending_handback_bodies:
+            # Agent's own result is only a "delivered as a message" placeholder;
+            # swap in the buffered hand-back report so the card carries it.
+            parsed.result = self._pending_handback_bodies.pop(parsed.task_id)
         text, note_metadata = build_task_notification_metadata(
             parsed,
             record_uuid=record_uuid,
@@ -454,14 +464,28 @@ class TranscriptNormalizer:
             )
         ]
 
+    def _buffer_handback(self, content: str) -> bool:
+        """Buffer a subagent hand-back report by sender id; True if it was one."""
+        handback = parse_agent_handback(content)
+        if handback is None:
+            return False
+        sender_id, report = handback
+        self._pending_handback_bodies[sender_id] = report
+        return True
+
     def _process_queue_operation(self, record: dict[str, Any]) -> list[NormalizedEvent]:
-        # A task notification that arrives mid-turn is persisted only as an
-        # ``enqueue`` (the ``remove`` echoes the same content, and ``dequeue`` has
-        # none) — surface it the same as the user-turn delivery, deduped by content.
+        # A task notification or hand-back that arrives mid-turn is persisted only
+        # as an ``enqueue`` (``remove`` echoes the same content, ``dequeue`` has
+        # none). Surface the task notification as the user-turn path does; buffer a
+        # hand-back for the task notification that follows it.
         if record.get("operation") != "enqueue":
             return []
         content = record.get("content")
-        if not isinstance(content, str) or "<task-notification>" not in content:
+        if not isinstance(content, str):
+            return []
+        if self._buffer_handback(content):
+            return []
+        if "<task-notification>" not in content:
             return []
         return self._task_notification_events(content, record.get("uuid"))
 
@@ -473,6 +497,8 @@ class TranscriptNormalizer:
         if injected == "task_notification" and isinstance(content, str):
             return self._task_notification_events(content, record.get("uuid"))
         if injected == "continuation":
+            return []
+        if isinstance(content, str) and self._buffer_handback(content):
             return []
 
         turn_aborted = _is_user_rejection(record)

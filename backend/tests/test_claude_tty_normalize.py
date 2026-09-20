@@ -223,6 +223,60 @@ def test_distinct_enqueued_notifications_each_emit() -> None:
     assert len(second) == 1
 
 
+# ── TranscriptNormalizer: subagent hand-backs ───────────────────────────────────
+
+_HANDBACK_CONTENT = (
+    '<agent-message from="agent-x">\n'
+    "[Subagent hand-back] preamble text. The report follows:\n"
+    "  Line one of the report.\n"
+    "  Line two of the report.\n"
+    "</agent-message>"
+)
+_AGENT_NOTIFICATION = (
+    "<task-notification><task-id>agent-x</task-id><status>completed</status>"
+    '<summary>Agent "X" finished</summary>'
+    "<result>This agent's report was delivered as a message.</result>"
+    "</task-notification>"
+)
+_EXPECTED_REPORT = "Line one of the report.\nLine two of the report."
+
+
+def test_handback_attaches_to_matching_task_notification() -> None:
+    norm = TranscriptNormalizer()
+    # The hand-back itself surfaces nothing; it is buffered for the notification.
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert events[0].metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
+
+
+def test_handback_via_user_turn_also_attaches() -> None:
+    norm = TranscriptNormalizer()
+    user_form = {
+        "type": "user",
+        "message": {
+            "content": "Another Claude session sent a message:\n" + _HANDBACK_CONTENT
+        },
+    }
+    assert norm.process_record(user_form) == []
+    events = norm.process_record(_queue_op(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    assert events[0].metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
+
+
+def test_task_notification_without_handback_keeps_its_own_result() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_task_notification_record(_AGENT_NOTIFICATION))
+    assert len(events) == 1
+    preview = events[0].metadata["task_notification"]["result_preview"]
+    assert preview == "This agent's report was delivered as a message."
+
+
+def test_orphan_handback_surfaces_nothing() -> None:
+    norm = TranscriptNormalizer()
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+
+
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────
 
 

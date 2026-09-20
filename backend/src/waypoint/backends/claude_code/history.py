@@ -34,6 +34,7 @@ from waypoint.backends.claude_code.normalize import (
     build_task_notification_metadata,
     classify_injected_user_turn,
     iter_content_blocks,
+    parse_agent_handback,
     parse_task_notification,
     stringify_tool_result,
     task_notification_dedup_key,
@@ -79,23 +80,53 @@ def convert_transcript_records(
     # is recorded as a queue-operation enqueue and (when flushed at an idle
     # boundary) again as a user turn, so surface each notification once.
     seen_task_notification_keys: set[str] = set()
+    # Subagent hand-back report bodies, keyed by sender id, awaiting the matching
+    # "Agent … finished" task notification that follows.
+    pending_handback: dict[str, str] = {}
     for record in records:
         ts = _record_timestamp(record) or last_ts
         last_ts = ts
+        content = _string_content(record)
+        if content is not None:
+            handback = parse_agent_handback(content)
+            if handback is not None:
+                pending_handback[handback[0]] = handback[1]
+                continue
         rec_type = record.get("type")
         if rec_type == "assistant":
             events.extend(_convert_assistant(session_id, record, ts))
         elif rec_type == "user":
             events.extend(
-                _convert_user(session_id, record, ts, seen_task_notification_keys)
+                _convert_user(
+                    session_id,
+                    record,
+                    ts,
+                    seen_task_notification_keys,
+                    pending_handback,
+                )
             )
         elif rec_type == "queue-operation":
             events.extend(
                 _convert_queue_operation(
-                    session_id, record, ts, seen_task_notification_keys
+                    session_id,
+                    record,
+                    ts,
+                    seen_task_notification_keys,
+                    pending_handback,
                 )
             )
     return events
+
+
+def _string_content(record: dict[str, Any]) -> str | None:
+    """The record's plain-string content — a user turn's or a queue op's — else None."""
+    if record.get("type") == "queue-operation":
+        content = record.get("content")
+    elif record.get("type") == "user":
+        content = (record.get("message") or {}).get("content")
+    else:
+        return None
+    return content if isinstance(content, str) else None
 
 
 def token_usage_records_from_history(
@@ -186,6 +217,7 @@ def _task_notification_event(
     record_uuid: str | None,
     ts: datetime,
     seen_keys: set[str],
+    pending_handback: dict[str, str],
 ) -> list[EventRecord]:
     parsed = parse_task_notification(content)
     if parsed is None:
@@ -194,6 +226,10 @@ def _task_notification_event(
     if key in seen_keys:
         return []
     seen_keys.add(key)
+    if parsed.task_id in pending_handback:
+        # The Agent's own result is only a "delivered as a message" placeholder;
+        # swap in the buffered hand-back report so the card carries it.
+        parsed.result = pending_handback.pop(parsed.task_id)
     text, metadata = build_task_notification_metadata(
         parsed,
         record_uuid=record_uuid,
@@ -205,7 +241,11 @@ def _task_notification_event(
 
 
 def _convert_queue_operation(
-    session_id: str, record: dict[str, Any], ts: datetime, seen_keys: set[str]
+    session_id: str,
+    record: dict[str, Any],
+    ts: datetime,
+    seen_keys: set[str],
+    pending_handback: dict[str, str],
 ) -> list[EventRecord]:
     # A mid-turn task notification is persisted only as an ``enqueue`` (``remove``
     # echoes the same content, ``dequeue`` carries none).
@@ -215,19 +255,23 @@ def _convert_queue_operation(
     if not isinstance(content, str) or "<task-notification>" not in content:
         return []
     return _task_notification_event(
-        session_id, content, record.get("uuid"), ts, seen_keys
+        session_id, content, record.get("uuid"), ts, seen_keys, pending_handback
     )
 
 
 def _convert_user(
-    session_id: str, record: dict[str, Any], ts: datetime, seen_keys: set[str]
+    session_id: str,
+    record: dict[str, Any],
+    ts: datetime,
+    seen_keys: set[str],
+    pending_handback: dict[str, str],
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     content = message.get("content")
     injected = classify_injected_user_turn(record, content)
     if injected == "task_notification" and isinstance(content, str):
         return _task_notification_event(
-            session_id, content, record.get("uuid"), ts, seen_keys
+            session_id, content, record.get("uuid"), ts, seen_keys, pending_handback
         )
     if injected == "continuation":
         return []

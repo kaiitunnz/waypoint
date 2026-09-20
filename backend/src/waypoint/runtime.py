@@ -31,7 +31,6 @@ from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_asse
 from waypoint.attachments import (
     AttachmentStore,
     ResolvedAttachment,
-    read_text_prefix,
 )
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.account_profiles import (
@@ -157,6 +156,7 @@ from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_reques
 from waypoint.transports import TransportAdapter
 from waypoint.usage_providers import UsageProviderService
 from waypoint.usage_providers.registry import build_providers
+from waypoint.workspace_preview import read_text_prefix
 
 TMUX_TRANSPORT_ID = "tmux"
 # Per-request HTTP timeout for usage-provider fetches (NFR2: bounded I/O).

@@ -27,7 +27,6 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from waypoint.attachments import read_text_prefix
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
 from waypoint.backends.account_profiles import (
@@ -141,6 +140,7 @@ from waypoint.workspace_preview import (
     list_dir,
     rank_files,
     read_text_capped,
+    read_text_prefix,
     relative_to_base,
     resolve_in_base,
     walk_files,

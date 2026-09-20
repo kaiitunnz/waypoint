@@ -27,6 +27,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from waypoint.attachments import read_text_prefix
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
 from waypoint.backends.account_profiles import (
@@ -57,6 +58,7 @@ from waypoint.schemas import (
     AssistantAttachRequest,
     AssistantResetRequest,
     AssistantSummary,
+    AttachmentPreviewResponse,
     BoardEntryUpdateRequest,
     BoardPostRequest,
     InboxBatchDeleteRequest,
@@ -759,6 +761,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type=spec.mime,
             filename=spec.filename,
             content_disposition_type="inline",
+        )
+
+    @app.get("/api/sessions/{session_id}/attachments/{attachment_id}/preview")
+    async def preview_attachment(
+        session_id: str,
+        attachment_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> AttachmentPreviewResponse:
+        context.runtime.get_session(session_id)
+        resolved = context.runtime.attachments.resolve(session_id, attachment_id)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attachment not found"
+            )
+        spec, path = resolved
+        try:
+            content, truncated, binary = read_text_prefix(
+                path, context.settings.attachment_preview_max_bytes
+            )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attachment not readable"
+            ) from exc
+        return AttachmentPreviewResponse(
+            filename=spec.filename,
+            mime=spec.mime,
+            size=spec.size,
+            binary=binary,
+            truncated=truncated,
+            content=content,
+            content_bytes=len(content.encode("utf-8")) if content else 0,
         )
 
     def _workspace_session(session_id: str) -> SessionRecord:

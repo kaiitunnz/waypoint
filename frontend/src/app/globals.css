@@ -7998,6 +7998,23 @@ details.transcript.codex.task-notification > summary .transcript-role {
   gap: 6px;
 }
 
+/* An open card renders the body below; the teaser would repeat it. */
+.transcript.codex.task-notification[open] > summary .transcript-preview {
+  display: none;
+}
+
+.task-note-preview-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-soft);
+}
+
+.task-note-preview-note.is-error {
+  color: var(--muted);
+}
+
 .task-note-unavailable {
   margin: 0;
   font-size: 0.78rem;

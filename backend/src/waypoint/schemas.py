@@ -134,6 +134,19 @@ class AttachmentSpec(BaseModel):
     kind: AttachmentKind
 
 
+class AttachmentPreviewResponse(BaseModel):
+    # A bounded text prefix of a stored attachment. ``content`` is null when the
+    # prefix is binary or undecodable; ``size`` is the attachment's full size.
+    filename: str
+    mime: str
+    size: int
+    binary: bool
+    truncated: bool
+    content: str | None = None
+    # The ceiling is applied in bytes, which a decoded string cannot recover.
+    content_bytes: int = 0
+
+
 class SessionCompletionsResponse(BaseModel):
     completions: list[CommandCompletion] = Field(default_factory=list)
     refreshing: bool = False

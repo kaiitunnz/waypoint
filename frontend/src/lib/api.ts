@@ -1851,6 +1851,36 @@ export function attachmentUrl(
   return `${host}/api/sessions/${sessionId}/attachments/${attachmentId}?token=${encodeURIComponent(token)}`;
 }
 
+export interface AttachmentPreview {
+  filename: string;
+  mime: string;
+  size: number;
+  binary: boolean;
+  truncated: boolean;
+  content: string | null;
+  content_bytes: number;
+}
+
+// A bounded text prefix of a stored attachment, read with the bearer header.
+export async function fetchAttachmentPreview(
+  host: string,
+  token: string,
+  sessionId: string,
+  attachmentId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<AttachmentPreview> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/attachments/${attachmentId}/preview`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal: opts.signal,
+    },
+  );
+  await ensureOk(response, "failed to fetch attachment preview");
+  return (await response.json()) as AttachmentPreview;
+}
+
 interface SocketHandlers {
   onMessage: (message: SessionEnvelope) => void;
   onAuthFailure?: () => void;

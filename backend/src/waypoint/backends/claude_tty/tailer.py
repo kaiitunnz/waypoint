@@ -98,7 +98,10 @@ class TranscriptTailer:
         self._runtime = runtime
         self._plugin = plugin
         self._context_window_resolver = context_window_resolver
-        self._normalizer = TranscriptNormalizer(config_dir)
+        self._normalizer = TranscriptNormalizer(
+            config_dir,
+            capture_enabled=runtime.settings.task_output_capture_enabled,
+        )
         self._pane_check_elapsed = 0.0
         self._dialog_check_elapsed = 0.0
         # Cursor state, source-independent. ``start_at_end`` is applied lazily on

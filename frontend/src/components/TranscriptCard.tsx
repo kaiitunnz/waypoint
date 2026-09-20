@@ -1,5 +1,6 @@
 import {
   memo,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -14,9 +15,17 @@ import {
   type BackendCatalog,
 } from "@/lib/backends";
 import { isModifiedEnterShortcut } from "@/lib/keyboard";
-import { BackendModelOption, EventRecord, SessionTransport } from "@/lib/types";
+import { fetchAttachmentPreview, type AttachmentPreview } from "@/lib/api";
+import {
+  AttachmentSpec,
+  BackendModelOption,
+  EventRecord,
+  SessionTransport,
+} from "@/lib/types";
 import { modelLabelFor } from "@/lib/modelDisplay";
 import {
+  capturedTexts,
+  inlineAttachmentIds,
   isModelChangeEvent,
   isModelSwitchEvent,
   normalizeToolName,
@@ -32,7 +41,11 @@ import {
   summarizeTodos,
   type TodoEntry,
 } from "@/lib/todos";
-import { MessageAttachments } from "@/components/AttachmentTray";
+import {
+  attachmentSpecsFor,
+  MessageAttachments,
+  useAttachmentContext,
+} from "@/components/AttachmentTray";
 import { useSessionFilesLink } from "@/components/SessionFilesLinkContext";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
@@ -973,6 +986,97 @@ function reportUnavailableText(view: TaskNotificationView): string | null {
   }
 }
 
+// Collapse whitespace so containment survives wrapping and trailing newlines.
+function flattenWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+type ReportPreviewState =
+  | { status: "loading" }
+  | { status: "ready"; preview: AttachmentPreview }
+  | { status: "error" };
+
+// Lazily reads a bounded text prefix of a captured report once its card is
+// expanded. The request is abandoned when the card collapses or unmounts, and
+// a failure only ever costs the preview — the attachment link stays.
+// Previews are immutable per attachment id; one fetch per id per page life.
+const reportPreviewCache = new Map<string, AttachmentPreview>();
+
+function useReportPreview(
+  spec: AttachmentSpec | null,
+  open: boolean,
+): ReportPreviewState | null {
+  const ctx = useAttachmentContext();
+  const attachmentId = spec?.id ?? null;
+  const cached = attachmentId ? reportPreviewCache.get(attachmentId) : undefined;
+  const [state, setState] = useState<ReportPreviewState | null>(
+    cached ? { status: "ready", preview: cached } : null,
+  );
+
+  useEffect(() => {
+    if (!open || !ctx || !attachmentId) {
+      return;
+    }
+    const hit = reportPreviewCache.get(attachmentId);
+    if (hit) {
+      setState({ status: "ready", preview: hit });
+      return;
+    }
+    const controller = new AbortController();
+    setState({ status: "loading" });
+    fetchAttachmentPreview(ctx.host, ctx.token, ctx.sessionId, attachmentId, {
+      signal: controller.signal,
+    })
+      .then((preview) => {
+        reportPreviewCache.set(attachmentId, preview);
+        if (!controller.signal.aborted) {
+          setState({ status: "ready", preview });
+        }
+      })
+      .catch(() => {
+        // A 404 from a backend without the route lands here too.
+        if (!controller.signal.aborted) {
+          setState({ status: "error" });
+        }
+      });
+    return () => controller.abort();
+  }, [open, ctx, attachmentId]);
+
+  return state;
+}
+
+function TaskReportPreview({ state }: { state: ReportPreviewState | null }) {
+  if (!state || state.status === "loading") {
+    return <p className="task-note-preview-note">Loading report…</p>;
+  }
+  if (state.status === "error") {
+    return (
+      <p className="task-note-preview-note is-error">
+        Report preview unavailable — open the full file
+      </p>
+    );
+  }
+  const { preview } = state;
+  if (preview.binary || preview.content === null) {
+    return (
+      <p className="task-note-preview-note is-error">
+        Binary report — open the full file
+      </p>
+    );
+  }
+  return (
+    <>
+      <pre className="task-note-result">{preview.content}</pre>
+      {preview.truncated ? (
+        <p className="task-note-caption">
+          Preview — first {Math.round(preview.content_bytes / 1024)} KB of the
+          full report
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function TaskNotificationCard({
   view,
   event,
@@ -980,22 +1084,61 @@ function TaskNotificationCard({
   view: TaskNotificationView;
   event: EventRecord;
 }) {
+  const [open, setOpen] = useState(false);
   const badge = TASK_NOTIFICATION_BADGES[view.kind];
   const lamp = taskStatusLamp(view);
   const headline = view.summary || view.event || "Task notification";
-  // A Monitor event's `event` line is the real signal; show it under the summary.
-  const preview = view.kind === "monitor" && view.summary ? view.event : null;
-  const specs = Array.isArray(event.metadata?.attachments)
-    ? (event.metadata.attachments as unknown[])
-    : [];
-  const hasReport = specs.length > 0;
+  // With a summary present the `event` line rides under the headline; without
+  // one it is the headline. Both surfaces clamp, so the body renders it in full.
+  const preview = view.summary ? view.event : null;
+  const inlineIds = inlineAttachmentIds(event);
+  // An Agent's captured output-file is its transcript, not its report. Older
+  // events still carry one; drop it, but keep spilled bodies.
+  const reportIsInline = view.kind === "agent" && Boolean(view.resultPreview);
+  const specs = attachmentSpecsFor(event).filter(
+    (spec) => !reportIsInline || inlineIds.has(spec.id),
+  );
+  // A spilled body is text this card already shows inline; the report is a
+  // separately captured artifact. Only the latter is a "report".
+  // A separately captured report, else a spilled body holding the text the
+  // inline prefix was cut from.
+  const reportSpec =
+    specs.find((spec) => !inlineIds.has(spec.id)) ?? specs[0] ?? null;
+  const hasReport = reportSpec !== null;
+  // Small enough that the runtime read it into the event; no request needed.
+  const inlineReports = capturedTexts(event);
+  const previewState = useReportPreview(reportSpec, open);
+  const previewText =
+    previewState?.status === "ready" && !previewState.preview.binary
+      ? previewState.preview.content
+      : (inlineReports[0] ?? null);
+  // A captured report is often the fuller version of a body the event carries
+  // inline, so when it contains that body the duplicate is dropped.
+  const supersedes = (body: string | null) =>
+    Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
+  // Wholly on screen already, so the link adds nothing. Guarded on there being
+  // no spill alongside it, which must stay reachable.
+  const previewShowsWholeFile =
+    inlineIds.size === 0 &&
+    specs.length === 1 &&
+    reportSpec !== null &&
+    previewState?.status === "ready" &&
+    !previewState.preview.truncated &&
+    !previewState.preview.binary &&
+    previewState.preview.content !== null;
   const usageParts = taskUsageParts(view.usage);
-  const unavailable = hasReport ? null : reportUnavailableText(view);
+  // An ignored transcript leaves nothing missing, but those events were stored
+  // with output_available set.
+  const unavailable =
+    hasReport || reportIsInline ? null : reportUnavailableText(view);
+  const retained = specs.length > 0 || inlineReports.length > 0;
   const hasBody = Boolean(
     view.resultPreview ||
+      view.event ||
       view.note ||
       usageParts.length > 0 ||
-      hasReport ||
+      specs.length > 0 ||
+      inlineReports.length > 0 ||
       unavailable,
   );
 
@@ -1018,42 +1161,65 @@ function TaskNotificationCard({
   );
 
   if (!hasBody) {
+    // No body means no `event`, and the teaser is only ever `event`.
     return (
       <article className="panel transcript codex task-notification">
         {header}
-        {preview ? <p className="transcript-preview">{preview}</p> : null}
       </article>
     );
   }
 
+  // Belongs to the inline block: once a loaded report supersedes it, the text
+  // on screen is the whole body. `retained` is card-wide, never the failure
+  // flag, so one failed spill cannot disown a sibling attached below.
+  const cutCaption = (body: string | null, truncated: boolean) =>
+    truncated && !supersedes(body) ? (
+      <p className="task-note-caption">
+        {retained
+          ? "Preview shown — full output attached below"
+          : "Preview — the rest was not retained"}
+      </p>
+    ) : null;
+
   return (
-    <details className="panel transcript codex task-notification">
+    <details
+      className="panel transcript codex task-notification"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
       <summary className="transcript-summary">
         {header}
         {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
       <div className="task-note-body">
-        {view.resultPreview ? (
-          <pre className="task-note-result">
-            {view.resultPreview}
-            {view.resultTruncated ? "\n…" : ""}
-          </pre>
+        {view.resultPreview && !supersedes(view.resultPreview) ? (
+          <pre className="task-note-result">{view.resultPreview}</pre>
         ) : null}
-        {view.resultTruncated ? (
-          <p className="task-note-caption">
-            {hasReport
-              ? "Preview shown — full report attached below"
-              : "Preview — first 64 KB of the report"}
-          </p>
+        {cutCaption(view.resultPreview, view.resultTruncated)}
+        {view.event && !supersedes(view.event) ? (
+          <pre className="task-note-result">{view.event}</pre>
         ) : null}
+        {cutCaption(view.event, view.eventTruncated)}
         {view.note ? <p className="task-note-text">{view.note}</p> : null}
+        {cutCaption(view.note, view.noteTruncated)}
         {usageParts.length > 0 ? (
           <p className="task-note-usage">{usageParts.join(" · ")}</p>
         ) : null}
-        {hasReport ? (
+        {inlineReports.length > 0 || specs.length > 0 ? (
           <div className="task-note-report">
-            <span className="task-note-report-label">Full report</span>
-            <MessageAttachments event={event} />
+            <span className="task-note-report-label">
+              {hasReport || inlineReports.length > 0
+                ? "Full report"
+                : "Full output"}
+            </span>
+            {inlineReports.map((text, i) => (
+              <pre className="task-note-result" key={i}>
+                {text}
+              </pre>
+            ))}
+            {reportSpec ? <TaskReportPreview state={previewState} /> : null}
+            {specs.length > 0 && !previewShowsWholeFile ? (
+              <MessageAttachments event={event} />
+            ) : null}
           </div>
         ) : unavailable ? (
           <p className="task-note-unavailable">{unavailable}</p>

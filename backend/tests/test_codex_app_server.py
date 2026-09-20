@@ -904,6 +904,43 @@ def test_map_notification_collab_wait_without_message_falls_back_to_tool_name() 
     assert text == "wait"
 
 
+def test_map_notification_collab_completed_without_message_falls_back() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "item/completed",
+        {
+            "item": {
+                "type": "collabAgentToolCall",
+                "tool": "spawnAgent",
+                "agentsStates": {"t1": {"message": None, "status": "pendingInit"}},
+            }
+        },
+    )
+    assert kind == EventKind.TOOL_RESULT
+    assert text == "spawnAgent"
+
+
+def test_map_notification_collab_wait_joins_multiple_subagent_reports() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "item/completed",
+        {
+            "item": {
+                "type": "collabAgentToolCall",
+                "tool": "wait",
+                "agentsStates": {
+                    "t1": {"message": "first report", "status": "completed"},
+                    "t2": {"message": "second report", "status": "completed"},
+                },
+            }
+        },
+    )
+    assert kind == EventKind.TOOL_RESULT
+    assert text == "wait\n\nfirst report\n\nsecond report"
+
+
 def test_map_notification_file_change_patch_updated_has_preview() -> None:
     from waypoint.backends.codex.normalize import (
         diff_preview_for_notification,

@@ -3338,6 +3338,14 @@ details.tool-disclosure[open] .tool-glyph.monitor {
   border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
 }
 
+.transcript.codex.tool_call:hover .tool-glyph.mcp,
+.transcript.codex.tool_pair:hover .tool-glyph.mcp,
+details.tool-disclosure[open] .tool-glyph.mcp {
+  background: color-mix(in srgb, var(--todo-glyph) 8%, transparent);
+  color: color-mix(in srgb, var(--todo-glyph) 60%, var(--muted));
+  border-color: color-mix(in srgb, var(--todo-glyph) 20%, transparent);
+}
+
 /* Status pill is loud against the recessed card; trim it to a fine label. */
 .transcript.codex.tool_call:not(.ask-user-question):not(.send-user-file) .badge.tool-status,
 .transcript.codex.tool_result .badge.tool-status,
@@ -3634,6 +3642,12 @@ details.tool-disclosure[open] .tool-glyph.monitor {
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
   border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
+}
+
+.tool-glyph.mcp {
+  background: color-mix(in srgb, var(--todo-glyph) 8%, transparent);
+  color: color-mix(in srgb, var(--todo-glyph) 60%, var(--muted));
+  border-color: color-mix(in srgb, var(--todo-glyph) 20%, transparent);
 }
 
 .tool-name {

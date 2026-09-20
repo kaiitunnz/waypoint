@@ -546,45 +546,64 @@ interface ToolBadge {
   label: string;
 }
 
+// Visually distinct glyphs help the user scan a long transcript and tell a
+// shell command apart from a file edit or a subagent spawn at a glance. The
+// variant maps to a CSS-only colour theme so we don't ship icon assets: tools
+// in one family share a hue and are told apart by glyph and label. Anything not
+// listed falls through to the plugin heuristic or the neutral default below.
+const TOOL_BADGES: Record<string, ToolBadge> = {
+  // Shell, files, and search.
+  Bash: { glyph: "›_", variant: "bash", label: "Bash" },
+  Read: { glyph: "▤", variant: "read", label: "Read" },
+  Edit: { glyph: "✎", variant: "edit", label: "Edit" },
+  MultiEdit: { glyph: "✎", variant: "edit", label: "MultiEdit" },
+  NotebookEdit: { glyph: "✎", variant: "edit", label: "NotebookEdit" },
+  Write: { glyph: "✚", variant: "write", label: "Write" },
+  Grep: { glyph: "⌕", variant: "grep", label: "Grep" },
+  Glob: { glyph: "✱", variant: "glob", label: "Glob" },
+  WebFetch: { glyph: "⌖", variant: "web", label: "WebFetch" },
+  WebSearch: { glyph: "⌖", variant: "web", label: "WebSearch" },
+  // Subagent orchestration.
+  Task: { glyph: "◇", variant: "task", label: "Task" },
+  Agent: { glyph: "◇", variant: "task", label: "Agent" },
+  spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
+  Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
+  // Messaging and notifications.
+  SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
+  PushNotification: { glyph: "✉", variant: "web", label: "PushNotification" },
+  ReadNotifications: { glyph: "✉", variant: "read", label: "ReadNotifications" },
+  // Skills, todos, and questions.
+  Skill: { glyph: "❖", variant: "skill", label: "Skill" },
+  TodoWrite: { glyph: "☑", variant: "todo", label: "Todo" },
+  AskUserQuestion: { glyph: "?", variant: "task", label: "Ask" },
+};
+
+// MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
+// ``server:tool``); there is an open-ended set of them, so badge them
+// generically and shorten the label to the readable ``server·tool`` tail.
+// Lower-signal harness plumbing (Wait, ToolSearch, plan-mode toggles, subagent
+// polling) is intentionally left to the neutral default so badges stay signal.
+function isPluginToolName(toolName: string): boolean {
+  return toolName.includes("__") || toolName.includes(":");
+}
+
+function prettyPluginName(toolName: string): string {
+  const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
+  return stripped.replace(/__/g, "·").replace(/:/g, "·");
+}
+
 function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
-  // Visually distinct glyphs help the user scan a long transcript and tell
-  // a shell command apart from a file edit at a glance. The variant maps to
-  // a CSS-only colour theme so we don't ship icon assets.
-  switch (toolName) {
-    case "Bash":
-      return { glyph: "›_", variant: "bash", label: "Bash" };
-    case "Read":
-      return { glyph: "▤", variant: "read", label: toolName };
-    case "Edit":
-    case "MultiEdit":
-    case "NotebookEdit":
-      return { glyph: "✎", variant: "edit", label: toolName };
-    case "Write":
-      return { glyph: "✚", variant: "write", label: toolName };
-    case "Grep":
-      return { glyph: "⌕", variant: "grep", label: toolName };
-    case "Glob":
-      return { glyph: "✱", variant: "glob", label: toolName };
-    case "WebFetch":
-    case "WebSearch":
-      return { glyph: "⌖", variant: "web", label: toolName };
-    case "Task":
-    case "Agent":
-      return { glyph: "◇", variant: "task", label: toolName };
-    case "Skill":
-      return { glyph: "❖", variant: "skill", label: toolName };
-    case "Monitor":
-      return { glyph: "◉", variant: "monitor", label: toolName };
-    case "TodoWrite":
-      return { glyph: "☑", variant: "todo", label: "Todo" };
-    case "AskUserQuestion":
-      return { glyph: "?", variant: "task", label: "Ask" };
-    default:
-      if (toolName) {
-        return { glyph: "ƒ", variant: "default", label: toolName };
-      }
-      return { glyph: "→", variant: "default", label: "tool" };
+  if (!toolName) {
+    return { glyph: "→", variant: "default", label: "tool" };
   }
+  const known = TOOL_BADGES[toolName];
+  if (known) {
+    return known;
+  }
+  if (isPluginToolName(toolName)) {
+    return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
+  }
+  return { glyph: "ƒ", variant: "default", label: toolName };
 }
 
 export function readToolName(event: EventRecord): string | null {

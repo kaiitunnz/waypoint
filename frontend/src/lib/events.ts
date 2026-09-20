@@ -178,6 +178,7 @@ const NORMALIZED_TOOL_NAMES: Record<string, string> = {
   agent: "Agent",
   skill: "Skill",
   monitor: "Monitor",
+  readnotifications: "ReadNotifications",
   todowrite: "TodoWrite",
   askuserquestion: "AskUserQuestion",
   question: "AskUserQuestion",

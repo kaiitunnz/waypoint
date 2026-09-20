@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.21.0](https://github.com/kaiitunnz/waypoint/compare/v0.20.0...v0.21.0) (2026-09-20)
+
+
+### Features
+
+* batch consecutive task notifications in the transcript ([#461](https://github.com/kaiitunnz/waypoint/issues/461)) ([967bc50](https://github.com/kaiitunnz/waypoint/commit/967bc5005a7585973e097605ba1a3f713c96ec2b))
+* preview captured task output and expand notification bodies ([#457](https://github.com/kaiitunnz/waypoint/issues/457)) ([0739d95](https://github.com/kaiitunnz/waypoint/commit/0739d95ea9fd6c9aca25222aada47ca648b84452))
+* surface agent and tool activity in the transcript ([#460](https://github.com/kaiitunnz/waypoint/issues/460)) ([dc2a777](https://github.com/kaiitunnz/waypoint/commit/dc2a7778d27bbeda35d5fe4120f68ddcf08c9548))
+
 ## [0.20.0](https://github.com/kaiitunnz/waypoint/compare/v0.19.0...v0.20.0) (2026-09-19)
 
 

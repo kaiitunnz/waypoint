@@ -127,6 +127,39 @@ def map_notification(
     return None, "", SessionStatus.RUNNING
 
 
+def _collab_agent_messages(item: dict[str, Any]) -> list[str]:
+    """Subagent report bodies carried by a completed collab-agent tool item.
+
+    Codex collaboration mode records each waited-on subagent's reply under
+    ``agentsStates[threadId].message``; ``wait``/``closeAgent`` results are only
+    meaningful because of these, so surface them rather than the bare tool name.
+    """
+    states = item.get("agentsStates")
+    if not isinstance(states, dict):
+        return []
+    messages: list[str] = []
+    for state in states.values():
+        if isinstance(state, dict):
+            message = state.get("message")
+            if isinstance(message, str) and message.strip():
+                messages.append(message.strip())
+    return messages
+
+
+def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
+    """Text for a collab-agent tool item: the spawn prompt on the call, the
+    subagent reports on the result, falling back to the bare tool name."""
+    tool = str(item.get("tool") or "") or "collab agent tool call"
+    if completed:
+        bodies = _collab_agent_messages(item)
+    else:
+        prompt = item.get("prompt")
+        bodies = [prompt.strip()] if isinstance(prompt, str) and prompt.strip() else []
+    if not bodies:
+        return tool
+    return f"{tool}\n\n" + "\n\n".join(bodies)
+
+
 def _format_item_started(
     item: dict[str, Any],
 ) -> tuple[EventKind, str, SessionStatus]:
@@ -166,10 +199,9 @@ def _format_item_started(
             SessionStatus.RUNNING,
         )
     if item_type == "collabAgentToolCall":
-        tool = item.get("tool", "")
         return (
             EventKind.TOOL_CALL,
-            str(tool) if tool else "collab agent tool call",
+            _format_collab_agent_tool(item, completed=False),
             SessionStatus.RUNNING,
         )
     if item_type == "plan":
@@ -253,10 +285,9 @@ def _format_item_completed(
             SessionStatus.RUNNING,
         )
     if item_type == "collabAgentToolCall":
-        tool = item.get("tool", "")
         return (
             EventKind.TOOL_RESULT,
-            str(tool) if tool else "collab agent tool call",
+            _format_collab_agent_tool(item, completed=True),
             SessionStatus.RUNNING,
         )
     return (

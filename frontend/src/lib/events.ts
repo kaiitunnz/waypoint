@@ -179,6 +179,7 @@ const NORMALIZED_TOOL_NAMES: Record<string, string> = {
   skill: "Skill",
   monitor: "Monitor",
   readnotifications: "ReadNotifications",
+  wait: "Wait",
   todowrite: "TodoWrite",
   askuserquestion: "AskUserQuestion",
   question: "AskUserQuestion",

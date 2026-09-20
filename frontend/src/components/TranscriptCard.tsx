@@ -563,10 +563,14 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
   Glob: { glyph: "✱", variant: "glob", label: "Glob" },
   WebFetch: { glyph: "⌖", variant: "web", label: "WebFetch" },
   WebSearch: { glyph: "⌖", variant: "web", label: "WebSearch" },
-  // Subagent orchestration.
+  // Subagent orchestration. Claude spawns via Task/Agent; Codex collaboration
+  // mode drives subagents through spawnAgent → wait (the join, whose result
+  // carries the subagent's report) → closeAgent.
   Task: { glyph: "◇", variant: "task", label: "Task" },
   Agent: { glyph: "◇", variant: "task", label: "Agent" },
   spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
+  Wait: { glyph: "◈", variant: "task", label: "Wait" },
+  closeAgent: { glyph: "◇", variant: "task", label: "closeAgent" },
   Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
   // Messaging and notifications.
   SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
@@ -581,7 +585,7 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
 // MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
 // ``server:tool``); there is an open-ended set of them, so badge them
 // generically and shorten the label to the readable ``server·tool`` tail.
-// Lower-signal harness plumbing (Wait, ToolSearch, plan-mode toggles, subagent
+// Lower-signal harness plumbing (ToolSearch, plan-mode toggles, subagent
 // polling) is intentionally left to the neutral default so badges stay signal.
 function isPluginToolName(toolName: string): boolean {
   return toolName.includes("__") || toolName.includes(":");
@@ -621,6 +625,20 @@ function isFileEditToolName(toolName: string | null | undefined): boolean {
     toolName === "MultiEdit" ||
     toolName === "Write" ||
     toolName === "NotebookEdit"
+  );
+}
+
+// Subagent orchestration across backends: Claude's Task/Agent and Codex
+// collaboration mode's spawnAgent/wait/closeAgent. Kept in step with the
+// matching ``task``-variant entries in TOOL_BADGES so a run of these reads as
+// the agent chip when collapsed and a ◇/◈ badge when expanded.
+function isAgentToolName(toolName: string | null | undefined): boolean {
+  return (
+    toolName === "Task" ||
+    toolName === "Agent" ||
+    toolName === "spawnAgent" ||
+    toolName === "Wait" ||
+    toolName === "closeAgent"
   );
 }
 
@@ -697,8 +715,7 @@ export function ToolCallRunGroup({
     else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
     else if (name === "TodoWrite") todoCount++;
-    else if (name === "Task" || name === "Agent" || name === "spawnAgent")
-      agentCount++;
+    else if (isAgentToolName(name)) agentCount++;
     else if (name === "Skill") skillCount++;
     else if (name === "Monitor") monitorCount++;
     else otherCount++;

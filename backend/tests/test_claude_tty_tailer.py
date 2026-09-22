@@ -391,7 +391,7 @@ async def test_observe_records_model_without_notice_on_alias_resolution() -> Non
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    source.feed(_jsonl(_assistant_record(model="claude-opus-5")))
+    source.feed(_jsonl(_assistant_record(model="claude-opus-5-5")))
     await tailer._drain()
 
     updates = _resolved_model_updates(runtime)
@@ -426,7 +426,7 @@ async def test_observe_mid_session_switch_emits_divider() -> None:
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    source.feed(_jsonl(_assistant_record(message_id="msg_1", model="claude-opus-5")))
+    source.feed(_jsonl(_assistant_record(message_id="msg_1", model="claude-opus-5-5")))
     await tailer._drain()
     source.feed(_jsonl(_assistant_record(message_id="msg_2", model="claude-sonnet-5")))
     await tailer._drain()

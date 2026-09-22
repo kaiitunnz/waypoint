@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.assistant_assets import AssistantAssetError
-from waypoint.backends.claude_code.models import OPUS5_MIN_CLI_VERSION
+from waypoint.backends.claude_code.models import OPUS55_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
@@ -4404,7 +4404,7 @@ def _current_epoch_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     # depending on whichever `claude` binary the host happens to have installed.
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
-        lambda binary, launch_target: OPUS5_MIN_CLI_VERSION,
+        lambda binary, launch_target: OPUS55_MIN_CLI_VERSION,
     )
 
 
@@ -4423,7 +4423,7 @@ async def test_list_backend_models_returns_curated_claude_list(
     # Default falls back to the entry flagged is_default in the curated list
     # when no plugin_configs.claude_code.default_model_id override is present.
     assert response["default_model_id"] == "opus[1m]"
-    assert response["default_model_label"] == "Opus 5 (1M context)"
+    assert response["default_model_label"] == "Opus 5.5 (1M context)"
 
 
 @pytest.mark.asyncio
@@ -4439,7 +4439,7 @@ async def test_list_backend_models_honours_default_models_override(
     runtime = SessionRuntime(settings, storage)
     response = await runtime.list_backend_models("claude_code")
     assert response["default_model_id"] == "opus"
-    assert response["default_model_label"] == "Opus 5"
+    assert response["default_model_label"] == "Opus 5.5"
 
 
 def _seed_session_with_events(

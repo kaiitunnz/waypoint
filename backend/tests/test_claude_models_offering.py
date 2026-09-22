@@ -13,7 +13,7 @@ import pytest
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
-    FABLE51_MIN_CLI_VERSION,
+    OPUS55_MIN_CLI_VERSION,
     SONNET5_MIN_CLI_VERSION,
     claude_models_for_version,
     merge_model_catalogue,
@@ -30,7 +30,7 @@ def _by_id(models: tuple, model_id: str):
     return next(opt for opt in models if opt.id == model_id)
 
 
-@pytest.mark.parametrize("version", [None, FABLE51_MIN_CLI_VERSION, (2, 2, 0)])
+@pytest.mark.parametrize("version", [None, OPUS55_MIN_CLI_VERSION, (2, 2, 0)])
 def test_current_offering_for_none_or_recent_version(version) -> None:
     models = claude_models_for_version(version)
     assert models == DEFAULT_CLAUDE_MODELS
@@ -39,9 +39,10 @@ def test_current_offering_for_none_or_recent_version(version) -> None:
     assert "max" in sonnet.supported_efforts
 
     opus = _by_id(models, "opus")
-    assert opus.label == "Opus 5"
+    assert opus.label == "Opus 5.5"
     assert "xhigh" in opus.supported_efforts and "max" in opus.supported_efforts
-    assert _by_id(models, "opus[1m]").label == "Opus 5 (1M context)"
+    assert opus.default_effort == "medium"
+    assert _by_id(models, "opus[1m]").label == "Opus 5.5 (1M context)"
 
     fable = _by_id(models, "fable")
     assert fable.label == "Fable 5.1"
@@ -65,6 +66,30 @@ def test_legacy_offering_below_opus5_min_version() -> None:
     sonnet = _by_id(models, "sonnet")
     assert sonnet.label == "Sonnet 5"
     assert "xhigh" in sonnet.supported_efforts
+
+
+def test_legacy_offering_below_opus55_min_version() -> None:
+    models = claude_models_for_version((2, 1, 278))
+
+    # Only the opus entries roll back across the 2.1.279 boundary.
+    opus = _by_id(models, "opus")
+    assert opus.label == "Opus 5"
+    assert opus.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+    assert opus.default_effort == "high"
+
+    opus_1m = _by_id(models, "opus[1m]")
+    assert opus_1m.label == "Opus 5 (1M context)"
+    assert opus_1m.default_effort == "high"
+    assert opus_1m.is_default is True
+
+    # The pin the rolled-back alias now duplicates is dropped.
+    ids = {opt.id for opt in models}
+    assert "claude-opus-5" not in ids
+    assert "claude-opus-5[1m]" not in ids
+
+    # Fable 5.1 and Sonnet 5 already shipped by 2.1.278.
+    assert _by_id(models, "fable").label == "Fable 5.1"
+    assert _by_id(models, "sonnet").label == "Sonnet 5"
 
 
 def test_legacy_offering_below_fable51_min_version() -> None:
@@ -123,6 +148,8 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
 @pytest.mark.parametrize(
     ("version", "opus_label", "sonnet_label"),
     [
+        ((2, 1, 279), "Opus 5.5", "Sonnet 5"),
+        ((2, 1, 278), "Opus 5", "Sonnet 5"),
         ((2, 1, 219), "Opus 5", "Sonnet 5"),
         ((2, 1, 218), "Opus 4.8", "Sonnet 5"),
         ((2, 1, 197), "Opus 4.8", "Sonnet 5"),
@@ -140,7 +167,8 @@ def test_rollbacks_apply_cumulatively_at_each_boundary(
 
 
 @pytest.mark.parametrize(
-    "version", [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260)]
+    "version",
+    [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 280)],
 )
 def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
     # A rollback may drop a redundant pin, so an older offering is a subset -- never a
@@ -155,7 +183,8 @@ def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
 
 
 @pytest.mark.parametrize(
-    "version", [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260)]
+    "version",
+    [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 280)],
 )
 def test_no_offering_lists_a_label_twice(version) -> None:
     # Below 2.1.219 the `opus` alias is itself labelled "Opus 4.8"; likewise `sonnet`
@@ -185,11 +214,18 @@ def test_rollbacks_drop_the_pin_the_alias_makes_redundant() -> None:
     # At the current epoch the Fable 5 pin is a distinct model from the alias.
     assert "claude-fable-5" in {opt.id for opt in DEFAULT_CLAUDE_MODELS}
 
+    below_opus55 = {opt.id for opt in claude_models_for_version((2, 1, 278))}
+    assert "claude-opus-5" not in below_opus55
+    assert "claude-opus-5[1m]" not in below_opus55
+    assert "claude-opus-4-8" in below_opus55
+    assert "claude-opus-5" in {opt.id for opt in DEFAULT_CLAUDE_MODELS}
+
 
 # --- pinned legacy models -------------------------------------------------
 
 
 _LEGACY_IDS = (
+    "claude-opus-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
@@ -225,6 +261,7 @@ def test_legacy_models_forward_effort_unvalidated(model_id: str) -> None:
 @pytest.mark.parametrize(
     "model_id",
     [
+        "claude-opus-5",
         "claude-opus-4-8",
         "claude-opus-4-7",
         "claude-opus-4-6",

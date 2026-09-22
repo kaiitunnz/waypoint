@@ -25,6 +25,7 @@ CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max"
 # claude-sonnet-4-5), and those ids must keep resolving for display and usage
 # tracking for as long as such sessions can be resumed.
 CLAUDE_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-5-5": "opus",
     "claude-opus-5": "opus",
     "claude-opus-4-8": "opus",
     "claude-opus-4-7": "opus",
@@ -54,6 +55,16 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
 # is offered. `supported_efforts` stays unset, leaving the CLI the authority. Probed
 # against 2.1.220; the remap/retirement table is server-fetched and can drift.
 _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
+    BackendModelOption(
+        id="claude-opus-5",
+        label="Opus 5",
+        description="Previous Opus version",
+    ),
+    BackendModelOption(
+        id="claude-opus-5[1m]",
+        label="Opus 5 (1M context)",
+        description="Previous Opus version, long sessions",
+    ),
     BackendModelOption(
         id="claude-opus-4-8",
         label="Opus 4.8",
@@ -126,18 +137,18 @@ _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
-        label="Opus 5",
+        label="Opus 5.5",
         description="Most capable for complex work",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
+        default_effort="medium",
     ),
     BackendModelOption(
         id="opus[1m]",
-        label="Opus 5 (1M context)",
+        label="Opus 5.5 (1M context)",
         description="Long sessions with large codebases",
         is_default=True,
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
+        default_effort="medium",
     ),
     BackendModelOption(
         id="sonnet",
@@ -464,24 +475,28 @@ def resolve_import_model_id(
     return default_model_id
 
 
-# Catalogue boundaries from the official changelog (anthropics/claude-code). Only the
-# affected family differs across each. The introduction boundaries carry no rollback:
-# a CLI below them is still offered the model, so `fable` reaches builds older than
-# 2.1.170.
+# Catalogue boundaries from the official changelog (anthropics/claude-code) and the CLI
+# binaries; when the first build shipping a model follows a skipped version, the skipped
+# version is the boundary. Only the affected family differs across each. The
+# introduction boundaries carry no rollback: a CLI below them is still offered the
+# model, so `fable` reaches builds older than 2.1.170.
 #   2.1.154  Opus 4.8 introduced      (unhandled)
 #   2.1.170  Fable 5 introduced       (unhandled)
 #   2.1.197  `sonnet` becomes Sonnet 5
 #   2.1.219  `opus` becomes Opus 5
 #   2.1.257  `fable` becomes Fable 5.1
+#   2.1.279  `opus` becomes Opus 5.5
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
 OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
 FABLE51_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 257)
+OPUS55_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 279)
 
 
 class _ModelEpoch(NamedTuple):
     """What an alias swap looks like to CLI builds older than ``min_version``.
 
-    ``labels`` relabels the affected alias ids and ``efforts`` narrows their ladder.
+    ``labels`` relabels the affected alias ids, ``efforts`` narrows their ladder, and
+    ``default_effort`` resets their default.
     ``drop`` removes the pinned ids the relabelled alias now duplicates; the pin goes
     rather than the alias so the default selection, an alias id, stays valid.
     """
@@ -490,11 +505,19 @@ class _ModelEpoch(NamedTuple):
     labels: Mapping[str, str]
     drop: frozenset[str]
     efforts: tuple[str, ...] | None = None
+    default_effort: str | None = None
 
 
 # Newest first, applied cumulatively, so a build below several boundaries gets every
 # rollback.
 _CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
+    _ModelEpoch(
+        min_version=OPUS55_MIN_CLI_VERSION,
+        labels={"opus": "Opus 5", "opus[1m]": "Opus 5 (1M context)"},
+        drop=frozenset({"claude-opus-5", "claude-opus-5[1m]"}),
+        # Opus 5 accepts the full ladder, as Opus 5.5 does, but defaults to high.
+        default_effort="high",
+    ),
     _ModelEpoch(
         min_version=FABLE51_MIN_CLI_VERSION,
         labels={"fable": "Fable 5", "fable[1m]": "Fable 5 (1M context)"},
@@ -532,6 +555,8 @@ def _roll_back(
         update: dict[str, str | list[str]] = {"label": label}
         if epoch.efforts is not None:
             update["supported_efforts"] = list(epoch.efforts)
+        if epoch.default_effort is not None:
+            update["default_effort"] = epoch.default_effort
         rolled.append(option.model_copy(update=update))
     return tuple(rolled)
 

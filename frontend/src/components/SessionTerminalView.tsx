@@ -4,6 +4,7 @@ import {
   CSSProperties,
   Dispatch,
   MutableRefObject,
+  ReactNode,
   SetStateAction,
   useCallback,
   useState,
@@ -79,6 +80,9 @@ interface SessionTerminalViewProps {
   onBrowseWorkspace: () => void;
   onScheduled: () => void;
   onError: (message: string) => void;
+  // Session toasts and docks, laid out in flow above the key bar so the stage
+  // shrinks to make room instead of the notices covering the keys.
+  notices?: ReactNode;
 }
 
 export function SessionTerminalView({
@@ -121,6 +125,7 @@ export function SessionTerminalView({
   onBrowseWorkspace,
   onScheduled,
   onError,
+  notices,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
   // Emulated panes (claude_tty) are pinned to a fixed server-side grid. The
@@ -405,6 +410,7 @@ export function SessionTerminalView({
           />
         ) : null}
       </div>
+      <div className="term-notices">{notices}</div>
       {keyInjection ? (
         <TerminalKeyBar
           onSend={onTerminalInput}

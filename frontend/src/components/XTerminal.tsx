@@ -185,24 +185,34 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       onResizeRef.current?.({ cols: term.cols, rows: term.rows });
 
       // Only resizable panes refit on container changes. Fixed-grid panes
-      // keep the server-driven grid and let the host scroll instead.
-      const ro = fit
-        ? new ResizeObserver(() => {
-            try {
-              fit.fit();
-            } catch {
-              // Container detached mid-resize; ignore until next tick.
-            }
-          })
-        : null;
-      ro?.observe(host);
+      // keep the server-driven grid and let the host scroll instead; when the
+      // host shrinks (e.g. a notice appears below the stage) they stay pinned
+      // to the live bottom row unless the user has scrolled up.
+      let pinnedToBottom = true;
+      const onHostScroll = () => {
+        pinnedToBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 2;
+      };
+      if (!fit) host.addEventListener("scroll", onHostScroll, { passive: true });
+      const ro = new ResizeObserver(() => {
+        if (!fit) {
+          if (pinnedToBottom) host.scrollTop = host.scrollHeight;
+          return;
+        }
+        try {
+          fit.fit();
+        } catch {
+          // Container detached mid-resize; ignore until next tick.
+        }
+      });
+      ro.observe(host);
 
       return () => {
         onDataSub.dispose();
         onResizeSub.dispose();
         onScrollSub.dispose();
         osc52Sub.dispose();
-        ro?.disconnect();
+        ro.disconnect();
+        host.removeEventListener("scroll", onHostScroll);
         term.dispose();
         termRef.current = null;
         fitRef.current = null;

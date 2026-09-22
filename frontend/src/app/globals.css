@@ -9225,8 +9225,13 @@ html[data-theme="light"] .term-bar-action.primary {
  * app-theme tokens — so the stage never tracks the web chrome's light/dark. */
 .term-stage {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  /* Contain the stage's own floaters (jump pill, scroll chips) so an expanded
+     dock panel from .term-notices paints above them. */
+  isolation: isolate;
+  /* Gives up space first. At its floor of a few rows, crowded notices overlap
+     the stage (see .term-notices) rather than pushing the keybar out. */
+  flex: 1 1000 auto;
+  min-height: 96px;
   display: flex;
   background: #060810;
   overflow: hidden;
@@ -9440,6 +9445,70 @@ html[data-theme="light"] .term-bar-action.primary {
     min-width: 48px;
     min-height: 40px;
     font-size: 0.85rem;
+  }
+}
+
+/* Session toasts and docks in the Terminal view sit in flow between the stage
+   and the keybar, so the stage shrinks to make room instead of the notices
+   covering the keys. In flow they drop the floating offsets and the glass. */
+.term-notices {
+  position: relative;
+  z-index: 3;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-card);
+}
+
+.term-notices:empty {
+  display: none;
+}
+
+.term-notices > .session-error-toast,
+.term-notices > .session-notice-toast,
+.term-notices > .clipboard-prompt,
+.term-notices > .sq-dock,
+.term-notices > .sched-dock {
+  position: relative;
+  bottom: auto;
+  margin: 0;
+}
+
+.term-notices > .clipboard-prompt {
+  align-self: flex-end;
+}
+
+.term-notices > .session-error-toast,
+.term-notices > .session-notice-toast,
+.term-notices > .clipboard-prompt,
+.term-notices .sq-dock-strip,
+.term-notices .sched-dock-strip {
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.term-notices > .session-notice-toast,
+.term-notices .sq-dock-strip,
+.term-notices .sched-dock-strip {
+  border-color: var(--line);
+  background: var(--bg-card-soft);
+}
+
+.term-notices > .session-error-toast {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-card-soft));
+}
+
+@media (min-width: 768px) {
+  .term-notices .sq-dock.expanded .sq-dock-strip,
+  .term-notices .sched-dock.expanded .sched-dock-strip {
+    border-radius: var(--radius-sm);
   }
 }
 

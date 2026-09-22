@@ -1870,6 +1870,235 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     };
   }, [workspacePreviewEnabled, workspaceOpen, dockWidth, dockSheet]);
 
+  // Toasts and docks. The Terminal view lays them out above its key bar;
+  // everywhere else they float above the composer.
+  const noticesInTerminal = Boolean(session) && activeView === "terminal";
+  const notices = (
+    <>
+      {error ? (
+        <div className="session-error-toast" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="session-error-toast-dismiss"
+            onClick={() => setError("")}
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {modelNotice ? (
+        <div className="session-notice-toast" role="status">
+          <span className="session-notice-lamp" aria-hidden="true" />
+          <span className="session-notice-body">
+            {modelNotice.reason === "switch" ? (
+              <>
+                <span className="session-notice-label">Model changed</span>
+                <span className="model-transition">
+                  {modelNotice.previous ? (
+                    <span className="model-chip prev">
+                      {modelLabelFor(modelNotice.previous, modelOptions)}
+                    </span>
+                  ) : null}
+                  <span className="model-transition-arrow" aria-hidden="true">
+                    →
+                  </span>
+                  <span className="model-chip current">
+                    {modelLabelFor(modelNotice.current, modelOptions)}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="session-notice-label">Running</span>
+                <span className="model-transition">
+                  <span className="model-chip current">
+                    {modelLabelFor(modelNotice.current, modelOptions)}
+                  </span>
+                  {modelNotice.selection ? (
+                    <span className="model-transition-note">
+                      selected {modelLabelFor(modelNotice.selection, modelOptions)}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            className="session-notice-dismiss"
+            onClick={() => setModelNotice(null)}
+            aria-label="Dismiss notice"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {pendingPaste === null && pendingClipboard !== null ? (
+        <div
+          key={`clipboard-pending-${clipboardSeq}`}
+          className="clipboard-prompt"
+          role="dialog"
+          aria-label="Copy response to clipboard"
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
+              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
+              <path d="M6 7.5h4M6 10h4" />
+            </svg>
+          </span>
+          <button
+            type="button"
+            className="clipboard-prompt__send"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={copyPendingClipboard}
+            aria-label={`Copy ${pendingClipboard.length} characters to clipboard`}
+          >
+            <span className="clipboard-prompt__label">Response ready</span>
+            <span className="clipboard-prompt__meta">
+              {pendingClipboard.length.toLocaleString()} chars · tap to copy
+            </span>
+          </button>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissClipboardPill}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      ) : pendingPaste === null && clipboardCopied ? (
+        <div
+          key={`clipboard-copied-${clipboardSeq}`}
+          className="clipboard-prompt is-copied"
+          role="status"
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3.5 8.5L6.5 11.5L12.5 5" />
+            </svg>
+          </span>
+          <span className="clipboard-prompt__body">
+            <span className="clipboard-prompt__label">Copied</span>
+            <span className="clipboard-prompt__meta">paste anywhere</span>
+          </span>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissClipboardPill}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {pendingPaste !== null ? (
+        <div
+          key={`paste-pending-${pasteSeq}`}
+          className="clipboard-prompt is-paste"
+          role="dialog"
+          aria-label="Confirm paste"
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
+              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
+              <path d="M8 6.25v4.25M6 8.5l2 2 2-2" />
+            </svg>
+          </span>
+          <button
+            type="button"
+            className="clipboard-prompt__send"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={sendPendingPaste}
+            aria-label={`Send ${pendingPaste.length} characters from clipboard`}
+          >
+            <span className="clipboard-prompt__label">Paste ready</span>
+            <span className="clipboard-prompt__meta">
+              {pendingPaste.length.toLocaleString()} chars · tap to send
+            </span>
+          </button>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissPendingPaste}
+            aria-label="Cancel paste"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {sideQuestions.size > 0 ? (
+        <SideQuestionDock
+          questions={[...sideQuestions.values()]}
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          expandSignal={sqExpandSignal}
+        />
+      ) : null}
+      {showTaskDock && taskProgress ? (
+        <TaskProgressDock
+          progress={taskProgress}
+          onDismiss={() => {
+            const sequence = currentTaskEvent?.sequence ?? null;
+            setDismissedTaskSequence(sequence);
+            if (sequence !== null && typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
+                  String(sequence),
+                );
+              } catch {
+                // sessionStorage unavailable (private mode, quota) — the
+                // in-memory dismissal above still applies for this view.
+              }
+            }
+          }}
+        />
+      ) : null}
+      {session ? (
+        <ScheduledMessagesDock
+          messages={scheduledMessages.messages}
+          onCancel={scheduledMessages.cancel}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <WorkspaceFileLinkProvider value={workspaceLink}>
     <SessionFilesLinkProvider value={filesLink}>
@@ -2160,6 +2389,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onBrowseWorkspace={openWorkspaceRoot}
           onScheduled={scheduledMessages.refresh}
           onError={setError}
+          notices={notices}
         />
       ) : null}
       {!terminalOnly && pendingApproval ? (
@@ -2221,227 +2451,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           </button>
         </div>
       ) : null}
-      {error ? (
-        <div className="session-error-toast" role="alert">
-          <span>{error}</span>
-          <button
-            type="button"
-            className="session-error-toast-dismiss"
-            onClick={() => setError("")}
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {modelNotice ? (
-        <div className="session-notice-toast" role="status">
-          <span className="session-notice-lamp" aria-hidden="true" />
-          <span className="session-notice-body">
-            {modelNotice.reason === "switch" ? (
-              <>
-                <span className="session-notice-label">Model changed</span>
-                <span className="model-transition">
-                  {modelNotice.previous ? (
-                    <span className="model-chip prev">
-                      {modelLabelFor(modelNotice.previous, modelOptions)}
-                    </span>
-                  ) : null}
-                  <span className="model-transition-arrow" aria-hidden="true">
-                    →
-                  </span>
-                  <span className="model-chip current">
-                    {modelLabelFor(modelNotice.current, modelOptions)}
-                  </span>
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="session-notice-label">Running</span>
-                <span className="model-transition">
-                  <span className="model-chip current">
-                    {modelLabelFor(modelNotice.current, modelOptions)}
-                  </span>
-                  {modelNotice.selection ? (
-                    <span className="model-transition-note">
-                      selected {modelLabelFor(modelNotice.selection, modelOptions)}
-                    </span>
-                  ) : null}
-                </span>
-              </>
-            )}
-          </span>
-          <button
-            type="button"
-            className="session-notice-dismiss"
-            onClick={() => setModelNotice(null)}
-            aria-label="Dismiss notice"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {pendingPaste === null && pendingClipboard !== null ? (
-        <div
-          key={`clipboard-pending-${clipboardSeq}`}
-          className="clipboard-prompt"
-          role="dialog"
-          aria-label="Copy response to clipboard"
-        >
-          <span className="clipboard-prompt__glyph" aria-hidden="true">
-            <svg
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
-              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
-              <path d="M6 7.5h4M6 10h4" />
-            </svg>
-          </span>
-          <button
-            type="button"
-            className="clipboard-prompt__send"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={copyPendingClipboard}
-            aria-label={`Copy ${pendingClipboard.length} characters to clipboard`}
-          >
-            <span className="clipboard-prompt__label">Response ready</span>
-            <span className="clipboard-prompt__meta">
-              {pendingClipboard.length.toLocaleString()} chars · tap to copy
-            </span>
-          </button>
-          <button
-            type="button"
-            className="clipboard-prompt__dismiss"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={dismissClipboardPill}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      ) : pendingPaste === null && clipboardCopied ? (
-        <div
-          key={`clipboard-copied-${clipboardSeq}`}
-          className="clipboard-prompt is-copied"
-          role="status"
-        >
-          <span className="clipboard-prompt__glyph" aria-hidden="true">
-            <svg
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3.5 8.5L6.5 11.5L12.5 5" />
-            </svg>
-          </span>
-          <span className="clipboard-prompt__body">
-            <span className="clipboard-prompt__label">Copied</span>
-            <span className="clipboard-prompt__meta">paste anywhere</span>
-          </span>
-          <button
-            type="button"
-            className="clipboard-prompt__dismiss"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={dismissClipboardPill}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {pendingPaste !== null ? (
-        <div
-          key={`paste-pending-${pasteSeq}`}
-          className="clipboard-prompt is-paste"
-          role="dialog"
-          aria-label="Confirm paste"
-        >
-          <span className="clipboard-prompt__glyph" aria-hidden="true">
-            <svg
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
-              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
-              <path d="M8 6.25v4.25M6 8.5l2 2 2-2" />
-            </svg>
-          </span>
-          <button
-            type="button"
-            className="clipboard-prompt__send"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={sendPendingPaste}
-            aria-label={`Send ${pendingPaste.length} characters from clipboard`}
-          >
-            <span className="clipboard-prompt__label">Paste ready</span>
-            <span className="clipboard-prompt__meta">
-              {pendingPaste.length.toLocaleString()} chars · tap to send
-            </span>
-          </button>
-          <button
-            type="button"
-            className="clipboard-prompt__dismiss"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={dismissPendingPaste}
-            aria-label="Cancel paste"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {sideQuestions.size > 0 ? (
-        <SideQuestionDock
-          questions={[...sideQuestions.values()]}
-          host={host}
-          token={token}
-          sessionId={sessionId}
-          expandSignal={sqExpandSignal}
-        />
-      ) : null}
-      {showTaskDock && taskProgress ? (
-        <TaskProgressDock
-          progress={taskProgress}
-          onDismiss={() => {
-            const sequence = currentTaskEvent?.sequence ?? null;
-            setDismissedTaskSequence(sequence);
-            if (sequence !== null && typeof window !== "undefined") {
-              try {
-                window.sessionStorage.setItem(
-                  `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
-                  String(sequence),
-                );
-              } catch {
-                // sessionStorage unavailable (private mode, quota) — the
-                // in-memory dismissal above still applies for this view.
-              }
-            }
-          }}
-        />
-      ) : null}
-      {session && !terminalOnly ? (
-        <ScheduledMessagesDock
-          messages={scheduledMessages.messages}
-          onCancel={scheduledMessages.cancel}
-        />
-      ) : null}
+      {noticesInTerminal ? null : notices}
       {session && !terminalOnly ? (
         <ReplyComposer
           host={host}

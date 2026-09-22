@@ -426,7 +426,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   useEffect(() => {
     setSideQuestions(new Map());
     sqLiveSeenRef.current = new Set();
-    setSqExpandSignal(0);
+    setSqExpandPending(false);
   }, [sessionId]);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
@@ -463,11 +463,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
-  // Bumped when a *live* (non-hydrated) side-question first arrives, so the dock
+  // Set when a *live* (non-hydrated) side-question first arrives, so the dock
   // auto-expands a just-sent /btw but not asides replayed on page load. The ref
   // tracks ids already accounted for — including hydrated ones, so a later live
   // update to a rehydrated aside doesn't pop the dock open.
-  const [sqExpandSignal, setSqExpandSignal] = useState(0);
+  const [sqExpandPending, setSqExpandPending] = useState(false);
+  const handleSqExpandHandled = useCallback(() => setSqExpandPending(false), []);
   const sqLiveSeenRef = useRef<Set<string>>(new Set());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -924,7 +925,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               if (!sqLiveSeenRef.current.has(sq.id)) {
                 sqLiveSeenRef.current.add(sq.id);
                 // Live (non-hydrated) first appearance → ask the dock to open.
-                if (!payload.hydrated) setSqExpandSignal((n) => n + 1);
+                if (!payload.hydrated) setSqExpandPending(true);
               }
             } else if (payload.removed_id) {
               setSideQuestions((prev) => {
@@ -2067,7 +2068,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           host={host}
           token={token}
           sessionId={sessionId}
-          expandSignal={sqExpandSignal}
+          expandRequested={sqExpandPending}
+          onExpandHandled={handleSqExpandHandled}
         />
       ) : null}
       {showTaskDock && taskProgress ? (

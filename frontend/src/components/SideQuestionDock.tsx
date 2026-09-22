@@ -144,30 +144,31 @@ export function SideQuestionDock({
   host,
   token,
   sessionId,
-  expandSignal,
+  expandRequested,
+  onExpandHandled,
 }: {
   questions: SideQuestion[];
   host: string;
   token: string;
   sessionId: string;
-  expandSignal: number;
+  expandRequested: boolean;
+  onExpandHandled: () => void;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
-  const lastExpandSignalRef = useRef(0);
 
-  // Auto-expand when the parent reports a *live* /btw (a non-hydrated aside) by
-  // advancing expandSignal — so a just-sent question opens immediately, but
-  // asides replayed on page load/refresh (which never advance the signal) stay
-  // collapsed. A manual collapse sticks until the next live /btw.
+  // Auto-expand when the parent reports a *live* /btw (a non-hydrated aside) —
+  // so a just-sent question opens immediately, but asides replayed on page
+  // load/refresh stay collapsed. The parent owns the pending request, so a
+  // remount (e.g. switching between Chat and Terminal) doesn't replay it and a
+  // manual collapse sticks until the next live /btw.
   useEffect(() => {
-    if (expandSignal > lastExpandSignalRef.current) {
-      lastExpandSignalRef.current = expandSignal;
-      setExpanded(true);
-    }
-  }, [expandSignal]);
+    if (!expandRequested) return;
+    setExpanded(true);
+    onExpandHandled();
+  }, [expandRequested, onExpandHandled]);
 
   useEffect(() => {
     if (!expanded) return;

@@ -50,6 +50,36 @@ interface XTerminalProps {
 }
 
 
+function refitOnResize(host: HTMLElement, fit: FitAddon): () => void {
+  const ro = new ResizeObserver(() => {
+    try {
+      fit.fit();
+    } catch {
+      // Container detached mid-resize; ignore until next tick.
+    }
+  });
+  ro.observe(host);
+  return () => ro.disconnect();
+}
+
+// Keeps a scrolling host on its bottom row as it shrinks, unless the user has
+// scrolled up.
+function pinToBottomOnResize(host: HTMLElement): () => void {
+  let pinnedToBottom = true;
+  const onScroll = () => {
+    pinnedToBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 2;
+  };
+  host.addEventListener("scroll", onScroll, { passive: true });
+  const ro = new ResizeObserver(() => {
+    if (pinnedToBottom) host.scrollTop = host.scrollHeight;
+  });
+  ro.observe(host);
+  return () => {
+    ro.disconnect();
+    host.removeEventListener("scroll", onScroll);
+  };
+}
+
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
   function XTerminal(
     {
@@ -184,25 +214,16 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       fitRef.current = fit;
       onResizeRef.current?.({ cols: term.cols, rows: term.rows });
 
-      // Only resizable panes refit on container changes. Fixed-grid panes
-      // keep the server-driven grid and let the host scroll instead.
-      const ro = fit
-        ? new ResizeObserver(() => {
-            try {
-              fit.fit();
-            } catch {
-              // Container detached mid-resize; ignore until next tick.
-            }
-          })
-        : null;
-      ro?.observe(host);
+      // Resizable panes refit on container changes. Fixed-grid panes keep the
+      // server-driven grid and scroll the host.
+      const stopObservingHost = fit ? refitOnResize(host, fit) : pinToBottomOnResize(host);
 
       return () => {
         onDataSub.dispose();
         onResizeSub.dispose();
         onScrollSub.dispose();
         osc52Sub.dispose();
-        ro?.disconnect();
+        stopObservingHost();
         term.dispose();
         termRef.current = null;
         fitRef.current = null;

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/kaiitunnz/waypoint/compare/v0.21.0...v0.22.0) (2026-09-22)
+
+
+### Features
+
+* add Claude Opus 5.5 to the Claude Code model catalogue ([#462](https://github.com/kaiitunnz/waypoint/issues/462)) ([00b901c](https://github.com/kaiitunnz/waypoint/commit/00b901ca3f8ef5f545f450e0cfad5025c72008dd))
+
+
+### Bug Fixes
+
+* lay out terminal-view notices above the key bar ([#464](https://github.com/kaiitunnz/waypoint/issues/464)) ([2f28f3b](https://github.com/kaiitunnz/waypoint/commit/2f28f3b65ad2eb9ed89ad5c045450fcb4a525edf))
+
 ## [0.21.0](https://github.com/kaiitunnz/waypoint/compare/v0.20.0...v0.21.0) (2026-09-20)
 
 

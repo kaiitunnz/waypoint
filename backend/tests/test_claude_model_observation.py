@@ -11,14 +11,16 @@ from waypoint.backends.claude_code.models import (
     ("concrete", "expected"),
     [
         # Current-epoch alias targets have no pinned entry -> map to the alias.
-        ("claude-opus-5", "opus"),
+        ("claude-opus-5-5", "opus"),
         ("claude-sonnet-5", "sonnet"),
         ("claude-fable-5-1", "fable"),
         # Pinned legacy ids keep their distinct identity (checked before alias).
+        ("claude-opus-5", "claude-opus-5"),
         ("claude-opus-4-8", "claude-opus-4-8"),
         ("claude-sonnet-4-6", "claude-sonnet-4-6"),
         # The [1m] suffix is stripped from the stored base either way.
-        ("claude-opus-5[1m]", "opus"),
+        ("claude-opus-5-5[1m]", "opus"),
+        ("claude-opus-5[1m]", "claude-opus-5"),
         ("claude-opus-4-8[1m]", "claude-opus-4-8"),
         # Unknown ids round-trip unchanged (picker shows a Custom entry).
         ("claude-opus-9", "claude-opus-9"),
@@ -46,8 +48,8 @@ def test_is_plan_switching(model: str | None, expected: bool) -> None:
 
 
 def test_alias_resolution_first_reply_no_toast() -> None:
-    # select opus[1m], first reply runs claude-opus-5 -> same model, just resolved.
-    obs = observe_claude_model("claude-opus-5", "opus[1m]", prev_base=None)
+    # select opus[1m], first reply runs claude-opus-5-5 -> same model, just resolved.
+    obs = observe_claude_model("claude-opus-5-5", "opus[1m]", prev_base=None)
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection is None
@@ -55,11 +57,20 @@ def test_alias_resolution_first_reply_no_toast() -> None:
 
 
 def test_first_reply_intra_family_fallback_adopts_and_toasts() -> None:
-    # select opus (Opus 5), first reply runs Opus 4.8 -> a real fallback.
+    # select opus (Opus 5.5), first reply runs Opus 4.8 -> a real fallback.
     obs = observe_claude_model("claude-opus-4-8", "opus", prev_base=None)
     assert obs is not None
     assert obs.resolved_base == "claude-opus-4-8"
     assert obs.adopt_selection == "claude-opus-4-8"
+    assert obs.reason == "initial_mismatch"
+
+
+def test_first_reply_previous_opus_keeps_pinned_identity() -> None:
+    # select opus[1m], first reply runs Opus 5 (a CLI older than 2.1.279).
+    obs = observe_claude_model("claude-opus-5", "opus[1m]", prev_base=None)
+    assert obs is not None
+    assert obs.resolved_base == "claude-opus-5"
+    assert obs.adopt_selection == "claude-opus-5[1m]"
     assert obs.reason == "initial_mismatch"
 
 
@@ -80,7 +91,7 @@ def test_mid_session_switch_toasts_and_marks() -> None:
 
 
 def test_stable_model_no_notice() -> None:
-    obs = observe_claude_model("claude-opus-5", "opus", prev_base="opus")
+    obs = observe_claude_model("claude-opus-5-5", "opus", prev_base="opus")
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection is None
@@ -89,7 +100,7 @@ def test_stable_model_no_notice() -> None:
 
 def test_no_selection_adopts_without_toast() -> None:
     # No explicit selection (agent default) -> fill in the actual model, no alarm.
-    obs = observe_claude_model("claude-opus-5", None, prev_base=None)
+    obs = observe_claude_model("claude-opus-5-5", None, prev_base=None)
     assert obs is not None
     assert obs.resolved_base == "opus"
     assert obs.adopt_selection == "opus"

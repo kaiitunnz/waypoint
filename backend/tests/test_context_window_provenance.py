@@ -231,7 +231,7 @@ class _FeedOnceSource:
 
 @pytest.mark.asyncio
 async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> None:
-    # The transcript's resolved id normalizes to a base family (claude-opus-5 →
+    # The transcript's resolved id normalizes to a base family (claude-opus-5-5 →
     # 200K), but the session's durable model is opus[1m]; the published window is 1M.
     session = _session("opus[1m]", None)
     runtime = MagicMock()
@@ -244,7 +244,7 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
         "type": "assistant",
         "message": {
             "id": "msg_1",
-            "model": "claude-opus-5",
+            "model": "claude-opus-5-5",
             "content": [{"type": "text", "text": "hi"}],
             "usage": {"input_tokens": 42, "output_tokens": 1},
         },

@@ -468,7 +468,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // tracks ids already accounted for — including hydrated ones, so a later live
   // update to a rehydrated aside doesn't pop the dock open.
   const [sqExpandPending, setSqExpandPending] = useState(false);
-  const handleSqExpandHandled = useCallback(() => setSqExpandPending(false), []);
+  const handleSqExpandHandled = useCallback(() => setSqExpandPending(false), [setSqExpandPending]);
   const sqLiveSeenRef = useRef<Set<string>>(new Set());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);

@@ -9461,9 +9461,18 @@ html[data-theme="light"] .term-bar-action.primary {
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 0 8px;
   border-top: 1px solid var(--line);
   background: var(--bg-card);
+}
+
+/* Zero-height spacers carry the vertical inset as content (via the gap), so a
+   crowded slot can shrink all the way and spill upward instead of holding a
+   padding floor that pushes the keybar down. */
+.term-notices::before,
+.term-notices::after {
+  content: "";
+  flex: 0 0 0;
 }
 
 .term-notices:empty {

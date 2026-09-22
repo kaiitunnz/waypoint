@@ -9479,6 +9479,13 @@ html[data-theme="light"] .term-bar-action.primary {
   display: none;
 }
 
+/* The locked terminal is its own stacking context, so an expanded dock's
+   full-screen scrim would sit under the page composer. Lift the whole pane
+   while a dock in the slot is open. */
+.session-terminal:has(.term-notices .sq-dock.expanded, .term-notices .sched-dock.expanded) {
+  z-index: 50;
+}
+
 .term-notices > .session-error-toast,
 .term-notices > .session-notice-toast,
 .term-notices > .clipboard-prompt,
@@ -9512,6 +9519,14 @@ html[data-theme="light"] .term-bar-action.primary {
 
 .term-notices > .session-error-toast {
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-card-soft));
+}
+
+.term-notices > .clipboard-prompt {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card-soft));
+}
+
+.term-notices > .clipboard-prompt.is-copied {
+  background: color-mix(in srgb, var(--success) 16%, var(--bg-card-soft));
 }
 
 @media (min-width: 768px) {

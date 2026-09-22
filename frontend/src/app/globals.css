@@ -9225,11 +9225,10 @@ html[data-theme="light"] .term-bar-action.primary {
  * app-theme tokens — so the stage never tracks the web chrome's light/dark. */
 .term-stage {
   position: relative;
-  /* Contain the stage's own floaters (jump pill, scroll chips) so an expanded
-     dock panel from .term-notices paints above them. */
+  /* Contains the jump pill and scroll chips so an expanded .term-notices dock
+     panel paints above them. */
   isolation: isolate;
-  /* Gives up space first. At its floor of a few rows, crowded notices overlap
-     the stage (see .term-notices) rather than pushing the keybar out. */
+  /* Shrinks before the notices slot. */
   flex: 1 1000 auto;
   min-height: 96px;
   display: flex;
@@ -9448,9 +9447,10 @@ html[data-theme="light"] .term-bar-action.primary {
   }
 }
 
-/* Session toasts and docks in the Terminal view sit in flow between the stage
-   and the keybar, so the stage shrinks to make room instead of the notices
-   covering the keys. In flow they drop the floating offsets and the glass. */
+/* ─── Terminal notices ───
+   Session toasts and docks in the Terminal view, in flow between the stage and
+   the key bar: flat surfaces, no sticky offsets. Past the stage's floor the
+   slot shrinks and its content overlaps the stage. */
 .term-notices {
   position: relative;
   z-index: 3;
@@ -9460,15 +9460,13 @@ html[data-theme="light"] .term-bar-action.primary {
   flex-direction: column;
   justify-content: flex-end;
   gap: 6px;
-  min-width: 0;
   padding: 0 8px;
   border-top: 1px solid var(--line);
   background: var(--bg-card);
 }
 
-/* Zero-height spacers carry the vertical inset as content (via the gap), so a
-   crowded slot can shrink all the way and spill upward instead of holding a
-   padding floor that pushes the keybar down. */
+/* Zero-height spacers carry the vertical inset through the gap; padding would
+   set a floor the slot can't shrink below. */
 .term-notices::before,
 .term-notices::after {
   content: "";
@@ -9479,9 +9477,8 @@ html[data-theme="light"] .term-bar-action.primary {
   display: none;
 }
 
-/* The locked terminal is its own stacking context, so an expanded dock's
-   full-screen scrim would sit under the page composer. Lift the whole pane
-   while a dock in the slot is open. */
+/* The locked pane is a stacking context; lifting it while a slot dock is
+   expanded lets the dock's scrim cover the page composer. */
 .session-terminal:has(.term-notices .sq-dock.expanded, .term-notices .sched-dock.expanded) {
   z-index: 50;
 }
@@ -9491,13 +9488,8 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-notices > .clipboard-prompt,
 .term-notices > .sq-dock,
 .term-notices > .sched-dock {
-  position: relative;
   bottom: auto;
   margin: 0;
-}
-
-.term-notices > .clipboard-prompt {
-  align-self: flex-end;
 }
 
 .term-notices > .session-error-toast,

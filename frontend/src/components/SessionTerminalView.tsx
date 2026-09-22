@@ -80,9 +80,8 @@ interface SessionTerminalViewProps {
   onBrowseWorkspace: () => void;
   onScheduled: () => void;
   onError: (message: string) => void;
-  // Session toasts and docks, laid out in flow above the key bar so the stage
-  // shrinks to make room instead of the notices covering the keys.
-  notices?: ReactNode;
+  // Session toasts and docks, rendered in flow above the key bar.
+  notices: ReactNode;
 }
 
 export function SessionTerminalView({

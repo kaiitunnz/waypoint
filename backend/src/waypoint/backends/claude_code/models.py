@@ -475,10 +475,11 @@ def resolve_import_model_id(
     return default_model_id
 
 
-# Catalogue boundaries from the official changelog (anthropics/claude-code). Only the
-# affected family differs across each. The introduction boundaries carry no rollback:
-# a CLI below them is still offered the model, so `fable` reaches builds older than
-# 2.1.170.
+# Catalogue boundaries from the official changelog (anthropics/claude-code) and the CLI
+# binaries; when the first build shipping a model follows a skipped version, the skipped
+# version is the boundary. Only the affected family differs across each. The
+# introduction boundaries carry no rollback: a CLI below them is still offered the
+# model, so `fable` reaches builds older than 2.1.170.
 #   2.1.154  Opus 4.8 introduced      (unhandled)
 #   2.1.170  Fable 5 introduced       (unhandled)
 #   2.1.197  `sonnet` becomes Sonnet 5

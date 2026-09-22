@@ -426,7 +426,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   useEffect(() => {
     setSideQuestions(new Map());
     sqLiveSeenRef.current = new Set();
-    setSqExpandPending(false);
+    setSqExpanded(false);
   }, [sessionId]);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
@@ -463,13 +463,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
-  // Set when a *live* (non-hydrated) side-question first arrives, so the dock
-  // auto-expands a just-sent /btw but not asides replayed on page load. The ref
-  // tracks ids already accounted for — including hydrated ones, so a later live
-  // update to a rehydrated aside doesn't pop the dock open.
-  const [sqExpandPending, setSqExpandPending] = useState(false);
-  const handleSqExpandHandled = useCallback(() => setSqExpandPending(false), [setSqExpandPending]);
+  // The dock expands when a live (non-hydrated) side-question first arrives.
+  // The ref holds every id already seen, hydrated ones included, so a later
+  // update to a rehydrated aside doesn't expand the dock.
+  const [sqExpanded, setSqExpanded] = useState(false);
   const sqLiveSeenRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (sideQuestions.size === 0) setSqExpanded(false);
+  }, [sideQuestions.size]);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -925,7 +926,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               if (!sqLiveSeenRef.current.has(sq.id)) {
                 sqLiveSeenRef.current.add(sq.id);
                 // Live (non-hydrated) first appearance → ask the dock to open.
-                if (!payload.hydrated) setSqExpandPending(true);
+                if (!payload.hydrated) setSqExpanded(true);
               }
             } else if (payload.removed_id) {
               setSideQuestions((prev) => {
@@ -1871,9 +1872,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     };
   }, [workspacePreviewEnabled, workspaceOpen, dockWidth, dockSheet]);
 
-  // Toasts and docks. The Terminal view lays them out above its key bar;
-  // everywhere else they float above the composer.
-  const noticesInTerminal = Boolean(session) && activeView === "terminal";
+  const showTerminalPane = Boolean(session) && activeView === "terminal";
   const notices = (
     <>
       {error ? (
@@ -2068,8 +2067,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           host={host}
           token={token}
           sessionId={sessionId}
-          expandRequested={sqExpandPending}
-          onExpandHandled={handleSqExpandHandled}
+          expanded={sqExpanded}
+          onExpandedChange={setSqExpanded}
         />
       ) : null}
       {showTaskDock && taskProgress ? (
@@ -2344,7 +2343,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         </section>
         </AttachmentContextProvider>
       ) : null}
-      {session && activeView === "terminal" ? (
+      {showTerminalPane ? (
         <SessionTerminalView
           host={host}
           token={token}
@@ -2453,7 +2452,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           </button>
         </div>
       ) : null}
-      {noticesInTerminal ? null : notices}
+      {showTerminalPane ? null : notices}
       {session && !terminalOnly ? (
         <ReplyComposer
           host={host}

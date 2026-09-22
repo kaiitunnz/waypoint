@@ -144,40 +144,28 @@ export function SideQuestionDock({
   host,
   token,
   sessionId,
-  expandRequested,
-  onExpandHandled,
+  expanded,
+  onExpandedChange,
 }: {
   questions: SideQuestion[];
   host: string;
   token: string;
   sessionId: string;
-  expandRequested: boolean;
-  onExpandHandled: () => void;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
-
-  // Auto-expand when the parent reports a *live* /btw (a non-hydrated aside) —
-  // so a just-sent question opens immediately, but asides replayed on page
-  // load/refresh stay collapsed. The parent owns the pending request, so a
-  // remount (e.g. switching between Chat and Terminal) doesn't replay it and a
-  // manual collapse sticks until the next live /btw.
-  useEffect(() => {
-    if (!expandRequested) return;
-    setExpanded(true);
-    onExpandHandled();
-  }, [expandRequested, onExpandHandled]);
 
   useEffect(() => {
     if (!expanded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setExpanded(false);
+      if (e.key === "Escape") onExpandedChange(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [expanded]);
+  }, [expanded, onExpandedChange]);
 
   const handleDismiss = useCallback(
     async (sqid: string) => {
@@ -232,7 +220,7 @@ export function SideQuestionDock({
             type="button"
             className="sq-dock-scrim"
             aria-label="Close side questions"
-            onClick={() => setExpanded(false)}
+            onClick={() => onExpandedChange(false)}
           />
           <div className="sq-dock-panel" role="dialog" aria-label="Side questions">
             <div className="sq-dock-panel-head">
@@ -247,7 +235,7 @@ export function SideQuestionDock({
                 type="button"
                 className="sq-dock-collapse"
                 aria-label="Collapse side questions"
-                onClick={() => setExpanded(false)}
+                onClick={() => onExpandedChange(false)}
               >
                 <ChevronIcon />
               </button>
@@ -274,7 +262,7 @@ export function SideQuestionDock({
             type="button"
             className="sq-dock-toggle"
             aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => onExpandedChange(!expanded)}
           >
             <span className="sq-dock-glyph" aria-hidden>
               ¶

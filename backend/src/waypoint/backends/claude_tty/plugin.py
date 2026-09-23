@@ -641,13 +641,16 @@ class ClaudeTtyPlugin:
     ) -> SessionRecord:
         _validate_custom_args(request.args)
         thread_id = str(uuid.uuid4())
-        launch_args = _build_launch_args(
-            thread_id=thread_id,
-            permission_mode=permission_mode,
-            model=resolved_model,
-            effort=resolved_effort,
-            extra_args=request.args,
-        )
+        launch_args = [
+            "--session-id",
+            thread_id,
+            *self._claude.launch_flags(
+                model=resolved_model,
+                effort=resolved_effort,
+                permission_mode=permission_mode,
+            ),
+            *request.args,
+        ]
         try:
             command = runtime._command_for_backend(
                 self.id,
@@ -764,10 +767,16 @@ class ClaudeTtyPlugin:
         stored_args = state.get("launch_args")
         # After a transport switch the state is reset to the neutral native-thread
         # handoff (no launch_args); fall back to the persisted custom args so they
-        # survive the switch. Model/effort/permission are inherited via --resume
-        # (scrubbed here as on every reconnect).
+        # survive the switch.
         base_args = _scrub_session_args(
             stored_args if isinstance(stored_args, list) else list(session.args)
+        )
+        # `--resume` restores only a model the CLI recognizes in the transcript
+        # (a custom gateway model falls back to the default), so pin the controls.
+        control_flags = self._claude.launch_flags(
+            model=session.model,
+            effort=session.effort,
+            permission_mode=session.permission_mode,
         )
 
         effective_thread_id: str | None = None
@@ -778,10 +787,10 @@ class ClaudeTtyPlugin:
 
         if effective_thread_id:
             new_thread_id = effective_thread_id
-            launch_args = ["--resume", effective_thread_id, *base_args]
+            launch_args = ["--resume", effective_thread_id, *control_flags, *base_args]
         else:
             new_thread_id = str(uuid.uuid4())
-            launch_args = ["--session-id", new_thread_id, *base_args]
+            launch_args = ["--session-id", new_thread_id, *control_flags, *base_args]
 
         try:
             command = runtime._command_for_backend(
@@ -828,6 +837,7 @@ class ClaudeTtyPlugin:
             "pid": target.pane_pid,
             "thread_id": new_thread_id,
             "launch_args": launch_args,
+            **_carried_pre_plan_mode(session.permission_mode, state),
         }
         # The respawned pane hasn't confirmed a model yet.
         runtime.storage.update_session(
@@ -882,6 +892,11 @@ class ClaudeTtyPlugin:
         base_args = _scrub_session_args(
             stored_args if isinstance(stored_args, list) else []
         )
+        control_flags = self._claude.launch_flags(
+            model=session.model,
+            effort=session.effort,
+            permission_mode=session.permission_mode,
+        )
         config_dir = self._config_dir(session)
         new_thread_id = str(uuid.uuid4())
         # Claude writes a --fork-session transcript only after the first turn.
@@ -894,7 +909,7 @@ class ClaudeTtyPlugin:
             session, src_thread_id, new_thread_id, config_dir, launch_target
         )
         if materialized:
-            launch_args = ["--resume", new_thread_id, *base_args]
+            launch_args = ["--resume", new_thread_id, *control_flags, *base_args]
         else:
             launch_args = [
                 "--resume",
@@ -902,6 +917,7 @@ class ClaudeTtyPlugin:
                 "--fork-session",
                 "--session-id",
                 new_thread_id,
+                *control_flags,
                 *base_args,
             ]
         try:
@@ -956,6 +972,9 @@ class ClaudeTtyPlugin:
                 "pid": target.pane_pid,
                 "thread_id": new_thread_id,
                 "launch_args": launch_args,
+                **_carried_pre_plan_mode(
+                    session.permission_mode, session.transport_state
+                ),
             },
             permission_mode=session.permission_mode,
             model=session.model,
@@ -1140,13 +1159,9 @@ class ClaudeTtyPlugin:
         base_args = _scrub_session_args(
             stored_args if isinstance(stored_args, list) else []
         )
-        flag_pairs: list[str] = []
-        if merged[0]:
-            flag_pairs += ["--model", merged[0]]
-        if merged[1]:
-            flag_pairs += ["--effort", merged[1]]
-        if merged[2]:
-            flag_pairs += ["--permission-mode", merged[2]]
+        flag_pairs = self._claude.launch_flags(
+            model=merged[0], effort=merged[1], permission_mode=merged[2]
+        )
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
         # The thread file is only written on first input, so a settings change
@@ -1287,8 +1302,9 @@ class ClaudeTtyPlugin:
 
         The aside already forked a self-contained thread off the parent, so we
         resume it directly (no second ``--fork-session``); the new session owns
-        it. Launch flags are inherited from ``parent`` so model/permission carry
-        over, mirroring :meth:`fork_session` minus the re-fork.
+        it. Custom args come from ``parent``; the controls are pinned from
+        ``new_session``, which copied them from ``parent``, mirroring
+        :meth:`fork_session` minus the re-fork.
         """
         launch_target = (
             runtime._find_launch_target(parent.launch_target_id)
@@ -1299,7 +1315,16 @@ class ClaudeTtyPlugin:
         base_args = _scrub_session_args(
             stored_args if isinstance(stored_args, list) else []
         )
-        launch_args = ["--resume", thread_id, *base_args]
+        launch_args = [
+            "--resume",
+            thread_id,
+            *self._claude.launch_flags(
+                model=new_session.model,
+                effort=new_session.effort,
+                permission_mode=new_session.permission_mode,
+            ),
+            *base_args,
+        ]
         command = runtime._command_for_backend(
             self.id,
             launch_args,
@@ -1331,6 +1356,9 @@ class ClaudeTtyPlugin:
                     "pid": target.pane_pid,
                     "thread_id": thread_id,
                     "launch_args": launch_args,
+                    **_carried_pre_plan_mode(
+                        new_session.permission_mode, parent.transport_state
+                    ),
                 },
                 status=SessionStatus.STARTING,
             )
@@ -1658,23 +1686,20 @@ class ClaudeTtyPlugin:
         return runtime.get_session(session.id)
 
 
-def _build_launch_args(
-    *,
-    thread_id: str,
-    permission_mode: str | None,
-    model: str | None,
-    effort: str | None,
-    extra_args: list[str],
-) -> list[str]:
-    args = ["--session-id", thread_id]
-    if model:
-        args += ["--model", model]
-    if effort:
-        args += ["--effort", effort]
-    if permission_mode:
-        args += ["--permission-mode", permission_mode]
-    args += extra_args
-    return args
+def _carried_pre_plan_mode(
+    permission_mode: str | None, source_state: dict[str, Any]
+) -> dict[str, str]:
+    """``pre_plan_mode`` to keep across a relaunch that stays in plan mode.
+
+    The tailer restores it when a plan is approved; without it the session
+    would drop to ``default`` instead of the mode it held before plan.
+    """
+    if permission_mode != "plan":
+        return {}
+    pre_plan_mode = source_state.get("pre_plan_mode")
+    if isinstance(pre_plan_mode, str) and pre_plan_mode:
+        return {"pre_plan_mode": pre_plan_mode}
+    return {}
 
 
 def _scrub_session_args(args: list[str]) -> list[str]:

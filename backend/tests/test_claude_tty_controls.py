@@ -245,8 +245,8 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
 async def test_restore_reconstructs_custom_args_when_launch_args_absent() -> None:
     # Transport-switch handoff: the runtime resets transport_state to the neutral
     # {thread_id} (no launch_args). claude_tty restore must fall back to the
-    # persisted custom args so they survive the switch (model/effort/permission
-    # are inherited via --resume).
+    # persisted custom args so they survive the switch, and pin the controls
+    # from the session fields.
     plugin = ClaudeTtyPlugin()
     captured = _stub_lifecycle(plugin)
     now = datetime.now(UTC)
@@ -272,8 +272,80 @@ async def test_restore_reconstructs_custom_args_when_launch_args_absent() -> Non
     await plugin.restore_session(runtime, session)
 
     built_args = runtime._command_for_backend.call_args.args[1]
-    assert built_args == ["--resume", "thread-1", "--verbose"]
+    assert built_args == ["--resume", "thread-1", "--model", "opus", "--verbose"]
     assert captured["start_at_end"] is True
+
+
+async def test_reconnect_pins_controls_from_session_fields() -> None:
+    # `--resume` alone falls back to the CLI default for a custom gateway model,
+    # so an EXITED reconnect pins the stored controls over stale launch args.
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(
+        status=SessionStatus.EXITED,
+        model="deepseek-v4-flash[1m]",
+        effort="high",
+        permission_mode="auto",
+        launch_args=["--resume", "thread-1", "--verbose"],
+    )
+    runtime, _ = _restart_runtime()
+
+    await plugin.restore_session(runtime, session)
+
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args == [
+        "--resume",
+        "thread-1",
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "auto",
+        "--verbose",
+    ]
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert state["launch_args"] == built_args
+
+
+async def test_reconnect_new_thread_pins_controls() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    plugin._conversation_exists = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    session = _make_session(
+        status=SessionStatus.EXITED,
+        model="deepseek-v4-flash[1m]",
+        permission_mode="auto",
+    )
+    runtime, _ = _restart_runtime()
+
+    await plugin.restore_session(runtime, session)
+
+    built_args = runtime._command_for_backend.call_args.args[1]
+    new_thread_id = built_args[1]
+    assert new_thread_id != "thread-1"
+    assert built_args == [
+        "--session-id",
+        new_thread_id,
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--permission-mode",
+        "auto",
+    ]
+
+
+async def test_reconnect_in_plan_keeps_pre_plan_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(status=SessionStatus.EXITED, permission_mode="plan")
+    session.transport_state["pre_plan_mode"] = "auto"
+    runtime, _ = _restart_runtime()
+
+    await plugin.restore_session(runtime, session)
+
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert state["pre_plan_mode"] == "auto"
+    assert state["launch_args"][-2:] == ["--permission-mode", "plan"]
 
 
 async def test_restart_into_plan_stashes_pre_plan_mode() -> None:
@@ -372,6 +444,43 @@ async def test_launch_resumed_pane_kills_pane_on_post_start_failure() -> None:
 
     runtime.tmux.start_managed_session.assert_awaited_once()
     runtime.tmux.kill_session.assert_awaited_once_with(target.session)
+
+
+async def test_launch_resumed_pane_pins_controls_from_new_session() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    runtime, _ = _restart_runtime()
+    parent = _make_session(
+        session_id="parent-1",
+        permission_mode="plan",
+        launch_args=["--resume", "thread-1", "--model", "stale", "--verbose"],
+    )
+    parent.transport_state["pre_plan_mode"] = "auto"
+    new_session = _make_session(
+        session_id="new-1",
+        thread_id=None,
+        model="deepseek-v4-flash[1m]",
+        effort="high",
+        permission_mode="plan",
+    )
+
+    await plugin._launch_resumed_pane(runtime, parent, new_session, "fork-thread")
+
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args == [
+        "--resume",
+        "fork-thread",
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "plan",
+        "--verbose",
+    ]
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert state["launch_args"] == built_args
+    assert state["pre_plan_mode"] == "auto"
 
 
 # ── apply_effort return contract ──────────────────────────────────────────────
@@ -556,6 +665,8 @@ async def test_fork_session_materializes_transcript_and_seeds_events(
     source = _make_session(
         session_id="src",
         thread_id="thread-src",
+        model="deepseek-v4-flash[1m]",
+        effort="high",
         launch_env={"CLAUDE_CONFIG_DIR": config_dir},
     )
     source.cwd = cwd
@@ -581,8 +692,14 @@ async def test_fork_session_materializes_transcript_and_seeds_events(
     # A materialized fork resumes the copy and tails from its end; the seeded
     # history reaches the DB through clone_events, not the tailer.
     built_args = runtime._command_for_backend.call_args.args[1]
-    assert built_args == ["--resume", new_thread_id]
-    assert "--fork-session" not in built_args
+    assert built_args == [
+        "--resume",
+        new_thread_id,
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--effort",
+        "high",
+    ]
     assert captured["start_at_end"] is True
     runtime.storage.clone_events.assert_called_once_with("src", "fork-1")
 
@@ -594,7 +711,13 @@ async def test_fork_session_falls_back_to_native_fork_without_transcript() -> No
     runtime, _ = _launch_runtime()
     # No transcript on disk, so materialization fails and the fork uses the
     # native lazy path.
-    source = _make_session(session_id="src", thread_id="thread-src")
+    source = _make_session(
+        session_id="src",
+        thread_id="thread-src",
+        model="deepseek-v4-flash[1m]",
+        permission_mode="plan",
+    )
+    source.transport_state["pre_plan_mode"] = "auto"
 
     forked = await plugin.fork_session(
         runtime,
@@ -613,7 +736,12 @@ async def test_fork_session_falls_back_to_native_fork_without_transcript() -> No
         "--fork-session",
         "--session-id",
         new_thread_id,
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--permission-mode",
+        "plan",
     ]
+    assert forked.transport_state["pre_plan_mode"] == "auto"
     assert captured["start_at_end"] is False
     runtime.storage.clone_events.assert_not_called()
 

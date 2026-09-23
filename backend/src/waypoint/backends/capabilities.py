@@ -97,6 +97,9 @@ class TransportCapabilities(_FrozenModel):
     supports_set_effort_inline: bool = False
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
+    # The transport applies a permission-mode change by restarting the session
+    # (claude_tty); the frontend confirms first.
+    supports_set_permission_mode_with_restart: bool = False
     settings_change_interrupts_turn: bool = False
     # The transport can apply restart-scoped launch-settings edits (env, args,
     # config overrides, account profile) by terminating and restoring the
@@ -168,6 +171,9 @@ class BackendCapabilities(_FrozenModel):
     # path don't have to also claim ``supports_set_effort_inline``.
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
+    # The plugin applies a permission-mode change by restarting the session
+    # (claude_tty); the frontend confirms first.
+    supports_set_permission_mode_with_restart: bool = False
     # Applying a model/permission-mode/effort change relaunches the session
     # process, so doing it mid-turn interrupts the running turn. claude_tty
     # is the only backend like this today — its TUI has no in-process knob,
@@ -297,6 +303,9 @@ class BackendCapabilities(_FrozenModel):
             supports_set_effort_inline=self.supports_set_effort_inline,
             supports_set_effort_with_restart=self.supports_set_effort_with_restart,
             supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,
+            supports_set_permission_mode_with_restart=(
+                self.supports_set_permission_mode_with_restart
+            ),
             settings_change_interrupts_turn=self.settings_change_interrupts_turn,
             supports_launch_settings_with_restart=self.supports_launch_settings_with_restart,
             live_terminal=self.live_terminal,

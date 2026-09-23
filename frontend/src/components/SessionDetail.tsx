@@ -575,12 +575,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [session, catalog],
   );
 
+  // `confirmed`: the change comes from the restart pill, which already confirmed it.
   const handlePermissionModeChange = useCallback(
-    async (nextMode: string) => {
+    async (nextMode: string, confirmed = false) => {
       if (!session || nextMode === (session.permission_mode ?? "default")) {
         return;
       }
-      if (!confirmTurnInterrupt("permission mode")) {
+      if (!confirmed && !confirmTurnInterrupt("permission mode")) {
         return;
       }
       setModeBusy(true);
@@ -647,7 +648,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, [host, token, sessionBackend, sessionLaunchTargetId, handleAuthFailure]);
 
   const handleModelChange = useCallback(
-    async (nextModel: string) => {
+    async (nextModel: string, confirmed = false) => {
       if (!session) {
         return;
       }
@@ -656,7 +657,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       if (cleaned === current) {
         return;
       }
-      if (!confirmTurnInterrupt("model")) {
+      if (!confirmed && !confirmTurnInterrupt("model")) {
         return;
       }
       setModelBusy(true);
@@ -680,7 +681,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
 
   const handleEffortChange = useCallback(
-    async (nextEffort: string) => {
+    async (nextEffort: string, confirmed = false) => {
       if (!session) {
         return;
       }
@@ -689,7 +690,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       if (cleaned === current) {
         return;
       }
-      if (!confirmTurnInterrupt("effort")) {
+      if (!confirmed && !confirmTurnInterrupt("effort")) {
         return;
       }
       setEffortBusy(true);
@@ -2484,6 +2485,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
+          modeRequiresConfirm={
+            Boolean(
+              session?.transport &&
+                catalog.capsFor(session.backend, session.transport)
+                  ?.supports_set_permission_mode_with_restart,
+            )
+          }
           modelRequiresConfirm={
             // A model swap restarts on some transports (claude_tty) and is
             // inline on others, so resolve against the (agent, transport) pair.
@@ -2600,8 +2608,9 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
-  // The model swap restarts the session (claude_tty), so it stages behind the
-  // restart pill like effort rather than applying inline.
+  // Set when the transport applies the change by restarting (claude_tty); the
+  // pick stages behind the restart pill.
+  modeRequiresConfirm: boolean;
   modelRequiresConfirm: boolean;
   // True when the backend's effort swap requires a session restart
   // (Claude respawns the CLI). Drives the "confirm before applying"
@@ -2610,9 +2619,9 @@ interface ReplyComposerProps {
   effortRequiresConfirm: boolean;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
-  onModeChange: (mode: string) => void | Promise<void>;
-  onModelChange: (model: string) => void | Promise<void>;
-  onEffortChange: (effort: string) => void | Promise<void>;
+  onModeChange: (mode: string, confirmed?: boolean) => void | Promise<void>;
+  onModelChange: (model: string, confirmed?: boolean) => void | Promise<void>;
+  onEffortChange: (effort: string, confirmed?: boolean) => void | Promise<void>;
   onRefresh: () => void;
   onRateLimitRefresh: () => void | Promise<void>;
   onReattach: () => void | Promise<void>;
@@ -2663,6 +2672,7 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   catalog,
+  modeRequiresConfirm,
   modelRequiresConfirm,
   effortRequiresConfirm,
   hasToolRuns,
@@ -2727,8 +2737,8 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // Staged model/effort picks awaiting the restart-confirm Apply; `null` is no
-  // pending change. Only used by transports that restart to apply them.
+  // Picks staged behind the restart pill; `null` when none.
+  const [pendingMode, setPendingMode] = useState<string | null>(null);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
@@ -3126,10 +3136,11 @@ const ReplyComposer = memo(function ReplyComposer({
       event.preventDefault();
       if (permissionModeOptions.length > 0 && !modeBusy) {
         const currentIndex = permissionModeOptions.findIndex(
-          (opt) => opt.id === (permissionMode ?? "")
+          (opt) => opt.id === modeDisplayValue,
         );
         const nextIndex = (currentIndex + 1) % permissionModeOptions.length;
-        void onModeChange(permissionModeOptions[nextIndex].id);
+        handleModeSelect(permissionModeOptions[nextIndex].id);
+        if (modeRequiresConfirm) setTuneOpen(true);
       }
       return;
     }
@@ -3181,18 +3192,35 @@ const ReplyComposer = memo(function ReplyComposer({
         ),
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
-  const modelDisplayValue = pendingModel ?? (currentModel ?? "");
+  const currentMode = permissionMode ?? "default";
+  // A staged pick is ignored once the transport applies inline (e.g. after an
+  // interface switch).
+  const modeDisplayValue = modeRequiresConfirm
+    ? (pendingMode ?? currentMode)
+    : currentMode;
+  const modePendingDiffers =
+    modeRequiresConfirm && pendingMode !== null && pendingMode !== currentMode;
+  const modelDisplayValue = modelRequiresConfirm
+    ? (pendingModel ?? (currentModel ?? ""))
+    : (currentModel ?? "");
   const modelPendingDiffers =
     modelRequiresConfirm &&
     pendingModel !== null &&
     pendingModel !== (currentModel ?? "");
-  const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
+  const effortDisplayValue = effortRequiresConfirm
+    ? (pendingEffort ?? (currentEffort ?? ""))
+    : (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
-  // Model and effort both relaunch the pane (claude_tty), so a pick is staged
-  // and applied only on explicit confirm via the shared restart pill below.
+  const handleModeSelect = (next: string) => {
+    if (modeRequiresConfirm) {
+      setPendingMode(next === currentMode ? null : next);
+      return;
+    }
+    void onModeChange(next);
+  };
   const handleModelSelect = (next: string) => {
     if (modelRequiresConfirm) {
       setPendingModel(next === (currentModel ?? "") ? null : next);
@@ -3207,8 +3235,10 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     void onEffortChange(next);
   };
-  // Which staged changes the restart pill names — model, effort, or both.
   const pendingRestartLabel = [
+    modePendingDiffers && pendingMode
+      ? `${modeOptions.find((option) => option.id === pendingMode)?.label ?? pendingMode} mode`
+      : null,
     modelPendingDiffers
       ? pendingModel
         ? (modelEntries.find((option) => option.id === pendingModel)?.label ??
@@ -3223,15 +3253,20 @@ const ReplyComposer = memo(function ReplyComposer({
   ]
     .filter(Boolean)
     .join(" and ");
+  const hasPendingRestart =
+    modePendingDiffers || modelPendingDiffers || effortPendingDiffers;
+  const restartBusy = modeBusy || modelBusy || effortBusy;
   const applyPendingRestart = async () => {
-    const model = pendingModel;
-    const effort = pendingEffort;
+    const mode = modePendingDiffers ? pendingMode : null;
+    const model = modelPendingDiffers ? pendingModel : null;
+    const effort = effortPendingDiffers ? pendingEffort : null;
+    setPendingMode(null);
     setPendingModel(null);
     setPendingEffort(null);
     setTuneOpen(false);
-    // Model before effort so effort's relaunch resumes on the new model.
-    if (model !== null) await onModelChange(model);
-    if (effort !== null) await onEffortChange(effort);
+    if (mode !== null) await onModeChange(mode, true);
+    if (model !== null) await onModelChange(model, true);
+    if (effort !== null) await onEffortChange(effort, true);
   };
 
   const assistantOps = assistant ? assistantControls : null;
@@ -3390,7 +3425,7 @@ const ReplyComposer = memo(function ReplyComposer({
                 {"⚙︎"}
               </span>
               <span className="composer-tune-summary">{tuneSummary}</span>
-              {modelPendingDiffers || effortPendingDiffers ? (
+              {hasPendingRestart ? (
                 <span
                   className="composer-tune-pending"
                   aria-label="Pending change"
@@ -3535,8 +3570,8 @@ const ReplyComposer = memo(function ReplyComposer({
                   <label className="composer-tune-field">
                     <span>Permission mode</span>
                     <select
-                      value={permissionMode ?? "default"}
-                      onChange={(event) => void onModeChange(event.target.value)}
+                      value={modeDisplayValue}
+                      onChange={(event) => handleModeSelect(event.target.value)}
                       disabled={modeBusy || disabled}
                     >
                       {modeOptions.map((option) => (
@@ -3586,7 +3621,7 @@ const ReplyComposer = memo(function ReplyComposer({
                     </select>
                   </label>
                 ) : null}
-                {modelPendingDiffers || effortPendingDiffers ? (
+                {hasPendingRestart ? (
                   <div className="composer-tune-restart">
                     <p>
                       Restart Claude with <strong>{pendingRestartLabel}</strong>?
@@ -3597,9 +3632,9 @@ const ReplyComposer = memo(function ReplyComposer({
                       type="button"
                       className="composer-tune-restart-apply"
                       onClick={() => void applyPendingRestart()}
-                      disabled={modelBusy || effortBusy}
+                      disabled={restartBusy}
                     >
-                      {modelBusy || effortBusy ? "Restarting…" : "Apply restart"}
+                      {restartBusy ? "Restarting…" : "Apply restart"}
                     </button>
                   </div>
                 ) : null}

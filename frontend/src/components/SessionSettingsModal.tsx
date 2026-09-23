@@ -259,7 +259,10 @@ export function SessionSettingsModal({
   // an interface switch is staged (it can't ride the same restart).
   const showPermission =
     !transportChanged &&
-    Boolean(caps?.supports_set_permission_mode_inline) &&
+    Boolean(
+      caps?.supports_set_permission_mode_inline ||
+        caps?.supports_set_permission_mode_with_restart,
+    ) &&
     permissionModes.length > 0;
   const showModel =
     !transportChanged &&

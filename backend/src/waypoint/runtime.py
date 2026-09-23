@@ -4386,7 +4386,11 @@ class SessionRuntime:
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
-        if not plugin.capabilities.supports_set_permission_mode_inline:
+        caps = plugin.capabilities
+        if not (
+            caps.supports_set_permission_mode_inline
+            or caps.supports_set_permission_mode_with_restart
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"permission mode is not supported for {session.backend}",

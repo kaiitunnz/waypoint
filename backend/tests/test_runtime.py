@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import ANY
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -4165,6 +4165,29 @@ async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
 
     assert fake.permission_mode_calls == [("claude-sess", "plan")]
     assert updated.permission_mode == "plan"
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_accepts_restart_only_transport(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="tty-sess",
+        backend="claude_code",
+        transport="claude_tty",
+    )
+    storage.create_session(session)
+    plugin = runtime.registry.plugin_for(session)
+    assert plugin.capabilities.supports_set_permission_mode_inline is False
+    apply = AsyncMock()
+    plugin.apply_permission_mode = apply  # type: ignore[method-assign]
+
+    updated = await runtime.set_permission_mode("tty-sess", "auto")
+
+    apply.assert_awaited_once()
+    assert apply.await_args is not None
+    assert apply.await_args.args[2] == "auto"
+    assert updated.permission_mode == "auto"
 
 
 @pytest.mark.asyncio

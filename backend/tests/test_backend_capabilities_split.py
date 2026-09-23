@@ -78,6 +78,22 @@ def test_model_swap_restart_is_claude_tty_only() -> None:
             assert caps.supports_set_model_inline is False
 
 
+def test_permission_mode_swap_restart_is_claude_tty_only() -> None:
+    """Only claude_tty sets the permission mode by restarting, and it does not
+    also claim inline."""
+    registry = build_default_registry()
+    for plugin in registry.all():
+        caps = plugin.capabilities
+        with_restart = plugin.id == "claude_tty"
+        assert caps.supports_set_permission_mode_with_restart is with_restart
+        assert not (
+            caps.supports_set_permission_mode_inline
+            and caps.supports_set_permission_mode_with_restart
+        )
+        if with_restart:
+            assert caps.supports_set_permission_mode_inline is False
+
+
 def test_terminal_pane_caps() -> None:
     """has_terminal_pane is set for tmux (interactive+resizable) and claude_tty
     (read-only, fixed-size); all other plugins leave all three False."""

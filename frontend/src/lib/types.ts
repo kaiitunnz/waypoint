@@ -318,6 +318,7 @@ export interface TransportCapabilities {
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
+  supports_set_permission_mode_with_restart: boolean;
   settings_change_interrupts_turn: boolean;
   live_terminal: boolean;
   has_terminal_pane: boolean;
@@ -358,6 +359,7 @@ export interface BackendCapabilities {
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
+  supports_set_permission_mode_with_restart: boolean;
   settings_change_interrupts_turn: boolean;
   live_terminal: boolean;
   has_terminal_pane: boolean;

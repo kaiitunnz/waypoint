@@ -2848,6 +2848,7 @@ def _permission_mode_handler(
     supports_inline: bool,
     modes: list[str],
     transport: str | None = None,
+    supports_with_restart: bool = False,
     interrupts: bool = False,
     status: str = "idle",
 ) -> Any:
@@ -2882,6 +2883,9 @@ def _permission_mode_handler(
                             },
                             "transport_capabilities": {
                                 "supports_set_permission_mode_inline": supports_inline,
+                                "supports_set_permission_mode_with_restart": (
+                                    supports_with_restart
+                                ),
                                 "settings_change_interrupts_turn": interrupts,
                             },
                         }
@@ -2980,6 +2984,57 @@ def test_set_permission_mode_rejects_unsupported_backend(
     assert result.exit_code != 0
     assert "does not support" in _error_text(result.output)
     assert posted == []
+
+
+def _restart_only_mode_handler(posted: list[dict[str, Any]]) -> Any:
+    return _permission_mode_handler(
+        posted,
+        backend="claude_code",
+        transport="claude_tty",
+        supports_inline=False,
+        supports_with_restart=True,
+        interrupts=True,
+        modes=["default", "auto"],
+    )
+
+
+def test_set_permission_mode_restart_only_transport_needs_restart_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_restart_only_mode_handler(posted)),
+    )
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "sessions", "mode", "s1", "auto"]
+    )
+    assert result.exit_code == 4
+    assert posted == []
+
+
+def test_set_permission_mode_restart_only_transport_applies_with_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "waypoint.cli.WaypointClient",
+        _fake_client_factory(_restart_only_mode_handler(posted)),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "mode",
+            "s1",
+            "auto",
+            "--restart",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert posted == [{"mode": "auto"}]
 
 
 def test_start_warns_on_unknown_model(

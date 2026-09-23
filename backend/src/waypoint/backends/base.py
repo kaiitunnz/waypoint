@@ -349,7 +349,8 @@ class BackendPlugin(Protocol):
         """Apply a validated permission mode mid-session.
 
         Only invoked when the plugin advertises
-        ``supports_set_permission_mode_inline=True``.
+        ``supports_set_permission_mode_inline`` or
+        ``supports_set_permission_mode_with_restart``.
         """
         ...
 

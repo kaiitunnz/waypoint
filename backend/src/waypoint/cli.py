@@ -2550,7 +2550,10 @@ def _build_settings_plan(
 
     # ── tuning capability gates ─────────────────────────────────────────────
     if opts.permission_mode is not None:
-        if not caps.get("supports_set_permission_mode_inline"):
+        if not (
+            caps.get("supports_set_permission_mode_inline")
+            or caps.get("supports_set_permission_mode_with_restart")
+        ):
             raise typer.BadParameter(
                 f"backend {backend!r} does not support setting the permission mode"
             )

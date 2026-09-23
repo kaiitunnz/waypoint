@@ -46,11 +46,7 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, status
 
 from waypoint.backends.claude_code.threads import claude_projects_root
-from waypoint.launch_targets import (
-    SshLaunchTargetConfig,
-    _resolve_local_binary,
-    quote_remote_path,
-)
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     EventKind,
     SessionEnvelope,
@@ -249,13 +245,16 @@ async def _run_one_shot_local(
     thread_id: str,
     fork_id: str,
     cwd: str,
+    control_flags: list[str],
     env: dict[str, str] | None = None,
 ) -> str:
     """Run a one-shot fork-query locally and return the answer text.
 
-    ``env`` is the session's process env (``os.environ`` + its ``launch_env``);
-    it carries ``CLAUDE_CONFIG_DIR`` so a profile-scoped session resumes its
-    thread under the right config dir. ``None`` inherits the parent env.
+    ``control_flags`` pins the session's model and effort, which ``--resume``
+    does not restore for a custom gateway model. ``env`` is the session's
+    process env (``os.environ`` + its ``launch_env``); it carries
+    ``CLAUDE_CONFIG_DIR`` so a profile-scoped session resumes its thread under
+    the right config dir. ``None`` inherits the parent env.
     """
     binary = shutil.which("claude")
     if binary is None:
@@ -269,6 +268,7 @@ async def _run_one_shot_local(
         "--fork-session",
         "--session-id",
         fork_id,
+        *control_flags,
         "--output-format",
         "json",
         *_TOOL_ISOLATION_ARGS,
@@ -300,10 +300,16 @@ async def _run_one_shot_remote(
     thread_id: str,
     fork_id: str,
     cwd: str,
+    control_flags: list[str],
     launch_target: SshLaunchTargetConfig,
     claude_bin: str,
+    env: dict[str, str] | None = None,
 ) -> str:
-    """Run a one-shot fork-query on a remote SSH host and return the answer."""
+    """Run a one-shot fork-query on a remote SSH host and return the answer.
+
+    ``env`` is the session's ``launch_env`` overlay, applied on the remote
+    side as the session's own pane launch does.
+    """
     claude_args = [
         claude_bin,
         "-p",
@@ -313,25 +319,13 @@ async def _run_one_shot_remote(
         "--fork-session",
         "--session-id",
         fork_id,
+        *control_flags,
         "--output-format",
         "json",
         *_TOOL_ISOLATION_ARGS,
         *_ANSWER_STYLE_ARGS,
     ]
-    remote_parts = [
-        f"cd {quote_remote_path(cwd)}",
-        "&&",
-        "exec",
-        shlex.join(claude_args),
-    ]
-    remote_cmd = " ".join(remote_parts)
-    wrapped = launch_target.wrap_remote_command(remote_cmd)
-    ssh_args = [
-        _resolve_local_binary(launch_target.ssh_bin),
-        *launch_target.ssh_args,
-        launch_target.ssh_destination,
-        wrapped,
-    ]
+    ssh_args = launch_target.build_remote_exec_args(claude_args, cwd, extra_env=env)
     proc = await asyncio.create_subprocess_exec(
         *ssh_args,
         stdout=asyncio.subprocess.PIPE,
@@ -445,14 +439,14 @@ async def _run_side_question_bg(
             _write_side_questions(runtime, session_id, qs)
 
         config_dir = _session_config_dir(session)
+        control_flags = plugin.launch_flags(model=session.model, effort=session.effort)
+        env = runtime.account_lookup_env(
+            session.backend, session.launch_env, launch_target=launch_target
+        )
         try:
             if launch_target is None:
                 answer = await _run_one_shot_local(
-                    question,
-                    thread_id,
-                    fork_id,
-                    session.cwd,
-                    env=runtime.account_lookup_env(session.backend, session.launch_env),
+                    question, thread_id, fork_id, session.cwd, control_flags, env=env
                 )
             else:
                 claude_bin = plugin.remote_executable(launch_target) or "claude"
@@ -461,8 +455,10 @@ async def _run_side_question_bg(
                     thread_id,
                     fork_id,
                     session.cwd,
+                    control_flags,
                     launch_target,
                     claude_bin,
+                    env=env,
                 )
         except Exception as exc:  # noqa: BLE001
             log.warning(

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import waypoint.backends.claude_code.side_question as sq_module
+from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.claude_code.side_question import (
     MAX_ATTEMPTS,
     _parse_one_shot_output,
@@ -26,6 +27,7 @@ from waypoint.backends.claude_code.side_question import (
     recover_pending_side_questions,
     start_side_question,
 )
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     SessionEnvelope,
     SessionRecord,
@@ -74,8 +76,14 @@ class _FakeRuntime:
         return self._launch_targets.get(launch_target_id)
 
     def account_lookup_env(
-        self, backend: str, launch_env: dict[str, str]
+        self,
+        backend: str,
+        launch_env: dict[str, str],
+        *,
+        launch_target: Any = None,
     ) -> dict[str, str]:
+        if launch_target is not None:
+            return dict(launch_env)
         return {**os.environ, **launch_env}
 
     async def _record_user_event(
@@ -133,6 +141,8 @@ class _FakePlugin:
     def remote_executable(self, launch_target: Any) -> str:
         return "claude"
 
+    launch_flags = ClaudeCodePlugin.launch_flags
+
     def launch_factory(self, runtime: Any, launch_target_id: str | None) -> Any:
         return None
 
@@ -170,6 +180,8 @@ def _make_session(
     launch_target_id: str | None = None,
     transport_state_extra: dict | None = None,
     launch_env: dict[str, str] | None = None,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> SessionRecord:
     settings_dir = storage.database_path.parent / "sessions" / session_id
     settings_dir.mkdir(parents=True, exist_ok=True)
@@ -195,6 +207,8 @@ def _make_session(
         raw_log_path=str(settings_dir / "raw.log"),
         structured_log_path=str(settings_dir / "events.jsonl"),
         launch_env=launch_env or {},
+        model=model,
+        effort=effort,
     )
     return storage.create_session(session)
 
@@ -1122,8 +1136,6 @@ async def test_one_shot_local_argv_disables_tools(
 
 async def test_one_shot_remote_argv_disables_tools() -> None:
     """The remote one-shot command must isolate tools with quoting preserved."""
-    from waypoint.launch_targets import SshLaunchTargetConfig
-
     target = SshLaunchTargetConfig(id="box", name="Box", ssh_destination="user@host")
     captured_args: list[list[str]] = []
 
@@ -1156,7 +1168,7 @@ async def test_one_shot_remote_argv_disables_tools() -> None:
         patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
     ):
         await sq_module._run_one_shot_remote(
-            "What branch?", "thread-1", "fork-1", "~/project", target, "claude"
+            "What branch?", "thread-1", "fork-1", "~/project", [], target, "claude"
         )
 
     assert captured_args, "subprocess was never called"
@@ -1181,6 +1193,96 @@ async def test_one_shot_remote_argv_disables_tools() -> None:
     assert (
         "'You are answering a brief, read-only side-question" in remote_cmd
     ), f"side-question system prompt not quoted intact: {remote_cmd!r}"
+
+
+async def _capture_bg_one_shot_argv(
+    runtime: Any, plugin: Any, session: SessionRecord
+) -> list[str]:
+    _write_side_questions(
+        runtime,
+        session.id,
+        [
+            SideQuestion(
+                id="sq-pin",
+                question="Which model?",
+                status=SideQuestionStatus.PENDING,
+                attempts=1,
+                created_at=datetime.now(UTC),
+            )
+        ],
+    )
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured.append(list(args))
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (
+                    json.dumps(
+                        {"is_error": False, "result": "ok", "subtype": "success"}
+                    ).encode(),
+                    b"",
+                )
+
+        return _FakeProc()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/claude"),
+        patch.object(
+            SshLaunchTargetConfig, "wrap_remote_command", lambda self, cmd: cmd
+        ),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
+        await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-pin")
+    assert captured, "subprocess was never called"
+    return captured[0]
+
+
+async def test_one_shot_local_pins_session_model_and_effort(
+    runtime: Any, plugin: Any
+) -> None:
+    # `--resume` falls back to the CLI default for a custom gateway model, so the
+    # aside must answer on the session's model, not the default.
+    session = _make_session(
+        runtime.storage, model="deepseek-v4-flash[1m]", effort="high"
+    )
+
+    argv = await _capture_bg_one_shot_argv(runtime, plugin, session)
+
+    fork_idx = argv.index("--session-id")
+    assert argv[fork_idx + 2 : fork_idx + 6] == [
+        "--model",
+        "deepseek-v4-flash[1m]",
+        "--effort",
+        "high",
+    ]
+
+
+async def test_one_shot_remote_pins_model_and_forwards_launch_env(
+    runtime: Any, plugin: Any
+) -> None:
+    # A remote gateway-model session needs its launch_env (the gateway URL) on
+    # the remote side, as its pane launch gets, or the pinned model is rejected.
+    target = SshLaunchTargetConfig(id="box", name="Box", ssh_destination="user@host")
+    runtime._launch_targets["box"] = target
+    session = _make_session(
+        runtime.storage,
+        launch_target_id="box",
+        model="deepseek-v4-flash[1m]",
+        launch_env={"ANTHROPIC_BASE_URL": "https://gw.example"},
+    )
+
+    argv = await _capture_bg_one_shot_argv(runtime, plugin, session)
+
+    remote_cmd = argv[-1]
+    assert remote_cmd.startswith(
+        "cd /tmp/project && exec env ANTHROPIC_BASE_URL=https://gw.example claude"
+    ), remote_cmd
+    assert "--model 'deepseek-v4-flash[1m]'" in remote_cmd, remote_cmd
+    assert "--effort" not in remote_cmd, remote_cmd
 
 
 # ---------------------------------------------------------------------------
@@ -1479,7 +1581,7 @@ async def test_run_one_shot_local_passes_env(monkeypatch: Any) -> None:
 
     with patch("asyncio.create_subprocess_exec", fake_exec):
         out = await sq_module._run_one_shot_local(
-            "q", "t", "f", "/cwd", env={"CLAUDE_CONFIG_DIR": "/prof", "PATH": "/x"}
+            "q", "t", "f", "/cwd", [], env={"CLAUDE_CONFIG_DIR": "/prof", "PATH": "/x"}
         )
     assert out == "ok"
     assert captured["env"]["CLAUDE_CONFIG_DIR"] == "/prof"

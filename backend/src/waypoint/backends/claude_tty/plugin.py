@@ -173,12 +173,8 @@ class ClaudeTtyPlugin:
         supports_reattach_after_exit=True,
         supports_fork=True,
         supports_attachments=True,
-        # All control swaps restart the pane with `--resume <thread>` and a
-        # rebuilt flag set; none of them mutate a live process inline. Model,
-        # effort, and permission mode advertise the ``*_with_restart`` variant
-        # so the swap is not misreported as free (the frontend confirms the
-        # restart). ``settings_change_interrupts_turn`` records the real cost
-        # when it lands mid-turn.
+        # Every control swap respawns the pane with `--resume <thread>` and the
+        # rebuilt flags, interrupting a running turn.
         supports_set_model_inline=False,
         supports_set_model_with_restart=True,
         supports_set_effort_inline=False,

@@ -97,10 +97,8 @@ class TransportCapabilities(_FrozenModel):
     supports_set_effort_inline: bool = False
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
-    # The transport changes the permission mode by restarting the protocol
-    # process (claude_tty respawns the pane with a new ``--permission-mode``).
-    # Mirrors ``supports_set_model_with_restart``; the frontend reads it to
-    # confirm before the restart.
+    # The transport applies a permission-mode change by restarting the session
+    # (claude_tty); the frontend confirms first.
     supports_set_permission_mode_with_restart: bool = False
     settings_change_interrupts_turn: bool = False
     # The transport can apply restart-scoped launch-settings edits (env, args,
@@ -173,10 +171,8 @@ class BackendCapabilities(_FrozenModel):
     # path don't have to also claim ``supports_set_effort_inline``.
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
-    # The plugin changes the permission mode by restarting the protocol
-    # process (claude_tty: stop the pane + respawn with a new
-    # --permission-mode). Mirrors ``supports_set_model_with_restart``; the
-    # frontend reads it to confirm before the restart.
+    # The plugin applies a permission-mode change by restarting the session
+    # (claude_tty); the frontend confirms first.
     supports_set_permission_mode_with_restart: bool = False
     # Applying a model/permission-mode/effort change relaunches the session
     # process, so doing it mid-turn interrupts the running turn. claude_tty

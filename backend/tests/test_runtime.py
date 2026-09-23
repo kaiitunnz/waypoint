@@ -4169,8 +4169,6 @@ async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_set_permission_mode_accepts_restart_only_transport(tmp_path) -> None:
-    # claude_tty applies the mode by restarting the pane (inline=False,
-    # with_restart=True); the gate must still route it to the plugin.
     runtime, storage, settings = make_runtime(tmp_path)
     session = make_session(
         settings,

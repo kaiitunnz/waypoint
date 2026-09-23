@@ -4387,8 +4387,6 @@ class SessionRuntime:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         caps = plugin.capabilities
-        # Applied inline, or via a session restart (claude_tty respawns the pane
-        # with the new --permission-mode). Mirrors the set_model gate.
         if not (
             caps.supports_set_permission_mode_inline
             or caps.supports_set_permission_mode_with_restart

@@ -575,8 +575,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [session, catalog],
   );
 
-  // `confirmed` skips the guard when the change comes from the composer's
-  // "Apply restart" pill, which is itself the confirmation.
+  // `confirmed`: the change comes from the restart pill, which already confirmed it.
   const handlePermissionModeChange = useCallback(
     async (nextMode: string, confirmed = false) => {
       if (!session || nextMode === (session.permission_mode ?? "default")) {
@@ -2487,8 +2486,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           transport={session?.transport ?? null}
           catalog={catalog}
           modeRequiresConfirm={
-            // Like the model swap, a permission-mode change restarts on some
-            // transports (claude_tty) and is inline on others.
             Boolean(
               session?.transport &&
                 catalog.capsFor(session.backend, session.transport)
@@ -2611,8 +2608,8 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
-  // The permission-mode and model swaps restart the session (claude_tty), so
-  // they stage behind the restart pill like effort rather than applying inline.
+  // Set when the transport applies the change by restarting (claude_tty); the
+  // pick stages behind the restart pill.
   modeRequiresConfirm: boolean;
   modelRequiresConfirm: boolean;
   // True when the backend's effort swap requires a session restart
@@ -2740,8 +2737,7 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // Staged mode/model/effort picks awaiting the restart-confirm Apply; `null`
-  // is no pending change. Only used by transports that restart to apply them.
+  // Picks staged behind the restart pill; `null` when none.
   const [pendingMode, setPendingMode] = useState<string | null>(null);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
@@ -3144,7 +3140,6 @@ const ReplyComposer = memo(function ReplyComposer({
         );
         const nextIndex = (currentIndex + 1) % permissionModeOptions.length;
         handleModeSelect(permissionModeOptions[nextIndex].id);
-        // A staged pick needs the restart pill on screen to be applied.
         if (modeRequiresConfirm) setTuneOpen(true);
       }
       return;
@@ -3198,8 +3193,8 @@ const ReplyComposer = memo(function ReplyComposer({
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
   const currentMode = permissionMode ?? "default";
-  // A staged value only counts while its transport still restarts to apply it
-  // (the interface can switch under a stale pick).
+  // A staged pick is ignored once the transport applies inline (e.g. after an
+  // interface switch).
   const modeDisplayValue = modeRequiresConfirm
     ? (pendingMode ?? currentMode)
     : currentMode;
@@ -3219,8 +3214,6 @@ const ReplyComposer = memo(function ReplyComposer({
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
-  // Mode, model, and effort all relaunch the pane (claude_tty), so a pick is
-  // staged and applied only on explicit confirm via the shared restart pill.
   const handleModeSelect = (next: string) => {
     if (modeRequiresConfirm) {
       setPendingMode(next === currentMode ? null : next);
@@ -3242,7 +3235,6 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     void onEffortChange(next);
   };
-  // Which staged changes the restart pill names — mode, model, and/or effort.
   const pendingRestartLabel = [
     modePendingDiffers && pendingMode
       ? `${modeOptions.find((option) => option.id === pendingMode)?.label ?? pendingMode} mode`
@@ -3272,8 +3264,6 @@ const ReplyComposer = memo(function ReplyComposer({
     setPendingModel(null);
     setPendingEffort(null);
     setTuneOpen(false);
-    // Mode, then model, then effort (the settings modal's order); each later
-    // relaunch resumes with the earlier changes already applied.
     if (mode !== null) await onModeChange(mode, true);
     if (model !== null) await onModelChange(model, true);
     if (effort !== null) await onEffortChange(effort, true);

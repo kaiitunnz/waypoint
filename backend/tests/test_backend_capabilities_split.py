@@ -79,9 +79,8 @@ def test_model_swap_restart_is_claude_tty_only() -> None:
 
 
 def test_permission_mode_swap_restart_is_claude_tty_only() -> None:
-    """Only claude_tty changes the permission mode by restarting the pane; the
-    two flags are mutually exclusive, and the frontend reads ``with_restart`` to
-    confirm before the restart (mirrors the model-restart contract)."""
+    """Only claude_tty sets the permission mode by restarting, and it does not
+    also claim inline."""
     registry = build_default_registry()
     for plugin in registry.all():
         caps = plugin.capabilities

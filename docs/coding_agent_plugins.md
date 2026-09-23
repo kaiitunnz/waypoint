@@ -164,6 +164,7 @@ Properties of the channel — how the agent is driven.
 | `supports_set_effort_inline` | `bool` | Gates the effort picker. `False` if effort changes need a restart (Claude); the runtime still routes through `apply_effort`. |
 | `supports_set_effort_with_restart` | `bool` | Gates effort changes that restart-and-resume between turns instead of applying mid-stream. |
 | `supports_set_permission_mode_inline` | `bool` | Gates the permission-mode picker + the `/api/sessions/{id}/mode` endpoint. |
+| `supports_set_permission_mode_with_restart` | `bool` | Gates permission-mode changes that restart-and-resume the session instead of applying inline (claude_tty); the composer stages the pick behind a restart confirmation. |
 | `settings_change_interrupts_turn` | `bool` | Frontend hint that applying a model/permission/effort change relaunches the session and interrupts the running turn (claude_tty), so the composer confirms first. |
 | `live_terminal` | `bool` | The transport drives the agent in a live terminal pane (a pty): the runtime tails its raw log to scrape state (`_ensure_monitor`) and the frontend can mirror the pane over the terminal websocket. True for the generic `tmux` wrapper only; structured transports (including `claude_tty`, which runs in a pane but is tailed from its transcript) publish to the event stream instead. |
 | `has_terminal_pane` | `bool` | The transport exposes a tmux pane the terminal websocket can mirror (`tmux`, `claude_tty`). Panes with no pane are refused by the terminal WS. May be read-only or fixed-size — see the flags below. |

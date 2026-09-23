@@ -1208,18 +1208,13 @@ class ClaudeTtyPlugin:
             "launch_args": launch_args,
         }
         # Remember the mode held before entering plan so an ExitPlanMode approval
-        # can restore it (mirroring Chat). Set it on the transition into plan,
-        # carry it across a model/effort restart that stays in plan, and drop it
-        # on any restart that leaves plan. new_state is rebuilt fresh each restart,
-        # so this is the only place the key survives across one.
-        if new_permission_mode == "plan":
-            pre_plan_mode = (
-                session.permission_mode
-                if session.permission_mode != "plan"
-                else state.get("pre_plan_mode")
-            )
-            if isinstance(pre_plan_mode, str) and pre_plan_mode:
-                new_state["pre_plan_mode"] = pre_plan_mode
+        # can restore it (mirroring Chat): set it on the transition into plan;
+        # otherwise carry it while staying in plan and drop it on leaving.
+        if new_permission_mode == "plan" and session.permission_mode != "plan":
+            if session.permission_mode:
+                new_state["pre_plan_mode"] = session.permission_mode
+        else:
+            new_state.update(_carried_pre_plan_mode(new_permission_mode, state))
         # The respawn may run a different model; the no-op early return above
         # keeps a benign relaunch from reaching here.
         runtime.storage.update_session(

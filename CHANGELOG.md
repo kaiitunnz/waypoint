@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.1](https://github.com/kaiitunnz/waypoint/compare/v0.22.0...v0.22.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* pin model, effort, and permission mode on claude_tty relaunch ([#465](https://github.com/kaiitunnz/waypoint/issues/465)) ([8c3debf](https://github.com/kaiitunnz/waypoint/commit/8c3debf66d0ae7e42e0b17ed83edfe711200b840))
+* warn before a permission-mode change restarts a claude_tty session ([#467](https://github.com/kaiitunnz/waypoint/issues/467)) ([698ec6b](https://github.com/kaiitunnz/waypoint/commit/698ec6b14192197bc34b4058282c1f7a8b4acd5f))
+
 ## [0.22.0](https://github.com/kaiitunnz/waypoint/compare/v0.21.0...v0.22.0) (2026-09-22)
 
 

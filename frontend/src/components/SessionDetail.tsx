@@ -3198,15 +3198,23 @@ const ReplyComposer = memo(function ReplyComposer({
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
   const currentMode = permissionMode ?? "default";
-  const modeDisplayValue = pendingMode ?? currentMode;
+  // A staged value only counts while its transport still restarts to apply it
+  // (the interface can switch under a stale pick).
+  const modeDisplayValue = modeRequiresConfirm
+    ? (pendingMode ?? currentMode)
+    : currentMode;
   const modePendingDiffers =
     modeRequiresConfirm && pendingMode !== null && pendingMode !== currentMode;
-  const modelDisplayValue = pendingModel ?? (currentModel ?? "");
+  const modelDisplayValue = modelRequiresConfirm
+    ? (pendingModel ?? (currentModel ?? ""))
+    : (currentModel ?? "");
   const modelPendingDiffers =
     modelRequiresConfirm &&
     pendingModel !== null &&
     pendingModel !== (currentModel ?? "");
-  const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
+  const effortDisplayValue = effortRequiresConfirm
+    ? (pendingEffort ?? (currentEffort ?? ""))
+    : (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
     pendingEffort !== null &&
@@ -3257,9 +3265,9 @@ const ReplyComposer = memo(function ReplyComposer({
     modePendingDiffers || modelPendingDiffers || effortPendingDiffers;
   const restartBusy = modeBusy || modelBusy || effortBusy;
   const applyPendingRestart = async () => {
-    const mode = pendingMode;
-    const model = pendingModel;
-    const effort = pendingEffort;
+    const mode = modePendingDiffers ? pendingMode : null;
+    const model = modelPendingDiffers ? pendingModel : null;
+    const effort = effortPendingDiffers ? pendingEffort : null;
     setPendingMode(null);
     setPendingModel(null);
     setPendingEffort(null);

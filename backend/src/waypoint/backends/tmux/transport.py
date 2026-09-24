@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +40,8 @@ class TmuxTransport(TransportAdapter):
 
     def __init__(self, runtime: SessionRuntime) -> None:
         self._runtime = runtime
+        # One write at a time per pane: concurrent sends garble it.
+        self._input_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     @property
     def adapter(self):
@@ -48,6 +51,17 @@ class TmuxTransport(TransportAdapter):
     def _target(session: SessionRecord) -> str:
         state = session.transport_state
         return state.get("tmux_pane") or state.get("tmux_session") or session.id
+
+    def _input_lock(self, session: SessionRecord) -> asyncio.Lock:
+        return self._input_locks[session.id]
+
+    def _confirmer(self, session: SessionRecord) -> PaneSubmitConfirming | None:
+        # Resolve the *agent* plugin (by backend), not plugin_for(session),
+        # which is transport-keyed and returns this TmuxPlugin for the generic
+        # tmux transport — the agent (Claude/Codex/OpenCode) owns the
+        # composer-confirmation knowledge.
+        plugin = self._runtime.registry.get(session.backend)
+        return plugin if isinstance(plugin, PaneSubmitConfirming) else None
 
     async def send_input(
         self,
@@ -59,12 +73,13 @@ class TmuxTransport(TransportAdapter):
         # host paths appended to the message; the inner CLI reads them itself.
         payload = append_attachment_paths(text, attachments or [])
         target = self._target(session)
-        # Resolve the *agent* plugin (by backend), not plugin_for(session),
-        # which is transport-keyed and returns this TmuxPlugin for the generic
-        # tmux transport — the agent (Claude/Codex/OpenCode) owns the
-        # composer-confirmation knowledge.
-        plugin = self._runtime.registry.get(session.backend)
-        confirmer = plugin if isinstance(plugin, PaneSubmitConfirming) else None
+        confirmer = self._confirmer(session)
+        async with self._input_lock(session):
+            await self._send(target, payload, confirmer)
+
+    async def _send(
+        self, target: str, payload: str, confirmer: PaneSubmitConfirming | None
+    ) -> None:
         try:
             if confirmer is None:
                 await self.adapter.send_input(target, payload, True)
@@ -268,13 +283,11 @@ class TmuxTransport(TransportAdapter):
         return False
 
     async def input_blocked(self, session: SessionRecord) -> bool:
-        # The same check ``send_input`` refuses on, made before anything is
-        # recorded.
-        plugin = self._runtime.registry.get(session.backend)
-        if not isinstance(plugin, PaneSubmitConfirming):
+        confirmer = self._confirmer(session)
+        if confirmer is None:
             return False
         try:
             snapshot = await self.adapter.capture_snapshot(self._target(session))
         except TmuxError:
             return False
-        return plugin.pane_shows_blocking_dialog(snapshot)
+        return confirmer.pane_shows_blocking_dialog(snapshot)

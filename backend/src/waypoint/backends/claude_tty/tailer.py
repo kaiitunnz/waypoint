@@ -135,9 +135,9 @@ class TranscriptTailer:
         # (not a bool) so one popup replacing another does not suppress the next
         # Escape; reset when the pane leaves the screen.
         self._dismissed_screen: pane_dialog.PaneScreen | None = None
-        # (dialog signature, approval id) of cards left open by an earlier
-        # tailer. A matching dialog still on the pane adopts its card instead
-        # of posting a duplicate; the rest expire on the first decided screen.
+        # (dialog signature, approval id) of cards an earlier tailer left open:
+        # a matching dialog on the pane adopts its card; the rest expire on the
+        # first decided screen.
         self._adoptable: list[tuple[str | None, str]] = []
 
     async def _drain(self, *, force: bool = False) -> None:
@@ -530,7 +530,7 @@ class TranscriptTailer:
         self._surfaced_sig = sig
         return None if adopted else approval_id
 
-    async def _load_adoptable(self) -> None:
+    def _load_adoptable(self) -> None:
         # A new tailer means a new pane or a restarted backend: any in-memory
         # approval is stale, and its card is judged against the pane below.
         self._plugin._pending_approvals.pop(self._session_id, None)
@@ -693,17 +693,15 @@ class TranscriptTailer:
 
     async def run(self) -> None:
         try:
-            await self._load_adoptable()
+            self._load_adoptable()
             await self._loop()
-        except asyncio.CancelledError:
-            # Cancelled by terminate/restart (which close the card themselves)
-            # or by backend shutdown (where the next tailer adopts it).
-            raise
         except Exception:
             log.exception(
                 "transcript tailer crashed",
                 extra={"session_id": self._session_id},
             )
+        # Not on cancel: terminate/restart close the card themselves; after a
+        # backend shutdown the next tailer adopts it.
         await self._close_dialog_state()
 
     async def _loop(self) -> None:

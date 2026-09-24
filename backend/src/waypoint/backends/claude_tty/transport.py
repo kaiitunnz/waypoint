@@ -102,7 +102,7 @@ class ClaudeTtyTransport(TmuxTransport):
         self._plugin._pending_approvals.pop(session.id, None)
         approve = is_approve_decision(decision)
         try:
-            async with self._runtime.pane_lock(session.id):
+            async with self._input_lock(session):
                 await self._press(session, pending, approve)
         except Exception:
             # Nothing reached the dialog: keep it answerable.

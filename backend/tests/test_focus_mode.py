@@ -443,6 +443,8 @@ async def test_api_cancel_endpoints(tmp_path) -> None:
 
 
 class BlockingTransport:
+    is_structured = False
+
     def __init__(self) -> None:
         self.blocked = False
         self.pending = False
@@ -462,6 +464,21 @@ def blocking_runtime(tmp_path: Path, monkeypatch) -> tuple[SessionRuntime, Any]:
     return runtime, transport
 
 
+def record_blocked_dispatches(
+    runtime: SessionRuntime, transport: BlockingTransport, monkeypatch
+) -> list[str]:
+    sent: list[str] = []
+
+    async def fake_dispatch(prepared: PreparedInput) -> SessionRecord:
+        if await transport.input_blocked(prepared.session):
+            raise InputBlockedError()
+        sent.append(prepared.request.text)
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", fake_dispatch)
+    return sent
+
+
 async def settle(runtime: SessionRuntime) -> None:
     while runtime.focus._tasks:
         await asyncio.gather(*list(runtime.focus._tasks))
@@ -471,7 +488,7 @@ async def test_blocked_session_holds_then_delivers_in_order(
     tmp_path, monkeypatch
 ) -> None:
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
-    sent = record_dispatches(runtime, monkeypatch)
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
 
     first = await runtime.focus.deliver(
@@ -492,7 +509,7 @@ async def test_blocked_session_holds_then_delivers_in_order(
 async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("waypoint.focus.DEFER_RETRY_SECONDS", 0.01)
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
-    sent = record_dispatches(runtime, monkeypatch)
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.blocked = True
 
     await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
@@ -507,7 +524,7 @@ async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
 
 async def test_pending_approval_waits_for_an_edge(tmp_path, monkeypatch) -> None:
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
-    sent = record_dispatches(runtime, monkeypatch)
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
 
     await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
@@ -522,7 +539,7 @@ async def test_pending_approval_waits_for_an_edge(tmp_path, monkeypatch) -> None
 
 async def test_focus_held_items_never_auto_release(tmp_path, monkeypatch) -> None:
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
-    sent = record_dispatches(runtime, monkeypatch)
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
     await runtime.focus.deliver("s1", agent_send("auto"), HeldMessageOrigin.AGENT)
     await settle(runtime)

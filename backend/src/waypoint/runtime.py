@@ -489,9 +489,6 @@ class SessionRuntime:
         self._pending_wakes: set[str] = set()
         self._wake_tasks: set[asyncio.Task[None]] = set()
         self._wake_in_flight: set[str] = set()
-        # One write at a time into a session's input: concurrent sends garble a
-        # tty pane.
-        self._pane_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
         # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
         # loop below is the only thing that publishes onto the broadcast hub.
@@ -2594,8 +2591,7 @@ class SessionRuntime:
             )
         self.attachments.sweep(session.id, self.settings.attachment_orphan_ttl_seconds)
         try:
-            async with self.pane_lock(session.id):
-                await transport.send_input(session, request.text, attachments or None)
+            await transport.send_input(session, request.text, attachments or None)
         except Exception as exc:
             self.storage.update_session(session.id, status=previous_status)
             if isinstance(exc, InputBlockedError):
@@ -2606,9 +2602,6 @@ class SessionRuntime:
                 )
             raise
         return updated
-
-    def pane_lock(self, session_id: str) -> asyncio.Lock:
-        return self._pane_locks[session_id]
 
     def resolve_attachments(
         self, session_id: str, attachment_ids: list[str] | None
@@ -4372,7 +4365,7 @@ class SessionRuntime:
         # Never resurrect a stopped session.
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             return
-        if self._wake_eligible(session):
+        if self.wake_eligible(session):
             self._fire_wake(session_id)
         else:
             # RUNNING / STARTING / INTERRUPTED / WAITING_INPUT-awaiting-approval:
@@ -4414,7 +4407,7 @@ class SessionRuntime:
             if session_id in self._pending_wakes:
                 self._drain_pending_wakes({session_id})
 
-    def _wake_eligible(self, session: SessionRecord) -> bool:
+    def wake_eligible(self, session: SessionRecord) -> bool:
         if session.status == SessionStatus.IDLE:
             return True
         if session.status != SessionStatus.WAITING_INPUT:
@@ -4440,7 +4433,7 @@ class SessionRuntime:
             }:
                 self._pending_wakes.discard(session_id)
                 continue
-            if not self._wake_eligible(session):
+            if not self.wake_eligible(session):
                 continue  # still non-deliverable; wait for the next edge
             self._pending_wakes.discard(session_id)
             self._fire_wake(session_id)

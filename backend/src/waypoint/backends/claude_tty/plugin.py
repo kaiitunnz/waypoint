@@ -613,8 +613,8 @@ class ClaudeTtyPlugin:
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str
     ) -> PendingTtyApproval | None:
-        """Forget the session's pending approval and close its card, which the
-        frontend dequeues only on a resolution note."""
+        """Forget the session's pending approval and post the note that closes
+        its card."""
         pending = self._pending_approvals.pop(session_id, None)
         if pending is not None:
             await runtime._record_system_event(
@@ -1442,12 +1442,11 @@ class ClaudeTtyPlugin:
         self._answering.add(key)
         try:
             transport = runtime.transport_for(session)
-            async with runtime.pane_lock(session.id):
-                await transport.send_input(
-                    session,
-                    f"User has answered your questions: {answer}. "
-                    "You can now continue with the user's answers in mind.",
-                )
+            await transport.send_input(
+                session,
+                f"User has answered your questions: {answer}. "
+                "You can now continue with the user's answers in mind.",
+            )
 
             extra: dict[str, Any] = {
                 "kind": "ask_user_question_answer",

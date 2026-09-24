@@ -1090,7 +1090,7 @@ async def test_restarted_tailer_adopts_the_open_plan_card() -> None:
     ]
     restarted = _make_tailer(ClaudeTtyPlugin(), runtime)
     restarted._plugin._pending_approvals.clear()
-    await restarted._load_adoptable()
+    restarted._load_adoptable()
     await _surface(restarted)
 
     runtime._emit_adapter_event.assert_not_called()
@@ -1110,7 +1110,7 @@ async def test_restarted_tailer_expires_cards_without_a_dialog() -> None:
     runtime.storage.list_approval_events.return_value = [_open_card("a1", "sig")]
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._load_adoptable()
+    tailer._load_adoptable()
     await tailer._poll_dialog()
 
     runtime._record_system_event.assert_awaited_once_with(

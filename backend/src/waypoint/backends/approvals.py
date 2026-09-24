@@ -34,7 +34,7 @@ def is_approve_decision(decision: str) -> bool:
 _RESOLUTION_TEXT = re.compile(r"Approval response sent|Approval timed out", re.I)
 
 
-def is_approval_resolution(event: EventRecord) -> bool:
+def _is_resolution(event: EventRecord) -> bool:
     return event.kind is EventKind.SYSTEM_NOTE and (
         event.metadata.get("method") == "approval.invalidated"
         or bool(_RESOLUTION_TEXT.search(event.text))
@@ -51,7 +51,7 @@ def open_approval_requests(events: list[EventRecord]) -> list[EventRecord]:
     for event in events:
         if event.kind is EventKind.APPROVAL_REQUEST:
             queue.append(event)
-        elif is_approval_resolution(event):
+        elif _is_resolution(event):
             approval_id = event.metadata.get("approval_id")
             if isinstance(approval_id, str):
                 queue = [

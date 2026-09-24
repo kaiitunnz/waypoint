@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -109,25 +108,3 @@ async def test_open_approval_requests_follow_the_pager_rule(tmp_path) -> None:
     assert [e.metadata["approval_id"] for e in open_approval_requests(events)] == [
         "open"
     ]
-
-
-async def test_sends_into_one_session_do_not_overlap(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path, SessionStatus.IDLE)
-    transport = fake_transport(runtime, monkeypatch, pending=False)
-    active: list[int] = []
-    overlap: list[bool] = []
-
-    async def slow_send(*args, **kwargs) -> None:
-        overlap.append(bool(active))
-        active.append(1)
-        await asyncio.sleep(0.01)
-        active.pop()
-
-    transport.send_input.side_effect = slow_send
-
-    await asyncio.gather(
-        runtime.handle_input("s1", SessionInputRequest(text="a")),
-        runtime.handle_input("s1", SessionInputRequest(text="b")),
-    )
-
-    assert overlap == [False, False]

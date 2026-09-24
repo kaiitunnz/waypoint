@@ -8,6 +8,7 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -28,8 +29,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.focus")
 
-# Re-check cadence while only the pane (no pending approval, which ends with a
-# status edge) blocks delivery — e.g. a popup the tailer is about to dismiss.
+# A pane-only block ends without a status edge, so delivery re-checks on this
+# cadence.
 DEFER_RETRY_SECONDS = 3.0
 _UNDELIVERABLE = frozenset(
     {SessionStatus.EXITED, SessionStatus.ERROR, SessionStatus.STARTING}
@@ -65,16 +66,11 @@ class FocusGate:
         session = self._runtime.get_session(session_id)
         if session.focus:
             return await self._hold(session_id, request, origin, auto_release=False)
-        transport = self._runtime.transport_for(session)
         async with self._send_locks[session_id]:
             # Queue behind earlier auto-held items so delivery keeps its order.
-            if session_id not in self._deferred and not await transport.input_blocked(
-                session
-            ):
-                try:
+            if session_id not in self._deferred:
+                with suppress(InputBlockedError):
                     return await self._runtime.handle_input(session_id, request)
-                except InputBlockedError:
-                    pass
             record = await self._hold(session_id, request, origin, auto_release=True)
         self._deferred.add(session_id)
         self.kick(session_id)
@@ -195,7 +191,7 @@ class FocusGate:
                     break
                 session = current
                 if held.origin is HeldMessageOrigin.WAKE and not (
-                    self._runtime._wake_eligible(session)
+                    self._runtime.wake_eligible(session)
                 ):
                     continue
                 if transport.has_pending_approval(session):
@@ -260,11 +256,10 @@ class FocusGate:
                 # A dialog opened first; keep the item for the next edge.
                 self._put_back(record)
                 raise
-            self._unpin(record)
-        except Exception:
-            if record.id not in self._runtime.storage.held_message_ids():
+            except Exception:
                 self._unpin(record)
-            raise
+                raise
+            self._unpin(record)
         finally:
             self._in_flight.pop(record.id, None)
             self._cancelled.discard(record.id)
@@ -272,11 +267,14 @@ class FocusGate:
             await self._publish(record.session_id)
 
     def _put_back(self, record: HeldMessageRecord) -> None:
-        # Unless it was cancelled meanwhile (a deleted session refuses the
-        # insert too).
-        if record.id in self._cancelled:
-            return
-        if self._runtime.storage.create_held_message(record) and record.auto_release:
+        """Re-hold a claimed item unless it was cancelled meanwhile."""
+        restored = (
+            record.id not in self._cancelled
+            and self._runtime.storage.create_held_message(record)
+        )
+        if not restored:
+            self._unpin(record)
+        elif record.auto_release:
             self._deferred.add(record.session_id)
 
     def _title_of(self, session_id: str | None) -> str | None:

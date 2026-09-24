@@ -2204,19 +2204,11 @@ class Storage:
 
     @_synchronized
     def list_approval_events(self, session_id: str) -> list[EventRecord]:
-        """Approval requests and the notes that may resolve them, in order;
-        :func:`waypoint.backends.approvals.open_approval_requests` narrows these
-        to the still-pending cards."""
+        """Approval requests and system notes, in order."""
         rows = self.connection.execute(
             """
             SELECT * FROM events
-            WHERE session_id = ?
-              AND (kind = ?
-                   OR (kind = ?
-                       AND (json_extract(metadata, '$.method')
-                              = 'approval.invalidated'
-                            OR text LIKE '%Approval response sent%'
-                            OR text LIKE '%Approval timed out%')))
+            WHERE session_id = ? AND kind IN (?, ?)
             ORDER BY sequence ASC, id ASC
             """,
             [session_id, EventKind.APPROVAL_REQUEST, EventKind.SYSTEM_NOTE],

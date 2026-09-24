@@ -49,13 +49,9 @@ export function HeldMessagesDock({
   const count = messages.length;
 
   useEffect(() => {
-    if (!count) {
-      setExpanded(false);
-      return;
-    }
     const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
     return () => window.clearInterval(id);
-  }, [count]);
+  }, []);
 
   useEffect(() => {
     if (!expanded) {
@@ -73,13 +69,9 @@ export function HeldMessagesDock({
   }, [expanded]);
 
   const latest = messages[count - 1];
-  const awaiting = !focus && messages.every((m) => m.auto_release);
-  const state = focus ? "Focus" : awaiting ? "After you respond" : "Focus off";
 
   return (
-    <div
-      className={`held-dock${expanded ? " expanded" : ""}${awaiting ? " awaiting" : ""}`}
-    >
+    <div className={`held-dock${expanded ? " expanded" : ""}`}>
       {expanded ? (
         <>
           <button
@@ -176,9 +168,7 @@ export function HeldMessagesDock({
                       </button>
                     </span>
                   </div>
-                  {m.auto_release && !focus ? (
-                    <span className="held-dock-when">Sends after you respond</span>
-                  ) : null}
+                  <HoldReason message={m} focus={focus} />
                   <ExpandableText
                     className="held-dock-item-text"
                     text={messageText(m)}
@@ -195,30 +185,36 @@ export function HeldMessagesDock({
           type="button"
           className="held-dock-toggle"
           aria-expanded={expanded}
-          disabled={!count}
           onClick={() => setExpanded((value) => !value)}
         >
           <span className="held-dock-glyph" aria-hidden>
             ◎
           </span>
-          <span className="held-dock-state">{state}</span>
-          <span className="held-dock-label">
-            {latest ? messageText(latest) : "Holding messages from agents, schedules, and wake-ups"}
+          <span className="held-dock-label">{messageText(latest)}</span>
+          <span className="held-dock-count">{count} held</span>
+          <span className="held-dock-chevron" aria-hidden>
+            <ChevronIcon />
           </span>
-          {count ? (
-            <>
-              <span className="held-dock-count">{count} held</span>
-              <span className="held-dock-chevron" aria-hidden>
-                <ChevronIcon />
-              </span>
-            </>
-          ) : null}
         </button>
       </div>
       <span className="sr-only" aria-live="polite">
         {count} held message{count === 1 ? "" : "s"}
       </span>
     </div>
+  );
+}
+
+function HoldReason({ message, focus }: { message: HeldMessage; focus: boolean }) {
+  if (message.hold_reason === "focus") {
+    return <span className="held-dock-when manual">Held by Focus</span>;
+  }
+  if (focus) {
+    return <span className="held-dock-when manual">Paused by Focus</span>;
+  }
+  return (
+    <span className="held-dock-when">
+      {message.hold_reason === "dialog" ? "Sends after you respond" : "Sends when idle"}
+    </span>
   );
 }
 

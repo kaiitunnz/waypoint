@@ -881,7 +881,7 @@ export interface HeldMessage {
   attachments: string[];
   created_at: string;
   // Held for an open dialog; sends once the human responds.
-  auto_release: boolean;
+  hold_reason: "focus" | "dialog" | "idle";
 }
 
 export type SideQuestionStatus = "pending" | "answered" | "error";

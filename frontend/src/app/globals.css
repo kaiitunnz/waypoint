@@ -11728,21 +11728,15 @@ html[data-theme="light"] .sched-dock-scrim {
   }
 }
 
-/* ─── In-session held-messages dock (Focus) ─── */
+/* ─── In-session held-messages dock ─── */
 
 .held-dock {
-  --held-hue: var(--accent-cool);
   position: sticky;
   bottom: calc(var(--composer-height, 220px) + 12px);
   z-index: 5;
   margin-top: -8px;
   pointer-events: none;
   min-width: 0;
-}
-
-/* Every held item waits on the human's dialog response. */
-.held-dock.awaiting {
-  --held-hue: var(--warn);
 }
 
 .held-dock.expanded {
@@ -11776,28 +11770,16 @@ html[data-theme="light"] .sched-dock-scrim {
   cursor: pointer;
 }
 
-.held-dock-toggle:disabled {
-  cursor: default;
-}
-
 .held-dock-toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--held-hue) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 55%, transparent);
   outline-offset: -2px;
 }
 
 .held-dock-glyph {
   flex: none;
-  color: var(--held-hue);
+  color: var(--accent-cool);
   font-size: 0.95rem;
   line-height: 1;
-}
-
-.held-dock-state {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  color: var(--held-hue);
 }
 
 .held-dock-label {
@@ -11809,12 +11791,6 @@ html[data-theme="light"] .sched-dock-scrim {
   font-family: var(--font-mono);
   font-size: 0.84rem;
   color: var(--text);
-}
-
-.held-dock-toggle:disabled .held-dock-label {
-  font-family: var(--font-sans);
-  font-size: 0.8rem;
-  color: var(--muted);
 }
 
 .held-dock-count {
@@ -11982,6 +11958,10 @@ html[data-theme="light"] .held-dock-scrim {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--warn);
+}
+
+.held-dock-when.manual {
+  color: var(--accent-cool);
 }
 
 .held-dock-when::before {

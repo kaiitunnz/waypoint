@@ -2157,7 +2157,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           }}
         />
       ) : null}
-      {session?.focus || heldMessages.length ? (
+      {heldMessages.length ? (
         <HeldMessagesDock
           focus={Boolean(session?.focus)}
           messages={heldMessages}

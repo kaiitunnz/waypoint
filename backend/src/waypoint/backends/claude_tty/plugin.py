@@ -1442,11 +1442,12 @@ class ClaudeTtyPlugin:
         self._answering.add(key)
         try:
             transport = runtime.transport_for(session)
-            await transport.send_input(
-                session,
-                f"User has answered your questions: {answer}. "
-                "You can now continue with the user's answers in mind.",
-            )
+            async with runtime.pane_lock(session.id):
+                await transport.send_input(
+                    session,
+                    f"User has answered your questions: {answer}. "
+                    "You can now continue with the user's answers in mind.",
+                )
 
             extra: dict[str, Any] = {
                 "kind": "ask_user_question_answer",

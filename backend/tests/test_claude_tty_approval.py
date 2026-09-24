@@ -1201,5 +1201,6 @@ async def test_input_blocked_by_pending_approval_or_dialog(
         plugin._pending_approvals["sess-1"] = _pending()
     transport, tmux = _make_transport(plugin)
     tmux.capture_snapshot = AsyncMock(return_value=_load(screen))
+    cast(MagicMock, transport._runtime).registry.get.return_value = plugin
 
     assert await transport.input_blocked(_make_session()) is expected

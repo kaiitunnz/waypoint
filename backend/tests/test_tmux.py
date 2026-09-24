@@ -672,3 +672,16 @@ def test_flush_before_restart_times_out_and_proceeds_without_raising(
     asyncio.run(transport.flush_before_restart(_flush_session()))  # must not raise
 
     assert adapter.calls >= 2
+
+
+@pytest.mark.parametrize(
+    ("agent", "dialog", "expected"),
+    [
+        (_AgentConfirmer(), True, True),
+        (_AgentConfirmer(), False, False),
+        (_PlainAgent(), True, False),
+    ],
+)
+def test_input_blocked_matches_the_send_guard(agent, dialog, expected) -> None:
+    transport, _ = _transport_with(agent, dialog=dialog)
+    assert asyncio.run(transport.input_blocked(_session("codex"))) is expected

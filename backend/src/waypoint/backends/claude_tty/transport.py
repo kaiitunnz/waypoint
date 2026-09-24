@@ -79,13 +79,9 @@ class ClaudeTtyTransport(TmuxTransport):
         return session.id in self._plugin._pending_approvals
 
     async def input_blocked(self, session: SessionRecord) -> bool:
-        if self.has_pending_approval(session):
-            return True
-        try:
-            snapshot = await self.adapter.capture_snapshot(self._target(session))
-        except TmuxError:
-            return False
-        return pane_dialog.shows_blocking_dialog(snapshot)
+        return self.has_pending_approval(session) or await super().input_blocked(
+            session
+        )
 
     async def respond_to_approval(
         self,
@@ -106,7 +102,8 @@ class ClaudeTtyTransport(TmuxTransport):
         self._plugin._pending_approvals.pop(session.id, None)
         approve = is_approve_decision(decision)
         try:
-            await self._press(session, pending, approve)
+            async with self._runtime.pane_lock(session.id):
+                await self._press(session, pending, approve)
         except Exception:
             # Nothing reached the dialog: keep it answerable.
             self._plugin._pending_approvals.setdefault(session.id, pending)

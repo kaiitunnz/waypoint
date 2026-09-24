@@ -44,7 +44,7 @@ class FocusGate:
         self._in_flight: dict[str, str] = {}
         self._cancelled: set[str] = set()
         self._dispatching: set[str] = set()
-        # One send at a time per session: concurrent sends garble a tty pane.
+        # Serializes the hold-or-deliver decision so held items keep their order.
         self._send_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # Sessions with auto-release items, and their drain bookkeeping.
         self._deferred: set[str] = set()

@@ -266,3 +266,15 @@ class TmuxTransport(TransportAdapter):
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return False
+
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        # The same check ``send_input`` refuses on, made before anything is
+        # recorded.
+        plugin = self._runtime.registry.get(session.backend)
+        if not isinstance(plugin, PaneSubmitConfirming):
+            return False
+        try:
+            snapshot = await self.adapter.capture_snapshot(self._target(session))
+        except TmuxError:
+            return False
+        return plugin.pane_shows_blocking_dialog(snapshot)

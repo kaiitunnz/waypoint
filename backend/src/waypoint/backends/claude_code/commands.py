@@ -1,13 +1,14 @@
 import asyncio
+import importlib.resources
 import json
 import logging
-import os
-from pathlib import Path
+from functools import cache
 from typing import Any
 
 import yaml
 
 from waypoint.backends.capabilities import SlashCommandSpec
+from waypoint.backends.claude_code.command_candidates import list_candidates
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import CommandCompletion, CompletionDispatch
 
@@ -31,155 +32,6 @@ CLAUDE_BUILTIN_SLASH_COMMANDS = (
     SlashCommandSpec(name="help", description="List available commands"),
 )
 
-_REMOTE_SCRIPT = r"""
-import glob
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-cwd = sys.argv[1]
-claude_bin = sys.argv[2]
-
-
-def frontmatter(path):
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    data = {}
-    for raw in parts[1].splitlines():
-        if ":" not in raw:
-            continue
-        key, value = raw.split(":", 1)
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key in {"name", "description", "argument-hint"} and value:
-            data[key] = value
-    return data
-
-
-def command_name(root, path):
-    rel = Path(path).relative_to(root).with_suffix("")
-    return "/".join(rel.parts)
-
-
-def custom_commands():
-    roots = [Path(cwd) / ".claude" / "commands", Path.home() / ".claude" / "commands"]
-    seen = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            name = command_name(root, path)
-            if not name or name in seen:
-                continue
-            meta = frontmatter(path)
-            seen.add(name)
-            yield {
-                "name": name,
-                "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "custom_command",
-                "path": str(path),
-            }
-
-
-def user_skills():
-    # Workspace skills win over user skills on name collision: order
-    # matters here.
-    roots = [Path(cwd) / ".claude" / "skills", Path.home() / ".claude" / "skills"]
-    seen = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.glob("*/SKILL.md")):
-            meta = frontmatter(path)
-            name = meta.get("name") if isinstance(meta.get("name"), str) else None
-            if not name:
-                name = path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            yield {
-                "name": name,
-                "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "user_skill",
-                "path": str(path),
-            }
-
-
-def plugin_inventory():
-    try:
-        completed = subprocess.run(
-            [claude_bin, "plugin", "list", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return []
-    if completed.returncode != 0:
-        return []
-    try:
-        payload = json.loads(completed.stdout)
-    except Exception:
-        return []
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("plugins", "items", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return value
-    return []
-
-
-def plugin_skills():
-    seen = set()
-    for plugin in plugin_inventory():
-        if not isinstance(plugin, dict) or plugin.get("enabled") is not True:
-            continue
-        install_path = plugin.get("installPath")
-        if not isinstance(install_path, str):
-            continue
-        for path in sorted(glob.glob(os.path.join(install_path, "skills", "*", "SKILL.md"))):
-            meta = frontmatter(path)
-            name = meta.get("name")
-            if not isinstance(name, str) or not name:
-                name = Path(path).parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            description = meta.get("description")
-            yield {
-                "name": name,
-                "description": description if isinstance(description, str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "plugin_skill",
-                "path": path,
-            }
-
-
-print(json.dumps([*custom_commands(), *user_skills(), *plugin_skills()]))
-"""
-
-
-def _user_config_root(config_dir: str | None) -> Path:
-    """The session's account config dir (a profile's CLAUDE_CONFIG_DIR), else ~/.claude.
-
-    User commands/skills live under it, so completion for a profile-scoped
-    session must scan the profile's dir, not the default account's.
-    """
-    return Path(config_dir).expanduser() if config_dir else Path.home() / ".claude"
-
 
 async def list_claude_command_completions(
     *,
@@ -189,156 +41,39 @@ async def list_claude_command_completions(
     launch_target: SshLaunchTargetConfig | None = None,
     config_dir: str | None = None,
 ) -> list[CommandCompletion]:
-    records = (
-        await _list_remote_records(launch_target, cwd, claude_bin)
+    candidates = (
+        await _list_remote_candidates(launch_target, cwd, claude_bin, config_dir)
         if launch_target is not None
-        else await _list_local_records(cwd, claude_bin, config_dir)
+        else await asyncio.to_thread(list_candidates, cwd, claude_bin, config_dir)
     )
-    return _records_to_completions(records, prefix)
+    return _records_to_completions(_records_from_candidates(candidates), prefix)
 
 
-async def _list_local_records(
-    cwd: str, claude_bin: str, config_dir: str | None = None
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    records.extend(_local_custom_commands(cwd, config_dir))
-    records.extend(_local_user_skills(cwd, config_dir))
-    records.extend(await _local_plugin_skills(claude_bin, config_dir))
-    return records
-
-
-def _local_custom_commands(
-    cwd: str, config_dir: str | None = None
-) -> list[dict[str, Any]]:
-    roots = [
-        Path(cwd).expanduser() / ".claude" / "commands",
-        _user_config_root(config_dir) / "commands",
-    ]
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            name = _command_name(root, path)
-            if not name or name in seen:
-                continue
-            meta = _frontmatter(path)
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "custom_command",
-                    "path": str(path),
-                }
-            )
-    return records
-
-
-def _local_user_skills(cwd: str, config_dir: str | None = None) -> list[dict[str, Any]]:
-    # Workspace `<cwd>/.claude/skills/` wins over the account `skills/` on
-    # name collision, matching how the Claude CLI itself resolves
-    # overlapping skill names.
-    roots = [
-        Path(cwd).expanduser() / ".claude" / "skills",
-        _user_config_root(config_dir) / "skills",
-    ]
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.glob("*/SKILL.md")):
-            meta = _frontmatter(path)
-            name = _string_or_none(meta.get("name")) or path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "user_skill",
-                    "path": str(path),
-                }
-            )
-    return records
-
-
-async def _local_plugin_skills(
-    claude_bin: str, config_dir: str | None = None
-) -> list[dict[str, Any]]:
-    # `claude plugin list` reports the plugins enabled for a config dir, so run
-    # it under the session's CLAUDE_CONFIG_DIR (a profile's) rather than the
-    # backend's default account.
-    env = {**os.environ, "CLAUDE_CONFIG_DIR": config_dir} if config_dir else None
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            claude_bin,
-            "plugin",
-            "list",
-            "--json",
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-    except Exception:
-        return []
-    if proc.returncode != 0:
-        return []
-    try:
-        payload = json.loads(stdout.decode("utf-8"))
-    except json.JSONDecodeError:
-        return []
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for plugin in _plugin_items(payload):
-        if plugin.get("enabled") is not True:
-            continue
-        install_path = plugin.get("installPath")
-        if not isinstance(install_path, str):
-            continue
-        for path in sorted(Path(install_path).glob("skills/*/SKILL.md")):
-            meta = _frontmatter(path)
-            name = _string_or_none(meta.get("name")) or path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "plugin_skill",
-                    "path": str(path),
-                }
-            )
-    return records
-
-
-async def _list_remote_records(
+async def _list_remote_candidates(
     target: SshLaunchTargetConfig,
     cwd: str,
     claude_bin: str,
+    config_dir: str | None,
 ) -> list[dict[str, Any]]:
     try:
         args = target.build_remote_exec_args(
-            ["python3", "-c", _REMOTE_SCRIPT, cwd or target.default_cwd, claude_bin]
+            [
+                "python3",
+                "-",
+                cwd or target.default_cwd,
+                claude_bin,
+                config_dir or "",
+            ]
         )
-    except (FileNotFoundError, OSError) as exc:
-        log.warning("failed to build Claude command discovery SSH argv: %s", exc)
-        return []
-    try:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(_candidates_script()), timeout=15
+        )
     except Exception as exc:
         log.warning("failed to run remote Claude command discovery: %s", exc)
         return []
@@ -357,6 +92,49 @@ async def _list_remote_records(
         if isinstance(payload, list)
         else []
     )
+
+
+@cache
+def _candidates_script() -> bytes:
+    return (
+        importlib.resources.files("waypoint.backends.claude_code")
+        .joinpath("command_candidates.py")
+        .read_bytes()
+    )
+
+
+def _records_from_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    # Custom commands are named by path; skills by frontmatter ``name``, else
+    # the skill directory. The first candidate per (source, name) wins.
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in candidates:
+        source = _string_or_none(item.get("source"))
+        name_hint = _string_or_none(item.get("name_hint"))
+        if source is None or name_hint is None:
+            continue
+        block = item.get("frontmatter")
+        meta = _parse_frontmatter(block) if isinstance(block, str) else {}
+        name = (
+            name_hint
+            if source == "custom_command"
+            else _string_or_none(meta.get("name")) or name_hint
+        )
+        if (source, name) in seen:
+            continue
+        seen.add((source, name))
+        records.append(
+            {
+                "name": name,
+                "description": _string_or_none(meta.get("description")),
+                "argument_hint": _string_or_none(meta.get("argument-hint")),
+                "source": source,
+                "path": item.get("path"),
+            }
+        )
+    return records
 
 
 def _records_to_completions(
@@ -395,40 +173,12 @@ def _records_to_completions(
     return completions
 
 
-def _frontmatter(path: Path) -> dict[str, Any]:
+def _parse_frontmatter(block: str) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    try:
-        data = yaml.safe_load(parts[1]) or {}
+        data = yaml.safe_load(block) or {}
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _command_name(root: Path, path: Path) -> str:
-    try:
-        rel = path.relative_to(root).with_suffix("")
-    except ValueError:
-        return path.stem
-    return "/".join(part for part in rel.parts if part)
-
-
-def _plugin_items(payload: object) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if isinstance(payload, dict):
-        for key in ("plugins", "items", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    return []
 
 
 def _string_or_none(value: object) -> str | None:

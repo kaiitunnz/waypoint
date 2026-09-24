@@ -459,6 +459,29 @@ export async function deleteThread(
   await ensureOk(response, `failed to delete ${backend} thread`);
 }
 
+// Child directories completing a typed absolute or `~`-relative path on the
+// local host (no target) or an SSH launch target.
+export async function fetchDirectorySuggestions(
+  host: string,
+  token: string,
+  prefix: string,
+  launchTargetId: string | null,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const params = new URLSearchParams({ prefix });
+  if (launchTargetId) {
+    params.set("launch_target_id", launchTargetId);
+  }
+  const response = await fetch(`${host}/api/directories?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal,
+  });
+  await ensureOk(response, "failed to fetch directory suggestions");
+  const payload = await response.json();
+  return Array.isArray(payload.directories) ? payload.directories : [];
+}
+
 export async function postAction(
   host: string,
   token: string,

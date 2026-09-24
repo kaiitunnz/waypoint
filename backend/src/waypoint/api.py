@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 import fastapi
 from fastapi import (
@@ -60,6 +61,7 @@ from waypoint.schemas import (
     AttachmentPreviewResponse,
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    DirectorySuggestionsResponse,
     InboxBatchDeleteRequest,
     InboxBatchDeleteResponse,
     InboxBlockSubmitRequest,
@@ -133,17 +135,19 @@ from waypoint.telemetry.instance import service as instance_service
 from waypoint.telemetry.nl import NLInsight
 from waypoint.telemetry.query import parse_range_filter
 from waypoint.usage_dashboard import build_dashboard
+from waypoint.workspace_fs import (
+    LocalWorkspaceFilesystem,
+    RemoteWorkspaceFilesystem,
+    WorkspaceFilesystem,
+    WorkspaceUnavailableError,
+)
 from waypoint.workspace_git import git_file_diff, git_list_files, git_status
 from waypoint.workspace_preview import (
+    WorkspaceFileTooLargeError,
     WorkspacePathError,
     is_denied,
-    list_dir,
     rank_files,
-    read_text_capped,
     read_text_prefix,
-    relative_to_base,
-    resolve_in_base,
-    walk_files,
 )
 
 log = logging.getLogger("waypoint.api")
@@ -794,18 +798,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_bytes=len(content.encode("utf-8")) if content else 0,
         )
 
-    def _workspace_session(session_id: str) -> SessionRecord:
+    def _workspace_fs(launch_target_id: str | None) -> WorkspaceFilesystem:
+        denylist = context.settings.workspace_denylist
+        follow = context.settings.workspace_follow_symlinks
+        if launch_target_id is None:
+            return LocalWorkspaceFilesystem(denylist, follow)
+        # An unknown or disabled target is unavailable: the session's path names
+        # another host's filesystem.
+        target = context.runtime.ssh_targets.get(launch_target_id)
+        if target is None or context.runtime.remote_probe_blocked(launch_target_id):
+            raise WorkspaceUnavailableError(f"launch target {launch_target_id}")
+        return RemoteWorkspaceFilesystem(target, denylist, follow)
+
+    def _workspace(
+        session_id: str,
+    ) -> tuple[SessionRecord, WorkspaceFilesystem, str]:
         if not context.settings.workspace_preview_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
             )
         session = context.runtime.get_session(session_id)
-        if session.launch_target_id is not None:
+        try:
+            fs = _workspace_fs(session.launch_target_id)
+        except WorkspaceUnavailableError as exc:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace preview unavailable for remote sessions",
-            )
-        return session
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace unavailable",
+            ) from exc
+        return session, fs, session.worktree_path or session.cwd
+
+    @asynccontextmanager
+    async def _workspace_errors() -> AsyncIterator[None]:
+        try:
+            yield
+        except WorkspacePathError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
+            ) from exc
+        except WorkspaceFileTooLargeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="workspace file too large",
+            ) from exc
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
+            ) from exc
+        except WorkspaceUnavailableError as exc:
+            log.warning("workspace unavailable: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace unavailable",
+            ) from exc
 
     @app.get("/api/sessions/{session_id}/workspace/tree")
     async def workspace_tree(
@@ -815,32 +859,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> Any:
-        session = _workspace_session(session_id)
-        base = Path(session.worktree_path or session.cwd)
-        try:
-            entries, truncated, overflow, resolved_dir = list_dir(
-                base,
-                path,
-                limit,
-                denylist=context.settings.workspace_denylist,
-                follow_symlinks=context.settings.workspace_follow_symlinks,
-                offset=offset,
-            )
-        except WorkspacePathError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
-            ) from exc
-        except (FileNotFoundError, NotADirectoryError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
-            ) from exc
+        session, fs, base = _workspace(session_id)
+        async with _workspace_errors():
+            listing = await fs.list_dir(base, path, limit, offset)
         return {
             "root": {"cwd": session.cwd, "worktree_path": session.worktree_path},
-            "path": relative_to_base(base, resolved_dir),
-            "entries": entries,
+            "path": listing["path"],
+            "entries": listing["entries"],
             "offset": offset,
-            "truncated": truncated,
-            "overflow": overflow,
+            "truncated": listing["truncated"],
+            "overflow": listing["overflow"],
         }
 
     @app.get("/api/sessions/{session_id}/workspace/find")
@@ -850,26 +878,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: Annotated[str, Query()] = "",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> Any:
-        session = _workspace_session(session_id)
+        session, fs, base = _workspace(session_id)
         query = q.strip()
         if not query:
             return {"matches": [], "truncated": False}
-        base = Path(session.worktree_path or session.cwd)
-        denylist = context.settings.workspace_denylist
         # Prefer git's index (fast, .gitignore-aware); fall back to a capped walk
         # for non-repo workspaces.
-        listed = await git_list_files(base)
-        walk_truncated = False
-        if listed is None:
-            candidates, walk_truncated = await asyncio.to_thread(
-                walk_files,
-                base,
-                denylist,
-                context.settings.workspace_follow_symlinks,
-            )
-        else:
-            candidates = listed
-        matches, rank_truncated = rank_files(query, candidates, denylist, limit)
+        async with _workspace_errors():
+            listed = await git_list_files(fs, base)
+            walk_truncated = False
+            if listed is None:
+                walked = await fs.walk_files(base)
+                candidates, walk_truncated = walked["paths"], walked["truncated"]
+            else:
+                candidates = listed
+        matches, rank_truncated = rank_files(
+            query, candidates, context.settings.workspace_denylist, limit
+        )
         return {
             "matches": [{"path": path, "kind": "file"} for path in matches],
             "truncated": walk_truncated or rank_truncated,
@@ -891,49 +916,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         else:
             require_token(authorization, context.tokens)
-        session = _workspace_session(session_id)
-        base = Path(session.worktree_path or session.cwd)
-        try:
-            if is_denied(path, context.settings.workspace_denylist):
-                raise WorkspacePathError("path is denied")
-            resolved = resolve_in_base(
-                base,
-                path,
-                follow_symlinks=context.settings.workspace_follow_symlinks,
+        session, fs, base = _workspace(session_id)
+        if raw:
+            async with _workspace_errors():
+                raw_file = await fs.read_raw(base, path)
+            media_type = (
+                mimetypes.guess_type(raw_file.name)[0] or "application/octet-stream"
             )
-            if not resolved.exists() or not resolved.is_file():
-                raise FileNotFoundError(resolved)
-            if raw:
-                media_type = (
-                    mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
-                )
+            if isinstance(raw_file.content, Path):
                 return FileResponse(
-                    resolved,
+                    raw_file.content,
                     media_type=media_type,
-                    filename=resolved.name,
+                    filename=raw_file.name,
                     content_disposition_type="inline",
                 )
-            stat = resolved.stat()
-            content, truncated, binary, encoding = read_text_capped(
-                resolved, context.settings.workspace_max_file_bytes
+            return Response(
+                content=raw_file.content,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": (
+                        f"inline; filename*=utf-8''{quote(raw_file.name)}"
+                    )
+                },
             )
-        except WorkspacePathError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
-            ) from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
-            ) from exc
-        return {
-            "path": relative_to_base(base, resolved),
-            "size": stat.st_size,
-            "mtime": stat.st_mtime,
-            "encoding": encoding,
-            "truncated": truncated,
-            "binary": binary,
-            "content": content,
-        }
+        async with _workspace_errors():
+            return await fs.read_file(
+                base, path, context.settings.workspace_max_file_bytes
+            )
 
     @app.get("/api/sessions/{session_id}/workspace/resolve")
     async def workspace_resolve(
@@ -945,37 +954,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # workspace. Used by the transcript to turn an agent-printed filesystem
         # path into a canonical relative path plus its kind, so the frontend can
         # open a file preview or reveal a directory in the tree.
-        session = _workspace_session(session_id)
-        base = Path(session.worktree_path or session.cwd)
-        try:
-            if is_denied(path, context.settings.workspace_denylist):
-                raise WorkspacePathError("path is denied")
-            resolved = resolve_in_base(
-                base,
-                path,
-                follow_symlinks=context.settings.workspace_follow_symlinks,
-            )
-            if not resolved.exists():
-                raise FileNotFoundError(resolved)
-        except WorkspacePathError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
-            ) from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
-            ) from exc
-        return {
-            "path": relative_to_base(base, resolved),
-            "kind": "dir" if resolved.is_dir() else "file",
-        }
+        session, fs, base = _workspace(session_id)
+        async with _workspace_errors():
+            return await fs.resolve(base, path)
 
     @app.get("/api/sessions/{session_id}/workspace/git/status")
     async def workspace_git_status(
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = _workspace_session(session_id)
+        session, fs, base = _workspace(session_id)
         disabled: dict[str, Any] = {
             "enabled": False,
             "branch": None,
@@ -984,8 +972,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         if not context.settings.workspace_git_enabled:
             return disabled
-        base = Path(session.worktree_path or session.cwd)
-        result = await git_status(base)
+        async with _workspace_errors():
+            result = await git_status(fs, base)
         if result is None:
             return disabled
         # Hide denied paths so the Changes list matches what the tree, file, and
@@ -1009,32 +997,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: Annotated[str, Query()] = "",
         staged: Annotated[bool, Query()] = False,
     ) -> Any:
-        session = _workspace_session(session_id)
+        session, fs, base = _workspace(session_id)
         if not context.settings.workspace_git_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
             )
-        base = Path(session.worktree_path or session.cwd)
-        try:
-            if not path or is_denied(path, context.settings.workspace_denylist):
-                raise WorkspacePathError("path is denied")
-            # Validate the path stays inside the workspace without requiring it to
-            # exist on disk — a deleted file still has a diff against HEAD.
-            resolve_in_base(
-                base,
-                path,
-                follow_symlinks=context.settings.workspace_follow_symlinks,
-            )
-        except WorkspacePathError as exc:
+        if not path:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
-            ) from exc
-        preview = await git_file_diff(
-            base,
-            path,
-            staged=staged,
-            max_file_bytes=context.settings.workspace_max_file_bytes,
-        )
+            )
+        async with _workspace_errors():
+            # Validate the path stays inside the workspace without requiring it to
+            # exist on disk — a deleted file still has a diff against HEAD.
+            await fs.resolve(base, path, must_exist=False)
+            preview = await git_file_diff(
+                fs,
+                base,
+                path,
+                staged=staged,
+                max_file_bytes=context.settings.workspace_max_file_bytes,
+            )
         if preview is None:
             return {
                 "schema_version": 1,
@@ -1045,6 +1027,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "truncated": False,
             }
         return preview.model_dump(mode="json")
+
+    @app.get("/api/directories", response_model=DirectorySuggestionsResponse)
+    async def directory_suggestions(
+        _: Annotated[str, Depends(token_dependency())],
+        prefix: Annotated[str, Query(max_length=1024)] = "",
+        launch_target_id: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> DirectorySuggestionsResponse:
+        if not context.settings.workspace_preview_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
+            )
+        if (
+            launch_target_id is not None
+            and launch_target_id not in context.runtime.ssh_targets
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="launch target not found",
+            )
+        try:
+            fs = _workspace_fs(launch_target_id)
+            directories = await fs.list_dirs(prefix, limit)
+        except WorkspaceUnavailableError:
+            directories = []
+        return DirectorySuggestionsResponse(directories=directories)
 
     @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def delete_attachment(

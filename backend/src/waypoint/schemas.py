@@ -152,6 +152,10 @@ class SessionCompletionsResponse(BaseModel):
     refreshing: bool = False
 
 
+class DirectorySuggestionsResponse(BaseModel):
+    directories: list[str] = Field(default_factory=list)
+
+
 class SessionContextUsage(BaseModel):
     used_tokens: int
     context_window_tokens: int | None = None

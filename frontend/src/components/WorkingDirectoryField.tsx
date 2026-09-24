@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+
+import { fetchDirectorySuggestions } from "@/lib/api";
+
+const SUGGEST_DELAY_MS = 200;
 
 interface WorkingDirectoryFieldProps {
+  host: string;
+  token: string;
   cwd: string;
   onChange: (cwd: string) => void;
+  // SSH launch target to suggest directories from; null for this host.
+  launchTargetId: string | null;
   targetLabel: string | null;
   recentCwds: string[];
   // The path the backend rejected as nonexistent, or null. When set, the field
@@ -14,8 +22,11 @@ interface WorkingDirectoryFieldProps {
 }
 
 export function WorkingDirectoryField({
+  host,
+  token,
   cwd,
   onChange,
+  launchTargetId,
   targetLabel,
   recentCwds,
   error,
@@ -27,7 +38,49 @@ export function WorkingDirectoryField({
   const label = targetLabel
     ? `Working directory on ${targetLabel}`
     : "Working directory";
-  const hasRecents = recentCwds.length > 0;
+  // Tagged with the source target; options exclude a previous target's
+  // results while the new fetch is in flight.
+  const [suggested, setSuggested] = useState<{
+    targetId: string | null;
+    dirs: string[];
+  }>({ targetId: null, dirs: [] });
+  const completable = cwd.startsWith("/") || cwd.startsWith("~");
+
+  useEffect(() => {
+    if (!completable || !host || !token) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetchDirectorySuggestions(
+        host,
+        token,
+        cwd,
+        launchTargetId,
+        controller.signal,
+      )
+        .then((dirs) => {
+          if (!controller.signal.aborted) {
+            setSuggested({ targetId: launchTargetId, dirs });
+          }
+        })
+        .catch(() => undefined);
+    }, SUGGEST_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [host, token, cwd, launchTargetId, completable]);
+
+  // Earlier suggestions stay while they still extend the input.
+  const options = useMemo(() => {
+    const dirs =
+      completable && suggested.targetId === launchTargetId
+        ? suggested.dirs.filter((dir) => dir.startsWith(cwd))
+        : [];
+    return [...new Set([...recentCwds, ...dirs])];
+  }, [completable, cwd, launchTargetId, recentCwds, suggested]);
+  const hasOptions = options.length > 0;
 
   // Pull focus to the offending field when a launch fails on the cwd, so the
   // fix is immediate even if the launch card scrolled out of view.
@@ -53,7 +106,7 @@ export function WorkingDirectoryField({
           }
         }}
         placeholder={targetLabel ? "~" : undefined}
-        list={hasRecents ? listId : undefined}
+        list={hasOptions ? listId : undefined}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
       />
@@ -62,10 +115,10 @@ export function WorkingDirectoryField({
           Directory not found: <code>{error}</code>
         </span>
       ) : null}
-      {hasRecents ? (
+      {hasOptions ? (
         <datalist id={listId}>
-          {recentCwds.map((recent) => (
-            <option key={recent} value={recent} />
+          {options.map((option) => (
+            <option key={option} value={option} />
           ))}
         </datalist>
       ) : null}

@@ -37,8 +37,8 @@ interface SessionTerminalViewProps {
   inputUnlocked: boolean;
   onToggleInputUnlocked: () => void;
   focus: boolean;
-  focusBusy?: boolean;
-  onToggleFocus: () => void;
+  focusBusy: boolean;
+  onFocusChange: (enabled: boolean) => void | Promise<void>;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
   // Light/dark surface for the pane, resolved from the agent's TUI theme.
@@ -102,7 +102,7 @@ export function SessionTerminalView({
   onToggleInputUnlocked,
   focus,
   focusBusy,
-  onToggleFocus,
+  onFocusChange,
   terminalRef,
   terminalDims,
   terminalAppearance,
@@ -139,6 +139,7 @@ export function SessionTerminalView({
   notices,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
+  const termMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   // Emulated panes (claude_tty) are pinned to a fixed server-side grid. The
   // terminal must mirror that grid exactly rather than fit to the viewport,
   // or the cell-positioned stream misaligns; the host scrolls at native size.
@@ -163,7 +164,6 @@ export function SessionTerminalView({
     };
   }
 
-  const termMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const closeMenu = () => setTermMenuOpen(false);
   const fireFromMenu = (cb: () => void | Promise<void>) => {
     closeMenu();
@@ -216,7 +216,7 @@ export function SessionTerminalView({
         {focus ? (
           <FocusPill
             anchored
-            onTurnOff={onToggleFocus}
+            onTurnOff={() => void onFocusChange(false)}
             busy={focusBusy}
             returnFocusRef={termMenuTriggerRef}
           />
@@ -333,7 +333,7 @@ export function SessionTerminalView({
                   type="button"
                   role="menuitem"
                   className="composer-overflow-item"
-                  onClick={() => fireFromMenu(onToggleFocus)}
+                  onClick={() => fireFromMenu(() => onFocusChange(!focus))}
                 >
                   <span className="glyph">◎</span>
                   {focus ? "Turn off Focus" : "Turn on Focus"}

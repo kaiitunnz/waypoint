@@ -2440,7 +2440,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onToggleInputUnlocked={toggleInputUnlocked}
           focus={Boolean(session?.focus)}
           focusBusy={focusBusy}
-          onToggleFocus={() => void handleSetFocus(!session?.focus)}
+          onFocusChange={handleSetFocus}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           terminalAppearance={terminalAppearance}
@@ -3871,7 +3871,7 @@ const ReplyComposer = memo(function ReplyComposer({
         <div className="composer-toprow-trail">
           {focus ? (
             <FocusPill
-              onTurnOff={() => onFocusChange(false)}
+              onTurnOff={() => void onFocusChange(false)}
               busy={focusBusy}
               returnFocusRef={tuneTriggerRef}
             />

@@ -5585,10 +5585,7 @@ html[data-theme="light"] .sq-dock-scrim {
   padding: 0 4px;
 }
 
-/* Right-anchored trailing group: the keyboard-shortcut hint then the
- * connection chip. The chip stays visible (and right-anchored) on mobile
- * even when the shortcut hint is hidden, because the wrapper itself owns
- * the auto margin. */
+/* Right-anchored trailing group: the Focus pill and the connection chip. */
 .composer-toprow-trail {
   margin-left: auto;
   flex: 0 0 auto;
@@ -5599,20 +5596,24 @@ html[data-theme="light"] .sq-dock-scrim {
   justify-content: flex-end;
 }
 
-.composer-connection {
+.composer-connection,
+.focus-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--bg-input);
-  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   flex: 0 0 auto;
+}
+
+.composer-connection {
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--muted);
 }
 
 .composer-context {
@@ -6802,18 +6803,9 @@ html[data-theme="light"] .composer-connection.open::before {
 }
 
 .focus-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--accent-cool) 40%, var(--line));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--bg-input));
   color: var(--accent-cool);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   cursor: pointer;
   transition:
     border-color 120ms ease,
@@ -6826,12 +6818,13 @@ html[data-theme="light"] .composer-connection.open::before {
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--bg-input));
 }
 
-.focus-pill:focus-visible {
+.focus-pill:focus-visible,
+.focus-pill-off:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 55%, transparent);
   outline-offset: 2px;
 }
 
-/* ◎ drawn rather than typeset, so it centers on the label regardless of font. */
+/* ◎, drawn so it centers on the label in any font. */
 .focus-mark {
   flex: 0 0 auto;
   display: inline-grid;
@@ -6902,18 +6895,12 @@ html[data-theme="light"] .composer-connection.open::before {
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.focus-pill-off:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-cool) 55%, transparent);
-  outline-offset: 2px;
-}
-
 .focus-pill-off:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
-/* Phones: the composer panel spans the composer (its containing block once the
- * wrap stops being positioned) instead of hanging off the pill. */
+/* Phones: with the wrap unpositioned, the composer panel spans the composer. */
 @media (max-width: 540px) {
   .composer .focus-pill-wrap {
     position: static;
@@ -6932,8 +6919,7 @@ html[data-theme="light"] .composer-connection.open::before {
     padding: 4px 7px;
   }
 
-  /* Zero width, not display: none, so the label's line box keeps the pill as
-   * tall as LIVE. */
+  /* The zero-width label's line box keeps the pill as tall as LIVE. */
   .focus-pill-label {
     max-width: 0;
     overflow: hidden;

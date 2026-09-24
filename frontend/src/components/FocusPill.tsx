@@ -3,37 +3,35 @@
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useMediaQuery } from "@/lib/use-media-query";
 import { usePopoverAnchor } from "@/lib/use-popover-anchor";
+import { usePopoverDismiss } from "@/lib/use-popover-dismiss";
 
-const NARROW_MAX_WIDTH = 540;
 const NARROW_INSET = 12;
 
 interface FocusPillProps {
-  onTurnOff: () => void | Promise<void>;
-  busy?: boolean;
-  // Terminal placement: the panel drops below the trigger and is portaled out
-  // of ``.session-terminal``'s ``overflow: hidden`` box, as the usage panel is.
+  onTurnOff: () => void;
+  busy: boolean;
+  // Focused after a turn-off unmounts the pill.
+  returnFocusRef: RefObject<HTMLElement | null>;
+  // Portals the panel below the trigger, out of .session-terminal's overflow: hidden.
   anchored?: boolean;
-  // Receives keyboard focus once a turn-off unmounts the pill from under it.
-  returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function FocusPill({
-  onTurnOff,
-  busy = false,
-  anchored = false,
-  returnFocusRef,
-}: FocusPillProps) {
+export function FocusPill({ onTurnOff, busy, returnFocusRef, anchored = false }: FocusPillProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const offRef = useRef<HTMLButtonElement | null>(null);
   const turnOffFocusedRef = useRef(false);
+  const narrow = useMediaQuery("(max-width: 540px)");
+
+  usePopoverDismiss(open, setOpen, wrapRef, panelRef, triggerRef);
 
   useEffect(() => {
     const turnOffFocused = turnOffFocusedRef;
-    const focusTarget = returnFocusRef?.current;
+    const focusTarget = returnFocusRef.current;
     return () => {
       if (!turnOffFocused.current) return;
       // Defer past the DOM removal that drops focus to <body>.
@@ -45,59 +43,21 @@ export function FocusPill({
     };
   }, [returnFocusRef]);
 
-  // A turn-off that settles with the pill still mounted failed; forget it so a
-  // later unmount by another path doesn't move focus.
+  // Settling while still mounted means the turn-off failed.
   useEffect(() => {
     if (!busy) turnOffFocusedRef.current = false;
   }, [busy]);
 
-  // The portaled panel sits at the end of <body>, far from the trigger in tab
-  // order, so move focus into it.
+  // The portaled panel is last in <body>, far from the trigger in tab order.
   useEffect(() => {
     if (open && anchored) offRef.current?.focus();
   }, [open, anchored]);
 
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${NARROW_MAX_WIDTH}px)`);
-    const onChange = () => setNarrow(mq.matches);
-    onChange();
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-
   const { style: anchorStyle } = usePopoverAnchor(wrapRef, open && anchored, "left");
-  // On a phone the dropdown spans the viewport below the term-bar rather than
-  // hanging off a trigger that sits mid-bar.
   const panelStyle: CSSProperties | undefined =
     anchorStyle && narrow
       ? { ...anchorStyle, left: NARROW_INSET, right: NARROW_INSET, width: "auto" }
       : (anchorStyle ?? undefined);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(event: MouseEvent) {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (wrapRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
-      const restoreFocus = panelRef.current?.contains(document.activeElement);
-      setOpen(false);
-      if (restoreFocus) triggerRef.current?.focus();
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const panel = (
     <div
@@ -119,7 +79,7 @@ export function FocusPill({
         disabled={busy}
         onClick={() => {
           turnOffFocusedRef.current = document.activeElement === offRef.current;
-          void onTurnOff();
+          onTurnOff();
         }}
       >
         {busy ? "Turning off…" : "Turn off Focus"}
@@ -144,11 +104,7 @@ export function FocusPill({
           Focus
         </span>
       </button>
-      {open
-        ? anchored && typeof document !== "undefined"
-          ? createPortal(panel, document.body)
-          : panel
-        : null}
+      {open ? (anchored ? createPortal(panel, document.body) : panel) : null}
     </div>
   );
 }

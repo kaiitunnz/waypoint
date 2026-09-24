@@ -706,16 +706,16 @@ wheels = [
 
 [[package]]
 name = "openai-codex"
-version = "0.154.0"
+version = "0.155.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai-codex-cli-bin" },
     { name = "packaging" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/98/525a9ecbc927cb71f716e53b5e6840986a2a7ad1dabe8766bcaab6e5c4c3/openai_codex-0.154.0.tar.gz", hash = "sha256:55a2675ab92ad3f900bc6572ab9d7da857d089da4e2008ce3fa8539154e1c2c3", size = 86801, upload-time = "2026-09-10T19:51:08.001Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/3e/8bc1702c189e9f744c4fd6c2a7cb0003839b5844bb3914279d5414bd8724/openai_codex-0.155.1.tar.gz", hash = "sha256:9706342a04571b6c5c1fddebf9a3202727574026bf4b988c37515c8eca07a8c8", size = 86819, upload-time = "2026-09-20T00:41:06.051Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/66/bdadb71a855aebc965f21b721239cf4a265aa7c78cfcd0ab87ae4a44b68e/openai_codex-0.154.0-py3-none-any.whl", hash = "sha256:b5f354e1280621d0f5e28313ecf6974d2a98bcf0b088dbe791dc6df5044d2214", size = 94949, upload-time = "2026-09-10T19:51:06.371Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/7e/190b3188ad4e0933fad0850bd641d274f2e002055f86d2f880c6e6647ede/openai_codex-0.155.1-py3-none-any.whl", hash = "sha256:cc7eee57ab2803a59b5125f25190839af37689f09812f0fca6565d722303cf5d", size = 94950, upload-time = "2026-09-20T00:41:04.574Z" },
 ]
 
 [[package]]
@@ -1292,7 +1292,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "croniter", specifier = ">=6.0.0" },
     { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "openai-codex", specifier = "==0.154.0" },
+    { name = "openai-codex", specifier = "==0.155.1" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pyte", specifier = ">=0.8.2" },
     { name = "python-multipart", specifier = ">=0.0.9" },

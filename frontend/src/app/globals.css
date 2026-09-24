@@ -11740,7 +11740,7 @@ html[data-theme="light"] .sched-dock-scrim {
   min-width: 0;
 }
 
-/* Everything held is waiting on the human's dialog answer, not on Focus. */
+/* Every held item waits on the human's dialog response. */
 .held-dock.awaiting {
   --held-hue: var(--warn);
 }

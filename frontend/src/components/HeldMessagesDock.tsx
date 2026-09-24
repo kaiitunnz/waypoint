@@ -73,7 +73,7 @@ export function HeldMessagesDock({
   }, [expanded]);
 
   const latest = messages[count - 1];
-  const awaiting = !focus && count > 0 && messages.every((m) => m.auto_release);
+  const awaiting = !focus && messages.every((m) => m.auto_release);
   const state = focus ? "Focus" : awaiting ? "After you respond" : "Focus off";
 
   return (

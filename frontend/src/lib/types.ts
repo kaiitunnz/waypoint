@@ -880,8 +880,7 @@ export interface HeldMessage {
   text: string;
   attachments: string[];
   created_at: string;
-  // Held because the session waits on an approval or plan dialog; sends on its
-  // own once the human responds.
+  // Held for an open dialog; sends once the human responds.
   auto_release: boolean;
 }
 

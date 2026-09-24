@@ -1502,6 +1502,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canInjectKeys = session
     ? terminalKeyInjection(session.transport, catalog)
     : false;
+  // A key-injection pane can be unlocked for typing and mouse input for this
+  // view only; the ref feeds the terminal WS hello on (re)connect.
+  const canUnlockInput = canInjectKeys && !canTerminalInteract;
+  const [inputUnlocked, setInputUnlocked] = useState(false);
+  const inputUnlockedRef = useRef(false);
+  const paneUnlocked = canUnlockInput && inputUnlocked;
   const activeView: ViewMode = terminalOnly
     ? "terminal"
     : !canShowTerminal
@@ -1518,6 +1524,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // Bumped to reconnect the terminal WS: on EXITED → live transitions and
   // when the pane target (tmux_pane) changes under a running session.
   const [terminalEpoch, setTerminalEpoch] = useState(0);
+  useEffect(() => {
+    inputUnlockedRef.current = false;
+    setInputUnlocked(false);
+  }, [sessionId]);
   // The light/dark surface the connected pane should show, resolved from the
   // agent's own TUI theme by the server. Connection state, not app state:
   // dark until the appearance frame arrives, reset to dark on each reconnect.
@@ -1593,6 +1603,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               type: "hello",
               terminal_protocol: 2,
               ...(cols && rows ? { cols, rows } : {}),
+              ...(inputUnlockedRef.current ? { interactive: true } : {}),
             }),
           );
         },
@@ -1640,6 +1651,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       terminalSocketRef.current = null;
     };
   }, [activeView, paneTransport, catalog, host, token, sessionId, handleAuthFailure, terminalEpoch]);
+
+  // Reconnects so the server re-renders with mouse modes forwarded (or not).
+  const toggleInputUnlocked = useCallback(() => {
+    const next = !inputUnlockedRef.current;
+    inputUnlockedRef.current = next;
+    setInputUnlocked(next);
+    const term = terminalRef.current;
+    term?.setInputEnabled(next);
+    if (next) term?.focus();
+    else term?.blur();
+    setTerminalEpoch((e) => e + 1);
+  }, []);
 
   const handleTerminalInput = useCallback((data: string) => {
     const socket = terminalSocketRef.current;
@@ -2350,6 +2373,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           session={session}
           interactive={canTerminalInteract}
           keyInjection={canInjectKeys}
+          canUnlockInput={canUnlockInput}
+          inputUnlocked={paneUnlocked}
+          onToggleInputUnlocked={toggleInputUnlocked}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           terminalAppearance={terminalAppearance}

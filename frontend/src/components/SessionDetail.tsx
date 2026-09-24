@@ -100,6 +100,7 @@ import {
 } from "@/components/AttachmentTray";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
+import { FocusPill } from "@/components/FocusPill";
 import { HeldMessagesDock } from "@/components/HeldMessagesDock";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
@@ -2438,6 +2439,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           inputUnlocked={paneUnlocked}
           onToggleInputUnlocked={toggleInputUnlocked}
           focus={Boolean(session?.focus)}
+          focusBusy={focusBusy}
           onToggleFocus={() => void handleSetFocus(!session?.focus)}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
@@ -3512,7 +3514,6 @@ const ReplyComposer = memo(function ReplyComposer({
               {"⚙︎"}
             </span>
             <span className="composer-tune-summary">{tuneSummary}</span>
-            {focus ? <span className="composer-tune-focus">Focus</span> : null}
             {hasPendingRestart ? (
               <span
                 className="composer-tune-pending"
@@ -3866,6 +3867,9 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
+          {focus ? (
+            <FocusPill onTurnOff={() => onFocusChange(false)} busy={focusBusy} />
+          ) : null}
           <SessionUsagePill
             session={session}
             connection={connection}

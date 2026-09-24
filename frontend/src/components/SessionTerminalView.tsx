@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { FocusPill } from "@/components/FocusPill";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
@@ -35,6 +36,7 @@ interface SessionTerminalViewProps {
   inputUnlocked: boolean;
   onToggleInputUnlocked: () => void;
   focus: boolean;
+  focusBusy?: boolean;
   onToggleFocus: () => void;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
@@ -98,6 +100,7 @@ export function SessionTerminalView({
   inputUnlocked,
   onToggleInputUnlocked,
   focus,
+  focusBusy,
   onToggleFocus,
   terminalRef,
   terminalDims,
@@ -208,6 +211,9 @@ export function SessionTerminalView({
           rateLimitRefreshBusy={rateLimitRefreshBusy}
           anchored
         />
+        {focus ? (
+          <FocusPill anchored onTurnOff={onToggleFocus} busy={focusBusy} />
+        ) : null}
         <span className="term-bar-spacer" />
         {interactive && terminalDims ? (
           <span className="term-bar-dims" aria-label="Pane dimensions">

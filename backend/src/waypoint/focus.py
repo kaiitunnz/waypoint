@@ -23,9 +23,11 @@ class FocusGate:
     def __init__(self, runtime: "SessionRuntime") -> None:
         self._runtime = runtime
         # Claimed held ids mid-delivery, keyed to their session. A cancel that
-        # lands on one stops a failed delivery from putting it back.
+        # lands before dispatch stops the delivery; once dispatching, it is too
+        # late to cancel.
         self._in_flight: dict[str, str] = {}
         self._cancelled: set[str] = set()
+        self._dispatching: set[str] = set()
 
     def list(self, session_id: str) -> list[HeldMessageRecord]:
         self._runtime.get_session(session_id)
@@ -67,7 +69,8 @@ class FocusGate:
         record = self._runtime.storage.take_held_message(held_id)
         if record is None:
             raise _not_found()
-        return await self._deliver_claimed(record)
+        await self._deliver_claimed(record)
+        return self._runtime.get_session(record.session_id)
 
     async def release_all(self, session_id: str) -> SessionRecord:
         for held in self.list(session_id):
@@ -77,6 +80,11 @@ class FocusGate:
         return self._runtime.get_session(session_id)
 
     async def cancel(self, held_id: str) -> None:
+        if held_id in self._dispatching:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="held message is already being delivered",
+            )
         if held_id in self._in_flight:
             self._cancelled.add(held_id)
             return
@@ -89,14 +97,17 @@ class FocusGate:
     async def cancel_all(self, session_id: str) -> None:
         self._runtime.get_session(session_id)
         self._cancelled.update(
-            held_id for held_id, owner in self._in_flight.items() if owner == session_id
+            held_id
+            for held_id, owner in self._in_flight.items()
+            if owner == session_id and held_id not in self._dispatching
         )
         for record in self._runtime.storage.take_held_messages(session_id):
             self._unpin(record)
         await self._publish(session_id)
 
-    async def _deliver_claimed(self, record: HeldMessageRecord) -> SessionRecord:
+    async def _deliver_claimed(self, record: HeldMessageRecord) -> None:
         self._in_flight[record.id] = record.session_id
+        await self._publish(record.session_id)
         request = SessionInputRequest(
             text=record.text,
             submit=record.submit,
@@ -110,18 +121,25 @@ class FocusGate:
             except Exception:
                 # Nothing reached the transcript: put it back unless it was
                 # cancelled meanwhile (a deleted session refuses the insert).
-                if record.id in self._cancelled:
-                    self._unpin(record)
-                elif not self._runtime.storage.create_held_message(record):
+                restored = (
+                    record.id not in self._cancelled
+                    and self._runtime.storage.create_held_message(record)
+                )
+                if not restored:
                     self._unpin(record)
                 raise
+            if record.id in self._cancelled:
+                self._unpin(record)
+                return
+            self._dispatching.add(record.id)
             try:
-                return await self._runtime.dispatch_input(prepared)
+                await self._runtime.dispatch_input(prepared)
             finally:
                 self._unpin(record)
         finally:
             self._in_flight.pop(record.id, None)
             self._cancelled.discard(record.id)
+            self._dispatching.discard(record.id)
             await self._publish(record.session_id)
 
     def _title_of(self, session_id: str | None) -> str | None:

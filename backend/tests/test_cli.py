@@ -2482,6 +2482,32 @@ def test_sessions_send_attachment_id_passes_ids_to_send_input(
     assert state["input_body"]["attachments"] == ["id-aaa", "id-bbb"]
 
 
+def test_sessions_send_stamps_sender_and_reports_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", "peer")
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["input_body"] = json.loads(request.content)
+        return httpx.Response(
+            200, json={"session": {"id": "s1"}, "held_message": {"id": "h1"}}
+        )
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "sessions", "send", "s1", "hi"]
+    )
+    assert result.exit_code == 0, result.output
+    assert state["input_body"]["sender_session_id"] == "peer"
+    assert json.loads(result.output)["session"]["send"] == "held"
+
+
 def test_sessions_send_attach_and_attachment_id_combined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

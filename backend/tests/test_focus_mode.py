@@ -244,6 +244,50 @@ async def test_cancel_during_release_blocks_put_back(tmp_path, monkeypatch) -> N
     assert runtime.storage.list_held_messages("s1") == []
 
 
+async def test_cancel_after_prepare_skips_dispatch(tmp_path, monkeypatch) -> None:
+    runtime = focused_runtime(tmp_path)
+    sent = record_dispatches(runtime, monkeypatch)
+    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    gate = asyncio.Event()
+    real_prepare = runtime.prepare_input
+
+    async def slow_prepare(*args: Any) -> PreparedInput:
+        await gate.wait()
+        return await real_prepare(*args)
+
+    monkeypatch.setattr(runtime, "prepare_input", slow_prepare)
+    release = asyncio.create_task(runtime.focus.release(held.id))
+    await asyncio.sleep(0)
+
+    await runtime.focus.cancel(held.id)
+    gate.set()
+    await release
+
+    assert sent == []
+    assert runtime.storage.list_held_messages("s1") == []
+
+
+async def test_cancel_while_dispatching_conflicts(tmp_path, monkeypatch) -> None:
+    runtime = focused_runtime(tmp_path)
+    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    gate = asyncio.Event()
+
+    async def slow_dispatch(prepared: PreparedInput) -> SessionRecord:
+        await gate.wait()
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", slow_dispatch)
+    release = asyncio.create_task(runtime.focus.release(held.id))
+    await asyncio.sleep(0.01)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.focus.cancel(held.id)
+    gate.set()
+    await release
+
+    assert exc.value.status_code == 409
+
+
 async def test_put_back_skipped_for_deleted_session(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
     held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)

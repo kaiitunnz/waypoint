@@ -6,7 +6,6 @@ from waypoint.workspace_git import (
     git_file_diff,
     git_list_files,
     git_status,
-    is_git_repo,
 )
 
 
@@ -221,7 +220,6 @@ async def test_git_list_files_non_repo_returns_none(
 async def test_non_repo_returns_none(
     tmp_path: Path, workspace_fs: WorkspaceFilesystem
 ) -> None:
-    assert await is_git_repo(workspace_fs, str(tmp_path)) is False
     assert await git_status(workspace_fs, str(tmp_path)) is None
 
 

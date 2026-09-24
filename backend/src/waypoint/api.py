@@ -803,24 +803,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         follow = context.settings.workspace_follow_symlinks
         if launch_target_id is None:
             return LocalWorkspaceFilesystem(denylist, follow)
-        # An unknown or disabled target is unavailable, never local: falling
-        # back would serve this host's filesystem at the remote session's path.
+        # An unknown or disabled target is unavailable: the session's path names
+        # another host's filesystem.
         target = context.runtime.ssh_targets.get(launch_target_id)
         if target is None or context.runtime.remote_probe_blocked(launch_target_id):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="workspace unavailable",
-            )
+            raise WorkspaceUnavailableError(f"launch target {launch_target_id}")
         return RemoteWorkspaceFilesystem(target, denylist, follow)
 
-    def _workspace(session_id: str) -> tuple[WorkspaceFilesystem, str]:
+    def _workspace(
+        session_id: str,
+    ) -> tuple[SessionRecord, WorkspaceFilesystem, str]:
         if not context.settings.workspace_preview_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
             )
         session = context.runtime.get_session(session_id)
-        fs = _workspace_fs(session.launch_target_id)
-        return fs, session.worktree_path or session.cwd
+        try:
+            fs = _workspace_fs(session.launch_target_id)
+        except WorkspaceUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace unavailable",
+            ) from exc
+        return session, fs, session.worktree_path or session.cwd
 
     @asynccontextmanager
     async def _workspace_errors() -> AsyncIterator[None]:
@@ -854,8 +859,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> Any:
-        session = context.runtime.get_session(session_id)
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         async with _workspace_errors():
             listing = await fs.list_dir(base, path, limit, offset)
         return {
@@ -874,7 +878,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: Annotated[str, Query()] = "",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> Any:
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         query = q.strip()
         if not query:
             return {"matches": [], "truncated": False}
@@ -912,22 +916,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         else:
             require_token(authorization, context.tokens)
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         if raw:
             async with _workspace_errors():
                 raw_file = await fs.read_raw(base, path)
             media_type = (
                 mimetypes.guess_type(raw_file.name)[0] or "application/octet-stream"
             )
-            if raw_file.path is not None:
+            if isinstance(raw_file.content, Path):
                 return FileResponse(
-                    raw_file.path,
+                    raw_file.content,
                     media_type=media_type,
                     filename=raw_file.name,
                     content_disposition_type="inline",
                 )
             return Response(
-                content=raw_file.data,
+                content=raw_file.content,
                 media_type=media_type,
                 headers={
                     "Content-Disposition": (
@@ -950,7 +954,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # workspace. Used by the transcript to turn an agent-printed filesystem
         # path into a canonical relative path plus its kind, so the frontend can
         # open a file preview or reveal a directory in the tree.
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         async with _workspace_errors():
             return await fs.resolve(base, path)
 
@@ -959,7 +963,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         disabled: dict[str, Any] = {
             "enabled": False,
             "branch": None,
@@ -993,7 +997,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: Annotated[str, Query()] = "",
         staged: Annotated[bool, Query()] = False,
     ) -> Any:
-        fs, base = _workspace(session_id)
+        session, fs, base = _workspace(session_id)
         if not context.settings.workspace_git_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
@@ -1031,7 +1035,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         launch_target_id: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
     ) -> DirectorySuggestionsResponse:
-        # Completes the launch form's working directory on the selected target.
         if not context.settings.workspace_preview_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
@@ -1047,7 +1050,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             fs = _workspace_fs(launch_target_id)
             directories = await fs.list_dirs(prefix, limit)
-        except (HTTPException, WorkspaceUnavailableError):
+        except WorkspaceUnavailableError:
             directories = []
         return DirectorySuggestionsResponse(directories=directories)
 

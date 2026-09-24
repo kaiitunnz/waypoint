@@ -1,14 +1,11 @@
-"""Workspace filesystem semantics shared by local and remote sessions.
+"""Workspace operations (``op_*``) for local and remote sessions.
 
-The ``op_*`` functions are the workspace operations. Local sessions call them
-in-process; remote sessions pipe this same file to ``python3 -`` on the SSH
-target, where ``_main`` dispatches one op per call and prints one
-sentinel-framed JSON line. The module therefore stays stdlib-only and
-Python 3.8-compatible.
+Local sessions call the ops in-process; remote sessions pipe this file to
+``python3 -`` on the SSH target, where ``_main`` runs one op and prints one
+sentinel-framed JSON line. The module is stdlib-only and Python 3.8-compatible.
 """
 
-# Deferred annotation evaluation keeps the modern type hints from being
-# evaluated on a remote Python 3.8 interpreter.
+# Required for PEP 585/604 annotations on a remote Python 3.8 interpreter.
 from __future__ import annotations
 
 import base64
@@ -17,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -317,20 +315,25 @@ def rank_files(
     return [path for _, _, path in scored[:limit]], truncated
 
 
-def resolve_existing_file(
+def resolve_allowed(
     base: Path, rel: str, denylist: list[str] | None, follow_symlinks: bool
 ) -> Path:
     if is_denied(rel, denylist):
         raise WorkspacePathError("path is denied")
-    resolved = resolve_in_base(base, rel, follow_symlinks=follow_symlinks)
+    return resolve_in_base(base, rel, follow_symlinks=follow_symlinks)
+
+
+def resolve_existing_file(
+    base: Path, rel: str, denylist: list[str] | None, follow_symlinks: bool
+) -> Path:
+    resolved = resolve_allowed(base, rel, denylist, follow_symlinks)
     if not resolved.is_file():
         raise FileNotFoundError(resolved)
     return resolved
 
 
 def run_git_commands(base: str, commands: list[list[str]]) -> list[tuple[int, bytes]]:
-    # ``git -C`` gets no shell, so a remote session's ``~``-relative cwd must be
-    # expanded here, on the host that runs git.
+    # ``git -C`` does no tilde expansion.
     cwd = os.path.expanduser(base)
     results: list[tuple[int, bytes]] = []
     for args in commands:
@@ -382,10 +385,8 @@ def op_resolve(
     follow_symlinks: bool,
     must_exist: bool,
 ) -> ResolvedPath:
-    if is_denied(rel, denylist):
-        raise WorkspacePathError("path is denied")
     base_path = Path(base)
-    resolved = resolve_in_base(base_path, rel, follow_symlinks=follow_symlinks)
+    resolved = resolve_allowed(base_path, rel, denylist, follow_symlinks)
     path = relative_to_base(base_path, resolved)
     if not must_exist:
         return {"path": path, "kind": None}
@@ -474,10 +475,10 @@ def op_list_dirs(
     except OSError:
         return {"directories": []}
     names.sort(key=lambda name: (name.lower(), name))
-    return {"directories": [parent_typed + name for name in names[: max(limit, 0)]]}
+    return {"directories": [parent_typed + name for name in names[:limit]]}
 
 
-OPS: dict[str, Any] = {
+OPS: dict[str, Callable[..., Any]] = {
     "list_dir": op_list_dir,
     "walk_files": op_walk_files,
     "resolve": op_resolve,
@@ -487,24 +488,20 @@ OPS: dict[str, Any] = {
     "list_dirs": op_list_dirs,
 }
 
-
-def error_code(exc: Exception) -> str | None:
-    if isinstance(exc, WorkspacePathError):
-        return "denied"
-    if isinstance(exc, WorkspaceFileTooLargeError):
-        return "too_large"
-    if isinstance(exc, NotADirectoryError):
-        return "not_a_directory"
-    if isinstance(exc, FileNotFoundError):
-        return "not_found"
-    return None
+ERROR_CODES: tuple[tuple[type[Exception], str], ...] = (
+    (WorkspacePathError, "denied"),
+    (WorkspaceFileTooLargeError, "too_large"),
+    (NotADirectoryError, "not_a_directory"),
+    (FileNotFoundError, "not_found"),
+)
 
 
 def _main(argv: list[str]) -> None:
     try:
         payload = OPS[argv[1]](**json.loads(argv[2]))
     except Exception as exc:
-        payload = {"error": error_code(exc) or "failed", "detail": str(exc)[:240]}
+        code = next((c for cls, c in ERROR_CODES if isinstance(exc, cls)), "failed")
+        payload = {"error": code, "detail": str(exc)[:240]}
     sys.stdout.write(SENTINEL + json.dumps(payload) + "\n")
     sys.stdout.flush()
 

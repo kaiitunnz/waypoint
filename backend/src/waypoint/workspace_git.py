@@ -42,11 +42,6 @@ def _text(result: tuple[int, bytes]) -> str | None:
     return out.decode("utf-8", errors="replace").strip() or None
 
 
-async def is_git_repo(fs: WorkspaceFilesystem, base: str) -> bool:
-    [result] = await fs.git(base, [_REPO_CHECK])
-    return _text(result) == "true"
-
-
 async def _head_label(
     fs: WorkspaceFilesystem, base: str, abbrev: str | None
 ) -> tuple[str | None, bool]:

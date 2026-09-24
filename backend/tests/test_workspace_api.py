@@ -512,26 +512,25 @@ async def test_directories_never_list_inside_a_denied_path(
     assert resp.json() == {"directories": []}
 
 
-async def test_directories_unknown_target_and_disabled(tmp_path: Path) -> None:
+async def test_directories_unknown_target_is_404(tmp_path: Path) -> None:
     app, token = _build(tmp_path, None)
-    headers = {"Authorization": f"Bearer {token}"}
     async with _client(app) as client:
-        unknown = await client.get(
+        resp = await client.get(
             "/api/directories",
             params={"prefix": "/", "launch_target_id": "nope"},
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}"},
         )
-    assert unknown.status_code == 404
+    assert resp.status_code == 404
 
-    other = tmp_path / "other"
-    other.mkdir()
-    app, token = _app(
-        other, other, None, settings_kw={"workspace_preview_enabled": False}
+
+async def test_directories_disabled_is_404(tmp_path: Path) -> None:
+    app, token = _build(
+        tmp_path, None, settings_kw={"workspace_preview_enabled": False}
     )
     async with _client(app) as client:
-        disabled = await client.get(
+        resp = await client.get(
             "/api/directories",
             params={"prefix": "/"},
             headers={"Authorization": f"Bearer {token}"},
         )
-    assert disabled.status_code == 404
+    assert resp.status_code == 404

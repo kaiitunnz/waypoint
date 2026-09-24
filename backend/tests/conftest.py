@@ -14,11 +14,7 @@ from waypoint.workspace_preview import DEFAULT_WORKSPACE_DENYLIST
 
 @pytest.fixture
 def loopback_target(monkeypatch: pytest.MonkeyPatch) -> SshLaunchTargetConfig:
-    """An SSH target whose remote commands run on this host, unwrapped.
-
-    Remote workspace ops still pipe the real vendored module to a real
-    ``python3 -`` subprocess, so only the SSH hop itself is skipped.
-    """
+    """An SSH target that runs its remote commands as local subprocesses."""
 
     def _build(
         self: SshLaunchTargetConfig, command: list[str], *args: Any, **kwargs: Any

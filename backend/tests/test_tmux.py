@@ -3,10 +3,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
 
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
+from waypoint.transports import InputBlockedError
 
 
 def test_send_input_uses_literal_mode_and_submit() -> None:
@@ -502,7 +502,7 @@ def test_await_pane_ready_raises_on_blocking_dialog() -> None:
     # A modal dialog must not be treated as a ready composer; surface it instead
     # of pasting/Enter'ing into it.
     transport, _ = _transport_with(_AgentConfirmer(), dialog=True)
-    with pytest.raises(TmuxError):
+    with pytest.raises(InputBlockedError):
         asyncio.run(transport._await_pane_ready("%9", _AgentConfirmer()))
 
 
@@ -511,9 +511,9 @@ def test_send_input_refuses_when_dialog_open() -> None:
     # fire Enter into it (which would select an option). It surfaces an error
     # and never reaches the paste.
     transport, adapter = _transport_with(_AgentConfirmer(), dialog=True)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(InputBlockedError) as exc:
         asyncio.run(transport.send_input(_session("codex"), "hi"))
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 409
     assert not any(c[0] == "send_input" for c in adapter.calls)
     assert not any(c[0] == "submit" for c in adapter.calls)
 

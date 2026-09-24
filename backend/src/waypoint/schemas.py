@@ -1598,6 +1598,9 @@ class HeldMessageRecord(BaseModel):
     items: list[SessionInputItem] | None = None
     attachments: list[str] = Field(default_factory=list)
     created_at: datetime
+    # Held because a dialog blocked input, not by Focus; delivered on its own
+    # once the dialog clears.
+    auto_release: bool = False
 
 
 class ScheduledMessageStatus(StrEnum):

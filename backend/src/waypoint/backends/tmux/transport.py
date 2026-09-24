@@ -18,7 +18,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
 )
-from waypoint.transports.base import TransportAdapter
+from waypoint.transports.base import InputBlockedError, TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
@@ -106,9 +106,7 @@ class TmuxTransport(TransportAdapter):
             # option (e.g. approve a tool or accept a trust prompt). Surface it
             # so the caller responds to the dialog instead of bulldozing it.
             if confirmer.pane_shows_blocking_dialog(snapshot):
-                raise TmuxError(
-                    "the pane has an open dialog; respond to it before sending"
-                )
+                raise InputBlockedError()
             if confirmer.pane_ready_for_input(snapshot):
                 return
             await asyncio.sleep(poll_seconds)

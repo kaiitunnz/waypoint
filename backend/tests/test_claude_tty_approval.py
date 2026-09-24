@@ -1182,3 +1182,24 @@ async def test_terminate_closes_the_pending_card() -> None:
         "Pending approval cleared by terminate"
     )
     assert "sess-1" not in plugin._pending_approvals
+
+
+@pytest.mark.parametrize(
+    ("screen", "pending", "expected"),
+    [
+        ("ready.txt", False, False),
+        ("ready.txt", True, True),
+        ("plan_approval.txt", False, True),
+        ("question_dialog.txt", False, True),
+    ],
+)
+async def test_input_blocked_by_pending_approval_or_dialog(
+    screen: str, pending: bool, expected: bool
+) -> None:
+    plugin = ClaudeTtyPlugin()
+    if pending:
+        plugin._pending_approvals["sess-1"] = _pending()
+    transport, tmux = _make_transport(plugin)
+    tmux.capture_snapshot = AsyncMock(return_value=_load(screen))
+
+    assert await transport.input_blocked(_make_session()) is expected

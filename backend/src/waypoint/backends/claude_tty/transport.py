@@ -78,6 +78,15 @@ class ClaudeTtyTransport(TmuxTransport):
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return session.id in self._plugin._pending_approvals
 
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        if self.has_pending_approval(session):
+            return True
+        try:
+            snapshot = await self.adapter.capture_snapshot(self._target(session))
+        except TmuxError:
+            return False
+        return pane_dialog.shows_blocking_dialog(snapshot)
+
     async def respond_to_approval(
         self,
         session: SessionRecord,

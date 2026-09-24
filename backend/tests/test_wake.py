@@ -54,13 +54,16 @@ def make_session(
 
 
 class _ApprovalStub:
-    """Minimal transport stub exposing only ``has_pending_approval``."""
+    """Minimal transport stub for the approval and input-blocked checks."""
 
     def __init__(self, pending: bool = False) -> None:
         self.pending = pending
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.pending
+
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        return False
 
 
 def _record_wakes(runtime: SessionRuntime, monkeypatch) -> list[tuple[str, str]]:

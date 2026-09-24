@@ -11,6 +11,7 @@ from waypoint.api import create_app
 from waypoint.runtime import WAKE_INPUT_TEXT, PreparedInput, SessionRuntime
 from waypoint.schemas import (
     HeldMessageOrigin,
+    HeldMessageRecord,
     IdleMessageBatchMode,
     ScheduledMessageCreateRequest,
     ScheduledMessageStatus,
@@ -22,6 +23,7 @@ from waypoint.schemas import (
 )
 from waypoint.settings import Settings
 from waypoint.storage import Storage
+from waypoint.transports import InputBlockedError
 
 
 def make_runtime(tmp_path: Path) -> SessionRuntime:
@@ -438,3 +440,144 @@ async def test_api_cancel_endpoints(tmp_path) -> None:
         everything = await client.delete("/api/sessions/s1/held-messages", headers=auth)
         assert everything.status_code == 204
     assert runtime.storage.list_held_messages("s1") == []
+
+
+class BlockingTransport:
+    def __init__(self) -> None:
+        self.blocked = False
+        self.pending = False
+
+    def has_pending_approval(self, session: SessionRecord) -> bool:
+        return self.pending
+
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        return self.blocked or self.pending
+
+
+def blocking_runtime(tmp_path: Path, monkeypatch) -> tuple[SessionRuntime, Any]:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "s1"))
+    transport = BlockingTransport()
+    monkeypatch.setattr(runtime, "transport_for", lambda session: transport)
+    return runtime, transport
+
+
+async def settle(runtime: SessionRuntime) -> None:
+    while runtime.focus._tasks:
+        await asyncio.gather(*list(runtime.focus._tasks))
+
+
+async def test_blocked_session_holds_then_delivers_in_order(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    sent = record_dispatches(runtime, monkeypatch)
+    transport.pending = True
+
+    first = await runtime.focus.deliver(
+        "s1", agent_send("one"), HeldMessageOrigin.AGENT
+    )
+    await settle(runtime)
+    transport.pending = False
+    # Unblocked, but an item is still queued: the new send waits behind it.
+    await runtime.focus.deliver("s1", agent_send("two"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+
+    assert isinstance(first, HeldMessageRecord) and first.auto_release
+    assert sent == ["one", "two"]
+    assert runtime.storage.list_held_messages("s1") == []
+    assert "s1" not in runtime.focus._deferred
+
+
+async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.focus.DEFER_RETRY_SECONDS", 0.01)
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    sent = record_dispatches(runtime, monkeypatch)
+    transport.blocked = True
+
+    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+    assert sent == []
+    transport.blocked = False
+    await asyncio.sleep(0.05)
+    await settle(runtime)
+
+    assert sent == ["one"]
+
+
+async def test_pending_approval_waits_for_an_edge(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    sent = record_dispatches(runtime, monkeypatch)
+    transport.pending = True
+
+    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+    assert sent == [] and not runtime.focus._retries
+    transport.pending = False
+    runtime.focus.drain_deferred({"s1"})
+    await settle(runtime)
+
+    assert sent == ["one"]
+
+
+async def test_focus_held_items_never_auto_release(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    sent = record_dispatches(runtime, monkeypatch)
+    transport.pending = True
+    await runtime.focus.deliver("s1", agent_send("auto"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+    runtime.set_focus("s1", True)
+    await runtime.focus.deliver("s1", agent_send("focus"), HeldMessageOrigin.AGENT)
+
+    transport.pending = False
+    runtime.focus.drain_deferred({"s1"})
+    await settle(runtime)
+    assert sent == []  # Focus holds the auto item too
+    runtime.set_focus("s1", False)
+    await settle(runtime)
+
+    assert sent == ["auto"]
+    assert [m.text for m in runtime.storage.list_held_messages("s1")] == ["focus"]
+
+
+async def test_release_while_blocked_puts_the_item_back(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    transport.pending = True
+    held = await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+
+    async def blocked_dispatch(prepared: PreparedInput) -> SessionRecord:
+        raise InputBlockedError()
+
+    monkeypatch.setattr(runtime, "dispatch_input", blocked_dispatch)
+    with pytest.raises(InputBlockedError):
+        await runtime.focus.release(held.id)
+
+    assert [m.id for m in runtime.storage.list_held_messages("s1")] == [held.id]
+    assert "s1" in runtime.focus._deferred
+
+
+async def test_start_seeds_sessions_with_auto_items(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    transport.pending = True
+    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+
+    reopened = SessionRuntime(runtime.settings, runtime.storage)
+    reopened.focus.start()
+
+    assert reopened.focus._deferred == {"s1"}
+
+
+async def test_dispatch_refuses_a_blocked_session_before_recording(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    transport.is_structured = False
+    transport.blocked = True
+
+    with pytest.raises(InputBlockedError):
+        await runtime.handle_input("s1", SessionInputRequest(text="hi"))
+
+    assert runtime.storage.list_events("s1") == []
+    assert runtime.get_session("s1").status is SessionStatus.IDLE

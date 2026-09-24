@@ -155,7 +155,7 @@ from waypoint.telemetry.query import (
     subtract_calendar_months,
 )
 from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_request
-from waypoint.transports import TransportAdapter
+from waypoint.transports import InputBlockedError, TransportAdapter
 from waypoint.usage_providers import UsageProviderService
 from waypoint.usage_providers.registry import build_providers
 from waypoint.workspace_preview import read_text_prefix
@@ -609,6 +609,8 @@ class SessionRuntime:
         # Reap any one-shot session orphaned by a crash before the restore
         # loop below tries to reconnect it — it has no state worth resuming.
         await self._sweep_orphaned_oneshot_sessions()
+        # Before any restore can finish and kick its session's held items.
+        self.focus.start()
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
@@ -2553,6 +2555,8 @@ class SessionRuntime:
             handled = await plugin.maybe_handle_input(self, session, request)
             if handled is not None:
                 return handled
+        if await transport.input_blocked(session):
+            raise InputBlockedError()
         # Flip status and record the user event before send_input so the
         # broadcast snapshot carries status=RUNNING (Claude lags otherwise —
         # nothing comes back between stdin write and first content) and so
@@ -2588,8 +2592,14 @@ class SessionRuntime:
         self.attachments.sweep(session.id, self.settings.attachment_orphan_ttl_seconds)
         try:
             await transport.send_input(session, request.text, attachments or None)
-        except Exception:
+        except Exception as exc:
             self.storage.update_session(session.id, status=previous_status)
+            if isinstance(exc, InputBlockedError):
+                # A dialog opened after the check above; the message recorded
+                # above never reached the agent.
+                await self._record_system_event(
+                    session.id, "Message not delivered: a dialog opened first"
+                )
             raise
         return updated
 
@@ -2709,6 +2719,9 @@ class SessionRuntime:
         await plugin.restore_session(self, session)
         refreshed = self.storage.get_session(session.id)
         if refreshed is not None:
+            # Deliver items a dialog held before the restart, now that the
+            # restored transport can report whether one is still open.
+            self.focus.drain_deferred({refreshed.id})
             # Boot-restore warming is fire-and-forget for every persisted
             # session, so we skip remote targets to avoid fanning out
             # SSH/plugin-list probes against hosts the user may never
@@ -4598,6 +4611,8 @@ class SessionRuntime:
             return session
         updated = self.storage.update_session(session_id, focus=enabled)
         self._publish_session_state(session_id)
+        if not enabled:
+            self.focus.drain_deferred({session_id})
         return updated
 
     async def answer_question(
@@ -5570,6 +5585,7 @@ class SessionRuntime:
             # Deliver any owed wake whose session just reached a deliverable edge.
             if self._pending_wakes:
                 self._drain_pending_wakes(dirty_ids)
+            self.focus.drain_deferred(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
         if not self.settings.write_structured_log:

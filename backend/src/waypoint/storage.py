@@ -3022,6 +3022,14 @@ class Storage:
         return {row["id"] for row in rows}
 
     @_synchronized
+    def auto_release_session_ids(self) -> set[str]:
+        rows = self.connection.execute(
+            "SELECT DISTINCT session_id FROM held_messages "
+            "WHERE json_extract(body, '$.auto_release') = 1"
+        ).fetchall()
+        return {row["session_id"] for row in rows}
+
+    @_synchronized
     def take_held_message(self, held_id: str) -> HeldMessageRecord | None:
         row = self.connection.execute(
             "SELECT body FROM held_messages WHERE id = ?", (held_id,)

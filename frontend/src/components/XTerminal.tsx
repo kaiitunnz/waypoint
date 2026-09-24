@@ -145,11 +145,8 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       term.loadAddon(new WebLinksAddon());
       term.open(host);
 
-      // Fixed-grid panes scroll the host (.xterm-host--scroll) over the
-      // over-tall grid, but xterm consumes the wheel: it emits cursor keys or
-      // mouse reports and cancels the event. Stopping the wheel in the capture
-      // phase keeps it from xterm so the host scrolls. Resizable panes keep
-      // xterm's wheel handling (scrollback / mouse-mode passthrough).
+      // Fixed-grid panes scroll the host (.xterm-host--scroll); xterm would
+      // consume the wheel as cursor keys or mouse reports and cancel it.
       const keepHostWheel = (event: WheelEvent) => event.stopPropagation();
       if (!autoFit) {
         host.addEventListener("wheel", keepHostWheel, { capture: true, passive: true });

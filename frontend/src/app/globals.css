@@ -9217,14 +9217,12 @@ html[data-theme="light"] .term-bar-action.primary {
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
 
-/* Relocks an unlocked pane; the lamp marks the unlocked state. */
 .term-bar-unlocked::before {
   content: "";
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: currentColor;
-  flex: none;
 }
 
 /* The .term-bar-overflow wraps the trigger, mirroring .composer-overflow

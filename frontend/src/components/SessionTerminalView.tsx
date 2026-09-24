@@ -32,9 +32,6 @@ interface SessionTerminalViewProps {
   // The pane accepts key-bar / scroll injection even when not fully
   // interactive (claude_tty). Implied by, and broader than, ``interactive``.
   keyInjection: boolean;
-  // The pane can be unlocked for typing and mouse input (key-injection panes
-  // that aren't fully interactive); ``inputUnlocked`` is this view's state.
-  canUnlockInput: boolean;
   inputUnlocked: boolean;
   onToggleInputUnlocked: () => void;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
@@ -96,7 +93,6 @@ export function SessionTerminalView({
   session,
   interactive,
   keyInjection,
-  canUnlockInput,
   inputUnlocked,
   onToggleInputUnlocked,
   terminalRef,
@@ -219,7 +215,6 @@ export function SessionTerminalView({
             type="button"
             className="term-bar-action warn term-bar-unlocked"
             onClick={onToggleInputUnlocked}
-            aria-label="Lock pane input"
             title="Pane input is unlocked. Select text with Shift-drag (⌥-drag on macOS). Tap to lock."
           >
             Unlocked
@@ -343,15 +338,12 @@ export function SessionTerminalView({
                   Browse workspace…
                 </button>
               ) : null}
-              {canUnlockInput && session && !sessionExited ? (
+              {keyInjection && !interactive && !sessionExited ? (
                 <button
                   type="button"
                   role="menuitem"
                   className="composer-overflow-item warn"
-                  onClick={() => {
-                    closeMenu();
-                    onToggleInputUnlocked();
-                  }}
+                  onClick={() => fireFromMenu(onToggleInputUnlocked)}
                 >
                   <span className="glyph">⏎</span>
                   {inputUnlocked ? "Lock pane input" : "Unlock pane input"}

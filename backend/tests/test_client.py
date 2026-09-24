@@ -196,6 +196,10 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                 return httpx.Response(204)
         if request.url.path == "/api/sessions/s1/input":
             state["input_body"] = json.loads(request.content)
+            if "sender_session_id" in state["input_body"]:
+                return httpx.Response(
+                    200, json={"session": {"id": "s1"}, "held_message": {"id": "h1"}}
+                )
             return httpx.Response(200, json={"session": {"id": "s1"}})
         if request.url.path.startswith("/api/sessions/") and request.method == "DELETE":
             state["delete_force"] = request.url.params.get("force")
@@ -577,6 +581,17 @@ def test_send_input_omits_attachments_when_none(
     with _client(_settings(tmp_path), state) as client:
         client.send_input("s1", "hi")
     assert "attachments" not in state["input_body"]
+
+
+def test_send_input_from_session_reports_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        result = client.send_input("s1", "hi", sender_session_id="peer")
+    assert state["input_body"]["sender_session_id"] == "peer"
+    assert result == {"id": "s1", "send": "held"}
 
 
 def test_upload_attachment_pin_sends_form_field(

@@ -63,6 +63,7 @@ from waypoint.schemas import (
     BoardEntryUpdateRequest,
     BoardPostRequest,
     DirectorySuggestionsResponse,
+    HeldMessageOrigin,
     InboxBatchDeleteRequest,
     InboxBatchDeleteResponse,
     InboxBlockSubmitRequest,
@@ -670,8 +671,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: SessionInputRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = await context.runtime.handle_input(session_id, request)
-        return {"session": session.model_dump(mode="json")}
+        if request.sender_session_id is None:
+            session = await context.runtime.handle_input(session_id, request)
+            return {"session": session.model_dump(mode="json")}
+        result = await context.runtime.focus.deliver(
+            session_id, request, HeldMessageOrigin.AGENT
+        )
+        if isinstance(result, SessionRecord):
+            return {"session": result.model_dump(mode="json")}
+        session = context.runtime.get_session(session_id)
+        return {
+            "session": session.model_dump(mode="json"),
+            "held_message": result.model_dump(mode="json"),
+        }
 
     @app.post(
         "/api/sessions/{session_id}/presence",
@@ -1858,6 +1870,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.set_pinned(session_id, pinned=False)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/focus")
+    async def session_focus_on(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = context.runtime.set_focus(session_id, enabled=True)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}/focus")
+    async def session_focus_off(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = context.runtime.set_focus(session_id, enabled=False)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/held-messages/release")
+    async def release_all_held_messages(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.focus.release_all(session_id)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete(
+        "/api/sessions/{session_id}/held-messages",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def cancel_all_held_messages(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> None:
+        await context.runtime.focus.cancel_all(session_id)
+
+    @app.post("/api/held-messages/{held_id}/release")
+    async def release_held_message(
+        held_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.focus.release(held_id)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete("/api/held-messages/{held_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def cancel_held_message(
+        held_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> None:
+        await context.runtime.focus.cancel(held_id)
+
     @app.post("/api/sessions/attach-tmux")
     async def attach_tmux(
         request: SessionAttachRequest,
@@ -2286,6 +2347,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             payload={"side_question": sq, "hydrated": True},
                         ).model_dump(mode="json")
                     )
+            await websocket.send_json(
+                context.runtime.focus.envelope(session_id).model_dump(mode="json")
+            )
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)

@@ -974,6 +974,53 @@ export async function setSessionPinned(
   return body.session as SessionRecord;
 }
 
+export async function setSessionFocus(
+  host: string,
+  token: string,
+  sessionId: string,
+  enabled: boolean,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/focus`, {
+    method: enabled ? "POST" : "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, enabled ? "failed to turn on Focus" : "failed to turn off Focus");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function releaseHeldMessages(
+  host: string,
+  token: string,
+  target: { heldId: string } | { sessionId: string },
+): Promise<void> {
+  const path =
+    "heldId" in target
+      ? `/api/held-messages/${encodeURIComponent(target.heldId)}/release`
+      : `/api/sessions/${target.sessionId}/held-messages/release`;
+  const response = await fetch(`${host}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to release held messages");
+}
+
+export async function cancelHeldMessages(
+  host: string,
+  token: string,
+  target: { heldId: string } | { sessionId: string },
+): Promise<void> {
+  const path =
+    "heldId" in target
+      ? `/api/held-messages/${encodeURIComponent(target.heldId)}`
+      : `/api/sessions/${target.sessionId}/held-messages`;
+  const response = await fetch(`${host}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to cancel held messages");
+}
+
 export async function fetchSchedules(host: string, token: string): Promise<ScheduledSession[]> {
   const response = await fetch(`${host}/api/schedules`, {
     headers: { Authorization: `Bearer ${token}` },

@@ -22,6 +22,7 @@ import {
   answerAskQuestion,
   approvePlan,
   approveSession,
+  cancelHeldMessages,
   cloneSession,
   connectSessionSocket,
   connectTerminalSocket,
@@ -34,10 +35,12 @@ import {
   isAuthError,
   postAction,
   refreshSessionRateLimitUsage,
+  releaseHeldMessages,
   resolveWorkspacePath,
   sendInput,
   setSessionEffort,
   setSessionModel,
+  setSessionFocus,
   setSessionPermissionMode,
   setSessionPinned,
   setSessionTitle,
@@ -97,6 +100,7 @@ import {
 } from "@/components/AttachmentTray";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
+import { HeldMessagesDock } from "@/components/HeldMessagesDock";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionSettingsModal } from "@/components/SessionSettingsModal";
@@ -139,6 +143,7 @@ import {
   BackendModelOption,
   BackendPermissionMode,
   EventRecord,
+  HeldMessage,
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
@@ -427,6 +432,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setSideQuestions(new Map());
     sqLiveSeenRef.current = new Set();
     setSqExpanded(false);
+    setHeldMessages([]);
   }, [sessionId]);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
@@ -463,6 +469,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
+  const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
+  const [focusBusy, setFocusBusy] = useState(false);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
   // update to a rehydrated aside doesn't expand the dock.
@@ -937,6 +945,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               });
             }
           }
+          if (message.type === "held_messages") {
+            const payload = message.payload as {
+              session_id?: string;
+              held_messages?: HeldMessage[];
+            };
+            if (payload.session_id === sessionId) {
+              setHeldMessages(payload.held_messages ?? []);
+            }
+          }
           if (message.type === "auth_revoked") {
             handleAuthFailure();
           }
@@ -1343,6 +1360,40 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       }
     },
     [host, token, sessionId, handleAuthFailure],
+  );
+
+  const handleSetFocus = useCallback(
+    async (enabled: boolean) => {
+      setFocusBusy(true);
+      try {
+        const updated = await setSessionFocus(host, token, sessionId, enabled);
+        setSession(updated);
+      } catch (focusError) {
+        if (isAuthError(focusError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(focusError instanceof Error ? focusError.message : "failed to update Focus");
+      } finally {
+        setFocusBusy(false);
+      }
+    },
+    [host, token, sessionId, handleAuthFailure],
+  );
+
+  const runHeldAction = useCallback(
+    async (action: () => Promise<void>) => {
+      try {
+        await action();
+      } catch (heldError) {
+        if (isAuthError(heldError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(heldError instanceof Error ? heldError.message : "held message action failed");
+      }
+    },
+    [handleAuthFailure],
   );
 
   async function submitApproval(decision: string, text?: string, approvalId?: string) {
@@ -2106,6 +2157,24 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           }}
         />
       ) : null}
+      {session?.focus || heldMessages.length ? (
+        <HeldMessagesDock
+          focus={Boolean(session?.focus)}
+          messages={heldMessages}
+          onRelease={(heldId) =>
+            runHeldAction(() => releaseHeldMessages(host, token, { heldId }))
+          }
+          onCancel={(heldId) =>
+            runHeldAction(() => cancelHeldMessages(host, token, { heldId }))
+          }
+          onReleaseAll={() =>
+            runHeldAction(() => releaseHeldMessages(host, token, { sessionId }))
+          }
+          onCancelAll={() =>
+            runHeldAction(() => cancelHeldMessages(host, token, { sessionId }))
+          }
+        />
+      ) : null}
       {session ? (
         <ScheduledMessagesDock
           messages={scheduledMessages.messages}
@@ -2368,6 +2437,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           keyInjection={canInjectKeys}
           inputUnlocked={paneUnlocked}
           onToggleInputUnlocked={toggleInputUnlocked}
+          focus={Boolean(session?.focus)}
+          onToggleFocus={() => void handleSetFocus(!session?.focus)}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           terminalAppearance={terminalAppearance}
@@ -2498,6 +2569,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           currentModel={session?.model ?? null}
           currentEffort={session?.effort ?? null}
           effortBusy={effortBusy}
+          focus={Boolean(session?.focus)}
+          focusBusy={focusBusy}
+          onFocusChange={handleSetFocus}
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
@@ -2621,6 +2695,9 @@ interface ReplyComposerProps {
   currentModel: string | null;
   currentEffort: string | null;
   effortBusy: boolean;
+  focus: boolean;
+  focusBusy: boolean;
+  onFocusChange: (enabled: boolean) => void | Promise<void>;
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
@@ -2685,6 +2762,9 @@ const ReplyComposer = memo(function ReplyComposer({
   currentModel,
   currentEffort,
   effortBusy,
+  focus,
+  focusBusy,
+  onFocusChange,
   permissionMode,
   transport,
   catalog,
@@ -3286,14 +3366,6 @@ const ReplyComposer = memo(function ReplyComposer({
   };
 
   const assistantOps = assistant ? assistantControls : null;
-  // Account-profile switching for a regular session moved to the Session
-  // settings modal (opened from the overflow menu); the quick-tuning popover
-  // keeps only inline tuning and the assistant replacement controls.
-  const tuneVisible =
-    modeOptions.length > 0 ||
-    hasModelPicker ||
-    hasEffortPicker ||
-    assistantOps !== null;
   // Backend the assistant controls target — the picked one, or the current.
   const assistantTargetBackend = pendingBackend ?? session?.backend ?? null;
   const assistantTargetProfiles =
@@ -3428,343 +3500,361 @@ const ReplyComposer = memo(function ReplyComposer({
   return (
     <section className="composer" ref={composerRef}>
       <div className="composer-toprow">
-        {tuneVisible ? (
-          <div className="composer-tune" ref={tuneRef}>
-            <button
-              type="button"
-              className={`composer-tune-trigger ${tuneOpen ? "open" : ""}`}
-              aria-haspopup="dialog"
-              aria-expanded={tuneOpen}
-              onClick={() => setTuneOpen((open) => !open)}
+        <div className="composer-tune" ref={tuneRef}>
+          <button
+            type="button"
+            className={`composer-tune-trigger ${tuneOpen ? "open" : ""}`}
+            aria-haspopup="dialog"
+            aria-expanded={tuneOpen}
+            onClick={() => setTuneOpen((open) => !open)}
+          >
+            <span className="composer-tune-glyph" aria-hidden>
+              {"⚙︎"}
+            </span>
+            <span className="composer-tune-summary">{tuneSummary}</span>
+            {focus ? <span className="composer-tune-focus">Focus</span> : null}
+            {hasPendingRestart ? (
+              <span
+                className="composer-tune-pending"
+                aria-label="Pending change"
+                title="Pending change waits for Apply"
+              />
+            ) : null}
+          </button>
+          {tuneOpen ? (
+            <div
+              className="composer-tune-popover"
+              role="dialog"
+              aria-label="Session settings"
             >
-              <span className="composer-tune-glyph" aria-hidden>
-                {"⚙︎"}
-              </span>
-              <span className="composer-tune-summary">{tuneSummary}</span>
-              {hasPendingRestart ? (
-                <span
-                  className="composer-tune-pending"
-                  aria-label="Pending change"
-                  title="Pending change waits for Apply"
-                />
-              ) : null}
-            </button>
-            {tuneOpen ? (
-              <div
-                className="composer-tune-popover"
-                role="dialog"
-                aria-label="Session settings"
-              >
-                {assistantOps && session ? (
-                  <label className="composer-tune-field">
-                    <span>Agent</span>
-                    <select
-                      value={pendingBackend ?? session.backend}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        onError("");
-                        // Threads and transports are per-agent; drop any thread
-                        // selection and let the transport fall to the new
-                        // agent's default.
-                        setSelectedThreadId("");
-                        setPendingTransport(null);
-                        if (next === session.backend) {
-                          setPendingBackend(null);
-                          setPendingAssistantProfileId(undefined);
-                          setAssistantConfirm(null);
-                          return;
-                        }
-                        setPendingBackend(next);
-                        setPendingAssistantProfileId(null);
-                        // Stage the confirm only once the new agent's default
-                        // interface resolves; until the catalog loads it would
-                        // be set but not renderable.
-                        setAssistantConfirm(
-                          defaultTransportFor(next, catalog) ? "switch" : null,
-                        );
-                      }}
-                      disabled={assistantBusy}
-                    >
-                      {assistantAgentOptions.map((backend) => (
-                        <option key={backend} value={backend}>
-                          {humaniseBackend(backend, catalog)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {showAssistantTargetProfilePicker ? (
-                  <AccountProfilePicker
-                    profiles={assistantTargetProfiles}
-                    value={assistantTargetProfileId ?? ""}
-                    onChange={(id) => {
-                      const nextProfileId = id || null;
-                      setSelectedThreadId("");
-                      setPendingAssistantProfileId(nextProfileId);
-                      setAssistantConfirm(
-                        assistantSwitchDiffers ||
-                          nextProfileId !== (session?.account_profile_id ?? null)
-                          ? "switch"
-                          : null,
-                      );
+              {assistantOps && session ? (
+                <label className="composer-tune-field">
+                  <span>Agent</span>
+                  <select
+                    value={pendingBackend ?? session.backend}
+                    onChange={(event) => {
+                      const next = event.target.value;
                       onError("");
+                      // Threads and transports are per-agent; drop any thread
+                      // selection and let the transport fall to the new
+                      // agent's default.
+                      setSelectedThreadId("");
+                      setPendingTransport(null);
+                      if (next === session.backend) {
+                        setPendingBackend(null);
+                        setPendingAssistantProfileId(undefined);
+                        setAssistantConfirm(null);
+                        return;
+                      }
+                      setPendingBackend(next);
+                      setPendingAssistantProfileId(null);
+                      // Stage the confirm only once the new agent's default
+                      // interface resolves; until the catalog loads it would
+                      // be set but not renderable.
+                      setAssistantConfirm(
+                        defaultTransportFor(next, catalog) ? "switch" : null,
+                      );
                     }}
                     disabled={assistantBusy}
-                    defaultLabel="Default account"
-                    label="New conversation account"
-                    fieldClassName="composer-tune-field"
-                  />
-                ) : null}
-                {assistantOps && session && assistantTransportOptions.length > 1 ? (
-                  <label className="composer-tune-field">
-                    <span>Interface</span>
-                    <select
-                      value={assistantTargetTransport ?? ""}
-                      onChange={(event) => {
-                        const next = event.target.value as SessionTransport;
-                        onError("");
-                        // Picking a thread takes priority; a fresh transport
-                        // pick rebuilds the thread like an agent switch.
-                        setSelectedThreadId("");
-                        setPendingTransport(next);
-                        const stagedBackend = pendingBackend ?? session.backend;
-                        const differs =
-                          stagedBackend !== session.backend ||
-                          next !== session.transport;
-                        setAssistantConfirm(differs ? "switch" : null);
-                      }}
-                      disabled={assistantBusy}
-                    >
-                      {assistantTransportOptions.map((transportId) => (
-                        <option key={transportId} value={transportId}>
-                          {transportPresentation(transportId, catalog).name}
+                  >
+                    {assistantAgentOptions.map((backend) => (
+                      <option key={backend} value={backend}>
+                        {humaniseBackend(backend, catalog)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {showAssistantTargetProfilePicker ? (
+                <AccountProfilePicker
+                  profiles={assistantTargetProfiles}
+                  value={assistantTargetProfileId ?? ""}
+                  onChange={(id) => {
+                    const nextProfileId = id || null;
+                    setSelectedThreadId("");
+                    setPendingAssistantProfileId(nextProfileId);
+                    setAssistantConfirm(
+                      assistantSwitchDiffers ||
+                        nextProfileId !== (session?.account_profile_id ?? null)
+                        ? "switch"
+                        : null,
+                    );
+                    onError("");
+                  }}
+                  disabled={assistantBusy}
+                  defaultLabel="Default account"
+                  label="New conversation account"
+                  fieldClassName="composer-tune-field"
+                />
+              ) : null}
+              {assistantOps && session && assistantTransportOptions.length > 1 ? (
+                <label className="composer-tune-field">
+                  <span>Interface</span>
+                  <select
+                    value={assistantTargetTransport ?? ""}
+                    onChange={(event) => {
+                      const next = event.target.value as SessionTransport;
+                      onError("");
+                      // Picking a thread takes priority; a fresh transport
+                      // pick rebuilds the thread like an agent switch.
+                      setSelectedThreadId("");
+                      setPendingTransport(next);
+                      const stagedBackend = pendingBackend ?? session.backend;
+                      const differs =
+                        stagedBackend !== session.backend ||
+                        next !== session.transport;
+                      setAssistantConfirm(differs ? "switch" : null);
+                    }}
+                    disabled={assistantBusy}
+                  >
+                    {assistantTransportOptions.map((transportId) => (
+                      <option key={transportId} value={transportId}>
+                        {transportPresentation(transportId, catalog).name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {assistantOps &&
+              session &&
+              assistantCanAttach &&
+              threadOptions.length > 0 ? (
+                <label className="composer-tune-field">
+                  <span>Resume thread</span>
+                  <select
+                    value={selectedThreadId}
+                    onChange={(event) => {
+                      const id = event.target.value;
+                      onError("");
+                      setSelectedThreadId(id);
+                      if (id) {
+                        setAssistantConfirm("attach");
+                      } else {
+                        setAssistantConfirm(
+                          assistantSwitchDiffers ? "switch" : null,
+                        );
+                      }
+                    }}
+                    disabled={assistantBusy}
+                  >
+                    <option value="">— Start fresh —</option>
+                    {threadOptions.map((thread) => {
+                      const when = thread.updatedAt
+                        ? formatRelativeTime(thread.updatedAt)
+                        : "";
+                      const parts = [thread.title || thread.id];
+                      if (when && when !== "Unknown") parts.push(when);
+                      if (thread.preview) parts.push(thread.preview);
+                      return (
+                        <option key={thread.id} value={thread.id}>
+                          {parts.join(" · ")}
                         </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {assistantOps &&
-                session &&
-                assistantCanAttach &&
-                threadOptions.length > 0 ? (
-                  <label className="composer-tune-field">
-                    <span>Resume thread</span>
-                    <select
-                      value={selectedThreadId}
-                      onChange={(event) => {
-                        const id = event.target.value;
-                        onError("");
-                        setSelectedThreadId(id);
-                        if (id) {
-                          setAssistantConfirm("attach");
-                        } else {
+                      );
+                    })}
+                  </select>
+                </label>
+              ) : null}
+              {modeOptions.length > 0 ? (
+                <label className="composer-tune-field">
+                  <span>Permission mode</span>
+                  <select
+                    value={modeDisplayValue}
+                    onChange={(event) => handleModeSelect(event.target.value)}
+                    disabled={modeBusy || disabled}
+                  >
+                    {modeOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {hasModelPicker ? (
+                <label className="composer-tune-field">
+                  <span>Model</span>
+                  <select
+                    value={modelDisplayValue}
+                    onChange={(event) => handleModelSelect(event.target.value)}
+                    disabled={modelBusy || disabled}
+                  >
+                     <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
+                    {modelEntries.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {hasEffortPicker ? (
+                <label className="composer-tune-field">
+                  <span>Reasoning effort</span>
+                  <select
+                    value={effortDisplayValue}
+                    onChange={(event) => handleEffortSelect(event.target.value)}
+                    disabled={effortBusy || disabled}
+                  >
+                    <option value="">
+                      {defaultEffort ? `Default (${effortLabel(defaultEffort)})` : "Default"}
+                    </option>
+                    {effortOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {effortLabel(option)}
+                      </option>
+                    ))}
+                    {currentEffort && !effortOptions.includes(currentEffort) ? (
+                      <option value={currentEffort}>{currentEffort}</option>
+                    ) : null}
+                  </select>
+                </label>
+              ) : null}
+              <div className="composer-tune-toggle">
+                <span className="composer-tune-toggle-copy">
+                  <span id="composer-focus-label">Focus</span>
+                  <span className="composer-tune-toggle-hint">
+                    Hold messages from agents, schedules, and wake-ups
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  className="switch"
+                  aria-checked={focus}
+                  aria-labelledby="composer-focus-label"
+                  disabled={focusBusy}
+                  onClick={() => void onFocusChange(!focus)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
+              {hasPendingRestart ? (
+                <div className="composer-tune-restart">
+                  <p>
+                    Restart Claude with <strong>{pendingRestartLabel}</strong>?
+                    The current turn is interrupted and the session resumes with
+                    the new settings.
+                  </p>
+                  <button
+                    type="button"
+                    className="composer-tune-restart-apply"
+                    onClick={() => void applyPendingRestart()}
+                    disabled={restartBusy}
+                  >
+                    {restartBusy ? "Restarting…" : "Apply restart"}
+                  </button>
+                </div>
+              ) : null}
+              {assistantOps &&
+              assistantConfirm === "switch" &&
+              assistantSwitchDiffers &&
+              assistantTargetBackend &&
+              assistantTargetTransport ? (
+                <div className="composer-tune-lifecycle">
+                  <div className="composer-tune-confirm">
+                    <p>
+                      Switch to{" "}
+                      <strong>
+                        {humaniseBackend(assistantTargetBackend, catalog)} ·{" "}
+                        {
+                          transportPresentation(
+                            assistantTargetTransport,
+                            catalog,
+                          ).name
+                        }
+                        {" · "}
+                        {assistantTargetProfileLabel}
+                      </strong>
+                      ? This starts a new conversation; the current one is kept
+                      as a stopped session.
+                    </p>
+                    <div className="composer-tune-confirm-actions">
+                      <button
+                        type="button"
+                        className="composer-tune-confirm-cancel"
+                        onClick={() => {
+                          setPendingBackend(null);
+                          setPendingTransport(null);
+                          setPendingAssistantProfileId(undefined);
+                          setAssistantConfirm(null);
+                          onError("");
+                        }}
+                        disabled={assistantBusy}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="composer-tune-confirm-apply"
+                        onClick={() =>
+                          void runAssistantAction(() =>
+                            assistantOps.onSwitchBackend(
+                              assistantTargetBackend,
+                              assistantTargetTransport,
+                              assistantTargetProfileId,
+                            ),
+                          )
+                        }
+                        disabled={assistantBusy}
+                      >
+                        {assistantBusy ? "Switching…" : "Switch"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : assistantOps &&
+                assistantConfirm === "attach" &&
+                selectedThreadId &&
+                assistantTargetBackend ? (
+                <div className="composer-tune-lifecycle">
+                  <div className="composer-tune-confirm">
+                    <p>
+                      Attach to{" "}
+                      <strong>
+                        {threadOptions.find((t) => t.id === selectedThreadId)
+                          ?.title || selectedThreadId}
+                      </strong>
+                      ? This replaces the current conversation, which is kept as
+                      a stopped session.
+                    </p>
+                    <div className="composer-tune-confirm-actions">
+                      <button
+                        type="button"
+                        className="composer-tune-confirm-cancel"
+                        onClick={() => {
+                          setSelectedThreadId("");
                           setAssistantConfirm(
                             assistantSwitchDiffers ? "switch" : null,
                           );
+                          onError("");
+                        }}
+                        disabled={assistantBusy}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="composer-tune-confirm-apply"
+                        onClick={() =>
+                          void runAssistantAction(() =>
+                            assistantOps.onAttachThread(
+                              assistantTargetBackend,
+                              selectedThreadId,
+                              assistantTargetProfileId,
+                            ),
+                          )
                         }
-                      }}
-                      disabled={assistantBusy}
-                    >
-                      <option value="">— Start fresh —</option>
-                      {threadOptions.map((thread) => {
-                        const when = thread.updatedAt
-                          ? formatRelativeTime(thread.updatedAt)
-                          : "";
-                        const parts = [thread.title || thread.id];
-                        if (when && when !== "Unknown") parts.push(when);
-                        if (thread.preview) parts.push(thread.preview);
-                        return (
-                          <option key={thread.id} value={thread.id}>
-                            {parts.join(" · ")}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                ) : null}
-                {modeOptions.length > 0 ? (
-                  <label className="composer-tune-field">
-                    <span>Permission mode</span>
-                    <select
-                      value={modeDisplayValue}
-                      onChange={(event) => handleModeSelect(event.target.value)}
-                      disabled={modeBusy || disabled}
-                    >
-                      {modeOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {hasModelPicker ? (
-                  <label className="composer-tune-field">
-                    <span>Model</span>
-                    <select
-                      value={modelDisplayValue}
-                      onChange={(event) => handleModelSelect(event.target.value)}
-                      disabled={modelBusy || disabled}
-                    >
-                       <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
-                      {modelEntries.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {hasEffortPicker ? (
-                  <label className="composer-tune-field">
-                    <span>Reasoning effort</span>
-                    <select
-                      value={effortDisplayValue}
-                      onChange={(event) => handleEffortSelect(event.target.value)}
-                      disabled={effortBusy || disabled}
-                    >
-                      <option value="">
-                        {defaultEffort ? `Default (${effortLabel(defaultEffort)})` : "Default"}
-                      </option>
-                      {effortOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {effortLabel(option)}
-                        </option>
-                      ))}
-                      {currentEffort && !effortOptions.includes(currentEffort) ? (
-                        <option value={currentEffort}>{currentEffort}</option>
-                      ) : null}
-                    </select>
-                  </label>
-                ) : null}
-                {hasPendingRestart ? (
-                  <div className="composer-tune-restart">
-                    <p>
-                      Restart Claude with <strong>{pendingRestartLabel}</strong>?
-                      The current turn is interrupted and the session resumes with
-                      the new settings.
-                    </p>
-                    <button
-                      type="button"
-                      className="composer-tune-restart-apply"
-                      onClick={() => void applyPendingRestart()}
-                      disabled={restartBusy}
-                    >
-                      {restartBusy ? "Restarting…" : "Apply restart"}
-                    </button>
-                  </div>
-                ) : null}
-                {assistantOps &&
-                assistantConfirm === "switch" &&
-                assistantSwitchDiffers &&
-                assistantTargetBackend &&
-                assistantTargetTransport ? (
-                  <div className="composer-tune-lifecycle">
-                    <div className="composer-tune-confirm">
-                      <p>
-                        Switch to{" "}
-                        <strong>
-                          {humaniseBackend(assistantTargetBackend, catalog)} ·{" "}
-                          {
-                            transportPresentation(
-                              assistantTargetTransport,
-                              catalog,
-                            ).name
-                          }
-                          {" · "}
-                          {assistantTargetProfileLabel}
-                        </strong>
-                        ? This starts a new conversation; the current one is kept
-                        as a stopped session.
-                      </p>
-                      <div className="composer-tune-confirm-actions">
-                        <button
-                          type="button"
-                          className="composer-tune-confirm-cancel"
-                          onClick={() => {
-                            setPendingBackend(null);
-                            setPendingTransport(null);
-                            setPendingAssistantProfileId(undefined);
-                            setAssistantConfirm(null);
-                            onError("");
-                          }}
-                          disabled={assistantBusy}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="composer-tune-confirm-apply"
-                          onClick={() =>
-                            void runAssistantAction(() =>
-                              assistantOps.onSwitchBackend(
-                                assistantTargetBackend,
-                                assistantTargetTransport,
-                                assistantTargetProfileId,
-                              ),
-                            )
-                          }
-                          disabled={assistantBusy}
-                        >
-                          {assistantBusy ? "Switching…" : "Switch"}
-                        </button>
-                      </div>
+                        disabled={assistantBusy}
+                      >
+                        {assistantBusy ? "Attaching…" : "Attach thread"}
+                      </button>
                     </div>
                   </div>
-                ) : assistantOps &&
-                  assistantConfirm === "attach" &&
-                  selectedThreadId &&
-                  assistantTargetBackend ? (
-                  <div className="composer-tune-lifecycle">
-                    <div className="composer-tune-confirm">
-                      <p>
-                        Attach to{" "}
-                        <strong>
-                          {threadOptions.find((t) => t.id === selectedThreadId)
-                            ?.title || selectedThreadId}
-                        </strong>
-                        ? This replaces the current conversation, which is kept as
-                        a stopped session.
-                      </p>
-                      <div className="composer-tune-confirm-actions">
-                        <button
-                          type="button"
-                          className="composer-tune-confirm-cancel"
-                          onClick={() => {
-                            setSelectedThreadId("");
-                            setAssistantConfirm(
-                              assistantSwitchDiffers ? "switch" : null,
-                            );
-                            onError("");
-                          }}
-                          disabled={assistantBusy}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="composer-tune-confirm-apply"
-                          onClick={() =>
-                            void runAssistantAction(() =>
-                              assistantOps.onAttachThread(
-                                assistantTargetBackend,
-                                selectedThreadId,
-                                assistantTargetProfileId,
-                              ),
-                            )
-                          }
-                          disabled={assistantBusy}
-                        >
-                          {assistantBusy ? "Attaching…" : "Attach thread"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
         {agentBusy ? (
           <div
             className="composer-activity"

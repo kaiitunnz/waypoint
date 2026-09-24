@@ -200,6 +200,7 @@ export interface SessionRecord {
   raw_log_path: string;
   structured_log_path: string;
   pinned_at?: string | null;
+  focus?: boolean;
   permission_mode?: string | null;
   model?: string | null;
   // The concrete model id the backend actually resolved and ran (e.g.
@@ -859,10 +860,26 @@ export interface SessionEnvelope {
     | "board_update"
     | "clipboard_copy"
     | "side_question"
+    | "held_messages"
     | "inbox_update"
     | "telemetry_update"
     | "nl_insight_status";
   payload: Record<string, unknown>;
+}
+
+export type HeldMessageOrigin = "agent" | "schedule" | "wake";
+
+// A delivery a session in Focus is holding. Mirrors backend
+// schemas.HeldMessageRecord.
+export interface HeldMessage {
+  id: string;
+  session_id: string;
+  origin: HeldMessageOrigin;
+  sender_session_id?: string | null;
+  sender_title?: string | null;
+  text: string;
+  attachments: string[];
+  created_at: string;
 }
 
 export type SideQuestionStatus = "pending" | "answered" | "error";

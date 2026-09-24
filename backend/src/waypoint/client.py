@@ -513,16 +513,22 @@ class WaypointClient:
         *,
         submit: bool = True,
         attachments: list[str] | None = None,
+        sender_session_id: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "submit": submit}
         if attachments:
             body["attachments"] = attachments
+        if sender_session_id:
+            body["sender_session_id"] = sender_session_id
         try:
-            return self._request(
+            payload = self._request(
                 "POST",
                 f"/api/sessions/{session_id}/input",
                 json=body,
-            ).json()["session"]
+            ).json()
+            if "held_message" in payload:
+                return {**payload["session"], "send": "held"}
+            return payload["session"]
         except WaypointError as exc:
             if not isinstance(exc.__cause__, httpx.TimeoutException):
                 raise

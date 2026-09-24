@@ -18,6 +18,8 @@ from waypoint.schemas import (
     BoardEntry,
     EventKind,
     EventRecord,
+    HeldMessageOrigin,
+    HeldMessageRecord,
     IdleMessageBatchMode,
     InboxApprovalAnswer,
     InboxApprovalBlock,
@@ -369,6 +371,17 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_scheduled_messages_status
                 ON scheduled_messages(status);
 
+            CREATE TABLE IF NOT EXISTS held_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                body TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_held_messages_session
+                ON held_messages(session_id, created_at);
+
             CREATE TABLE IF NOT EXISTS board_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel TEXT NOT NULL,
@@ -554,6 +567,7 @@ class Storage:
             "wait_for_idle_transition",
             "INTEGER NOT NULL DEFAULT 0",
         )
+        self._ensure_column("sessions", "focus", "INTEGER NOT NULL DEFAULT 0")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -678,12 +692,12 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 launch_mode, repo_name, branch, status, created_at, updated_at,
                 last_event_at, raw_log_path, structured_log_path, transport_state,
-                pinned_at, spawner_session_id, worktree_path, permission_mode, model,
+                pinned_at, spawner_session_id, worktree_path, focus, permission_mode, model,
                 resolved_model, effort, args, config_overrides, launch_env, context_usage,
                 rate_limit_usage, tags, preset_id, preset_name,
                 account_profile_id, account_profile_label,
                 usage_limit_source, usage_provider_id, usage_provider_account_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -706,6 +720,7 @@ class Storage:
                 session.pinned_at.isoformat() if session.pinned_at else None,
                 session.spawner_session_id,
                 session.worktree_path,
+                1 if session.focus else 0,
                 session.permission_mode,
                 session.model,
                 session.resolved_model,
@@ -795,6 +810,10 @@ class Storage:
         )
         self.connection.execute(
             "DELETE FROM wake_subscriptions WHERE session_id = ?",
+            (session_id,),
+        )
+        self.connection.execute(
+            "DELETE FROM held_messages WHERE session_id = ?",
             (session_id,),
         )
         self.telemetry.delete_session(session_id)
@@ -2906,6 +2925,69 @@ class Storage:
         return ManagerTicket.model_validate(parsed)
 
     @_synchronized
+    def create_held_message(self, record: HeldMessageRecord) -> bool:
+        """Insert ``record`` while its session exists. A wake is stored at most
+        once per session; a second wake is dropped. Returns whether it was
+        stored."""
+        if self.get_session(record.session_id) is None:
+            return False
+        if (
+            record.origin == HeldMessageOrigin.WAKE
+            and self.connection.execute(
+                "SELECT 1 FROM held_messages WHERE session_id = ? AND origin = ?",
+                (record.session_id, HeldMessageOrigin.WAKE),
+            ).fetchone()
+        ):
+            return False
+        self.connection.execute(
+            "INSERT INTO held_messages (id, session_id, origin, created_at, body) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                record.id,
+                record.session_id,
+                record.origin,
+                record.created_at.isoformat(),
+                record.model_dump_json(),
+            ),
+        )
+        self.connection.commit()
+        return True
+
+    @_synchronized
+    def list_held_messages(self, session_id: str) -> list[HeldMessageRecord]:
+        rows = self.connection.execute(
+            "SELECT body FROM held_messages WHERE session_id = ? "
+            "ORDER BY created_at, id",
+            (session_id,),
+        ).fetchall()
+        return [HeldMessageRecord.model_validate_json(row["body"]) for row in rows]
+
+    @_synchronized
+    def held_message_ids(self) -> set[str]:
+        rows = self.connection.execute("SELECT id FROM held_messages").fetchall()
+        return {row["id"] for row in rows}
+
+    @_synchronized
+    def take_held_message(self, held_id: str) -> HeldMessageRecord | None:
+        row = self.connection.execute(
+            "SELECT body FROM held_messages WHERE id = ?", (held_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        self.connection.execute("DELETE FROM held_messages WHERE id = ?", (held_id,))
+        self.connection.commit()
+        return HeldMessageRecord.model_validate_json(row["body"])
+
+    @_synchronized
+    def take_held_messages(self, session_id: str) -> list[HeldMessageRecord]:
+        taken = self.list_held_messages(session_id)
+        self.connection.execute(
+            "DELETE FROM held_messages WHERE session_id = ?", (session_id,)
+        )
+        self.connection.commit()
+        return taken
+
+    @_synchronized
     def create_scheduled_message(
         self, record: ScheduledMessageRecord
     ) -> ScheduledMessageRecord:
@@ -3328,6 +3410,7 @@ class Storage:
             else None
         )
         payload["status"] = SessionStatus(payload["status"])
+        payload["focus"] = bool(payload.get("focus", 0))
         payload["launch_mode"] = payload.get("launch_mode") or "auto"
         raw_state = payload.pop("transport_state", None) or "{}"
         try:

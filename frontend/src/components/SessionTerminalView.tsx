@@ -217,7 +217,7 @@ export function SessionTerminalView({
         {inputUnlocked ? (
           <button
             type="button"
-            className="term-bar-unlocked"
+            className="term-bar-action warn term-bar-unlocked"
             onClick={onToggleInputUnlocked}
             aria-label="Lock pane input"
             title="Pane input is unlocked. Select text with Shift-drag (⌥-drag on macOS). Tap to lock."
@@ -347,23 +347,14 @@ export function SessionTerminalView({
                 <button
                   type="button"
                   role="menuitem"
-                  className={`composer-overflow-item${inputUnlocked ? "" : " warn"}`}
+                  className="composer-overflow-item warn"
                   onClick={() => {
                     closeMenu();
                     onToggleInputUnlocked();
                   }}
                 >
                   <span className="glyph">⏎</span>
-                  {inputUnlocked ? (
-                    "Lock pane input"
-                  ) : (
-                    <span className="composer-overflow-label">
-                      Unlock pane input
-                      <span className="composer-overflow-hint">
-                        Typing here can mix with chat sends
-                      </span>
-                    </span>
-                  )}
+                  {inputUnlocked ? "Lock pane input" : "Unlock pane input"}
                 </button>
               ) : null}
               {attachmentsEnabled && composeEnabled ? (

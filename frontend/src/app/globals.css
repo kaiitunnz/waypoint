@@ -7276,18 +7276,6 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   color: var(--warn);
 }
 
-/* An item with a second, muted line explaining its consequence. */
-.composer-overflow-label {
-  display: grid;
-  gap: 2px;
-}
-
-.composer-overflow-hint {
-  font-size: 0.74rem;
-  color: var(--muted);
-  letter-spacing: 0;
-}
-
 .composer-overflow-item:disabled {
   opacity: 0.45;
   cursor: default;
@@ -9177,46 +9165,6 @@ html[data-theme="light"] .slash-suggestion.active {
   flex: 1 1 auto;
 }
 
-/* Unlocked-input mark: a warn status (mono text + lamp) that relocks on tap.
-   Bare at rest like every status; the tint only answers hover/focus. */
-.term-bar-unlocked {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--warn);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  transition: background-color 120ms ease;
-}
-
-.term-bar-unlocked::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
-  flex: none;
-}
-
-.term-bar-unlocked:hover,
-.term-bar-unlocked:focus-visible {
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-}
-
-.term-bar-unlocked:focus-visible {
-  outline: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
-  outline-offset: 1px;
-}
-
 .term-bar-action {
   display: inline-flex;
   align-items: center;
@@ -9256,6 +9204,27 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-bar-action.danger {
   border-color: rgba(226, 108, 112, 0.4);
   color: var(--danger);
+}
+
+.term-bar-action.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+
+.term-bar-action.warn:hover {
+  border-color: color-mix(in srgb, var(--warn) 65%, transparent);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+/* Relocks an unlocked pane; the lamp marks the unlocked state. */
+.term-bar-unlocked::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
 }
 
 /* The .term-bar-overflow wraps the trigger, mirroring .composer-overflow

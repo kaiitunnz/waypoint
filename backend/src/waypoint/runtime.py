@@ -476,8 +476,7 @@ class SessionRuntime:
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
         self._broadcast_flusher: asyncio.Task[None] | None = None
-        # Board/inbox wake dispatch and delivery tasks, tracked so a poster's
-        # request never waits on a subscriber's send.
+        # Board/inbox wake dispatch and delivery tasks, cancelled on stop.
         self._wake_tasks: set[asyncio.Task[None]] = set()
         # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
         # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
@@ -2712,7 +2711,7 @@ class SessionRuntime:
         if refreshed is not None:
             # Deliver items a dialog held before the restart, now that the
             # restored transport can report whether one is still open.
-            self.held.drain_deferred({refreshed.id})
+            self.held.drain({refreshed.id})
             # Boot-restore warming is fire-and-forget for every persisted
             # session, so we skip remote targets to avoid fanning out
             # SSH/plugin-list probes against hosts the user may never
@@ -4292,8 +4291,6 @@ class SessionRuntime:
         owner_session_id: str | None = None,
         kind: str | None = None,
     ) -> None:
-        # Non-blocking: a poster's request latency must not include a
-        # subscriber's ``send_input`` (slow for SSH transports).
         task = asyncio.create_task(
             self._dispatch_subscription_wakes(
                 channel=channel,
@@ -4355,7 +4352,8 @@ class SessionRuntime:
             SessionStatus.ERROR,
         }:
             return
-        # One task per subscriber so one slow send never delays another's wake.
+        # A task per subscriber: neither the poster nor another subscriber waits
+        # on this send.
         task = asyncio.create_task(self._deliver_wake(session_id))
         self._wake_tasks.add(task)
         task.add_done_callback(self._wake_tasks.discard)
@@ -4556,7 +4554,7 @@ class SessionRuntime:
         updated = self.storage.update_session(session_id, focus=enabled)
         self._publish_session_state(session_id)
         if not enabled:
-            self.held.drain_deferred({session_id})
+            self.held.drain({session_id})
         return updated
 
     async def answer_question(
@@ -5526,7 +5524,7 @@ class SessionRuntime:
                 await self._broadcast_session_state(session_id)
             if list_dirty:
                 await self._broadcast_session_list()
-            self.held.drain_deferred(dirty_ids)
+            self.held.drain(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
         if not self.settings.write_structured_log:

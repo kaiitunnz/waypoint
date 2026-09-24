@@ -49,7 +49,7 @@ class HeldQueue:
         # Serializes the hold-or-deliver decision so held items keep their order.
         self._send_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # Sessions with automatic items, and their drain bookkeeping.
-        self._deferred: set[str] = set()
+        self._auto_held: set[str] = set()
         self._draining: set[str] = set()
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
@@ -57,7 +57,7 @@ class HeldQueue:
         self._stopped = False
 
     def start(self) -> None:
-        self._deferred = self._runtime.storage.auto_held_session_ids()
+        self._auto_held = self._runtime.storage.auto_held_session_ids()
 
     async def stop(self) -> None:
         self._stopped = True
@@ -81,27 +81,26 @@ class HeldQueue:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
         async with self._send_locks[session_id]:
-            if self._runtime.get_session(session_id).focus:
+            session = self._runtime.get_session(session_id)
+            if session.focus:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
-            if self._deliverable_now(session_id, wake):
+            if self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
                     delivered = await self._runtime.handle_input(session_id, request)
-                    if wake and self._runtime.storage.take_held_wake(session_id):
+                    if wake and self._runtime.storage.delete_held_wake(session_id):
                         await self._publish(session_id)
                     return delivered
             reason = HeldReason.IDLE if wake else HeldReason.DIALOG
             record = await self._hold(session_id, request, origin, reason)
-        self._deferred.add(session_id)
+        self._auto_held.add(session_id)
         self.kick(session_id)
         return record
 
-    def _deliverable_now(self, session_id: str, wake: bool) -> bool:
+    def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:
         # Queue behind items waiting on a dialog so delivery keeps its order.
-        if self._runtime.storage.has_held_messages(session_id, HeldReason.DIALOG):
+        if self._runtime.storage.has_held_messages(session.id, HeldReason.DIALOG):
             return False
-        return not wake or self._runtime.wake_eligible(
-            self._runtime.get_session(session_id)
-        )
+        return not wake or self._runtime.wake_eligible(session)
 
     async def _hold(
         self,
@@ -175,9 +174,9 @@ class HeldQueue:
             self._unpin(record)
         await self._publish(session_id)
 
-    def drain_deferred(self, session_ids: set[str]) -> None:
+    def drain(self, session_ids: set[str]) -> None:
         """Deliver automatic items for sessions that reached a new state."""
-        for session_id in session_ids & self._deferred:
+        for session_id in session_ids & self._auto_held:
             self.kick(session_id)
 
     def kick(self, session_id: str) -> None:
@@ -195,7 +194,7 @@ class HeldQueue:
         try:
             while True:
                 self._rerun.discard(session_id)
-                await self._release_deferred(session_id)
+                await self._release_auto(session_id)
                 if session_id not in self._rerun:
                     return
         except Exception:
@@ -203,10 +202,10 @@ class HeldQueue:
         finally:
             self._draining.discard(session_id)
 
-    async def _release_deferred(self, session_id: str) -> None:
+    async def _release_auto(self, session_id: str) -> None:
         session = self._runtime.storage.get_session(session_id)
         if session is None:
-            self._deferred.discard(session_id)
+            self._auto_held.discard(session_id)
             return
         if session.focus or session.status in _UNDELIVERABLE:
             return
@@ -219,10 +218,9 @@ class HeldQueue:
                 if current is None or current.focus:
                     break
                 session = current
-                if (
-                    held.hold_reason is HeldReason.IDLE
-                    or held.origin is HeldMessageOrigin.WAKE
-                ) and not self._runtime.wake_eligible(session):
+                if held.hold_reason is HeldReason.IDLE and not (
+                    self._runtime.wake_eligible(session)
+                ):
                     continue
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
@@ -245,7 +243,7 @@ class HeldQueue:
             held.hold_reason is HeldReason.FOCUS
             for held in self._runtime.storage.list_held_messages(session_id)
         ):
-            self._deferred.discard(session_id)
+            self._auto_held.discard(session_id)
 
     def _retry_later(self, session_id: str) -> None:
         if self._stopped or session_id in self._retries:
@@ -305,7 +303,7 @@ class HeldQueue:
         if not restored:
             self._unpin(record)
         elif record.hold_reason is not HeldReason.FOCUS:
-            self._deferred.add(record.session_id)
+            self._auto_held.add(record.session_id)
 
     def _title_of(self, session_id: str | None) -> str | None:
         sender = self._runtime.storage.get_session(session_id) if session_id else None

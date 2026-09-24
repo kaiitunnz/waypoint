@@ -503,7 +503,7 @@ async def test_blocked_session_holds_then_delivers_in_order(
     )
     assert sent == ["one", "two"]
     assert runtime.storage.list_held_messages("s1") == []
-    assert "s1" not in runtime.held._deferred
+    assert "s1" not in runtime.held._auto_held
 
 
 async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
@@ -531,7 +531,7 @@ async def test_pending_approval_waits_for_an_edge(tmp_path, monkeypatch) -> None
     await settle(runtime)
     assert sent == [] and not runtime.held._retries
     transport.pending = False
-    runtime.held.drain_deferred({"s1"})
+    runtime.held.drain({"s1"})
     await settle(runtime)
 
     assert sent == ["one"]
@@ -547,7 +547,7 @@ async def test_focus_held_items_never_auto_release(tmp_path, monkeypatch) -> Non
     await runtime.held.deliver("s1", agent_send("focus"), HeldMessageOrigin.AGENT)
 
     transport.pending = False
-    runtime.held.drain_deferred({"s1"})
+    runtime.held.drain({"s1"})
     await settle(runtime)
     assert sent == []  # Focus holds the auto item too
     runtime.set_focus("s1", False)
@@ -571,7 +571,7 @@ async def test_release_while_blocked_puts_the_item_back(tmp_path, monkeypatch) -
         await runtime.held.release(held.id)
 
     assert [m.id for m in runtime.storage.list_held_messages("s1")] == [held.id]
-    assert "s1" in runtime.held._deferred
+    assert "s1" in runtime.held._auto_held
 
 
 async def test_start_seeds_sessions_with_auto_items(tmp_path, monkeypatch) -> None:
@@ -583,7 +583,7 @@ async def test_start_seeds_sessions_with_auto_items(tmp_path, monkeypatch) -> No
     reopened = SessionRuntime(runtime.settings, runtime.storage)
     reopened.held.start()
 
-    assert reopened.held._deferred == {"s1"}
+    assert reopened.held._auto_held == {"s1"}
 
 
 async def test_dispatch_refuses_a_blocked_session_before_recording(
@@ -650,7 +650,7 @@ async def test_cancelled_drain_puts_the_item_back(tmp_path, monkeypatch) -> None
 
     monkeypatch.setattr(runtime, "prepare_input", stuck_prepare)
     transport.pending = False
-    runtime.held.drain_deferred({"s1"})
+    runtime.held.drain({"s1"})
     await started.wait()
     await runtime.held.stop()
 
@@ -666,7 +666,7 @@ async def test_stopped_queue_starts_no_drain(tmp_path, monkeypatch) -> None:
 
     await runtime.held.stop()
     transport.pending = False
-    runtime.held.drain_deferred({"s1"})
+    runtime.held.drain({"s1"})
     await settle(runtime)
 
     assert sent == []

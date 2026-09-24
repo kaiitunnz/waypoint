@@ -99,7 +99,7 @@ async def _post(runtime: SessionRuntime) -> None:
 
 async def _turn_ends(runtime: SessionRuntime, session_id: str) -> None:
     runtime.storage.update_session(session_id, status=SessionStatus.IDLE)
-    runtime.held.drain_deferred({session_id})
+    runtime.held.drain({session_id})
     await _flush_wakes(runtime)
 
 
@@ -581,13 +581,13 @@ async def test_mid_approval_holds_then_fires_when_approval_clears(
     monkeypatch.setattr(runtime, "transport_for", lambda session: stub)
 
     await _post(runtime)
-    runtime.held.drain_deferred({"codex-sub"})
+    runtime.held.drain({"codex-sub"})
     await _flush_wakes(runtime)
     assert calls == []
     assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
 
     stub.pending = False
-    runtime.held.drain_deferred({"codex-sub"})
+    runtime.held.drain({"codex-sub"})
     await _flush_wakes(runtime)
     assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
 
@@ -617,7 +617,7 @@ async def test_held_wake_outlives_an_exit_and_fires_after_resume(
     await _post(runtime)
 
     runtime.storage.update_session("codex-sub", status=SessionStatus.EXITED)
-    runtime.held.drain_deferred({"codex-sub"})
+    runtime.held.drain({"codex-sub"})
     await _flush_wakes(runtime)
     assert calls == []
     assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
@@ -677,21 +677,6 @@ async def test_automatic_wake_takes_over_a_leftover_focus_wake(
 
 
 @pytest.mark.asyncio
-async def test_direct_wake_absorbs_a_leftover_focus_wake(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path)
-    _subscriber(runtime)
-    calls = _record_wakes(runtime, monkeypatch)
-    runtime.set_focus("codex-sub", True)
-    await _post(runtime)
-    runtime.set_focus("codex-sub", False)
-
-    await _post(runtime)
-
-    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
-    assert _held(runtime, "codex-sub") == []
-
-
-@pytest.mark.asyncio
 async def test_focus_turned_on_during_a_send_holds_the_next_wake(
     tmp_path, monkeypatch
 ) -> None:
@@ -723,11 +708,17 @@ async def test_focus_turned_on_during_a_send_holds_the_next_wake(
 
 
 @pytest.mark.asyncio
-async def test_direct_wake_absorbs_the_held_one(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("focus", [True, False])
+async def test_direct_wake_absorbs_the_held_one(tmp_path, monkeypatch, focus) -> None:
     runtime = make_runtime(tmp_path)
-    _subscriber(runtime, SessionStatus.RUNNING)
+    _subscriber(runtime)
     calls = _record_wakes(runtime, monkeypatch)
+    if focus:
+        runtime.set_focus("codex-sub", True)
+    else:
+        runtime.storage.update_session("codex-sub", status=SessionStatus.RUNNING)
     await _post(runtime)
+    runtime.set_focus("codex-sub", False)
     runtime.storage.update_session("codex-sub", status=SessionStatus.IDLE)
 
     await _post(runtime)

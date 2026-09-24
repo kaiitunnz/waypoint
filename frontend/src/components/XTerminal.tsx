@@ -134,10 +134,11 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         scrollback: 20000,
         allowProposedApi: true,
         disableStdin: readOnly,
-        // Mouse-tracking TUIs capture plain drags; ⌥-drag selects on macOS
-        // (Shift-drag elsewhere). A quick ⌥-click must not type arrow keys.
-        macOptionClickForcesSelection: true,
-        altClickMovesCursor: false,
+        // On a fixed grid a mouse-tracking TUI captures plain drags, so ⌥-drag
+        // selects on macOS (Shift-drag elsewhere), and ⌥-click must not type
+        // cursor keys into the TUI.
+        macOptionClickForcesSelection: !autoFit,
+        altClickMovesCursor: autoFit,
       });
       const fit = autoFit ? new FitAddon() : null;
       if (fit) term.loadAddon(fit);

@@ -249,8 +249,8 @@ def _usage_provider_options(context: "AppContext") -> list[UsageProviderOption]:
 
 
 def _pane_accepts_mouse(caps: BackendCapabilities, handshake: Any) -> bool:
-    # A key-injection pane is unlocked for typing and mouse input per
-    # connection by ``interactive: true`` on the client's ``hello`` frame.
+    # ``interactive: true`` on the client's ``hello`` frame opts a key-injection
+    # pane into mouse-mode forwarding for that connection.
     if caps.terminal_interactive:
         return True
     return (

@@ -39,7 +39,12 @@ export function WorkingDirectoryField({
   const label = targetLabel
     ? `Working directory on ${targetLabel}`
     : "Working directory";
-  const [suggested, setSuggested] = useState<string[]>([]);
+  // Tagged with the target they came from so a switch never shows another
+  // machine's directories while the new target's fetch is in flight.
+  const [suggested, setSuggested] = useState<{
+    targetId: string | null;
+    dirs: string[];
+  }>({ targetId: null, dirs: [] });
   const completable = cwd.startsWith("/") || cwd.startsWith("~");
 
   useEffect(() => {
@@ -57,7 +62,7 @@ export function WorkingDirectoryField({
       )
         .then((dirs) => {
           if (!controller.signal.aborted) {
-            setSuggested(dirs);
+            setSuggested({ targetId: launchTargetId, dirs });
           }
         })
         .catch(() => {
@@ -74,11 +79,12 @@ export function WorkingDirectoryField({
   // Suggestions from an older keystroke stay only while they still extend the
   // input, so the list doesn't flash empty while the next fetch is in flight.
   const options = useMemo(() => {
-    const dirs = completable
-      ? suggested.filter((dir) => dir.startsWith(cwd))
-      : [];
+    const dirs =
+      completable && suggested.targetId === launchTargetId
+        ? suggested.dirs.filter((dir) => dir.startsWith(cwd))
+        : [];
     return [...new Set([...recentCwds, ...dirs])];
-  }, [completable, cwd, recentCwds, suggested]);
+  }, [completable, cwd, launchTargetId, recentCwds, suggested]);
   const hasOptions = options.length > 0;
 
   // Pull focus to the offending field when a launch fails on the cwd, so the

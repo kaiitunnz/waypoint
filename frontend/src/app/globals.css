@@ -6928,11 +6928,15 @@ html[data-theme="light"] .composer-connection.open::before {
 
 @media (max-width: 480px) {
   .focus-pill {
+    gap: 0;
     padding: 4px 7px;
   }
 
+  /* Zero width, not display: none, so the label's line box keeps the pill as
+   * tall as LIVE. */
   .focus-pill-label {
-    display: none;
+    max-width: 0;
+    overflow: hidden;
   }
 }
 

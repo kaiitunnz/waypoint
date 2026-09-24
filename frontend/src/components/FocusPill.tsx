@@ -45,6 +45,12 @@ export function FocusPill({
     };
   }, [returnFocusRef]);
 
+  // A turn-off that settles with the pill still mounted failed; forget it so a
+  // later unmount by another path doesn't move focus.
+  useEffect(() => {
+    if (!busy) turnOffFocusedRef.current = false;
+  }, [busy]);
+
   // The portaled panel sits at the end of <body>, far from the trigger in tab
   // order, so move focus into it.
   useEffect(() => {

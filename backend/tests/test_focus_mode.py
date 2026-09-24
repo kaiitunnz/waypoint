@@ -106,7 +106,7 @@ async def test_focused_session_holds(tmp_path, monkeypatch) -> None:
     assert sent == []
     assert [
         (r.id, r.text, r.sender_session_id, r.sender_title)
-        for r in runtime.focus.list("s1")
+        for r in runtime.storage.list_held_messages("s1")
     ] == [(held.id, "hi", "peer", "Focused")]
 
 
@@ -129,7 +129,7 @@ async def test_wakes_coalesce(tmp_path, monkeypatch) -> None:
     for _ in range(3):
         await runtime._deliver_wake("s1")
 
-    held = runtime.focus.list("s1")
+    held = runtime.storage.list_held_messages("s1")
     assert [(r.origin, r.text) for r in held] == [
         (HeldMessageOrigin.WAKE, WAKE_INPUT_TEXT)
     ]
@@ -156,11 +156,8 @@ async def test_scheduled_firing_is_held_and_marked_sent(tmp_path, monkeypatch) -
     await runtime.scheduler._fire_due_schedules()
 
     assert sent == []
-    held = runtime.focus.list("s1")
-    assert sorted((r.text, r.schedule_id) for r in held) == [
-        ("idle", idle.id),
-        ("timed", timed.id),
-    ]
+    held = runtime.storage.list_held_messages("s1")
+    assert sorted(r.text for r in held) == ["idle", "timed"]
     assert {r.origin for r in held} == {HeldMessageOrigin.SCHEDULE}
     for schedule_id in (timed.id, idle.id):
         record = runtime.storage.get_scheduled_message(schedule_id)
@@ -205,7 +202,9 @@ async def test_prepare_failure_puts_message_back(tmp_path, monkeypatch) -> None:
     with pytest.raises(RuntimeError):
         await runtime.focus.release(held.id)
 
-    assert [r.model_dump() for r in runtime.focus.list("s1")] == [held.model_dump()]
+    assert [r.model_dump() for r in runtime.storage.list_held_messages("s1")] == [
+        held.model_dump()
+    ]
 
 
 async def test_dispatch_failure_consumes_message(tmp_path, monkeypatch) -> None:
@@ -220,7 +219,7 @@ async def test_dispatch_failure_consumes_message(tmp_path, monkeypatch) -> None:
     with pytest.raises(RuntimeError):
         await runtime.focus.release(held.id)
 
-    assert runtime.focus.list("s1") == []
+    assert runtime.storage.list_held_messages("s1") == []
 
 
 async def test_cancel_during_release_blocks_put_back(tmp_path, monkeypatch) -> None:
@@ -308,7 +307,7 @@ async def test_release_all_in_order_and_cancel_mid_run(tmp_path, monkeypatch) ->
     runtime = focused_runtime(tmp_path)
     for text in ("one", "two", "three"):
         await runtime.focus.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
-    held = runtime.focus.list("s1")
+    held = runtime.storage.list_held_messages("s1")
     sent: list[str] = []
 
     async def dispatch(prepared: PreparedInput) -> SessionRecord:
@@ -410,8 +409,7 @@ async def test_api_focus_hold_and_release(tmp_path, monkeypatch) -> None:
         held_id = agent.json()["held_message"]["id"]
         assert sent == ["typed"]
 
-        listed = await client.get("/api/sessions/s1/held-messages", headers=auth)
-        assert [r["id"] for r in listed.json()["held_messages"]] == [held_id]
+        assert [r.id for r in runtime.storage.list_held_messages("s1")] == [held_id]
 
         released = await client.post(
             f"/api/held-messages/{held_id}/release", headers=auth
@@ -428,15 +426,15 @@ async def test_api_cancel_endpoints(tmp_path) -> None:
     runtime.storage.create_session(make_session(runtime.settings, "s1", focus=True))
     for text in ("a", "b", "c"):
         await runtime.focus.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
-    first = runtime.focus.list("s1")[0]
+    first = runtime.storage.list_held_messages("s1")[0]
     async with _client(app) as client:
         one = await client.delete(f"/api/held-messages/{first.id}", headers=auth)
         assert one.status_code == 204
-        assert len(runtime.focus.list("s1")) == 2
+        assert len(runtime.storage.list_held_messages("s1")) == 2
 
         missing = await client.delete("/api/held-messages/nope", headers=auth)
         assert missing.status_code == 404
 
         everything = await client.delete("/api/sessions/s1/held-messages", headers=auth)
         assert everything.status_code == 204
-    assert runtime.focus.list("s1") == []
+    assert runtime.storage.list_held_messages("s1") == []

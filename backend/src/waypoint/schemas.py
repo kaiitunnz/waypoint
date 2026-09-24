@@ -444,7 +444,7 @@ class SessionRecord(BaseModel):
     spawner_session_id: str | None = None
     worktree_path: str | None = None
     # Focus holds agent sends, scheduled firings, and board/inbox wakes as
-    # ``HeldMessageRecord``s instead of delivering them.
+    # ``HeldMessageRecord``s.
     focus: bool = False
     permission_mode: str | None = None
     model: str | None = None
@@ -1592,7 +1592,6 @@ class HeldMessageRecord(BaseModel):
     origin: HeldMessageOrigin
     sender_session_id: str | None = None
     sender_title: str | None = None
-    schedule_id: str | None = None
     text: str = ""
     submit: bool = True
     command: SessionCommandInvocation | None = None

@@ -22,23 +22,17 @@ if TYPE_CHECKING:
 class FocusGate:
     def __init__(self, runtime: "SessionRuntime") -> None:
         self._runtime = runtime
-        # Claimed held ids mid-delivery, keyed to their session. A cancel that
-        # lands before dispatch stops the delivery; once dispatching, it is too
-        # late to cancel.
+        # Claimed held id -> session id. A cancel before dispatch stops the
+        # delivery; one during dispatch is a 409.
         self._in_flight: dict[str, str] = {}
         self._cancelled: set[str] = set()
         self._dispatching: set[str] = set()
-
-    def list(self, session_id: str) -> list[HeldMessageRecord]:
-        self._runtime.get_session(session_id)
-        return self._runtime.storage.list_held_messages(session_id)
 
     async def deliver(
         self,
         session_id: str,
         request: SessionInputRequest,
         origin: HeldMessageOrigin,
-        schedule_id: str | None = None,
     ) -> SessionRecord | HeldMessageRecord:
         session = self._runtime.get_session(session_id)
         if not session.focus:
@@ -50,7 +44,6 @@ class FocusGate:
             origin=origin,
             sender_session_id=request.sender_session_id,
             sender_title=self._title_of(request.sender_session_id),
-            schedule_id=schedule_id,
             text=request.text,
             submit=request.submit,
             command=request.command,
@@ -73,7 +66,8 @@ class FocusGate:
         return self._runtime.get_session(record.session_id)
 
     async def release_all(self, session_id: str) -> SessionRecord:
-        for held in self.list(session_id):
+        self._runtime.get_session(session_id)
+        for held in self._runtime.storage.list_held_messages(session_id):
             record = self._runtime.storage.take_held_message(held.id)
             if record is not None:
                 await self._deliver_claimed(record)
@@ -158,23 +152,20 @@ class FocusGate:
                 record.session_id, record.id, record.attachments
             )
 
-    async def _publish(self, session_id: str) -> None:
+    def envelope(self, session_id: str) -> SessionEnvelope:
         held = self._runtime.storage.list_held_messages(session_id)
-        await self._runtime.broadcast.publish(
-            held_messages_envelope(session_id, held), session_id=session_id
+        return SessionEnvelope(
+            type="held_messages",
+            payload={
+                "session_id": session_id,
+                "held_messages": [record.model_dump(mode="json") for record in held],
+            },
         )
 
-
-def held_messages_envelope(
-    session_id: str, held: list[HeldMessageRecord]
-) -> SessionEnvelope:
-    return SessionEnvelope(
-        type="held_messages",
-        payload={
-            "session_id": session_id,
-            "held_messages": [record.model_dump(mode="json") for record in held],
-        },
-    )
+    async def _publish(self, session_id: str) -> None:
+        await self._runtime.broadcast.publish(
+            self.envelope(session_id), session_id=session_id
+        )
 
 
 def _not_found() -> HTTPException:

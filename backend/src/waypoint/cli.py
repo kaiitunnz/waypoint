@@ -2157,19 +2157,18 @@ def sessions_send(
         str | None,
         typer.Option(
             envvar="WAYPOINT_SESSION_ID",
-            help="Sending session; defaults to this session's id. A target in "
-            "Focus holds messages sent from a session.",
+            help="Sending session id; defaults to $WAYPOINT_SESSION_ID. A target "
+            "in Focus holds messages that carry one.",
         ),
     ] = None,
 ) -> None:
     """Send a message to a session.
 
     Exits 0 on confirmed delivery or when the server accepted the input.
-    Reports ``{"session": {..., "send": "held"}}`` when the target is in Focus
-    and holds the message for its human. On transport timeout, reports
-    ``{"send": "delivered"}`` when the session advanced to running, or
-    ``{"send": "unknown"}`` when delivery cannot be confirmed, and exits 1 in
-    the unknown case.
+    Reports ``{"session": {..., "send": "held"}}`` when the target is in Focus.
+    On transport timeout, reports ``"send": "delivered"`` when the session
+    advanced to running, or ``"send": "unknown"`` when delivery cannot be
+    confirmed, and exits 1 in the unknown case.
     """
 
     def _run(c: WaypointClient) -> dict[str, Any]:

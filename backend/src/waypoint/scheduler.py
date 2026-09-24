@@ -669,7 +669,6 @@ class Scheduler:
                 attachments=list(record.attachments) if record.attachments else None,
             ),
             HeldMessageOrigin.SCHEDULE,
-            schedule_id=record.id,
         )
 
     async def _fire_message(self, record: ScheduledMessageRecord) -> None:

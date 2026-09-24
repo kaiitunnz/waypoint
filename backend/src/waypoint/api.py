@@ -42,7 +42,6 @@ from waypoint.backends.tmux.renderer import (
     SyncFrameTracker,
     make_renderer,
 )
-from waypoint.focus import held_messages_envelope
 from waypoint.notifications.contracts import NotificationStatus
 from waypoint.presets import (
     redact_preset,
@@ -1887,14 +1886,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = context.runtime.set_focus(session_id, enabled=False)
         return {"session": session.model_dump(mode="json")}
 
-    @app.get("/api/sessions/{session_id}/held-messages")
-    async def list_held_messages(
-        session_id: str,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        held = context.runtime.focus.list(session_id)
-        return {"held_messages": [record.model_dump(mode="json") for record in held]}
-
     @app.post("/api/sessions/{session_id}/held-messages/release")
     async def release_all_held_messages(
         session_id: str,
@@ -2357,9 +2348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ).model_dump(mode="json")
                     )
             await websocket.send_json(
-                held_messages_envelope(
-                    session_id, context.runtime.storage.list_held_messages(session_id)
-                ).model_dump(mode="json")
+                context.runtime.focus.envelope(session_id).model_dump(mode="json")
             )
             while True:
                 message = await queue.get()

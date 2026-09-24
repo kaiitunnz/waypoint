@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
 import { HeldMessage } from "@/lib/types";
@@ -45,6 +45,8 @@ export function HeldMessagesDock({
   const [expanded, setExpanded] = useState(false);
   const [confirmCancelAll, setConfirmCancelAll] = useState(false);
   const [, setTick] = useState(0);
+  const [panelRoom, setPanelRoom] = useState<number | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const count = messages.length;
 
   useEffect(() => {
@@ -61,6 +63,7 @@ export function HeldMessagesDock({
       setConfirmCancelAll(false);
       return;
     }
+    setPanelRoom(stripRef.current?.getBoundingClientRect().top ?? null);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setExpanded(false);
@@ -82,7 +85,16 @@ export function HeldMessagesDock({
             aria-label="Close held messages"
             onClick={() => setExpanded(false)}
           />
-          <div className="held-dock-panel" role="dialog" aria-label="Held messages">
+          <div
+            className="held-dock-panel"
+            role="dialog"
+            aria-label="Held messages"
+            style={
+              panelRoom === null
+                ? undefined
+                : ({ "--held-dock-room": `${panelRoom}px` } as CSSProperties)
+            }
+          >
             <div className="held-dock-panel-head">
               <span className="held-dock-panel-title">Held messages</span>
               <span className="held-dock-count">{count}</span>
@@ -144,13 +156,7 @@ export function HeldMessagesDock({
                   <div className="held-dock-item-meta">
                     <span className="held-dock-origin">{originLabel(m)}</span>
                     <span className="held-dock-age">{timeAgo(m.created_at)}</span>
-                  </div>
-                  <ExpandableText
-                    className="held-dock-item-text"
-                    text={messageText(m)}
-                    collapsedMaxHeight="3em"
-                  />
-                  <div className="held-dock-item-actions">
+                    <span className="held-dock-item-actions">
                     <button
                       type="button"
                       className="link-button held-dock-release"
@@ -165,14 +171,20 @@ export function HeldMessagesDock({
                     >
                       Cancel
                     </button>
+                    </span>
                   </div>
+                  <ExpandableText
+                    className="held-dock-item-text"
+                    text={messageText(m)}
+                    collapsedMaxHeight="3em"
+                  />
                 </div>
               ))}
             </div>
           </div>
         </>
       ) : null}
-      <div className="held-dock-strip">
+      <div className="held-dock-strip" ref={stripRef}>
         <button
           type="button"
           className="held-dock-toggle"

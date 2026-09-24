@@ -11844,13 +11844,15 @@ html[data-theme="light"] .held-dock-scrim {
   background: rgba(20, 16, 8, 0.22);
 }
 
+/* --held-dock-room is the strip's distance from the viewport top, so a strip
+   sitting high on a short transcript never pushes the panel off-screen. */
 .held-dock-panel {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 100%;
   z-index: 7;
-  max-height: 50vh;
+  max-height: min(50vh, calc(var(--held-dock-room, 100vh) - 16px));
   overflow-y: auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -11962,7 +11964,6 @@ html[data-theme="light"] .held-dock-scrim {
 
 .held-dock-age {
   flex: none;
-  margin-left: auto;
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--muted-soft);
@@ -11979,9 +11980,10 @@ html[data-theme="light"] .held-dock-scrim {
 }
 
 .held-dock-item-actions {
+  flex: none;
   display: flex;
-  justify-content: flex-end;
-  gap: 16px;
+  gap: 14px;
+  margin-left: auto;
 }
 
 .held-dock-item-actions .link-button {

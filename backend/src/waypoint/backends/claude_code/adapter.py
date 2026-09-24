@@ -1025,8 +1025,16 @@ class ClaudeCliAdapter:
             # AskUserQuestion's tool_call event already renders the question
             # UI in the transcript via parseAskUserQuestion; emitting a
             # separate APPROVAL_REQUEST card would show the prompt twice. Only
-            # register the pending entry so respond_to_ask_question answers it.
-            if tool_name != "AskUserQuestion":
+            # register the pending entry so respond_to_ask_question answers it,
+            # and mark the parked turn as waiting on the human.
+            if tool_name == "AskUserQuestion":
+                if self._on_session_update is not None:
+                    await self._on_session_update(
+                        state.session_id,
+                        {"status": SessionStatus.WAITING_INPUT},
+                        True,
+                    )
+            else:
                 tool_input = payload.get("tool_input")
                 if tool_name == "ExitPlanMode":
                     plan_body = (
@@ -1766,13 +1774,19 @@ class ClaudeCliAdapter:
                     )
                     continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
+                # The turn parks on an AskUserQuestion until the human answers.
+                call_status = (
+                    SessionStatus.WAITING_INPUT
+                    if tool_name == "AskUserQuestion"
+                    else SessionStatus.RUNNING
+                )
                 tool_call_metadata: dict[str, Any] = {
                     "method": "assistant.tool_use",
                     "item_id": tool_use_id,
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
                     "payload": block,
-                    "status": SessionStatus.RUNNING,
+                    "status": call_status,
                 }
                 if tool_name == "AskUserQuestion":
                     question = question_interaction(
@@ -1795,7 +1809,7 @@ class ClaudeCliAdapter:
                     EventKind.TOOL_CALL,
                     f"{tool_name}\n{input_text}",
                     tool_call_metadata,
-                    SessionStatus.RUNNING,
+                    call_status,
                 )
             elif block_type == "thinking":
                 # Optional surface; hide behind an opt-in later if too noisy.

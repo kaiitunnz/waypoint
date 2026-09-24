@@ -77,7 +77,7 @@ class NormalizedEvent:
         kind: EventKind,
         text: str,
         metadata: dict[str, Any],
-        status: SessionStatus,
+        status: SessionStatus | None,
     ) -> None:
         self.kind = kind
         self.text = text
@@ -436,14 +436,22 @@ class TranscriptNormalizer:
             )
 
     def _task_notification_events(
-        self, content: str, record_uuid: str | None
+        self, content: str, record_uuid: str | None, status: SessionStatus | None
     ) -> list[NormalizedEvent]:
         parsed = parse_task_notification(content)
         if parsed is None:
             return []
         key = task_notification_dedup_key(content)
         if key in self._seen_task_notification_keys:
-            return []
+            # The queued copy already posted the note; this delivery starts the
+            # turn, so only the status moves.
+            if status is None:
+                return []
+            return [
+                NormalizedEvent(
+                    kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
+                )
+            ]
         self._seen_task_notification_keys.add(key)
         if parsed.task_id in self._pending_handback_bodies:
             # Agent's own result is only a "delivered as a message" placeholder;
@@ -460,7 +468,7 @@ class TranscriptNormalizer:
                 kind=EventKind.SYSTEM_NOTE,
                 text=text,
                 metadata=note_metadata,
-                status=SessionStatus.RUNNING,
+                status=status,
             )
         ]
 
@@ -487,7 +495,9 @@ class TranscriptNormalizer:
             return []
         if "<task-notification>" not in content:
             return []
-        return self._task_notification_events(content, record.get("uuid"))
+        # Queued behind the current turn or an open dialog: not delivered yet,
+        # so the note leaves the session's status alone.
+        return self._task_notification_events(content, record.get("uuid"), None)
 
     def _process_user(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         message: dict[str, Any] = record.get("message") or {}
@@ -495,7 +505,9 @@ class TranscriptNormalizer:
 
         injected = classify_injected_user_turn(record, content)
         if injected == "task_notification" and isinstance(content, str):
-            return self._task_notification_events(content, record.get("uuid"))
+            return self._task_notification_events(
+                content, record.get("uuid"), SessionStatus.RUNNING
+            )
         if injected == "continuation":
             return []
         if isinstance(content, str) and self._buffer_handback(content):

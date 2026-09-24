@@ -8,7 +8,7 @@ import pytest
 
 from waypoint.backends.claude_tty.byte_source import TranscriptRead
 from waypoint.backends.claude_tty.tailer import TranscriptTailer, transcript_path
-from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 
 class _FakeSource:
@@ -493,3 +493,40 @@ async def test_observe_emits_note_with_current_session_status() -> None:
     )
     # session.status keeps the event-insert COALESCE a no-op mid-turn.
     assert change_call.args[4] is SessionStatus.RUNNING
+
+
+async def test_queued_notification_keeps_status_until_delivered() -> None:
+    session = _make_session()
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+    notification = (
+        "<task-notification><task-id>q1</task-id>"
+        '<summary>Agent "Queued" finished</summary><result>done</result>'
+        "</task-notification>"
+    )
+
+    source.feed(
+        _jsonl(
+            {"type": "queue-operation", "operation": "enqueue", "content": notification}
+        )
+    )
+    await tailer._drain()
+    source.feed(
+        _jsonl(
+            {
+                "type": "user",
+                "uuid": "u1",
+                "origin": {"kind": "task-notification"},
+                "message": {"content": notification},
+            }
+        )
+    )
+    await tailer._drain()
+
+    note = runtime._emit_adapter_event.await_args_list[0].args
+    assert note[1] is EventKind.SYSTEM_NOTE
+    assert note[4] is None
+    assert runtime._emit_adapter_event.await_count == 1
+    runtime.update_session_fields.assert_awaited_once_with(
+        "sess-1", status=SessionStatus.RUNNING
+    )

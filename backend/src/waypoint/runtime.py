@@ -2560,13 +2560,22 @@ class SessionRuntime:
         # OpenCode's POST returns only after the server has already pushed
         # SSE events; recording the user event afterward would land it last
         # in the transcript. Revert on send failure so the UI doesn't show
-        # a stuck "running" state for an unsent message.
+        # a stuck "running" state for an unsent message. Input queued behind a
+        # pending approval or question does not start a turn, so the session
+        # keeps waiting on the human.
         previous_status = session.status
-        updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        next_status = (
+            SessionStatus.WAITING_INPUT
+            if session.status == SessionStatus.WAITING_INPUT
+            and transport.has_pending_approval(session)
+            else SessionStatus.RUNNING
+        )
+        updated = self.storage.update_session(session.id, status=next_status)
         await self._record_user_event(
             session.id,
             request.text,
             submit=request.submit,
+            status=next_status,
             attachments=[item.spec for item in attachments],
         )
         # The recorded user event now references these blobs, so exempt them
@@ -5733,8 +5742,9 @@ class SessionRuntime:
         kind: EventKind,
         text: str,
         metadata: dict[str, Any],
-        status: SessionStatus,
+        status: SessionStatus | None,
     ) -> None:
+        """``status=None`` keeps the session's status as stored at insert time."""
         for key, sink in (
             ("capture_host_files", self._capture_host_files),
             ("capture_host_text", self._capture_host_text),
@@ -5748,7 +5758,11 @@ class SessionRuntime:
             ts=datetime.now(UTC),
             kind=kind,
             text=text,
-            metadata={**metadata, "status": status},
+            metadata=(
+                {**metadata, "status": status}
+                if status is not None
+                else {k: v for k, v in metadata.items() if k != "status"}
+            ),
             sequence=self.storage.next_sequence(session_id),
         )
         service = self.notifications

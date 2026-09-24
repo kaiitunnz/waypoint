@@ -219,6 +219,11 @@ class TranscriptTailer:
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
             for ev in self._normalizer.process_record(record):
+                if ev.kind is EventKind.STATUS_UPDATE and ev.status is not None:
+                    await self._runtime.update_session_fields(
+                        self._session_id, status=ev.status
+                    )
+                    continue
                 await self._runtime._emit_adapter_event(
                     self._session_id,
                     ev.kind,

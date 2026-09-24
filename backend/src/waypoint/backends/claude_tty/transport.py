@@ -52,11 +52,9 @@ class ClaudeTtyTransport(TmuxTransport):
         # permission dialog, which it declines. Drop any pending approval now
         # so ``has_pending_approval`` goes false immediately instead of lingering
         # until the next dialog poll, where a racing ``respond_to_approval``
-        # would fire a stray digit at the ready prompt. A pending question is
-        # already dismissed on the pane (we Esc it when surfacing), so just drop
-        # the entry so a later answer is rejected rather than misrouted.
+        # would fire a stray digit at the ready prompt. Open questions stay
+        # answerable: their popup was already dismissed when surfaced.
         pending = self._plugin._pending_approvals.pop(session.id, None)
-        self._plugin._pending_questions.pop(session.id, None)
         target = self._target(session)
         await self.adapter.send_bytes(target, b"\x1b")
         # The chat approval card is dequeued only by a resolution note; emit one

@@ -101,7 +101,6 @@ def _make_tailer(
     runtime: MagicMock, session_id: str = "sess-1"
 ) -> tuple[TranscriptTailer, _FakeSource]:
     plugin = MagicMock()
-    plugin._pending_questions = {}
     source = _FakeSource()
     tailer = TranscriptTailer(
         session_id=session_id,
@@ -255,7 +254,6 @@ async def test_partial_record_carries_across_reads() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     full = _jsonl(_assistant_record())
     mid = len(full) // 2
     source = _ScriptedSource(
@@ -280,7 +278,6 @@ async def test_start_at_end_skips_history_then_emits_append() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     history = _jsonl(_assistant_record(message_id="old"))
     append = _jsonl(_assistant_record(message_id="new"))
     source = _ScriptedSource(
@@ -315,7 +312,6 @@ async def test_truncation_records_note_and_skips_replay() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     first = _jsonl(_assistant_record(message_id="a"))
     source = _ScriptedSource(
         [
@@ -341,7 +337,6 @@ async def test_replacement_identity_change_skips_replay() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     first = _jsonl(_assistant_record(message_id="a"))
     source = _ScriptedSource(
         [

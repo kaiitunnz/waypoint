@@ -27,7 +27,7 @@ from waypoint.backends.claude_code.models import (
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     TranscriptByteSource,
     transcript_path,
@@ -219,18 +219,6 @@ class TranscriptTailer:
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
             for ev in self._normalizer.process_record(record):
-                if (
-                    ev.kind == EventKind.TOOL_CALL
-                    and ev.metadata.get("tool_name") == "AskUserQuestion"
-                    and ev.status == SessionStatus.WAITING_INPUT
-                ):
-                    tool_use_id = str(ev.metadata.get("tool_use_id") or "")
-                    self._plugin._pending_questions[self._session_id] = (
-                        PendingTtyQuestion(
-                            approval_id=uuid.uuid4().hex,
-                            tool_use_id=tool_use_id,
-                        )
-                    )
                 await self._runtime._emit_adapter_event(
                     self._session_id,
                     ev.kind,

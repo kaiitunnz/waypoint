@@ -610,16 +610,35 @@ class ClaudeTtyPlugin:
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
 
+    async def drop_pending_approval(
+        self, runtime: "SessionRuntime", session_id: str, note: str
+    ) -> PendingTtyApproval | None:
+        """Forget the session's pending approval and close its card, which the
+        frontend dequeues only on a resolution note."""
+        pending = self._pending_approvals.pop(session_id, None)
+        if pending is not None:
+            await runtime._record_system_event(
+                session_id,
+                note,
+                metadata={
+                    "method": "approval.invalidated",
+                    "approval_id": pending.approval_id,
+                },
+            )
+        return pending
+
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         await self._tmux.terminate_session(runtime, session)
+        await self.drop_pending_approval(
+            runtime, session.id, "Pending approval cleared by terminate"
+        )
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await tailer_task
-        self._pending_approvals.pop(session.id, None)
 
     async def create_session(
         self,
@@ -1144,7 +1163,9 @@ class ClaudeTtyPlugin:
         if old_tmux_session:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(old_tmux_session)
-        self._pending_approvals.pop(session.id, None)
+        await self.drop_pending_approval(
+            runtime, session.id, "Pending approval cleared by restart"
+        )
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()

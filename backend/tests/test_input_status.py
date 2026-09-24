@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from waypoint.backends.approvals import open_approval_requests
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     EventKind,
@@ -79,3 +80,31 @@ async def test_input_queued_behind_pending_approval_keeps_waiting(
 
     assert runtime.get_session("s1").status is expected
     assert runtime.storage.list_events("s1")[-1].metadata["status"] == expected
+
+
+async def test_open_approval_requests_follow_the_pager_rule(tmp_path) -> None:
+    runtime = make_runtime(tmp_path, SessionStatus.WAITING_INPUT)
+    for approval_id in ("answered", "invalidated", "idless", "open"):
+        await runtime._emit_adapter_event(
+            "s1",
+            EventKind.APPROVAL_REQUEST,
+            "Approve",
+            {"approval_id": approval_id},
+            SessionStatus.WAITING_INPUT,
+        )
+    await runtime._record_system_event(
+        "s1", "Approval response sent: approve", metadata={"approval_id": "answered"}
+    )
+    await runtime._record_system_event(
+        "s1",
+        "Pending approval expired",
+        metadata={"method": "approval.invalidated", "approval_id": "invalidated"},
+    )
+    await runtime._record_system_event("s1", "Approval timed out")
+    await runtime._record_system_event("s1", "Unrelated note")
+
+    events = runtime.storage.list_approval_events("s1")
+
+    assert [e.metadata["approval_id"] for e in open_approval_requests(events)] == [
+        "open"
+    ]

@@ -2203,6 +2203,27 @@ class Storage:
         return [row["tool_use_id"] for row in rows]
 
     @_synchronized
+    def list_approval_events(self, session_id: str) -> list[EventRecord]:
+        """Approval requests and the notes that may resolve them, in order;
+        :func:`waypoint.backends.approvals.open_approval_requests` narrows these
+        to the still-pending cards."""
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ?
+              AND (kind = ?
+                   OR (kind = ?
+                       AND (json_extract(metadata, '$.method')
+                              = 'approval.invalidated'
+                            OR text LIKE '%Approval response sent%'
+                            OR text LIKE '%Approval timed out%')))
+            ORDER BY sequence ASC, id ASC
+            """,
+            [session_id, EventKind.APPROVAL_REQUEST, EventKind.SYSTEM_NOTE],
+        ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:
         now = datetime.now(UTC)
         self.connection.execute(

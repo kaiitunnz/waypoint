@@ -1,6 +1,3 @@
-import asyncio
-from pathlib import Path
-
 from pydantic import BaseModel
 
 from waypoint.backends.diff_preview import (
@@ -13,7 +10,8 @@ from waypoint.backends.diff_preview import (
     files_from_unified_diff,
     unavailable_file,
 )
-from waypoint.workspace_preview import read_text_capped
+from waypoint.workspace_fs import WorkspaceFilesystem
+from waypoint.workspace_preview import WorkspacePathError
 
 
 class GitFileStatus(BaseModel):
@@ -34,92 +32,95 @@ class GitStatus(BaseModel):
     files: list[GitFileStatus]
 
 
-async def _run_git(cwd: Path, *args: str) -> tuple[int, bytes]:
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "git",
-            "-C",
-            str(cwd),
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        return 127, b""
-    stdout, _ = await process.communicate()
-    return process.returncode if process.returncode is not None else -1, stdout
+_REPO_CHECK = ["rev-parse", "--is-inside-work-tree"]
 
 
-async def _git_text(cwd: Path, *args: str) -> str | None:
-    code, out = await _run_git(cwd, *args)
+def _text(result: tuple[int, bytes]) -> str | None:
+    code, out = result
     if code != 0:
         return None
     return out.decode("utf-8", errors="replace").strip() or None
 
 
-async def is_git_repo(base: Path) -> bool:
-    code, out = await _run_git(base, "rev-parse", "--is-inside-work-tree")
-    return code == 0 and out.decode("utf-8", errors="replace").strip() == "true"
+async def is_git_repo(fs: WorkspaceFilesystem, base: str) -> bool:
+    [result] = await fs.git(base, [_REPO_CHECK])
+    return _text(result) == "true"
 
 
-async def _head_label(base: Path) -> tuple[str | None, bool]:
+async def _head_label(
+    fs: WorkspaceFilesystem, base: str, abbrev: str | None
+) -> tuple[str | None, bool]:
     # On a branch, ``--abbrev-ref HEAD`` is the branch name. A detached HEAD
-    # (``git checkout`` of a tag or commit) reports the literal ``HEAD``; resolve
-    # a friendlier label so the UI never shows the bare word "HEAD".
-    branch = await _git_text(base, "rev-parse", "--abbrev-ref", "HEAD")
-    if branch and branch != "HEAD":
-        return branch, False
-    exact = await _git_text(base, "describe", "--tags", "--exact-match", "HEAD")
-    if exact:
-        return exact, True
-    described = await _git_text(base, "describe", "--tags", "--always", "HEAD")
-    if described:
-        return described, True
-    # Unborn branch (repo with no commits yet): no commit to describe, but the
-    # symbolic target still names the branch HEAD will create on first commit.
-    symbolic = await _git_text(base, "symbolic-ref", "--short", "HEAD")
-    if symbolic:
-        return symbolic, False
+    # (``git checkout`` of a tag or commit) reports the literal ``HEAD``, and an
+    # unborn branch fails outright; resolve a friendlier label so the UI never
+    # shows the bare word "HEAD".
+    if abbrev and abbrev != "HEAD":
+        return abbrev, False
+    exact, described, symbolic = await fs.git(
+        base,
+        [
+            ["describe", "--tags", "--exact-match", "HEAD"],
+            ["describe", "--tags", "--always", "HEAD"],
+            # Unborn branch (repo with no commits yet): no commit to describe,
+            # but the symbolic target still names the branch HEAD will create.
+            ["symbolic-ref", "--short", "HEAD"],
+        ],
+    )
+    for label, detached in ((exact, True), (described, True), (symbolic, False)):
+        text = _text(label)
+        if text:
+            return text, detached
     return None, False
 
 
-async def git_status(base: Path) -> GitStatus | None:
-    if not await is_git_repo(base):
+async def git_status(fs: WorkspaceFilesystem, base: str) -> GitStatus | None:
+    repo, abbrev, prefix, status = await fs.git(
+        base,
+        [
+            _REPO_CHECK,
+            ["rev-parse", "--abbrev-ref", "HEAD"],
+            ["rev-parse", "--show-prefix"],
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        ],
+    )
+    if _text(repo) != "true":
         return None
-    branch, detached = await _head_label(base)
+    branch, detached = await _head_label(fs, base, _text(abbrev))
     # ``base`` may be a subdirectory of the repo; porcelain paths are always
     # repo-root-relative, so translate them to ``base``-relative and drop
     # entries living outside the browsed subtree.
-    prefix = await _git_text(base, "rev-parse", "--show-prefix") or ""
-    code, raw = await _run_git(
-        base, "status", "--porcelain=v1", "-z", "--untracked-files=all"
-    )
+    prefix_text = _text(prefix) or ""
+    code, raw = status
     if code != 0:
         return None
     scoped: list[GitFileStatus] = []
     for entry in _parse_porcelain_z(raw):
-        rel = _strip_prefix(entry.path, prefix)
+        rel = _strip_prefix(entry.path, prefix_text)
         if rel is None:
             continue
-        old_rel = _strip_prefix(entry.old_path, prefix) if entry.old_path else None
+        old_rel = _strip_prefix(entry.old_path, prefix_text) if entry.old_path else None
         scoped.append(entry.model_copy(update={"path": rel, "old_path": old_rel}))
     return GitStatus(branch=branch, detached=detached, files=scoped)
 
 
-async def git_list_files(base: Path) -> list[str] | None:
+async def git_list_files(fs: WorkspaceFilesystem, base: str) -> list[str] | None:
     # Tracked plus untracked-but-not-ignored files, ``base``-relative. ``git
     # ls-files`` scopes to the cwd subtree and respects ``.gitignore``, so this
     # skips ``node_modules``/build dirs for free. Returns ``None`` outside a repo
     # so the caller can fall back to a filesystem walk.
-    if not await is_git_repo(base):
-        return None
-    code_tracked, tracked = await _run_git(base, "ls-files", "-z")
-    code_others, others = await _run_git(
-        base, "ls-files", "-z", "--others", "--exclude-standard"
+    repo, *listings = await fs.git(
+        base,
+        [
+            _REPO_CHECK,
+            ["ls-files", "-z"],
+            ["ls-files", "-z", "--others", "--exclude-standard"],
+        ],
     )
+    if _text(repo) != "true":
+        return None
     paths: list[str] = []
     seen: set[str] = set()
-    for code, raw in ((code_tracked, tracked), (code_others, others)):
+    for code, raw in listings:
         if code != 0:
             continue
         for token in raw.decode("utf-8", errors="replace").split("\0"):
@@ -130,7 +131,8 @@ async def git_list_files(base: Path) -> list[str] | None:
 
 
 async def git_file_diff(
-    base: Path,
+    fs: WorkspaceFilesystem,
+    base: str,
     rel: str,
     *,
     staged: bool,
@@ -141,41 +143,34 @@ async def git_file_diff(
     # working-tree-vs-HEAD view (staged + unstaged together).
     # ``-U1000000`` forces git to emit the entire file as context (clamped to
     # the file length) so the frontend can render full-file inline diffs.
-    diff_args = ("-U1000000", "--cached") if staged else ("-U1000000", "HEAD")
-    diff = await _git_diff(base, *diff_args, "--", rel)
+    diff_args = ["-U1000000", "--cached"] if staged else ["-U1000000", "HEAD"]
+    [result] = await fs.git(base, [["diff", *diff_args, "--", rel]])
+    code, out = result
+    diff = out.decode("utf-8", errors="replace") if code == 0 else None
     if diff and diff.strip():
         files = files_from_unified_diff(diff, fallback_path=rel)
     else:
-        files = await _untracked_add(base, rel, max_file_bytes)
+        files = await _untracked_add(fs, base, rel, max_file_bytes)
     if not files:
         return None
     return build_preview("aggregate", files, max_file_bytes, max_total_bytes)
 
 
-async def _git_diff(base: Path, *args: str) -> str | None:
-    code, out = await _run_git(base, "diff", *args)
-    if code != 0:
-        return None
-    return out.decode("utf-8", errors="replace")
-
-
 async def _untracked_add(
-    base: Path, rel: str, max_file_bytes: int
+    fs: WorkspaceFilesystem, base: str, rel: str, max_file_bytes: int
 ) -> list[DiffPreviewFile]:
-    code, out = await _run_git(base, "status", "--porcelain=v1", "-z", "--", rel)
+    [(code, out)] = await fs.git(base, [["status", "--porcelain=v1", "-z", "--", rel]])
     if code != 0:
         return []
     first = out.decode("utf-8", errors="replace").split("\0", 1)[0]
     if not first.startswith("??"):
         return []
-    target = base.expanduser() / rel
     try:
-        content, _truncated, binary, _encoding = read_text_capped(
-            target, max_file_bytes
-        )
-    except OSError:
+        read = await fs.read_file(base, rel, max_file_bytes)
+    except (WorkspacePathError, OSError):
         return []
-    if binary or content is None:
+    content = read["content"]
+    if read["binary"] or content is None:
         return [unavailable_file(rel, "Untracked file is binary or too large", "add")]
     return [file_from_old_new(rel, "", content, "add")]
 

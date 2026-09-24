@@ -1,7 +1,24 @@
+"""Workspace filesystem semantics shared by local and remote sessions.
+
+The ``op_*`` functions are the workspace operations. Local sessions call them
+in-process; remote sessions pipe this same file to ``python3 -`` on the SSH
+target, where ``_main`` dispatches one op per call and prints one
+sentinel-framed JSON line. The module therefore stays stdlib-only and
+Python 3.8-compatible.
+"""
+
+# Deferred annotation evaluation keeps the modern type hints from being
+# evaluated on a remote Python 3.8 interpreter.
+from __future__ import annotations
+
+import base64
 import fnmatch
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 # The denylist is the single filter knob. By default only VCS internals and
 # SSH key material are hidden; ordinary dotfiles (.env, .gitignore, …) preview
@@ -12,7 +29,14 @@ DEFAULT_WORKSPACE_DENYLIST = [".git", ".ssh"]
 WorkspaceEntryKind = Literal["file", "dir", "symlink"]
 
 
+SENTINEL = "__WP_WORKSPACE_BEGIN__"
+
+
 class WorkspacePathError(ValueError):
+    pass
+
+
+class WorkspaceFileTooLargeError(ValueError):
     pass
 
 
@@ -23,17 +47,53 @@ class WorkspaceEntry(TypedDict):
     mtime: float
 
 
+class DirListing(TypedDict):
+    entries: list[WorkspaceEntry]
+    truncated: bool
+    overflow: int | None
+    path: str
+
+
+class WalkResult(TypedDict):
+    paths: list[str]
+    truncated: bool
+
+
+class ResolvedPath(TypedDict):
+    path: str
+    # ``None`` when resolved without requiring the path to exist.
+    kind: Literal["file", "dir"] | None
+
+
+class FileContent(TypedDict):
+    path: str
+    size: int
+    mtime: float
+    encoding: str
+    truncated: bool
+    binary: bool
+    content: str | None
+
+
 def resolve_in_base(base: Path, rel: str, follow_symlinks: bool = False) -> Path:
     base_expanded = base.expanduser()
     base_resolved = base_expanded.resolve()
     target = base_expanded / rel
     lexical_target = Path(os.path.normpath(base_resolved / rel))
     resolved = Path(os.path.realpath(os.path.normpath(target)))
-    if not resolved.is_relative_to(base_resolved):
+    if not _is_within(resolved, base_resolved):
         raise WorkspacePathError("path escapes workspace")
     if not follow_symlinks and _has_symlink_component(base_resolved, lexical_target):
         raise WorkspacePathError("symlink paths are not allowed")
     return resolved
+
+
+def _is_within(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return False
+    return True
 
 
 def is_denied(
@@ -255,3 +315,197 @@ def rank_files(
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
     truncated = len(scored) > limit
     return [path for _, _, path in scored[:limit]], truncated
+
+
+def resolve_existing_file(
+    base: Path, rel: str, denylist: list[str] | None, follow_symlinks: bool
+) -> Path:
+    if is_denied(rel, denylist):
+        raise WorkspacePathError("path is denied")
+    resolved = resolve_in_base(base, rel, follow_symlinks=follow_symlinks)
+    if not resolved.is_file():
+        raise FileNotFoundError(resolved)
+    return resolved
+
+
+def run_git_commands(base: str, commands: list[list[str]]) -> list[tuple[int, bytes]]:
+    # ``git -C`` gets no shell, so a remote session's ``~``-relative cwd must be
+    # expanded here, on the host that runs git.
+    cwd = os.path.expanduser(base)
+    results: list[tuple[int, bytes]] = []
+    for args in commands:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", cwd, *args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except FileNotFoundError:
+            results.append((127, b""))
+            continue
+        results.append((completed.returncode, completed.stdout))
+    return results
+
+
+def op_list_dir(
+    base: str,
+    rel: str,
+    cap: int,
+    offset: int,
+    denylist: list[str] | None,
+    follow_symlinks: bool,
+) -> DirListing:
+    base_path = Path(base)
+    entries, truncated, overflow, directory = list_dir(
+        base_path, rel, cap, denylist, follow_symlinks, offset
+    )
+    return {
+        "entries": entries,
+        "truncated": truncated,
+        "overflow": overflow,
+        "path": relative_to_base(base_path, directory),
+    }
+
+
+def op_walk_files(
+    base: str, denylist: list[str] | None, follow_symlinks: bool
+) -> WalkResult:
+    paths, truncated = walk_files(Path(base), denylist, follow_symlinks)
+    return {"paths": paths, "truncated": truncated}
+
+
+def op_resolve(
+    base: str,
+    rel: str,
+    denylist: list[str] | None,
+    follow_symlinks: bool,
+    must_exist: bool,
+) -> ResolvedPath:
+    if is_denied(rel, denylist):
+        raise WorkspacePathError("path is denied")
+    base_path = Path(base)
+    resolved = resolve_in_base(base_path, rel, follow_symlinks=follow_symlinks)
+    path = relative_to_base(base_path, resolved)
+    if not must_exist:
+        return {"path": path, "kind": None}
+    if not resolved.exists():
+        raise FileNotFoundError(resolved)
+    return {"path": path, "kind": "dir" if resolved.is_dir() else "file"}
+
+
+def op_read_file(
+    base: str,
+    rel: str,
+    max_bytes: int,
+    denylist: list[str] | None,
+    follow_symlinks: bool,
+) -> FileContent:
+    base_path = Path(base)
+    resolved = resolve_existing_file(base_path, rel, denylist, follow_symlinks)
+    stat = resolved.stat()
+    content, truncated, binary, encoding = read_text_capped(resolved, max_bytes)
+    return {
+        "path": relative_to_base(base_path, resolved),
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+        "encoding": encoding,
+        "truncated": truncated,
+        "binary": binary,
+        "content": content,
+    }
+
+
+def op_read_raw(
+    base: str,
+    rel: str,
+    max_bytes: int,
+    denylist: list[str] | None,
+    follow_symlinks: bool,
+) -> dict[str, str]:
+    resolved = resolve_existing_file(Path(base), rel, denylist, follow_symlinks)
+    if resolved.stat().st_size > max_bytes:
+        raise WorkspaceFileTooLargeError(str(resolved))
+    return {
+        "name": resolved.name,
+        "data_b64": base64.b64encode(resolved.read_bytes()).decode("ascii"),
+    }
+
+
+def op_git(base: str, commands: list[list[str]]) -> dict[str, list[list[Any]]]:
+    return {
+        "results": [
+            [code, base64.b64encode(out).decode("ascii")]
+            for code, out in run_git_commands(base, commands)
+        ]
+    }
+
+
+def op_list_dirs(
+    prefix: str, limit: int, denylist: list[str] | None
+) -> dict[str, list[str]]:
+    # Completes a typed absolute or ``~``-relative directory path to its child
+    # directories, keeping the typed form (a leading ``~`` stays unexpanded).
+    if prefix == "~":
+        prefix = "~/"
+    if not prefix.startswith(("/", "~/")):
+        return {"directories": []}
+    parent_typed, partial = prefix.rsplit("/", 1)
+    parent_typed += "/"
+    show_hidden = partial.startswith(".")
+    names: list[str] = []
+    try:
+        with os.scandir(os.path.expanduser(parent_typed)) as entries:
+            for entry in entries:
+                name = entry.name
+                if not name.startswith(partial):
+                    continue
+                if name.startswith(".") and not show_hidden:
+                    continue
+                if is_denied(name, denylist):
+                    continue
+                try:
+                    if entry.is_dir():
+                        names.append(name)
+                except OSError:
+                    continue
+    except OSError:
+        return {"directories": []}
+    names.sort(key=lambda name: (name.lower(), name))
+    return {"directories": [parent_typed + name for name in names[: max(limit, 0)]]}
+
+
+OPS: dict[str, Any] = {
+    "list_dir": op_list_dir,
+    "walk_files": op_walk_files,
+    "resolve": op_resolve,
+    "read_file": op_read_file,
+    "read_raw": op_read_raw,
+    "git": op_git,
+    "list_dirs": op_list_dirs,
+}
+
+
+def error_code(exc: Exception) -> str | None:
+    if isinstance(exc, WorkspacePathError):
+        return "denied"
+    if isinstance(exc, WorkspaceFileTooLargeError):
+        return "too_large"
+    if isinstance(exc, NotADirectoryError):
+        return "not_a_directory"
+    if isinstance(exc, FileNotFoundError):
+        return "not_found"
+    return None
+
+
+def _main(argv: list[str]) -> None:
+    try:
+        payload = OPS[argv[1]](**json.loads(argv[2]))
+    except Exception as exc:
+        payload = {"error": error_code(exc) or "failed", "detail": str(exc)[:240]}
+    sys.stdout.write(SENTINEL + json.dumps(payload) + "\n")
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    _main(sys.argv)

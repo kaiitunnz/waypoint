@@ -801,7 +801,9 @@ implementation returned from that agent's `transport_view`. It owns
 `send_input` / `interrupt` / `terminate` / `respond_to_approval` /
 `terminal_snapshot` against whatever channel the agent speaks (a subprocess
 stream, a websocket, an SDK client). No registry change is needed — it ships
-inside the agent package (`backends/<id>/transport.py`).
+inside the agent package (`backends/<id>/transport.py`). A channel that can show
+a dialog capturing input overrides `input_blocked`; agent and scheduled messages
+are held while it reports true.
 
 **A transport registered as its own plugin** — the generic `tmux` pane wrapper
 that drives any agent, or an agent-bound tail like `claude_tty` for the Claude

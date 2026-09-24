@@ -877,7 +877,6 @@ export interface HeldMessage {
   origin: HeldMessageOrigin;
   sender_session_id?: string | null;
   sender_title?: string | null;
-  schedule_id?: string | null;
   text: string;
   attachments: string[];
   created_at: string;

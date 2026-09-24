@@ -3366,9 +3366,6 @@ const ReplyComposer = memo(function ReplyComposer({
   };
 
   const assistantOps = assistant ? assistantControls : null;
-  // Account-profile switching for a regular session moved to the Session
-  // settings modal (opened from the overflow menu); the quick-tuning popover
-  // keeps inline tuning, Focus, and the assistant replacement controls.
   // Backend the assistant controls target — the picked one, or the current.
   const assistantTargetBackend = pendingBackend ?? session?.backend ?? null;
   const assistantTargetProfiles =

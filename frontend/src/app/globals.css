@@ -11728,8 +11728,7 @@ html[data-theme="light"] .sched-dock-scrim {
   }
 }
 
-/* ─── In-session held-messages dock (Focus) ───
- * Same family and behavior as .sched-dock, in the cool Focus hue. */
+/* ─── In-session held-messages dock (Focus) ─── */
 
 .held-dock {
   position: sticky;

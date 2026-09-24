@@ -4,6 +4,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
 import { HeldMessage } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/usage";
 
 function ChevronIcon() {
   return (
@@ -32,8 +33,6 @@ interface HeldMessagesDockProps {
   onCancelAll: () => Promise<void> | void;
 }
 
-// Messages a session in Focus is holding, docked above the composer in the
-// scheduled-messages dock family.
 export function HeldMessagesDock({
   focus,
   messages,
@@ -155,7 +154,7 @@ export function HeldMessagesDock({
                 <div key={m.id} className="held-dock-item">
                   <div className="held-dock-item-meta">
                     <span className="held-dock-origin">{originLabel(m)}</span>
-                    <span className="held-dock-age">{timeAgo(m.created_at)}</span>
+                    <span className="held-dock-age">{formatRelativeTime(m.created_at)}</span>
                     <span className="held-dock-item-actions">
                       <button
                         type="button"
@@ -226,13 +225,4 @@ function messageText(message: HeldMessage): string {
   const attached = message.attachments.length;
   const suffix = attached ? ` (+${attached} file${attached === 1 ? "" : "s"})` : "";
   return (message.text || "(no text)") + suffix;
-}
-
-function timeAgo(iso: string): string {
-  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }

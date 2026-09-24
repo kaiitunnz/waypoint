@@ -189,18 +189,13 @@ async def test_list_claude_command_completions_propagates_command_argument_hint(
     assert completions[0].argument_hint == "<branch>"
 
 
-def _loopback_remote(monkeypatch, home) -> list[dict[str, str] | None]:
-    # Run the vendored remote discovery script on this host under a fake remote
-    # HOME, recording the per-call env the SSH argv would have carried.
-    captured: list[dict[str, str] | None] = []
-
+def _loopback_remote(monkeypatch, home) -> None:
+    # Runs the remote discovery script locally under ``home``.
     def _build(self, command, cwd=None, *, allocate_tty=False, extra_env=None):
-        captured.append(extra_env)
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", **(extra_env or {})}
         return ("env", "-i", *(f"{k}={v}" for k, v in env.items()), *command)
 
     monkeypatch.setattr(SshLaunchTargetConfig, "build_remote_exec_args", _build)
-    return captured
 
 
 def _write_skill(root, name: str) -> None:
@@ -218,7 +213,7 @@ async def test_remote_discovery_scopes_to_profile_config_dir(
     home = tmp_path / "home"
     _write_skill(home / ".claude" / "skills", "default-only")
     _write_skill(home / ".claude-work" / "skills", "profile-only")
-    captured = _loopback_remote(monkeypatch, home)
+    _loopback_remote(monkeypatch, home)
 
     completions = await list_claude_command_completions(
         cwd="~/repo",
@@ -228,7 +223,6 @@ async def test_remote_discovery_scopes_to_profile_config_dir(
         config_dir="~/.claude-work",
     )
 
-    assert captured == [{"CLAUDE_CONFIG_DIR": "~/.claude-work"}]
     assert [item.name for item in completions] == ["profile-only"]
 
 
@@ -236,7 +230,7 @@ async def test_remote_discovery_scopes_to_profile_config_dir(
 async def test_remote_discovery_expands_tilde_cwd(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     _write_skill(home / "repo" / ".claude" / "skills", "project-skill")
-    captured = _loopback_remote(monkeypatch, home)
+    _loopback_remote(monkeypatch, home)
 
     completions = await list_claude_command_completions(
         cwd="~/repo",
@@ -245,7 +239,6 @@ async def test_remote_discovery_expands_tilde_cwd(tmp_path, monkeypatch) -> None
         launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
     )
 
-    assert captured == [None]
     assert [item.name for item in completions] == ["project-skill"]
 
 

@@ -6882,6 +6882,25 @@ html[data-theme="light"] .composer-activity-spinner {
   box-shadow: 0 0 0 2px rgba(217, 154, 74, 0.18);
 }
 
+.composer-tune-focus {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-cool);
+}
+
+.composer-tune-focus::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .composer-tune-popover {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -6939,6 +6958,34 @@ html[data-theme="light"] .composer-tune-field select {
 .composer-tune-field select:focus-visible {
   outline: 2px solid rgba(200, 169, 106, 0.45);
   outline-offset: 1px;
+}
+
+.composer-tune-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.composer-tune-toggle-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.composer-tune-toggle-copy > span:first-child {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.composer-tune-toggle-hint {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--muted);
 }
 
 .composer-tune-restart {
@@ -9498,7 +9545,11 @@ html[data-theme="light"] .term-bar-action.primary {
 
 /* The locked pane is a stacking context; lifting it while a slot dock is
    expanded lets the dock's scrim cover the page composer. */
-.session-terminal:has(.term-notices .sq-dock.expanded, .term-notices .sched-dock.expanded) {
+.session-terminal:has(
+    .term-notices .sq-dock.expanded,
+    .term-notices .sched-dock.expanded,
+    .term-notices .held-dock.expanded
+  ) {
   z-index: 50;
 }
 
@@ -9506,7 +9557,8 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-notices > .session-notice-toast,
 .term-notices > .clipboard-prompt,
 .term-notices > .sq-dock,
-.term-notices > .sched-dock {
+.term-notices > .sched-dock,
+.term-notices > .held-dock {
   bottom: auto;
   margin: 0;
 }
@@ -9515,7 +9567,8 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-notices > .session-notice-toast,
 .term-notices > .clipboard-prompt,
 .term-notices .sq-dock-strip,
-.term-notices .sched-dock-strip {
+.term-notices .sched-dock-strip,
+.term-notices .held-dock-strip {
   border-radius: var(--radius-sm);
   box-shadow: none;
   backdrop-filter: none;
@@ -9523,7 +9576,8 @@ html[data-theme="light"] .term-bar-action.primary {
 
 .term-notices > .session-notice-toast,
 .term-notices .sq-dock-strip,
-.term-notices .sched-dock-strip {
+.term-notices .sched-dock-strip,
+.term-notices .held-dock-strip {
   border-color: var(--line);
   background: var(--bg-card-soft);
 }
@@ -9542,7 +9596,8 @@ html[data-theme="light"] .term-bar-action.primary {
 
 @media (min-width: 768px) {
   .term-notices .sq-dock.expanded .sq-dock-strip,
-  .term-notices .sched-dock.expanded .sched-dock-strip {
+  .term-notices .sched-dock.expanded .sched-dock-strip,
+  .term-notices .held-dock.expanded .held-dock-strip {
     border-radius: var(--radius-sm);
   }
 }
@@ -11668,6 +11723,293 @@ html[data-theme="light"] .sched-dock-scrim {
   }
 
   .sched-dock.expanded .sched-dock-strip {
+    border-top-left-radius: var(--radius-glass);
+    border-top-right-radius: var(--radius-glass);
+  }
+}
+
+/* ─── In-session held-messages dock (Focus) ───
+ * Same family and behavior as .sched-dock, in the cool Focus hue. */
+
+.held-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  margin-top: -8px;
+  pointer-events: none;
+  min-width: 0;
+}
+
+.held-dock.expanded {
+  z-index: 50;
+}
+
+.held-dock-strip {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.held-dock-toggle {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 12px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.held-dock-toggle:disabled {
+  cursor: default;
+}
+
+.held-dock-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.held-dock-glyph {
+  flex: none;
+  color: var(--accent-cool);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.held-dock-state {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-cool);
+}
+
+.held-dock-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.held-dock-toggle:disabled .held-dock-label {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.held-dock-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.held-dock-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-soft);
+  transition: transform 160ms ease;
+}
+
+.held-dock-toggle[aria-expanded="true"] .held-dock-chevron {
+  transform: rotate(180deg);
+}
+
+.held-dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .held-dock-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+.held-dock-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 7;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  pointer-events: auto;
+}
+
+.held-dock.expanded .held-dock-panel {
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.held-dock.expanded .held-dock-strip {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.held-dock-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.held-dock-panel-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.held-dock-collapse {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+}
+
+.held-dock-collapse svg {
+  transform: rotate(180deg);
+}
+
+.held-dock-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.held-dock-bulk .link-button {
+  margin-top: 0;
+}
+
+.held-dock-bulk-prompt {
+  flex: 1 1 100%;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.link-button.held-dock-release {
+  color: var(--accent-cool);
+}
+
+.held-dock-list {
+  display: grid;
+  gap: 2px;
+}
+
+.held-dock-item {
+  display: grid;
+  gap: 6px;
+  padding: 8px 2px;
+}
+
+.held-dock-item + .held-dock-item {
+  border-top: 1px solid var(--line);
+}
+
+.held-dock-item-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.held-dock-origin {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-cool);
+}
+
+.held-dock-age {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+}
+
+.held-dock-item-text {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.held-dock-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.held-dock-item-actions .link-button {
+  margin-top: 0;
+}
+
+@media (min-width: 768px) {
+  .held-dock-scrim,
+  html[data-theme="light"] .held-dock-scrim {
+    background: transparent;
+  }
+
+  .held-dock-panel {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: min(420px, 92vw);
+  }
+
+  .held-dock.expanded .held-dock-panel {
+    border-bottom: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass);
+    box-shadow:
+      inset 0 1px 0 var(--glass-hi),
+      var(--shadow);
+  }
+
+  .held-dock.expanded .held-dock-strip {
     border-top-left-radius: var(--radius-glass);
     border-top-right-radius: var(--radius-glass);
   }

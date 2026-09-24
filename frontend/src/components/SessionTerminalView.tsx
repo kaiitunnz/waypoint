@@ -34,6 +34,8 @@ interface SessionTerminalViewProps {
   keyInjection: boolean;
   inputUnlocked: boolean;
   onToggleInputUnlocked: () => void;
+  focus: boolean;
+  onToggleFocus: () => void;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
   // Light/dark surface for the pane, resolved from the agent's TUI theme.
@@ -95,6 +97,8 @@ export function SessionTerminalView({
   keyInjection,
   inputUnlocked,
   onToggleInputUnlocked,
+  focus,
+  onToggleFocus,
   terminalRef,
   terminalDims,
   terminalAppearance,
@@ -308,6 +312,17 @@ export function SessionTerminalView({
                 >
                   <span className="glyph">⚙︎</span>
                   Session settings…
+                </button>
+              ) : null}
+              {session ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => fireFromMenu(onToggleFocus)}
+                >
+                  <span className="glyph">◎</span>
+                  {focus ? "Turn off Focus" : "Turn on Focus"}
                 </button>
               ) : null}
               {session ? (

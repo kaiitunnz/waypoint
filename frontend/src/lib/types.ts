@@ -869,6 +869,8 @@ export interface SessionEnvelope {
 
 export type HeldMessageOrigin = "agent" | "schedule" | "wake";
 
+export type HeldReason = "focus" | "dialog" | "idle";
+
 // A delivery a session is holding. Mirrors backend schemas.HeldMessageRecord.
 export interface HeldMessage {
   id: string;
@@ -879,7 +881,7 @@ export interface HeldMessage {
   text: string;
   attachments: string[];
   created_at: string;
-  hold_reason: "focus" | "dialog" | "idle";
+  hold_reason: HeldReason;
 }
 
 export type SideQuestionStatus = "pending" | "answered" | "error";

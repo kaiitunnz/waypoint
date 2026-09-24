@@ -15,6 +15,7 @@ from waypoint.recurrence import (
     resolve_recurrence_base,
 )
 from waypoint.schemas import (
+    HeldMessageOrigin,
     IdleMessageBatchMode,
     ScheduleCreateRequest,
     ScheduledMessageCreateRequest,
@@ -658,7 +659,7 @@ class Scheduler:
         return session.id
 
     async def _send_input(self, record: ScheduledMessageRecord) -> None:
-        await self._runtime.handle_input(
+        await self._runtime.focus.deliver(
             record.session_id,
             SessionInputRequest(
                 text=record.text,
@@ -667,6 +668,8 @@ class Scheduler:
                 items=record.items,
                 attachments=list(record.attachments) if record.attachments else None,
             ),
+            HeldMessageOrigin.SCHEDULE,
+            schedule_id=record.id,
         )
 
     async def _fire_message(self, record: ScheduledMessageRecord) -> None:

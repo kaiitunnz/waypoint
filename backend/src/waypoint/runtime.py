@@ -71,6 +71,7 @@ from waypoint.backends.transcripts import (
     unpersisted_thread_error,
 )
 from waypoint.builtin_completions import waypoint_builtin_completions
+from waypoint.focus import FocusGate
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.manager import ManagerRegistry
@@ -96,6 +97,7 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     EventsPageResponse,
+    HeldMessageOrigin,
     InboxAttachmentBlockInput,
     InboxAttachmentRef,
     InboxBlockInput,
@@ -269,6 +271,13 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
         for key in order
     ]
     return "\n\n".join(part for part in parts if part.strip())
+
+
+@dataclass(frozen=True)
+class PreparedInput:
+    session: SessionRecord
+    request: SessionInputRequest
+    attachments: list[ResolvedAttachment]
 
 
 @dataclass
@@ -529,6 +538,7 @@ class SessionRuntime:
         self.presets = PresetManager(storage)
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
+        self.focus = FocusGate(self)
         self.session_presence = SessionPresenceRegistry()
         self.notifications: NotificationService | None = (
             NotificationService(
@@ -672,6 +682,14 @@ class SessionRuntime:
                 log.info("reconciled %d stale schedule attachment references", removed)
         except Exception:
             log.exception("failed to reconcile schedule attachment references")
+        try:
+            removed = self.attachments.reconcile_held_references(
+                self.storage.held_message_ids()
+            )
+            if removed:
+                log.info("reconciled %d stale held attachment references", removed)
+        except Exception:
+            log.exception("failed to reconcile held attachment references")
 
     def _reconcile_provider_selections(self) -> None:
         """Mark provider-selected sessions whose provider is no longer enabled as
@@ -2511,9 +2529,23 @@ class SessionRuntime:
     async def handle_input(
         self, session_id: str, request: SessionInputRequest
     ) -> SessionRecord:
+        return await self.dispatch_input(await self.prepare_input(session_id, request))
+
+    async def prepare_input(
+        self, session_id: str, request: SessionInputRequest
+    ) -> PreparedInput:
+        """Checks that can fail before anything reaches the transcript or agent:
+        the session exists (reattached if exited) and every attachment resolves."""
         session = self.get_session(session_id)
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             session = await self._reattach_session(session)
+        attachments = self.resolve_attachments(session.id, request.attachments)
+        return PreparedInput(session=session, request=request, attachments=attachments)
+
+    async def dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
+        session = prepared.session
+        request = prepared.request
+        attachments = prepared.attachments
         transport = self.transport_for(session)
         plugin = self.registry.plugin_for(session)
         if transport.is_structured:
@@ -2529,7 +2561,6 @@ class SessionRuntime:
         # SSE events; recording the user event afterward would land it last
         # in the transcript. Revert on send failure so the UI doesn't show
         # a stuck "running" state for an unsent message.
-        attachments = self._resolve_attachments(session.id, request.attachments)
         previous_status = session.status
         updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         await self._record_user_event(
@@ -2553,7 +2584,7 @@ class SessionRuntime:
             raise
         return updated
 
-    def _resolve_attachments(
+    def resolve_attachments(
         self, session_id: str, attachment_ids: list[str] | None
     ) -> list[ResolvedAttachment]:
         if not attachment_ids:
@@ -4335,8 +4366,10 @@ class SessionRuntime:
 
     async def _deliver_wake(self, session_id: str) -> None:
         try:
-            await self.handle_input(
-                session_id, SessionInputRequest(text=WAKE_INPUT_TEXT)
+            await self.focus.deliver(
+                session_id,
+                SessionInputRequest(text=WAKE_INPUT_TEXT),
+                HeldMessageOrigin.WAKE,
             )
         except Exception:
             log.exception("wake delivery failed", extra={"session": session_id})
@@ -4548,6 +4581,14 @@ class SessionRuntime:
             return session
         updated = self.storage.update_session(session_id, pinned_at=pinned_at)
         await self._broadcast_session_list()
+        return updated
+
+    def set_focus(self, session_id: str, enabled: bool) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.focus == enabled:
+            return session
+        updated = self.storage.update_session(session_id, focus=enabled)
+        self._publish_session_state(session_id)
         return updated
 
     async def answer_question(

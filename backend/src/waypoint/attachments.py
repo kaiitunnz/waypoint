@@ -30,6 +30,8 @@ _INBOX_REFS_INDEX = "_inbox_refs.json"
 # schedule's attachments must survive the orphan sweep until the schedule
 # resolves (an idle queue can outlive the normal TTL).
 _SCHEDULE_REFS_INDEX = "_schedule_refs.json"
+# Held-message pins: attachments of a message a focused session is holding.
+_HELD_REFS_INDEX = "_held_refs.json"
 
 
 def _sanitize_component(value: str, *, fallback: str) -> str:
@@ -288,6 +290,32 @@ class AttachmentStore:
         session index. Startup repair mirroring inbox-ref reconciliation."""
         return self._reconcile_owner_references(live_schedule_ids, _SCHEDULE_REFS_INDEX)
 
+    def mark_held_references(
+        self, session_id: str, held_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Pin each resolvable attachment against ``held_id`` so the sweep keeps
+        it while that message is held. Idempotent."""
+        self._mark_owner_references(
+            session_id, held_id, attachment_ids, _HELD_REFS_INDEX
+        )
+
+    def release_held_references(
+        self, session_id: str, held_id: str, attachment_ids: list[str]
+    ) -> None:
+        """Drop ``held_id``'s pin from each attachment. Idempotent; never raises."""
+        self._release_owner_references(
+            session_id, held_id, attachment_ids, _HELD_REFS_INDEX
+        )
+
+    def held_referenced_ids(self, session_id: str) -> set[str]:
+        """Attachment ids pinned by one or more held messages in this session."""
+        return self._owner_referenced_ids(session_id, _HELD_REFS_INDEX)
+
+    def reconcile_held_references(self, live_held_ids: set[str]) -> int:
+        """Drop pins whose held message is not in ``live_held_ids``, across every
+        session index."""
+        return self._reconcile_owner_references(live_held_ids, _HELD_REFS_INDEX)
+
     def _mark_owner_references(
         self, session_id: str, owner_id: str, attachment_ids: list[str], index_name: str
     ) -> None:
@@ -401,6 +429,7 @@ class AttachmentStore:
             | self._read_id_index(session_dir, _PINNED_INDEX)
             | self.inbox_referenced_ids(session_id)
             | self.schedule_referenced_ids(session_id)
+            | self.held_referenced_ids(session_id)
         )
         cutoff = time.time() - ttl_seconds
         removed = 0

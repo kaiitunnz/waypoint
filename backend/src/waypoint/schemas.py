@@ -443,6 +443,9 @@ class SessionRecord(BaseModel):
     # and to identify subagent sessions. ``None`` for user/top-level sessions.
     spawner_session_id: str | None = None
     worktree_path: str | None = None
+    # Focus holds agent sends, scheduled firings, and board/inbox wakes as
+    # ``HeldMessageRecord``s instead of delivering them.
+    focus: bool = False
     permission_mode: str | None = None
     model: str | None = None
     # The concrete model id the backend actually resolved and ran (e.g.
@@ -1263,6 +1266,9 @@ class SessionInputRequest(BaseModel):
     # Ids of previously uploaded attachments to deliver alongside the text.
     # Resolved to host paths server-side; see ``AttachmentSpec``.
     attachments: list[str] | None = None
+    # The sending session, stamped by the CLI from ``WAYPOINT_SESSION_ID``.
+    # Marks the input as an agent send, which a focused target holds.
+    sender_session_id: str | None = None
 
 
 class SessionApprovalRequest(BaseModel):
@@ -1572,6 +1578,26 @@ class SchedulePreviewResponse(BaseModel):
 class SessionEnvelope(BaseModel):
     type: str
     payload: Mapping[str, Any]
+
+
+class HeldMessageOrigin(StrEnum):
+    AGENT = "agent"
+    SCHEDULE = "schedule"
+    WAKE = "wake"
+
+
+class HeldMessageRecord(BaseModel):
+    id: str
+    session_id: str
+    origin: HeldMessageOrigin
+    sender_session_id: str | None = None
+    schedule_id: str | None = None
+    text: str = ""
+    submit: bool = True
+    command: SessionCommandInvocation | None = None
+    items: list[SessionInputItem] | None = None
+    attachments: list[str] = Field(default_factory=list)
+    created_at: datetime
 
 
 class ScheduledMessageStatus(StrEnum):

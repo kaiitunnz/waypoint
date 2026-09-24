@@ -1438,9 +1438,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       ),
     [transcriptItems],
   );
-  // True for local sessions only; remote sessions return 400 from the workspace
-  // endpoints.
-  const workspacePreviewEnabled = Boolean(session && !session.launch_target_id);
+  const workspacePreviewEnabled = Boolean(session);
   // Latest task group, read off the raw event stream so the dock reflects the
   // true current state regardless of the transcript's event filter. Fall back
   // to `loadedTodoEvent` (the tail-page snapshot) when the latest todo predates

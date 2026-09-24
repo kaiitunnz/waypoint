@@ -395,8 +395,11 @@ export function LaunchFormFields({
       <section className="launch-section">
         <span className="launch-section-caption">Session</span>
         <WorkingDirectoryField
+          host={host}
+          token={token}
           cwd={form.cwd}
           onChange={form.setCwd}
+          launchTargetId={launchTargetId}
           targetLabel={targetLabel}
           recentCwds={recentCwds}
           error={cwdError}

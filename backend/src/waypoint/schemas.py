@@ -122,6 +122,12 @@ class AttachmentKind(StrEnum):
     FILE = "file"
 
 
+class AttachmentOrigin(StrEnum):
+    # Text the runtime captured from a background task's notification: its
+    # output file or a body too large to keep in the event.
+    TASK_OUTPUT = "task_output"
+
+
 class AttachmentSpec(BaseModel):
     # Server-issued handle for an uploaded blob. The frontend receives this
     # from the upload endpoint and later references the attachment by ``id``
@@ -132,6 +138,8 @@ class AttachmentSpec(BaseModel):
     mime: str
     size: int
     kind: AttachmentKind
+    # ``None`` for a file the human uploaded or an agent sent.
+    origin: AttachmentOrigin | None = None
 
 
 class AttachmentPreviewResponse(BaseModel):

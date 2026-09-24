@@ -11,7 +11,7 @@ from waypoint.backends.claude_code.normalize import (
     infer_task_notification_kind,
     parse_task_notification,
 )
-from waypoint.schemas import SessionStatus
+from waypoint.schemas import AttachmentOrigin, SessionStatus
 
 AGENT_COMPLETION = (
     "<task-notification>\n"
@@ -321,6 +321,7 @@ def test_build_metadata_agent_import_claims_nothing_missing() -> None:
     assert payload["output_available"] is False
     assert payload["output_unavailable_reason"] is None
     assert payload["result_preview"] == "The full subagent report body."
+    assert not [key for key in metadata if key.startswith("capture_")]
 
 
 def test_build_metadata_agent_without_a_report_still_captures() -> None:
@@ -335,6 +336,7 @@ def test_build_metadata_agent_without_a_report_still_captures() -> None:
     )
     assert metadata["capture_host_text"] == ["/tmp/tasks/a9af42717082ba876.output"]
     assert metadata["task_notification"]["output_available"] is True
+    assert metadata["capture_origin"] == AttachmentOrigin.TASK_OUTPUT
 
 
 def test_build_metadata_oversized_inline_without_output_file() -> None:
@@ -363,6 +365,7 @@ def test_build_metadata_oversized_inline_without_output_file() -> None:
     spills = metadata["capture_inline_blobs"]
     assert [entry["filename"] for entry in spills] == ["task-rec-4-result.txt"]
     assert spills[0]["text"] == big
+    assert metadata["capture_origin"] == AttachmentOrigin.TASK_OUTPUT
 
 
 def test_build_metadata_stable_id_without_uuid_is_deterministic() -> None:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from waypoint.schemas import AttachmentKind, AttachmentSpec
+from waypoint.schemas import AttachmentKind, AttachmentOrigin, AttachmentSpec
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _ATTACHMENT_ID = re.compile(r"[0-9a-f]{32}")
@@ -126,6 +126,7 @@ class AttachmentStore:
         data: bytes,
         filename: str,
         content_type: str | None,
+        origin: AttachmentOrigin | None = None,
     ) -> AttachmentSpec:
         attachment_id = uuid.uuid4().hex
         clean_name = _sanitize_component(filename, fallback="file")
@@ -141,6 +142,7 @@ class AttachmentStore:
             mime=mime,
             size=len(data),
             kind=_kind_for(mime),
+            origin=origin,
         )
         sidecar = {**spec.model_dump(mode="json"), "stored_name": stored_name}
         (session_dir / f"{attachment_id}.json").write_text(

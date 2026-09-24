@@ -7,7 +7,7 @@ from typing import Any
 
 from waypoint.attachments import AttachmentStore
 from waypoint.runtime import SessionRuntime
-from waypoint.schemas import EventKind, EventRecord, SessionStatus
+from waypoint.schemas import AttachmentOrigin, EventKind, EventRecord, SessionStatus
 
 
 def _runtime(
@@ -322,3 +322,43 @@ async def test_emit_runs_both_capture_seams_into_one_event(tmp_path: Path) -> No
     inline = set(saved["inline_attachment_ids"])
     reports = [a["filename"] for a in saved["attachments"] if a["id"] not in inline]
     assert reports == ["big.output"]
+
+
+async def test_emit_tags_captures_with_their_origin(tmp_path: Path) -> None:
+    runtime, persisted = _emit_runtime(tmp_path)
+    report = tmp_path / "run.output"
+    report.write_text("z" * 8192, encoding="utf-8")
+
+    await _emit(
+        runtime,
+        {
+            "capture_origin": "task_output",
+            "capture_host_text": [str(report)],
+            "capture_inline_blobs": [{"filename": "spill.txt", "text": "tail"}],
+        },
+    )
+
+    metadata = persisted[0].metadata
+    assert "capture_origin" not in metadata
+    assert [spec["origin"] for spec in metadata["attachments"]] == [
+        "task_output",
+        "task_output",
+    ]
+    assert {spec.origin for spec, _ts in runtime.attachments.entries("sess-1")} == {
+        AttachmentOrigin.TASK_OUTPUT
+    }
+
+
+async def test_emit_ignores_an_unknown_origin(tmp_path: Path) -> None:
+    runtime, persisted = _emit_runtime(tmp_path)
+
+    await _emit(
+        runtime,
+        {
+            "capture_origin": "bogus",
+            "capture_inline_blobs": [{"filename": "spill.txt", "text": "tail"}],
+        },
+    )
+
+    (spec,) = persisted[0].metadata["attachments"]
+    assert spec["origin"] is None

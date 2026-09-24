@@ -8,7 +8,7 @@ import pytest
 
 from waypoint.backends.claude_tty.byte_source import TranscriptRead
 from waypoint.backends.claude_tty.tailer import TranscriptTailer, transcript_path
-from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 
 class _FakeSource:
@@ -101,7 +101,6 @@ def _make_tailer(
     runtime: MagicMock, session_id: str = "sess-1"
 ) -> tuple[TranscriptTailer, _FakeSource]:
     plugin = MagicMock()
-    plugin._pending_questions = {}
     source = _FakeSource()
     tailer = TranscriptTailer(
         session_id=session_id,
@@ -255,7 +254,6 @@ async def test_partial_record_carries_across_reads() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     full = _jsonl(_assistant_record())
     mid = len(full) // 2
     source = _ScriptedSource(
@@ -280,7 +278,6 @@ async def test_start_at_end_skips_history_then_emits_append() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     history = _jsonl(_assistant_record(message_id="old"))
     append = _jsonl(_assistant_record(message_id="new"))
     source = _ScriptedSource(
@@ -315,7 +312,6 @@ async def test_truncation_records_note_and_skips_replay() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     first = _jsonl(_assistant_record(message_id="a"))
     source = _ScriptedSource(
         [
@@ -341,7 +337,6 @@ async def test_replacement_identity_change_skips_replay() -> None:
     session = _make_session()
     runtime = _make_runtime(session)
     plugin = MagicMock()
-    plugin._pending_questions = {}
     first = _jsonl(_assistant_record(message_id="a"))
     source = _ScriptedSource(
         [
@@ -498,3 +493,40 @@ async def test_observe_emits_note_with_current_session_status() -> None:
     )
     # session.status keeps the event-insert COALESCE a no-op mid-turn.
     assert change_call.args[4] is SessionStatus.RUNNING
+
+
+async def test_queued_notification_keeps_status_until_delivered() -> None:
+    session = _make_session()
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+    notification = (
+        "<task-notification><task-id>q1</task-id>"
+        '<summary>Agent "Queued" finished</summary><result>done</result>'
+        "</task-notification>"
+    )
+
+    source.feed(
+        _jsonl(
+            {"type": "queue-operation", "operation": "enqueue", "content": notification}
+        )
+    )
+    await tailer._drain()
+    source.feed(
+        _jsonl(
+            {
+                "type": "user",
+                "uuid": "u1",
+                "origin": {"kind": "task-notification"},
+                "message": {"content": notification},
+            }
+        )
+    )
+    await tailer._drain()
+
+    note = runtime._emit_adapter_event.await_args_list[0].args
+    assert note[1] is EventKind.SYSTEM_NOTE
+    assert note[4] is None
+    assert runtime._emit_adapter_event.await_count == 1
+    runtime.update_session_fields.assert_awaited_once_with(
+        "sess-1", status=SessionStatus.RUNNING
+    )

@@ -177,7 +177,8 @@ def test_queue_operation_enqueue_emits_one_system_note() -> None:
     ev = events[0]
     assert ev.kind == EventKind.SYSTEM_NOTE
     assert ev.text == 'Agent "Queued" finished'
-    assert ev.status == SessionStatus.RUNNING
+    # Queued, not delivered: the note keeps the session's status.
+    assert ev.status is None
     assert ev.metadata["method"] == "claude.task_notification"
 
 
@@ -196,12 +197,14 @@ def test_queue_operation_without_task_notification_is_dropped() -> None:
 
 def test_enqueue_then_user_turn_of_same_notification_emits_once() -> None:
     # An idle-boundary session records the notification as both an enqueue and a
-    # user turn; the twin must surface exactly once.
+    # user turn; the note surfaces once and the delivery starts the turn.
     norm = TranscriptNormalizer()
     first = norm.process_record(_queue_op(_QUEUED_NOTIFICATION))
     second = norm.process_record(_task_notification_record(_QUEUED_NOTIFICATION))
     assert len(first) == 1
-    assert second == []
+    assert [(ev.kind, ev.status) for ev in second] == [
+        (EventKind.STATUS_UPDATE, SessionStatus.RUNNING)
+    ]
 
 
 def test_user_turn_then_enqueue_of_same_notification_emits_once() -> None:

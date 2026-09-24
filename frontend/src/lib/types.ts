@@ -880,6 +880,8 @@ export interface HeldMessage {
   text: string;
   attachments: string[];
   created_at: string;
+  // Held for an open dialog; sends once the human responds.
+  auto_release: boolean;
 }
 
 export type SideQuestionStatus = "pending" | "answered" | "error";

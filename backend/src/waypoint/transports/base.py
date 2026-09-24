@@ -8,6 +8,16 @@ from waypoint.attachments import ResolvedAttachment
 from waypoint.schemas import SessionRecord
 
 
+class InputBlockedError(HTTPException):
+    """The session is waiting on a dialog, so input would land in it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="the session is waiting on a dialog; respond to it first",
+        )
+
+
 class TransportAdapter(ABC):
     """Routes runtime operations to the underlying session backend.
 
@@ -44,6 +54,10 @@ class TransportAdapter(ABC):
 
     @abstractmethod
     def has_pending_approval(self, session: SessionRecord) -> bool: ...
+
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        """Whether a dialog on the session would capture sent input."""
+        return False
 
     async def resume(self, session: SessionRecord) -> None:
         raise HTTPException(

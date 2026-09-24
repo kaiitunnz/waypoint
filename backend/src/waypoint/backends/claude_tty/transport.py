@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.claude_tty import pane_dialog
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.schemas import SessionRecord
@@ -52,24 +53,13 @@ class ClaudeTtyTransport(TmuxTransport):
         # permission dialog, which it declines. Drop any pending approval now
         # so ``has_pending_approval`` goes false immediately instead of lingering
         # until the next dialog poll, where a racing ``respond_to_approval``
-        # would fire a stray digit at the ready prompt. A pending question is
-        # already dismissed on the pane (we Esc it when surfacing), so just drop
-        # the entry so a later answer is rejected rather than misrouted.
-        pending = self._plugin._pending_approvals.pop(session.id, None)
-        self._plugin._pending_questions.pop(session.id, None)
+        # would fire a stray digit at the ready prompt. Open questions stay
+        # answerable: their popup was already dismissed when surfaced.
+        await self._plugin.drop_pending_approval(
+            self._runtime, session.id, "Pending approval cleared by interrupt"
+        )
         target = self._target(session)
         await self.adapter.send_bytes(target, b"\x1b")
-        # The chat approval card is dequeued only by a resolution note; emit one
-        # so interrupt clears it promptly, before the dismissal retries below.
-        if pending is not None:
-            await self._runtime._record_system_event(
-                session.id,
-                "Pending approval cleared by interrupt",
-                metadata={
-                    "method": "approval.invalidated",
-                    "approval_id": pending.approval_id,
-                },
-            )
         # Nothing else retries a stranded prompt: the tailer's surfaced-signature
         # guard suppresses a re-emit and the pending entry is already popped.
         await self._ensure_dialog_dismissed(target)
@@ -88,6 +78,11 @@ class ClaudeTtyTransport(TmuxTransport):
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return session.id in self._plugin._pending_approvals
 
+    async def input_blocked(self, session: SessionRecord) -> bool:
+        return self.has_pending_approval(session) or await super().input_blocked(
+            session
+        )
+
     async def respond_to_approval(
         self,
         session: SessionRecord,
@@ -105,30 +100,38 @@ class ClaudeTtyTransport(TmuxTransport):
         # (double-click, retried POST) short-circuits on the None lookup above
         # rather than sending a second keystroke and double-deleting the key.
         self._plugin._pending_approvals.pop(session.id, None)
+        approve = is_approve_decision(decision)
+        try:
+            async with self._input_lock(session):
+                await self._press(session, pending, approve)
+        except Exception:
+            # Nothing reached the dialog: keep it answerable.
+            self._plugin._pending_approvals.setdefault(session.id, pending)
+            raise
+        if approve and pending.is_plan:
+            # Approving exits plan mode in the TUI; the pressed option already
+            # lands the pane in ``restore_mode`` (the pre-plan mode the dialog
+            # can express, else default). Mirror it into the stored mode so the
+            # badge tracks the binary and a later restart does not relaunch
+            # back into plan mode.
+            await self._runtime.update_session_fields(
+                session.id, permission_mode=pending.restore_mode or "default"
+            )
+        return True
 
+    async def _press(
+        self, session: SessionRecord, pending: PendingTtyApproval, approve: bool
+    ) -> None:
         target = self._target(session)
-
-        if is_approve_decision(decision):
+        if approve:
             await self.adapter.send_input(
                 target, str(pending.approve_number), submit=True
             )
-            if pending.is_plan:
-                # Approving exits plan mode in the TUI; the pressed option already
-                # lands the pane in ``restore_mode`` (the pre-plan mode the dialog
-                # can express, else default). Mirror it into the stored mode so the
-                # badge tracks the binary and a later restart does not relaunch
-                # back into plan mode.
-                await self._runtime.update_session_fields(
-                    session.id, permission_mode=pending.restore_mode or "default"
-                )
-        else:
+        elif pending.decline_number is not None:
             # Decline: send the No-labelled option's digit, never position 2
             # ("allow all this session"). Fall back to Esc if no explicit No.
-            if pending.decline_number is not None:
-                await self.adapter.send_input(
-                    target, str(pending.decline_number), submit=True
-                )
-            else:
-                await self.adapter.send_bytes(target, b"\x1b")
-
-        return True
+            await self.adapter.send_input(
+                target, str(pending.decline_number), submit=True
+            )
+        else:
+            await self.adapter.send_bytes(target, b"\x1b")

@@ -77,7 +77,7 @@ from waypoint.backends.claude_code.threads import (
     local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
@@ -217,7 +217,9 @@ class ClaudeTtyPlugin:
         self._tmux = TmuxPlugin()
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
-        self._pending_questions: dict[str, PendingTtyQuestion] = {}
+        # (session id, tool_use_id) of answers being delivered, so a double
+        # submit cannot send the same answer twice.
+        self._answering: set[tuple[str, str]] = set()
         # Resolver from this transport's own config, used only by the
         # backend=claude_tty rebase hook (the sole path with no runtime handle to
         # read the session's agent config). The per-session tailer/seed/import
@@ -608,17 +610,35 @@ class ClaudeTtyPlugin:
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
 
+    async def drop_pending_approval(
+        self, runtime: "SessionRuntime", session_id: str, note: str
+    ) -> PendingTtyApproval | None:
+        """Forget the session's pending approval and post the note that closes
+        its card."""
+        pending = self._pending_approvals.pop(session_id, None)
+        if pending is not None:
+            await runtime._record_system_event(
+                session_id,
+                note,
+                metadata={
+                    "method": "approval.invalidated",
+                    "approval_id": pending.approval_id,
+                },
+            )
+        return pending
+
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         await self._tmux.terminate_session(runtime, session)
+        await self.drop_pending_approval(
+            runtime, session.id, "Pending approval cleared by terminate"
+        )
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await tailer_task
-        self._pending_approvals.pop(session.id, None)
-        self._pending_questions.pop(session.id, None)
 
     async def create_session(
         self,
@@ -1143,8 +1163,9 @@ class ClaudeTtyPlugin:
         if old_tmux_session:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(old_tmux_session)
-        self._pending_approvals.pop(session.id, None)
-        self._pending_questions.pop(session.id, None)
+        await self.drop_pending_approval(
+            runtime, session.id, "Pending approval cleared by restart"
+        )
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
@@ -1392,71 +1413,73 @@ class ClaudeTtyPlugin:
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        """Deliver an answer to a surfaced AskUserQuestion as a new user turn.
+        """Deliver an answer to an open AskUserQuestion as a new user turn.
 
-        The popup was already Esc-dismissed when the tailer surfaced it, so the
-        pane sits at the ready prompt; the answer is sent as an ordinary message
-        the way claude_code carries it on a denied tool. A synthetic tool_result
-        flips the surfaced card to answered so it stops accepting input, and a
-        styled answers card records the choices.
+        The popup was Esc-dismissed when the tailer surfaced it, so the answer
+        is an ordinary message and any question the transcript still shows as
+        open can be answered, oldest included. A synthetic tool_result closes
+        the card and a styled answers card records the choices.
         """
-        pending = self._pending_questions.get(session.id)
-        if pending is None:
+        open_ids = runtime.storage.open_question_tool_use_ids(session.id)
+        if tool_use_id is None:
+            if not open_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="no pending question for this session",
+                )
+            tool_use_id = open_ids[-1]
+        elif tool_use_id not in open_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="no pending question for this session",
+                detail="question is no longer open",
             )
-        if (
-            tool_use_id is not None
-            and pending.tool_use_id
-            and pending.tool_use_id != tool_use_id
-        ):
+        key = (session.id, tool_use_id)
+        if key in self._answering:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="question answer does not match the pending question",
+                status_code=status.HTTP_409_CONFLICT,
+                detail="question answer is already being delivered",
             )
-        self._pending_questions.pop(session.id, None)
-        resolved_tool_use_id = pending.tool_use_id or tool_use_id
+        self._answering.add(key)
+        try:
+            transport = runtime.transport_for(session)
+            await transport.send_input(
+                session,
+                f"User has answered your questions: {answer}. "
+                "You can now continue with the user's answers in mind.",
+            )
 
-        transport = runtime.transport_for(session)
-        await transport.send_input(
-            session,
-            f"User has answered your questions: {answer}. "
-            "You can now continue with the user's answers in mind.",
-        )
-
-        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            extra["answers"] = answers
-        if resolved_tool_use_id:
-            extra["tool_use_id"] = resolved_tool_use_id
-        # Flip status to RUNNING before recording the answer so the broadcast
-        # snapshot shows the spinner immediately, matching handle_input.
-        updated = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
-        # Persist the durable answer event before the synthetic tool_result
-        # (FR6): the transcript derives "answered" from this user event, so a
-        # live client that saw the result first would briefly render the card
-        # as closed-unanswered.
-        await runtime._record_user_event(
-            session.id, answer, submit=True, extra_metadata=extra
-        )
-
-        if resolved_tool_use_id:
+            extra: dict[str, Any] = {
+                "kind": "ask_user_question_answer",
+                "tool_use_id": tool_use_id,
+            }
+            if answers:
+                extra["answers"] = answers
+            # Flip status to RUNNING before recording the answer so the broadcast
+            # snapshot shows the spinner immediately, matching handle_input.
+            updated = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            # Persist the durable answer event before the synthetic tool_result
+            # (FR6): the transcript derives "answered" from this user event, so a
+            # live client that saw the result first would briefly render the card
+            # as closed-unanswered.
+            await runtime._record_user_event(
+                session.id, answer, submit=True, extra_metadata=extra
+            )
             await runtime._emit_adapter_event(
                 session.id,
                 EventKind.TOOL_RESULT,
                 "User answered the question.",
                 {
                     "method": "user.tool_result",
-                    "item_id": resolved_tool_use_id,
-                    "tool_use_id": resolved_tool_use_id,
+                    "item_id": tool_use_id,
+                    "tool_use_id": tool_use_id,
                     "is_error": False,
                 },
                 SessionStatus.RUNNING,
             )
-
+        finally:
+            self._answering.discard(key)
         return updated
 
     # ── Thread discovery + import ────────────────────────────────────────────

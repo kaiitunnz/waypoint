@@ -6,8 +6,9 @@ Send input:
 waypoint sessions send <session-id> <text>
 ```
 
-A target in Focus holds a message sent from another session until its human
-releases or cancels it; the result reports `"send": "held"`.
+A message sent from another session is held, reported as `"send": "held"`,
+while the target is in Focus (its human releases or cancels it) or waiting on a
+dialog (it is delivered once the human answers).
 
 Attach files to a message with `--attach` (upload-and-send in one step):
 

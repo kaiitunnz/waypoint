@@ -2170,6 +2170,52 @@ class Storage:
         return self._event_from_row(row) if row is not None else None
 
     @_synchronized
+    def open_question_tool_use_ids(self, session_id: str) -> list[str]:
+        """Tool-use ids of AskUserQuestion calls with neither an answer nor a
+        result, oldest first — the transcript's "pending" question cards."""
+        rows = self.connection.execute(
+            """
+            SELECT json_extract(q.metadata, '$.tool_use_id') AS tool_use_id
+            FROM events q
+            WHERE q.session_id = ?
+              AND q.kind = ?
+              AND json_extract(q.metadata, '$.tool_name') = 'AskUserQuestion'
+              AND json_extract(q.metadata, '$.tool_use_id') IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM events r
+                WHERE r.session_id = q.session_id
+                  AND json_extract(r.metadata, '$.tool_use_id')
+                      = json_extract(q.metadata, '$.tool_use_id')
+                  AND (r.kind = ?
+                       OR (r.kind = ?
+                           AND json_extract(r.metadata, '$.kind')
+                               = 'ask_user_question_answer'))
+              )
+            ORDER BY q.sequence ASC, q.id ASC
+            """,
+            [
+                session_id,
+                EventKind.TOOL_CALL,
+                EventKind.TOOL_RESULT,
+                EventKind.USER_INPUT,
+            ],
+        ).fetchall()
+        return [row["tool_use_id"] for row in rows]
+
+    @_synchronized
+    def list_approval_events(self, session_id: str) -> list[EventRecord]:
+        """Approval requests and system notes, in order."""
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ? AND kind IN (?, ?)
+            ORDER BY sequence ASC, id ASC
+            """,
+            [session_id, EventKind.APPROVAL_REQUEST, EventKind.SYSTEM_NOTE],
+        ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:
         now = datetime.now(UTC)
         self.connection.execute(
@@ -2966,6 +3012,14 @@ class Storage:
     def held_message_ids(self) -> set[str]:
         rows = self.connection.execute("SELECT id FROM held_messages").fetchall()
         return {row["id"] for row in rows}
+
+    @_synchronized
+    def auto_release_session_ids(self) -> set[str]:
+        rows = self.connection.execute(
+            "SELECT DISTINCT session_id FROM held_messages "
+            "WHERE json_extract(body, '$.auto_release') = 1"
+        ).fetchall()
+        return {row["session_id"] for row in rows}
 
     @_synchronized
     def take_held_message(self, held_id: str) -> HeldMessageRecord | None:

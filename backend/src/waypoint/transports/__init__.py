@@ -6,6 +6,6 @@ The per-backend transport classes now live in their plugin homes
 can't depend on each other.
 """
 
-from waypoint.transports.base import TransportAdapter
+from waypoint.transports.base import InputBlockedError, TransportAdapter
 
-__all__ = ["TransportAdapter"]
+__all__ = ["InputBlockedError", "TransportAdapter"]

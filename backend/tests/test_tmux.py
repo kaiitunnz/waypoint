@@ -3,10 +3,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
 
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
+from waypoint.transports import InputBlockedError
 
 
 def test_send_input_uses_literal_mode_and_submit() -> None:
@@ -457,7 +457,9 @@ def _transport_with(agent, boot_frames: int = 0, dialog: bool = False):
 
 
 def _session(backend):
-    return SimpleNamespace(backend=backend, transport_state={"tmux_pane": "%9"})
+    return SimpleNamespace(
+        id="s1", backend=backend, transport_state={"tmux_pane": "%9"}
+    )
 
 
 def test_send_input_uses_confirm_path_for_confirmer_agent() -> None:
@@ -502,7 +504,7 @@ def test_await_pane_ready_raises_on_blocking_dialog() -> None:
     # A modal dialog must not be treated as a ready composer; surface it instead
     # of pasting/Enter'ing into it.
     transport, _ = _transport_with(_AgentConfirmer(), dialog=True)
-    with pytest.raises(TmuxError):
+    with pytest.raises(InputBlockedError):
         asyncio.run(transport._await_pane_ready("%9", _AgentConfirmer()))
 
 
@@ -511,9 +513,9 @@ def test_send_input_refuses_when_dialog_open() -> None:
     # fire Enter into it (which would select an option). It surfaces an error
     # and never reaches the paste.
     transport, adapter = _transport_with(_AgentConfirmer(), dialog=True)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(InputBlockedError) as exc:
         asyncio.run(transport.send_input(_session("codex"), "hi"))
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 409
     assert not any(c[0] == "send_input" for c in adapter.calls)
     assert not any(c[0] == "submit" for c in adapter.calls)
 
@@ -672,3 +674,39 @@ def test_flush_before_restart_times_out_and_proceeds_without_raising(
     asyncio.run(transport.flush_before_restart(_flush_session()))  # must not raise
 
     assert adapter.calls >= 2
+
+
+@pytest.mark.parametrize(
+    ("agent", "dialog", "expected"),
+    [
+        (_AgentConfirmer(), True, True),
+        (_AgentConfirmer(), False, False),
+        (_PlainAgent(), True, False),
+    ],
+)
+def test_input_blocked_matches_the_send_guard(agent, dialog, expected) -> None:
+    transport, _ = _transport_with(agent, dialog=dialog)
+    assert asyncio.run(transport.input_blocked(_session("codex"))) is expected
+
+
+def test_sends_into_one_pane_do_not_overlap() -> None:
+    transport, _ = _transport_with(_PlainAgent())
+    active: list[int] = []
+    overlap: list[bool] = []
+
+    async def slow_send(*args) -> None:
+        overlap.append(bool(active))
+        active.append(1)
+        await asyncio.sleep(0.01)
+        active.pop()
+
+    transport._send = slow_send
+
+    async def both() -> None:
+        await asyncio.gather(
+            transport.send_input(_session("opencode"), "a"),
+            transport.send_input(_session("opencode"), "b"),
+        )
+
+    asyncio.run(both())
+    assert overlap == [False, False]

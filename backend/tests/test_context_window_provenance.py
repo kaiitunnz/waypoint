@@ -251,7 +251,6 @@ async def test_tailer_uses_durable_1m_model_over_transcript_resolved_id() -> Non
     }
     data = (json.dumps(record) + "\n").encode()
     plugin = MagicMock()
-    plugin._pending_questions = {}
     tailer = TranscriptTailer(
         session_id="sess-1",
         source=_FeedOnceSource(data),
@@ -294,7 +293,6 @@ async def test_tailer_uses_configured_custom_window() -> None:
     }
     data = (json.dumps(record) + "\n").encode()
     plugin = MagicMock()
-    plugin._pending_questions = {}
     tailer = TranscriptTailer(
         session_id="sess-1",
         source=_FeedOnceSource(data),
@@ -331,7 +329,6 @@ async def test_tailer_emits_window_on_output_only_gateway_turn() -> None:
     }
     data = (json.dumps(record) + "\n").encode()
     plugin = MagicMock()
-    plugin._pending_questions = {}
     tailer = TranscriptTailer(
         session_id="sess-1",
         source=_FeedOnceSource(data),

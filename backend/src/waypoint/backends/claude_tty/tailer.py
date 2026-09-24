@@ -13,8 +13,10 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from waypoint.backends.approvals import open_approval_requests
 from waypoint.backends.claude_code.adapter import (
     _context_usage_snapshot_from_message,
     claude_token_usage_record,
@@ -27,7 +29,7 @@ from waypoint.backends.claude_code.models import (
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     TranscriptByteSource,
     transcript_path,
@@ -66,6 +68,8 @@ _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
         "dismissing Claude auto-mode teaching popup"
     ),
 }
+_DIALOG_CLOSED_NOTE = "Approval dialog closed in the terminal"
+_EXPIRED_NOTE = "Pending approval expired"
 # Protective cap on the unparsed trailing buffer: a JSONL record that never
 # completes past this size is dropped rather than grown without bound.
 _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
@@ -131,6 +135,10 @@ class TranscriptTailer:
         # (not a bool) so one popup replacing another does not suppress the next
         # Escape; reset when the pane leaves the screen.
         self._dismissed_screen: pane_dialog.PaneScreen | None = None
+        # (dialog signature, approval id) of cards an earlier tailer left open:
+        # a matching dialog on the pane adopts its card; the rest expire on the
+        # first decided screen.
+        self._adoptable: list[tuple[str | None, str]] = []
 
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body) so start-at-end
@@ -219,18 +227,11 @@ class TranscriptTailer:
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
             for ev in self._normalizer.process_record(record):
-                if (
-                    ev.kind == EventKind.TOOL_CALL
-                    and ev.metadata.get("tool_name") == "AskUserQuestion"
-                    and ev.status == SessionStatus.WAITING_INPUT
-                ):
-                    tool_use_id = str(ev.metadata.get("tool_use_id") or "")
-                    self._plugin._pending_questions[self._session_id] = (
-                        PendingTtyQuestion(
-                            approval_id=uuid.uuid4().hex,
-                            tool_use_id=tool_use_id,
-                        )
+                if ev.kind is EventKind.STATUS_UPDATE and ev.status is not None:
+                    await self._runtime.update_session_fields(
+                        self._session_id, status=ev.status
                     )
+                    continue
                 await self._runtime._emit_adapter_event(
                     self._session_id,
                     ev.kind,
@@ -420,8 +421,12 @@ class TranscriptTailer:
             return
 
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
-            # Dialog gone — clear any pending approval for this session.
-            self._plugin._pending_approvals.pop(self._session_id, None)
+            # Dialog gone without a Waypoint response (answered or dismissed
+            # in the terminal): close its card.
+            await self._expire_adoptable()
+            await self._plugin.drop_pending_approval(
+                self._runtime, self._session_id, _DIALOG_CLOSED_NOTE
+            )
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             self._surfaced_sig = None
@@ -455,22 +460,25 @@ class TranscriptTailer:
         decline_opt = dialog.decline_option
         decline_num = decline_opt.number if decline_opt else None
 
-        approval_id = str(uuid.uuid4())
         target = dialog.target or ""
         tool_name, tool_input = self._resolve_approval_tool(dialog)
+        new_id = await self._register_dialog(
+            sig,
+            lambda approval_id: PendingTtyApproval(
+                approval_id=approval_id,
+                tool_name=tool_name,
+                target=target or None,
+                approve_number=approve_num,
+                decline_number=decline_num,
+                signature=sig,
+            ),
+        )
+        if new_id is None:
+            return
+        approval_id = new_id
 
         payload: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input}
         text = format_approval_text(payload)
-
-        self._plugin._pending_approvals[self._session_id] = PendingTtyApproval(
-            approval_id=approval_id,
-            tool_name=tool_name,
-            target=target or None,
-            approve_number=approve_num,
-            decline_number=decline_num,
-            signature=sig,
-        )
-        self._surfaced_sig = sig
 
         interaction = InteractionEnvelope(
             kind="approval",
@@ -490,11 +498,70 @@ class TranscriptTailer:
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "approval_id": approval_id,
+                "dialog_signature": sig,
                 "method": "tty_permission",
                 "status": SessionStatus.WAITING_INPUT,
                 INTERACTION_METADATA_KEY: interaction.to_metadata(),
             },
             SessionStatus.WAITING_INPUT,
+        )
+
+    async def _register_dialog(
+        self, sig: str, make: Callable[[str], PendingTtyApproval]
+    ) -> str | None:
+        """Register the stable dialog ``sig`` as the pending approval.
+
+        Returns the new card's approval id, or None when the dialog adopted a
+        card an earlier tailer left open (nothing to emit). A different dialog
+        still pending was resolved in the terminal, so its card closes first.
+        """
+        current = self._plugin._pending_approvals.get(self._session_id)
+        if current is not None and current.signature != sig:
+            await self._plugin.drop_pending_approval(
+                self._runtime, self._session_id, _DIALOG_CLOSED_NOTE
+            )
+        adopted = next(
+            (approval_id for key, approval_id in self._adoptable if key == sig), None
+        )
+        self._adoptable = [item for item in self._adoptable if item[1] != adopted]
+        await self._expire_adoptable()
+        approval_id = adopted or str(uuid.uuid4())
+        self._plugin._pending_approvals[self._session_id] = make(approval_id)
+        self._surfaced_sig = sig
+        return None if adopted else approval_id
+
+    def _load_adoptable(self) -> None:
+        # A new tailer means a new pane or a restarted backend: any in-memory
+        # approval is stale, and its card is judged against the pane below.
+        self._plugin._pending_approvals.pop(self._session_id, None)
+        events = self._runtime.storage.list_approval_events(self._session_id)
+        self._adoptable = [
+            (
+                event.metadata.get("dialog_signature"),
+                str(event.metadata.get("approval_id")),
+            )
+            for event in open_approval_requests(events)
+            if event.metadata.get("approval_id")
+        ]
+
+    async def _expire_adoptable(self) -> None:
+        stale, self._adoptable = self._adoptable, []
+        for _, approval_id in stale:
+            await self._runtime._record_system_event(
+                self._session_id,
+                _EXPIRED_NOTE,
+                metadata={"method": "approval.invalidated", "approval_id": approval_id},
+            )
+
+    async def _close_dialog_state(self) -> None:
+        # The tailer stopped on its own (pane gone, session stopped, crash), so
+        # no dialog it tracked can still be answered.
+        if self._runtime.storage.get_session(self._session_id) is None:
+            self._plugin._pending_approvals.pop(self._session_id, None)
+            return
+        await self._expire_adoptable()
+        await self._plugin.drop_pending_approval(
+            self._runtime, self._session_id, _EXPIRED_NOTE
         )
 
     def _resolve_approval_tool(
@@ -567,18 +634,22 @@ class TranscriptTailer:
         if plan_path:
             tool_input["planFilePath"] = plan_path
 
-        approval_id = str(uuid.uuid4())
-        self._plugin._pending_approvals[self._session_id] = PendingTtyApproval(
-            approval_id=approval_id,
-            tool_name="ExitPlanMode",
-            target=plan_path,
-            approve_number=approve_option.number,
-            decline_number=None,
-            signature=sig,
-            is_plan=True,
-            restore_mode=restore_mode,
+        new_id = await self._register_dialog(
+            sig,
+            lambda approval_id: PendingTtyApproval(
+                approval_id=approval_id,
+                tool_name="ExitPlanMode",
+                target=plan_path,
+                approve_number=approve_option.number,
+                decline_number=None,
+                signature=sig,
+                is_plan=True,
+                restore_mode=restore_mode,
+            ),
         )
-        self._surfaced_sig = sig
+        if new_id is None:
+            return
+        approval_id = new_id
 
         payload = {"tool_name": "ExitPlanMode", "tool_input": tool_input}
         interaction = InteractionEnvelope(
@@ -600,6 +671,7 @@ class TranscriptTailer:
                 "tool_name": "ExitPlanMode",
                 "tool_input": tool_input,
                 "approval_id": approval_id,
+                "dialog_signature": sig,
                 "method": "tty_permission",
                 "status": SessionStatus.WAITING_INPUT,
                 INTERACTION_METADATA_KEY: interaction.to_metadata(),
@@ -621,43 +693,48 @@ class TranscriptTailer:
 
     async def run(self) -> None:
         try:
-            while True:
-                session = self._runtime.storage.get_session(self._session_id)
-                if session is None:
-                    return
-
-                await self._drain()
-
-                if session.status not in (SessionStatus.EXITED, SessionStatus.ERROR):
-                    self._dialog_check_elapsed += _POLL_INTERVAL
-                    if self._dialog_check_elapsed >= _DIALOG_POLL_INTERVAL:
-                        self._dialog_check_elapsed = 0.0
-                        await self._poll_dialog()
-
-                if session.status in (SessionStatus.EXITED, SessionStatus.ERROR):
-                    # One final drain in case records landed between the status
-                    # check and this point. ``force`` bypasses a remote source's
-                    # poll cadence so a tail written in the last second isn't lost.
-                    await self._drain(force=True)
-                    return
-
-                self._pane_check_elapsed += _POLL_INTERVAL
-                if self._pane_check_elapsed >= _PANE_CHECK_INTERVAL:
-                    self._pane_check_elapsed = 0.0
-                    if not await self._pane_alive():
-                        await self._drain(force=True)
-                        await self._runtime._record_system_event(
-                            self._session_id,
-                            "Claude TUI session exited",
-                            status=SessionStatus.EXITED,
-                        )
-                        return
-
-                await asyncio.sleep(_POLL_INTERVAL)
-        except asyncio.CancelledError:
-            raise
+            self._load_adoptable()
+            await self._loop()
         except Exception:
             log.exception(
                 "transcript tailer crashed",
                 extra={"session_id": self._session_id},
             )
+        # Not on cancel: terminate/restart close the card themselves; after a
+        # backend shutdown the next tailer adopts it.
+        await self._close_dialog_state()
+
+    async def _loop(self) -> None:
+        while True:
+            session = self._runtime.storage.get_session(self._session_id)
+            if session is None:
+                return
+
+            await self._drain()
+
+            if session.status not in (SessionStatus.EXITED, SessionStatus.ERROR):
+                self._dialog_check_elapsed += _POLL_INTERVAL
+                if self._dialog_check_elapsed >= _DIALOG_POLL_INTERVAL:
+                    self._dialog_check_elapsed = 0.0
+                    await self._poll_dialog()
+
+            if session.status in (SessionStatus.EXITED, SessionStatus.ERROR):
+                # One final drain in case records landed between the status
+                # check and this point. ``force`` bypasses a remote source's
+                # poll cadence so a tail written in the last second isn't lost.
+                await self._drain(force=True)
+                return
+
+            self._pane_check_elapsed += _POLL_INTERVAL
+            if self._pane_check_elapsed >= _PANE_CHECK_INTERVAL:
+                self._pane_check_elapsed = 0.0
+                if not await self._pane_alive():
+                    await self._drain(force=True)
+                    await self._runtime._record_system_event(
+                        self._session_id,
+                        "Claude TUI session exited",
+                        status=SessionStatus.EXITED,
+                    )
+                    return
+
+            await asyncio.sleep(_POLL_INTERVAL)

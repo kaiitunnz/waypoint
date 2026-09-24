@@ -994,6 +994,48 @@ async def test_ask_user_question_skips_approval_card() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ask_user_question_tool_call_is_waiting() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_ask",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": [{"question": "ok?", "options": []}]},
+                },
+            ],
+        },
+    }
+    await adapter._dispatch(state, event)
+
+    (call,) = [item for item in emitted if item[1] == EventKind.TOOL_CALL]
+    assert call[4] is SessionStatus.WAITING_INPUT
+
+
+@pytest.mark.asyncio
+async def test_parked_ask_user_question_marks_session_waiting() -> None:
+    emitted: list = []
+    updates: list = []
+    adapter = _make_adapter(emitted, session_updates=updates)
+    state, _ = _attach_state(adapter)
+
+    payload = {
+        "tool_use_id": "toolu_ask",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "ok?", "options": []}]},
+    }
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+
+    assert updates == [("sess", {"status": SessionStatus.WAITING_INPUT}, True)]
+
+
+@pytest.mark.asyncio
 async def test_respond_to_ask_question_returns_none_without_pending() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

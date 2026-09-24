@@ -6896,12 +6896,16 @@ html[data-theme="light"] .composer-connection.open::before {
   cursor: default;
 }
 
+/* Phones: the composer panel spans the composer (its containing block once the
+ * wrap stops being positioned) instead of hanging off the pill. */
 @media (max-width: 540px) {
-  .focus-pill-panel {
-    position: fixed;
-    left: 12px;
-    right: 12px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
+  .composer .focus-pill-wrap {
+    position: static;
+  }
+
+  .composer .focus-pill-panel {
+    left: 0;
+    right: 0;
     width: auto;
   }
 }

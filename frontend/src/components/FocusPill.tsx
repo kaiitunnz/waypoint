@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { usePopoverAnchor } from "@/lib/use-popover-anchor";
+
+const NARROW_MAX_WIDTH = 540;
+const NARROW_INSET = 12;
 
 interface FocusPillProps {
   onTurnOff: () => void | Promise<void>;
@@ -19,13 +22,22 @@ export function FocusPill({ onTurnOff, busy = false, anchored = false }: FocusPi
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const { style: anchorStyle } = usePopoverAnchor(
-    wrapRef,
-    open && anchored,
-    "left",
-    { deferBelow: 540 },
-    "dropdown",
-  );
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${NARROW_MAX_WIDTH}px)`);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  const { style: anchorStyle } = usePopoverAnchor(wrapRef, open && anchored, "left");
+  // On a phone the dropdown spans the viewport below the term-bar rather than
+  // hanging off a trigger that sits mid-bar.
+  const panelStyle: CSSProperties | undefined =
+    anchorStyle && narrow
+      ? { ...anchorStyle, left: NARROW_INSET, right: NARROW_INSET, width: "auto" }
+      : (anchorStyle ?? undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -56,7 +68,7 @@ export function FocusPill({ onTurnOff, busy = false, anchored = false }: FocusPi
     <div
       ref={panelRef}
       className="focus-pill-panel"
-      style={anchorStyle ?? undefined}
+      style={panelStyle}
       role="dialog"
       aria-label="Focus"
     >

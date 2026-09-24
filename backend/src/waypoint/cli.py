@@ -2153,13 +2153,23 @@ def sessions_send(
             "uploaded first; --attachment-id values follow in order.",
         ),
     ] = None,
+    sender_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Sending session; defaults to this session's id. A target in "
+            "Focus holds messages sent from a session.",
+        ),
+    ] = None,
 ) -> None:
     """Send a message to a session.
 
     Exits 0 on confirmed delivery or when the server accepted the input.
-    On transport timeout, reports ``{"session": {..., "send": "delivered"}}``
-    when the session advanced to running, or ``{"send": "unknown"}`` when
-    delivery cannot be confirmed, and exits 1 in the unknown case.
+    Reports ``{"session": {..., "send": "held"}}`` when the target is in Focus
+    and holds the message for its human. On transport timeout, reports
+    ``{"send": "delivered"}`` when the session advanced to running, or
+    ``{"send": "unknown"}`` when delivery cannot be confirmed, and exits 1 in
+    the unknown case.
     """
 
     def _run(c: WaypointClient) -> dict[str, Any]:
@@ -2167,7 +2177,14 @@ def sessions_send(
             c.upload_attachment(session_id, path)["id"] for path in attach or []
         ]
         combined = uploaded + list(attachment_id or [])
-        return {"session": c.send_input(session_id, text, attachments=combined or None)}
+        return {
+            "session": c.send_input(
+                session_id,
+                text,
+                attachments=combined or None,
+                sender_session_id=sender_session_id,
+            )
+        }
 
     result = _run_client(_settings_from_ctx(ctx), _run)
     typer.echo(json.dumps(result, indent=2))

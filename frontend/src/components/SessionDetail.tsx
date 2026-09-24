@@ -100,6 +100,7 @@ import {
 } from "@/components/AttachmentTray";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
+import { FocusPill } from "@/components/FocusPill";
 import { HeldMessagesDock } from "@/components/HeldMessagesDock";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
@@ -2438,7 +2439,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           inputUnlocked={paneUnlocked}
           onToggleInputUnlocked={toggleInputUnlocked}
           focus={Boolean(session?.focus)}
-          onToggleFocus={() => void handleSetFocus(!session?.focus)}
+          focusBusy={focusBusy}
+          onFocusChange={handleSetFocus}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           terminalAppearance={terminalAppearance}
@@ -2848,6 +2850,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
+  const tuneTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Auto-grow the field to fit its content: a single line by default (so the
   // pill matches the flanking buttons), growing as the draft wraps up to the
@@ -3502,6 +3505,7 @@ const ReplyComposer = memo(function ReplyComposer({
       <div className="composer-toprow">
         <div className="composer-tune" ref={tuneRef}>
           <button
+            ref={tuneTriggerRef}
             type="button"
             className={`composer-tune-trigger ${tuneOpen ? "open" : ""}`}
             aria-haspopup="dialog"
@@ -3512,7 +3516,6 @@ const ReplyComposer = memo(function ReplyComposer({
               {"⚙︎"}
             </span>
             <span className="composer-tune-summary">{tuneSummary}</span>
-            {focus ? <span className="composer-tune-focus">Focus</span> : null}
             {hasPendingRestart ? (
               <span
                 className="composer-tune-pending"
@@ -3866,6 +3869,13 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
+          {focus ? (
+            <FocusPill
+              onTurnOff={() => void onFocusChange(false)}
+              busy={focusBusy}
+              returnFocusRef={tuneTriggerRef}
+            />
+          ) : null}
           <SessionUsagePill
             session={session}
             connection={connection}

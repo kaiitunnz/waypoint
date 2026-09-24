@@ -242,6 +242,11 @@ export function SessionList({
                 {session.account_profile_label}
               </span>
             ) : null}
+            {session.focus ? (
+              <span className="badge focus" title="Focus is on">
+                ◎ focus
+              </span>
+            ) : null}
             <span className={`status ${session.status}`}>
               {session.status.replace("_", " ")}
             </span>

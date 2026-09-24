@@ -7,10 +7,12 @@ import {
   ReactNode,
   SetStateAction,
   useCallback,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
 
+import { FocusPill } from "@/components/FocusPill";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
@@ -35,7 +37,8 @@ interface SessionTerminalViewProps {
   inputUnlocked: boolean;
   onToggleInputUnlocked: () => void;
   focus: boolean;
-  onToggleFocus: () => void;
+  focusBusy: boolean;
+  onFocusChange: (enabled: boolean) => void | Promise<void>;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
   // Light/dark surface for the pane, resolved from the agent's TUI theme.
@@ -98,7 +101,8 @@ export function SessionTerminalView({
   inputUnlocked,
   onToggleInputUnlocked,
   focus,
-  onToggleFocus,
+  focusBusy,
+  onFocusChange,
   terminalRef,
   terminalDims,
   terminalAppearance,
@@ -135,6 +139,7 @@ export function SessionTerminalView({
   notices,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
+  const termMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   // Emulated panes (claude_tty) are pinned to a fixed server-side grid. The
   // terminal must mirror that grid exactly rather than fit to the viewport,
   // or the cell-positioned stream misaligns; the host scrolls at native size.
@@ -208,6 +213,14 @@ export function SessionTerminalView({
           rateLimitRefreshBusy={rateLimitRefreshBusy}
           anchored
         />
+        {focus ? (
+          <FocusPill
+            anchored
+            onTurnOff={() => void onFocusChange(false)}
+            busy={focusBusy}
+            returnFocusRef={termMenuTriggerRef}
+          />
+        ) : null}
         <span className="term-bar-spacer" />
         {interactive && terminalDims ? (
           <span className="term-bar-dims" aria-label="Pane dimensions">
@@ -235,6 +248,7 @@ export function SessionTerminalView({
         ) : null}
         <div className="term-bar-overflow" ref={termMenuWrapRef}>
           <button
+            ref={termMenuTriggerRef}
             type="button"
             className={`composer-overflow-trigger ${termMenuOpen ? "open" : ""}`}
             aria-label="More actions"
@@ -319,7 +333,7 @@ export function SessionTerminalView({
                   type="button"
                   role="menuitem"
                   className="composer-overflow-item"
-                  onClick={() => fireFromMenu(onToggleFocus)}
+                  onClick={() => fireFromMenu(() => onFocusChange(!focus))}
                 >
                   <span className="glyph">◎</span>
                   {focus ? "Turn off Focus" : "Turn on Focus"}

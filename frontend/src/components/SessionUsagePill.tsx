@@ -26,7 +26,9 @@ import {
   formatTokens,
   rateLimitUsageTone,
 } from "@/lib/usage";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { usePopoverAnchor } from "@/lib/use-popover-anchor";
+import { usePopoverDismiss } from "@/lib/use-popover-dismiss";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -129,19 +131,8 @@ export function SessionUsagePill({
   const widthSeamRef = useRef<HTMLDivElement | null>(null);
 
   // Desktop drives resize controls and saved dimensions; the mobile sheet is
-  // left untouched. Tracked reactively so a viewport crossing 540px re-renders.
-  const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window === "undefined"
-      ? true
-      : window.matchMedia(`(min-width: ${DESKTOP_MIN_WIDTH}px)`).matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia(`(min-width: ${DESKTOP_MIN_WIDTH}px)`);
-    const onChange = () => setIsDesktop(mq.matches);
-    onChange();
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
+  // left untouched.
+  const isDesktop = useMediaQuery(`(min-width: ${DESKTOP_MIN_WIDTH}px)`);
 
   // Below 540px the generic ``.usage-panel`` mobile bottom-sheet rule takes
   // over (deferBelow), so the fixed anchor and bounds only drive wider
@@ -234,35 +225,7 @@ export function SessionUsagePill({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(event: MouseEvent) {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (wrapRef.current?.contains(target)) return;
-      // Once portaled, the panel is no longer a descendant of the
-      // wrapper — check it separately so clicks inside the panel
-      // don't dismiss it.
-      if (panelRef.current?.contains(target)) return;
-      // Only pull focus back to the trigger when it was inside the panel, so a
-      // click that lands on another control keeps its own focus.
-      const restoreFocus = panelRef.current?.contains(document.activeElement);
-      setOpen(false);
-      if (restoreFocus) triggerRef.current?.focus();
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, setOpen, wrapRef, panelRef, triggerRef);
 
   useEffect(() => {
     if (!open) setTotalTipOpen(false);

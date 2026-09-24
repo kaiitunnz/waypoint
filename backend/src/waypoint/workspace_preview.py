@@ -452,6 +452,8 @@ def op_list_dirs(
         return {"directories": []}
     parent_typed, partial = prefix.rsplit("/", 1)
     parent_typed += "/"
+    if is_denied(parent_typed, denylist):
+        return {"directories": []}
     show_hidden = partial.startswith(".")
     names: list[str] = []
     try:

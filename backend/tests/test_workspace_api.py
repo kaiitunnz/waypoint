@@ -497,6 +497,21 @@ async def test_directories_complete_on_the_target(
     assert relative.json() == {"directories": []}
 
 
+async def test_directories_never_list_inside_a_denied_path(
+    tmp_path: Path, target: SshLaunchTargetConfig | None
+) -> None:
+    app, token = _build(tmp_path, target)
+    (tmp_path / "ws" / ".git" / "hooks").mkdir()
+    params: dict[str, str] = {"launch_target_id": target.id} if target else {}
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/directories",
+            params={**params, "prefix": f"{tmp_path}/ws/.git/"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.json() == {"directories": []}
+
+
 async def test_directories_unknown_target_and_disabled(tmp_path: Path) -> None:
     app, token = _build(tmp_path, None)
     headers = {"Authorization": f"Bearer {token}"}

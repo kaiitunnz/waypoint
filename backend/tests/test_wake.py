@@ -677,6 +677,52 @@ async def test_automatic_wake_takes_over_a_leftover_focus_wake(
 
 
 @pytest.mark.asyncio
+async def test_direct_wake_absorbs_a_leftover_focus_wake(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime)
+    calls = _record_wakes(runtime, monkeypatch)
+    runtime.set_focus("codex-sub", True)
+    await _post(runtime)
+    runtime.set_focus("codex-sub", False)
+
+    await _post(runtime)
+
+    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+    assert _held(runtime, "codex-sub") == []
+
+
+@pytest.mark.asyncio
+async def test_focus_turned_on_during_a_send_holds_the_next_wake(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def slow_dispatch(prepared: PreparedInput) -> SessionRecord:
+        calls.append(prepared.request.text)
+        started.set()
+        await release.wait()
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", slow_dispatch)
+    await runtime._dispatch_subscription_wakes(
+        channel="tickets", is_inbox=False, actor_session_id=None
+    )
+    await started.wait()
+    runtime._wake("codex-sub")
+    await asyncio.sleep(0)
+    runtime.set_focus("codex-sub", True)
+    release.set()
+    await _flush_wakes(runtime)
+
+    assert calls == [WAKE_INPUT_TEXT]
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.FOCUS)]
+
+
+@pytest.mark.asyncio
 async def test_direct_wake_absorbs_the_held_one(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     _subscriber(runtime, SessionStatus.RUNNING)

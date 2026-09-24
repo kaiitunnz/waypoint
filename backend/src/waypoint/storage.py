@@ -3049,17 +3049,17 @@ class Storage:
         )
 
     @_synchronized
-    def take_auto_held_wake(self, session_id: str) -> HeldMessageRecord | None:
+    def take_held_wake(self, session_id: str) -> HeldMessageRecord | None:
         row = self.connection.execute(
-            "SELECT id, body FROM held_messages WHERE session_id = ? AND origin = ? "
-            "AND json_extract(body, '$.hold_reason') != ?",
-            (session_id, HeldMessageOrigin.WAKE, HeldReason.FOCUS),
+            "SELECT body FROM held_messages WHERE session_id = ? AND origin = ?",
+            (session_id, HeldMessageOrigin.WAKE),
         ).fetchone()
         if row is None:
             return None
-        self.connection.execute("DELETE FROM held_messages WHERE id = ?", (row["id"],))
+        record = HeldMessageRecord.model_validate_json(row["body"])
+        self.connection.execute("DELETE FROM held_messages WHERE id = ?", (record.id,))
         self.connection.commit()
-        return HeldMessageRecord.model_validate_json(row["body"])
+        return record
 
     @_synchronized
     def take_held_message(self, held_id: str) -> HeldMessageRecord | None:

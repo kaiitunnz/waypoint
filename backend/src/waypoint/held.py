@@ -54,11 +54,13 @@ class HeldQueue:
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._stopped = False
 
     def start(self) -> None:
         self._deferred = self._runtime.storage.auto_held_session_ids()
 
     async def stop(self) -> None:
+        self._stopped = True
         for handle in self._retries.values():
             handle.cancel()
         self._retries.clear()
@@ -75,15 +77,16 @@ class HeldQueue:
         request: SessionInputRequest,
         origin: HeldMessageOrigin,
     ) -> SessionRecord | HeldMessageRecord:
-        session = self._runtime.get_session(session_id)
-        if session.focus:
+        if self._runtime.get_session(session_id).focus:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
         async with self._send_locks[session_id]:
+            if self._runtime.get_session(session_id).focus:
+                return await self._hold(session_id, request, origin, HeldReason.FOCUS)
             if self._deliverable_now(session_id, wake):
                 with suppress(InputBlockedError):
                     delivered = await self._runtime.handle_input(session_id, request)
-                    if wake and self._runtime.storage.take_auto_held_wake(session_id):
+                    if wake and self._runtime.storage.take_held_wake(session_id):
                         await self._publish(session_id)
                     return delivered
             reason = HeldReason.IDLE if wake else HeldReason.DIALOG
@@ -178,6 +181,8 @@ class HeldQueue:
             self.kick(session_id)
 
     def kick(self, session_id: str) -> None:
+        if self._stopped:
+            return
         if session_id in self._draining:
             self._rerun.add(session_id)
             return
@@ -211,7 +216,7 @@ class HeldQueue:
                 if held.hold_reason is HeldReason.FOCUS:
                     continue
                 current = self._runtime.storage.get_session(session_id)
-                if current is None:
+                if current is None or current.focus:
                     break
                 session = current
                 if (
@@ -243,7 +248,7 @@ class HeldQueue:
             self._deferred.discard(session_id)
 
     def _retry_later(self, session_id: str) -> None:
-        if session_id in self._retries:
+        if self._stopped or session_id in self._retries:
             return
 
         def fire() -> None:

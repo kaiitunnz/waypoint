@@ -655,3 +655,19 @@ async def test_cancelled_drain_puts_the_item_back(tmp_path, monkeypatch) -> None
     await runtime.held.stop()
 
     assert [m.id for m in runtime.storage.list_held_messages("s1")] == [held.id]
+
+
+async def test_stopped_queue_starts_no_drain(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
+    transport.pending = True
+    await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+
+    await runtime.held.stop()
+    transport.pending = False
+    runtime.held.drain_deferred({"s1"})
+    await settle(runtime)
+
+    assert sent == []
+    assert [m.text for m in runtime.storage.list_held_messages("s1")] == ["one"]

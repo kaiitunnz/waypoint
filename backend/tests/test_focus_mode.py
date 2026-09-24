@@ -99,13 +99,15 @@ async def test_unfocused_session_delivers(tmp_path, monkeypatch) -> None:
 async def test_focused_session_holds(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
     sent = record_dispatches(runtime, monkeypatch)
+    runtime.storage.create_session(make_session(runtime.settings, "peer"))
 
     held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     assert sent == []
-    assert [(r.id, r.text, r.sender_session_id) for r in runtime.focus.list("s1")] == [
-        (held.id, "hi", "peer")
-    ]
+    assert [
+        (r.id, r.text, r.sender_session_id, r.sender_title)
+        for r in runtime.focus.list("s1")
+    ] == [(held.id, "hi", "peer", "Focused")]
 
 
 async def test_hold_rejects_unknown_attachment(tmp_path) -> None:

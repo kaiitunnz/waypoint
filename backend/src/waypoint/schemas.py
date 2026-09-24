@@ -1591,6 +1591,7 @@ class HeldMessageRecord(BaseModel):
     session_id: str
     origin: HeldMessageOrigin
     sender_session_id: str | None = None
+    sender_title: str | None = None
     schedule_id: str | None = None
     text: str = ""
     submit: bool = True

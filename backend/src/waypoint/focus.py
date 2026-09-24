@@ -47,6 +47,7 @@ class FocusGate:
             session_id=session_id,
             origin=origin,
             sender_session_id=request.sender_session_id,
+            sender_title=self._title_of(request.sender_session_id),
             schedule_id=schedule_id,
             text=request.text,
             submit=request.submit,
@@ -122,6 +123,10 @@ class FocusGate:
             self._in_flight.pop(record.id, None)
             self._cancelled.discard(record.id)
             await self._publish(record.session_id)
+
+    def _title_of(self, session_id: str | None) -> str | None:
+        sender = self._runtime.storage.get_session(session_id) if session_id else None
+        return sender.title if sender else None
 
     def _pin(self, record: HeldMessageRecord) -> None:
         if record.attachments:

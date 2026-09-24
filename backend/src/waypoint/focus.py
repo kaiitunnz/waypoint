@@ -107,7 +107,6 @@ class FocusGate:
 
     async def _deliver_claimed(self, record: HeldMessageRecord) -> None:
         self._in_flight[record.id] = record.session_id
-        await self._publish(record.session_id)
         request = SessionInputRequest(
             text=record.text,
             submit=record.submit,
@@ -116,6 +115,7 @@ class FocusGate:
             attachments=record.attachments or None,
         )
         try:
+            await self._publish(record.session_id)
             try:
                 prepared = await self._runtime.prepare_input(record.session_id, request)
             except Exception:

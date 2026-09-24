@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.23.0](https://github.com/kaiitunnz/waypoint/compare/v0.22.1...v0.23.0) (2026-09-24)
+
+
+### Features
+
+* add a warn-coded toggle to unlock emulated terminal pane input ([#474](https://github.com/kaiitunnz/waypoint/issues/474)) ([73cf0b3](https://github.com/kaiitunnz/waypoint/commit/73cf0b30327db6ac0b0f360edaedd24f305485fb))
+* add Focus mode to hold agent, scheduled, and wake messages ([#475](https://github.com/kaiitunnz/waypoint/issues/475)) ([c6d795b](https://github.com/kaiitunnz/waypoint/commit/c6d795bb6ce62884f5f8a4c84e7df35b56f8dfd0))
+* give SSH-target sessions workspace and skill discovery parity ([#472](https://github.com/kaiitunnz/waypoint/issues/472)) ([2553ba3](https://github.com/kaiitunnz/waypoint/commit/2553ba32dc893ffcf4a4731d699974e4b31736de))
+* make the held-messages queue generic and hold owed wakes in it ([#477](https://github.com/kaiitunnz/waypoint/issues/477)) ([bb48c83](https://github.com/kaiitunnz/waypoint/commit/bb48c833c825d58b674fd84757509365b6f38c70))
+
+
+### Bug Fixes
+
+* keep claude_tty questions and plans respondable across async input ([#476](https://github.com/kaiitunnz/waypoint/issues/476)) ([4920e11](https://github.com/kaiitunnz/waypoint/commit/4920e11b89926bf7657550738c68575015ccae77))
+
 ## [0.22.1](https://github.com/kaiitunnz/waypoint/compare/v0.22.0...v0.22.1) (2026-09-23)
 
 

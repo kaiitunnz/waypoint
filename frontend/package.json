@@ -1,6 +1,6 @@
 {
   "name": "waypoint-frontend",
-  "version": "0.22.1",
+  "version": "0.23.0",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",

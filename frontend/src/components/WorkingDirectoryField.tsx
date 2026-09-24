@@ -11,8 +11,7 @@ interface WorkingDirectoryFieldProps {
   token: string;
   cwd: string;
   onChange: (cwd: string) => void;
-  // The SSH launch target the session will run on, or null for this host;
-  // directory suggestions come from that machine.
+  // SSH launch target to suggest directories from; null for this host.
   launchTargetId: string | null;
   targetLabel: string | null;
   recentCwds: string[];
@@ -39,8 +38,8 @@ export function WorkingDirectoryField({
   const label = targetLabel
     ? `Working directory on ${targetLabel}`
     : "Working directory";
-  // Tagged with the target they came from so a switch never shows another
-  // machine's directories while the new target's fetch is in flight.
+  // Tagged with the source target; options exclude a previous target's
+  // results while the new fetch is in flight.
   const [suggested, setSuggested] = useState<{
     targetId: string | null;
     dirs: string[];
@@ -65,9 +64,7 @@ export function WorkingDirectoryField({
             setSuggested({ targetId: launchTargetId, dirs });
           }
         })
-        .catch(() => {
-          // Suggestions are best-effort; the field still accepts any path.
-        });
+        .catch(() => undefined);
     }, SUGGEST_DELAY_MS);
     return () => {
       window.clearTimeout(timer);
@@ -75,9 +72,7 @@ export function WorkingDirectoryField({
     };
   }, [host, token, cwd, launchTargetId, completable]);
 
-  // Recents first, then the target's child directories for the typed path.
-  // Suggestions from an older keystroke stay only while they still extend the
-  // input, so the list doesn't flash empty while the next fetch is in flight.
+  // Earlier suggestions stay while they still extend the input.
   const options = useMemo(() => {
     const dirs =
       completable && suggested.targetId === launchTargetId

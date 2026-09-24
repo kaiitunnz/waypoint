@@ -31,6 +31,9 @@ CLAUDE_BUILTIN_SLASH_COMMANDS = (
     SlashCommandSpec(name="help", description="List available commands"),
 )
 
+# Lists candidate command/skill files on a remote target. It returns each file's
+# raw frontmatter block and leaves parsing, naming, and de-duplication to
+# ``_records_from_candidates`` so remote results match local ones exactly.
 _REMOTE_SCRIPT = r"""
 import glob
 import json
@@ -39,81 +42,46 @@ import subprocess
 import sys
 from pathlib import Path
 
-cwd = sys.argv[1]
+cwd = os.path.expanduser(sys.argv[1])
 claude_bin = sys.argv[2]
+# A profile-scoped session's user commands, skills, and plugins live under its
+# CLAUDE_CONFIG_DIR; `claude plugin list` below inherits the same variable.
+user_root = Path(os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"))
 
 
-def frontmatter(path):
+def frontmatter_block(path):
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except OSError:
-        return {}
+    except (OSError, UnicodeDecodeError):
+        return None
     if not text.startswith("---"):
-        return {}
+        return None
     parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    data = {}
-    for raw in parts[1].splitlines():
-        if ":" not in raw:
-            continue
-        key, value = raw.split(":", 1)
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key in {"name", "description", "argument-hint"} and value:
-            data[key] = value
-    return data
+    return parts[1] if len(parts) == 3 else None
 
 
-def command_name(root, path):
-    rel = Path(path).relative_to(root).with_suffix("")
-    return "/".join(rel.parts)
+def candidate(source, name_hint, path):
+    return {
+        "source": source,
+        "name_hint": name_hint,
+        "path": str(path),
+        "frontmatter": frontmatter_block(path),
+    }
 
 
 def custom_commands():
-    roots = [Path(cwd) / ".claude" / "commands", Path.home() / ".claude" / "commands"]
-    seen = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            name = command_name(root, path)
-            if not name or name in seen:
-                continue
-            meta = frontmatter(path)
-            seen.add(name)
-            yield {
-                "name": name,
-                "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "custom_command",
-                "path": str(path),
-            }
+    for root in (Path(cwd) / ".claude" / "commands", user_root / "commands"):
+        if root.is_dir():
+            for path in sorted(root.rglob("*.md")):
+                name = "/".join(path.relative_to(root).with_suffix("").parts)
+                yield candidate("custom_command", name, path)
 
 
 def user_skills():
-    # Workspace skills win over user skills on name collision: order
-    # matters here.
-    roots = [Path(cwd) / ".claude" / "skills", Path.home() / ".claude" / "skills"]
-    seen = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.glob("*/SKILL.md")):
-            meta = frontmatter(path)
-            name = meta.get("name") if isinstance(meta.get("name"), str) else None
-            if not name:
-                name = path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            yield {
-                "name": name,
-                "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "user_skill",
-                "path": str(path),
-            }
+    for root in (Path(cwd) / ".claude" / "skills", user_root / "skills"):
+        if root.is_dir():
+            for path in sorted(root.glob("*/SKILL.md")):
+                yield candidate("user_skill", path.parent.name, path)
 
 
 def plugin_inventory():
@@ -124,48 +92,26 @@ def plugin_inventory():
             text=True,
             timeout=10,
         )
+        return json.loads(completed.stdout) if completed.returncode == 0 else []
     except Exception:
         return []
-    if completed.returncode != 0:
-        return []
-    try:
-        payload = json.loads(completed.stdout)
-    except Exception:
-        return []
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("plugins", "items", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return value
-    return []
 
 
 def plugin_skills():
-    seen = set()
-    for plugin in plugin_inventory():
+    payload = plugin_inventory()
+    if isinstance(payload, dict):
+        payload = next(
+            (payload[k] for k in ("plugins", "items", "data") if isinstance(payload.get(k), list)),
+            [],
+        )
+    for plugin in payload if isinstance(payload, list) else []:
         if not isinstance(plugin, dict) or plugin.get("enabled") is not True:
             continue
         install_path = plugin.get("installPath")
         if not isinstance(install_path, str):
             continue
         for path in sorted(glob.glob(os.path.join(install_path, "skills", "*", "SKILL.md"))):
-            meta = frontmatter(path)
-            name = meta.get("name")
-            if not isinstance(name, str) or not name:
-                name = Path(path).parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            description = meta.get("description")
-            yield {
-                "name": name,
-                "description": description if isinstance(description, str) else None,
-                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
-                "source": "plugin_skill",
-                "path": path,
-            }
+            yield candidate("plugin_skill", Path(path).parent.name, path)
 
 
 print(json.dumps([*custom_commands(), *user_skills(), *plugin_skills()]))
@@ -189,86 +135,40 @@ async def list_claude_command_completions(
     launch_target: SshLaunchTargetConfig | None = None,
     config_dir: str | None = None,
 ) -> list[CommandCompletion]:
-    records = (
-        await _list_remote_records(launch_target, cwd, claude_bin)
+    candidates = (
+        await _list_remote_candidates(launch_target, cwd, claude_bin, config_dir)
         if launch_target is not None
-        else await _list_local_records(cwd, claude_bin, config_dir)
+        else await _list_local_candidates(cwd, claude_bin, config_dir)
     )
-    return _records_to_completions(records, prefix)
+    return _records_to_completions(_records_from_candidates(candidates), prefix)
 
 
-async def _list_local_records(
+async def _list_local_candidates(
     cwd: str, claude_bin: str, config_dir: str | None = None
 ) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    records.extend(_local_custom_commands(cwd, config_dir))
-    records.extend(_local_user_skills(cwd, config_dir))
-    records.extend(await _local_plugin_skills(claude_bin, config_dir))
-    return records
-
-
-def _local_custom_commands(
-    cwd: str, config_dir: str | None = None
-) -> list[dict[str, Any]]:
-    roots = [
-        Path(cwd).expanduser() / ".claude" / "commands",
-        _user_config_root(config_dir) / "commands",
-    ]
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            name = _command_name(root, path)
-            if not name or name in seen:
-                continue
-            meta = _frontmatter(path)
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "custom_command",
-                    "path": str(path),
-                }
+    user_root = _user_config_root(config_dir)
+    project_root = Path(cwd).expanduser() / ".claude"
+    candidates: list[dict[str, Any]] = []
+    for root in (project_root / "commands", user_root / "commands"):
+        if root.is_dir():
+            candidates.extend(
+                _candidate("custom_command", _command_name(root, path), path)
+                for path in sorted(root.rglob("*.md"))
             )
-    return records
-
-
-def _local_user_skills(cwd: str, config_dir: str | None = None) -> list[dict[str, Any]]:
     # Workspace `<cwd>/.claude/skills/` wins over the account `skills/` on
     # name collision, matching how the Claude CLI itself resolves
     # overlapping skill names.
-    roots = [
-        Path(cwd).expanduser() / ".claude" / "skills",
-        _user_config_root(config_dir) / "skills",
-    ]
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.glob("*/SKILL.md")):
-            meta = _frontmatter(path)
-            name = _string_or_none(meta.get("name")) or path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "user_skill",
-                    "path": str(path),
-                }
+    for root in (project_root / "skills", user_root / "skills"):
+        if root.is_dir():
+            candidates.extend(
+                _candidate("user_skill", path.parent.name, path)
+                for path in sorted(root.glob("*/SKILL.md"))
             )
-    return records
+    candidates.extend(await _local_plugin_skill_candidates(claude_bin, config_dir))
+    return candidates
 
 
-async def _local_plugin_skills(
+async def _local_plugin_skill_candidates(
     claude_bin: str, config_dir: str | None = None
 ) -> list[dict[str, Any]]:
     # `claude plugin list` reports the plugins enabled for a config dir, so run
@@ -294,40 +194,30 @@ async def _local_plugin_skills(
         payload = json.loads(stdout.decode("utf-8"))
     except json.JSONDecodeError:
         return []
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    candidates: list[dict[str, Any]] = []
     for plugin in _plugin_items(payload):
         if plugin.get("enabled") is not True:
             continue
         install_path = plugin.get("installPath")
         if not isinstance(install_path, str):
             continue
-        for path in sorted(Path(install_path).glob("skills/*/SKILL.md")):
-            meta = _frontmatter(path)
-            name = _string_or_none(meta.get("name")) or path.parent.name
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            records.append(
-                {
-                    "name": name,
-                    "description": _string_or_none(meta.get("description")),
-                    "argument_hint": _string_or_none(meta.get("argument-hint")),
-                    "source": "plugin_skill",
-                    "path": str(path),
-                }
-            )
-    return records
+        candidates.extend(
+            _candidate("plugin_skill", path.parent.name, path)
+            for path in sorted(Path(install_path).glob("skills/*/SKILL.md"))
+        )
+    return candidates
 
 
-async def _list_remote_records(
+async def _list_remote_candidates(
     target: SshLaunchTargetConfig,
     cwd: str,
     claude_bin: str,
+    config_dir: str | None = None,
 ) -> list[dict[str, Any]]:
     try:
         args = target.build_remote_exec_args(
-            ["python3", "-c", _REMOTE_SCRIPT, cwd or target.default_cwd, claude_bin]
+            ["python3", "-c", _REMOTE_SCRIPT, cwd or target.default_cwd, claude_bin],
+            extra_env={"CLAUDE_CONFIG_DIR": config_dir} if config_dir else None,
         )
     except (FileNotFoundError, OSError) as exc:
         log.warning("failed to build Claude command discovery SSH argv: %s", exc)
@@ -357,6 +247,50 @@ async def _list_remote_records(
         if isinstance(payload, list)
         else []
     )
+
+
+def _candidate(source: str, name_hint: str, path: Path) -> dict[str, Any]:
+    return {
+        "source": source,
+        "name_hint": name_hint,
+        "path": str(path),
+        "frontmatter": _frontmatter_block(path),
+    }
+
+
+def _records_from_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    # Custom commands are named by their path; skills by their frontmatter
+    # ``name``, falling back to the skill directory. Within a source the first
+    # candidate wins, so candidate order encodes root precedence.
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in candidates:
+        source = _string_or_none(item.get("source"))
+        name_hint = _string_or_none(item.get("name_hint"))
+        if source is None or name_hint is None:
+            continue
+        block = item.get("frontmatter")
+        meta = _parse_frontmatter(block) if isinstance(block, str) else {}
+        name = (
+            name_hint
+            if source == "custom_command"
+            else _string_or_none(meta.get("name")) or name_hint
+        )
+        if (source, name) in seen:
+            continue
+        seen.add((source, name))
+        records.append(
+            {
+                "name": name,
+                "description": _string_or_none(meta.get("description")),
+                "argument_hint": _string_or_none(meta.get("argument-hint")),
+                "source": source,
+                "path": item.get("path"),
+            }
+        )
+    return records
 
 
 def _records_to_completions(
@@ -395,18 +329,20 @@ def _records_to_completions(
     return completions
 
 
-def _frontmatter(path: Path) -> dict[str, Any]:
+def _frontmatter_block(path: Path) -> str | None:
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
+    except (OSError, UnicodeDecodeError):
+        return None
     if not text.startswith("---"):
-        return {}
+        return None
     parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
+    return parts[1] if len(parts) == 3 else None
+
+
+def _parse_frontmatter(block: str) -> dict[str, Any]:
     try:
-        data = yaml.safe_load(parts[1]) or {}
+        data = yaml.safe_load(block) or {}
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}

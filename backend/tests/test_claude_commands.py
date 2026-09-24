@@ -3,6 +3,7 @@ import json
 import pytest
 
 from waypoint.backends.claude_code.commands import list_claude_command_completions
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 @pytest.mark.asyncio
@@ -186,3 +187,101 @@ async def test_list_claude_command_completions_propagates_command_argument_hint(
     )
 
     assert completions[0].argument_hint == "<branch>"
+
+
+def _loopback_remote(monkeypatch, home) -> list[dict[str, str] | None]:
+    # Run the vendored remote discovery script on this host under a fake remote
+    # HOME, recording the per-call env the SSH argv would have carried.
+    captured: list[dict[str, str] | None] = []
+
+    def _build(self, command, cwd=None, *, allocate_tty=False, extra_env=None):
+        captured.append(extra_env)
+        env = {"HOME": str(home), "PATH": "/usr/bin:/bin", **(extra_env or {})}
+        return ("env", "-i", *(f"{k}={v}" for k, v in env.items()), *command)
+
+    monkeypatch.setattr(SshLaunchTargetConfig, "build_remote_exec_args", _build)
+    return captured
+
+
+def _write_skill(root, name: str) -> None:
+    skill = root / name
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {name} skill\n---\nBody\n", encoding="utf-8"
+    )
+
+
+@pytest.mark.asyncio
+async def test_remote_discovery_scopes_to_profile_config_dir(
+    tmp_path, monkeypatch
+) -> None:
+    home = tmp_path / "home"
+    _write_skill(home / ".claude" / "skills", "default-only")
+    _write_skill(home / ".claude-work" / "skills", "profile-only")
+    captured = _loopback_remote(monkeypatch, home)
+
+    completions = await list_claude_command_completions(
+        cwd="~/repo",
+        claude_bin="missing-claude",
+        prefix="/",
+        launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
+        config_dir="~/.claude-work",
+    )
+
+    assert captured == [{"CLAUDE_CONFIG_DIR": "~/.claude-work"}]
+    assert [item.name for item in completions] == ["profile-only"]
+
+
+@pytest.mark.asyncio
+async def test_remote_discovery_expands_tilde_cwd(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    _write_skill(home / "repo" / ".claude" / "skills", "project-skill")
+    captured = _loopback_remote(monkeypatch, home)
+
+    completions = await list_claude_command_completions(
+        cwd="~/repo",
+        claude_bin="missing-claude",
+        prefix="/",
+        launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
+    )
+
+    assert captured == [None]
+    assert [item.name for item in completions] == ["project-skill"]
+
+
+@pytest.mark.asyncio
+async def test_remote_discovery_matches_local(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    skills = home / "repo" / ".claude" / "skills"
+    bodies = {
+        "plain": "name: plain\ndescription: Plain text\n",
+        "quoted": 'name: quoted\ndescription: "Quoted: with colon"\n',
+        "folded": "name: folded\ndescription: >-\n  Folded across\n  two lines\n",
+        "literal": "name: literal\ndescription: |\n  Line one\n  Line two\nargument-hint: <x>\n",
+    }
+    for dirname, body in bodies.items():
+        (skills / dirname).mkdir(parents=True)
+        (skills / dirname / "SKILL.md").write_text(f"---\n{body}---\nBody\n")
+    commands = home / ".claude" / "commands"
+    commands.mkdir(parents=True)
+    (commands / "hint.md").write_text("---\nargument-hint: >\n  [file]\n---\nBody\n")
+    monkeypatch.setenv("HOME", str(home))
+
+    local = await list_claude_command_completions(
+        cwd=str(home / "repo"), claude_bin="missing-claude", prefix="/"
+    )
+    _loopback_remote(monkeypatch, home)
+    remote = await list_claude_command_completions(
+        cwd="~/repo",
+        claude_bin="missing-claude",
+        prefix="/",
+        launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
+    )
+
+    assert len(local) == 5
+    assert [item.model_dump() for item in remote] == [
+        item.model_dump() for item in local
+    ]
+    by_name = {item.name: item for item in remote}
+    assert by_name["folded"].description == "Folded across two lines"
+    assert by_name["literal"].argument_hint == "<x>"

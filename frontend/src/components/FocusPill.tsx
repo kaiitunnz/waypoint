@@ -108,12 +108,10 @@ export function FocusPill({
       aria-label="Focus"
     >
       <span className="focus-pill-panel-title">
-        <span aria-hidden>◎</span> Focus is on
+        <span className="focus-mark" aria-hidden />
+        Focus is on
       </span>
-      <p>
-        Messages from other sessions, schedules, and wake-ups wait in the
-        held-messages dock until you release them.
-      </p>
+      <p>Messages from agents and schedules are held until you release them.</p>
       <button
         ref={offRef}
         type="button"
@@ -141,9 +139,7 @@ export function FocusPill({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="focus-pill-mark" aria-hidden>
-          ◎
-        </span>
+        <span className="focus-mark" aria-hidden />
         <span className="focus-pill-label" aria-hidden>
           Focus
         </span>

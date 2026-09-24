@@ -6831,10 +6831,23 @@ html[data-theme="light"] .composer-connection.open::before {
   outline-offset: 2px;
 }
 
-.focus-pill-mark {
-  font-size: 0.8rem;
-  line-height: 1;
-  letter-spacing: 0;
+/* ◎ drawn rather than typeset, so it centers on the label regardless of font. */
+.focus-mark {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.focus-mark::after {
+  content: "";
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .focus-pill-panel {
@@ -6864,6 +6877,9 @@ html[data-theme="light"] .composer-connection.open::before {
 }
 
 .focus-pill-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   letter-spacing: 0.04em;

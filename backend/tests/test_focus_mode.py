@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from waypoint.runtime import WAKE_INPUT_TEXT, PreparedInput, SessionRuntime
 from waypoint.schemas import (
     HeldMessageOrigin,
     HeldMessageRecord,
+    HeldReason,
     IdleMessageBatchMode,
     ScheduledMessageCreateRequest,
     ScheduledMessageStatus,
@@ -89,9 +91,7 @@ async def test_unfocused_session_delivers(tmp_path, monkeypatch) -> None:
     runtime.storage.create_session(make_session(runtime.settings, "s1"))
     sent = record_dispatches(runtime, monkeypatch)
 
-    result = await runtime.focus.deliver(
-        "s1", agent_send("hi"), HeldMessageOrigin.AGENT
-    )
+    result = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     assert isinstance(result, SessionRecord)
     assert sent == ["hi"]
@@ -103,7 +103,7 @@ async def test_focused_session_holds(tmp_path, monkeypatch) -> None:
     sent = record_dispatches(runtime, monkeypatch)
     runtime.storage.create_session(make_session(runtime.settings, "peer"))
 
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     assert sent == []
     assert [
@@ -116,7 +116,7 @@ async def test_hold_rejects_unknown_attachment(tmp_path) -> None:
     runtime = focused_runtime(tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        await runtime.focus.deliver(
+        await runtime.held.deliver(
             "s1", agent_send("hi", attachments=["0" * 32]), HeldMessageOrigin.AGENT
         )
 
@@ -171,12 +171,12 @@ async def test_release_delivers_and_unpins(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
     sent = record_dispatches(runtime, monkeypatch)
     attachment_id = upload(runtime, "s1")
-    held = await runtime.focus.deliver(
+    held = await runtime.held.deliver(
         "s1", agent_send("hi", attachments=[attachment_id]), HeldMessageOrigin.AGENT
     )
     assert runtime.attachments.held_referenced_ids("s1") == {attachment_id}
 
-    await runtime.focus.release(held.id)
+    await runtime.held.release(held.id)
 
     assert sent == ["hi"]
     assert runtime.storage.list_held_messages("s1") == []
@@ -187,14 +187,14 @@ async def test_release_unknown_is_404(tmp_path) -> None:
     runtime = focused_runtime(tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        await runtime.focus.release("missing")
+        await runtime.held.release("missing")
 
     assert exc.value.status_code == 404
 
 
 async def test_prepare_failure_puts_message_back(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     async def failing_prepare(*_: Any) -> PreparedInput:
         raise RuntimeError("reattach failed")
@@ -202,7 +202,7 @@ async def test_prepare_failure_puts_message_back(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(runtime, "prepare_input", failing_prepare)
 
     with pytest.raises(RuntimeError):
-        await runtime.focus.release(held.id)
+        await runtime.held.release(held.id)
 
     assert [r.model_dump() for r in runtime.storage.list_held_messages("s1")] == [
         held.model_dump()
@@ -211,7 +211,7 @@ async def test_prepare_failure_puts_message_back(tmp_path, monkeypatch) -> None:
 
 async def test_dispatch_failure_consumes_message(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     async def failing_dispatch(_: PreparedInput) -> SessionRecord:
         raise RuntimeError("send failed")
@@ -219,14 +219,14 @@ async def test_dispatch_failure_consumes_message(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(runtime, "dispatch_input", failing_dispatch)
 
     with pytest.raises(RuntimeError):
-        await runtime.focus.release(held.id)
+        await runtime.held.release(held.id)
 
     assert runtime.storage.list_held_messages("s1") == []
 
 
 async def test_cancel_during_release_blocks_put_back(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
     gate = asyncio.Event()
 
     async def slow_failing_prepare(*_: Any) -> PreparedInput:
@@ -234,10 +234,10 @@ async def test_cancel_during_release_blocks_put_back(tmp_path, monkeypatch) -> N
         raise RuntimeError("reattach failed")
 
     monkeypatch.setattr(runtime, "prepare_input", slow_failing_prepare)
-    release = asyncio.create_task(runtime.focus.release(held.id))
+    release = asyncio.create_task(runtime.held.release(held.id))
     await asyncio.sleep(0)
 
-    await runtime.focus.cancel(held.id)
+    await runtime.held.cancel(held.id)
     gate.set()
     with pytest.raises(RuntimeError):
         await release
@@ -248,7 +248,7 @@ async def test_cancel_during_release_blocks_put_back(tmp_path, monkeypatch) -> N
 async def test_cancel_after_prepare_skips_dispatch(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
     sent = record_dispatches(runtime, monkeypatch)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
     gate = asyncio.Event()
     real_prepare = runtime.prepare_input
 
@@ -257,10 +257,10 @@ async def test_cancel_after_prepare_skips_dispatch(tmp_path, monkeypatch) -> Non
         return await real_prepare(*args)
 
     monkeypatch.setattr(runtime, "prepare_input", slow_prepare)
-    release = asyncio.create_task(runtime.focus.release(held.id))
+    release = asyncio.create_task(runtime.held.release(held.id))
     await asyncio.sleep(0)
 
-    await runtime.focus.cancel(held.id)
+    await runtime.held.cancel(held.id)
     gate.set()
     await release
 
@@ -270,7 +270,7 @@ async def test_cancel_after_prepare_skips_dispatch(tmp_path, monkeypatch) -> Non
 
 async def test_cancel_while_dispatching_conflicts(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
     gate = asyncio.Event()
 
     async def slow_dispatch(prepared: PreparedInput) -> SessionRecord:
@@ -278,11 +278,11 @@ async def test_cancel_while_dispatching_conflicts(tmp_path, monkeypatch) -> None
         return prepared.session
 
     monkeypatch.setattr(runtime, "dispatch_input", slow_dispatch)
-    release = asyncio.create_task(runtime.focus.release(held.id))
+    release = asyncio.create_task(runtime.held.release(held.id))
     await asyncio.sleep(0.01)
 
     with pytest.raises(HTTPException) as exc:
-        await runtime.focus.cancel(held.id)
+        await runtime.held.cancel(held.id)
     gate.set()
     await release
 
@@ -291,7 +291,7 @@ async def test_cancel_while_dispatching_conflicts(tmp_path, monkeypatch) -> None
 
 async def test_put_back_skipped_for_deleted_session(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
-    held = await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     async def prepare_after_delete(*_: Any) -> PreparedInput:
         runtime.storage.delete_session("s1")
@@ -300,7 +300,7 @@ async def test_put_back_skipped_for_deleted_session(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(runtime, "prepare_input", prepare_after_delete)
 
     with pytest.raises(HTTPException):
-        await runtime.focus.release(held.id)
+        await runtime.held.release(held.id)
 
     assert runtime.storage.list_held_messages("s1") == []
 
@@ -308,19 +308,19 @@ async def test_put_back_skipped_for_deleted_session(tmp_path, monkeypatch) -> No
 async def test_release_all_in_order_and_cancel_mid_run(tmp_path, monkeypatch) -> None:
     runtime = focused_runtime(tmp_path)
     for text in ("one", "two", "three"):
-        await runtime.focus.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
+        await runtime.held.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
     held = runtime.storage.list_held_messages("s1")
     sent: list[str] = []
 
     async def dispatch(prepared: PreparedInput) -> SessionRecord:
         sent.append(prepared.request.text)
         if prepared.request.text == "one":
-            await runtime.focus.cancel(held[1].id)
+            await runtime.held.cancel(held[1].id)
         return prepared.session
 
     monkeypatch.setattr(runtime, "dispatch_input", dispatch)
 
-    await runtime.focus.release_all("s1")
+    await runtime.held.release_all("s1")
 
     assert sent == ["one", "three"]
     assert runtime.storage.list_held_messages("s1") == []
@@ -329,12 +329,12 @@ async def test_release_all_in_order_and_cancel_mid_run(tmp_path, monkeypatch) ->
 async def test_cancel_all_unpins(tmp_path) -> None:
     runtime = focused_runtime(tmp_path)
     attachment_id = upload(runtime, "s1")
-    await runtime.focus.deliver(
+    await runtime.held.deliver(
         "s1", agent_send("a", attachments=[attachment_id]), HeldMessageOrigin.AGENT
     )
-    await runtime.focus.deliver("s1", agent_send("b"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("b"), HeldMessageOrigin.AGENT)
 
-    await runtime.focus.cancel_all("s1")
+    await runtime.held.cancel_all("s1")
 
     assert runtime.storage.list_held_messages("s1") == []
     assert runtime.attachments.held_referenced_ids("s1") == set()
@@ -343,7 +343,7 @@ async def test_cancel_all_unpins(tmp_path) -> None:
 async def test_held_attachment_survives_sweep(tmp_path) -> None:
     runtime = focused_runtime(tmp_path)
     attachment_id = upload(runtime, "s1")
-    await runtime.focus.deliver(
+    await runtime.held.deliver(
         "s1", agent_send("a", attachments=[attachment_id]), HeldMessageOrigin.AGENT
     )
 
@@ -365,7 +365,7 @@ async def test_startup_reconcile_drops_orphan_held_pins(tmp_path) -> None:
 
 async def test_focus_persists_and_turning_off_keeps_held(tmp_path) -> None:
     runtime = focused_runtime(tmp_path)
-    await runtime.focus.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
 
     runtime.set_focus("s1", False)
 
@@ -427,7 +427,7 @@ async def test_api_cancel_endpoints(tmp_path) -> None:
     app, runtime, auth = _build(tmp_path)
     runtime.storage.create_session(make_session(runtime.settings, "s1", focus=True))
     for text in ("a", "b", "c"):
-        await runtime.focus.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
+        await runtime.held.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
     first = runtime.storage.list_held_messages("s1")[0]
     async with _client(app) as client:
         one = await client.delete(f"/api/held-messages/{first.id}", headers=auth)
@@ -480,8 +480,8 @@ def record_blocked_dispatches(
 
 
 async def settle(runtime: SessionRuntime) -> None:
-    while runtime.focus._tasks:
-        await asyncio.gather(*list(runtime.focus._tasks))
+    while runtime.held._tasks:
+        await asyncio.gather(*list(runtime.held._tasks))
 
 
 async def test_blocked_session_holds_then_delivers_in_order(
@@ -491,28 +491,28 @@ async def test_blocked_session_holds_then_delivers_in_order(
     sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
 
-    first = await runtime.focus.deliver(
-        "s1", agent_send("one"), HeldMessageOrigin.AGENT
-    )
+    first = await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
     await settle(runtime)
     transport.pending = False
     # Unblocked, but an item is still queued: the new send waits behind it.
-    await runtime.focus.deliver("s1", agent_send("two"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("two"), HeldMessageOrigin.AGENT)
     await settle(runtime)
 
-    assert isinstance(first, HeldMessageRecord) and first.auto_release
+    assert (
+        isinstance(first, HeldMessageRecord) and first.hold_reason is HeldReason.DIALOG
+    )
     assert sent == ["one", "two"]
     assert runtime.storage.list_held_messages("s1") == []
-    assert "s1" not in runtime.focus._deferred
+    assert "s1" not in runtime.held._deferred
 
 
 async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.focus.DEFER_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr("waypoint.held.DEFER_RETRY_SECONDS", 0.01)
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
     sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.blocked = True
 
-    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
     await settle(runtime)
     assert sent == []
     transport.blocked = False
@@ -527,11 +527,11 @@ async def test_pending_approval_waits_for_an_edge(tmp_path, monkeypatch) -> None
     sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
 
-    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
     await settle(runtime)
-    assert sent == [] and not runtime.focus._retries
+    assert sent == [] and not runtime.held._retries
     transport.pending = False
-    runtime.focus.drain_deferred({"s1"})
+    runtime.held.drain_deferred({"s1"})
     await settle(runtime)
 
     assert sent == ["one"]
@@ -541,13 +541,13 @@ async def test_focus_held_items_never_auto_release(tmp_path, monkeypatch) -> Non
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
     sent = record_blocked_dispatches(runtime, transport, monkeypatch)
     transport.pending = True
-    await runtime.focus.deliver("s1", agent_send("auto"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("auto"), HeldMessageOrigin.AGENT)
     await settle(runtime)
     runtime.set_focus("s1", True)
-    await runtime.focus.deliver("s1", agent_send("focus"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("focus"), HeldMessageOrigin.AGENT)
 
     transport.pending = False
-    runtime.focus.drain_deferred({"s1"})
+    runtime.held.drain_deferred({"s1"})
     await settle(runtime)
     assert sent == []  # Focus holds the auto item too
     runtime.set_focus("s1", False)
@@ -560,7 +560,7 @@ async def test_focus_held_items_never_auto_release(tmp_path, monkeypatch) -> Non
 async def test_release_while_blocked_puts_the_item_back(tmp_path, monkeypatch) -> None:
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
     transport.pending = True
-    held = await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    held = await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
     await settle(runtime)
 
     async def blocked_dispatch(prepared: PreparedInput) -> SessionRecord:
@@ -568,22 +568,22 @@ async def test_release_while_blocked_puts_the_item_back(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(runtime, "dispatch_input", blocked_dispatch)
     with pytest.raises(InputBlockedError):
-        await runtime.focus.release(held.id)
+        await runtime.held.release(held.id)
 
     assert [m.id for m in runtime.storage.list_held_messages("s1")] == [held.id]
-    assert "s1" in runtime.focus._deferred
+    assert "s1" in runtime.held._deferred
 
 
 async def test_start_seeds_sessions_with_auto_items(tmp_path, monkeypatch) -> None:
     runtime, transport = blocking_runtime(tmp_path, monkeypatch)
     transport.pending = True
-    await runtime.focus.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
     await settle(runtime)
 
     reopened = SessionRuntime(runtime.settings, runtime.storage)
-    reopened.focus.start()
+    reopened.held.start()
 
-    assert reopened.focus._deferred == {"s1"}
+    assert reopened.held._deferred == {"s1"}
 
 
 async def test_dispatch_refuses_a_blocked_session_before_recording(
@@ -598,3 +598,60 @@ async def test_dispatch_refuses_a_blocked_session_before_recording(
 
     assert runtime.storage.list_events("s1") == []
     assert runtime.get_session("s1").status is SessionStatus.IDLE
+
+
+def test_legacy_auto_release_rows_migrate_to_hold_reasons(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "s1"))
+    now = datetime.now(UTC).isoformat()
+    legacy = [
+        ("a", HeldMessageOrigin.AGENT, True),
+        ("w", HeldMessageOrigin.WAKE, True),
+        ("f", HeldMessageOrigin.SCHEDULE, False),
+    ]
+    for held_id, origin, auto_release in legacy:
+        body = {
+            "id": held_id,
+            "session_id": "s1",
+            "origin": origin,
+            "created_at": now,
+            "auto_release": auto_release,
+        }
+        runtime.storage.connection.execute(
+            "INSERT INTO held_messages (id, session_id, origin, created_at, body) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (held_id, "s1", origin, now, json.dumps(body)),
+        )
+    runtime.storage.connection.commit()
+
+    for _ in range(2):
+        storage = Storage(runtime.settings.database_path)
+        reasons = {m.id: m.hold_reason for m in storage.list_held_messages("s1")}
+        assert reasons == {
+            "a": HeldReason.DIALOG,
+            "w": HeldReason.IDLE,
+            "f": HeldReason.FOCUS,
+        }
+
+
+async def test_cancelled_drain_puts_the_item_back(tmp_path, monkeypatch) -> None:
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    transport.pending = True
+    held = await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+    await settle(runtime)
+    started = asyncio.Event()
+
+    async def stuck_prepare(
+        session_id: str, request: SessionInputRequest
+    ) -> PreparedInput:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError
+
+    monkeypatch.setattr(runtime, "prepare_input", stuck_prepare)
+    transport.pending = False
+    runtime.held.drain_deferred({"s1"})
+    await started.wait()
+    await runtime.held.stop()
+
+    assert [m.id for m in runtime.storage.list_held_messages("s1")] == [held.id]

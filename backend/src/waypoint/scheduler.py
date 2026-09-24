@@ -659,7 +659,7 @@ class Scheduler:
         return session.id
 
     async def _send_input(self, record: ScheduledMessageRecord) -> None:
-        await self._runtime.focus.deliver(
+        await self._runtime.held.deliver(
             record.session_id,
             SessionInputRequest(
                 text=record.text,

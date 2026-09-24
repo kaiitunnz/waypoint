@@ -71,8 +71,8 @@ from waypoint.backends.transcripts import (
     unpersisted_thread_error,
 )
 from waypoint.builtin_completions import waypoint_builtin_completions
-from waypoint.focus import FocusGate
 from waypoint.git_meta import resolve_git_meta
+from waypoint.held import HeldQueue
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.manager import ManagerRegistry
 from waypoint.notifications import (
@@ -476,19 +476,9 @@ class SessionRuntime:
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
         self._broadcast_flusher: asyncio.Task[None] | None = None
-        # Board/inbox-triggered wake (native addition 1). ``_pending_wakes`` holds
-        # sessions owed a wake that were not deliverable when a matching mutation
-        # arrived; the broadcast-loop observer fires them on the next deliverable
-        # edge. Membership alone encodes "owed a wake" — no prior-status map.
-        # ``_wake_tasks`` tracks the non-blocking dispatch/delivery tasks so a
-        # poster's request latency never includes a subscriber's (possibly slow)
-        # send, and neither does the broadcast-loop drain. ``_wake_in_flight``
-        # serializes delivery per session: while a wake is being sent, a second
-        # is deferred rather than concurrently injected (a double ``send_input``
-        # garbles a tty transport).
-        self._pending_wakes: set[str] = set()
+        # Board/inbox wake dispatch and delivery tasks, tracked so a poster's
+        # request never waits on a subscriber's send.
         self._wake_tasks: set[asyncio.Task[None]] = set()
-        self._wake_in_flight: set[str] = set()
         # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
         # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
         # loop below is the only thing that publishes onto the broadcast hub.
@@ -538,7 +528,7 @@ class SessionRuntime:
         self.presets = PresetManager(storage)
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
-        self.focus = FocusGate(self)
+        self.held = HeldQueue(self)
         self.session_presence = SessionPresenceRegistry()
         self.notifications: NotificationService | None = (
             NotificationService(
@@ -610,7 +600,7 @@ class SessionRuntime:
         # loop below tries to reconnect it — it has no state worth resuming.
         await self._sweep_orphaned_oneshot_sessions()
         # Before any restore can finish and kick its session's held items.
-        self.focus.start()
+        self.held.start()
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
@@ -788,6 +778,7 @@ class SessionRuntime:
         for wake_task in wake_tasks:
             with suppress(asyncio.CancelledError):
                 await wake_task
+        await self.held.stop()
         if self._broadcast_flusher is not None:
             self._broadcast_flusher.cancel()
             with suppress(asyncio.CancelledError):
@@ -2721,7 +2712,7 @@ class SessionRuntime:
         if refreshed is not None:
             # Deliver items a dialog held before the restart, now that the
             # restored transport can report whether one is still open.
-            self.focus.drain_deferred({refreshed.id})
+            self.held.drain_deferred({refreshed.id})
             # Boot-restore warming is fire-and-forget for every persisted
             # session, so we skip remote targets to avoid fanning out
             # SSH/plugin-list probes against hosts the user may never
@@ -4302,9 +4293,7 @@ class SessionRuntime:
         kind: str | None = None,
     ) -> None:
         # Non-blocking: a poster's request latency must not include a
-        # subscriber's ``send_input`` (slow for SSH transports). Delivery is
-        # serialized per session by ``_fire_wake``, so two mutations landing
-        # while a subscriber is IDLE cannot double-send to one tty.
+        # subscriber's ``send_input`` (slow for SSH transports).
         task = asyncio.create_task(
             self._dispatch_subscription_wakes(
                 channel=channel,
@@ -4344,7 +4333,7 @@ class SessionRuntime:
             elif sub.kinds and kind is not None and kind not in sub.kinds:
                 continue
             try:
-                self._wake_or_defer(sub.session_id)
+                self._wake(sub.session_id)
             except Exception:
                 log.exception("wake dispatch failed", extra={"session": sub.session_id})
 
@@ -4358,54 +4347,28 @@ class SessionRuntime:
             return True
         return any(fnmatch.fnmatch(channel, glob) for glob in globs)
 
-    def _wake_or_defer(self, session_id: str) -> None:
+    def _wake(self, session_id: str) -> None:
         session = self.storage.get_session(session_id)
-        if session is None:
-            return
         # Never resurrect a stopped session.
-        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+        if session is None or session.status in {
+            SessionStatus.EXITED,
+            SessionStatus.ERROR,
+        }:
             return
-        if self.wake_eligible(session):
-            self._fire_wake(session_id)
-        else:
-            # RUNNING / STARTING / INTERRUPTED / WAITING_INPUT-awaiting-approval:
-            # defer to the deliverable edge (the broadcast-loop observer).
-            self._pending_wakes.add(session_id)
-
-    def _fire_wake(self, session_id: str) -> None:
-        # Serialize delivery per session: while a wake is in flight, defer a
-        # second to the next deliverable edge rather than concurrently inject it
-        # (two ``send_input`` calls garble a tty transport). Delivery runs in a
-        # tracked task so no caller — request path or broadcast loop — blocks on
-        # the send.
-        if session_id in self._wake_in_flight:
-            self._pending_wakes.add(session_id)
-            return
-        self._wake_in_flight.add(session_id)
+        # One task per subscriber so one slow send never delays another's wake.
         task = asyncio.create_task(self._deliver_wake(session_id))
         self._wake_tasks.add(task)
         task.add_done_callback(self._wake_tasks.discard)
 
     async def _deliver_wake(self, session_id: str) -> None:
         try:
-            await self.focus.deliver(
+            await self.held.deliver(
                 session_id,
                 SessionInputRequest(text=WAKE_INPUT_TEXT),
                 HeldMessageOrigin.WAKE,
             )
         except Exception:
             log.exception("wake delivery failed", extra={"session": session_id})
-        finally:
-            self._wake_in_flight.discard(session_id)
-            # A wake that arrived while this one was in flight was parked in
-            # ``_pending_wakes``. Re-drive it now instead of relying on a later
-            # broadcast-loop edge — a delivery that failed (or otherwise changed
-            # no status) never produces one, which would strand the parked wake.
-            # ``_drain_pending_wakes`` clears the entry before re-firing and
-            # re-checks eligibility, so this spends at most one retry per parked
-            # wake and a persistently failing send cannot spin.
-            if session_id in self._pending_wakes:
-                self._drain_pending_wakes({session_id})
 
     def wake_eligible(self, session: SessionRecord) -> bool:
         if session.status == SessionStatus.IDLE:
@@ -4418,25 +4381,6 @@ class SessionRuntime:
             return not self.transport_for(session).has_pending_approval(session)
         except Exception:
             return False
-
-    def _drain_pending_wakes(self, dirty_ids: set[str]) -> None:
-        # Called from the broadcast-loop drain: fire any owed wake whose session
-        # just reached a deliverable edge. Synchronous and non-blocking — the
-        # send runs in a tracked task via ``_fire_wake`` so the broadcast loop
-        # is never held on it. A mutation during the woken turn re-adds to
-        # ``_pending_wakes``.
-        for session_id in dirty_ids & self._pending_wakes:
-            session = self.storage.get_session(session_id)
-            if session is None or session.status in {
-                SessionStatus.EXITED,
-                SessionStatus.ERROR,
-            }:
-                self._pending_wakes.discard(session_id)
-                continue
-            if not self.wake_eligible(session):
-                continue  # still non-deliverable; wait for the next edge
-            self._pending_wakes.discard(session_id)
-            self._fire_wake(session_id)
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -4612,7 +4556,7 @@ class SessionRuntime:
         updated = self.storage.update_session(session_id, focus=enabled)
         self._publish_session_state(session_id)
         if not enabled:
-            self.focus.drain_deferred({session_id})
+            self.held.drain_deferred({session_id})
         return updated
 
     async def answer_question(
@@ -5582,10 +5526,7 @@ class SessionRuntime:
                 await self._broadcast_session_state(session_id)
             if list_dirty:
                 await self._broadcast_session_list()
-            # Deliver any owed wake whose session just reached a deliverable edge.
-            if self._pending_wakes:
-                self._drain_pending_wakes(dirty_ids)
-            self.focus.drain_deferred(dirty_ids)
+            self.held.drain_deferred(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
         if not self.settings.write_structured_log:

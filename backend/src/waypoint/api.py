@@ -674,7 +674,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.sender_session_id is None:
             session = await context.runtime.handle_input(session_id, request)
             return {"session": session.model_dump(mode="json")}
-        result = await context.runtime.focus.deliver(
+        result = await context.runtime.held.deliver(
             session_id, request, HeldMessageOrigin.AGENT
         )
         if isinstance(result, SessionRecord):
@@ -1891,7 +1891,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = await context.runtime.focus.release_all(session_id)
+        session = await context.runtime.held.release_all(session_id)
         return {"session": session.model_dump(mode="json")}
 
     @app.delete(
@@ -1902,14 +1902,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> None:
-        await context.runtime.focus.cancel_all(session_id)
+        await context.runtime.held.cancel_all(session_id)
 
     @app.post("/api/held-messages/{held_id}/release")
     async def release_held_message(
         held_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = await context.runtime.focus.release(held_id)
+        session = await context.runtime.held.release(held_id)
         return {"session": session.model_dump(mode="json")}
 
     @app.delete("/api/held-messages/{held_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1917,7 +1917,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         held_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> None:
-        await context.runtime.focus.cancel(held_id)
+        await context.runtime.held.cancel(held_id)
 
     @app.post("/api/sessions/attach-tmux")
     async def attach_tmux(
@@ -2348,7 +2348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ).model_dump(mode="json")
                     )
             await websocket.send_json(
-                context.runtime.focus.envelope(session_id).model_dump(mode="json")
+                context.runtime.held.envelope(session_id).model_dump(mode="json")
             )
             while True:
                 message = await queue.get()

@@ -118,7 +118,7 @@ The frontend launch form also reads `default_backend` and `default_cwd` from bac
 
 When an SSH target is selected, the launch form uses that target's `default_cwd` as the default remote path and lets you override it per launch, suggesting directories on the target as you type. Managed sessions now use the same `cwd` value for UI display and the actual SSH-side working directory.
 
-Remote sessions get the same workspace explorer, file finder, git changes, path completion, and skill completion as local ones. These run over SSH and need `python3` and `git` on the target; each operation is one SSH command, so configure `ControlMaster`/`ControlPath`/`ControlPersist` in `ssh_args` (as in the example config) to keep browsing responsive.
+Remote sessions have the same workspace explorer, file finder, git changes, path completion, and skill completion as local sessions. They run over SSH, one command per operation, and require `python3` and `git` on the target. `ControlMaster`/`ControlPath`/`ControlPersist` in `ssh_args` (see the example config) reuse one connection across operations.
 
 #### Frontend
 

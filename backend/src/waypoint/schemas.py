@@ -1586,6 +1586,14 @@ class HeldMessageOrigin(StrEnum):
     WAKE = "wake"
 
 
+class HeldReason(StrEnum):
+    """What releases a held message."""
+
+    FOCUS = "focus"  # the human
+    DIALOG = "dialog"  # the session's open dialog clearing
+    IDLE = "idle"  # the session going idle
+
+
 class HeldMessageRecord(BaseModel):
     id: str
     session_id: str
@@ -1598,8 +1606,7 @@ class HeldMessageRecord(BaseModel):
     items: list[SessionInputItem] | None = None
     attachments: list[str] = Field(default_factory=list)
     created_at: datetime
-    # Held for an open dialog; delivered once it clears.
-    auto_release: bool = False
+    hold_reason: HeldReason
 
 
 class ScheduledMessageStatus(StrEnum):

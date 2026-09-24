@@ -869,8 +869,9 @@ export interface SessionEnvelope {
 
 export type HeldMessageOrigin = "agent" | "schedule" | "wake";
 
-// A delivery a session in Focus is holding. Mirrors backend
-// schemas.HeldMessageRecord.
+export type HeldReason = "focus" | "dialog" | "idle";
+
+// A delivery a session is holding. Mirrors backend schemas.HeldMessageRecord.
 export interface HeldMessage {
   id: string;
   session_id: string;
@@ -880,8 +881,7 @@ export interface HeldMessage {
   text: string;
   attachments: string[];
   created_at: string;
-  // Held for an open dialog; sends once the human responds.
-  auto_release: boolean;
+  hold_reason: HeldReason;
 }
 
 export type SideQuestionStatus = "pending" | "answered" | "error";

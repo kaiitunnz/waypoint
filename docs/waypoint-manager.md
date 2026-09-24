@@ -117,11 +117,14 @@ does wake the manager — that is the intended signal — and reading answers vi
 
 Delivery is state-aware. A wake into `idle` or finished-turn `waiting_input` starts
 the turn immediately. A wake arriving during `running`, `starting`, `interrupted`,
-or approval-pending `waiting_input` is marked pending and fires on the next
-transition into a deliverable state, so it never interrupts an active turn or
-injects while an approval is pending. A wake into `exited` or `error` is dropped — a
-stopped session is not resurrected by a board post; an explicit resume, or a pending
-liveness self-wake (which delivers through the input path), recovers it.
+or approval-pending `waiting_input` is held in the session's held messages and fires
+on the next transition into a deliverable state, so it never interrupts an active
+turn or injects while an approval is pending. A session holds at most one wake; a
+held wake survives a backend restart, and one whose session exits fires after the
+session is resumed. A wake held while the session is in Focus waits for the human to
+release it. A wake into `exited` or `error` is dropped — a stopped session is not
+resurrected by a board post; an explicit resume, or a pending liveness self-wake
+(which delivers through the input path), recovers it.
 
 `waypoint board wait` blocks until a watched channel changes and is an interactive
 convenience for a human or a one-off script. It is not the manager's loop driver;
@@ -424,11 +427,10 @@ transport:
   Only a real operation failure (the backend answered and the operation failed)
   consumes a budget.
 - Events that arrive while the backend is down do not wake the manager (the wake
-  driver is the backend and the pending-wake set is in-memory). They sit durably on
-  the board. While a ticket is in flight, the pending liveness self-wake (durable,
-  re-fired on restart) re-drains and picks them up; a fully-idle manager arms no
-  self-wake, so an event posted during downtime waits for the next live board or inbox
-  change.
+  driver is the backend). They sit durably on the board. While a ticket is in
+  flight, the pending liveness self-wake (durable, re-fired on restart) re-drains
+  and picks them up; a fully-idle manager arms no self-wake, so an event posted
+  during downtime waits for the next live board or inbox change.
 
 ### Teardown
 

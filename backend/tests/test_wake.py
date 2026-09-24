@@ -4,10 +4,12 @@ from typing import Any
 
 import pytest
 
-from waypoint.runtime import WAKE_INPUT_TEXT, SessionRuntime
+from waypoint.runtime import WAKE_INPUT_TEXT, PreparedInput, SessionRuntime
 from waypoint.schemas import (
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    HeldMessageOrigin,
+    HeldReason,
     InboxApprovalBlockInput,
     InboxBlockType,
     InboxMarkdownBlockInput,
@@ -69,13 +71,11 @@ class _ApprovalStub:
 def _record_wakes(runtime: SessionRuntime, monkeypatch) -> list[tuple[str, str]]:
     calls: list[tuple[str, str]] = []
 
-    async def fake_handle_input(
-        session_id: str, request: SessionInputRequest
-    ) -> SessionRecord:
-        calls.append((session_id, request.text))
-        return runtime.storage.get_session(session_id)  # type: ignore[return-value]
+    async def fake_dispatch(prepared: PreparedInput) -> SessionRecord:
+        calls.append((prepared.session.id, prepared.request.text))
+        return prepared.session
 
-    monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
+    monkeypatch.setattr(runtime, "dispatch_input", fake_dispatch)
     return calls
 
 
@@ -84,13 +84,39 @@ def _register(runtime: SessionRuntime, session_id: str, **kwargs: Any) -> None:
 
 
 async def _flush_wakes(runtime: SessionRuntime) -> None:
-    # Wake delivery now runs in tracked background tasks (``_fire_wake``); a
-    # dispatch task can spawn a delivery task, so drain to a fixpoint. The
-    # ``sleep(0)`` lets each task's done-callback prune ``_wake_tasks`` before
-    # the next round so the loop terminates.
-    while runtime._wake_tasks:
-        await asyncio.gather(*list(runtime._wake_tasks))
+    # A dispatch task spawns delivery tasks, and a hold kicks a drain task.
+    while runtime._wake_tasks or runtime.held._tasks:
+        await asyncio.gather(*list(runtime._wake_tasks | runtime.held._tasks))
         await asyncio.sleep(0)
+
+
+async def _post(runtime: SessionRuntime) -> None:
+    await runtime._dispatch_subscription_wakes(
+        channel="tickets", is_inbox=False, actor_session_id=None
+    )
+    await _flush_wakes(runtime)
+
+
+async def _turn_ends(runtime: SessionRuntime, session_id: str) -> None:
+    runtime.storage.update_session(session_id, status=SessionStatus.IDLE)
+    runtime.held.drain({session_id})
+    await _flush_wakes(runtime)
+
+
+def _held(runtime: SessionRuntime, session_id: str) -> list[tuple[str, HeldReason]]:
+    return [
+        (m.origin, m.hold_reason)
+        for m in runtime.storage.list_held_messages(session_id)
+    ]
+
+
+def _subscriber(
+    runtime: SessionRuntime, status: SessionStatus = SessionStatus.IDLE
+) -> None:
+    runtime.storage.create_session(
+        make_session(runtime.settings, "codex-sub", status=status)
+    )
+    _register(runtime, "codex-sub", channel_globs=["tickets"])
 
 
 @pytest.mark.asyncio
@@ -448,83 +474,67 @@ async def test_read_of_answered_item_does_not_rewake_owner(
 
 
 @pytest.mark.asyncio
-async def test_wake_in_flight_defers_concurrent_second(tmp_path, monkeypatch) -> None:
+async def test_concurrent_wakes_never_overlap(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(make_session(runtime.settings, "codex-sub"))
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
-
-    # A slow delivery holds the in-flight slot; a second fire while it runs is
-    # deferred to ``_pending_wakes`` rather than concurrently injected.
+    _subscriber(runtime)
     started = asyncio.Event()
     release = asyncio.Event()
+    in_flight: list[str] = []
     calls: list[str] = []
 
-    async def slow_handle_input(
-        session_id: str, request: SessionInputRequest
-    ) -> SessionRecord:
-        calls.append(session_id)
+    async def slow_dispatch(prepared: PreparedInput) -> SessionRecord:
+        assert not in_flight
+        in_flight.append(prepared.session.id)
+        calls.append(prepared.session.id)
+        runtime.storage.update_session(
+            prepared.session.id, status=SessionStatus.RUNNING
+        )
         started.set()
         await release.wait()
-        return runtime.storage.get_session(session_id)  # type: ignore[return-value]
+        in_flight.clear()
+        return prepared.session
 
-    monkeypatch.setattr(runtime, "handle_input", slow_handle_input)
+    monkeypatch.setattr(runtime, "dispatch_input", slow_dispatch)
 
-    runtime._fire_wake("codex-sub")
+    runtime._wake("codex-sub")
     await started.wait()
-    assert runtime._wake_in_flight == {"codex-sub"}
-
-    # Second fire while the first is in flight: deferred, not a second send.
-    runtime._fire_wake("codex-sub")
-    assert runtime._pending_wakes == {"codex-sub"}
-    assert calls == ["codex-sub"]
-
+    runtime._wake("codex-sub")
     release.set()
     await _flush_wakes(runtime)
-    # The deferred wake is delivered once the first completes — not stranded.
+    assert calls == ["codex-sub"]
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
+
+    await _turn_ends(runtime, "codex-sub")
     assert calls == ["codex-sub", "codex-sub"]
-    assert runtime._pending_wakes == set()
-    assert runtime._wake_in_flight == set()
+    assert _held(runtime, "codex-sub") == []
 
 
 @pytest.mark.asyncio
-async def test_deferred_wake_survives_failed_in_flight_delivery(
-    tmp_path, monkeypatch
-) -> None:
+async def test_failed_wake_does_not_strand_a_later_one(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(make_session(runtime.settings, "codex-sub"))
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
-
+    _subscriber(runtime)
     started = asyncio.Event()
     gate = asyncio.Event()
     calls: list[str] = []
-    attempt = {"n": 0}
 
-    async def flaky_handle_input(
-        session_id: str, request: SessionInputRequest
-    ) -> SessionRecord:
-        calls.append(session_id)
-        if attempt["n"] == 0:
-            attempt["n"] += 1
+    async def flaky_dispatch(prepared: PreparedInput) -> SessionRecord:
+        calls.append(prepared.session.id)
+        if len(calls) == 1:
             started.set()
             await gate.wait()
             raise RuntimeError("transient transport error")
-        return runtime.storage.get_session(session_id)  # type: ignore[return-value]
+        return prepared.session
 
-    monkeypatch.setattr(runtime, "handle_input", flaky_handle_input)
+    monkeypatch.setattr(runtime, "dispatch_input", flaky_dispatch)
 
-    runtime._fire_wake("codex-sub")  # first delivery — will fail
+    runtime._wake("codex-sub")
     await started.wait()
-    runtime._fire_wake("codex-sub")  # deferred behind the in-flight failure
-    assert runtime._pending_wakes == {"codex-sub"}
-
-    # The in-flight delivery now raises without changing the session's status,
-    # so no broadcast edge is produced. The parked wake must not be stranded:
-    # it is re-driven from the failed delivery's ``finally``.
+    runtime._wake("codex-sub")
     gate.set()
     await _flush_wakes(runtime)
+
     assert calls == ["codex-sub", "codex-sub"]
-    assert runtime._pending_wakes == set()
-    assert runtime._wake_in_flight == set()
+    assert _held(runtime, "codex-sub") == []
 
 
 @pytest.mark.asyncio
@@ -543,65 +553,41 @@ async def test_board_wake_ignores_inbox_only_subscriber(tmp_path, monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_running_subscriber_burst_coalesces_and_fires_on_edge(
+async def test_running_subscriber_burst_holds_one_wake_until_idle(
     tmp_path, monkeypatch
 ) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(
-        make_session(runtime.settings, "codex-sub", status=SessionStatus.RUNNING)
-    )
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
+    _subscriber(runtime, SessionStatus.RUNNING)
     calls = _record_wakes(runtime, monkeypatch)
 
-    # Two matching posts while RUNNING: deferred, coalesced to a single owed wake.
-    await runtime._dispatch_subscription_wakes(
-        channel="tickets", is_inbox=False, actor_session_id=None
-    )
-    await runtime._dispatch_subscription_wakes(
-        channel="tickets", is_inbox=False, actor_session_id=None
-    )
+    await _post(runtime)
+    await _post(runtime)
     assert calls == []
-    assert runtime._pending_wakes == {"codex-sub"}
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
 
-    # Turn ends → deliverable edge → exactly one wake, and the debt is cleared.
-    runtime.storage.update_session("codex-sub", status=SessionStatus.IDLE)
-    runtime._drain_pending_wakes({"codex-sub"})
-    assert runtime._pending_wakes == set()
-    await _flush_wakes(runtime)
+    await _turn_ends(runtime, "codex-sub")
     assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+    assert _held(runtime, "codex-sub") == []
 
 
 @pytest.mark.asyncio
-async def test_mid_approval_defers_then_fires_when_approval_clears(
+async def test_mid_approval_holds_then_fires_when_approval_clears(
     tmp_path, monkeypatch
 ) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(
-        make_session(runtime.settings, "codex-sub", status=SessionStatus.WAITING_INPUT)
-    )
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
+    _subscriber(runtime, SessionStatus.WAITING_INPUT)
     calls = _record_wakes(runtime, monkeypatch)
-
     stub = _ApprovalStub(pending=True)
     monkeypatch.setattr(runtime, "transport_for", lambda session: stub)
 
-    # WAITING_INPUT while an approval is outstanding: never inject; defer.
-    await runtime._dispatch_subscription_wakes(
-        channel="tickets", is_inbox=False, actor_session_id=None
-    )
-    assert calls == []
-    assert runtime._pending_wakes == {"codex-sub"}
-
-    # Draining while the approval is still pending must not deliver.
-    runtime._drain_pending_wakes({"codex-sub"})
+    await _post(runtime)
+    runtime.held.drain({"codex-sub"})
     await _flush_wakes(runtime)
     assert calls == []
-    assert runtime._pending_wakes == {"codex-sub"}
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
 
-    # Approval resolved (still WAITING_INPUT, now the finished-turn state).
     stub.pending = False
-    runtime._drain_pending_wakes({"codex-sub"})
-    assert runtime._pending_wakes == set()
+    runtime.held.drain({"codex-sub"})
     await _flush_wakes(runtime)
     assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
 
@@ -612,42 +598,150 @@ async def test_stopped_subscriber_is_not_resurrected(
     tmp_path, monkeypatch, status
 ) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(
-        make_session(runtime.settings, "codex-sub", status=status)
-    )
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
+    _subscriber(runtime, status)
     calls = _record_wakes(runtime, monkeypatch)
 
-    await runtime._dispatch_subscription_wakes(
-        channel="tickets", is_inbox=False, actor_session_id=None
-    )
-    await _flush_wakes(runtime)
+    await _post(runtime)
 
     assert calls == []
-    assert runtime._pending_wakes == set()
+    assert _held(runtime, "codex-sub") == []
 
 
 @pytest.mark.asyncio
-async def test_pending_wake_dropped_when_session_stops(tmp_path, monkeypatch) -> None:
+async def test_held_wake_outlives_an_exit_and_fires_after_resume(
+    tmp_path, monkeypatch
+) -> None:
     runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(
-        make_session(runtime.settings, "codex-sub", status=SessionStatus.RUNNING)
-    )
-    _register(runtime, "codex-sub", channel_globs=["tickets"])
+    _subscriber(runtime, SessionStatus.RUNNING)
     calls = _record_wakes(runtime, monkeypatch)
+    await _post(runtime)
 
+    runtime.storage.update_session("codex-sub", status=SessionStatus.EXITED)
+    runtime.held.drain({"codex-sub"})
+    await _flush_wakes(runtime)
+    assert calls == []
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
+
+    await _turn_ends(runtime, "codex-sub")
+    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_held_wake_survives_a_restart(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime, SessionStatus.RUNNING)
+    _record_wakes(runtime, monkeypatch)
+    await _post(runtime)
+
+    reopened = SessionRuntime(runtime.settings, runtime.storage)
+    reopened.held.start()
+    calls = _record_wakes(reopened, monkeypatch)
+    await _turn_ends(reopened, "codex-sub")
+
+    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+
+
+@pytest.mark.asyncio
+async def test_held_wake_never_blocks_an_agent_send(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime, SessionStatus.RUNNING)
+    calls = _record_wakes(runtime, monkeypatch)
+    await _post(runtime)
+
+    await runtime.held.deliver(
+        "codex-sub", SessionInputRequest(text="hi"), HeldMessageOrigin.AGENT
+    )
+
+    assert calls == [("codex-sub", "hi")]
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
+
+
+@pytest.mark.asyncio
+async def test_automatic_wake_takes_over_a_leftover_focus_wake(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime)
+    calls = _record_wakes(runtime, monkeypatch)
+    runtime.set_focus("codex-sub", True)
+    await _post(runtime)
+    runtime.set_focus("codex-sub", False)
+    runtime.storage.update_session("codex-sub", status=SessionStatus.RUNNING)
+
+    await _post(runtime)
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
+
+    await _turn_ends(runtime, "codex-sub")
+    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+    assert _held(runtime, "codex-sub") == []
+
+
+@pytest.mark.asyncio
+async def test_focus_turned_on_during_a_send_holds_the_next_wake(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def slow_dispatch(prepared: PreparedInput) -> SessionRecord:
+        calls.append(prepared.request.text)
+        started.set()
+        await release.wait()
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", slow_dispatch)
     await runtime._dispatch_subscription_wakes(
         channel="tickets", is_inbox=False, actor_session_id=None
     )
-    assert runtime._pending_wakes == {"codex-sub"}
-
-    # The session dies before ever reaching a deliverable edge: drop the debt,
-    # never resurrect.
-    runtime.storage.update_session("codex-sub", status=SessionStatus.EXITED)
-    runtime._drain_pending_wakes({"codex-sub"})
+    await started.wait()
+    runtime._wake("codex-sub")
+    await asyncio.sleep(0)
+    runtime.set_focus("codex-sub", True)
+    release.set()
     await _flush_wakes(runtime)
-    assert calls == []
-    assert runtime._pending_wakes == set()
+
+    assert calls == [WAKE_INPUT_TEXT]
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.FOCUS)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("focus", [True, False])
+async def test_direct_wake_absorbs_the_held_one(tmp_path, monkeypatch, focus) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime)
+    calls = _record_wakes(runtime, monkeypatch)
+    if focus:
+        runtime.set_focus("codex-sub", True)
+    else:
+        runtime.storage.update_session("codex-sub", status=SessionStatus.RUNNING)
+    await _post(runtime)
+    runtime.set_focus("codex-sub", False)
+    runtime.storage.update_session("codex-sub", status=SessionStatus.IDLE)
+
+    await _post(runtime)
+
+    assert calls == [("codex-sub", WAKE_INPUT_TEXT)]
+    assert _held(runtime, "codex-sub") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_direct_wake_keeps_the_held_one(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    _subscriber(runtime, SessionStatus.RUNNING)
+    await _post(runtime)
+    runtime.storage.update_session("codex-sub", status=SessionStatus.IDLE)
+
+    async def failing_dispatch(prepared: PreparedInput) -> SessionRecord:
+        raise RuntimeError("transport down")
+
+    monkeypatch.setattr(runtime, "dispatch_input", failing_dispatch)
+    runtime._wake("codex-sub")
+    await asyncio.gather(*list(runtime._wake_tasks))
+
+    assert _held(runtime, "codex-sub") == [(HeldMessageOrigin.WAKE, HeldReason.IDLE)]
 
 
 @pytest.mark.asyncio

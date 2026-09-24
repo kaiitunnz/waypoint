@@ -20,6 +20,7 @@ from waypoint.schemas import (
     EventRecord,
     HeldMessageOrigin,
     HeldMessageRecord,
+    HeldReason,
     IdleMessageBatchMode,
     InboxApprovalAnswer,
     InboxApprovalBlock,
@@ -579,6 +580,7 @@ class Storage:
         # shape and adopt the one legacy manager under a minted id.
         self._ensure_column("manager_tickets", "manager_id", "TEXT NOT NULL DEFAULT ''")
         self._migrate_manager_config_to_multi()
+        self._migrate_held_auto_release()
         # Indexes for columns filtered on by the runtime/scheduler. Created
         # after the ALTER TABLE block above so ``spawner_session_id`` exists on
         # databases that predate it.
@@ -2972,19 +2974,32 @@ class Storage:
 
     @_synchronized
     def create_held_message(self, record: HeldMessageRecord) -> bool:
-        """Insert ``record`` while its session exists. A wake is stored at most
-        once per session; a second wake is dropped. Returns whether it was
-        stored."""
+        """Insert ``record`` while its session exists. A session holds at most
+        one wake: a later wake is dropped, except that an automatic wake turns
+        a held Focus wake automatic. Returns whether the queue changed."""
         if self.get_session(record.session_id) is None:
             return False
-        if (
-            record.origin == HeldMessageOrigin.WAKE
-            and self.connection.execute(
-                "SELECT 1 FROM held_messages WHERE session_id = ? AND origin = ?",
+        if record.origin == HeldMessageOrigin.WAKE:
+            held = self.connection.execute(
+                "SELECT id, body FROM held_messages WHERE session_id = ? AND origin = ?",
                 (record.session_id, HeldMessageOrigin.WAKE),
             ).fetchone()
-        ):
-            return False
+            if held is not None:
+                existing = HeldMessageRecord.model_validate_json(held["body"])
+                if (
+                    record.hold_reason is HeldReason.FOCUS
+                    or existing.hold_reason is not HeldReason.FOCUS
+                ):
+                    return False
+                promoted = existing.model_copy(
+                    update={"hold_reason": record.hold_reason}
+                )
+                self.connection.execute(
+                    "UPDATE held_messages SET body = ? WHERE id = ?",
+                    (promoted.model_dump_json(), held["id"]),
+                )
+                self.connection.commit()
+                return True
         self.connection.execute(
             "INSERT INTO held_messages (id, session_id, origin, created_at, body) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -3014,12 +3029,33 @@ class Storage:
         return {row["id"] for row in rows}
 
     @_synchronized
-    def auto_release_session_ids(self) -> set[str]:
+    def auto_held_session_ids(self) -> set[str]:
         rows = self.connection.execute(
             "SELECT DISTINCT session_id FROM held_messages "
-            "WHERE json_extract(body, '$.auto_release') = 1"
+            "WHERE json_extract(body, '$.hold_reason') != ?",
+            (HeldReason.FOCUS,),
         ).fetchall()
         return {row["session_id"] for row in rows}
+
+    @_synchronized
+    def has_held_messages(self, session_id: str, reason: HeldReason) -> bool:
+        return (
+            self.connection.execute(
+                "SELECT 1 FROM held_messages WHERE session_id = ? "
+                "AND json_extract(body, '$.hold_reason') = ?",
+                (session_id, reason),
+            ).fetchone()
+            is not None
+        )
+
+    @_synchronized
+    def delete_held_wake(self, session_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM held_messages WHERE session_id = ? AND origin = ?",
+            (session_id, HeldMessageOrigin.WAKE),
+        )
+        self.connection.commit()
+        return bool(cursor.rowcount)
 
     @_synchronized
     def take_held_message(self, held_id: str) -> HeldMessageRecord | None:
@@ -3727,6 +3763,22 @@ class Storage:
         if any(row["name"] == column for row in rows):
             return
         self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    def _migrate_held_auto_release(self) -> None:
+        """Replace the legacy ``auto_release`` flag with ``hold_reason``."""
+        self.connection.execute("""
+            UPDATE held_messages SET body = json_set(
+                json_remove(body, '$.auto_release'),
+                '$.hold_reason',
+                CASE
+                    WHEN json_extract(body, '$.auto_release') = 1 AND origin = 'wake'
+                        THEN 'idle'
+                    WHEN json_extract(body, '$.auto_release') = 1 THEN 'dialog'
+                    ELSE 'focus'
+                END
+            )
+            WHERE json_extract(body, '$.hold_reason') IS NULL
+            """)
 
     def _migrate_manager_config_to_multi(self) -> None:
         """Rebuild the legacy single-row ``manager_config`` (``id = 1``) into the

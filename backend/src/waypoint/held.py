@@ -1,8 +1,8 @@
 """Held delivery for agent sends, scheduled firings, and board/inbox wakes.
 
-A focused session holds them until the human releases or cancels them. A
-session waiting on a dialog holds them too, and delivers them on its own once
-the dialog clears."""
+Each held message records what releases it: the human (Focus), the session's
+open dialog clearing, or the session going idle (wakes). Focus pauses every
+automatic release."""
 
 import asyncio
 import logging
@@ -17,6 +17,7 @@ from fastapi import HTTPException, status
 from waypoint.schemas import (
     HeldMessageOrigin,
     HeldMessageRecord,
+    HeldReason,
     SessionEnvelope,
     SessionInputRequest,
     SessionRecord,
@@ -27,7 +28,7 @@ from waypoint.transports import InputBlockedError
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
-log = logging.getLogger("waypoint.focus")
+log = logging.getLogger("waypoint.held")
 
 # A pane-only block ends without a status edge, so delivery re-checks on this
 # cadence.
@@ -37,7 +38,7 @@ _UNDELIVERABLE = frozenset(
 )
 
 
-class FocusGate:
+class HeldQueue:
     def __init__(self, runtime: "SessionRuntime") -> None:
         self._runtime = runtime
         # Claimed held id -> session id. A cancel before dispatch stops the
@@ -47,15 +48,28 @@ class FocusGate:
         self._dispatching: set[str] = set()
         # Serializes the hold-or-deliver decision so held items keep their order.
         self._send_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        # Sessions with auto-release items, and their drain bookkeeping.
-        self._deferred: set[str] = set()
+        # Sessions with automatic items, and their drain bookkeeping.
+        self._auto_held: set[str] = set()
         self._draining: set[str] = set()
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._stopped = False
 
     def start(self) -> None:
-        self._deferred = self._runtime.storage.auto_release_session_ids()
+        self._auto_held = self._runtime.storage.auto_held_session_ids()
+
+    async def stop(self) -> None:
+        self._stopped = True
+        for handle in self._retries.values():
+            handle.cancel()
+        self._retries.clear()
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
 
     async def deliver(
         self,
@@ -63,25 +77,37 @@ class FocusGate:
         request: SessionInputRequest,
         origin: HeldMessageOrigin,
     ) -> SessionRecord | HeldMessageRecord:
-        session = self._runtime.get_session(session_id)
-        if session.focus:
-            return await self._hold(session_id, request, origin, auto_release=False)
+        if self._runtime.get_session(session_id).focus:
+            return await self._hold(session_id, request, origin, HeldReason.FOCUS)
+        wake = origin is HeldMessageOrigin.WAKE
         async with self._send_locks[session_id]:
-            # Queue behind earlier auto-held items so delivery keeps its order.
-            if session_id not in self._deferred:
+            session = self._runtime.get_session(session_id)
+            if session.focus:
+                return await self._hold(session_id, request, origin, HeldReason.FOCUS)
+            if self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
-                    return await self._runtime.handle_input(session_id, request)
-            record = await self._hold(session_id, request, origin, auto_release=True)
-        self._deferred.add(session_id)
+                    delivered = await self._runtime.handle_input(session_id, request)
+                    if wake and self._runtime.storage.delete_held_wake(session_id):
+                        await self._publish(session_id)
+                    return delivered
+            reason = HeldReason.IDLE if wake else HeldReason.DIALOG
+            record = await self._hold(session_id, request, origin, reason)
+        self._auto_held.add(session_id)
         self.kick(session_id)
         return record
+
+    def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:
+        # Queue behind items waiting on a dialog so delivery keeps its order.
+        if self._runtime.storage.has_held_messages(session.id, HeldReason.DIALOG):
+            return False
+        return not wake or self._runtime.wake_eligible(session)
 
     async def _hold(
         self,
         session_id: str,
         request: SessionInputRequest,
         origin: HeldMessageOrigin,
-        auto_release: bool,
+        hold_reason: HeldReason,
     ) -> HeldMessageRecord:
         self._runtime.resolve_attachments(session_id, request.attachments)
         record = HeldMessageRecord(
@@ -96,7 +122,7 @@ class FocusGate:
             items=request.items,
             attachments=list(request.attachments or []),
             created_at=datetime.now(UTC),
-            auto_release=auto_release,
+            hold_reason=hold_reason,
         )
         self._pin(record)
         if self._runtime.storage.create_held_message(record):
@@ -148,12 +174,14 @@ class FocusGate:
             self._unpin(record)
         await self._publish(session_id)
 
-    def drain_deferred(self, session_ids: set[str]) -> None:
-        """Deliver auto-release items for sessions that reached a new state."""
-        for session_id in session_ids & self._deferred:
+    def drain(self, session_ids: set[str]) -> None:
+        """Deliver automatic items for sessions that reached a new state."""
+        for session_id in session_ids & self._auto_held:
             self.kick(session_id)
 
     def kick(self, session_id: str) -> None:
+        if self._stopped:
+            return
         if session_id in self._draining:
             self._rerun.add(session_id)
             return
@@ -166,7 +194,7 @@ class FocusGate:
         try:
             while True:
                 self._rerun.discard(session_id)
-                await self._release_deferred(session_id)
+                await self._release_auto(session_id)
                 if session_id not in self._rerun:
                     return
         except Exception:
@@ -174,23 +202,23 @@ class FocusGate:
         finally:
             self._draining.discard(session_id)
 
-    async def _release_deferred(self, session_id: str) -> None:
+    async def _release_auto(self, session_id: str) -> None:
         session = self._runtime.storage.get_session(session_id)
         if session is None:
-            self._deferred.discard(session_id)
+            self._auto_held.discard(session_id)
             return
         if session.focus or session.status in _UNDELIVERABLE:
             return
         transport = self._runtime.transport_for(session)
         async with self._send_locks[session_id]:
             for held in self._runtime.storage.list_held_messages(session_id):
-                if not held.auto_release:
+                if held.hold_reason is HeldReason.FOCUS:
                     continue
                 current = self._runtime.storage.get_session(session_id)
-                if current is None:
+                if current is None or current.focus:
                     break
                 session = current
-                if held.origin is HeldMessageOrigin.WAKE and not (
+                if held.hold_reason is HeldReason.IDLE and not (
                     self._runtime.wake_eligible(session)
                 ):
                     continue
@@ -211,14 +239,14 @@ class FocusGate:
                     log.exception(
                         "held message delivery failed", extra={"held": record.id}
                     )
-        if not any(
-            held.auto_release
+        if all(
+            held.hold_reason is HeldReason.FOCUS
             for held in self._runtime.storage.list_held_messages(session_id)
         ):
-            self._deferred.discard(session_id)
+            self._auto_held.discard(session_id)
 
     def _retry_later(self, session_id: str) -> None:
-        if session_id in self._retries:
+        if self._stopped or session_id in self._retries:
             return
 
         def fire() -> None:
@@ -239,10 +267,10 @@ class FocusGate:
             attachments=record.attachments or None,
         )
         try:
-            await self._publish(record.session_id)
             try:
+                await self._publish(record.session_id)
                 prepared = await self._runtime.prepare_input(record.session_id, request)
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 # Nothing reached the transcript: put it back.
                 self._put_back(record)
                 raise
@@ -274,8 +302,8 @@ class FocusGate:
         )
         if not restored:
             self._unpin(record)
-        elif record.auto_release:
-            self._deferred.add(record.session_id)
+        elif record.hold_reason is not HeldReason.FOCUS:
+            self._auto_held.add(record.session_id)
 
     def _title_of(self, session_id: str | None) -> str | None:
         sender = self._runtime.storage.get_session(session_id) if session_id else None

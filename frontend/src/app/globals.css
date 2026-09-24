@@ -11975,7 +11975,7 @@ html[data-theme="light"] .held-dock-scrim {
 }
 
 .held-dock-when {
-  flex: none;
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 6px;

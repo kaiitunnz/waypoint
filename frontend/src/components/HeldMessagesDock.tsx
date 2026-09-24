@@ -158,9 +158,6 @@ export function HeldMessagesDock({
                 <div key={m.id} className="held-dock-item">
                   <div className="held-dock-item-meta">
                     <span className="held-dock-origin">{originLabel(m)}</span>
-                    {m.auto_release && !focus ? (
-                      <span className="held-dock-when">Sends after you respond</span>
-                    ) : null}
                     <span className="held-dock-age">{formatRelativeTime(m.created_at)}</span>
                     <span className="held-dock-item-actions">
                       <button
@@ -179,6 +176,9 @@ export function HeldMessagesDock({
                       </button>
                     </span>
                   </div>
+                  {m.auto_release && !focus ? (
+                    <span className="held-dock-when">Sends after you respond</span>
+                  ) : null}
                   <ExpandableText
                     className="held-dock-item-text"
                     text={messageText(m)}

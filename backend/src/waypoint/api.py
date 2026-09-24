@@ -35,6 +35,7 @@ from waypoint.backends.account_profiles import (
     redacted_profile_metadata,
 )
 from waypoint.backends.base import TerminalAppearance, TerminalAppearanceResolving
+from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
     Osc52Extractor,
@@ -245,6 +246,19 @@ def _default_preset_id(context: "AppContext") -> str | None:
 def _usage_provider_options(context: "AppContext") -> list[UsageProviderOption]:
     providers = context.runtime.usage_providers
     return providers.options() if providers is not None else []
+
+
+def _pane_accepts_mouse(caps: BackendCapabilities, handshake: Any) -> bool:
+    # A key-injection pane is unlocked for typing and mouse input per
+    # connection by ``interactive: true`` on the client's ``hello`` frame.
+    if caps.terminal_interactive:
+        return True
+    return (
+        caps.terminal_key_injection
+        and isinstance(handshake, dict)
+        and handshake.get("type") == "hello"
+        and handshake.get("interactive") is True
+    )
 
 
 class AppContext:
@@ -2464,8 +2478,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # inconsistently from native terminals.
         # Read-only panes can't send mouse input, and mirroring mouse modes
         # would make xterm swallow wheel events (blocking scroll), so only
-        # forward them for interactive transports.
-        renderer = make_renderer(cols, rows, forward_mouse_modes=terminal_interactive)
+        # forward them to panes that accept mouse input.
+        renderer = make_renderer(
+            cols, rows, forward_mouse_modes=_pane_accepts_mouse(caps, handshake)
+        )
 
         # Seed pyte with the pane's current ANSI snapshot so the renderer
         # has the same starting state the user would see if they ran

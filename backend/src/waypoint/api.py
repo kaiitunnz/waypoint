@@ -248,9 +248,7 @@ def _usage_provider_options(context: "AppContext") -> list[UsageProviderOption]:
     return providers.options() if providers is not None else []
 
 
-def _pane_accepts_mouse(caps: BackendCapabilities, handshake: Any) -> bool:
-    # ``interactive: true`` on the client's ``hello`` frame opts a key-injection
-    # pane into mouse-mode forwarding for that connection.
+def _forwards_mouse_modes(caps: BackendCapabilities, handshake: Any) -> bool:
     if caps.terminal_interactive:
         return True
     return (
@@ -2476,11 +2474,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # has to interpret DECSTBM scroll regions, partial sync-output
         # frames, or other sequences browser emulators handle
         # inconsistently from native terminals.
-        # Read-only panes can't send mouse input, and mirroring mouse modes
-        # would make xterm swallow wheel events (blocking scroll), so only
-        # forward them to panes that accept mouse input.
+        # Mirrored mouse modes turn off xterm's plain-drag selection, so only
+        # panes that accept mouse input get them.
         renderer = make_renderer(
-            cols, rows, forward_mouse_modes=_pane_accepts_mouse(caps, handshake)
+            cols, rows, forward_mouse_modes=_forwards_mouse_modes(caps, handshake)
         )
 
         # Seed pyte with the pane's current ANSI snapshot so the renderer

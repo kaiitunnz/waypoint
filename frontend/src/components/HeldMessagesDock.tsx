@@ -73,9 +73,13 @@ export function HeldMessagesDock({
   }, [expanded]);
 
   const latest = messages[count - 1];
+  const awaiting = !focus && count > 0 && messages.every((m) => m.auto_release);
+  const state = focus ? "Focus" : awaiting ? "After you respond" : "Focus off";
 
   return (
-    <div className={`held-dock${expanded ? " expanded" : ""}`}>
+    <div
+      className={`held-dock${expanded ? " expanded" : ""}${awaiting ? " awaiting" : ""}`}
+    >
       {expanded ? (
         <>
           <button
@@ -154,6 +158,9 @@ export function HeldMessagesDock({
                 <div key={m.id} className="held-dock-item">
                   <div className="held-dock-item-meta">
                     <span className="held-dock-origin">{originLabel(m)}</span>
+                    {m.auto_release && !focus ? (
+                      <span className="held-dock-when">Sends after you respond</span>
+                    ) : null}
                     <span className="held-dock-age">{formatRelativeTime(m.created_at)}</span>
                     <span className="held-dock-item-actions">
                       <button
@@ -194,7 +201,7 @@ export function HeldMessagesDock({
           <span className="held-dock-glyph" aria-hidden>
             ◎
           </span>
-          <span className="held-dock-state">{focus ? "Focus" : "Focus off"}</span>
+          <span className="held-dock-state">{state}</span>
           <span className="held-dock-label">
             {latest ? messageText(latest) : "Holding messages from agents, schedules, and wake-ups"}
           </span>

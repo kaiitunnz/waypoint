@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { usePopoverAnchor } from "@/lib/use-popover-anchor";
@@ -14,13 +14,42 @@ interface FocusPillProps {
   // Terminal placement: the panel drops below the trigger and is portaled out
   // of ``.session-terminal``'s ``overflow: hidden`` box, as the usage panel is.
   anchored?: boolean;
+  // Receives keyboard focus once a turn-off unmounts the pill from under it.
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function FocusPill({ onTurnOff, busy = false, anchored = false }: FocusPillProps) {
+export function FocusPill({
+  onTurnOff,
+  busy = false,
+  anchored = false,
+  returnFocusRef,
+}: FocusPillProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const offRef = useRef<HTMLButtonElement | null>(null);
+  const turnOffFocusedRef = useRef(false);
+
+  useEffect(() => {
+    const turnOffFocused = turnOffFocusedRef;
+    const focusTarget = returnFocusRef?.current;
+    return () => {
+      if (!turnOffFocused.current) return;
+      // Defer past the DOM removal that drops focus to <body>.
+      window.setTimeout(() => {
+        if (document.activeElement === document.body || !document.activeElement) {
+          focusTarget?.focus();
+        }
+      });
+    };
+  }, [returnFocusRef]);
+
+  // The portaled panel sits at the end of <body>, far from the trigger in tab
+  // order, so move focus into it.
+  useEffect(() => {
+    if (open && anchored) offRef.current?.focus();
+  }, [open, anchored]);
 
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
@@ -80,10 +109,14 @@ export function FocusPill({ onTurnOff, busy = false, anchored = false }: FocusPi
         held-messages dock until you release them.
       </p>
       <button
+        ref={offRef}
         type="button"
         className="focus-pill-off"
         disabled={busy}
-        onClick={() => void onTurnOff()}
+        onClick={() => {
+          turnOffFocusedRef.current = document.activeElement === offRef.current;
+          void onTurnOff();
+        }}
       >
         {busy ? "Turning off…" : "Turn off Focus"}
       </button>

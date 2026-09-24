@@ -7,6 +7,7 @@ import {
   ReactNode,
   SetStateAction,
   useCallback,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -162,6 +163,7 @@ export function SessionTerminalView({
     };
   }
 
+  const termMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const closeMenu = () => setTermMenuOpen(false);
   const fireFromMenu = (cb: () => void | Promise<void>) => {
     closeMenu();
@@ -212,7 +214,12 @@ export function SessionTerminalView({
           anchored
         />
         {focus ? (
-          <FocusPill anchored onTurnOff={onToggleFocus} busy={focusBusy} />
+          <FocusPill
+            anchored
+            onTurnOff={onToggleFocus}
+            busy={focusBusy}
+            returnFocusRef={termMenuTriggerRef}
+          />
         ) : null}
         <span className="term-bar-spacer" />
         {interactive && terminalDims ? (
@@ -241,6 +248,7 @@ export function SessionTerminalView({
         ) : null}
         <div className="term-bar-overflow" ref={termMenuWrapRef}>
           <button
+            ref={termMenuTriggerRef}
             type="button"
             className={`composer-overflow-trigger ${termMenuOpen ? "open" : ""}`}
             aria-label="More actions"

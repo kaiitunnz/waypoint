@@ -2850,6 +2850,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
+  const tuneTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Auto-grow the field to fit its content: a single line by default (so the
   // pill matches the flanking buttons), growing as the draft wraps up to the
@@ -3504,6 +3505,7 @@ const ReplyComposer = memo(function ReplyComposer({
       <div className="composer-toprow">
         <div className="composer-tune" ref={tuneRef}>
           <button
+            ref={tuneTriggerRef}
             type="button"
             className={`composer-tune-trigger ${tuneOpen ? "open" : ""}`}
             aria-haspopup="dialog"
@@ -3868,7 +3870,11 @@ const ReplyComposer = memo(function ReplyComposer({
         ) : null}
         <div className="composer-toprow-trail">
           {focus ? (
-            <FocusPill onTurnOff={() => onFocusChange(false)} busy={focusBusy} />
+            <FocusPill
+              onTurnOff={() => onFocusChange(false)}
+              busy={focusBusy}
+              returnFocusRef={tuneTriggerRef}
+            />
           ) : null}
           <SessionUsagePill
             session={session}

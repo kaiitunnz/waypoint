@@ -1241,16 +1241,19 @@ function TaskNotificationCard({
   // inline, so when it contains that body the duplicate is dropped.
   const supersedes = (body: string | null) =>
     Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
-  // Wholly on screen already, so the link adds nothing. Guarded on there being
-  // no spill alongside it, which must stay reachable.
+  // Only `reportSpec` is previewed, so any other attachment keeps its link.
+  // A lone one is linked only once its preview proves it isn't wholly on
+  // screen; until then the link would just flash in and out.
   const previewShowsWholeFile =
-    inlineIds.size === 0 &&
-    specs.length === 1 &&
-    reportSpec !== null &&
     previewState?.status === "ready" &&
     !previewState.preview.truncated &&
     !previewState.preview.binary &&
     previewState.preview.content !== null;
+  const showLinks =
+    specs.length > 1 ||
+    (specs.length === 1 &&
+      (previewState?.status === "error" ||
+        (previewState?.status === "ready" && !previewShowsWholeFile)));
   const usageParts = taskUsageParts(view.usage);
   // An ignored transcript leaves nothing missing, but those events were stored
   // with output_available set.
@@ -1336,14 +1339,20 @@ function TaskNotificationCard({
                 ? "Full report"
                 : "Full output"}
             </span>
-            {inlineReports.map((text, i) => (
-              <pre className="task-note-result" key={i}>
-                {text}
-              </pre>
-            ))}
+            {inlineReports.map((text, i) =>
+              text.trim() ? (
+                <pre className="task-note-result" key={i}>
+                  {text}
+                </pre>
+              ) : (
+                <p className="task-note-preview-note" key={i}>
+                  No output
+                </p>
+              ),
+            )}
             {reportSpec ? <TaskReportPreview state={previewState} /> : null}
-            {specs.length > 0 && !previewShowsWholeFile ? (
-              <MessageAttachments event={event} />
+            {showLinks ? (
+              <MessageAttachments event={event} specs={specs} />
             ) : null}
           </div>
         ) : unavailable ? (

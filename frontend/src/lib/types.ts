@@ -225,12 +225,15 @@ export interface SessionRecord {
 
 export type AttachmentKind = "image" | "file";
 
+export type AttachmentOrigin = "task_output";
+
 export interface AttachmentSpec {
   id: string;
   filename: string;
   mime: string;
   size: number;
   kind: AttachmentKind;
+  origin?: AttachmentOrigin | null;
 }
 
 // A session-stored attachment as returned by the list endpoint: the spec plus

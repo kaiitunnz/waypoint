@@ -9075,6 +9075,10 @@ html[data-theme="light"] .ask-answer-chip {
   color: var(--muted);
 }
 
+.session-files-origin {
+  color: var(--todo-glyph);
+}
+
 .session-files-add,
 .session-files-open,
 .session-files-delete {

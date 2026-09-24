@@ -1502,6 +1502,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canInjectKeys = session
     ? terminalKeyInjection(session.transport, catalog)
     : false;
+  const [unlockedSessionId, setUnlockedSessionId] = useState<string | null>(null);
+  if (unlockedSessionId !== null && unlockedSessionId !== sessionId) {
+    setUnlockedSessionId(null);
+  }
+  const paneUnlocked =
+    canInjectKeys && !canTerminalInteract && unlockedSessionId === sessionId;
   const activeView: ViewMode = terminalOnly
     ? "terminal"
     : !canShowTerminal
@@ -1593,6 +1599,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               type: "hello",
               terminal_protocol: 2,
               ...(cols && rows ? { cols, rows } : {}),
+              ...(paneUnlocked ? { interactive: true } : {}),
             }),
           );
         },
@@ -1639,7 +1646,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       socket?.close();
       terminalSocketRef.current = null;
     };
-  }, [activeView, paneTransport, catalog, host, token, sessionId, handleAuthFailure, terminalEpoch]);
+  }, [activeView, paneTransport, catalog, host, token, sessionId, handleAuthFailure, terminalEpoch, paneUnlocked]);
+
+  const toggleInputUnlocked = useCallback(() => {
+    const next = !paneUnlocked;
+    setUnlockedSessionId(next ? sessionId : null);
+    const term = terminalRef.current;
+    term?.setInputEnabled(next);
+    if (next) term?.focus();
+    else term?.blur();
+  }, [paneUnlocked, sessionId]);
 
   const handleTerminalInput = useCallback((data: string) => {
     const socket = terminalSocketRef.current;
@@ -2350,6 +2366,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           session={session}
           interactive={canTerminalInteract}
           keyInjection={canInjectKeys}
+          inputUnlocked={paneUnlocked}
+          onToggleInputUnlocked={toggleInputUnlocked}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           terminalAppearance={terminalAppearance}

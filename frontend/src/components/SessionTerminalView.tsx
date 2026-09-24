@@ -32,6 +32,8 @@ interface SessionTerminalViewProps {
   // The pane accepts key-bar / scroll injection even when not fully
   // interactive (claude_tty). Implied by, and broader than, ``interactive``.
   keyInjection: boolean;
+  inputUnlocked: boolean;
+  onToggleInputUnlocked: () => void;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
   // Light/dark surface for the pane, resolved from the agent's TUI theme.
@@ -91,6 +93,8 @@ export function SessionTerminalView({
   session,
   interactive,
   keyInjection,
+  inputUnlocked,
+  onToggleInputUnlocked,
   terminalRef,
   terminalDims,
   terminalAppearance,
@@ -165,6 +169,7 @@ export function SessionTerminalView({
   // session isn't interactive, so we don't carry stale "open" state across a
   // disconnect / view switch.
   const composeEnabled = interactive;
+  const paneTypable = interactive || inputUnlocked;
   const refocusTerminal = useCallback(() => {
     terminalRef.current?.focus();
   }, [terminalRef]);
@@ -204,6 +209,16 @@ export function SessionTerminalView({
           <span className="term-bar-dims" aria-label="Pane dimensions">
             {terminalDims.cols}×{terminalDims.rows}
           </span>
+        ) : null}
+        {inputUnlocked ? (
+          <button
+            type="button"
+            className="term-bar-action warn term-bar-unlocked"
+            onClick={onToggleInputUnlocked}
+            title="Pane input is unlocked. Select text with Shift-drag (⌥-drag on macOS). Tap to lock."
+          >
+            Unlocked
+          </button>
         ) : null}
         {primary ? (
           <button
@@ -323,6 +338,17 @@ export function SessionTerminalView({
                   Browse workspace…
                 </button>
               ) : null}
+              {keyInjection && !interactive && !sessionExited ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item warn"
+                  onClick={() => fireFromMenu(onToggleInputUnlocked)}
+                >
+                  <span className="glyph">⏎</span>
+                  {inputUnlocked ? "Lock pane input" : "Unlock pane input"}
+                </button>
+              ) : null}
               {attachmentsEnabled && composeEnabled ? (
                 <button
                   type="button"
@@ -382,10 +408,10 @@ export function SessionTerminalView({
             // is fixed at mount, so switching sessions must rebuild the term.
             key={session?.transport ?? "none"}
             ref={terminalRef}
-            readOnly={!interactive}
+            readOnly={!paneTypable}
             autoFit={!fixedGrid}
             appearance={terminalAppearance}
-            onData={interactive ? onTerminalInput : undefined}
+            onData={paneTypable ? onTerminalInput : undefined}
             onResize={onTerminalResize}
             onScrollChange={interactive ? onTerminalScrollChange : undefined}
           />

@@ -9206,6 +9206,25 @@ html[data-theme="light"] .term-bar-action.primary {
   color: var(--danger);
 }
 
+.term-bar-action.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+
+.term-bar-action.warn:hover {
+  border-color: color-mix(in srgb, var(--warn) 65%, transparent);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+.term-bar-unlocked::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* The .term-bar-overflow wraps the trigger, mirroring .composer-overflow
    on the chat composer so the two surfaces share visual + structural
    vocabulary. The term-bar's usage panel and overflow menu both drop out

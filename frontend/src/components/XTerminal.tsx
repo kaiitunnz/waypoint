@@ -20,6 +20,10 @@ export interface XTerminalHandle {
   cols(): number;
   rows(): number;
   focus(): void;
+  blur(): void;
+  // Synchronous stdin toggle, so a focus() in the same tap lands on a writable
+  // textarea and mobile browsers raise the keyboard.
+  setInputEnabled(enabled: boolean): void;
   scrollToBottom(): void;
   // Select the light/dark surface. The connection layer calls this on the
   // appearance control frame before writing the seed, and resets it to dark
@@ -130,19 +134,22 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         scrollback: 20000,
         allowProposedApi: true,
         disableStdin: readOnly,
+        // On a fixed grid a mouse-tracking TUI captures plain drags, so ⌥-drag
+        // selects on macOS (Shift-drag elsewhere), and ⌥-click must not type
+        // cursor keys into the TUI.
+        macOptionClickForcesSelection: !autoFit,
+        altClickMovesCursor: autoFit,
       });
       const fit = autoFit ? new FitAddon() : null;
       if (fit) term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.open(host);
 
-      // Fixed-grid panes scroll the host (.xterm-host--scroll) over the
-      // over-tall grid, but xterm's viewport still consumes the wheel: with no
-      // scrollback it preventDefaults and emits cursor-key sequences instead.
-      // Returning false opts xterm out so the wheel scrolls the host. Resizable
-      // panes keep xterm's wheel handling (scrollback / mouse-mode passthrough).
+      // Fixed-grid panes scroll the host (.xterm-host--scroll); xterm would
+      // consume the wheel as cursor keys or mouse reports and cancel it.
+      const keepHostWheel = (event: WheelEvent) => event.stopPropagation();
       if (!autoFit) {
-        term.attachCustomWheelEventHandler(() => false);
+        host.addEventListener("wheel", keepHostWheel, { capture: true, passive: true });
       }
 
       // Subscribe before the first fit so the initial dimension change
@@ -223,6 +230,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         onResizeSub.dispose();
         onScrollSub.dispose();
         osc52Sub.dispose();
+        host.removeEventListener("wheel", keepHostWheel, { capture: true });
         stopObservingHost();
         term.dispose();
         termRef.current = null;
@@ -281,6 +289,11 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       cols: () => termRef.current?.cols ?? 80,
       rows: () => termRef.current?.rows ?? 24,
       focus: () => termRef.current?.focus(),
+      blur: () => termRef.current?.blur(),
+      setInputEnabled: (enabled: boolean) => {
+        const term = termRef.current;
+        if (term) term.options.disableStdin = !enabled;
+      },
       scrollToBottom: () => {
         termRef.current?.scrollToBottom();
       },

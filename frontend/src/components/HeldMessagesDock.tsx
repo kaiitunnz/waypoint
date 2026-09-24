@@ -157,20 +157,20 @@ export function HeldMessagesDock({
                     <span className="held-dock-origin">{originLabel(m)}</span>
                     <span className="held-dock-age">{timeAgo(m.created_at)}</span>
                     <span className="held-dock-item-actions">
-                    <button
-                      type="button"
-                      className="link-button held-dock-release"
-                      onClick={() => void onRelease(m.id)}
-                    >
-                      Release
-                    </button>
-                    <button
-                      type="button"
-                      className="link-button danger-link"
-                      onClick={() => void onCancel(m.id)}
-                    >
-                      Cancel
-                    </button>
+                      <button
+                        type="button"
+                        className="link-button held-dock-release"
+                        onClick={() => void onRelease(m.id)}
+                      >
+                        Release
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button danger-link"
+                        onClick={() => void onCancel(m.id)}
+                      >
+                        Cancel
+                      </button>
                     </span>
                   </div>
                   <ExpandableText

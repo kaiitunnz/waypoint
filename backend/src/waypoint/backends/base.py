@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -219,6 +220,36 @@ class PaneSubmitConfirming(Protocol):
         was sent. Agents that render input literally check that ``sent_text``
         no longer occupies the composer; ones that collapse it (Claude pastes an
         image to an ``[Image]`` chip) check that the composer is empty instead."""
+        ...
+
+
+@dataclass(frozen=True)
+class PaneTypingSpec:
+    """How to type a message into an agent's TUI as keystrokes.
+
+    ``max_event_units`` caps each typed piece in UTF-16 code units, and
+    ``event_separator`` is the byte sequence sent between consecutive pieces so
+    the TUI reads each piece as its own key event.
+    """
+
+    max_event_units: int
+    event_separator: bytes
+
+
+@runtime_checkable
+class PaneTypedInput(Protocol):
+    """An agent whose tmux-wrapped TUI must receive messages as typed keystrokes.
+
+    The tmux transport narrows to this protocol (``isinstance``) and, for a
+    plugin that satisfies it, types message text per :meth:`pane_typing_spec`
+    instead of delivering it as a bracketed paste, pasting only image
+    attachment paths. For a TUI that treats pasted text differently from typed
+    text, e.g. by framing it to the model as untrusted pasted content. Agents
+    that don't implement it keep the paste path.
+    """
+
+    def pane_typing_spec(self) -> PaneTypingSpec:
+        """Return the typing parameters for this agent's TUI."""
         ...
 
 

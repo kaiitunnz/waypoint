@@ -36,6 +36,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
 from waypoint.backends.base import (
+    PaneTypingSpec,
     TerminalAppearance,
     config_dir_for,
 )
@@ -312,6 +313,9 @@ class ClaudeTtyPlugin:
 
     def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
         return pane_dialog.shows_blocking_dialog(pane_text)
+
+    def pane_typing_spec(self) -> PaneTypingSpec:
+        return self._claude.pane_typing_spec()
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # The Claude TUI can swallow the submit Enter while loading an image

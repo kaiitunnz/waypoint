@@ -1,13 +1,44 @@
 import asyncio
+import re
 import shlex
 import uuid
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+# tmux rejects a command over ~16 KB ("command too long"); stay well under it
+# when chaining typed input into one invocation.
+_TYPED_BATCH_BYTES = 12_000
+_TAB_AS_SPACES = "    "
+# Control characters would be read as keys (ESC starts a sequence); LF stays.
+_UNTYPEABLE_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
+_LEADING_BLANK_LINES_RE = re.compile(r"\A(?:[ \t]*\n)+")
+
 
 class TmuxError(RuntimeError):
     pass
+
+
+def _tmux_literal(text: str) -> str:
+    # tmux reads an argument ending in ";" as a command separator and drops the
+    # ";" ("a;" arrives as "a"); a trailing "\;" is its escape for a literal one.
+    return f"{text[:-1]}\\;" if text.endswith(";") else text
+
+
+def _split_utf16(text: str, max_units: int) -> list[str]:
+    """Split ``text`` into pieces of at most ``max_units`` UTF-16 code units."""
+    pieces: list[str] = []
+    start = units = 0
+    for index, char in enumerate(text):
+        width = 2 if ord(char) > 0xFFFF else 1
+        if units + width > max_units:
+            pieces.append(text[start:index])
+            start, units = index, 0
+        units += width
+    if start < len(text):
+        pieces.append(text[start:])
+    return pieces
 
 
 @dataclass
@@ -77,6 +108,91 @@ class TmuxAdapter:
             await self._send_literal_text(target, text)
         if submit:
             await self.submit(target)
+
+    async def type_input(
+        self,
+        target: str,
+        segments: Sequence[tuple[str, bool]],
+        max_event_units: int,
+        event_separator: bytes,
+    ) -> None:
+        """Type ``(chunk, is_path)`` segments into the pane without submitting.
+
+        Text chunks go in as literal keystrokes, in pieces of at most
+        ``max_event_units`` UTF-16 units with ``event_separator`` sent between
+        consecutive pieces so the wrapped TUI reads each as its own key event
+        even when tmux's writes coalesce into one read. Path chunks are pasted
+        on their own so the TUI can still load them (e.g. as images).
+
+        Text is normalized for typing: CRLF/CR become LF, tabs become spaces
+        (a typed tab triggers completion), other control characters are
+        dropped, and leading blank lines are removed.
+        """
+        separator = [
+            "send-keys",
+            "-t",
+            target,
+            "-H",
+            *(f"{byte:02x}" for byte in event_separator),
+        ]
+        groups: list[list[list[str]]] = []
+        for index, (chunk, is_path) in enumerate(segments):
+            if is_path:
+                buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
+                groups.append(
+                    [
+                        ["set-buffer", "-b", buffer_name, "--", _tmux_literal(chunk)],
+                        [
+                            "paste-buffer",
+                            "-d",
+                            "-p",
+                            "-r",
+                            "-b",
+                            buffer_name,
+                            "-t",
+                            target,
+                        ],
+                    ]
+                )
+                continue
+            text = chunk.replace("\r\n", "\n").replace("\r", "\n")
+            text = _UNTYPEABLE_RE.sub("", text.replace("\t", _TAB_AS_SPACES))
+            if index == 0:
+                text = _LEADING_BLANK_LINES_RE.sub("", text)
+            groups.extend(
+                [["send-keys", "-t", target, "-l", "--", _tmux_literal(piece)]]
+                for piece in _split_utf16(text, max_event_units)
+            )
+
+        # Chain the groups into as few tmux invocations as fit the size limit.
+        # The separator also opens every later invocation: separate writes can
+        # coalesce into one read just like chained ones.
+        batch: list[str] = []
+        batch_size = 0
+        batch_buffers: list[str] = []
+        for position, group in enumerate(groups):
+            commands = [separator, *group] if position else group
+            args = [arg for command in commands for arg in (";", *command)][1:]
+            size = sum(len(arg.encode()) + 1 for arg in args)
+            if batch and batch_size + size > _TYPED_BATCH_BYTES:
+                await self._run_typed_batch(batch, batch_buffers)
+                batch, batch_size, batch_buffers = [], 0, []
+            batch += [";", *args] if batch else args
+            batch_size += size
+            batch_buffers += [c[2] for c in group if c[0] == "set-buffer"]
+        if batch:
+            await self._run_typed_batch(batch, batch_buffers)
+
+    async def _run_typed_batch(self, args: list[str], buffer_names: list[str]) -> None:
+        try:
+            await self._run(*args)
+        except TmuxError:
+            # paste-buffer -d only drops a buffer it pasted; clear any the
+            # failed batch left behind before propagating.
+            for buffer_name in buffer_names:
+                with suppress(TmuxError):
+                    await self._run("delete-buffer", "-b", buffer_name)
+            raise
 
     async def submit(self, target: str) -> None:
         """Send a bare Enter to submit the pane's current composer content.
@@ -218,13 +334,17 @@ class TmuxAdapter:
         # ``send_input``, outside the paste.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         if "\n" not in normalized:
-            await self._run("send-keys", "-t", target, "-l", "--", normalized)
+            await self._run(
+                "send-keys", "-t", target, "-l", "--", _tmux_literal(normalized)
+            )
             return
         # A fresh name per send: input is not serialized per pane (an HTTP
         # send and a terminal-WS submit can race), so a deterministic name
         # would let one send paste or delete another's buffer.
         buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
-        await self._run("set-buffer", "-b", buffer_name, "--", normalized)
+        await self._run(
+            "set-buffer", "-b", buffer_name, "--", _tmux_literal(normalized)
+        )
         # -p wraps the paste in bracketed-paste markers when the pane's app
         # requested them; -r keeps LF (no newline-to-CR translation, so the
         # paste never submits on its own); -d drops the buffer afterward.

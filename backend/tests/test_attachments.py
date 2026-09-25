@@ -6,6 +6,7 @@ from waypoint.attachments import (
     AttachmentStore,
     ResolvedAttachment,
     append_attachment_paths,
+    pane_attachment_segments,
 )
 from waypoint.backends.claude_code.adapter import _user_content
 from waypoint.backends.codex.transport import _input_items
@@ -307,6 +308,25 @@ def test_append_attachment_paths(tmp_path: Path) -> None:
     assert "look at this" in out
     assert str(att.path) in out
     assert append_attachment_paths("solo", []) == "solo"
+
+
+def test_pane_attachment_segments_paste_images_last(tmp_path: Path) -> None:
+    first = _resolved(tmp_path, "a.png", "image/png", PNG_BYTES)
+    notes = _resolved(tmp_path, "notes.txt", "text/plain", b"hi")
+    second = _resolved(tmp_path, "b.png", "image/png", PNG_BYTES)
+    segments = pane_attachment_segments("look", [first, notes, second])
+    assert segments == [
+        (f"look\n\nAttached files:\n- {notes.path}\n- ", False),
+        (f"{first.path} {second.path}", True),
+    ]
+
+
+def test_pane_attachment_segments_without_images(tmp_path: Path) -> None:
+    notes = _resolved(tmp_path, "notes.txt", "text/plain", b"hi")
+    assert pane_attachment_segments("look", [notes]) == [
+        (append_attachment_paths("look", [notes]), False)
+    ]
+    assert pane_attachment_segments("solo", []) == [("solo", False)]
 
 
 def test_claude_user_content_plain_without_attachments() -> None:

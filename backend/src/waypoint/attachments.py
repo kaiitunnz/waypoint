@@ -83,6 +83,27 @@ def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) ->
     return f"{text}\n\n{block}" if text else block
 
 
+def pane_attachment_segments(
+    text: str, attachments: list[ResolvedAttachment]
+) -> list[tuple[str, bool]]:
+    """``text`` and its attachment listing as ``(chunk, paste)`` segments.
+
+    For a pane transport that types text but must paste image paths so the
+    wrapped TUI loads them as images. Other paths are listed as in
+    :func:`append_attachment_paths`; the image paths follow as one pasted line.
+    They go last because the TUI loads pasted images asynchronously and drops
+    each image chip wherever the cursor is when loading finishes.
+    """
+    if not attachments:
+        return [(text, False)]
+    header = f"{text}\n\nAttached files:" if text else "Attached files:"
+    files = "".join(f"\n- {a.path}" for a in attachments if not a.is_image)
+    images = " ".join(str(a.path) for a in attachments if a.is_image)
+    if not images:
+        return [(header + files, False)]
+    return [(f"{header}{files}\n- ", False), (images, True)]
+
+
 def _write_unique(session_dir: Path, name: str, data: bytes) -> str:
     """Write ``data`` under ``name`` in ``session_dir``, suffixing `` (1)``,
     `` (2)`` … on collision, and return the stored filename. Uses exclusive

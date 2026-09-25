@@ -25,6 +25,7 @@ from waypoint.backends.base import (
     ConfigDirNotReadyError,
     ConfigDirReadiness,
     DefaultLaunchContract,
+    PaneTypingSpec,
     TerminalAppearance,
     config_dir_for,
 )
@@ -59,6 +60,7 @@ from waypoint.backends.claude_code.models import (
     overridden_builtin_ids,
     resolve_import_model_id,
 )
+from waypoint.backends.claude_code.pane_input import CLAUDE_PANE_TYPING
 from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
@@ -349,6 +351,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
 
     def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
         return shows_blocking_dialog(pane_text)
+
+    def pane_typing_spec(self) -> PaneTypingSpec:
+        return CLAUDE_PANE_TYPING
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # Over the tmux/Terminal transport the Claude TUI can absorb the submit

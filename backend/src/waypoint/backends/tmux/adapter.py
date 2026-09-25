@@ -54,15 +54,15 @@ def _paste_commands(target: str, text: str) -> tuple[str, list[list[str]]]:
     # a terminal-WS submit can race), so a fixed name would let one send paste or
     # delete another's buffer.
     buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
-    fills = [
-        ["set-buffer", *(["-a"] if index else []), "-b", buffer_name, "--"]
-        + [_tmux_literal(chunk)]
-        for index, chunk in enumerate(_split(text, _COMMAND_BUDGET_BYTES, _utf8_len))
-    ]
+    commands: list[list[str]] = []
+    for index, chunk in enumerate(_split(text, _COMMAND_BUDGET_BYTES, _utf8_len)):
+        append = ["-a"] if index else []
+        fill = ["set-buffer", *append, "-b", buffer_name, "--", _tmux_literal(chunk)]
+        commands.append(fill)
     # -p brackets the paste when the app asked for it; -r keeps LF so the paste
     # never submits; -d drops the buffer afterward.
-    paste = ["paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target]
-    return buffer_name, [*fills, paste]
+    commands.append(["paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target])
+    return buffer_name, commands
 
 
 @dataclass

@@ -86,6 +86,29 @@ async def test_open_questions_follow_the_transcript_rule(tmp_path) -> None:
     assert runtime.storage.open_question_tool_use_ids("other") == []
 
 
+async def test_open_questions_lookup_is_index_driven(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    await ask(runtime, "q1")
+    connection = runtime.storage.connection
+    statements: list[str] = []
+    connection.set_trace_callback(statements.append)
+    try:
+        runtime.storage.open_question_tool_use_ids("s1")
+    finally:
+        connection.set_trace_callback(None)
+    (query,) = [sql for sql in statements if "AskUserQuestion" in sql]
+
+    plan = " | ".join(
+        row["detail"] for row in connection.execute(f"EXPLAIN QUERY PLAN {query}")
+    )
+
+    # A per-question scan of the session's events made answers take seconds.
+    assert "USING INDEX idx_events_tool_name" in plan
+    assert "USING INDEX idx_events_tool_use_id" in plan
+    assert "idx_events_session_seq" not in plan
+    assert "TEMP B-TREE" not in plan
+
+
 async def test_older_question_stays_answerable_after_a_newer_one(
     tmp_path, monkeypatch
 ) -> None:

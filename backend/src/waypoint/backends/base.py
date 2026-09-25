@@ -226,11 +226,11 @@ class PaneSubmitConfirming(Protocol):
 
 @dataclass(frozen=True)
 class PaneTypingSpec:
-    """How to type a message into an agent's TUI as keystrokes.
+    """How to type a message into an agent's TUI.
 
-    ``max_event_units`` caps each typed piece in UTF-16 code units, and
-    ``event_separator`` is the byte sequence sent between consecutive pieces so
-    the TUI reads each piece as its own key event.
+    Typed pieces are capped at ``max_event_units`` UTF-16 code units, with
+    ``event_separator`` sent between them so the TUI reads each as its own key
+    event.
     """
 
     max_event_units: int
@@ -239,19 +239,13 @@ class PaneTypingSpec:
 
 @runtime_checkable
 class PaneTypedInput(Protocol):
-    """An agent whose tmux-wrapped TUI must receive messages as typed keystrokes.
+    """An agent whose tmux-wrapped TUI treats pasted text differently from typed text.
 
-    The tmux transport narrows to this protocol (``isinstance``) and, for a
-    plugin that satisfies it, types message text per :meth:`pane_typing_spec`
-    instead of delivering it as a bracketed paste, pasting only image
-    attachment paths. For a TUI that treats pasted text differently from typed
-    text, e.g. by framing it to the model as untrusted pasted content. Agents
-    that don't implement it keep the paste path.
+    The tmux transport and the Terminal compose drawer type this agent's messages
+    per :meth:`pane_typing_spec` and paste only image attachment paths.
     """
 
-    def pane_typing_spec(self) -> PaneTypingSpec:
-        """Return the typing parameters for this agent's TUI."""
-        ...
+    def pane_typing_spec(self) -> PaneTypingSpec: ...
 
 
 class TerminalAppearance(StrEnum):

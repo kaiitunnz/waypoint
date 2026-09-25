@@ -253,13 +253,14 @@ def _live_composer_bottom(lines: list[str]) -> int | None:
 
 
 def _active_region(lines: list[str]) -> list[str]:
-    """The pane text at and below the bottom-most live composer prompt.
+    """The pane text below the live composer, where a live dialog or popup draws.
 
     Scoping here drops dialog signatures quoted higher in settled transcript.
-    The composer's own text is dropped too: a typed message quoting a dialog
-    must not read as one. A trailing run of blank / leading-``❯`` lines resting
-    on a dialog footer is queued messages or a free-text answer field, not the
-    composer, so it is skipped and the scan continues above the footer.
+    When the composer frame is drawn the region starts at its bottom border, so a
+    typed message quoting a dialog is excluded. Otherwise it starts at the
+    bottom-most composer prompt; a trailing run of blank / leading-``❯`` lines
+    resting on a dialog footer is queued messages or a free-text answer field,
+    so the scan skips it and continues above the footer.
     """
     composer_bottom = _live_composer_bottom(lines)
     if composer_bottom is not None:

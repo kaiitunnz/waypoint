@@ -484,22 +484,23 @@ to the wrapper, the websocket, or the frontend.
 
 ### Typed pane input (optional)
 
-The tmux transport delivers a multi-line message to a pane as a bracketed paste
-by default. An agent whose TUI treats pasted text differently from typed text
-implements the `PaneTypedInput` protocol from
+An agent whose TUI treats pasted text differently from typed text implements
+the `PaneTypedInput` protocol from
 [`base.py`](../backend/src/waypoint/backends/base.py):
 
 ```python
 def pane_typing_spec(self) -> PaneTypingSpec: ...
 ```
 
-The transport then types the message as keystrokes, in pieces of at most
-`max_event_units` UTF-16 units with `event_separator` sent between them, and
-pastes only image attachment paths, last, so the TUI still loads them as images.
+The tmux transport and the Terminal compose drawer type its messages as
+keystrokes, in pieces of at most `max_event_units` UTF-16 units separated by
+`event_separator`, and paste image attachment paths last so the TUI loads them
+as images. Other agents receive multi-line messages as a bracketed paste.
 Claude implements it because Claude Code frames pasted text to the model as
-untrusted `<pasted_content>`; the spec and the TUI behavior it relies on live in
-[`claude_code/pane_input.py`](../backend/src/waypoint/backends/claude_code/pane_input.py).
-`claude_tty` delegates to its composed Claude agent.
+untrusted `<pasted_content>`;
+[`claude_code/pane_input.py`](../backend/src/waypoint/backends/claude_code/pane_input.py)
+records the TUI behavior its spec relies on. `claude_tty` delegates to its
+composed Claude agent.
 
 ## Token & context usage
 

@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from waypoint.api import _submit_pane_text
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.base import PaneTypedInput, PaneTypingSpec
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
@@ -671,6 +672,19 @@ def test_send_input_types_then_submits_without_confirmer() -> None:
     transport, adapter = _transport_with(_TypingAgent())
     asyncio.run(transport.send_input(_session("x"), "hi"))
     assert adapter.calls == [("type_input", "%9", [("hi", False)]), ("submit", "%9")]
+
+
+def test_compose_drawer_types_for_typing_agent() -> None:
+    adapter = _RecordingAdapter()
+    spec = PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
+    asyncio.run(_submit_pane_text(adapter, "%9", "a\nb", True, spec))  # type: ignore[arg-type]
+    assert adapter.calls == [("type_input", "%9", [("a\nb", False)]), ("submit", "%9")]
+
+
+def test_compose_drawer_pastes_for_other_agents() -> None:
+    adapter = _RecordingAdapter()
+    asyncio.run(_submit_pane_text(adapter, "%9", "a\nb", False, None))  # type: ignore[arg-type]
+    assert adapter.calls == [("send_input", "%9", "a\nb", False)]
 
 
 def test_send_input_waits_for_ready_before_pasting() -> None:

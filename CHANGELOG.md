@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.0](https://github.com/kaiitunnz/waypoint/compare/v0.23.0...v0.24.0) (2026-09-25)
+
+
+### Features
+
+* show Focus as a pill beside the connection status ([#478](https://github.com/kaiitunnz/waypoint/issues/478)) ([da05b71](https://github.com/kaiitunnz/waypoint/commit/da05b713c7c59cfdf5feaaccbf29b39dee9933b0))
+
+
+### Bug Fixes
+
+* link a task report only when its card can't show it whole ([#480](https://github.com/kaiitunnz/waypoint/issues/480)) ([0f8c2f9](https://github.com/kaiitunnz/waypoint/commit/0f8c2f9f20cea7f9faf465f20b95b53a031cc5ed))
+
 ## [0.23.0](https://github.com/kaiitunnz/waypoint/compare/v0.22.1...v0.23.0) (2026-09-24)
 
 

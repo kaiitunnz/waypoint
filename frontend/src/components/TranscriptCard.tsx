@@ -420,7 +420,7 @@ function UserMessageBubble({ event }: { event: EventRecord }) {
       style={style}
     >
       <MarkdownMessage text={event.text} />
-      <MessageAttachments event={event} />
+      <MessageAttachments specs={attachmentSpecsFor(event)} />
       <div ref={metaRef} className="transcript-meta">
         <span className="badge user">you</span>
         <span className="role-time">{formatTime(event.ts)}</span>
@@ -995,9 +995,7 @@ function sendUserFileInput(event: EventRecord): {
 // with the sent files and a shortcut to the Files browser.
 function SendUserFileCard({ event }: { event: EventRecord }) {
   const filesLink = useSessionFilesLink();
-  const specs = Array.isArray(event.metadata?.attachments)
-    ? (event.metadata.attachments as unknown[])
-    : [];
+  const specs = attachmentSpecsFor(event);
   const { files, caption } = sendUserFileInput(event);
   const count = specs.length || files.length;
   return (
@@ -1014,7 +1012,7 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
       </div>
       {caption ? <p className="send-user-file-caption">{caption}</p> : null}
       {specs.length > 0 ? (
-        <MessageAttachments event={event} />
+        <MessageAttachments specs={specs} />
       ) : files.length > 0 ? (
         <ul className="send-user-file-names">
           {files.map((path, index) => (
@@ -1223,8 +1221,6 @@ function TaskNotificationCard({
   const specs = attachmentSpecsFor(event).filter(
     (spec) => !reportIsInline || inlineIds.has(spec.id),
   );
-  // A spilled body is text this card already shows inline; the report is a
-  // separately captured artifact. Only the latter is a "report".
   // A separately captured report, else a spilled body holding the text the
   // inline prefix was cut from.
   const reportSpec =
@@ -1241,16 +1237,15 @@ function TaskNotificationCard({
   // inline, so when it contains that body the duplicate is dropped.
   const supersedes = (body: string | null) =>
     Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
-  // Wholly on screen already, so the link adds nothing. Guarded on there being
-  // no spill alongside it, which must stay reachable.
-  const previewShowsWholeFile =
-    inlineIds.size === 0 &&
-    specs.length === 1 &&
-    reportSpec !== null &&
-    previewState?.status === "ready" &&
-    !previewState.preview.truncated &&
-    !previewState.preview.binary &&
-    previewState.preview.content !== null;
+  // Only `reportSpec` is previewed: several attachments are always linked, a
+  // lone one once its preview fails or comes back partial.
+  const previewIsPartial =
+    previewState?.status === "error" ||
+    (previewState?.status === "ready" &&
+      (previewState.preview.truncated ||
+        previewState.preview.binary ||
+        previewState.preview.content === null));
+  const showLinks = specs.length > 1 || previewIsPartial;
   const usageParts = taskUsageParts(view.usage);
   // An ignored transcript leaves nothing missing, but those events were stored
   // with output_available set.
@@ -1336,14 +1331,20 @@ function TaskNotificationCard({
                 ? "Full report"
                 : "Full output"}
             </span>
-            {inlineReports.map((text, i) => (
-              <pre className="task-note-result" key={i}>
-                {text}
-              </pre>
-            ))}
+            {inlineReports.map((text, i) =>
+              text.trim() ? (
+                <pre className="task-note-result" key={i}>
+                  {text}
+                </pre>
+              ) : (
+                <p className="task-note-preview-note" key={i}>
+                  No output
+                </p>
+              ),
+            )}
             {reportSpec ? <TaskReportPreview state={previewState} /> : null}
-            {specs.length > 0 && !previewShowsWholeFile ? (
-              <MessageAttachments event={event} />
+            {showLinks ? (
+              <MessageAttachments specs={specs} />
             ) : null}
           </div>
         ) : unavailable ? (
@@ -1912,7 +1913,7 @@ function HeuristicCard({ event }: { event: EventRecord }) {
         <CopyMessageButton text={event.text} />
       </div>
       <pre>{event.text}</pre>
-      <MessageAttachments event={event} />
+      <MessageAttachments specs={attachmentSpecsFor(event)} />
     </article>
   );
 }

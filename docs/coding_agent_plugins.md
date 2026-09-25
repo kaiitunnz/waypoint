@@ -637,6 +637,10 @@ pops each one, runs its sink, and never persists the key itself.
 | `capture_host_text` | host paths | content within `inline_capture_max_bytes` on `metadata.captured_text`; anything larger, binary, or unreadable becomes an attachment |
 | `capture_inline_blobs` | `{filename, text, mime}` entries | pinned attachments, with their ids listed on `metadata.inline_attachment_ids` so a consumer can tell them from a separately captured report |
 
+A fourth transient key, `capture_origin`, tags every attachment the sinks
+create on that event with an `AttachmentOrigin` (`task_output` for
+task-notification reports); the session Files panel shows it as a label.
+
 Each sink is best-effort and never raises into the emit path: a missing,
 oversized, or unreadable entry is skipped. The seams are backend-neutral —
 they read no plugin id and no per-agent schema.

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from waypoint.schemas import SessionStatus
+from waypoint.schemas import AttachmentOrigin, SessionStatus
 
 
 def format_status_event(event: dict[str, Any]) -> tuple[str, SessionStatus]:
@@ -475,6 +475,8 @@ def build_task_notification_metadata(
         metadata["capture_host_text"] = [capture_path]
     if spills:
         metadata["capture_inline_blobs"] = spills
+    if capture_path is not None or spills:
+        metadata["capture_origin"] = AttachmentOrigin.TASK_OUTPUT
     return _compact_task_notification_text(summary_text, event_text), metadata
 
 

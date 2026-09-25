@@ -437,9 +437,7 @@ export function capturedTexts(event: EventRecord): string[] {
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw.filter(
-    (text): text is string => typeof text === "string" && text !== "",
-  );
+  return raw.filter((text): text is string => typeof text === "string");
 }
 
 export function itemIdForEvent(event: EventRecord): string | null {

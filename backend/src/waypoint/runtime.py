@@ -88,6 +88,7 @@ from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AccountProbeResult,
     AssistantSummary,
+    AttachmentOrigin,
     AttachmentSpec,
     BoardChannel,
     BoardEntry,
@@ -397,6 +398,14 @@ class BroadcastHub:
         if inbox_id is not None:
             for queue in list(self.inbox_queues.get(inbox_id, set())):
                 await queue.put(payload)
+
+
+def _capture_origin(raw: Any) -> AttachmentOrigin | None:
+    try:
+        return AttachmentOrigin(raw) if raw is not None else None
+    except ValueError:
+        log.warning("capture_origin: unknown origin %r", raw)
+        return None
 
 
 def _append_attachments(
@@ -5700,6 +5709,7 @@ class SessionRuntime:
         status: SessionStatus | None,
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
+        origin = _capture_origin(metadata.pop("capture_origin", None))
         for key, sink in (
             ("capture_host_files", self._capture_host_files),
             ("capture_host_text", self._capture_host_text),
@@ -5707,7 +5717,7 @@ class SessionRuntime:
         ):
             raw = metadata.pop(key, None)
             if isinstance(raw, list) and raw:
-                await sink(session_id, raw, metadata)
+                await sink(session_id, raw, metadata, origin)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -5743,7 +5753,11 @@ class SessionRuntime:
         await self._publish_event(persisted)
 
     async def _capture_host_files(
-        self, session_id: str, paths: list[Any], metadata: dict[str, Any]
+        self,
+        session_id: str,
+        paths: list[Any],
+        metadata: dict[str, Any],
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save host paths as pinned attachments on ``metadata["attachments"]``.
 
@@ -5751,12 +5765,20 @@ class SessionRuntime:
         host paths and have them surface in the Files browser.
         """
         specs = await asyncio.to_thread(
-            self._persist_host_files, session_id, self._session_base(session_id), paths
+            self._persist_host_files,
+            session_id,
+            self._session_base(session_id),
+            paths,
+            origin,
         )
         _append_attachments(metadata, specs)
 
     async def _capture_host_text(
-        self, session_id: str, paths: list[Any], metadata: dict[str, Any]
+        self,
+        session_id: str,
+        paths: list[Any],
+        metadata: dict[str, Any],
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save host paths whose content is meant to be read in place.
 
@@ -5765,19 +5787,29 @@ class SessionRuntime:
         becomes a pinned attachment instead.
         """
         texts, specs = await asyncio.to_thread(
-            self._read_host_text, session_id, self._session_base(session_id), paths
+            self._read_host_text,
+            session_id,
+            self._session_base(session_id),
+            paths,
+            origin,
         )
         if texts:
             metadata.setdefault("captured_text", []).extend(texts)
         _append_attachments(metadata, specs)
 
     async def _capture_inline_blobs(
-        self, session_id: str, blobs: list[Any], metadata: dict[str, Any]
+        self,
+        session_id: str,
+        blobs: list[Any],
+        metadata: dict[str, Any],
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save text a normalizer already holds as pinned attachments, listing
         their ids on ``metadata["inline_attachment_ids"]`` so a consumer can
         tell them from a separately captured report."""
-        specs = await asyncio.to_thread(self._persist_inline_blobs, session_id, blobs)
+        specs = await asyncio.to_thread(
+            self._persist_inline_blobs, session_id, blobs, origin
+        )
         if not specs:
             return
         _append_attachments(metadata, specs)
@@ -5823,16 +5855,26 @@ class SessionRuntime:
             yield path
 
     def _save_pinned(
-        self, session_id: str, *, data: bytes, filename: str, mime: str | None
+        self,
+        session_id: str,
+        *,
+        data: bytes,
+        filename: str,
+        mime: str | None,
+        origin: AttachmentOrigin | None,
     ) -> AttachmentSpec:
         spec = self.attachments.save(
-            session_id, data=data, filename=filename, content_type=mime
+            session_id, data=data, filename=filename, content_type=mime, origin=origin
         )
         self.attachments.mark_pinned(session_id, [spec.id])
         return spec
 
     def _persist_host_files(
-        self, session_id: str, base: str | None, raw_paths: list[Any]
+        self,
+        session_id: str,
+        base: str | None,
+        raw_paths: list[Any],
+        origin: AttachmentOrigin | None,
     ) -> list[AttachmentSpec]:
         out: list[AttachmentSpec] = []
         for path in self._iter_host_paths(base, raw_paths, tag="send_user_file"):
@@ -5847,12 +5889,17 @@ class SessionRuntime:
                     data=data,
                     filename=path.name,
                     mime=mimetypes.guess_type(path.name)[0],
+                    origin=origin,
                 )
             )
         return out
 
     def _read_host_text(
-        self, session_id: str, base: str | None, raw_paths: list[Any]
+        self,
+        session_id: str,
+        base: str | None,
+        raw_paths: list[Any],
+        origin: AttachmentOrigin | None,
     ) -> tuple[list[str], list[AttachmentSpec]]:
         """Split host paths into text small enough to inline and blobs that must
         be attached. Blocking; run off the event loop."""
@@ -5875,12 +5922,16 @@ class SessionRuntime:
                     data=data,
                     filename=path.name,
                     mime=mimetypes.guess_type(path.name)[0],
+                    origin=origin,
                 )
             )
         return texts, specs
 
     def _persist_inline_blobs(
-        self, session_id: str, entries: list[Any]
+        self,
+        session_id: str,
+        entries: list[Any],
+        origin: AttachmentOrigin | None,
     ) -> list[AttachmentSpec]:
         """Save each in-memory text blob as a pinned attachment, skipping
         malformed or oversized entries. Blocking; run off the event loop."""
@@ -5910,6 +5961,7 @@ class SessionRuntime:
                     data=data,
                     filename=filename,
                     mime=mime if isinstance(mime, str) else None,
+                    origin=origin,
                 )
             )
         return out

@@ -464,9 +464,8 @@ function MessageAttachmentCard({
 }
 
 // Renders the attachments carried by a user message as compact cards.
-export function MessageAttachments({ event }: { event: EventRecord }) {
+export function MessageAttachments({ specs }: { specs: AttachmentSpec[] }) {
   const ctx = useContext(AttachmentContext);
-  const specs = attachmentSpecsFor(event);
   if (!ctx || specs.length === 0) return null;
   return (
     <div className="message-attachments">

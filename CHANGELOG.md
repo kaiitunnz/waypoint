@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/kaiitunnz/waypoint/compare/v0.24.1...v0.24.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* type Claude pane messages instead of pasting them ([#483](https://github.com/kaiitunnz/waypoint/issues/483)) ([359d442](https://github.com/kaiitunnz/waypoint/commit/359d4429cfb47e678a9db4efcfe18a44c6d61833))
+
 ## [0.24.1](https://github.com/kaiitunnz/waypoint/compare/v0.24.0...v0.24.1) (2026-09-25)
 
 

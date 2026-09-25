@@ -1,11 +1,11 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from waypoint.api import _submit_pane_text
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.base import PaneTypedInput, PaneTypingSpec
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
@@ -158,11 +158,12 @@ def _split_commands(args: tuple[str, ...]) -> list[list[str]]:
     return commands
 
 
+SPEC = PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
 SEP = ["send-keys", "-t", "%1", "-H", "1b", "5b", "49"]
 
 
-def _type(adapter: TmuxAdapter, segments, max_units: int = 760) -> None:
-    asyncio.run(adapter.type_input("%1", segments, max_units, b"\x1b[I"))
+def _type(adapter: TmuxAdapter, segments, spec: PaneTypingSpec = SPEC) -> None:
+    asyncio.run(adapter.type_input("%1", segments, spec, submit=False))
 
 
 def _literal(text: str) -> list[str]:
@@ -188,7 +189,7 @@ def test_type_input_splits_by_utf16_units_with_separators() -> None:
     # A key event over the TUI's paste threshold reads as a paste, so pieces
     # are capped in UTF-16 units (an astral emoji is two) and separated.
     adapter, commands = _recording_adapter()
-    _type(adapter, [("ab😀cd", False)], max_units=3)
+    _type(adapter, [("ab😀cd", False)], replace(SPEC, max_event_units=3))
     assert len(commands) == 1
     assert _split_commands(commands[0]) == [
         _literal("ab"),
@@ -569,8 +570,10 @@ class _RecordingAdapter:
     async def send_input(self, target, text, submit=True):
         self.calls.append(("send_input", target, text, submit))
 
-    async def type_input(self, target, segments, max_event_units, event_separator):
+    async def type_input(self, target, segments, typing_spec, submit=True):
         self.calls.append(("type_input", target, list(segments)))
+        if submit:
+            await self.submit(target)
 
     async def submit(self, target):
         self.calls.append(("submit", target))
@@ -609,12 +612,12 @@ class _TypingConfirmer(_AgentConfirmer):
     id = "claude_tty"
 
     def pane_typing_spec(self):
-        return PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
+        return SPEC
 
 
 class _TypingAgent(_PlainAgent):
     def pane_typing_spec(self):
-        return PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
+        return SPEC
 
 
 def _transport_with(agent, boot_frames: int = 0, dialog: bool = False):
@@ -672,19 +675,6 @@ def test_send_input_types_then_submits_without_confirmer() -> None:
     transport, adapter = _transport_with(_TypingAgent())
     asyncio.run(transport.send_input(_session("x"), "hi"))
     assert adapter.calls == [("type_input", "%9", [("hi", False)]), ("submit", "%9")]
-
-
-def test_compose_drawer_types_for_typing_agent() -> None:
-    adapter = _RecordingAdapter()
-    spec = PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
-    asyncio.run(_submit_pane_text(adapter, "%9", "a\nb", True, spec))  # type: ignore[arg-type]
-    assert adapter.calls == [("type_input", "%9", [("a\nb", False)]), ("submit", "%9")]
-
-
-def test_compose_drawer_pastes_for_other_agents() -> None:
-    adapter = _RecordingAdapter()
-    asyncio.run(_submit_pane_text(adapter, "%9", "a\nb", False, None))  # type: ignore[arg-type]
-    assert adapter.calls == [("send_input", "%9", "a\nb", False)]
 
 
 def test_send_input_waits_for_ready_before_pasting() -> None:

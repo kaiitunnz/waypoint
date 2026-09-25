@@ -318,12 +318,7 @@ class ClaudeTtyPlugin:
         return self._claude.pane_typing_spec()
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
-        # The Claude TUI can swallow the submit Enter while loading an image
-        # pasted by path; the composer clearing is how the tmux transport
-        # confirms the message was actually sent (vs typed-but-unsent). The sent
-        # text is never on screen verbatim (typed input wraps; image paths become
-        # chips), so emptiness — not the sent text — is the signal.
-        return pane_dialog.composer_is_empty(pane_text)
+        return self._claude.confirm_pane_submit(pane_text, sent_text)
 
     async def terminal_appearance(
         self, runtime: "SessionRuntime", session: SessionRecord

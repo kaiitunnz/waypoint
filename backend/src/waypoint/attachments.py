@@ -78,9 +78,7 @@ def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) ->
     """
     if not attachments:
         return text
-    listing = "\n".join(f"- {attachment.path}" for attachment in attachments)
-    block = f"Attached files:\n{listing}"
-    return f"{text}\n\n{block}" if text else block
+    return _with_listing(text, [str(attachment.path) for attachment in attachments])
 
 
 def pane_attachment_segments(
@@ -88,20 +86,23 @@ def pane_attachment_segments(
 ) -> list[tuple[str, bool]]:
     """``text`` and its attachment listing as ``(chunk, paste)`` segments.
 
-    For a pane transport that types text but must paste image paths so the
-    wrapped TUI loads them as images. Other paths are listed as in
-    :func:`append_attachment_paths`; the image paths follow as one pasted line.
-    They go last because the TUI loads pasted images asynchronously and drops
-    each image chip wherever the cursor is when loading finishes.
+    Non-image paths are listed as in :func:`append_attachment_paths`. Image paths
+    follow as one pasted line, last: the TUI loads a pasted image asynchronously
+    and drops its chip wherever the cursor is when loading finishes.
     """
     if not attachments:
         return [(text, False)]
-    header = f"{text}\n\nAttached files:" if text else "Attached files:"
-    files = "".join(f"\n- {a.path}" for a in attachments if not a.is_image)
+    files = [str(a.path) for a in attachments if not a.is_image]
     images = " ".join(str(a.path) for a in attachments if a.is_image)
     if not images:
-        return [(header + files, False)]
-    return [(f"{header}{files}\n- ", False), (images, True)]
+        return [(_with_listing(text, files), False)]
+    return [(_with_listing(text, [*files, ""]), False), (images, True)]
+
+
+def _with_listing(text: str, entries: list[str]) -> str:
+    listing = "\n".join(f"- {entry}" for entry in entries)
+    block = f"Attached files:\n{listing}"
+    return f"{text}\n\n{block}" if text else block
 
 
 def _write_unique(session_dir: Path, name: str, data: bytes) -> str:

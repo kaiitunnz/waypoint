@@ -5,6 +5,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,28 +83,15 @@ class TmuxTransport(TransportAdapter):
         # host paths appended to the message; the inner CLI reads them itself.
         target = self._target(session)
         confirmer = self._confirmer(session)
-        typing = self._typing_spec(session)
+        typing_spec = self._typing_spec(session)
         deliver: Callable[[bool], Awaitable[None]]
-        if typing is None:
+        if typing_spec is None:
             payload = append_attachment_paths(text, attachments or [])
-
-            async def deliver(submit: bool) -> None:
-                await self.adapter.send_input(target, payload, submit)
-
+            deliver = partial(self.adapter.send_input, target, payload)
         else:
             segments = pane_attachment_segments(text, attachments or [])
             payload = "".join(chunk for chunk, _ in segments)
-
-            async def deliver(submit: bool) -> None:
-                await self.adapter.type_input(
-                    target,
-                    segments,
-                    typing.max_event_units,
-                    typing.event_separator,
-                )
-                if submit:
-                    await self.adapter.submit(target)
-
+            deliver = partial(self.adapter.type_input, target, segments, typing_spec)
         async with self._input_lock(session):
             await self._send(target, payload, deliver, confirmer)
 

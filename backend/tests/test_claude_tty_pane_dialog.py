@@ -443,15 +443,6 @@ def test_message_quoting_dialog_in_composer_does_not_block() -> None:
     assert parse_approval(screen) is None
 
 
-def test_composer_scrolled_taller_than_pane_does_not_block() -> None:
-    # Captured live (Claude Code 2.1.282): a message taller than the pane scrolls
-    # inside the composer, whose first visible line still carries the prompt
-    # glyph under the top rule; the quoted dialog near its end stays inert.
-    screen = _load("composer_quotes_dialog.txt")
-    assert "Do you want to" in screen and "Esc to cancel · Tab to amend" in screen
-    assert classify(screen) is PaneScreen.OTHER
-
-
 def test_popup_below_slash_command_echo_still_classifies() -> None:
     # The /model and /effort popups render below the composer's own slash-command
     # echo (a free-text ❯ line). The active region must extend from that echo

@@ -36,12 +36,11 @@ from waypoint.backends.account_profiles import (
 )
 from waypoint.backends.base import (
     PaneTypedInput,
-    PaneTypingSpec,
     TerminalAppearance,
     TerminalAppearanceResolving,
 )
 from waypoint.backends.capabilities import BackendCapabilities
-from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
     Osc52Extractor,
     SyncFrameTracker,
@@ -252,25 +251,6 @@ def _default_preset_id(context: "AppContext") -> str | None:
 def _usage_provider_options(context: "AppContext") -> list[UsageProviderOption]:
     providers = context.runtime.usage_providers
     return providers.options() if providers is not None else []
-
-
-async def _submit_pane_text(
-    adapter: TmuxAdapter,
-    pane: str,
-    text: str,
-    submit: bool,
-    typing: PaneTypingSpec | None,
-) -> None:
-    """Deliver a terminal compose-drawer message the way the session's agent
-    needs it: typed for a :class:`PaneTypedInput` agent, else pasted."""
-    if typing is None:
-        await adapter.send_input(pane, text, submit=submit)
-        return
-    await adapter.type_input(
-        pane, [(text, False)], typing.max_event_units, typing.event_separator
-    )
-    if submit:
-        await adapter.submit(pane)
 
 
 def _forwards_mouse_modes(caps: BackendCapabilities, handshake: Any) -> bool:
@@ -2453,7 +2433,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         terminal_input_injection = terminal_interactive or caps.terminal_key_injection
         terminal_resizable = caps.terminal_resizable
         agent = context.runtime.registry.get(session.backend)
-        typing = agent.pane_typing_spec() if isinstance(agent, PaneTypedInput) else None
+        typing_spec = (
+            agent.pane_typing_spec() if isinstance(agent, PaneTypedInput) else None
+        )
         # Refuse to attach to an already-dead pane — the renderer would
         # seed from a stale capture and the stream would never produce
         # bytes. 4410 tells the frontend to surface the reconnect
@@ -2826,7 +2808,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if terminal_interactive:
                     for text, submit in submits:
                         with suppress(TmuxError):
-                            await _submit_pane_text(adapter, pane, text, submit, typing)
+                            if typing_spec is None:
+                                await adapter.send_input(pane, text, submit=submit)
+                            else:
+                                await adapter.type_input(
+                                    pane, [(text, False)], typing_spec, submit=submit
+                                )
                 if terminal_resizable and resize_target is not None:
                     new_cols, new_rows = resize_target
                     renderer.resize(new_cols, new_rows)

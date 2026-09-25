@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/kaiitunnz/waypoint/compare/v0.24.0...v0.24.1) (2026-09-25)
+
+
+### Performance Improvements
+
+* index the claude_tty open-question lookup ([059bec9](https://github.com/kaiitunnz/waypoint/commit/059bec96a4c646ec7a91824ad3846add1521a52a))
+
 ## [0.24.0](https://github.com/kaiitunnz/waypoint/compare/v0.23.0...v0.24.0) (2026-09-25)
 
 

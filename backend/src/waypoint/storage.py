@@ -292,6 +292,19 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_events_session_seq
                 ON events(session_id, sequence);
 
+            -- Serve open_question_tool_use_ids, which otherwise re-scans the
+            -- session's events per question. The trailing sequence lets the
+            -- tool_name index also satisfy that query's ORDER BY; without it
+            -- the planner falls back to idx_events_session_seq.
+            CREATE INDEX IF NOT EXISTS idx_events_tool_use_id
+                ON events(session_id, json_extract(metadata, '$.tool_use_id'))
+                WHERE json_extract(metadata, '$.tool_use_id') IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_events_tool_name
+                ON events(
+                    session_id, json_extract(metadata, '$.tool_name'), sequence
+                )
+                WHERE json_extract(metadata, '$.tool_name') IS NOT NULL;
+
             -- Durable notification outbox. One row per (channel, logical
             -- request); UNIQUE(channel_id, dedupe_key) makes repeated adapter
             -- events / retries idempotent. Holds no secrets — the rendered

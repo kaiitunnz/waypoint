@@ -1648,6 +1648,8 @@ def test_init_creates_performance_indexes(tmp_path) -> None:
         "idx_sessions_spawner",
         "idx_board_author",
         "idx_scheduled_status",
+        "idx_events_tool_use_id",
+        "idx_events_tool_name",
     } <= names
 
 

@@ -69,7 +69,7 @@ def test_persist_absolute_and_relative(tmp_path: Path) -> None:
     (tmp_path / "sub" / "rel.txt").write_text("BB")
 
     specs = runtime._persist_host_files(
-        "sess-1", str(tmp_path), [str(tmp_path / "abs.txt"), "sub/rel.txt"]
+        "sess-1", str(tmp_path), [str(tmp_path / "abs.txt"), "sub/rel.txt"], None
     )
 
     assert {s.filename for s in specs} == {"abs.txt", "rel.txt"}
@@ -81,7 +81,7 @@ def test_persist_dedupes_by_resolved_path(tmp_path: Path) -> None:
     (tmp_path / "one.txt").write_text("A")
 
     specs = runtime._persist_host_files(
-        "sess-1", str(tmp_path), [str(tmp_path / "one.txt"), "one.txt"]
+        "sess-1", str(tmp_path), [str(tmp_path / "one.txt"), "one.txt"], None
     )
 
     assert len(specs) == 1
@@ -92,7 +92,10 @@ def test_persist_skips_missing_and_oversized(tmp_path: Path) -> None:
     (tmp_path / "big.txt").write_text("way too long")
 
     specs = runtime._persist_host_files(
-        "sess-1", str(tmp_path), [str(tmp_path / "big.txt"), str(tmp_path / "gone")]
+        "sess-1",
+        str(tmp_path),
+        [str(tmp_path / "big.txt"), str(tmp_path / "gone")],
+        None,
     )
 
     assert specs == []
@@ -101,7 +104,9 @@ def test_persist_skips_missing_and_oversized(tmp_path: Path) -> None:
 def test_persist_ignores_non_string_entries(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
 
-    assert runtime._persist_host_files("sess-1", str(tmp_path), [None, 3, ""]) == []
+    assert (
+        runtime._persist_host_files("sess-1", str(tmp_path), [None, 3, ""], None) == []
+    )
 
 
 async def test_capture_sets_attachments(tmp_path: Path) -> None:
@@ -109,7 +114,9 @@ async def test_capture_sets_attachments(tmp_path: Path) -> None:
     (tmp_path / "report.md").write_text("the report")
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_files("sess-1", [str(tmp_path / "report.md")], metadata)
+    await runtime._capture_host_files(
+        "sess-1", [str(tmp_path / "report.md")], metadata, None
+    )
 
     assert metadata["attachments"][0]["filename"] == "report.md"
 
@@ -118,7 +125,9 @@ async def test_capture_no_attachments_when_all_unreadable(tmp_path: Path) -> Non
     runtime = _runtime(tmp_path)
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_files("sess-1", [str(tmp_path / "gone")], metadata)
+    await runtime._capture_host_files(
+        "sess-1", [str(tmp_path / "gone")], metadata, None
+    )
 
     assert "attachments" not in metadata
 
@@ -133,7 +142,7 @@ async def test_capture_uses_worktree_over_cwd(tmp_path: Path) -> None:
     )
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_files("sess-1", ["in-wt.txt"], metadata)
+    await runtime._capture_host_files("sess-1", ["in-wt.txt"], metadata, None)
 
     assert metadata["attachments"][0]["filename"] == "in-wt.txt"
 
@@ -142,7 +151,7 @@ async def test_capture_missing_session_is_noop(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path, session=None)
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_files("sess-1", ["relative.txt"], metadata)
+    await runtime._capture_host_files("sess-1", ["relative.txt"], metadata, None)
 
     assert "attachments" not in metadata
 
@@ -156,7 +165,7 @@ async def test_small_report_is_inlined_and_never_attached(tmp_path: Path) -> Non
     report.write_text("all checks passed\n[exited with code 0]", encoding="utf-8")
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_text("sess-1", [str(report)], metadata)
+    await runtime._capture_host_text("sess-1", [str(report)], metadata, None)
 
     assert "attachments" not in metadata
     assert metadata["captured_text"] == ["all checks passed\n[exited with code 0]"]
@@ -170,7 +179,7 @@ async def test_capture_inlines_only_within_the_eager_budget(tmp_path: Path) -> N
     report.write_text("y" * 8192, encoding="utf-8")
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_text("sess-1", [str(report)], metadata)
+    await runtime._capture_host_text("sess-1", [str(report)], metadata, None)
 
     assert "captured_text" not in metadata
     assert metadata["attachments"][0]["size"] == 8192
@@ -182,7 +191,7 @@ async def test_binary_report_falls_back_to_an_attachment(tmp_path: Path) -> None
     report.write_bytes(b"\x89PNG\x00\r\n")
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_text("sess-1", [str(report)], metadata)
+    await runtime._capture_host_text("sess-1", [str(report)], metadata, None)
 
     assert "captured_text" not in metadata
     assert len(metadata["attachments"]) == 1
@@ -192,7 +201,7 @@ async def test_missing_report_yields_nothing(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     metadata: dict[str, Any] = {}
 
-    await runtime._capture_host_text("sess-1", [str(tmp_path / "gone")], metadata)
+    await runtime._capture_host_text("sess-1", [str(tmp_path / "gone")], metadata, None)
 
     assert metadata == {}
 
@@ -208,6 +217,7 @@ async def test_inline_blobs_are_saved_and_pinned(tmp_path: Path) -> None:
         "sess-1",
         [{"filename": "task-1-result.txt", "text": "the tail", "mime": "text/plain"}],
         metadata,
+        None,
     )
 
     (spec,) = metadata["attachments"]
@@ -226,7 +236,7 @@ async def test_inline_blobs_append_to_existing_attachments(tmp_path: Path) -> No
     }
 
     await runtime._capture_inline_blobs(
-        "sess-1", [{"filename": "spill.txt", "text": "x"}], metadata
+        "sess-1", [{"filename": "spill.txt", "text": "x"}], metadata, None
     )
 
     ids = [entry["id"] for entry in metadata["attachments"]]
@@ -240,7 +250,7 @@ async def test_inline_blobs_refuse_oversized_text(tmp_path: Path) -> None:
     metadata: dict[str, Any] = {}
 
     await runtime._capture_inline_blobs(
-        "sess-1", [{"filename": "big.txt", "text": "y" * 64}], metadata
+        "sess-1", [{"filename": "big.txt", "text": "y" * 64}], metadata, None
     )
 
     assert metadata == {}
@@ -251,7 +261,10 @@ async def test_inline_blobs_skip_malformed_entries(tmp_path: Path) -> None:
     metadata: dict[str, Any] = {}
 
     await runtime._capture_inline_blobs(
-        "sess-1", ["nope", {"text": "no filename"}, {"filename": "a.txt"}], metadata
+        "sess-1",
+        ["nope", {"text": "no filename"}, {"filename": "a.txt"}],
+        metadata,
+        None,
     )
 
     assert metadata == {}

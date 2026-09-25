@@ -5757,7 +5757,7 @@ class SessionRuntime:
         session_id: str,
         paths: list[Any],
         metadata: dict[str, Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save host paths as pinned attachments on ``metadata["attachments"]``.
 
@@ -5778,7 +5778,7 @@ class SessionRuntime:
         session_id: str,
         paths: list[Any],
         metadata: dict[str, Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save host paths whose content is meant to be read in place.
 
@@ -5802,7 +5802,7 @@ class SessionRuntime:
         session_id: str,
         blobs: list[Any],
         metadata: dict[str, Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> None:
         """Save text a normalizer already holds as pinned attachments, listing
         their ids on ``metadata["inline_attachment_ids"]`` so a consumer can
@@ -5861,7 +5861,7 @@ class SessionRuntime:
         data: bytes,
         filename: str,
         mime: str | None,
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> AttachmentSpec:
         spec = self.attachments.save(
             session_id, data=data, filename=filename, content_type=mime, origin=origin
@@ -5874,7 +5874,7 @@ class SessionRuntime:
         session_id: str,
         base: str | None,
         raw_paths: list[Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> list[AttachmentSpec]:
         out: list[AttachmentSpec] = []
         for path in self._iter_host_paths(base, raw_paths, tag="send_user_file"):
@@ -5899,7 +5899,7 @@ class SessionRuntime:
         session_id: str,
         base: str | None,
         raw_paths: list[Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> tuple[list[str], list[AttachmentSpec]]:
         """Split host paths into text small enough to inline and blobs that must
         be attached. Blocking; run off the event loop."""
@@ -5931,7 +5931,7 @@ class SessionRuntime:
         self,
         session_id: str,
         entries: list[Any],
-        origin: AttachmentOrigin | None = None,
+        origin: AttachmentOrigin | None,
     ) -> list[AttachmentSpec]:
         """Save each in-memory text blob as a pinned attachment, skipping
         malformed or oversized entries. Blocking; run off the event loop."""

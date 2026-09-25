@@ -123,14 +123,14 @@ class TmuxTransport(TransportAdapter):
                 await deliver(True)
                 return
             # A reattach/restart relaunches the pane, and the wrapped TUI is
-            # still booting when this fires — pasting before the composer exists
-            # drops the keystrokes. Wait for it to draw first. This also refuses
-            # to send while a modal dialog is open, so the message is never
-            # pasted (and Enter'd) into an approval/trust prompt.
+            # still booting when this fires — input sent before the composer
+            # exists drops the keystrokes. Wait for it to draw first. This also
+            # refuses to send while a modal dialog is open, so the message is
+            # never sent (and Enter'd) into an approval/trust prompt.
             await self._await_pane_ready(target, confirmer)
             # Some wrapped TUIs absorb the submit Enter while still ingesting
-            # the paste (the Claude TUI does this loading an image pasted by
-            # path), leaving the message typed but unsent. Paste without
+            # the input (the Claude TUI does this loading an image pasted by
+            # path), leaving the message typed but unsent. Deliver without
             # submitting, then send Enter and confirm the composer cleared,
             # retrying the keystroke if it was swallowed.
             await deliver(False)

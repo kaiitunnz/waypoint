@@ -218,8 +218,9 @@ class PaneSubmitConfirming(Protocol):
         """Return whether the just-sent input has left the composer (submitted),
         given a ``capture-pane`` snapshot of the wrapped TUI and the text that
         was sent. Agents that render input literally check that ``sent_text``
-        no longer occupies the composer; ones that collapse it (Claude pastes an
-        image to an ``[Image]`` chip) check that the composer is empty instead."""
+        no longer occupies the composer; ones that transform it (Claude wraps
+        typed text and turns image paths into ``[Image]`` chips) check that the
+        composer is empty instead."""
         ...
 
 

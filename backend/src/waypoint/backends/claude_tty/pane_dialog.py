@@ -96,6 +96,9 @@ _OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 # recognizes; the plan dialog is a full-pane overlay with nothing below its footer,
 # so it needs no token.
 _DIALOG_FOOTER_TOKENS = ("Esc to cancel",)
+# The composer's top and bottom borders: full-width rules of this character.
+_RULE_CHAR = "─"
+_MIN_RULE_WIDTH = 20
 
 
 def _strip_ansi(text: str) -> str:
@@ -220,14 +223,47 @@ def _rests_on_dialog_footer(lines: list[str], run_end: int) -> int | None:
     return None
 
 
+def _is_column0_rule(line: str) -> bool:
+    stripped = line.rstrip()
+    return len(stripped) >= _MIN_RULE_WIDTH and set(stripped) == {_RULE_CHAR}
+
+
+def _live_composer_bottom(lines: list[str]) -> int | None:
+    """Index of the live composer's bottom border, when the composer is drawn.
+
+    The composer is framed by two full-width rules starting at column 0, with
+    the ``❯`` prompt at column 0 directly under the top one. Its text wraps onto
+    indented lines, so a message quoting a dialog (borders, footers, ``❯``
+    rows) can never reproduce that frame.
+    """
+    for top in range(len(lines) - 3, -1, -1):
+        prompt = lines[top + 1]
+        if not (
+            _is_column0_rule(lines[top])
+            and prompt.startswith(_COMPOSER_PROMPT)
+            and _is_composer_line(prompt)
+        ):
+            continue
+        width = len(lines[top].rstrip())
+        for bottom in range(top + 2, len(lines)):
+            if _is_column0_rule(lines[bottom]) and len(lines[bottom].rstrip()) == width:
+                return bottom
+        return None
+    return None
+
+
 def _active_region(lines: list[str]) -> list[str]:
     """The pane text at and below the bottom-most live composer prompt.
 
-    Scoping here drops dialog signatures quoted higher in settled transcript. A
-    trailing run of blank / leading-``❯`` lines resting on a dialog footer is
-    queued messages or a free-text answer field, not the composer, so it is
-    skipped and the scan continues above the footer.
+    Scoping here drops dialog signatures quoted higher in settled transcript.
+    The composer's own text is dropped too: a typed message quoting a dialog
+    must not read as one. A trailing run of blank / leading-``❯`` lines resting
+    on a dialog footer is queued messages or a free-text answer field, not the
+    composer, so it is skipped and the scan continues above the footer.
     """
+    composer_bottom = _live_composer_bottom(lines)
+    if composer_bottom is not None:
+        return lines[composer_bottom:]
     i = len(lines) - 1
     while i >= 0:
         if not _is_composer_line(lines[i]):

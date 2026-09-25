@@ -36,6 +36,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
 from waypoint.backends.base import (
+    PaneTypingSpec,
     TerminalAppearance,
     config_dir_for,
 )
@@ -313,13 +314,11 @@ class ClaudeTtyPlugin:
     def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
         return pane_dialog.shows_blocking_dialog(pane_text)
 
+    def pane_typing_spec(self) -> PaneTypingSpec:
+        return self._claude.pane_typing_spec()
+
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
-        # The Claude TUI can swallow the submit Enter while loading an image
-        # pasted by path; the composer clearing is how the tmux transport
-        # confirms the message was actually sent (vs typed-but-unsent). The TUI
-        # collapses the paste to a chip, so emptiness — not the sent text — is
-        # the signal.
-        return pane_dialog.composer_is_empty(pane_text)
+        return self._claude.confirm_pane_submit(pane_text, sent_text)
 
     async def terminal_appearance(
         self, runtime: "SessionRuntime", session: SessionRecord

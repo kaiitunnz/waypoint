@@ -1,11 +1,20 @@
 import asyncio
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.base import PaneTypedInput, PaneTypingSpec
+from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
+from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
+from waypoint.backends.codex.plugin import CodexPlugin
+from waypoint.backends.opencode.plugin import OpenCodePlugin
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
+from waypoint.schemas import AttachmentKind
 from waypoint.transports import InputBlockedError
 
 
@@ -125,6 +134,151 @@ def test_multiline_paste_failure_drops_orphaned_buffer() -> None:
     buffer_name = set_buffer[2]
     assert paste_buffer[0] == "paste-buffer"
     assert delete_buffer == ("delete-buffer", "-b", buffer_name)
+
+
+def _recording_adapter() -> tuple[TmuxAdapter, list[tuple[str, ...]]]:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+    return adapter, commands
+
+
+def _split_commands(args: tuple[str, ...]) -> list[list[str]]:
+    commands: list[list[str]] = [[]]
+    for arg in args:
+        if arg == ";":
+            commands.append([])
+        else:
+            commands[-1].append(arg)
+    return commands
+
+
+SPEC = PaneTypingSpec(max_event_units=760, event_separator=b"\x1b[I")
+SEP = ["send-keys", "-t", "%1", "-H", "1b", "5b", "49"]
+
+
+def _type(adapter: TmuxAdapter, segments, spec: PaneTypingSpec = SPEC) -> None:
+    asyncio.run(adapter.type_input("%1", segments, spec, submit=False))
+
+
+def _literal(text: str) -> list[str]:
+    return ["send-keys", "-t", "%1", "-l", "--", text]
+
+
+def test_trailing_semicolon_is_escaped_for_tmux() -> None:
+    # tmux reads an argument ending in ";" as a command separator and drops it.
+    adapter, commands = _recording_adapter()
+    asyncio.run(adapter.send_input("%1", "run it;", submit=False))
+    asyncio.run(adapter.send_input("%1", "a;\nb;", submit=False))
+    assert commands[0] == ("send-keys", "-t", "%1", "-l", "--", "run it\\;")
+    assert commands[1][-1] == "a;\nb\\;"
+
+
+def test_type_input_types_short_text_in_one_command() -> None:
+    adapter, commands = _recording_adapter()
+    _type(adapter, [("line one\nline two", False)])
+    assert [_split_commands(c) for c in commands] == [[_literal("line one\nline two")]]
+
+
+def test_type_input_splits_by_utf16_units_with_separators() -> None:
+    # A key event over the TUI's paste threshold reads as a paste, so pieces
+    # are capped in UTF-16 units (an astral emoji is two) and separated.
+    adapter, commands = _recording_adapter()
+    _type(adapter, [("ab😀cd", False)], replace(SPEC, max_event_units=3))
+    assert len(commands) == 1
+    assert _split_commands(commands[0]) == [
+        _literal("ab"),
+        SEP,
+        _literal("😀c"),
+        SEP,
+        _literal("d"),
+    ]
+
+
+def test_type_input_normalizes_text_for_typing() -> None:
+    adapter, commands = _recording_adapter()
+    _type(adapter, [("\n  \nx\ty\x1b[Az\r\nend;", False)])
+    assert _split_commands(commands[0]) == [_literal("x    y[Az\nend\\;")]
+
+
+def test_type_input_pastes_path_segments() -> None:
+    adapter, commands = _recording_adapter()
+    _type(adapter, [("look\n- ", False), ("/tmp/a.png /tmp/b;", True)])
+    typed, sep, set_buffer, paste = _split_commands(commands[0])
+    assert typed == _literal("look\n- ")
+    assert sep == SEP
+    buffer_name = set_buffer[2]
+    assert set_buffer == ["set-buffer", "-b", buffer_name, "--", "/tmp/a.png /tmp/b\\;"]
+    assert paste == ["paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", "%1"]
+
+
+def test_type_input_batches_under_tmux_command_limit() -> None:
+    adapter, commands = _recording_adapter()
+    _type(adapter, [("x" * 30_000, False)])
+    assert len(commands) > 1
+    for command in commands:
+        assert sum(len(arg.encode()) + 1 for arg in command) <= 12_000
+    # Separate invocations can coalesce too, so later ones open with the
+    # separator; no text is lost across the batch boundaries.
+    assert all(_split_commands(c)[0] == SEP for c in commands[1:])
+    typed = [c[-1] for cmd in commands for c in _split_commands(cmd) if "-l" in c]
+    assert "".join(typed) == "x" * 30_000
+
+
+def test_type_input_failure_drops_unpasted_buffers() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        if args[0] != "delete-buffer":
+            raise TmuxError("pane gone")
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+    with pytest.raises(TmuxError):
+        _type(adapter, [("hi ", False), ("/tmp/a.png", True)])
+    buffer_name = _split_commands(commands[0])[2][2]
+    assert commands[1] == ("delete-buffer", "-b", buffer_name)
+
+
+@pytest.mark.parametrize("text", ["line\n" * 6_000, "x" * 30_000])
+def test_large_paste_fills_buffer_in_chunks(text: str) -> None:
+    # tmux rejects one command over ~16 KB, so a large message (multi-line or
+    # not) fills the paste buffer across appends before pasting it.
+    adapter, commands = _recording_adapter()
+    asyncio.run(adapter.send_input("%1", text, submit=False))
+    *fills, paste = commands
+    assert len(fills) > 1
+    buffer_name = fills[0][2]
+    assert fills[0][:4] == ("set-buffer", "-b", buffer_name, "--")
+    assert all(
+        f[:5] == ("set-buffer", "-a", "-b", buffer_name, "--") for f in fills[1:]
+    )
+    assert all(sum(len(a.encode()) + 1 for a in f) <= 12_100 for f in fills)
+    assert "".join(f[-1] for f in fills) == text
+    assert paste[:2] == ("paste-buffer", "-d")
+
+
+def test_failed_buffer_fill_drops_the_buffer() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        if "-a" in args:
+            raise TmuxError("boom")
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+    with pytest.raises(TmuxError):
+        asyncio.run(adapter.send_input("%1", "x" * 30_000, submit=False))
+    assert commands[-1] == ("delete-buffer", "-b", commands[0][2])
 
 
 def test_send_bytes_forwards_hex_escape_sequences() -> None:
@@ -416,6 +570,11 @@ class _RecordingAdapter:
     async def send_input(self, target, text, submit=True):
         self.calls.append(("send_input", target, text, submit))
 
+    async def type_input(self, target, segments, typing_spec, submit=True):
+        self.calls.append(("type_input", target, list(segments)))
+        if submit:
+            await self.submit(target)
+
     async def submit(self, target):
         self.calls.append(("submit", target))
         self.submits += 1
@@ -449,6 +608,18 @@ class _PlainAgent:
     id = "opencode"  # no pane hooks -> not a confirmer
 
 
+class _TypingConfirmer(_AgentConfirmer):
+    id = "claude_tty"
+
+    def pane_typing_spec(self):
+        return SPEC
+
+
+class _TypingAgent(_PlainAgent):
+    def pane_typing_spec(self):
+        return SPEC
+
+
 def _transport_with(agent, boot_frames: int = 0, dialog: bool = False):
     adapter = _RecordingAdapter(boot_frames, dialog)
     registry = SimpleNamespace(get=lambda backend_id: agent)
@@ -476,6 +647,34 @@ def test_send_input_single_enter_for_non_confirmer_agent() -> None:
     transport, adapter = _transport_with(_PlainAgent())
     asyncio.run(transport.send_input(_session("opencode"), "hi"))
     assert adapter.calls == [("send_input", "%9", "hi", True)]
+
+
+def _attachment(path: str, image: bool) -> ResolvedAttachment:
+    return ResolvedAttachment(
+        spec=SimpleNamespace(kind=AttachmentKind.IMAGE if image else AttachmentKind.FILE),  # type: ignore[arg-type]
+        path=Path(path),
+    )
+
+
+def test_send_input_types_for_typing_agent_then_confirms_submit() -> None:
+    transport, adapter = _transport_with(_TypingConfirmer())
+    attachments = [_attachment("/a.png", True), _attachment("/b.txt", False)]
+    asyncio.run(transport.send_input(_session("claude_tty"), "hi\nthere", attachments))
+    assert (
+        "type_input",
+        "%9",
+        [("hi\nthere\n\nAttached files:\n- /b.txt\n- ", False), ("/a.png", True)],
+    ) in adapter.calls
+    assert not any(c[0] == "send_input" for c in adapter.calls)
+    assert adapter.calls.index(("submit", "%9")) > next(
+        i for i, c in enumerate(adapter.calls) if c[0] == "type_input"
+    )
+
+
+def test_send_input_types_then_submits_without_confirmer() -> None:
+    transport, adapter = _transport_with(_TypingAgent())
+    asyncio.run(transport.send_input(_session("x"), "hi"))
+    assert adapter.calls == [("type_input", "%9", [("hi", False)]), ("submit", "%9")]
 
 
 def test_send_input_waits_for_ready_before_pasting() -> None:
@@ -710,3 +909,11 @@ def test_sends_into_one_pane_do_not_overlap() -> None:
 
     asyncio.run(both())
     assert overlap == [False, False]
+
+
+def test_claude_agents_type_pane_input_and_others_paste() -> None:
+    assert isinstance(ClaudeCodePlugin(), PaneTypedInput)
+    assert isinstance(ClaudeTtyPlugin(), PaneTypedInput)
+    assert ClaudeTtyPlugin().pane_typing_spec() == ClaudeCodePlugin().pane_typing_spec()
+    assert not isinstance(CodexPlugin(), PaneTypedInput)
+    assert not isinstance(OpenCodePlugin(), PaneTypedInput)

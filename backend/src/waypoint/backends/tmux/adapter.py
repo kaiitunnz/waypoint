@@ -1,13 +1,68 @@
 import asyncio
+import re
 import shlex
 import uuid
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from waypoint.backends.base import PaneTypingSpec
+
+# tmux rejects a command over ~16 KB ("command too long").
+_COMMAND_BUDGET_BYTES = 12_000
+_TAB_AS_SPACES = "    "
+# Control characters would be read as keys (ESC starts a sequence); LF stays.
+_UNTYPEABLE_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
+_LEADING_BLANK_LINES_RE = re.compile(r"\A(?:[ \t]*\n)+")
+
 
 class TmuxError(RuntimeError):
     pass
+
+
+def _tmux_literal(text: str) -> str:
+    # tmux treats an argument ending in ";" as a command separator; "\;" is a
+    # literal one.
+    return f"{text[:-1]}\\;" if text.endswith(";") else text
+
+
+def _utf8_len(char: str) -> int:
+    return len(char.encode())
+
+
+def _utf16_len(char: str) -> int:
+    return 2 if ord(char) > 0xFFFF else 1
+
+
+def _split(text: str, limit: int, width: Callable[[str], int]) -> list[str]:
+    pieces: list[str] = []
+    start = size = 0
+    for index, char in enumerate(text):
+        char_width = width(char)
+        if size + char_width > limit:
+            pieces.append(text[start:index])
+            start, size = index, 0
+        size += char_width
+    if start < len(text):
+        pieces.append(text[start:])
+    return pieces
+
+
+def _paste_commands(target: str, text: str) -> tuple[str, list[list[str]]]:
+    # A fresh name per paste: input is not serialized per pane (an HTTP send and
+    # a terminal-WS submit can race), so a fixed name would let one send paste or
+    # delete another's buffer.
+    buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
+    commands: list[list[str]] = []
+    for index, chunk in enumerate(_split(text, _COMMAND_BUDGET_BYTES, _utf8_len)):
+        append = ["-a"] if index else []
+        fill = ["set-buffer", *append, "-b", buffer_name, "--", _tmux_literal(chunk)]
+        commands.append(fill)
+    # -p brackets the paste when the app asked for it; -r keeps LF so the paste
+    # never submits; -d drops the buffer afterward.
+    commands.append(["paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target])
+    return buffer_name, commands
 
 
 @dataclass
@@ -77,6 +132,78 @@ class TmuxAdapter:
             await self._send_literal_text(target, text)
         if submit:
             await self.submit(target)
+
+    async def type_input(
+        self,
+        target: str,
+        segments: Sequence[tuple[str, bool]],
+        typing_spec: PaneTypingSpec,
+        submit: bool = True,
+    ) -> None:
+        """Type ``(chunk, paste)`` segments into the pane, then press Enter if
+        ``submit``.
+
+        Text chunks are typed in pieces of at most ``typing_spec.max_event_units``
+        UTF-16 units, with ``typing_spec.event_separator`` between pieces so the
+        TUI reads each as its own key event even when tmux writes coalesce.
+        ``paste`` chunks are pasted.
+
+        Typed text is normalized: CR/CRLF become LF, tabs become spaces (a typed
+        tab triggers completion), other control characters are dropped, and the
+        first chunk's leading blank lines are removed.
+        """
+        separator = ["send-keys", "-t", target, "-H"] + [
+            f"{byte:02x}" for byte in typing_spec.event_separator
+        ]
+        groups: list[tuple[list[list[str]], str | None]] = []
+        for index, (chunk, paste) in enumerate(segments):
+            if paste:
+                name, commands = _paste_commands(target, chunk)
+                groups.append((commands, name))
+                continue
+            text = chunk.replace("\r\n", "\n").replace("\r", "\n")
+            text = _UNTYPEABLE_RE.sub("", text.replace("\t", _TAB_AS_SPACES))
+            if index == 0:
+                text = _LEADING_BLANK_LINES_RE.sub("", text)
+            groups.extend(
+                ([["send-keys", "-t", target, "-l", "--", _tmux_literal(piece)]], None)
+                for piece in _split(text, typing_spec.max_event_units, _utf16_len)
+            )
+
+        # Separate invocations can coalesce into one read too, so the separator
+        # also opens each later one.
+        batch: list[str] = []
+        batch_size = 0
+        batch_buffers: list[str] = []
+        for position, (commands, buffer_name) in enumerate(groups):
+            if position:
+                commands = [separator, *commands]
+            args = [arg for command in commands for arg in (";", *command)][1:]
+            size = sum(len(arg.encode()) + 1 for arg in args)
+            if batch and batch_size + size > _COMMAND_BUDGET_BYTES:
+                await self._run_dropping_buffers(batch, batch_buffers)
+                batch, batch_size, batch_buffers = [], 0, []
+            batch += [";", *args] if batch else args
+            batch_size += size
+            if buffer_name is not None:
+                batch_buffers.append(buffer_name)
+        if batch:
+            await self._run_dropping_buffers(batch, batch_buffers)
+        if submit:
+            await self.submit(target)
+
+    async def _run_dropping_buffers(
+        self, args: Sequence[str], buffer_names: Sequence[str]
+    ) -> None:
+        try:
+            await self._run(*args)
+        except TmuxError:
+            # paste-buffer -d only drops a buffer it pasted; clear any the
+            # failed command left behind before propagating.
+            for buffer_name in buffer_names:
+                with suppress(TmuxError):
+                    await self._run("delete-buffer", "-b", buffer_name)
+            raise
 
     async def submit(self, target: str) -> None:
         """Send a bare Enter to submit the pane's current composer content.
@@ -206,35 +333,16 @@ class TmuxAdapter:
         return stdout.decode()
 
     async def _send_literal_text(self, target: str, text: str) -> None:
-        # Single-line text goes in as literal keystrokes. Multi-line text is
-        # delivered as a bracketed paste instead. Emulating the newlines with
-        # ``C-j`` keystrokes and relying on the caller's trailing ``Enter`` to
-        # submit is unreliable: the wrapped CLIs enable bracketed paste
-        # (``\e[?2004h``), and a raw multi-key burst is sometimes interpreted
-        # such that the trailing ``Enter`` lands inside the composer rather
-        # than submitting — leaving the message typed but unsent. A real
-        # paste round-trips deterministically. The submitting ``Enter`` is
-        # still appended by the caller via the ``submit`` flag on
-        # ``send_input``, outside the paste.
+        # Short single-line text is typed. Multi-line text is pasted: the
+        # wrapped CLIs enable bracketed paste, and a raw multi-key burst can land
+        # the caller's trailing Enter inside the composer instead of submitting.
+        # A line too long for one tmux command is pasted too.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        if "\n" not in normalized:
-            await self._run("send-keys", "-t", target, "-l", "--", normalized)
-            return
-        # A fresh name per send: input is not serialized per pane (an HTTP
-        # send and a terminal-WS submit can race), so a deterministic name
-        # would let one send paste or delete another's buffer.
-        buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
-        await self._run("set-buffer", "-b", buffer_name, "--", normalized)
-        # -p wraps the paste in bracketed-paste markers when the pane's app
-        # requested them; -r keeps LF (no newline-to-CR translation, so the
-        # paste never submits on its own); -d drops the buffer afterward.
-        try:
+        if "\n" not in normalized and _utf8_len(normalized) <= _COMMAND_BUDGET_BYTES:
             await self._run(
-                "paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target
+                "send-keys", "-t", target, "-l", "--", _tmux_literal(normalized)
             )
-        except TmuxError:
-            # -d only runs on a successful paste, so drop the orphaned buffer
-            # before propagating (e.g. the pane died between set and paste).
-            with suppress(TmuxError):
-                await self._run("delete-buffer", "-b", buffer_name)
-            raise
+            return
+        buffer_name, commands = _paste_commands(target, normalized)
+        for command in commands:
+            await self._run_dropping_buffers(command, [buffer_name])

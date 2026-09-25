@@ -3,15 +3,25 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
-from waypoint.attachments import ResolvedAttachment, append_attachment_paths
+from waypoint.attachments import (
+    ResolvedAttachment,
+    append_attachment_paths,
+    pane_attachment_segments,
+)
 from waypoint.backends.approvals import is_approve_decision
-from waypoint.backends.base import PaneSubmitConfirming
+from waypoint.backends.base import (
+    PaneSubmitConfirming,
+    PaneTypedInput,
+    PaneTypingSpec,
+)
 from waypoint.backends.registry import get_registry
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
@@ -71,31 +81,47 @@ class TmuxTransport(TransportAdapter):
     ) -> None:
         # A raw terminal can't carry binary, so attachments degrade to their
         # host paths appended to the message; the inner CLI reads them itself.
-        payload = append_attachment_paths(text, attachments or [])
         target = self._target(session)
         confirmer = self._confirmer(session)
+        typing_spec = self._typing_spec(session)
+        deliver: Callable[[bool], Awaitable[None]]
+        if typing_spec is None:
+            payload = append_attachment_paths(text, attachments or [])
+            deliver = partial(self.adapter.send_input, target, payload)
+        else:
+            segments = pane_attachment_segments(text, attachments or [])
+            payload = "".join(chunk for chunk, _ in segments)
+            deliver = partial(self.adapter.type_input, target, segments, typing_spec)
         async with self._input_lock(session):
-            await self._send(target, payload, confirmer)
+            await self._send(target, payload, deliver, confirmer)
+
+    def _typing_spec(self, session: SessionRecord) -> PaneTypingSpec | None:
+        plugin = self._runtime.registry.get(session.backend)
+        return plugin.pane_typing_spec() if isinstance(plugin, PaneTypedInput) else None
 
     async def _send(
-        self, target: str, payload: str, confirmer: PaneSubmitConfirming | None
+        self,
+        target: str,
+        payload: str,
+        deliver: Callable[[bool], Awaitable[None]],
+        confirmer: PaneSubmitConfirming | None,
     ) -> None:
         try:
             if confirmer is None:
-                await self.adapter.send_input(target, payload, True)
+                await deliver(True)
                 return
             # A reattach/restart relaunches the pane, and the wrapped TUI is
-            # still booting when this fires — pasting before the composer exists
-            # drops the keystrokes. Wait for it to draw first. This also refuses
-            # to send while a modal dialog is open, so the message is never
-            # pasted (and Enter'd) into an approval/trust prompt.
+            # still booting when this fires — input sent before the composer
+            # exists drops the keystrokes. Wait for it to draw first. This also
+            # refuses to send while a modal dialog is open, so the message is
+            # never sent (and Enter'd) into an approval/trust prompt.
             await self._await_pane_ready(target, confirmer)
             # Some wrapped TUIs absorb the submit Enter while still ingesting
-            # the paste (the Claude TUI does this loading an image pasted by
-            # path), leaving the message typed but unsent. Paste without
+            # the input (the Claude TUI does this loading an image pasted by
+            # path), leaving the message typed but unsent. Deliver without
             # submitting, then send Enter and confirm the composer cleared,
             # retrying the keystroke if it was swallowed.
-            await self.adapter.send_input(target, payload, submit=False)
+            await deliver(False)
             await self._submit_confirmed(target, confirmer, payload)
         except TmuxError as exc:
             raise HTTPException(

@@ -78,7 +78,29 @@ def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) ->
     """
     if not attachments:
         return text
-    listing = "\n".join(f"- {attachment.path}" for attachment in attachments)
+    return _with_listing(text, [str(attachment.path) for attachment in attachments])
+
+
+def pane_attachment_segments(
+    text: str, attachments: list[ResolvedAttachment]
+) -> list[tuple[str, bool]]:
+    """``text`` and its attachment listing as ``(chunk, paste)`` segments.
+
+    Non-image paths are listed as in :func:`append_attachment_paths`. Image paths
+    follow as one pasted line, last: the TUI loads a pasted image asynchronously
+    and drops its chip wherever the cursor is when loading finishes.
+    """
+    if not attachments:
+        return [(text, False)]
+    files = [str(a.path) for a in attachments if not a.is_image]
+    images = " ".join(str(a.path) for a in attachments if a.is_image)
+    if not images:
+        return [(_with_listing(text, files), False)]
+    return [(_with_listing(text, [*files, ""]), False), (images, True)]
+
+
+def _with_listing(text: str, entries: list[str]) -> str:
+    listing = "\n".join(f"- {entry}" for entry in entries)
     block = f"Attached files:\n{listing}"
     return f"{text}\n\n{block}" if text else block
 

@@ -45,6 +45,7 @@ def _load(name: str) -> str:
         ("auto_mode_teaching.txt", PaneScreen.AUTO_MODE_TEACHING),
         ("ready.txt", PaneScreen.OTHER),
         ("slash_menu.txt", PaneScreen.OTHER),
+        ("composer_quotes_dialog.txt", PaneScreen.OTHER),
     ],
 )
 def test_classify(fixture: str, expected: PaneScreen) -> None:
@@ -68,6 +69,7 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("auto_mode_teaching.txt", True),
         ("ready.txt", False),
         ("slash_menu.txt", False),
+        ("composer_quotes_dialog.txt", False),
     ],
 )
 def test_shows_blocking_dialog(fixture: str, blocks: bool) -> None:
@@ -414,6 +416,31 @@ def test_classify_scopes_to_region_below_live_composer() -> None:
     )
     assert classify(screen) is PaneScreen.OTHER
     assert shows_blocking_dialog(screen) is False
+
+
+def test_message_quoting_dialog_in_composer_does_not_block() -> None:
+    # A typed message sits in the composer in full. One quoting a captured
+    # dialog (borders, a ❯ option row, footers) must not read as a live dialog,
+    # or the submit-confirm loop would refuse to press Enter.
+    rule = "─" * 40
+    screen = "\n".join(
+        [
+            rule,
+            "❯ please look at this dialog:",
+            "  " + "─" * 30,
+            "   Do you want to proceed?",
+            "   ❯ 1. Yes",
+            "  ❯ quoted prompt line",
+            "   Esc to cancel · Tab to amend",
+            "  " + "─" * 30,
+            "  Enter to select · Esc to cancel",
+            rule,
+            "  ⏸ manual mode on",
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen) is False
+    assert parse_approval(screen) is None
 
 
 def test_popup_below_slash_command_echo_still_classifies() -> None:

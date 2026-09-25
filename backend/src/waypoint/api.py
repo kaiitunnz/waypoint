@@ -34,7 +34,11 @@ from waypoint.backends.account_profiles import (
     backend_hosts_account_profiles,
     redacted_profile_metadata,
 )
-from waypoint.backends.base import TerminalAppearance, TerminalAppearanceResolving
+from waypoint.backends.base import (
+    PaneTypedInput,
+    TerminalAppearance,
+    TerminalAppearanceResolving,
+)
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
@@ -2428,6 +2432,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # interactive flag.
         terminal_input_injection = terminal_interactive or caps.terminal_key_injection
         terminal_resizable = caps.terminal_resizable
+        agent = context.runtime.registry.get(session.backend)
+        typing_spec = (
+            agent.pane_typing_spec() if isinstance(agent, PaneTypedInput) else None
+        )
         # Refuse to attach to an already-dead pane — the renderer would
         # seed from a stale capture and the stream would never produce
         # bytes. 4410 tells the frontend to surface the reconnect
@@ -2800,7 +2808,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if terminal_interactive:
                     for text, submit in submits:
                         with suppress(TmuxError):
-                            await adapter.send_input(pane, text, submit=submit)
+                            if typing_spec is None:
+                                await adapter.send_input(pane, text, submit=submit)
+                            else:
+                                await adapter.type_input(
+                                    pane, [(text, False)], typing_spec, submit=submit
+                                )
                 if terminal_resizable and resize_target is not None:
                     new_cols, new_rows = resize_target
                     renderer.resize(new_cols, new_rows)

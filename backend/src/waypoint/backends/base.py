@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -217,9 +218,34 @@ class PaneSubmitConfirming(Protocol):
         """Return whether the just-sent input has left the composer (submitted),
         given a ``capture-pane`` snapshot of the wrapped TUI and the text that
         was sent. Agents that render input literally check that ``sent_text``
-        no longer occupies the composer; ones that collapse it (Claude pastes an
-        image to an ``[Image]`` chip) check that the composer is empty instead."""
+        no longer occupies the composer; ones that transform it (Claude wraps
+        typed text and turns image paths into ``[Image]`` chips) check that the
+        composer is empty instead."""
         ...
+
+
+@dataclass(frozen=True)
+class PaneTypingSpec:
+    """How to type a message into an agent's TUI.
+
+    Typed pieces are capped at ``max_event_units`` UTF-16 code units, with
+    ``event_separator`` sent between them so the TUI reads each as its own key
+    event.
+    """
+
+    max_event_units: int
+    event_separator: bytes
+
+
+@runtime_checkable
+class PaneTypedInput(Protocol):
+    """An agent whose tmux-wrapped TUI treats pasted text differently from typed text.
+
+    The tmux transport and the Terminal compose drawer type this agent's messages
+    per :meth:`pane_typing_spec` and paste only image attachment paths.
+    """
+
+    def pane_typing_spec(self) -> PaneTypingSpec: ...
 
 
 class TerminalAppearance(StrEnum):

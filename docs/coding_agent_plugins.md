@@ -482,6 +482,26 @@ agent through the same protocol — so a new agent (Codex, OpenCode) gains
 terminal theme sync by implementing `terminal_appearance` alone, with no change
 to the wrapper, the websocket, or the frontend.
 
+### Typed pane input (optional)
+
+An agent whose TUI treats pasted text differently from typed text implements
+the `PaneTypedInput` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def pane_typing_spec(self) -> PaneTypingSpec: ...
+```
+
+The tmux transport and the Terminal compose drawer type its messages as
+keystrokes, in pieces of at most `max_event_units` UTF-16 units separated by
+`event_separator`, and paste image attachment paths last so the TUI loads them
+as images. Other agents receive multi-line messages as a bracketed paste.
+Claude implements it because Claude Code frames pasted text to the model as
+untrusted `<pasted_content>`;
+[`claude_code/pane_input.py`](../backend/src/waypoint/backends/claude_code/pane_input.py)
+records the TUI behavior its spec relies on. `claude_tty` delegates to its
+composed Claude agent.
+
 ## Token & context usage
 
 Waypoint tracks two independent token measurements, both agent-owned at the

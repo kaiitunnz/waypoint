@@ -196,10 +196,8 @@ export function SessionFilesPanel({
                   <span className="session-files-meta">
                     {it.origin === "task_output" ? (
                       <>
-                        <span className="session-files-origin">
-                          task report
-                        </span>{" "}
-                        ·{" "}
+                        <span className="session-files-origin">task report</span>
+                        {" · "}
                       </>
                     ) : null}
                     {typeTag(it.filename, it.kind === "image")} ·{" "}

@@ -245,6 +245,40 @@ def test_type_input_failure_drops_unpasted_buffers() -> None:
     assert commands[1] == ("delete-buffer", "-b", buffer_name)
 
 
+@pytest.mark.parametrize("text", ["line\n" * 6_000, "x" * 30_000])
+def test_large_paste_fills_buffer_in_chunks(text: str) -> None:
+    # tmux rejects one command over ~16 KB, so a large message (multi-line or
+    # not) fills the paste buffer across appends before pasting it.
+    adapter, commands = _recording_adapter()
+    asyncio.run(adapter.send_input("%1", text, submit=False))
+    *fills, paste = commands
+    assert len(fills) > 1
+    buffer_name = fills[0][2]
+    assert fills[0][:4] == ("set-buffer", "-b", buffer_name, "--")
+    assert all(
+        f[:5] == ("set-buffer", "-a", "-b", buffer_name, "--") for f in fills[1:]
+    )
+    assert all(sum(len(a.encode()) + 1 for a in f) <= 12_100 for f in fills)
+    assert "".join(f[-1] for f in fills) == text
+    assert paste[:2] == ("paste-buffer", "-d")
+
+
+def test_failed_buffer_fill_drops_the_buffer() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        if "-a" in args:
+            raise TmuxError("boom")
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+    with pytest.raises(TmuxError):
+        asyncio.run(adapter.send_input("%1", "x" * 30_000, submit=False))
+    assert commands[-1] == ("delete-buffer", "-b", commands[0][2])
+
+
 def test_send_bytes_forwards_hex_escape_sequences() -> None:
     commands: list[tuple[str, ...]] = []
 

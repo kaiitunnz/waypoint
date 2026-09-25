@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # tmux rejects a command over ~16 KB ("command too long"); stay well under it
-# when chaining typed input into one invocation.
-_TYPED_BATCH_BYTES = 12_000
+# when chaining typed input or filling a paste buffer.
+_COMMAND_BUDGET_BYTES = 12_000
 _TAB_AS_SPACES = "    "
 # Control characters would be read as keys (ESC starts a sequence); LF stays.
 _UNTYPEABLE_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
@@ -24,6 +24,20 @@ def _tmux_literal(text: str) -> str:
     # tmux reads an argument ending in ";" as a command separator and drops the
     # ";" ("a;" arrives as "a"); a trailing "\;" is its escape for a literal one.
     return f"{text[:-1]}\\;" if text.endswith(";") else text
+
+
+def _split_bytes(text: str, max_bytes: int) -> list[str]:
+    """Split ``text`` into pieces of at most ``max_bytes`` UTF-8 bytes."""
+    pieces: list[str] = []
+    start = size = 0
+    for index, char in enumerate(text):
+        width = len(char.encode())
+        if size + width > max_bytes:
+            pieces.append(text[start:index])
+            start, size = index, 0
+        size += width
+    pieces.append(text[start:])
+    return pieces
 
 
 def _split_utf16(text: str, max_units: int) -> list[str]:
@@ -116,13 +130,13 @@ class TmuxAdapter:
         max_event_units: int,
         event_separator: bytes,
     ) -> None:
-        """Type ``(chunk, is_path)`` segments into the pane without submitting.
+        """Type ``(chunk, paste)`` segments into the pane without submitting.
 
         Text chunks go in as literal keystrokes, in pieces of at most
         ``max_event_units`` UTF-16 units with ``event_separator`` sent between
         consecutive pieces so the wrapped TUI reads each as its own key event
-        even when tmux's writes coalesce into one read. Path chunks are pasted
-        on their own so the TUI can still load them (e.g. as images).
+        even when tmux's writes coalesce into one read. ``paste`` chunks are
+        pasted on their own so the TUI can still load them (e.g. as images).
 
         Text is normalized for typing: CRLF/CR become LF, tabs become spaces
         (a typed tab triggers completion), other control characters are
@@ -136,8 +150,8 @@ class TmuxAdapter:
             *(f"{byte:02x}" for byte in event_separator),
         ]
         groups: list[list[list[str]]] = []
-        for index, (chunk, is_path) in enumerate(segments):
-            if is_path:
+        for index, (chunk, paste) in enumerate(segments):
+            if paste:
                 buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
                 groups.append(
                     [
@@ -174,7 +188,7 @@ class TmuxAdapter:
             commands = [separator, *group] if position else group
             args = [arg for command in commands for arg in (";", *command)][1:]
             size = sum(len(arg.encode()) + 1 for arg in args)
-            if batch and batch_size + size > _TYPED_BATCH_BYTES:
+            if batch and batch_size + size > _COMMAND_BUDGET_BYTES:
                 await self._run_typed_batch(batch, batch_buffers)
                 batch, batch_size, batch_buffers = [], 0, []
             batch += [";", *args] if batch else args
@@ -322,18 +336,20 @@ class TmuxAdapter:
         return stdout.decode()
 
     async def _send_literal_text(self, target: str, text: str) -> None:
-        # Single-line text goes in as literal keystrokes. Multi-line text is
-        # delivered as a bracketed paste instead. Emulating the newlines with
-        # ``C-j`` keystrokes and relying on the caller's trailing ``Enter`` to
-        # submit is unreliable: the wrapped CLIs enable bracketed paste
-        # (``\e[?2004h``), and a raw multi-key burst is sometimes interpreted
-        # such that the trailing ``Enter`` lands inside the composer rather
-        # than submitting — leaving the message typed but unsent. A real
-        # paste round-trips deterministically. The submitting ``Enter`` is
-        # still appended by the caller via the ``submit`` flag on
+        # This is the paste path; agents implementing typed pane input go
+        # through ``type_input`` instead. Single-line text goes in as literal
+        # keystrokes. Multi-line text is delivered as a bracketed paste instead.
+        # Emulating the newlines with ``C-j`` keystrokes and relying on the
+        # caller's trailing ``Enter`` to submit is unreliable: the wrapped CLIs
+        # enable bracketed paste (``\e[?2004h``), and a raw multi-key burst is
+        # sometimes interpreted such that the trailing ``Enter`` lands inside
+        # the composer rather than submitting — leaving the message typed but
+        # unsent. A real paste round-trips deterministically. The submitting
+        # ``Enter`` is still appended by the caller via the ``submit`` flag on
         # ``send_input``, outside the paste.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        if "\n" not in normalized:
+        chunks = _split_bytes(normalized, _COMMAND_BUDGET_BYTES)
+        if "\n" not in normalized and len(chunks) == 1:
             await self._run(
                 "send-keys", "-t", target, "-l", "--", _tmux_literal(normalized)
             )
@@ -342,13 +358,16 @@ class TmuxAdapter:
         # send and a terminal-WS submit can race), so a deterministic name
         # would let one send paste or delete another's buffer.
         buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
-        await self._run(
-            "set-buffer", "-b", buffer_name, "--", _tmux_literal(normalized)
-        )
-        # -p wraps the paste in bracketed-paste markers when the pane's app
-        # requested them; -r keeps LF (no newline-to-CR translation, so the
-        # paste never submits on its own); -d drops the buffer afterward.
         try:
+            # Filled in chunks: one tmux command can't carry a large message.
+            for index, chunk in enumerate(chunks):
+                append = ["-a"] if index else []
+                await self._run(
+                    "set-buffer", *append, "-b", buffer_name, "--", _tmux_literal(chunk)
+                )
+            # -p wraps the paste in bracketed-paste markers when the pane's app
+            # requested them; -r keeps LF (no newline-to-CR translation, so the
+            # paste never submits on its own); -d drops the buffer afterward.
             await self._run(
                 "paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target
             )

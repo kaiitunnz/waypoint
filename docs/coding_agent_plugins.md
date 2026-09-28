@@ -392,25 +392,27 @@ warns without blocking, and the merged catalogue is what the frontend pickers an
 `waypoint models` show.
 
 The catalogue is ordered by family, newest first, with each model's `[1m]` entry
-directly after its base. Alongside the current aliases it pins the legacy models
-the CLI still runs: `claude-opus-4-8` down to `claude-opus-4-5`,
-`claude-sonnet-4-6`, and `claude-sonnet-4-5`, each with a `[1m]` entry except
-`claude-opus-4-5`, which the CLI excludes from long context. Pins use full model
-names; the CLI's short picker keys (`opus48`, …) are internal and rejected by
-`--model`. Models the CLI remaps to the latest (`claude-opus-4-1`) or has retired
-(`claude-3-5-haiku`) are absent, so a picker entry never runs as a different
-model than it names. Reachability is a runtime property: the remap/retirement
-table is fetched from the server, so a pinned model can start remapping without a
-CLI upgrade.
+directly after its base. Alongside the current aliases it pins the previous and
+legacy models the CLI still runs: `claude-opus-5` down to `claude-opus-4-5`,
+`claude-sonnet-5` down to `claude-sonnet-4-5`, and `claude-fable-5`, each with a
+`[1m]` entry except `claude-opus-4-5`, which the CLI excludes from long context.
+Pins use full model names; the CLI's short picker keys (`opus48`, …) are internal
+and rejected by `--model`. Models the CLI remaps to the latest (`claude-opus-4-1`)
+or has retired (`claude-3-5-haiku`) are absent, so a picker entry never runs as a
+different model than it names. Reachability is a runtime property: the
+remap/retirement table is fetched from the server, so a pinned model can start
+remapping without a CLI upgrade.
 
-Below `2.1.219` the `opus` alias is itself Opus 4.8, and below `2.1.197` `sonnet`
-is Sonnet 4.6, so each of those epochs drops the pin its alias duplicates rather
-than listing the model twice, and an older offering is an ordered subset of the
-current one. An `extra_models` entry reusing a pinned id
+Each release that moves an alias to a new model is an epoch boundary. A CLI older
+than the boundary sees the alias under the model it resolves to there (below
+`2.1.284`, `sonnet` is Sonnet 5), so the epoch relabels the alias, restores that
+model's effort ladder and default, and drops the pin the alias now duplicates rather
+than listing the model twice. Epochs apply cumulatively, and an older offering is an
+ordered subset of the current one. An `extra_models` entry reusing a pinned id
 replaces it in place on the current epoch, and appends on an epoch that already
-dropped it — reintroducing the duplicate label if it reuses the alias's label.
-The override line logs either way, since collision detection reads the ungated
-built-in ids.
+dropped it — reintroducing the duplicate label if it reuses the alias's label. The
+override line logs either way, since collision detection reads the ungated built-in
+ids.
 
 `import_thread` adopts an externally-created native thread into a brand-new
 session. When the import request's `import_history` flag is set (it defaults to

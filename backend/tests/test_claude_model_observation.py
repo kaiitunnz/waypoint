@@ -12,15 +12,18 @@ from waypoint.backends.claude_code.models import (
     [
         # Current-epoch alias targets have no pinned entry -> map to the alias.
         ("claude-opus-5-5", "opus"),
-        ("claude-sonnet-5", "sonnet"),
+        ("claude-sonnet-5-5", "sonnet"),
         ("claude-fable-5-1", "fable"),
         # Pinned legacy ids keep their distinct identity (checked before alias).
         ("claude-opus-5", "claude-opus-5"),
+        ("claude-sonnet-5", "claude-sonnet-5"),
         ("claude-opus-4-8", "claude-opus-4-8"),
         ("claude-sonnet-4-6", "claude-sonnet-4-6"),
         # The [1m] suffix is stripped from the stored base either way.
         ("claude-opus-5-5[1m]", "opus"),
         ("claude-opus-5[1m]", "claude-opus-5"),
+        ("claude-sonnet-5-5[1m]", "sonnet"),
+        ("claude-sonnet-5[1m]", "claude-sonnet-5"),
         ("claude-opus-4-8[1m]", "claude-opus-4-8"),
         # Unknown ids round-trip unchanged (picker shows a Custom entry).
         ("claude-opus-9", "claude-opus-9"),
@@ -74,8 +77,17 @@ def test_first_reply_previous_opus_keeps_pinned_identity() -> None:
     assert obs.reason == "initial_mismatch"
 
 
+def test_first_reply_previous_sonnet_keeps_pinned_identity() -> None:
+    # select sonnet[1m], first reply runs Sonnet 5 (a CLI older than 2.1.284).
+    obs = observe_claude_model("claude-sonnet-5", "sonnet[1m]", prev_base=None)
+    assert obs is not None
+    assert obs.resolved_base == "claude-sonnet-5"
+    assert obs.adopt_selection == "claude-sonnet-5[1m]"
+    assert obs.reason == "initial_mismatch"
+
+
 def test_first_reply_family_mismatch() -> None:
-    obs = observe_claude_model("claude-sonnet-5", "opus[1m]", prev_base=None)
+    obs = observe_claude_model("claude-sonnet-5-5", "opus[1m]", prev_base=None)
     assert obs is not None
     assert obs.resolved_base == "sonnet"
     assert obs.adopt_selection == "sonnet[1m]"  # [1m] preserved from selection
@@ -83,7 +95,7 @@ def test_first_reply_family_mismatch() -> None:
 
 
 def test_mid_session_switch_toasts_and_marks() -> None:
-    obs = observe_claude_model("claude-sonnet-5", "opus", prev_base="opus")
+    obs = observe_claude_model("claude-sonnet-5-5", "opus", prev_base="opus")
     assert obs is not None
     assert obs.resolved_base == "sonnet"
     assert obs.adopt_selection == "sonnet"

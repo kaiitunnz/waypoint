@@ -82,7 +82,7 @@ async def test_list_models_treats_undetectable_version_as_latest(
     result = await plugin.list_models(cast(Any, _fake_runtime()))
 
     sonnet = next(m for m in result["models"] if m["id"] == "sonnet")
-    assert sonnet["label"] == "Sonnet 5"
+    assert sonnet["label"] == "Sonnet 5.5"
 
 
 @pytest.mark.asyncio

@@ -402,7 +402,7 @@ async def test_observe_initial_mismatch_adopts_and_notifies() -> None:
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5-5")))
     await tailer._drain()
 
     updates = _resolved_model_updates(runtime)
@@ -423,7 +423,9 @@ async def test_observe_mid_session_switch_emits_divider() -> None:
 
     source.feed(_jsonl(_assistant_record(message_id="msg_1", model="claude-opus-5-5")))
     await tailer._drain()
-    source.feed(_jsonl(_assistant_record(message_id="msg_2", model="claude-sonnet-5")))
+    source.feed(
+        _jsonl(_assistant_record(message_id="msg_2", model="claude-sonnet-5-5"))
+    )
     await tailer._drain()
 
     events = _model_change_events(runtime)
@@ -452,7 +454,7 @@ async def test_observe_dedups_same_message_id() -> None:
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    record = _assistant_record(message_id="msg_1", model="claude-sonnet-5")
+    record = _assistant_record(message_id="msg_1", model="claude-sonnet-5-5")
     source.feed(_jsonl(record))
     await tailer._drain()
     source.feed(_jsonl(record))
@@ -469,7 +471,7 @@ async def test_observe_skips_plan_switching_selection() -> None:
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5-5")))
     await tailer._drain()
 
     assert _model_change_events(runtime) == []
@@ -483,7 +485,7 @@ async def test_observe_emits_note_with_current_session_status() -> None:
     runtime = _make_runtime(session)
     tailer, source = _make_tailer(runtime)
 
-    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5")))
+    source.feed(_jsonl(_assistant_record(model="claude-sonnet-5-5")))
     await tailer._drain()
 
     change_call = next(

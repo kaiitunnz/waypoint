@@ -54,6 +54,16 @@ def test_opus55_concrete_id_resolves_to_opus() -> None:
     assert claude_context_window_for_model("claude-opus-5-5[1m]") == 1_000_000
 
 
+def test_sonnet55_concrete_id_resolves_to_sonnet() -> None:
+    # The resolved id the CLI reports for the `sonnet` selection from 2.1.284 on.
+    assert normalize_claude_model_id("claude-sonnet-5-5") == "sonnet"
+    assert claude_model_family("claude-sonnet-5-5") == "sonnet"
+    assert claude_context_window_for_model("claude-sonnet-5-5") == 200_000
+    # The 1M entitlement survives on the concrete id.
+    assert normalize_claude_model_id("claude-sonnet-5-5[1m]") == "sonnet[1m]"
+    assert claude_context_window_for_model("claude-sonnet-5-5[1m]") == 1_000_000
+
+
 def test_fable51_concrete_id_resolves_to_fable() -> None:
     # The resolved id the CLI reports for the `fable` selection from 2.1.257 on.
     assert normalize_claude_model_id("claude-fable-5-1") == "fable"

@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.assistant_assets import AssistantAssetError
-from waypoint.backends.claude_code.models import OPUS55_MIN_CLI_VERSION
+from waypoint.backends.claude_code.models import SONNET55_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
@@ -4427,7 +4427,7 @@ def _current_epoch_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     # depending on whichever `claude` binary the host happens to have installed.
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
-        lambda binary, launch_target: OPUS55_MIN_CLI_VERSION,
+        lambda binary, launch_target: SONNET55_MIN_CLI_VERSION,
     )
 
 

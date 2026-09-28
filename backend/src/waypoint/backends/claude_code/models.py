@@ -31,6 +31,7 @@ CLAUDE_MODEL_ALIASES: dict[str, str] = {
     "claude-opus-4-7": "opus",
     "claude-opus-4-6": "opus",
     "claude-opus-4-5": "opus",
+    "claude-sonnet-5-5": "sonnet",
     "claude-sonnet-5": "sonnet",
     "claude-sonnet-4-6": "sonnet",
     "claude-sonnet-4-5": "sonnet",
@@ -102,6 +103,16 @@ _LEGACY_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         description="Legacy Opus version",
     ),
     BackendModelOption(
+        id="claude-sonnet-5",
+        label="Sonnet 5",
+        description="Previous Sonnet version",
+    ),
+    BackendModelOption(
+        id="claude-sonnet-5[1m]",
+        label="Sonnet 5 (1M context)",
+        description="Previous Sonnet version, long sessions",
+    ),
+    BackendModelOption(
         id="claude-sonnet-4-6",
         label="Sonnet 4.6",
         description="Previous Sonnet version",
@@ -152,17 +163,17 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     ),
     BackendModelOption(
         id="sonnet",
-        label="Sonnet 5",
+        label="Sonnet 5.5",
         description="Best for everyday tasks",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
+        default_effort="medium",
     ),
     BackendModelOption(
         id="sonnet[1m]",
-        label="Sonnet 5 (1M context)",
+        label="Sonnet 5.5 (1M context)",
         description="Long sessions with large codebases",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
+        default_effort="medium",
     ),
     BackendModelOption(
         id="fable",
@@ -486,10 +497,12 @@ def resolve_import_model_id(
 #   2.1.219  `opus` becomes Opus 5
 #   2.1.257  `fable` becomes Fable 5.1
 #   2.1.279  `opus` becomes Opus 5.5
+#   2.1.284  `sonnet` becomes Sonnet 5.5
 SONNET5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 197)
 OPUS5_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 219)
 FABLE51_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 257)
 OPUS55_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 279)
+SONNET55_MIN_CLI_VERSION: tuple[int, ...] = (2, 1, 284)
 
 
 class _ModelEpoch(NamedTuple):
@@ -511,6 +524,13 @@ class _ModelEpoch(NamedTuple):
 # Newest first, applied cumulatively, so a build below several boundaries gets every
 # rollback.
 _CLAUDE_MODEL_EPOCHS: tuple[_ModelEpoch, ...] = (
+    _ModelEpoch(
+        min_version=SONNET55_MIN_CLI_VERSION,
+        labels={"sonnet": "Sonnet 5", "sonnet[1m]": "Sonnet 5 (1M context)"},
+        drop=frozenset({"claude-sonnet-5", "claude-sonnet-5[1m]"}),
+        # Sonnet 5 accepts the full ladder, as Sonnet 5.5 does, but defaults to high.
+        default_effort="high",
+    ),
     _ModelEpoch(
         min_version=OPUS55_MIN_CLI_VERSION,
         labels={"opus": "Opus 5", "opus[1m]": "Opus 5 (1M context)"},

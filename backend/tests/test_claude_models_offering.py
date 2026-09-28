@@ -13,8 +13,8 @@ import pytest
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
-    OPUS55_MIN_CLI_VERSION,
     SONNET5_MIN_CLI_VERSION,
+    SONNET55_MIN_CLI_VERSION,
     claude_models_for_version,
     merge_model_catalogue,
     overridden_builtin_ids,
@@ -30,13 +30,15 @@ def _by_id(models: tuple, model_id: str):
     return next(opt for opt in models if opt.id == model_id)
 
 
-@pytest.mark.parametrize("version", [None, OPUS55_MIN_CLI_VERSION, (2, 2, 0)])
+@pytest.mark.parametrize("version", [None, SONNET55_MIN_CLI_VERSION, (2, 2, 0)])
 def test_current_offering_for_none_or_recent_version(version) -> None:
     models = claude_models_for_version(version)
     assert models == DEFAULT_CLAUDE_MODELS
     sonnet = _by_id(models, "sonnet")
-    assert sonnet.label == "Sonnet 5"
-    assert "max" in sonnet.supported_efforts
+    assert sonnet.label == "Sonnet 5.5"
+    assert "xhigh" in sonnet.supported_efforts and "max" in sonnet.supported_efforts
+    assert sonnet.default_effort == "medium"
+    assert _by_id(models, "sonnet[1m]").label == "Sonnet 5.5 (1M context)"
 
     opus = _by_id(models, "opus")
     assert opus.label == "Opus 5.5"
@@ -68,6 +70,30 @@ def test_legacy_offering_below_opus5_min_version() -> None:
     assert "xhigh" in sonnet.supported_efforts
 
 
+def test_legacy_offering_below_sonnet55_min_version() -> None:
+    models = claude_models_for_version((2, 1, 283))
+
+    # Only the sonnet entries roll back across the 2.1.284 boundary.
+    sonnet = _by_id(models, "sonnet")
+    assert sonnet.label == "Sonnet 5"
+    assert sonnet.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+    assert sonnet.default_effort == "high"
+
+    sonnet_1m = _by_id(models, "sonnet[1m]")
+    assert sonnet_1m.label == "Sonnet 5 (1M context)"
+    assert sonnet_1m.default_effort == "high"
+
+    # The pin the rolled-back alias now duplicates is dropped.
+    ids = {opt.id for opt in models}
+    assert "claude-sonnet-5" not in ids
+    assert "claude-sonnet-5[1m]" not in ids
+
+    # Opus 5.5 already shipped by 2.1.283.
+    opus = _by_id(models, "opus")
+    assert opus.label == "Opus 5.5"
+    assert opus.default_effort == "medium"
+
+
 def test_legacy_offering_below_opus55_min_version() -> None:
     models = claude_models_for_version((2, 1, 278))
 
@@ -90,6 +116,7 @@ def test_legacy_offering_below_opus55_min_version() -> None:
     # Fable 5.1 and Sonnet 5 already shipped by 2.1.278.
     assert _by_id(models, "fable").label == "Fable 5.1"
     assert _by_id(models, "sonnet").label == "Sonnet 5"
+    assert _by_id(models, "sonnet").default_effort == "high"
 
 
 def test_legacy_offering_below_fable51_min_version() -> None:
@@ -121,6 +148,7 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
     sonnet = _by_id(models, "sonnet")
     assert sonnet.label == "Sonnet 4.6"
     assert sonnet.supported_efforts == ["low", "medium", "high", "max"]
+    assert sonnet.default_effort == "high"
 
     sonnet_1m = _by_id(models, "sonnet[1m]")
     assert sonnet_1m.label == "Sonnet 4.6 (1M context)"
@@ -148,6 +176,8 @@ def test_legacy_offering_below_sonnet5_min_version() -> None:
 @pytest.mark.parametrize(
     ("version", "opus_label", "sonnet_label"),
     [
+        ((2, 1, 284), "Opus 5.5", "Sonnet 5.5"),
+        ((2, 1, 283), "Opus 5.5", "Sonnet 5"),
         ((2, 1, 279), "Opus 5.5", "Sonnet 5"),
         ((2, 1, 278), "Opus 5", "Sonnet 5"),
         ((2, 1, 219), "Opus 5", "Sonnet 5"),
@@ -168,7 +198,7 @@ def test_rollbacks_apply_cumulatively_at_each_boundary(
 
 @pytest.mark.parametrize(
     "version",
-    [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 280)],
+    [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 283)],
 )
 def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
     # A rollback may drop a redundant pin, so an older offering is a subset -- never a
@@ -184,7 +214,7 @@ def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
 
 @pytest.mark.parametrize(
     "version",
-    [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 280)],
+    [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 283)],
 )
 def test_no_offering_lists_a_label_twice(version) -> None:
     # Below 2.1.219 the `opus` alias is itself labelled "Opus 4.8"; likewise `sonnet`
@@ -220,6 +250,12 @@ def test_rollbacks_drop_the_pin_the_alias_makes_redundant() -> None:
     assert "claude-opus-4-8" in below_opus55
     assert "claude-opus-5" in {opt.id for opt in DEFAULT_CLAUDE_MODELS}
 
+    below_sonnet55 = {opt.id for opt in claude_models_for_version((2, 1, 283))}
+    assert "claude-sonnet-5" not in below_sonnet55
+    assert "claude-sonnet-5[1m]" not in below_sonnet55
+    assert "claude-sonnet-4-6" in below_sonnet55
+    assert "claude-sonnet-5" in {opt.id for opt in DEFAULT_CLAUDE_MODELS}
+
 
 # --- pinned legacy models -------------------------------------------------
 
@@ -230,6 +266,7 @@ _LEGACY_IDS = (
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-opus-4-5",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
     "claude-fable-5",
@@ -265,6 +302,7 @@ def test_legacy_models_forward_effort_unvalidated(model_id: str) -> None:
         "claude-opus-4-8",
         "claude-opus-4-7",
         "claude-opus-4-6",
+        "claude-sonnet-5",
         "claude-sonnet-4-6",
         "claude-sonnet-4-5",
         "claude-fable-5",

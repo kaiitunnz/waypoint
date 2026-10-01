@@ -57,7 +57,6 @@ import {
   askToolUseId,
   parseAskUserQuestion,
   useAskQuestionController,
-  type AskAnswerEntry,
   type AskQuestionResolution,
   type AskUserQuestion,
 } from "@/components/AskQuestion";
@@ -71,9 +70,6 @@ export interface ToolPair {
   itemId: string;
   ts: string;
   sequence: number;
-  // Set only for AskUserQuestion pairs; attached by buildTranscriptItems so
-  // grouped runs and ordinary rows agree without re-scanning per card.
-  askResolution?: AskQuestionResolution;
 }
 
 // Measure the meta strip's real width and surface it as `--meta-reserve`
@@ -131,11 +127,6 @@ interface TranscriptCardProps {
   catalog?: BackendCatalog;
   pair?: ToolPair;
   modelOptions?: BackendModelOption[];
-  onAnswerAskQuestion?: (
-    text: string,
-    toolUseId?: string,
-    answers?: AskAnswerEntry[],
-  ) => Promise<boolean> | void;
   onOpenWorkspaceFile?: (path: string) => void;
 }
 
@@ -145,7 +136,6 @@ export const TranscriptCard = memo(function TranscriptCard({
   catalog,
   pair,
   modelOptions,
-  onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: TranscriptCardProps) {
   if (fidelityFor(transport, catalog) === "structured") {
@@ -153,7 +143,6 @@ export const TranscriptCard = memo(function TranscriptCard({
       return (
         <ToolPairCard
           pair={pair}
-          onAnswerAskQuestion={onAnswerAskQuestion}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
         />
       );
@@ -164,7 +153,6 @@ export const TranscriptCard = memo(function TranscriptCard({
         transport={transport}
         catalog={catalog}
         modelOptions={modelOptions}
-        onAnswerAskQuestion={onAnswerAskQuestion}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
       />
     );
@@ -177,17 +165,12 @@ function StructuredCard({
   transport,
   catalog,
   modelOptions,
-  onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   transport: SessionTransport;
   catalog?: BackendCatalog;
   modelOptions?: BackendModelOption[];
-  onAnswerAskQuestion?: (
-    text: string,
-    toolUseId?: string,
-  ) => Promise<boolean> | void;
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
   // Convention: the chat-bubble agent label is the first word of the agent
@@ -203,7 +186,6 @@ function StructuredCard({
       event={event}
       agentLabel={agentLabel}
       modelOptions={modelOptions}
-      onAnswerAskQuestion={onAnswerAskQuestion}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
   );
@@ -213,16 +195,11 @@ function CodexCard({
   event,
   agentLabel = "codex",
   modelOptions,
-  onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   agentLabel?: string;
   modelOptions?: BackendModelOption[];
-  onAnswerAskQuestion?: (
-    text: string,
-    toolUseId?: string,
-  ) => Promise<boolean> | void;
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
   switch (event.kind) {
@@ -248,12 +225,7 @@ function CodexCard({
       const ask = parseAskUserQuestion(event);
       if (ask) {
         return (
-          <AskUserQuestionCard
-            event={event}
-            questions={ask}
-            onAnswer={onAnswerAskQuestion}
-            resolution={{ state: "pending" }}
-          />
+          <AskUserQuestionCard event={event} questions={ask} />
         );
       }
       // A SendUserFile call is normally paired (ToolPairCard); this covers the
@@ -835,14 +807,9 @@ function ToolDisclosure({
 
 function ToolPairCard({
   pair,
-  onAnswerAskQuestion,
   onOpenWorkspaceFile,
 }: {
   pair: ToolPair;
-  onAnswerAskQuestion?: (
-    text: string,
-    toolUseId?: string,
-  ) => Promise<boolean> | void;
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const { call, result } = pair;
@@ -850,12 +817,7 @@ function ToolPairCard({
     const ask = parseAskUserQuestion(call);
     if (ask) {
       return (
-        <AskUserQuestionCard
-          event={call}
-          questions={ask}
-          onAnswer={onAnswerAskQuestion}
-          resolution={pair.askResolution ?? { state: "pending" }}
-        />
+        <AskUserQuestionCard event={call} questions={ask} />
       );
     }
   }
@@ -1347,22 +1309,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function AskUserQuestionCard({
   event,
   questions,
-  onAnswer,
-  resolution: fallbackResolution,
 }: {
   event: EventRecord;
   questions: AskUserQuestion[];
-  onAnswer?: (
-    text: string,
-    toolUseId?: string,
-    answers?: AskAnswerEntry[],
-  ) => Promise<boolean> | void;
-  resolution: AskQuestionResolution;
 }) {
   const controller = useAskQuestionController();
   const toolUseId = askToolUseId(event);
-  const resolution =
-    (toolUseId ? controller?.resolution(toolUseId) : null) ?? fallbackResolution;
+  const resolution: AskQuestionResolution = toolUseId
+    ? controller.resolution(toolUseId)
+    : { state: "pending" };
   const formState = askFormState(controller, event, resolution);
   const closedResultEvent =
     resolution.state === "closed_unanswered" ? resolution.resultEvent : null;
@@ -1391,7 +1346,6 @@ function AskUserQuestionCard({
         event={event}
         questions={questions}
         resolution={resolution}
-        onAnswer={onAnswer}
       />
       {resolution.state === "cancelled" ? (
         <div className="ask-question-closed">

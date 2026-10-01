@@ -592,7 +592,6 @@ export interface EventsPage {
   // the task dock survives a todo update that predates the loaded window.
   latest_todo: EventRecord | null;
   // Every open AskUserQuestion of the session, sent only for the tail page.
-  // Absent from older backends.
   pending_questions: PendingQuestionsSnapshot | null;
 }
 

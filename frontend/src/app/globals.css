@@ -4453,7 +4453,6 @@ html[data-theme="light"] .tool-call-run-children {
   border-style: dashed;
 }
 
-/* Cancelled by the human: settled and quiet, distinct from "not answered". */
 .badge.tool-status.cancelled {
   background: transparent;
   color: var(--muted-soft);
@@ -5203,8 +5202,6 @@ html[data-theme="light"] .qd-dock-scrim {
   gap: 8px;
 }
 
-/* The open request: flat content inside the sheet, tinted like its
- * transcript card so the two read as the same question. */
 .qd-dock-entry {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -8609,8 +8606,6 @@ details.transcript.codex.task-notification > summary .transcript-role {
   font-size: 0.85rem;
 }
 
-/* Why an open question's form is disabled (agent not ready, session
- * detached). */
 .ask-question-status {
   margin: 0 0 10px;
   display: flex;
@@ -8633,8 +8628,6 @@ details.transcript.codex.task-notification > summary .transcript-role {
   margin-top: 12px;
 }
 
-/* Declines the request: separated from Send/Clear and in the danger hue so it
- * never reads as the local Clear reset. */
 .ask-question-cancel {
   margin-left: auto;
   color: var(--danger);
@@ -8644,7 +8637,6 @@ details.transcript.codex.task-notification > summary .transcript-role {
   color: var(--muted-soft);
 }
 
-/* Show in transcript lands here: a one-shot ring around the card. */
 .ask-user-question.ask-question-flash {
   animation: ask-question-flash 1.8s ease-out;
 }

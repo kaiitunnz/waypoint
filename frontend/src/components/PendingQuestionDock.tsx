@@ -41,10 +41,9 @@ function countLabel(count: number): string {
   return count === 1 ? "Question waiting" : `${count} questions waiting`;
 }
 
-// Every open AskUserQuestion of the session, oldest first: a compact strip
-// above the composer that expands into an accordion with one answer form open
-// at a time. It never opens by itself and has no dismiss: a question leaves
-// only when it is answered, cancelled, or ended by the agent.
+// Every open AskUserQuestion of the session, oldest first: a strip above the
+// composer that expands into an accordion with one answer form open. It never
+// auto-expands.
 export function PendingQuestionDock({
   questions,
   onReveal,
@@ -139,7 +138,7 @@ export function PendingQuestionDock({
                         asked {formatTime(question.event.ts)}
                       </span>
                       {parsed && parsed.length > 1 ? (
-                        <span className="qd-dock-entry-meta">
+                        <span>
                           {parsed.length} questions
                         </span>
                       ) : null}

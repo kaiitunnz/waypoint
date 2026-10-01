@@ -1,7 +1,17 @@
 "use client";
 
-import { createContext, useContext, useState, type KeyboardEvent } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
+import { answerAskQuestion, cancelAskQuestion } from "@/lib/api";
 import { normalizeToolName } from "@/lib/events";
 import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import type {
@@ -28,10 +38,6 @@ export interface AskAnswerEntry {
   notes?: string;
 }
 
-// Resolution of an AskUserQuestion, derived once over the loaded events from
-// durable evidence correlated by tool_use_id: an ask_user_question_answer user
-// event, an explicit cancellation note, or a provider ending (paired result or
-// closure note).
 export type AskQuestionResolution =
   | { state: "pending" }
   | { state: "answered"; answerEvent: EventRecord }
@@ -121,8 +127,6 @@ export function askToolUseId(event: EventRecord): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
-// One in-progress answer: picked labels and notes per sub-question, plus which
-// sub-question is showing.
 export interface AskDraft {
   picked: Record<number, string[]>;
   notes: Record<number, string>;
@@ -143,8 +147,7 @@ export type AskOperation = "send" | "cancel";
 // pending-question dock, so both show one draft and one availability per
 // request.
 export interface AskQuestionController {
-  // Null when the backend sends no pending-question snapshot; forms then stay
-  // answerable while pending, without Cancel.
+  // Null until the session's first snapshot arrives.
   snapshot: PendingQuestionsSnapshot | null;
   draft: (toolUseId: string) => AskDraft;
   updateDraft: (toolUseId: string, update: (draft: AskDraft) => AskDraft) => void;
@@ -155,31 +158,215 @@ export interface AskQuestionController {
     answers: AskAnswerEntry[],
   ) => Promise<boolean>;
   cancel: (toolUseId: string) => Promise<boolean>;
-  // Resolution from evidence across every loaded event, before transcript
-  // filtering; null when this id has no card in the loaded window.
-  resolution: (toolUseId: string) => AskQuestionResolution | null;
+  resolution: (toolUseId: string) => AskQuestionResolution;
   canReattach: boolean;
   reattach: () => void;
 }
 
 export const AskQuestionContext = createContext<AskQuestionController | null>(null);
 
-export function useAskQuestionController(): AskQuestionController | null {
-  return useContext(AskQuestionContext);
+export function useAskQuestionController(): AskQuestionController {
+  const controller = useContext(AskQuestionContext);
+  if (!controller) {
+    throw new Error("AskQuestion components need an AskQuestionContext provider");
+  }
+  return controller;
 }
 
-// "gone": pending by loaded evidence but missing from a snapshot that already
-// covers it — the provider ended it and its closure note is on the way.
-export type AskFormState = PendingQuestionAvailability | "gone" | "resolved";
+// Snapshots order by (as_of_sequence, revision). A socket's first frame
+// replaces the list outright: the server's revision counter restarts with
+// the backend, so a reconnect must not be compared against the old one.
+export function usePendingQuestionSnapshot(sessionId: string) {
+  const [snapshot, setSnapshot] = useState<PendingQuestionsSnapshot | null>(null);
+  useEffect(() => {
+    setSnapshot(null);
+  }, [sessionId]);
+  const applySnapshot = useCallback(
+    (next: PendingQuestionsSnapshot, replace: boolean) => {
+      setSnapshot((current) => {
+        if (replace || current === null) return next;
+        if (next.as_of_sequence !== current.as_of_sequence) {
+          return next.as_of_sequence > current.as_of_sequence ? next : current;
+        }
+        return next.revision >= current.revision ? next : current;
+      });
+    },
+    [],
+  );
+  return { snapshot, applySnapshot };
+}
+
+// Durable evidence that resolved an AskUserQuestion, keyed by tool_use_id.
+// Indexed over every loaded event before transcript filtering so hiding a
+// system note never reopens its card.
+interface AskQuestionEvidence {
+  answers: Map<string, EventRecord>;
+  cancels: Map<string, EventRecord>;
+  endings: Map<string, EventRecord>;
+}
+
+function indexAskQuestionEvidence(events: EventRecord[]): AskQuestionEvidence {
+  const evidence: AskQuestionEvidence = {
+    answers: new Map(),
+    cancels: new Map(),
+    endings: new Map(),
+  };
+  const keep = (index: Map<string, EventRecord>, id: string, event: EventRecord) => {
+    const existing = index.get(id);
+    if (!existing || event.sequence < existing.sequence) index.set(id, event);
+  };
+  for (const event of events) {
+    const metadata = event.metadata ?? {};
+    const toolUseId =
+      typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
+    if (!toolUseId) continue;
+    if (event.kind === "user_input" && metadata.kind === "ask_user_question_answer") {
+      keep(evidence.answers, toolUseId, event);
+    } else if (event.kind === "system_note") {
+      if (metadata.kind === "ask_user_question_cancelled") {
+        keep(evidence.cancels, toolUseId, event);
+      } else if (metadata.kind === "ask_user_question_closed") {
+        keep(evidence.endings, toolUseId, event);
+      }
+    } else if (event.kind === "tool_result") {
+      keep(evidence.endings, toolUseId, event);
+    }
+  }
+  return evidence;
+}
+
+// A correlated answer wins, then an explicit cancellation, then a provider
+// ending; otherwise the question is still pending.
+function resolveAskQuestion(
+  toolUseId: string,
+  evidence: AskQuestionEvidence,
+): AskQuestionResolution {
+  const answerEvent = evidence.answers.get(toolUseId);
+  if (answerEvent) return { state: "answered", answerEvent };
+  const cancelEvent = evidence.cancels.get(toolUseId);
+  if (cancelEvent) return { state: "cancelled", cancelEvent };
+  const resultEvent = evidence.endings.get(toolUseId);
+  if (resultEvent) return { state: "closed_unanswered", resultEvent };
+  return { state: "pending" };
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+export function useAskQuestionState({
+  host,
+  token,
+  sessionId,
+  snapshot,
+  events,
+  canReattach,
+  reattach,
+  onRequestError,
+}: {
+  host: string;
+  token: string;
+  sessionId: string;
+  snapshot: PendingQuestionsSnapshot | null;
+  events: EventRecord[];
+  canReattach: boolean;
+  reattach: () => void;
+  onRequestError: (error: unknown, fallback: string) => void;
+}): AskQuestionController {
+  const [drafts, setDrafts] = useState<Record<string, AskDraft>>({});
+  const [operations, setOperations] = useState<Record<string, AskOperation>>({});
+  const operationsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    setDrafts({});
+    setOperations({});
+    operationsRef.current.clear();
+  }, [sessionId]);
+
+  const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
+
+  const run = useCallback(
+    async (
+      toolUseId: string,
+      operation: AskOperation,
+      request: () => Promise<void>,
+      fallback: string,
+    ): Promise<boolean> => {
+      if (operationsRef.current.has(toolUseId)) return false;
+      operationsRef.current.add(toolUseId);
+      setOperations((current) => ({ ...current, [toolUseId]: operation }));
+      try {
+        await request();
+        setDrafts((current) => withoutKey(current, toolUseId));
+        return true;
+      } catch (requestError) {
+        onRequestError(requestError, fallback);
+        return false;
+      } finally {
+        operationsRef.current.delete(toolUseId);
+        setOperations((current) => withoutKey(current, toolUseId));
+      }
+    },
+    [onRequestError],
+  );
+
+  return useMemo<AskQuestionController>(
+    () => ({
+      snapshot,
+      draft: (toolUseId) => drafts[toolUseId] ?? EMPTY_ASK_DRAFT,
+      updateDraft: (toolUseId, update) =>
+        setDrafts((current) => ({
+          ...current,
+          [toolUseId]: update(current[toolUseId] ?? EMPTY_ASK_DRAFT),
+        })),
+      operation: (toolUseId) => operations[toolUseId] ?? null,
+      answer: (toolUseId, text, answers) =>
+        run(
+          toolUseId,
+          "send",
+          () => answerAskQuestion(host, token, sessionId, text, toolUseId, answers),
+          "failed to send answer",
+        ),
+      cancel: (toolUseId) =>
+        run(
+          toolUseId,
+          "cancel",
+          () => cancelAskQuestion(host, token, sessionId, toolUseId),
+          "failed to cancel question",
+        ),
+      resolution: (toolUseId) => resolveAskQuestion(toolUseId, evidence),
+      canReattach,
+      reattach,
+    }),
+    [
+      canReattach,
+      drafts,
+      evidence,
+      host,
+      operations,
+      reattach,
+      run,
+      sessionId,
+      snapshot,
+      token,
+    ],
+  );
+}
+
+// "loading": no snapshot yet. "gone": pending by loaded evidence but missing
+// from a snapshot that already covers it — the provider ended it and its
+// closure note is on the way.
+export type AskFormState = PendingQuestionAvailability | "loading" | "gone" | "resolved";
 
 export function askFormState(
-  controller: AskQuestionController | null,
+  controller: AskQuestionController,
   event: EventRecord,
   resolution: AskQuestionResolution,
 ): AskFormState {
   if (resolution.state !== "pending") return "resolved";
-  const snapshot = controller?.snapshot;
-  if (!snapshot) return "actionable";
+  const { snapshot } = controller;
+  if (!snapshot) return "loading";
   const toolUseId = askToolUseId(event);
   const entry = toolUseId
     ? snapshot.questions.find((question) => question.tool_use_id === toolUseId)
@@ -241,44 +428,27 @@ function serializeAnswers(
   return segments.length ? { text: segments.join(", "), answers: structured } : null;
 }
 
-// The answer form for one AskUserQuestion request: sub-question pager, options,
-// custom notes, and Send / Clear / Cancel question. Draft, availability, and
-// in-flight state come from the session's AskQuestionController so every
-// surface showing this request agrees; without one it keeps a local draft and
-// answers through `onAnswer`.
 export function AskQuestionForm({
   event,
   questions,
   resolution,
-  onAnswer,
 }: {
   event: EventRecord;
   questions: AskUserQuestion[];
   resolution: AskQuestionResolution;
-  onAnswer?: (
-    text: string,
-    toolUseId?: string,
-    answers?: AskAnswerEntry[],
-  ) => Promise<boolean> | void;
 }) {
   const controller = useAskQuestionController();
   const toolUseId = askToolUseId(event);
-  const [localDraft, setLocalDraft] = useState<AskDraft>(EMPTY_ASK_DRAFT);
-  const [localSending, setLocalSending] = useState(false);
-  const shared = Boolean(controller && toolUseId);
-  const draft = shared ? controller!.draft(toolUseId!) : localDraft;
+  const draft = toolUseId ? controller.draft(toolUseId) : EMPTY_ASK_DRAFT;
   const updateDraft = (update: (current: AskDraft) => AskDraft) => {
-    if (shared) controller!.updateDraft(toolUseId!, update);
-    else setLocalDraft(update);
+    if (toolUseId) controller.updateDraft(toolUseId, update);
   };
-  const operation = shared ? controller!.operation(toolUseId!) : localSending ? "send" : null;
+  const operation = toolUseId ? controller.operation(toolUseId) : null;
   const formState = askFormState(controller, event, resolution);
-  const canAnswer = shared ? Boolean(toolUseId) : Boolean(onAnswer);
   const open = formState !== "resolved" && formState !== "gone";
-  const actionable = formState === "actionable" && canAnswer;
-  const editable = open && canAnswer;
+  const actionable = formState === "actionable" && toolUseId !== null;
+  const editable = open && toolUseId !== null;
   const busy = operation !== null;
-  const canCancel = shared && Boolean(controller!.snapshot);
 
   const total = questions.length;
   const safeIndex = Math.min(draft.activeIndex, Math.max(0, total - 1));
@@ -296,18 +466,8 @@ export function AskQuestionForm({
   async function submit() {
     if (!canSubmit) return;
     const payload = serializeAnswers(questions, draft);
-    if (!payload) return;
-    if (shared) {
-      await controller!.answer(toolUseId!, payload.text, payload.answers);
-      return;
-    }
-    setLocalSending(true);
-    try {
-      const ok = await onAnswer?.(payload.text, toolUseId ?? undefined, payload.answers);
-      if (ok !== false) setLocalDraft(EMPTY_ASK_DRAFT);
-    } finally {
-      setLocalSending(false);
-    }
+    if (!payload || !toolUseId) return;
+    await controller.answer(toolUseId, payload.text, payload.answers);
   }
 
   function handleNoteKeyDown(keyEvent: KeyboardEvent<HTMLTextAreaElement>) {
@@ -328,11 +488,11 @@ export function AskQuestionForm({
       ) : formState === "unavailable" ? (
         <p className="ask-question-status warn">
           <span>
-            {controller?.canReattach
+            {controller.canReattach
               ? "This session isn't running. Reattach it to answer or cancel."
               : "The agent can't take a reply to this question right now."}
           </span>
-          {controller?.canReattach ? (
+          {controller.canReattach ? (
             <button
               type="button"
               className="secondary"
@@ -485,17 +645,17 @@ export function AskQuestionForm({
               Clear
             </button>
           ) : null}
-          {canCancel ? (
-            <button
-              type="button"
-              className="link-button ask-question-cancel"
-              disabled={!actionable || busy}
-              onClick={() => void controller!.cancel(toolUseId!)}
-              aria-label={`Cancel question: ${promptLabel}`}
-            >
-              {operation === "cancel" ? "Cancelling…" : "Cancel question"}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="link-button ask-question-cancel"
+            disabled={!actionable || busy}
+            onClick={() => {
+              if (toolUseId) void controller.cancel(toolUseId);
+            }}
+            aria-label={`Cancel question: ${promptLabel}`}
+          >
+            {operation === "cancel" ? "Cancelling…" : "Cancel question"}
+          </button>
         </div>
       ) : null}
     </>

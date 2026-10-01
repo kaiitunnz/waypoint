@@ -19,8 +19,6 @@ import {
 } from "react";
 
 import {
-  answerAskQuestion,
-  cancelAskQuestion,
   approvePlan,
   approveSession,
   cancelHeldMessages,
@@ -129,12 +127,8 @@ import {
 } from "@/components/TranscriptCard";
 import {
   AskQuestionContext,
-  EMPTY_ASK_DRAFT,
-  type AskAnswerEntry,
-  type AskDraft,
-  type AskOperation,
-  type AskQuestionController,
-  type AskQuestionResolution,
+  useAskQuestionState,
+  usePendingQuestionSnapshot,
 } from "@/components/AskQuestion";
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
@@ -482,17 +476,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
   const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
-  // Null until the backend sends a pending-question snapshot (older backends
-  // never do).
-  const [pendingQuestions, setPendingQuestions] =
-    useState<PendingQuestionsSnapshot | null>(null);
-  const [askDrafts, setAskDrafts] = useState<Record<string, AskDraft>>({});
-  const [askOperations, setAskOperations] = useState<Record<string, AskOperation>>({});
-  const askOperationsRef = useRef<Set<string>>(new Set());
+  const { snapshot: pendingQuestions, applySnapshot: applyPendingQuestions } =
+    usePendingQuestionSnapshot(sessionId);
   const [revealTarget, setRevealTarget] = useState<{
     toolUseId: string;
     pagesLeft: number;
   } | null>(null);
+  useEffect(() => {
+    setRevealTarget(null);
+  }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
@@ -851,22 +843,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setCurrentSession(session);
     return () => setCurrentSession(null);
   }, [session, setCurrentSession]);
-
-  // Snapshots order by (as_of_sequence, revision). A socket's first frame
-  // replaces the list outright: the server's revision counter restarts with
-  // the backend, so a reconnect must not be compared against the old one.
-  const applyPendingQuestions = useCallback(
-    (next: PendingQuestionsSnapshot, replace: boolean) => {
-      setPendingQuestions((current) => {
-        if (replace || current === null) return next;
-        if (next.as_of_sequence !== current.as_of_sequence) {
-          return next.as_of_sequence > current.as_of_sequence ? next : current;
-        }
-        return next.revision >= current.revision ? next : current;
-      });
-    },
-    [],
-  );
 
   useEffect(() => {
     let active = true;
@@ -1275,39 +1251,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     ],
   );
 
-  const submitAskAnswer = useCallback(
-    async (
-      answer: string,
-      toolUseId?: string,
-      answers?: AskAnswerEntry[],
-    ) => {
-      if (!answer.trim()) {
-        return false;
-      }
-      try {
-        await answerAskQuestion(
-          host,
-          token,
-          sessionId,
-          answer,
-          toolUseId,
-          answers,
-        );
-        return true;
-      } catch (sendError) {
-        if (isAuthError(sendError)) {
-          handleAuthFailure();
-          return false;
-        }
-        setError(
-          sendError instanceof Error ? sendError.message : "failed to send answer",
-        );
-        return false;
-      }
-    },
-    [handleAuthFailure, host, token, sessionId],
-  );
-
   const runAction = useCallback(async (action: "interrupt" | "resume") => {
     try {
       await postAction(host, token, sessionId, action);
@@ -1535,13 +1478,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         : visibleEvents,
     [pendingPlanApprovalEvent, visibleEvents],
   );
-  const askEvidence = useMemo(
-    () => indexAskQuestionEvidence(displayEvents),
-    [displayEvents],
-  );
   const transcriptItems = useMemo(
-    () => buildTranscriptItems(transcriptEventsForDisplay, askEvidence),
-    [transcriptEventsForDisplay, askEvidence],
+    () => buildTranscriptItems(transcriptEventsForDisplay),
+    [transcriptEventsForDisplay],
   );
   const hasToolRuns = useMemo(
     () =>
@@ -1588,90 +1527,27 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
   const dormantReattach = sessionExited && canReattachAfterExit;
 
-  const runAskOperation = useCallback(
-    async (
-      toolUseId: string,
-      operation: AskOperation,
-      perform: () => Promise<boolean>,
-    ): Promise<boolean> => {
-      if (askOperationsRef.current.has(toolUseId)) return false;
-      askOperationsRef.current.add(toolUseId);
-      setAskOperations((current) => ({ ...current, [toolUseId]: operation }));
-      try {
-        const ok = await perform();
-        if (ok) {
-          setAskDrafts((current) => {
-            const next = { ...current };
-            delete next[toolUseId];
-            return next;
-          });
-        }
-        return ok;
-      } finally {
-        askOperationsRef.current.delete(toolUseId);
-        setAskOperations((current) => {
-          const next = { ...current };
-          delete next[toolUseId];
-          return next;
-        });
+  const reportAskRequestError = useCallback(
+    (requestError: unknown, fallback: string) => {
+      if (isAuthError(requestError)) {
+        handleAuthFailure();
+        return;
       }
+      setError(requestError instanceof Error ? requestError.message : fallback);
     },
-    [],
+    [handleAuthFailure],
   );
-
-  const cancelAsk = useCallback(
-    async (toolUseId: string) => {
-      try {
-        await cancelAskQuestion(host, token, sessionId, toolUseId);
-        return true;
-      } catch (cancelError) {
-        if (isAuthError(cancelError)) {
-          handleAuthFailure();
-          return false;
-        }
-        setError(
-          cancelError instanceof Error
-            ? cancelError.message
-            : "failed to cancel question",
-        );
-        return false;
-      }
-    },
-    [handleAuthFailure, host, token, sessionId],
-  );
-
-  const askController = useMemo<AskQuestionController>(
-    () => ({
-      snapshot: pendingQuestions,
-      draft: (toolUseId) => askDrafts[toolUseId] ?? EMPTY_ASK_DRAFT,
-      updateDraft: (toolUseId, update) =>
-        setAskDrafts((current) => ({
-          ...current,
-          [toolUseId]: update(current[toolUseId] ?? EMPTY_ASK_DRAFT),
-        })),
-      operation: (toolUseId) => askOperations[toolUseId] ?? null,
-      answer: (toolUseId, text, answers) =>
-        runAskOperation(toolUseId, "send", async () =>
-          Boolean(await submitAskAnswer(text, toolUseId, answers)),
-        ),
-      cancel: (toolUseId) =>
-        runAskOperation(toolUseId, "cancel", () => cancelAsk(toolUseId)),
-      resolution: (toolUseId) => resolveAskQuestionEvidence(toolUseId, askEvidence),
-      canReattach: dormantReattach,
-      reattach: () => void reattach(),
-    }),
-    [
-      askDrafts,
-      askEvidence,
-      askOperations,
-      cancelAsk,
-      dormantReattach,
-      pendingQuestions,
-      reattach,
-      runAskOperation,
-      submitAskAnswer,
-    ],
-  );
+  const reattachForQuestion = useCallback(() => void reattach(), [reattach]);
+  const askController = useAskQuestionState({
+    host,
+    token,
+    sessionId,
+    snapshot: pendingQuestions,
+    events: displayEvents,
+    canReattach: dormantReattach,
+    reattach: reattachForQuestion,
+    onRequestError: reportAskRequestError,
+  });
 
   const revealQuestion = useCallback((question: PendingQuestion) => {
     setView("chat");
@@ -1703,8 +1579,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         `[data-ask-tool-use-id="${CSS.escape(toolUseId)}"]`,
       );
       if (card) {
-        // Leave stick-to-bottom first; a smooth scroll that starts near the
-        // bottom would be snapped back by the reflow re-anchor.
+        // Leave stick-to-bottom so the reflow re-anchor doesn't snap the view
+        // back down.
         nearBottomRef.current = false;
         card.scrollIntoView({ block: "center", behavior: "auto" });
         card.classList.remove("ask-question-flash");
@@ -2528,7 +2404,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             pair={child.pair}
                             transport={session.transport}
                             catalog={catalog}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`pair-${child.pair.itemId}`}
                           />
@@ -2538,7 +2413,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             modelOptions={modelOptions}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
@@ -2570,7 +2444,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             pair={child.pair}
                             transport={session.transport}
                             catalog={catalog}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`pair-${child.pair.itemId}`}
                           />
@@ -2580,7 +2453,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             modelOptions={modelOptions}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
@@ -2595,7 +2467,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     pair={item.pair}
                     transport={session.transport}
                     catalog={catalog}
-                    onAnswerAskQuestion={submitAskAnswer}
                     onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`pair-${item.pair.itemId}`}
                   />
@@ -2605,7 +2476,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     transport={session.transport}
                     catalog={catalog}
                     modelOptions={modelOptions}
-                    onAnswerAskQuestion={submitAskAnswer}
                     onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
@@ -4701,87 +4571,7 @@ type TranscriptItem =
   | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
   | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
-// Durable evidence that resolved an AskUserQuestion, keyed by tool_use_id:
-// an accepted answer (user_input ask_user_question_answer), an explicit
-// cancellation note, or a provider ending (tool_result or closure note).
-// Indexed over every loaded event before transcript filtering so hiding a
-// system note never reopens its card.
-interface AskQuestionEvidence {
-  answers: Map<string, EventRecord>;
-  cancels: Map<string, EventRecord>;
-  endings: Map<string, EventRecord>;
-}
-
-function indexAskQuestionEvidence(events: EventRecord[]): AskQuestionEvidence {
-  const evidence: AskQuestionEvidence = {
-    answers: new Map(),
-    cancels: new Map(),
-    endings: new Map(),
-  };
-  const keep = (index: Map<string, EventRecord>, id: string, event: EventRecord) => {
-    const existing = index.get(id);
-    if (!existing || event.sequence < existing.sequence) index.set(id, event);
-  };
-  for (const event of events) {
-    const metadata = event.metadata ?? {};
-    const toolUseId =
-      typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
-    if (!toolUseId) continue;
-    if (event.kind === "user_input" && metadata.kind === "ask_user_question_answer") {
-      keep(evidence.answers, toolUseId, event);
-    } else if (event.kind === "system_note") {
-      if (metadata.kind === "ask_user_question_cancelled") {
-        keep(evidence.cancels, toolUseId, event);
-      } else if (metadata.kind === "ask_user_question_closed") {
-        keep(evidence.endings, toolUseId, event);
-      }
-    } else if (event.kind === "tool_result") {
-      keep(evidence.endings, toolUseId, event);
-    }
-  }
-  return evidence;
-}
-
-// A correlated answer wins, then an explicit cancellation, then a provider
-// ending; otherwise the question is still pending. Both an answer and a cancel
-// for one request should be impossible; if history has both, the earlier
-// decision stands.
-function resolveAskQuestionEvidence(
-  toolUseId: string,
-  evidence: AskQuestionEvidence,
-): AskQuestionResolution {
-  const answerEvent = evidence.answers.get(toolUseId);
-  const cancelEvent = evidence.cancels.get(toolUseId);
-  if (answerEvent && cancelEvent) {
-    console.warn(
-      `AskUserQuestion ${toolUseId} has both an answer and a cancellation; using the earlier`,
-    );
-    return answerEvent.sequence <= cancelEvent.sequence
-      ? { state: "answered", answerEvent }
-      : { state: "cancelled", cancelEvent };
-  }
-  if (answerEvent) return { state: "answered", answerEvent };
-  if (cancelEvent) return { state: "cancelled", cancelEvent };
-  const resultEvent = evidence.endings.get(toolUseId);
-  if (resultEvent) return { state: "closed_unanswered", resultEvent };
-  return { state: "pending" };
-}
-
-function resolveAskQuestion(
-  pair: ToolPair,
-  evidence: AskQuestionEvidence,
-): AskQuestionResolution {
-  const resolution = resolveAskQuestionEvidence(pair.itemId, evidence);
-  if (resolution.state === "pending" && pair.result) {
-    return { state: "closed_unanswered", resultEvent: pair.result };
-  }
-  return resolution;
-}
-
-function buildTranscriptItems(
-  events: EventRecord[],
-  askEvidence: AskQuestionEvidence,
-): TranscriptItem[] {
+function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
   const pairIndex = new Map<string, number>();
   for (const event of events) {
@@ -4820,14 +4610,6 @@ function buildTranscriptItems(
     }
     item.pair.ts = event.ts;
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
-  }
-
-  // Resolve each AskUserQuestion pair's answer state once and attach it so
-  // every card reads the same derivation.
-  for (const item of result) {
-    if (item.kind !== "pair" || !item.pair.call) continue;
-    if (readToolName(item.pair.call) !== "AskUserQuestion") continue;
-    item.pair.askResolution = resolveAskQuestion(item.pair, askEvidence);
   }
 
   // Classify each item so the grouping loop is easy to reason about.

@@ -32,7 +32,7 @@ from waypoint.schemas import (
     UsageLimitSourceUpdateRequest,
     UsageWindow,
 )
-from waypoint.settings import Settings
+from waypoint.settings import AssistantConfig, Settings
 from waypoint.storage import Storage
 from waypoint.usage_providers.service import UsageProviderService
 
@@ -652,3 +652,60 @@ async def test_clone_record_carries_provider_source(tmp_path: Path) -> None:
     assert stored.usage_provider_account_key == _ACCOUNT_KEY
     assert stored.rate_limit_usage is not None
     assert stored.rate_limit_usage.origin == "usage_provider"
+
+
+# ── assistant clear-context ──────────────────────────────────────────────────
+
+
+def _assistant_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live_fields: dict[str, Any]
+) -> tuple[SessionRuntime, dict[str, Any]]:
+    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
+    runtime.settings.assistant = AssistantConfig(backend="codex")
+    storage.create_session(
+        _record(
+            tmp_path, "assistant-live", source=SessionSource.ASSISTANT, **live_fields
+        )
+    )
+    runtime.assistant_session_id = "assistant-live"
+    captured: dict[str, Any] = {}
+
+    async def fake_create(backend: str, **kwargs: Any) -> SessionRecord:
+        captured.update(backend=backend, **kwargs)
+        child = _record(tmp_path, "assistant-fresh", source=SessionSource.ASSISTANT)
+        storage.create_session(child)
+        return child
+
+    async def fake_retire(*_: Any) -> None:
+        return None
+
+    monkeypatch.setattr(runtime, "_create_assistant_session", fake_create)
+    monkeypatch.setattr(runtime, "_retire_previous_assistant", fake_retire)
+    return runtime, captured
+
+
+async def test_clear_context_keeps_provider_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, captured = _assistant_runtime(tmp_path, monkeypatch, _PROVIDER_FIELDS)
+    await runtime.reset_assistant()
+    assert captured["usage_selection"] == ("usage_provider", "lumid", _ACCOUNT_KEY)
+
+
+async def test_assistant_backend_switch_resets_to_plugin_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, captured = _assistant_runtime(tmp_path, monkeypatch, _PROVIDER_FIELDS)
+    await runtime.reset_assistant(backend="claude_code")
+    assert captured["usage_selection"] == ("plugin", None, None)
+
+
+async def test_clear_context_with_stale_source_keeps_live_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, captured = _assistant_runtime(tmp_path, monkeypatch, _STALE_FIELDS)
+    with pytest.raises(HTTPException) as exc_info:
+        await runtime.reset_assistant()
+    assert exc_info.value.status_code == 409
+    assert captured == {}
+    assert runtime.assistant_session_id == "assistant-live"

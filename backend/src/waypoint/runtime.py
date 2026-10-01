@@ -1939,6 +1939,11 @@ class SessionRuntime:
         permission_mode: str | None,
         transport: str | None,
         account_profile_id: str | None = None,
+        usage_selection: tuple[UsageLimitSource, str | None, str | None] = (
+            "plugin",
+            None,
+            None,
+        ),
     ) -> SessionRecord:
         plugin = self.registry.get(backend)
         validated_mode = (
@@ -1956,6 +1961,9 @@ class SessionRuntime:
             permission_mode=validated_mode,
             transport=transport,
             account_profile_id=account_profile_id,
+            usage_limit_source=usage_selection[0],
+            usage_provider_id=usage_selection[1],
+            usage_provider_account_key=usage_selection[2],
         )
         session = await self.create_session(request)
         return self.storage.update_session(
@@ -2240,6 +2248,19 @@ class SessionRuntime:
             selected_profile_id = old.account_profile_id
         else:
             selected_profile_id = None
+        usage_selection: tuple[UsageLimitSource, str | None, str | None] = (
+            "plugin",
+            None,
+            None,
+        )
+        if (
+            old is not None
+            and chosen == old.backend
+            and selected_profile_id == old.account_profile_id
+        ):
+            usage_selection = self._validate_inherited_usage_selection(
+                old, "clear the context of"
+            )
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
@@ -2250,6 +2271,7 @@ class SessionRuntime:
             permission_mode=permission_mode,
             transport=transport,
             account_profile_id=selected_profile_id,
+            usage_selection=usage_selection,
         )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)

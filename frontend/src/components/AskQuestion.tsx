@@ -327,7 +327,11 @@ export function AskQuestionForm({
         <p className="ask-question-status">Waiting for the agent to accept a reply…</p>
       ) : formState === "unavailable" ? (
         <p className="ask-question-status warn">
-          <span>This session isn&apos;t running. Reattach it to answer or cancel.</span>
+          <span>
+            {controller?.canReattach
+              ? "This session isn't running. Reattach it to answer or cancel."
+              : "The agent can't take a reply to this question right now."}
+          </span>
           {controller?.canReattach ? (
             <button
               type="button"

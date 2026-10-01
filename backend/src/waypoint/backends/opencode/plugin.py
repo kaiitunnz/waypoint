@@ -26,7 +26,7 @@ from waypoint.launch_env import LaunchEnv
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.questions import (
     ASK_QUESTION_ANSWER,
-    QuestionCloseReason,
+    QuestionDecline,
     QuestionLiveness,
 )
 from waypoint.schemas import (
@@ -630,15 +630,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         # Drop this session from any in-flight reconnect-loop target set so
         # an explicit terminate can't be silently undone by a later loop
         # tick resurrecting it.
@@ -661,15 +653,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         # observing. Also re-arms a fresh reconnect attempt: cancel any
         # active loop so the next `_get_or_create_adapter` call drives
         # the SSH spinup synchronously instead of racing the loop.
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         health = self._health.get(key)
         if health is not None:
             health.record_success()
@@ -697,19 +681,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         if self._shutting_down:
             return
-        adapter = self._adapters.get(
-            self._adapter_key(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
-                _agent_process_env(runtime, self.id, session.launch_env),
-            )
-        )
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
         if adapter is not None:
             task = asyncio.create_task(adapter.terminate_session(session.id))
             self._pending_tasks.add(task)
@@ -1296,51 +1268,18 @@ class OpenCodePlugin(DefaultLaunchContract):
             return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
         return adapter.question_liveness(session.id, tool_use_ids)
 
-    async def cancel_question(
+    async def decline_question(
         self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
-    ) -> SessionRecord:
-        runtime.questions.require_open(session.id, tool_use_id)
+    ) -> QuestionDecline:
         adapter = self._adapters.get(self._session_adapter_key(runtime, session))
         if adapter is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="session is not running; resume it to act on this question",
-            )
-        with runtime.questions.operation(session.id, tool_use_id):
-            runtime.questions.require_open(session.id, tool_use_id)
-            runtime.questions.require_actionable(session, tool_use_id)
-            outcome = await adapter.reject_question(session.id, tool_use_id)
-            if outcome == "missing":
-                await runtime.questions.record_closed(
-                    session.id,
-                    tool_use_id,
-                    QuestionCloseReason.PROVIDER_CLOSED,
-                    "Question closed: OpenCode no longer has this request",
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="question is no longer open",
-                )
-            if outcome == "error":
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=(
-                        "OpenCode did not accept the cancellation; "
-                        "the question is still open"
-                    ),
-                )
-            current = runtime.get_session(session.id)
-            resumes = (
-                current.status is SessionStatus.WAITING_INPUT
-                and adapter.current_question_id(session.id) is None
-                and not runtime.transport_for(current).has_pending_approval(current)
-            )
-            await runtime.questions.record_cancelled(
-                session.id,
-                tool_use_id,
-                status=SessionStatus.RUNNING if resumes else None,
-            )
-        return runtime.get_session(session.id)
+            return QuestionDecline.FAILED
+        outcome = await adapter.reject_question(session.id, tool_use_id)
+        if outcome == "missing":
+            return QuestionDecline.MISSING
+        if outcome == "error":
+            return QuestionDecline.FAILED
+        return QuestionDecline.TURN_RESUMES
 
     def _session_adapter_key(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1376,15 +1315,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         try:
             adapter = await self._get_or_create_adapter(
                 runtime,

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from waypoint.backends.base import QuestionCancelling
+from waypoint.backends.base import QuestionLifecycle
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.opencode.plugin import OpenCodePlugin
-from waypoint.questions import QuestionLiveness
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     EventKind,
@@ -35,12 +35,11 @@ class FakeQuestionPlugin:
             for tid in tool_use_ids
         }
 
-    async def cancel_question(
+    async def decline_question(
         self, runtime: SessionRuntime, session: SessionRecord, tool_use_id: str
-    ) -> SessionRecord:
+    ) -> QuestionDecline:
         self.cancelled.append(tool_use_id)
-        await runtime.questions.record_cancelled(session.id, tool_use_id)
-        return runtime.get_session(session.id)
+        return QuestionDecline.TURN_RESUMES
 
 
 def make_runtime(tmp_path: Path, monkeypatch, plugin: object) -> SessionRuntime:
@@ -220,12 +219,12 @@ async def test_flush_publishes_only_changed_snapshots(tmp_path, monkeypatch) -> 
     queue = subscribe(runtime)
     await ask(runtime, "q1")
 
-    await runtime.questions.flush("s1")
-    await runtime.questions.flush("s1")
+    await runtime.questions.flush({"s1"})
+    await runtime.questions.flush({"s1"})
     plugin.liveness = {"q1": QuestionLiveness.STARTING}
-    await runtime.questions.flush("s1")
+    await runtime.questions.flush({"s1"})
     await note(runtime, "ask_user_question_cancelled", "q1")
-    await runtime.questions.flush("s1")
+    await runtime.questions.flush({"s1"})
 
     published = drain_question_envelopes(queue)
     assert [
@@ -243,7 +242,7 @@ async def test_flush_ignores_sessions_without_question_activity(
     queue = subscribe(runtime)
     await runtime._record_system_event("s1", "unrelated")
 
-    await runtime.questions.flush("s1")
+    await runtime.questions.flush({"s1"})
 
     assert drain_question_envelopes(queue) == []
 
@@ -302,13 +301,14 @@ async def test_hydration_recheck_does_not_rebroadcast_the_session_list(
 
     runtime.session_events_page("s1", message_limit=10)
 
-    assert "s1" in runtime._dirty_session_states
+    assert "s1" in runtime.questions._dirty
+    assert "s1" not in runtime._dirty_session_states
     assert not runtime._session_list_dirty
 
 
 async def test_runtime_routes_cancel_to_the_plugin(tmp_path, monkeypatch) -> None:
     plugin = FakeQuestionPlugin()
-    assert isinstance(plugin, QuestionCancelling)
+    assert isinstance(plugin, QuestionLifecycle)
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
     await ask(runtime, "q1")
 
@@ -318,21 +318,26 @@ async def test_runtime_routes_cancel_to_the_plugin(tmp_path, monkeypatch) -> Non
     assert runtime.storage.open_question_tool_use_ids("s1") == []
 
 
-def native_claude_plugin(deny_ok: bool, pending_approval: bool = False) -> Any:
+def native_claude_plugin(deny_ok: bool) -> Any:
     plugin = ClaudeCodePlugin()
     adapter = MagicMock()
     adapter.ask_question_liveness = lambda session_id, ids: dict.fromkeys(
         ids, QuestionLiveness.ACTIONABLE
     )
     adapter.deny_ask_question = AsyncMock(return_value=deny_ok)
-    adapter.has_pending_approval = MagicMock(return_value=pending_approval)
     plugin.adapter = adapter
     return plugin
+
+
+def stub_approvals(runtime: SessionRuntime, monkeypatch, pending: bool) -> None:
+    transport = MagicMock(has_pending_approval=MagicMock(return_value=pending))
+    monkeypatch.setattr(runtime, "transport_for", lambda session: transport)
 
 
 async def test_native_cancel_declines_then_records(tmp_path, monkeypatch) -> None:
     plugin = native_claude_plugin(deny_ok=True)
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
+    stub_approvals(runtime, monkeypatch, pending=False)
     await ask(runtime, "q1")
 
     updated = await runtime.cancel_question("s1", "q1")
@@ -345,8 +350,9 @@ async def test_native_cancel_declines_then_records(tmp_path, monkeypatch) -> Non
 async def test_native_cancel_stays_waiting_on_another_request(
     tmp_path, monkeypatch
 ) -> None:
-    plugin = native_claude_plugin(deny_ok=True, pending_approval=True)
+    plugin = native_claude_plugin(deny_ok=True)
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
+    stub_approvals(runtime, monkeypatch, pending=True)
     await ask(runtime, "q1")
 
     updated = await runtime.cancel_question("s1", "q1")
@@ -381,7 +387,6 @@ def opencode_plugin(outcome: str) -> Any:
         ids, QuestionLiveness.ACTIONABLE
     )
     adapter.reject_question = AsyncMock(return_value=outcome)
-    adapter.current_question_id = MagicMock(return_value=None)
     plugin._adapters = _AdapterMap(adapter)  # type: ignore[assignment]
     return plugin
 
@@ -409,11 +414,7 @@ async def test_failed_opencode_reject_never_records_a_cancel(
 async def test_opencode_cancel_rejects_then_records(tmp_path, monkeypatch) -> None:
     plugin = opencode_plugin("ok")
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
-    monkeypatch.setattr(
-        runtime,
-        "transport_for",
-        lambda session: MagicMock(has_pending_approval=MagicMock(return_value=False)),
-    )
+    stub_approvals(runtime, monkeypatch, pending=False)
     await ask(runtime, "q1")
 
     updated = await runtime.cancel_question("s1", "q1")

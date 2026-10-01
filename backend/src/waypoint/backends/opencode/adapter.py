@@ -1320,9 +1320,10 @@ class OpenCodeAdapter:
         failed listing leaves the session unseeded rather than wrongly empty.
         """
         state.questions_seed_attempted_at = time.monotonic()
-        client = self._require_client()
         try:
-            data = await client.get("/question", params={"directory": state.cwd})
+            data = await self._require_client().get(
+                "/question", params={"directory": state.cwd}
+            )
         except Exception as exc:
             log.warning(
                 "failed to list opencode questions: %s",

@@ -37,3 +37,16 @@ class QuestionCloseReason(StrEnum):
     PROVIDER_CLOSED = "provider_closed"
     PROVIDER_REJECTED = "provider_rejected"
     PROVIDER_REPLIED = "provider_replied"
+
+
+class QuestionDecline(StrEnum):
+    """What declining one open question did on the provider side."""
+
+    # The provider took the decline and the asking turn continues.
+    TURN_RESUMES = "turn_resumes"
+    # Nothing was sent: the agent is no longer waiting on this question.
+    AGENT_IDLE = "agent_idle"
+    # The provider no longer has the request.
+    MISSING = "missing"
+    # The provider did not take the decline; the question stays open.
+    FAILED = "failed"

@@ -204,10 +204,8 @@ async def test_concurrent_answers_send_once(tmp_path, monkeypatch) -> None:
     assert transport.send_input.await_count == 1
 
 
-async def cancel(
-    plugin: ClaudeTtyPlugin, runtime: SessionRuntime, tool_use_id: str
-) -> SessionRecord:
-    return await plugin.cancel_question(runtime, runtime.get_session("s1"), tool_use_id)
+async def cancel(runtime: SessionRuntime, tool_use_id: str) -> SessionRecord:
+    return await runtime.cancel_question("s1", tool_use_id)
 
 
 async def test_cancel_closes_only_the_proxy_without_touching_the_pane(
@@ -216,11 +214,10 @@ async def test_cancel_closes_only_the_proxy_without_touching_the_pane(
     runtime = make_runtime(tmp_path)
     transport = fake_transport(runtime, monkeypatch)
     transport.has_pending_approval = MagicMock(return_value=False)
-    plugin = ClaudeTtyPlugin()
     await ask(runtime, "q1")
     await ask(runtime, "q2")
 
-    updated = await cancel(plugin, runtime, "q1")
+    updated = await cancel(runtime, "q1")
 
     assert runtime.storage.open_question_tool_use_ids("s1") == ["q2"]
     transport.send_input.assert_not_called()
@@ -240,7 +237,7 @@ async def test_cancelling_the_last_question_marks_the_idle_tui_idle(
     transport.has_pending_approval = MagicMock(return_value=False)
     await ask(runtime, "q1")
 
-    updated = await cancel(ClaudeTtyPlugin(), runtime, "q1")
+    updated = await cancel(runtime, "q1")
 
     assert updated.status is SessionStatus.IDLE
 
@@ -253,7 +250,7 @@ async def test_cancel_keeps_waiting_while_an_approval_is_pending(
     transport.has_pending_approval = MagicMock(return_value=True)
     await ask(runtime, "q1")
 
-    updated = await cancel(ClaudeTtyPlugin(), runtime, "q1")
+    updated = await cancel(runtime, "q1")
 
     assert updated.status is SessionStatus.WAITING_INPUT
 
@@ -266,7 +263,7 @@ async def test_cancel_rejects_a_resolved_question(tmp_path, monkeypatch) -> None
     await answer(plugin, runtime, "q1")
 
     with pytest.raises(HTTPException) as exc:
-        await cancel(plugin, runtime, "q1")
+        await cancel(runtime, "q1")
 
     assert exc.value.status_code == 400
     assert not any(
@@ -284,7 +281,7 @@ async def test_cancel_is_unavailable_while_the_pane_is_detached(
     runtime.storage.update_session("s1", status=SessionStatus.EXITED)
 
     with pytest.raises(HTTPException) as exc:
-        await cancel(ClaudeTtyPlugin(), runtime, "q1")
+        await cancel(runtime, "q1")
 
     assert exc.value.status_code == 409
     assert runtime.storage.open_question_tool_use_ids("s1") == ["q1"]
@@ -305,7 +302,7 @@ async def test_cancel_conflicts_with_an_answer_in_flight(tmp_path, monkeypatch) 
     first = asyncio.create_task(answer(plugin, runtime, "q1"))
     await asyncio.sleep(0)
     with pytest.raises(HTTPException) as exc:
-        await cancel(plugin, runtime, "q1")
+        await cancel(runtime, "q1")
     gate.set()
     await first
 

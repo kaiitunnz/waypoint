@@ -1217,7 +1217,6 @@ PendingQuestionAvailability = Literal["actionable", "starting", "unavailable"]
 
 class PendingQuestion(BaseModel):
     tool_use_id: str
-    # The original AskUserQuestion tool_call event.
     event: EventRecord
     availability: PendingQuestionAvailability
 

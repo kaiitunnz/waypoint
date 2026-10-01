@@ -725,8 +725,8 @@ class ClaudeCliAdapter:
         self,
         session_id: str,
         answer_text: str,
-        tool_use_id: str | None = None,
-    ) -> str | None:
+        tool_use_id: str,
+    ) -> bool:
         """Answer an AskUserQuestion parked on a ``can_use_tool`` request.
 
         AskUserQuestion arrives over the same ``can_use_tool`` channel as
@@ -735,22 +735,14 @@ class ClaudeCliAdapter:
         string becomes the tool_result Claude reads, matching the binary's
         own `User has answered your questions: …` shape.
 
-        Returns the resolved ``tool_use_id`` that was answered — including the
-        one selected here when the caller omitted it — so the plugin can record
-        it as durable answer evidence (FR5). Returns ``None`` when no pending
-        question could be resolved.
+        Returns ``False`` when ``tool_use_id`` is not parked.
         """
         state = self._sessions.get(session_id)
-        if state is None or not state.pending:
-            return None
-        if tool_use_id is None:
-            pending_ids = self.pending_ask_question_ids(session_id)
-            if not pending_ids:
-                return None
-            tool_use_id = pending_ids[0]
+        if state is None:
+            return False
         pending = self._pending_ask_question(state, tool_use_id)
         if pending is None:
-            return None
+            return False
         # Deny the tool and carry the answer in the message — the binary reads
         # that string as the tool_result, matching its own
         # "User has answered your questions: …" shape.
@@ -769,10 +761,7 @@ class ClaudeCliAdapter:
             ),
         )
         state.pending.pop(tool_use_id, None)
-        return tool_use_id
-
-    def has_pending_ask_question(self, session_id: str) -> bool:
-        return bool(self.pending_ask_question_ids(session_id))
+        return True
 
     def pending_ask_question_ids(self, session_id: str) -> list[str]:
         """AskUserQuestion requests parked on ``can_use_tool``, oldest first."""

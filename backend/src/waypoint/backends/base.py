@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
-from waypoint.questions import QuestionLiveness
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     CommandCompletion,
@@ -151,13 +151,12 @@ class FreshThreadRestarting(Protocol):
 
 
 @runtime_checkable
-class QuestionCancelling(Protocol):
-    """An agent that tracks its open AskUserQuestion requests and can decline one.
+class QuestionLifecycle(Protocol):
+    """An agent that reports the liveness of its open AskUserQuestion requests
+    and can decline one.
 
-    The runtime narrows to this protocol to build the session's pending-question
-    snapshot and to route an explicit cancel. A plugin without it has no
-    answerable questions: the snapshot reports every open question unavailable
-    and a cancel is rejected.
+    Without it the runtime closes the session's open questions and rejects
+    cancels.
     """
 
     def question_liveness(
@@ -170,11 +169,11 @@ class QuestionCancelling(Protocol):
         definitively ended the request; the runtime then records a closure."""
         ...
 
-    async def cancel_question(
+    async def decline_question(
         self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
-    ) -> SessionRecord:
-        """Decline exactly ``tool_use_id`` with the provider, then record the
-        cancellation. Must record nothing when the provider decline fails."""
+    ) -> QuestionDecline:
+        """Decline exactly ``tool_use_id`` with the provider. The runtime records
+        the outcome and serializes this against answers."""
         ...
 
 

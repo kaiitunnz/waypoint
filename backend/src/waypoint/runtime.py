@@ -46,7 +46,6 @@ from waypoint.backends.base import (
     ContextUsageRebasing,
     DefaultConfigDirProviding,
     FreshThreadRestarting,
-    QuestionCancelling,
     config_dir_for,
 )
 from waypoint.backends.capabilities import BackendCapabilities
@@ -4679,14 +4678,7 @@ class SessionRuntime:
         return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
     async def cancel_question(self, session_id: str, tool_use_id: str) -> SessionRecord:
-        session = self.get_session(session_id)
-        plugin = self.registry.plugin_for(session)
-        if not isinstance(plugin, QuestionCancelling):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"cancelling questions is not supported for {session.backend}",
-            )
-        return await plugin.cancel_question(self, session, tool_use_id)
+        return await self.questions.cancel(self.get_session(session_id), tool_use_id)
 
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
@@ -5226,11 +5218,7 @@ class SessionRuntime:
         self._session_list_dirty = True
         self._broadcast_wake.set()
 
-    def _schedule_session_flush(self, session_id: str) -> None:
-        # Like _publish_session_state, without marking the session list dirty:
-        # for per-session work (pending-question re-checks) that changes
-        # nothing in the list.
-        self._dirty_session_states.add(session_id)
+    def wake_session_flusher(self) -> None:
         self._broadcast_wake.set()
 
     async def _broadcast_session_list(self) -> None:
@@ -5659,13 +5647,7 @@ class SessionRuntime:
             self._session_list_dirty = False
             for session_id in dirty_ids:
                 await self._broadcast_session_state(session_id)
-                try:
-                    await self.questions.flush(session_id)
-                except Exception:
-                    log.exception(
-                        "pending-question flush failed",
-                        extra={"session_id": session_id},
-                    )
+            await self.questions.flush(dirty_ids)
             if list_dirty:
                 await self._broadcast_session_list()
             self.held.drain(dirty_ids)

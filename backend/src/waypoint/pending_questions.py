@@ -1,5 +1,5 @@
-"""Pending AskUserQuestion tracking: snapshots, reconciliation, and the
-per-request operation guard.
+"""Pending AskUserQuestion tracking: snapshots, reconciliation, cancellation,
+and the per-request operation guard.
 
 Durable events are the source of truth (see :mod:`waypoint.questions`). This
 module derives the session's open-question snapshot from them, asks the plugin
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
-from waypoint.backends.base import QuestionCancelling
+from waypoint.backends.base import QuestionLifecycle
 from waypoint.questions import (
     ASK_QUESTION_ANSWER,
     ASK_QUESTION_CANCELLED,
@@ -24,6 +24,7 @@ from waypoint.questions import (
     ASK_USER_QUESTION_TOOL,
     QUESTION_RESOLUTION_NOTE_KINDS,
     QuestionCloseReason,
+    QuestionDecline,
     QuestionLiveness,
 )
 from waypoint.schemas import (
@@ -90,7 +91,7 @@ class PendingQuestionTracker:
             self._operations.discard(key)
             self.mark_dirty(session_id)
 
-    def require_open(self, session_id: str, tool_use_id: str) -> None:
+    def _require_open(self, session_id: str, tool_use_id: str) -> None:
         if tool_use_id not in self._runtime.storage.open_question_tool_use_ids(
             session_id
         ):
@@ -99,9 +100,72 @@ class PendingQuestionTracker:
                 detail="question is no longer open",
             )
 
+    # ── Cancellation ────────────────────────────────────────────────────
+
+    async def cancel(self, session: SessionRecord, tool_use_id: str) -> SessionRecord:
+        """Decline ``tool_use_id`` with the provider and record the cancellation.
+
+        Records nothing when the provider decline fails.
+        """
+        plugin = self._runtime.registry.plugin_for(session)
+        if not isinstance(plugin, QuestionLifecycle):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"cancelling questions is not supported for {session.backend}",
+            )
+        with self.operation(session.id, tool_use_id):
+            self._require_open(session.id, tool_use_id)
+            self._require_actionable(session, tool_use_id)
+            outcome = await plugin.decline_question(self._runtime, session, tool_use_id)
+            if outcome is QuestionDecline.MISSING:
+                await self._record_closed(
+                    session.id,
+                    tool_use_id,
+                    QuestionCloseReason.PROVIDER_CLOSED,
+                    "Question closed: the agent no longer has this request",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="question is no longer open",
+                )
+            if outcome is QuestionDecline.FAILED:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="the agent did not accept the cancellation; the question is still open",
+                )
+            settled = (
+                SessionStatus.RUNNING
+                if outcome is QuestionDecline.TURN_RESUMES
+                else SessionStatus.IDLE
+            )
+            current = self._runtime.get_session(session.id)
+            await self._record_cancelled(
+                session.id,
+                tool_use_id,
+                settled if self._settles(current, tool_use_id) else None,
+            )
+        return self._runtime.get_session(session.id)
+
+    def _settles(self, session: SessionRecord, tool_use_id: str) -> bool:
+        """Whether the session stops waiting on the human once ``tool_use_id``
+        is cancelled."""
+        if session.status is not SessionStatus.WAITING_INPUT:
+            return False
+        if self._runtime.transport_for(session).has_pending_approval(session):
+            return False
+        others = [
+            other
+            for other in self._runtime.storage.open_question_tool_use_ids(session.id)
+            if other != tool_use_id
+        ]
+        return all(
+            state is QuestionLiveness.CLOSED
+            for state in self.liveness(session, others).values()
+        )
+
     # ── Durable resolution notes ─────────────────────────────────────────
 
-    async def record_cancelled(
+    async def _record_cancelled(
         self,
         session_id: str,
         tool_use_id: str,
@@ -114,7 +178,7 @@ class PendingQuestionTracker:
             metadata={"kind": ASK_QUESTION_CANCELLED, "tool_use_id": tool_use_id},
         )
 
-    async def record_closed(
+    async def _record_closed(
         self,
         session_id: str,
         tool_use_id: str,
@@ -139,17 +203,16 @@ class PendingQuestionTracker:
         if not tool_use_ids:
             return {}
         plugin = self._runtime.registry.plugin_for(session)
-        if not isinstance(plugin, QuestionCancelling):
-            # This driver can never answer (e.g. the session switched from
-            # claude_tty to the generic tmux interface), so close the
-            # questions instead of stranding them in the dock.
+        if not isinstance(plugin, QuestionLifecycle):
+            # A driver without the protocol can never answer (e.g. a
+            # claude_tty session switched to the generic tmux interface).
             return dict.fromkeys(tool_use_ids, QuestionLiveness.CLOSED)
         result = plugin.question_liveness(self._runtime, session, tool_use_ids)
         return {
             tid: result.get(tid, QuestionLiveness.UNAVAILABLE) for tid in tool_use_ids
         }
 
-    def require_actionable(self, session: SessionRecord, tool_use_id: str) -> None:
+    def _require_actionable(self, session: SessionRecord, tool_use_id: str) -> None:
         state = self.liveness(session, [tool_use_id])[tool_use_id]
         if state is QuestionLiveness.ACTIONABLE:
             return
@@ -169,11 +232,8 @@ class PendingQuestionTracker:
         )
 
     def compute(self, session_id: str) -> PendingQuestionsSnapshot:
-        """Read-only snapshot of the session's open questions.
-
-        Questions the provider has ended are omitted; :meth:`reconcile` records
-        their closure.
-        """
+        """Snapshot of the session's open questions, omitting those the
+        provider has ended."""
         session = self._runtime.get_session(session_id)
         events = self._runtime.storage.open_question_events(session_id)
         ids = [str(event.metadata["tool_use_id"]) for event in events]
@@ -221,7 +281,7 @@ class PendingQuestionTracker:
                     session_id
                 ):
                     continue
-                await self.record_closed(
+                await self._record_closed(
                     session_id,
                     tool_use_id,
                     QuestionCloseReason.PROVIDER_CLOSED,
@@ -232,18 +292,26 @@ class PendingQuestionTracker:
 
     def mark_dirty(self, session_id: str) -> None:
         self._dirty.add(session_id)
-        self._runtime._schedule_session_flush(session_id)
+        self._runtime.wake_session_flusher()
 
     def note_event(self, event: EventRecord) -> None:
         """Flag the session when ``event`` can change its open questions."""
         if is_question_lifecycle_event(event, self._open_ids.get(event.session_id)):
             self._dirty.add(event.session_id)
 
-    async def flush(self, session_id: str) -> None:
-        """Reconcile and publish a changed snapshot; called by the debounced
-        session-state flusher. Sessions with open questions re-check every
-        flush so liveness changes without an event (a permission request
-        registering, a pane detaching) still reach clients."""
+    async def flush(self, changed_session_ids: set[str]) -> None:
+        """Reconcile and publish each changed snapshot. Sessions with open
+        questions re-check whenever their state changes, since liveness can
+        change without a question event."""
+        for session_id in changed_session_ids | self._dirty:
+            try:
+                await self._flush_session(session_id)
+            except Exception:
+                log.exception(
+                    "pending-question flush failed", extra={"session_id": session_id}
+                )
+
+    async def _flush_session(self, session_id: str) -> None:
         if session_id not in self._dirty and not self._open_ids.get(session_id):
             return
         self._dirty.discard(session_id)

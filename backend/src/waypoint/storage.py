@@ -298,7 +298,7 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_events_session_seq
                 ON events(session_id, sequence);
 
-            -- Serve open_question_tool_use_ids, which otherwise re-scans the
+            -- Serve open_question_events, which otherwise re-scans the
             -- session's events per question. The trailing sequence lets the
             -- tool_name index also satisfy that query's ORDER BY; without it
             -- the planner falls back to idx_events_session_seq.

@@ -94,7 +94,7 @@ from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.questions import ASK_QUESTION_ANSWER, QuestionLiveness
+from waypoint.questions import ASK_QUESTION_ANSWER, QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
@@ -1486,35 +1486,11 @@ class ClaudeTtyPlugin:
         )
         return dict.fromkeys(tool_use_ids, state)
 
-    async def cancel_question(
+    async def decline_question(
         self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
-    ) -> SessionRecord:
-        """Close the Waypoint proxy for ``tool_use_id``.
-
-        The agent already moved on when its popup was dismissed, so nothing is
-        sent to the pane. When this was the last open question and no approval
-        is pending, the TUI is idle; record that so idle delivery can resume.
-        """
-        runtime.questions.require_open(session.id, tool_use_id)
-        with runtime.questions.operation(session.id, tool_use_id):
-            runtime.questions.require_open(session.id, tool_use_id)
-            runtime.questions.require_actionable(session, tool_use_id)
-            current = runtime.get_session(session.id)
-            others_open = any(
-                other != tool_use_id
-                for other in runtime.storage.open_question_tool_use_ids(session.id)
-            )
-            becomes_idle = (
-                current.status is SessionStatus.WAITING_INPUT
-                and not others_open
-                and not runtime.transport_for(current).has_pending_approval(current)
-            )
-            await runtime.questions.record_cancelled(
-                session.id,
-                tool_use_id,
-                status=SessionStatus.IDLE if becomes_idle else None,
-            )
-        return runtime.get_session(session.id)
+    ) -> QuestionDecline:
+        # The agent moved on when its popup was dismissed, so nothing is sent.
+        return QuestionDecline.AGENT_IDLE
 
     # ── Thread discovery + import ────────────────────────────────────────────
 

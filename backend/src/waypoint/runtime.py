@@ -162,6 +162,9 @@ from waypoint.usage_providers.registry import build_providers
 from waypoint.workspace_preview import read_text_prefix
 
 TMUX_TRANSPORT_ID = "tmux"
+_USAGE_SELECTION_FIELDS = frozenset(
+    {"usage_limit_source", "usage_provider_id", "usage_provider_account_key"}
+)
 # Per-request HTTP timeout for usage-provider fetches (NFR2: bounded I/O).
 _USAGE_PROVIDER_HTTP_TIMEOUT = 15.0
 
@@ -1769,26 +1772,40 @@ class SessionRuntime:
     ) -> tuple[UsageLimitSource, str | None, str | None]:
         """Resolve and validate the usage-limit-source selection for a launch.
 
-        An explicitly requested source (directly or carried by a preset) wins.
-        Otherwise a child inherits its spawner's selection when it runs as the
-        same agent account — same backend and account profile — since a provider
-        account reports one account's usage; any other spawn keeps the plugin
-        default.
+        An explicitly requested selection (directly or carried by a preset)
+        wins. Otherwise a child inherits its spawner's selection when it runs as
+        the same agent account — same backend, launch target, and account
+        profile — since a provider account reports one account's usage; any
+        other spawn keeps the plugin default.
         """
-        if "usage_limit_source" not in request.model_fields_set and (
-            request.spawner_session_id
+        if request.spawner_session_id and not (
+            _USAGE_SELECTION_FIELDS & request.model_fields_set
         ):
             spawner = self.storage.get_session(request.spawner_session_id)
             if (
                 spawner is not None
                 and spawner.backend == request.backend
+                and spawner.launch_target_id == request.launch_target_id
                 and spawner.account_profile_id == request.account_profile_id
             ):
-                return self._validate_inherited_usage_selection(
-                    spawner,
-                    "spawn a child of",
-                    remedy="pass --usage-limit-source plugin to launch without it",
-                )
+                try:
+                    return self.validate_usage_limit_selection(
+                        spawner.usage_limit_source,
+                        spawner.usage_provider_id,
+                        spawner.usage_provider_account_key,
+                    )
+                except HTTPException as exc:
+                    # Inheritance is implicit — nothing in the spawn asked for
+                    # it — so an unavailable selection must not break unattended
+                    # spawns; the child keeps the plugin default.
+                    log.warning(
+                        "spawned child not inheriting unavailable usage source",
+                        extra={
+                            "spawner_session_id": spawner.id,
+                            "detail": exc.detail,
+                        },
+                    )
+                    return ("plugin", None, None)
         return self.validate_usage_limit_selection(
             request.usage_limit_source,
             request.usage_provider_id,
@@ -1796,7 +1813,7 @@ class SessionRuntime:
         )
 
     def _validate_inherited_usage_selection(
-        self, source: SessionRecord, action: str, *, remedy: str | None = None
+        self, source: SessionRecord, action: str
     ) -> tuple[UsageLimitSource, str | None, str | None]:
         """Validate a selection a derived session inherits from ``source``.
 
@@ -1810,12 +1827,12 @@ class SessionRuntime:
                 source.usage_provider_account_key,
             )
         except HTTPException as exc:
-            fix = remedy or "change it in the session settings first"
             raise HTTPException(
                 status_code=exc.status_code,
                 detail=(
                     f"cannot {action} session {source.id}: its usage limit "
-                    f"source is unavailable ({exc.detail}); {fix}"
+                    f"source is unavailable ({exc.detail}); change it in the "
+                    "session settings first"
                 ),
             ) from exc
 

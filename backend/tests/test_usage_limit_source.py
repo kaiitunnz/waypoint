@@ -579,14 +579,76 @@ async def test_api_shaped_child_without_source_inherits(tmp_path: Path) -> None:
     assert runtime._effective_usage_selection(resolved)[0] == "usage_provider"
 
 
-async def test_stale_spawner_source_fails_with_remedy(tmp_path: Path) -> None:
+async def test_stale_spawner_source_falls_back_to_plugin(tmp_path: Path) -> None:
     runtime, _ = _spawn_runtime(tmp_path, _STALE_FIELDS)
     request = SessionCreateRequest(
         backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
     )
+    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
+
+
+async def test_child_on_different_launch_target_keeps_plugin_source(
+    tmp_path: Path,
+) -> None:
+    runtime, _ = _spawn_runtime(
+        tmp_path, {**_PROVIDER_FIELDS, "launch_target_id": "remote-a"}
+    )
+    request = SessionCreateRequest(
+        backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
+    )
+    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
+
+
+async def test_partial_provider_fields_do_not_inherit(tmp_path: Path) -> None:
+    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
+    request = SessionCreateRequest(
+        backend="codex",
+        cwd=str(tmp_path),
+        spawner_session_id="parent",
+        usage_provider_id="lumid",
+    )
     with pytest.raises(HTTPException) as exc_info:
         runtime._effective_usage_selection(request)
-    assert exc_info.value.status_code == 409
-    detail = str(exc_info.value.detail)
-    assert "spawn a child of session parent" in detail
-    assert "--usage-limit-source plugin" in detail
+    assert exc_info.value.status_code == 400
+
+
+class _CodexAdapter:
+    """Minimal codex adapter double so create_session runs the real pipeline."""
+
+    async def start_session(self, *args: Any, **kwargs: Any) -> str:
+        return "thread-child"
+
+    async def register_rate_limit_probe(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def force_refresh_rate_limit_usage(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+async def test_spawned_child_record_carries_provider_source(tmp_path: Path) -> None:
+    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
+    runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
+    child = await runtime.create_session(
+        SessionCreateRequest(
+            backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
+        )
+    )
+    stored = runtime.get_session(child.id)
+    assert stored.usage_limit_source == "usage_provider"
+    assert stored.usage_provider_id == "lumid"
+    assert stored.usage_provider_account_key == _ACCOUNT_KEY
+    assert stored.rate_limit_usage is not None
+    assert stored.rate_limit_usage.origin == "usage_provider"
+
+
+async def test_clone_record_carries_provider_source(tmp_path: Path) -> None:
+    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
+    storage.create_session(_record(tmp_path, **_PROVIDER_FIELDS))
+    runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
+    child = await runtime.clone_session_launch("src")
+    stored = runtime.get_session(child.id)
+    assert stored.id != "src"
+    assert stored.usage_limit_source == "usage_provider"
+    assert stored.usage_provider_account_key == _ACCOUNT_KEY
+    assert stored.rate_limit_usage is not None
+    assert stored.rate_limit_usage.origin == "usage_provider"

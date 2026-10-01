@@ -262,7 +262,7 @@ def test_resolve_explicit_plugin_overrides_provider_preset(tmp_path: Path) -> No
     assert resolved.usage_provider_account_key is None
 
 
-def test_resolve_preset_plugin_source_inherits_plugin(tmp_path: Path) -> None:
+def test_resolve_preset_plugin_source_is_not_carried(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     preset = _seed(storage, backend="codex", usage_limit_source="plugin")
     resolved, _ = resolve_session_create_request(
@@ -270,6 +270,8 @@ def test_resolve_preset_plugin_source_inherits_plugin(tmp_path: Path) -> None:
     )
     assert resolved.usage_limit_source == "plugin"
     assert resolved.usage_provider_id is None
+    # Left unset so a spawned child can still inherit its spawner's source.
+    assert "usage_limit_source" not in resolved.model_fields_set
 
 
 def test_resolve_list_replaces_not_appends(tmp_path: Path) -> None:

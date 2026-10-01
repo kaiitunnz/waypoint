@@ -1508,11 +1508,7 @@ class SessionRuntime:
             )
         # Validate the usage-limit-source selection before spawning anything so a
         # bad selection fails fast rather than after a live process exists.
-        usage_selection = self.validate_usage_limit_selection(
-            request.usage_limit_source,
-            request.usage_provider_id,
-            request.usage_provider_account_key,
-        )
+        usage_selection = self._effective_usage_selection(request)
         session_id = self._generate_session_id(request.backend)
         launch_target = self._resolve_launch_target(
             request.launch_target_id, request.backend
@@ -1731,30 +1727,97 @@ class SessionRuntime:
                 launch_target=launch_target,
                 cwd=session.cwd,
             )
-        # Usage-limit-source selection: plugins don't read it, so stamp it
-        # generically like preset/account provenance. A provider selection then
-        # projects its cached snapshot immediately (no upstream request).
-        selection_source, selection_provider, selection_account = usage_selection
-        if selection_source == "usage_provider":
-            session = self.storage.update_session(
-                session.id,
-                usage_limit_source=selection_source,
-                usage_provider_id=selection_provider,
-                usage_provider_account_key=selection_account,
-            )
-            if selection_provider is not None and self.usage_providers is not None:
-                buckets = self.usage_providers.provider_buckets(selection_provider)
-                provider_status = self.usage_providers.provider_status(
-                    selection_provider
-                )
-                if provider_status is not None:
-                    await self._project_provider_sessions(
-                        selection_provider, buckets, provider_status
-                    )
-                    session = self.get_session(session.id)
+        session = await self._apply_usage_selection(session, usage_selection)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
         return session
+
+    async def _apply_usage_selection(
+        self,
+        session: SessionRecord,
+        selection: tuple[UsageLimitSource, str | None, str | None],
+    ) -> SessionRecord:
+        """Stamp a validated usage-limit-source selection on a new session.
+
+        Plugins don't read the selection, so create, clone, and fork stamp it
+        generically like preset/account provenance. A provider selection then
+        projects its cached snapshot immediately (no upstream request).
+        """
+        source, provider_id, account_key = selection
+        if source != "usage_provider":
+            return session
+        # Clear any plugin-origin projection a launch-time probe wrote before the
+        # stamp, in the same write, so it never shows as provider data.
+        self.storage.update_session(
+            session.id,
+            usage_limit_source=source,
+            usage_provider_id=provider_id,
+            usage_provider_account_key=account_key,
+            rate_limit_usage=None,
+        )
+        if provider_id is not None and self.usage_providers is not None:
+            buckets = self.usage_providers.provider_buckets(provider_id)
+            provider_status = self.usage_providers.provider_status(provider_id)
+            if provider_status is not None:
+                await self._project_provider_sessions(
+                    provider_id, buckets, provider_status
+                )
+        return self.get_session(session.id)
+
+    def _effective_usage_selection(
+        self, request: SessionCreateRequest
+    ) -> tuple[UsageLimitSource, str | None, str | None]:
+        """Resolve and validate the usage-limit-source selection for a launch.
+
+        An explicitly requested source (directly or carried by a preset) wins.
+        Otherwise a child inherits its spawner's selection when it runs as the
+        same agent account — same backend and account profile — since a provider
+        account reports one account's usage; any other spawn keeps the plugin
+        default.
+        """
+        if "usage_limit_source" not in request.model_fields_set and (
+            request.spawner_session_id
+        ):
+            spawner = self.storage.get_session(request.spawner_session_id)
+            if (
+                spawner is not None
+                and spawner.backend == request.backend
+                and spawner.account_profile_id == request.account_profile_id
+            ):
+                return self._validate_inherited_usage_selection(
+                    spawner,
+                    "spawn a child of",
+                    remedy="pass --usage-limit-source plugin to launch without it",
+                )
+        return self.validate_usage_limit_selection(
+            request.usage_limit_source,
+            request.usage_provider_id,
+            request.usage_provider_account_key,
+        )
+
+    def _validate_inherited_usage_selection(
+        self, source: SessionRecord, action: str, *, remedy: str | None = None
+    ) -> tuple[UsageLimitSource, str | None, str | None]:
+        """Validate a selection a derived session inherits from ``source``.
+
+        A stale selection fails the derive instead of silently launching under
+        the plugin source; the error names the source session and the fix.
+        """
+        try:
+            return self.validate_usage_limit_selection(
+                source.usage_limit_source,
+                source.usage_provider_id,
+                source.usage_provider_account_key,
+            )
+        except HTTPException as exc:
+            fix = remedy or "change it in the session settings first"
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=(
+                    f"cannot {action} session {source.id}: its usage limit "
+                    f"source is unavailable ({exc.detail}); {fix}"
+                ),
+            ) from exc
 
     def _effective_permission_mode(self, request: SessionCreateRequest) -> str | None:
         """Resolve the permission mode to validate for a new session.
@@ -2373,6 +2436,7 @@ class SessionRuntime:
     ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
+        usage_selection = self._validate_inherited_usage_selection(session, "fork")
 
         new_session_id = self._generate_session_id(session.backend)
         session_dir = self._session_dir(new_session_id)
@@ -2396,6 +2460,7 @@ class SessionRuntime:
             raw_log=raw_log,
             structured_log=structured_log,
         )
+        new_session = await self._apply_usage_selection(new_session, usage_selection)
         await self._broadcast_session_list()
         return new_session
 
@@ -2407,6 +2472,7 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Backend {session.backend} does not support forking",
             )
+        usage_selection = self._validate_inherited_usage_selection(session, "fork")
 
         new_session_id = self._generate_session_id(session.backend)
         session_dir = self._session_dir(new_session_id)
@@ -2437,6 +2503,7 @@ class SessionRuntime:
             raw_log,
             structured_log,
         )
+        new_session = await self._apply_usage_selection(new_session, usage_selection)
         self._warm_command_completions(new_session)
         await self._broadcast_session_list()
         return new_session
@@ -2456,6 +2523,9 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
+        usage_source, usage_provider_id, usage_account_key = (
+            self._validate_inherited_usage_selection(source, "start a new session from")
+        )
         # Copy the non-secret launch fields; pin the transport so the child keeps
         # the source's channel. launch_env travels only in the private snapshot.
         request = SessionCreateRequest(
@@ -2470,6 +2540,9 @@ class SessionRuntime:
             effort=source.effort,
             permission_mode=source.permission_mode,
             account_profile_id=source.account_profile_id,
+            usage_limit_source=usage_source,
+            usage_provider_id=usage_provider_id,
+            usage_provider_account_key=usage_account_key,
         )
         snapshot = CloneLaunchSnapshot(
             launch_env=dict(source.launch_env),

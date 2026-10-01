@@ -58,7 +58,10 @@ _MAP_FIELDS = ("launch_env", "tags")
 # scalars: overlaying the provider fields alone would let an explicit
 # ``usage_limit_source: "plugin"`` request inherit a provider id from the preset
 # (an invalid combination). Resolve it as a unit — inherit all three from the
-# preset only when the request omitted ``usage_limit_source`` entirely.
+# preset only when the request omitted ``usage_limit_source`` entirely. A
+# preset's ``plugin`` source is the server default and the launch sheet saves it
+# on every preset, so it is not carried: it would otherwise read as an explicit
+# choice and block a spawned child from inheriting its spawner's source.
 _USAGE_SELECTION_FIELDS = (
     "usage_limit_source",
     "usage_provider_id",
@@ -265,12 +268,12 @@ def _merge(request: object, preset: SessionPresetRecord | None) -> dict[str, obj
             if value:
                 merged[name] = dict(value)
     # Coupled usage-selection triple (see _USAGE_SELECTION_FIELDS). Only inherit
-    # from the preset when the request left the source unset; an explicit source
-    # (even "plugin") takes the whole triple from the request.
+    # a provider selection, and only when the request left the source unset; an
+    # explicit source (even "plugin") takes the whole triple from the request.
     if (
         "usage_limit_source" in req_fields
         and "usage_limit_source" not in explicit
-        and spec.usage_limit_source is not None
+        and spec.usage_limit_source == "usage_provider"
     ):
         merged["usage_limit_source"] = spec.usage_limit_source
         merged["usage_provider_id"] = spec.usage_provider_id

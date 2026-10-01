@@ -1999,8 +1999,9 @@ def sessions_start(
         str | None,
         typer.Option(
             envvar="WAYPOINT_SESSION_ID",
-            help="Spawner session; the child inherits its permission mode. "
-            "Defaults to this session's id when run inside one.",
+            help="Spawner session; the child inherits its permission mode and "
+            "usage limit source. Defaults to this session's id when run inside "
+            "one.",
         ),
     ] = None,
     worktree: Annotated[
@@ -2047,10 +2048,11 @@ def sessions_start(
         str | None,
         typer.Option(
             "--usage-limit-source",
-            help="Rate-limit readout source: 'plugin' (the agent resolver, "
-            "default) or 'usage_provider' (a configured provider account). "
-            "'usage_provider' requires --usage-provider and "
-            "--usage-provider-account.",
+            help="Rate-limit readout source: 'plugin' (the agent resolver) or "
+            "'usage_provider' (a configured provider account). Defaults to the "
+            "preset's, else the spawner's on the same backend, launch target, "
+            "and account profile, else 'plugin'. 'usage_provider' requires "
+            "--usage-provider and --usage-provider-account.",
         ),
     ] = None,
     usage_provider: Annotated[

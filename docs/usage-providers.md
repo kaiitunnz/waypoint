@@ -98,10 +98,11 @@ takes the same fields on create/schedule plus a dedicated non-restart
 server-derived labels cross the wire.
 
 Sessions derived from another session carry its source: `/new`, fork, and a
-side-question fork copy it, and a spawned child inherits its spawner's source
-when it runs on the same backend and account profile and does not set one
-itself. A preset carries a provider selection (`presets create`/`update` take the
-same three flags); a preset's `plugin` source defers to that inheritance.
+side-question fork copy it. A spawned child that sets no source inherits its
+spawner's when it runs on the same backend, launch target, and account profile;
+an unavailable spawner selection leaves the child on the plugin source. A preset
+carries a provider selection (`presets create`/`update` take the same three
+flags); a preset's `plugin` source defers to that inheritance.
 
 Changing the source in settings never restarts or interrupts the agent.
 Switching to a provider projects that account's cached snapshot immediately;
@@ -111,10 +112,10 @@ only through its provider, coalesced onto one upstream request.
 A removed or unrefreshable provider/account retains its last-good projection
 marked stale/unavailable rather than falling back to plugin data, and a
 scheduled run with a now-unavailable selection fails instead of launching under
-an unintended source. Likewise, `/new`, a fork, or a spawn that would inherit an
-unavailable selection fails with the reason; change the source session's
-setting, or pass `--usage-limit-source plugin` to a spawn. The projection reuses the provider's own dashboard card
-and telemetry facts, so it is never counted twice.
+an unintended source. Likewise, `/new` or a fork of a session whose selection is
+unavailable fails with the reason; change the source session's setting first.
+The projection reuses the provider's own dashboard card and telemetry facts, so
+it is never counted twice.
 
 ## Security
 

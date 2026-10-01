@@ -32,9 +32,9 @@ spawns fall back to `default`, since modes are not portable). So you usually do
 permissive than you, which is the safe baseline.
 
 The child likewise inherits your **usage limit source** (the rate-limit readout)
-when it shares your backend and account profile. If your source is a usage
-provider that is no longer available, the spawn fails with that reason; pass
-`--usage-limit-source plugin` to launch the child on the plugin readout instead.
+when it shares your backend, launch target, and account profile; if your
+provider source is no longer available, the child uses the plugin readout. Pass
+`--usage-limit-source` to choose its source explicitly.
 
 ## Choosing a different mode
 

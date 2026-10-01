@@ -34,7 +34,8 @@ waypoint sessions start \
 - A child on the **same backend** inherits your permission mode automatically;
   cross-backend children fall back to that backend's default. Pass
   `--permission-mode` only to override this. It also inherits your usage limit
-  source when it shares your account profile. See `references/permissions.md`.
+  source when it shares your launch target and account profile too. See
+  `references/permissions.md`.
 - Capture the returned session id. Keep it for the rest of the turn.
 
 ### Spawn from a preset

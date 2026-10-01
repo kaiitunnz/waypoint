@@ -421,3 +421,18 @@ async def test_opencode_cancel_rejects_then_records(tmp_path, monkeypatch) -> No
 
     assert runtime.storage.open_question_tool_use_ids("s1") == []
     assert updated.status is SessionStatus.RUNNING
+
+
+async def test_cancel_settles_when_the_other_open_questions_are_closed(
+    tmp_path, monkeypatch
+) -> None:
+    plugin = FakeQuestionPlugin()
+    runtime = make_runtime(tmp_path, monkeypatch, plugin)
+    stub_approvals(runtime, monkeypatch, pending=False)
+    await ask(runtime, "q1")
+    await ask(runtime, "q2")
+    plugin.liveness = {"q2": QuestionLiveness.CLOSED}
+
+    updated = await runtime.cancel_question("s1", "q1")
+
+    assert updated.status is SessionStatus.RUNNING

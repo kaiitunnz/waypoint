@@ -91,11 +91,19 @@ Choose it under **Advanced → Usage limit source** in the launch sheet (New and
 Schedule) and in the session settings modal: a provider with one account is a
 single option (`Lumid — user@example.com`), one with several reveals an account
 picker. The CLI takes `--usage-limit-source`, `--usage-provider`, and
-`--usage-provider-account` on `sessions start` and `schedule create`; the API
+`--usage-provider-account` on `sessions start`, `schedule create`, and
+`presets create`/`update`; the API
 takes the same fields on create/schedule plus a dedicated non-restart
 `PATCH /api/sessions/{id}/usage-limit-source`, and `GET /api/usage-provider-options`
 (and launch bootstrap) list the current choices. Only opaque account keys and
 server-derived labels cross the wire.
+
+`/new`, fork, side-question fork, and clearing the assistant's context copy the
+source session's selection, and fail with the reason when it is unavailable. A
+spawned child that sets no source inherits its spawner's when both run on the
+same backend, launch target, and account profile, and uses the plugin source
+when the spawner's selection is unavailable. A preset carries only a provider
+selection.
 
 Changing the source in settings never restarts or interrupts the agent.
 Switching to a provider projects that account's cached snapshot immediately;

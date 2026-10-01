@@ -5015,6 +5015,7 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
         permission_mode: Any,
         transport: Any,
         account_profile_id: Any = None,
+        usage_selection: Any = None,
     ) -> SessionRecord:
         captured.update(
             backend=backend,
@@ -5099,6 +5100,7 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
         permission_mode: Any,
         transport: Any,
         account_profile_id: Any = None,
+        usage_selection: Any = None,
     ) -> SessionRecord:
         captured.update(
             backend=backend,
@@ -5158,6 +5160,7 @@ async def test_reset_assistant_keeps_current_thread_when_create_fails(tmp_path) 
         permission_mode: Any,
         transport: Any,
         account_profile_id: Any = None,
+        usage_selection: Any = None,
     ) -> SessionRecord:
         raise RuntimeError("spawn failed")
 

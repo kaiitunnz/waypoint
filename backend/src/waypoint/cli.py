@@ -789,6 +789,19 @@ def _resolve_usage_selection(
     )
 
 
+_UsageProviderOption = Annotated[
+    str | None,
+    typer.Option("--usage-provider", help="Usage provider id (with 'usage_provider')."),
+]
+_UsageProviderAccountOption = Annotated[
+    str | None,
+    typer.Option(
+        "--usage-provider-account",
+        help="Opaque usage-provider account key (with 'usage_provider').",
+    ),
+]
+
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
@@ -1999,8 +2012,9 @@ def sessions_start(
         str | None,
         typer.Option(
             envvar="WAYPOINT_SESSION_ID",
-            help="Spawner session; the child inherits its permission mode. "
-            "Defaults to this session's id when run inside one.",
+            help="Spawner session; the child inherits its permission mode and "
+            "usage limit source. Defaults to this session's id when run inside "
+            "one.",
         ),
     ] = None,
     worktree: Annotated[
@@ -2047,25 +2061,15 @@ def sessions_start(
         str | None,
         typer.Option(
             "--usage-limit-source",
-            help="Rate-limit readout source: 'plugin' (the agent resolver, "
-            "default) or 'usage_provider' (a configured provider account). "
-            "'usage_provider' requires --usage-provider and "
-            "--usage-provider-account.",
+            help="Rate-limit readout source: 'plugin' (the agent resolver) or "
+            "'usage_provider' (a configured provider account). Defaults to the "
+            "preset's, else the spawner's on the same backend, launch target, "
+            "and account profile, else 'plugin'. 'usage_provider' requires "
+            "--usage-provider and --usage-provider-account.",
         ),
     ] = None,
-    usage_provider: Annotated[
-        str | None,
-        typer.Option(
-            "--usage-provider", help="Usage provider id (with 'usage_provider')."
-        ),
-    ] = None,
-    usage_provider_account: Annotated[
-        str | None,
-        typer.Option(
-            "--usage-provider-account",
-            help="Opaque usage-provider account key (with 'usage_provider').",
-        ),
-    ] = None,
+    usage_provider: _UsageProviderOption = None,
+    usage_provider_account: _UsageProviderAccountOption = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
@@ -4310,19 +4314,8 @@ def schedule_create(
             "--usage-provider-account).",
         ),
     ] = None,
-    usage_provider: Annotated[
-        str | None,
-        typer.Option(
-            "--usage-provider", help="Usage provider id (with 'usage_provider')."
-        ),
-    ] = None,
-    usage_provider_account: Annotated[
-        str | None,
-        typer.Option(
-            "--usage-provider-account",
-            help="Opaque usage-provider account key (with 'usage_provider').",
-        ),
-    ] = None,
+    usage_provider: _UsageProviderOption = None,
+    usage_provider_account: _UsageProviderAccountOption = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Schedule a session launch on the running server."""
@@ -4404,6 +4397,9 @@ def _preset_spec_payload(
     config_override: list[str] | None,
     launch_env: list[str] | None,
     tag: list[str] | None,
+    usage_limit_source: str | None,
+    usage_provider: str | None,
+    usage_provider_account: str | None,
 ) -> dict[str, Any]:
     """Build a preset spec body from launch options, including only the fields the
     caller supplied so update PATCH-merges instead of clobbering omitted fields.
@@ -4431,6 +4427,15 @@ def _preset_spec_payload(
         spec["launch_env"] = _parse_launch_env(launch_env)
     if tag is not None:
         spec["tags"] = _parse_tags(tag)
+    usage_source, usage_provider_id, usage_account_key = _resolve_usage_selection(
+        usage_limit_source, usage_provider, usage_provider_account
+    )
+    if usage_source is not None:
+        # The selection is a coupled triple: send all three so an update to
+        # ``plugin`` clears provider fields the PATCH merge would otherwise keep.
+        spec["usage_limit_source"] = usage_source
+        spec["usage_provider_id"] = usage_provider_id
+        spec["usage_provider_account_key"] = usage_account_key
     return spec
 
 
@@ -4457,6 +4462,14 @@ _PresetAccountProfileOption = Annotated[
     typer.Option(
         "--account-profile",
         help="Account/config profile to launch under (see `accounts list`).",
+    ),
+]
+_PresetUsageLimitSourceOption = Annotated[
+    str | None,
+    typer.Option(
+        "--usage-limit-source",
+        help="Rate-limit readout source: 'plugin' or 'usage_provider'. "
+        "'usage_provider' requires --usage-provider and --usage-provider-account.",
     ),
 ]
 
@@ -4500,6 +4513,9 @@ def presets_create(
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
     account_profile: _PresetAccountProfileOption = None,
+    usage_limit_source: _PresetUsageLimitSourceOption = None,
+    usage_provider: _UsageProviderOption = None,
+    usage_provider_account: _UsageProviderAccountOption = None,
     launch_env: _PresetLaunchEnvOption = None,
     config_override: _PresetConfigOverrideOption = None,
     tag: _PresetTagOption = None,
@@ -4518,6 +4534,9 @@ def presets_create(
         config_override=config_override,
         launch_env=launch_env,
         tag=tag,
+        usage_limit_source=usage_limit_source,
+        usage_provider=usage_provider,
+        usage_provider_account=usage_provider_account,
     )
     body: dict[str, Any] = {"name": name, "spec": spec, "is_default": default}
     if description is not None:
@@ -4541,6 +4560,9 @@ def presets_update(
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
     account_profile: _PresetAccountProfileOption = None,
+    usage_limit_source: _PresetUsageLimitSourceOption = None,
+    usage_provider: _UsageProviderOption = None,
+    usage_provider_account: _UsageProviderAccountOption = None,
     launch_env: _PresetLaunchEnvOption = None,
     config_override: _PresetConfigOverrideOption = None,
     tag: _PresetTagOption = None,
@@ -4559,6 +4581,9 @@ def presets_update(
         config_override=config_override,
         launch_env=launch_env,
         tag=tag,
+        usage_limit_source=usage_limit_source,
+        usage_provider=usage_provider,
+        usage_provider_account=usage_provider_account,
     )
     body: dict[str, Any] = {}
     if name is not None:

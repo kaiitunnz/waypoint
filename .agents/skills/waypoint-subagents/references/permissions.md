@@ -31,6 +31,11 @@ spawns fall back to `default`, since modes are not portable). So you usually do
 **not** pass `--permission-mode` at all: by default the child is no more
 permissive than you, which is the safe baseline.
 
+The child also inherits your **usage limit source** (the rate-limit readout)
+when it shares your backend, launch target, and account profile, and uses the
+plugin readout when your provider is unavailable. Pass `--usage-limit-source` to
+choose it explicitly.
+
 ## Choosing a different mode
 
 To override the inherited mode, pass it explicitly:

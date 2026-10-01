@@ -94,6 +94,7 @@ from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.questions import ASK_QUESTION_ANSWER, QuestionLiveness
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
@@ -218,9 +219,6 @@ class ClaudeTtyPlugin:
         self._tmux = TmuxPlugin()
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
-        # (session id, tool_use_id) of answers being delivered, so a double
-        # submit cannot send the same answer twice.
-        self._answering: set[tuple[str, str]] = set()
         # Resolver from this transport's own config, used only by the
         # backend=claude_tty rebase hook (the sole path with no runtime handle to
         # read the session's agent config). The per-session tailer/seed/import
@@ -1432,14 +1430,7 @@ class ClaudeTtyPlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="question is no longer open",
             )
-        key = (session.id, tool_use_id)
-        if key in self._answering:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="question answer is already being delivered",
-            )
-        self._answering.add(key)
-        try:
+        with runtime.questions.operation(session.id, tool_use_id):
             transport = runtime.transport_for(session)
             await transport.send_input(
                 session,
@@ -1448,7 +1439,7 @@ class ClaudeTtyPlugin:
             )
 
             extra: dict[str, Any] = {
-                "kind": "ask_user_question_answer",
+                "kind": ASK_QUESTION_ANSWER,
                 "tool_use_id": tool_use_id,
             }
             if answers:
@@ -1477,9 +1468,53 @@ class ClaudeTtyPlugin:
                 },
                 SessionStatus.RUNNING,
             )
-        finally:
-            self._answering.discard(key)
         return updated
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        # The popup was Esc-dismissed when the tailer surfaced it, so the open
+        # card is a Waypoint proxy that lives until resolved; it only needs a
+        # live pane to deliver an answer.
+        state = (
+            QuestionLiveness.UNAVAILABLE
+            if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}
+            else QuestionLiveness.ACTIONABLE
+        )
+        return dict.fromkeys(tool_use_ids, state)
+
+    async def cancel_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> SessionRecord:
+        """Close the Waypoint proxy for ``tool_use_id``.
+
+        The agent already moved on when its popup was dismissed, so nothing is
+        sent to the pane. When this was the last open question and no approval
+        is pending, the TUI is idle; record that so idle delivery can resume.
+        """
+        runtime.questions.require_open(session.id, tool_use_id)
+        with runtime.questions.operation(session.id, tool_use_id):
+            runtime.questions.require_open(session.id, tool_use_id)
+            runtime.questions.require_actionable(session, tool_use_id)
+            current = runtime.get_session(session.id)
+            others_open = any(
+                other != tool_use_id
+                for other in runtime.storage.open_question_tool_use_ids(session.id)
+            )
+            becomes_idle = (
+                current.status is SessionStatus.WAITING_INPUT
+                and not others_open
+                and not runtime.transport_for(current).has_pending_approval(current)
+            )
+            await runtime.questions.record_cancelled(
+                session.id,
+                tool_use_id,
+                status=SessionStatus.IDLE if becomes_idle else None,
+            )
+        return runtime.get_session(session.id)
 
     # ── Thread discovery + import ────────────────────────────────────────────
 

@@ -112,6 +112,7 @@ from waypoint.backends.plugin_config import (
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.questions import ASK_QUESTION_ANSWER, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     BackendModelOption,
@@ -612,6 +613,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     ) -> None:
         if self.adapter is not None:
             await self.adapter.terminate_session(session.id)
+        await runtime.questions.reconcile(session.id)
 
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")
@@ -1083,43 +1085,93 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
+        adapter = self._require_question_adapter()
+        if tool_use_id is None:
+            pending_ids = adapter.pending_ask_question_ids(session.id)
+            if not pending_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="no pending question for this session",
+                )
+            tool_use_id = pending_ids[0]
+        with runtime.questions.operation(session.id, tool_use_id):
+            try:
+                resolved_tool_use_id = await adapter.respond_to_ask_question(
+                    session.id, answer, tool_use_id
+                )
+            except ClaudeCliError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+            if resolved_tool_use_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="no pending question for this session",
+                )
+            # Stash structured per-question answers + notes so the frontend
+            # renders this user_input as a styled "answers" card instead of
+            # the raw `"<question>"="<answer>" user notes: …` payload Claude
+            # was tuned around. Persist resolved_tool_use_id so the transcript
+            # can correlate this answer to its question.
+            extra: dict[str, Any] = {"kind": ASK_QUESTION_ANSWER}
+            if answers:
+                extra["answers"] = answers
+            extra["tool_use_id"] = resolved_tool_use_id
+            # Same ordering as handle_input: flip status to RUNNING before
+            # _record_user_event broadcasts the session_state snapshot,
+            # otherwise the spinner stays off until Claude's next chunk.
+            updated = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            await runtime._record_user_event(
+                session.id, answer, submit=True, extra_metadata=extra
+            )
+        return updated
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        if self.adapter is None:
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
+        return self.adapter.ask_question_liveness(session.id, tool_use_ids)
+
+    async def cancel_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> SessionRecord:
+        adapter = self._require_question_adapter()
+        runtime.questions.require_open(session.id, tool_use_id)
+        with runtime.questions.operation(session.id, tool_use_id):
+            runtime.questions.require_open(session.id, tool_use_id)
+            runtime.questions.require_actionable(session, tool_use_id)
+            if not await adapter.deny_ask_question(session.id, tool_use_id):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Claude did not accept the cancellation; the question is still open",
+                )
+            # The deny lets the parked turn continue; stay waiting only while
+            # another request still needs the human.
+            current = runtime.get_session(session.id)
+            resumes = (
+                current.status is SessionStatus.WAITING_INPUT
+                and not adapter.has_pending_approval(session.id)
+            )
+            await runtime.questions.record_cancelled(
+                session.id,
+                tool_use_id,
+                status=SessionStatus.RUNNING if resumes else None,
+            )
+        return runtime.get_session(session.id)
+
+    def _require_question_adapter(self) -> ClaudeCliAdapter:
         if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="answer-question is only supported for Claude sessions",
+                detail="the Claude adapter is unavailable",
             )
-        try:
-            resolved_tool_use_id = await self.adapter.respond_to_ask_question(
-                session.id, answer, tool_use_id
-            )
-        except ClaudeCliError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
-        if resolved_tool_use_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="no pending question for this session",
-            )
-        # Stash structured per-question answers + notes so the frontend
-        # renders this user_input as a styled "answers" card instead of
-        # the raw `"<question>"="<answer>" user notes: …` payload Claude
-        # was tuned around. Persist resolved_tool_use_id so the transcript
-        # can correlate this answer to its question.
-        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            extra["answers"] = answers
-        extra["tool_use_id"] = resolved_tool_use_id
-        # Same ordering as handle_input: flip status to RUNNING before
-        # _record_user_event broadcasts the session_state snapshot,
-        # otherwise the spinner stays off until Claude's next chunk.
-        updated = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
-        await runtime._record_user_event(
-            session.id, answer, submit=True, extra_metadata=extra
-        )
-        return updated
+        return self.adapter
 
     async def approve_plan(
         self,
@@ -1268,6 +1320,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
+        # The previous process's parked questions died with it.
+        await runtime.questions.reconcile(session.id)
         if not _session_transport_slash_commands(session):
             slash_commands = _latest_stored_slash_commands(runtime, session.id)
             if slash_commands:

@@ -19,6 +19,7 @@ from waypoint.backends.claude_code.models import (
     claude_default_model_id,
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
+from waypoint.questions import QuestionLiveness
 from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
 
 
@@ -1744,3 +1745,135 @@ async def test_dispatch_send_user_file_tags_capture_and_suppresses_result() -> N
     await adapter._dispatch(state, result_event)
     assert not any(item[1] == EventKind.TOOL_RESULT for item in emitted)
     assert "toolu_suf" not in state.suppressed_result_tool_use_ids
+
+
+def _ask_payload(tool_use_id: str) -> dict[str, Any]:
+    return {
+        "tool_use_id": tool_use_id,
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "ok?", "options": []}]},
+    }
+
+
+@pytest.mark.asyncio
+async def test_deny_ask_question_declines_only_the_selected_request() -> None:
+    adapter = _make_adapter([])
+    state, process = _attach_state(adapter)
+    await adapter._handle_can_use_tool(
+        state, _can_use_tool_event(_ask_payload("toolu_a"), "req-a")
+    )
+    await adapter._handle_can_use_tool(
+        state, _can_use_tool_event(_ask_payload("toolu_b"), "req-b")
+    )
+
+    assert await adapter.deny_ask_question("sess", "toolu_b")
+
+    (line,) = process.stdin.writes
+    response = json.loads(line)["response"]
+    assert response["request_id"] == "req-b"
+    assert response["response"] == {
+        "behavior": "deny",
+        "message": "The user declined to answer this question.",
+    }
+    assert adapter.pending_ask_question_ids("sess") == ["toolu_a"]
+
+
+@pytest.mark.asyncio
+async def test_deny_ask_question_fails_on_a_closed_stdin() -> None:
+    adapter = _make_adapter([])
+    state, process = _attach_state(adapter)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(_ask_payload("q")))
+    process.stdin.close()
+
+    assert not await adapter.deny_ask_question("sess", "q")
+    assert adapter.pending_ask_question_ids("sess") == ["q"]
+
+
+@pytest.mark.asyncio
+async def test_deny_ask_question_fails_when_the_write_breaks() -> None:
+    adapter = _make_adapter([])
+    state, process = _attach_state(adapter)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(_ask_payload("q")))
+
+    async def broken_drain() -> None:
+        raise BrokenPipeError
+
+    process.stdin.drain = broken_drain  # type: ignore[method-assign]
+
+    assert not await adapter.deny_ask_question("sess", "q")
+    assert adapter.pending_ask_question_ids("sess") == ["q"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_answer_id_never_falls_back_to_another_question() -> None:
+    adapter = _make_adapter([])
+    state, _ = _attach_state(adapter)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(_ask_payload("a")))
+
+    assert await adapter.respond_to_ask_question("sess", "x", "stale") is None
+    assert adapter.pending_ask_question_ids("sess") == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_ask_question_liveness_tracks_the_process_incarnation() -> None:
+    adapter = _make_adapter([])
+    state, process = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "streamed",
+                        "name": "AskUserQuestion",
+                        "input": {"questions": []},
+                    },
+                ],
+            },
+        },
+    )
+    await adapter._handle_can_use_tool(
+        state, _can_use_tool_event(_ask_payload("parked"))
+    )
+
+    assert adapter.ask_question_liveness("sess", ["parked", "streamed", "old"]) == {
+        "parked": QuestionLiveness.ACTIONABLE,
+        "streamed": QuestionLiveness.STARTING,
+        "old": QuestionLiveness.CLOSED,
+    }
+    process.returncode = 1
+    assert adapter.ask_question_liveness("sess", ["parked"]) == {
+        "parked": QuestionLiveness.CLOSED
+    }
+    assert adapter.ask_question_liveness("gone", ["parked"]) == {
+        "parked": QuestionLiveness.CLOSED
+    }
+
+
+@pytest.mark.asyncio
+async def test_turn_end_and_cancel_request_drop_parked_questions() -> None:
+    adapter = _make_adapter([])
+    state, _ = _attach_state(adapter)
+    await adapter._handle_can_use_tool(
+        state, _can_use_tool_event(_ask_payload("a"), "req-a")
+    )
+    await adapter._handle_can_use_tool(
+        state, _can_use_tool_event(_ask_payload("b"), "req-b")
+    )
+
+    await adapter._dispatch(
+        state, {"type": "control_cancel_request", "request_id": "req-a"}
+    )
+    assert adapter.pending_ask_question_ids("sess") == ["b"]
+    assert adapter.ask_question_liveness("sess", ["a"]) == {
+        "a": QuestionLiveness.CLOSED
+    }
+
+    await adapter._dispatch(state, {"type": "result", "subtype": "error"})
+    assert adapter.pending_ask_question_ids("sess") == []
+    assert adapter.ask_question_liveness("sess", ["b"]) == {
+        "b": QuestionLiveness.CLOSED
+    }

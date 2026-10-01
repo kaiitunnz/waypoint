@@ -16,6 +16,7 @@ from waypoint.backends.events import (
     InteractionEnvelope,
     question_interaction,
 )
+from waypoint.questions import ASK_QUESTION_CLOSED, QuestionCloseReason
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -256,26 +257,30 @@ def map_event(
             question_metadata[INTERACTION_METADATA_KEY] = question_env.to_metadata()
         return (EventKind.TOOL_CALL, "Need your input", question_metadata)
 
-    if event_type == "question.replied":
+    if event_type in {"question.replied", "question.rejected"}:
+        replied = event_type == "question.replied"
+        closure_metadata: dict[str, Any] = {
+            "method": event_type,
+            "payload": properties,
+            "status": SessionStatus.RUNNING,
+        }
+        request_id = properties.get("requestID")
+        if isinstance(request_id, str) and request_id:
+            # Correlate the provider's ending with its question card; an answer
+            # or cancel Waypoint recorded for the same id takes precedence.
+            closure_metadata.update(
+                kind=ASK_QUESTION_CLOSED,
+                tool_use_id=request_id,
+                reason=(
+                    QuestionCloseReason.PROVIDER_REPLIED
+                    if replied
+                    else QuestionCloseReason.PROVIDER_REJECTED
+                ).value,
+            )
         return (
             EventKind.SYSTEM_NOTE,
-            "Question answered",
-            {
-                "method": "question.replied",
-                "payload": properties,
-                "status": SessionStatus.RUNNING,
-            },
-        )
-
-    if event_type == "question.rejected":
-        return (
-            EventKind.SYSTEM_NOTE,
-            "Question dismissed",
-            {
-                "method": "question.rejected",
-                "payload": properties,
-                "status": SessionStatus.RUNNING,
-            },
+            "Question answered" if replied else "Question dismissed",
+            closure_metadata,
         )
 
     if event_type == "command.executed":

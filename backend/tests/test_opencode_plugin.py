@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -531,6 +532,7 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
             settings=SimpleNamespace(
                 plugin_config=lambda _id: SimpleNamespace(cli_args=[])
             ),
+            questions=SimpleNamespace(reconcile=AsyncMock()),
         ),
     )
     transport = OpenCodeTransport(runtime=fake_runtime, plugin=plugin)

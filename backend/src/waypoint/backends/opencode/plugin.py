@@ -24,6 +24,11 @@ from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConf
 from waypoint.git_meta import GitMeta
 from waypoint.launch_env import LaunchEnv
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.questions import (
+    ASK_QUESTION_ANSWER,
+    QuestionCloseReason,
+    QuestionLiveness,
+)
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -644,6 +649,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         adapter = self._adapters.get(key)
         if adapter is not None:
             await adapter.terminate_session(session.id)
+        await runtime.questions.reconcile(session.id)
 
     def clear_health_for_user_retry(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1252,30 +1258,101 @@ class OpenCodePlugin(DefaultLaunchContract):
                 detail="no pending question to answer",
             )
         structured_answers = self._serialize_question_answers(answer, answers)
-        success = await adapter.answer_question(
-            session.id,
-            request_id,
-            structured_answers,
-        )
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="failed to answer question",
+        with runtime.questions.operation(session.id, request_id):
+            success = await adapter.answer_question(
+                session.id,
+                request_id,
+                structured_answers,
             )
-        updated = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
-        metadata: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            metadata["answers"] = answers
-        metadata["tool_use_id"] = request_id
-        await runtime._record_user_event(
-            session.id,
-            answer,
-            submit=True,
-            extra_metadata=metadata,
-        )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="failed to answer question",
+                )
+            updated = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            metadata: dict[str, Any] = {"kind": ASK_QUESTION_ANSWER}
+            if answers:
+                metadata["answers"] = answers
+            metadata["tool_use_id"] = request_id
+            await runtime._record_user_event(
+                session.id,
+                answer,
+                submit=True,
+                extra_metadata=metadata,
+            )
         return updated
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        if adapter is None:
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
+        return adapter.question_liveness(session.id, tool_use_ids)
+
+    async def cancel_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> SessionRecord:
+        runtime.questions.require_open(session.id, tool_use_id)
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        if adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="session is not running; resume it to act on this question",
+            )
+        with runtime.questions.operation(session.id, tool_use_id):
+            runtime.questions.require_open(session.id, tool_use_id)
+            runtime.questions.require_actionable(session, tool_use_id)
+            outcome = await adapter.reject_question(session.id, tool_use_id)
+            if outcome == "missing":
+                await runtime.questions.record_closed(
+                    session.id,
+                    tool_use_id,
+                    QuestionCloseReason.PROVIDER_CLOSED,
+                    "Question closed: OpenCode no longer has this request",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="question is no longer open",
+                )
+            if outcome == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        "OpenCode did not accept the cancellation; "
+                        "the question is still open"
+                    ),
+                )
+            current = runtime.get_session(session.id)
+            resumes = (
+                current.status is SessionStatus.WAITING_INPUT
+                and adapter.current_question_id(session.id) is None
+                and not runtime.transport_for(current).has_pending_approval(current)
+            )
+            await runtime.questions.record_cancelled(
+                session.id,
+                tool_use_id,
+                status=SessionStatus.RUNNING if resumes else None,
+            )
+        return runtime.get_session(session.id)
+
+    def _session_adapter_key(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapterKey:
+        return self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
+            _agent_process_env(runtime, self.id, session.launch_env),
+        )
 
     async def approve_plan(
         self,
@@ -1366,6 +1443,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             "OpenCode session restored from previous backend process",
             status=SessionStatus.IDLE,
         )
+        await runtime.questions.reconcile(session.id)
 
     async def fork_session(
         self,

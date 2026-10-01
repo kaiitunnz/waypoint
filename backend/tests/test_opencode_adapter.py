@@ -10,6 +10,8 @@ from waypoint.backends.opencode.adapter import (
     OpenCodeSessionState,
     _context_usage_snapshot_from_message,
 )
+from waypoint.backends.opencode.client import OpenCodeHttpError
+from waypoint.questions import QuestionLiveness
 
 
 def _build_adapter() -> OpenCodeAdapter:
@@ -730,3 +732,110 @@ async def test_delete_session_swallows_http_error_as_failure() -> None:
 
     adapter._client = cast(Any, _FakeClient())
     assert await adapter.delete_session("ses_404") is False
+
+
+class _QuestionClient:
+    def __init__(self, listing: Any = None, reject_error: Exception | None = None):
+        self.listing = listing
+        self.reject_error = reject_error
+        self.calls: list[tuple[str, str, Any]] = []
+
+    async def get(self, path, params=None):
+        self.calls.append(("GET", path, params))
+        if isinstance(self.listing, Exception):
+            raise self.listing
+        return self.listing
+
+    async def post(self, path, json_data=None, params=None, long_running=False):
+        self.calls.append(("POST", path, params))
+        if self.reject_error is not None:
+            raise self.reject_error
+        return True
+
+
+def _question_state(adapter: OpenCodeAdapter, seeded: bool = True) -> Any:
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/work",
+        opencode_session_id="ses_1",
+        questions_seeded=seeded,
+    )
+    adapter._register_session(state)
+    return state
+
+
+@pytest.mark.asyncio
+async def test_seeding_adopts_this_sessions_server_questions() -> None:
+    adapter = _build_adapter()
+    state = _question_state(adapter, seeded=False)
+    state.pending_question_ids.append("que_live_sse")
+    client = _QuestionClient(
+        [
+            {"id": "que_a", "sessionID": "ses_1"},
+            {"id": "que_other", "sessionID": "ses_2"},
+            {"id": "que_live_sse", "sessionID": "ses_1"},
+        ]
+    )
+    adapter._client = cast(Any, client)
+
+    assert adapter.question_liveness("local-1", ["que_a"]) == {
+        "que_a": QuestionLiveness.UNAVAILABLE
+    }
+    await adapter._seed_pending_questions(state)
+
+    assert state.pending_question_ids == ["que_live_sse", "que_a"]
+    assert client.calls == [("GET", "/question", {"directory": "/work"})]
+    assert adapter.question_liveness("local-1", ["que_a", "que_gone"]) == {
+        "que_a": QuestionLiveness.ACTIONABLE,
+        "que_gone": QuestionLiveness.CLOSED,
+    }
+
+
+@pytest.mark.parametrize("listing", [RuntimeError("down"), {"error": "x"}])
+@pytest.mark.asyncio
+async def test_failed_seeding_never_closes_questions(listing: Any) -> None:
+    adapter = _build_adapter()
+    state = _question_state(adapter, seeded=False)
+    adapter._client = cast(Any, _QuestionClient(listing))
+
+    await adapter._seed_pending_questions(state)
+
+    assert not state.questions_seeded
+    assert adapter.question_liveness("local-1", ["que_a"]) == {
+        "que_a": QuestionLiveness.UNAVAILABLE
+    }
+
+
+@pytest.mark.asyncio
+async def test_reject_question_declines_the_request() -> None:
+    adapter = _build_adapter()
+    state = _question_state(adapter)
+    state.pending_question_ids.extend(["que_a", "que_b"])
+    client = _QuestionClient()
+    adapter._client = cast(Any, client)
+
+    assert await adapter.reject_question("local-1", "que_a") == "ok"
+
+    assert client.calls == [("POST", "/question/que_a/reject", {"directory": "/work"})]
+    assert state.pending_question_ids == ["que_b"]
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [
+        (OpenCodeHttpError(404, "", "POST", "/x"), "missing"),
+        (OpenCodeHttpError(500, "", "POST", "/x"), "error"),
+        (RuntimeError("curl failed"), "error"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_failed_reject_keeps_the_question_pending(
+    error: Exception, outcome: str
+) -> None:
+    adapter = _build_adapter()
+    state = _question_state(adapter)
+    state.pending_question_ids.append("que_a")
+    adapter._client = cast(Any, _QuestionClient(reject_error=error))
+
+    assert await adapter.reject_question("local-1", "que_a") == outcome
+    assert state.pending_question_ids == ["que_a"]

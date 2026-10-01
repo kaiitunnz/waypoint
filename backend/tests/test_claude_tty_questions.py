@@ -202,3 +202,112 @@ async def test_concurrent_answers_send_once(tmp_path, monkeypatch) -> None:
 
     assert exc.value.status_code == 409
     assert transport.send_input.await_count == 1
+
+
+async def cancel(
+    plugin: ClaudeTtyPlugin, runtime: SessionRuntime, tool_use_id: str
+) -> SessionRecord:
+    return await plugin.cancel_question(runtime, runtime.get_session("s1"), tool_use_id)
+
+
+async def test_cancel_closes_only_the_proxy_without_touching_the_pane(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = fake_transport(runtime, monkeypatch)
+    transport.has_pending_approval = MagicMock(return_value=False)
+    plugin = ClaudeTtyPlugin()
+    await ask(runtime, "q1")
+    await ask(runtime, "q2")
+
+    updated = await cancel(plugin, runtime, "q1")
+
+    assert runtime.storage.open_question_tool_use_ids("s1") == ["q2"]
+    transport.send_input.assert_not_called()
+    note = runtime.storage.list_events("s1")[-1]
+    assert note.kind is EventKind.SYSTEM_NOTE
+    assert note.metadata["kind"] == "ask_user_question_cancelled"
+    assert note.metadata["tool_use_id"] == "q1"
+    # Another question is still waiting on the human.
+    assert updated.status is SessionStatus.WAITING_INPUT
+
+
+async def test_cancelling_the_last_question_marks_the_idle_tui_idle(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = fake_transport(runtime, monkeypatch)
+    transport.has_pending_approval = MagicMock(return_value=False)
+    await ask(runtime, "q1")
+
+    updated = await cancel(ClaudeTtyPlugin(), runtime, "q1")
+
+    assert updated.status is SessionStatus.IDLE
+
+
+async def test_cancel_keeps_waiting_while_an_approval_is_pending(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = fake_transport(runtime, monkeypatch)
+    transport.has_pending_approval = MagicMock(return_value=True)
+    await ask(runtime, "q1")
+
+    updated = await cancel(ClaudeTtyPlugin(), runtime, "q1")
+
+    assert updated.status is SessionStatus.WAITING_INPUT
+
+
+async def test_cancel_rejects_a_resolved_question(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
+    plugin = ClaudeTtyPlugin()
+    await ask(runtime, "q1")
+    await answer(plugin, runtime, "q1")
+
+    with pytest.raises(HTTPException) as exc:
+        await cancel(plugin, runtime, "q1")
+
+    assert exc.value.status_code == 400
+    assert not any(
+        event.metadata.get("kind") == "ask_user_question_cancelled"
+        for event in runtime.storage.list_events("s1")
+    )
+
+
+async def test_cancel_is_unavailable_while_the_pane_is_detached(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    runtime.storage.update_session("s1", status=SessionStatus.EXITED)
+
+    with pytest.raises(HTTPException) as exc:
+        await cancel(ClaudeTtyPlugin(), runtime, "q1")
+
+    assert exc.value.status_code == 409
+    assert runtime.storage.open_question_tool_use_ids("s1") == ["q1"]
+
+
+async def test_cancel_conflicts_with_an_answer_in_flight(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = fake_transport(runtime, monkeypatch)
+    gate = asyncio.Event()
+
+    async def slow_send(*args, **kwargs) -> None:
+        await gate.wait()
+
+    transport.send_input.side_effect = slow_send
+    plugin = ClaudeTtyPlugin()
+    await ask(runtime, "q1")
+
+    first = asyncio.create_task(answer(plugin, runtime, "q1"))
+    await asyncio.sleep(0)
+    with pytest.raises(HTTPException) as exc:
+        await cancel(plugin, runtime, "q1")
+    gate.set()
+    await first
+
+    assert exc.value.status_code == 409
+    assert runtime.storage.open_question_tool_use_ids("s1") == []

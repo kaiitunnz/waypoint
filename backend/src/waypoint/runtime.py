@@ -82,6 +82,7 @@ from waypoint.notifications import (
     intent_from_event,
     intent_from_inbox_item,
 )
+from waypoint.pending_questions import PendingQuestionTracker
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
@@ -540,6 +541,7 @@ class SessionRuntime:
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
         self.held = HeldQueue(self)
+        self.questions = PendingQuestionTracker(self)
         self.session_presence = SessionPresenceRegistry()
         self.notifications: NotificationService | None = (
             NotificationService(
@@ -3881,6 +3883,7 @@ class SessionRuntime:
         # case (natural exit never called terminate()) here.
         await self._cancel_context_usage_source(session_id)
         self._close_structured_log(session_id)
+        self.questions.forget(session_id)
         plugin = self.registry.plugin_for(session)
         # Optional async cleanup hook; not part of the BackendPlugin protocol.
         # Run it BEFORE deleting the row so it can read fresh side-question state
@@ -4674,6 +4677,9 @@ class SessionRuntime:
         plugin = self.registry.plugin_for(session)
         return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
+    async def cancel_question(self, session_id: str, tool_use_id: str) -> SessionRecord:
+        return await self.questions.cancel(self.get_session(session_id), tool_use_id)
+
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
     ) -> SessionRecord:
@@ -4774,8 +4780,17 @@ class SessionRuntime:
             if before_sequence is None
             else None
         )
+        pending_questions = None
+        if before_sequence is None:
+            pending_questions = self.questions.compute(session_id)
+            # Reconcile off the request path: the flusher records closures for
+            # questions the provider ended and pushes the corrected snapshot.
+            self.questions.mark_dirty(session_id)
         return EventsPageResponse(
-            events=events, has_more=has_more, latest_todo=latest_todo
+            events=events,
+            has_more=has_more,
+            latest_todo=latest_todo,
+            pending_questions=pending_questions,
         )
 
     def launch_target_summaries(self) -> list[dict[str, Any]]:
@@ -5141,6 +5156,7 @@ class SessionRuntime:
             session_id=event.session_id,
         )
         self._derive_telemetry_from_event(event)
+        self.questions.note_event(event)
         self._publish_session_state(event.session_id)
         # Backend-neutral idle wake: the just-persisted event's canonical status
         # already updated the session record (see Storage._insert_event), so a
@@ -5200,6 +5216,9 @@ class SessionRuntime:
         # directly when they need an immediate update.
         self._dirty_session_states.add(session_id)
         self._session_list_dirty = True
+        self._broadcast_wake.set()
+
+    def wake_session_flusher(self) -> None:
         self._broadcast_wake.set()
 
     async def _broadcast_session_list(self) -> None:
@@ -5628,6 +5647,7 @@ class SessionRuntime:
             self._session_list_dirty = False
             for session_id in dirty_ids:
                 await self._broadcast_session_state(session_id)
+            await self.questions.flush(dirty_ids)
             if list_dirty:
                 await self._broadcast_session_list()
             self.held.drain(dirty_ids)

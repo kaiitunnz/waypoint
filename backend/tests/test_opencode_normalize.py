@@ -1,3 +1,5 @@
+import pytest
+
 from waypoint.backends.opencode.normalize import map_event
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -185,6 +187,34 @@ def test_question_asked_maps_to_ask_user_question_tool_call() -> None:
             ]
         }
     }
+
+
+@pytest.mark.parametrize(
+    ("event_type", "text", "reason"),
+    [
+        ("question.replied", "Question answered", "provider_replied"),
+        ("question.rejected", "Question dismissed", "provider_rejected"),
+    ],
+)
+def test_question_endings_correlate_with_their_card(
+    event_type: str, text: str, reason: str
+) -> None:
+    kind, mapped_text, metadata = map_event(
+        event_type, {"sessionID": "ses_1", "requestID": "q_1"}
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert mapped_text == text
+    assert metadata["kind"] == "ask_user_question_closed"
+    assert metadata["tool_use_id"] == "q_1"
+    assert metadata["reason"] == reason
+
+
+def test_uncorrelated_question_ending_stays_a_plain_note() -> None:
+    _, _, metadata = map_event("question.rejected", {"sessionID": "ses_1"})
+
+    assert "tool_use_id" not in metadata
+    assert "kind" not in metadata
 
 
 def test_step_finish_uses_part_payload_fields() -> None:

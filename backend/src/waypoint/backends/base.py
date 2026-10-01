@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     CommandCompletion,
@@ -146,6 +147,33 @@ class FreshThreadRestarting(Protocol):
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         """Start a fresh native thread for an already-persisted session row."""
+        ...
+
+
+@runtime_checkable
+class QuestionLifecycle(Protocol):
+    """An agent that reports the liveness of its open AskUserQuestion requests
+    and can decline one.
+
+    Without it the runtime closes the session's open questions and rejects
+    cancels.
+    """
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        """Classify each durable open question. ``CLOSED`` means the provider has
+        definitively ended the request; the runtime then records a closure."""
+        ...
+
+    async def decline_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> QuestionDecline:
+        """Decline exactly ``tool_use_id`` with the provider. The runtime records
+        the outcome and serializes this against answers."""
         ...
 
 

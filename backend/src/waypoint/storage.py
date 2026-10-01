@@ -13,6 +13,12 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from waypoint.perf import debug_timer
+from waypoint.questions import (
+    ASK_QUESTION_ANSWER,
+    ASK_QUESTION_CANCELLED,
+    ASK_QUESTION_CLOSED,
+    ASK_USER_QUESTION_TOOL,
+)
 from waypoint.schemas import (
     BoardChannel,
     BoardEntry,
@@ -292,7 +298,7 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_events_session_seq
                 ON events(session_id, sequence);
 
-            -- Serve open_question_tool_use_ids, which otherwise re-scans the
+            -- Serve open_question_events, which otherwise re-scans the
             -- session's events per question. The trailing sequence lets the
             -- tool_name index also satisfy that query's ORDER BY; without it
             -- the planner falls back to idx_events_session_seq.
@@ -2185,17 +2191,22 @@ class Storage:
         return self._event_from_row(row) if row is not None else None
 
     @_synchronized
-    def open_question_tool_use_ids(self, session_id: str) -> list[str]:
-        """Tool-use ids of AskUserQuestion calls with neither an answer nor a
-        result, oldest first — the transcript's "pending" question cards."""
+    def open_question_events(self, session_id: str) -> list[EventRecord]:
+        """AskUserQuestion calls that no correlated event has resolved, oldest
+        first — the transcript's "pending" question cards.
+
+        A call is resolved by a paired tool_result, an accepted-answer user
+        event, or a cancellation/closure system note carrying its tool_use_id.
+        Repeated calls for one tool_use_id collapse to the earliest.
+        """
         rows = self.connection.execute(
             """
-            SELECT json_extract(q.metadata, '$.tool_use_id') AS tool_use_id
-            FROM events q
+            SELECT q.* FROM events q
             WHERE q.session_id = ?
               AND q.kind = ?
-              AND json_extract(q.metadata, '$.tool_name') = 'AskUserQuestion'
+              AND json_extract(q.metadata, '$.tool_name') = ?
               AND json_extract(q.metadata, '$.tool_use_id') IS NOT NULL
+              AND json_extract(q.metadata, '$.tool_use_id') != ''
               AND NOT EXISTS (
                 SELECT 1 FROM events r
                 WHERE r.session_id = q.session_id
@@ -2203,19 +2214,44 @@ class Storage:
                       = json_extract(q.metadata, '$.tool_use_id')
                   AND (r.kind = ?
                        OR (r.kind = ?
-                           AND json_extract(r.metadata, '$.kind')
-                               = 'ask_user_question_answer'))
+                           AND json_extract(r.metadata, '$.kind') = ?)
+                       OR (r.kind = ?
+                           AND json_extract(r.metadata, '$.kind') IN (?, ?)))
               )
             ORDER BY q.sequence ASC, q.id ASC
             """,
             [
                 session_id,
                 EventKind.TOOL_CALL,
+                ASK_USER_QUESTION_TOOL,
                 EventKind.TOOL_RESULT,
                 EventKind.USER_INPUT,
+                ASK_QUESTION_ANSWER,
+                EventKind.SYSTEM_NOTE,
+                ASK_QUESTION_CANCELLED,
+                ASK_QUESTION_CLOSED,
             ],
         ).fetchall()
-        return [row["tool_use_id"] for row in rows]
+        events: list[EventRecord] = []
+        seen: set[str] = set()
+        for row in rows:
+            event = self._event_from_row(row)
+            tool_use_id = event.metadata.get("tool_use_id")
+            if not isinstance(tool_use_id, str) or tool_use_id in seen:
+                continue
+            seen.add(tool_use_id)
+            events.append(event)
+        return events
+
+    def open_question_tool_use_ids(self, session_id: str) -> list[str]:
+        """Tool-use ids of :meth:`open_question_events`, oldest first."""
+        return [
+            str(event.metadata["tool_use_id"])
+            for event in self.open_question_events(session_id)
+        ]
+
+    def max_sequence(self, session_id: str) -> int:
+        return self.next_sequence(session_id) - 1
 
     @_synchronized
     def list_approval_events(self, session_id: str) -> list[EventRecord]:

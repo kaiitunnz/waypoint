@@ -56,6 +56,7 @@ from waypoint.backends.events import (
     InteractionEnvelope,
     question_interaction,
 )
+from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -323,6 +324,10 @@ class ClaudeSessionState:
     stderr_task: asyncio.Task[None]
     wait_task: asyncio.Task[None]
     pending: dict[str, ClaudePendingApproval] = field(default_factory=dict)
+    # AskUserQuestion tool_use_ids this process has asked. A durable open
+    # question outside this set was asked by an earlier process (before a
+    # respawn or backend restart) and can no longer be answered.
+    seen_ask_question_ids: set[str] = field(default_factory=set)
     emitted_diff_preview_tool_ids: set[str] = field(default_factory=set)
     # tool_use_ids whose tool_call we deliberately suppressed (ExitPlanMode):
     # the binary still echoes a tool_result for them — our injected
@@ -391,6 +396,24 @@ class ClaudeSessionState:
 
 class ClaudeCliError(RuntimeError):
     pass
+
+
+def _control_response_line(request_id: str, response_body: dict[str, Any]) -> bytes:
+    envelope = {
+        "type": "control_response",
+        "response": {"request_id": request_id, **response_body},
+    }
+    return (json.dumps(envelope) + "\n").encode("utf-8")
+
+
+def _process_writable(state: ClaudeSessionState) -> bool:
+    stdin = state.process.stdin
+    return (
+        not state.closing
+        and state.process.returncode is None
+        and stdin is not None
+        and not stdin.is_closing()
+    )
 
 
 class ClaudeCliAdapter:
@@ -702,8 +725,8 @@ class ClaudeCliAdapter:
         self,
         session_id: str,
         answer_text: str,
-        tool_use_id: str | None = None,
-    ) -> str | None:
+        tool_use_id: str,
+    ) -> bool:
         """Answer an AskUserQuestion parked on a ``can_use_tool`` request.
 
         AskUserQuestion arrives over the same ``can_use_tool`` channel as
@@ -712,27 +735,14 @@ class ClaudeCliAdapter:
         string becomes the tool_result Claude reads, matching the binary's
         own `User has answered your questions: …` shape.
 
-        Returns the resolved ``tool_use_id`` that was answered — including the
-        one selected here when the caller omitted it — so the plugin can record
-        it as durable answer evidence (FR5). Returns ``None`` when no pending
-        question could be resolved.
+        Returns ``False`` when ``tool_use_id`` is not parked.
         """
         state = self._sessions.get(session_id)
-        if state is None or not state.pending:
-            return None
-        pending: ClaudePendingApproval | None = None
-        if tool_use_id and tool_use_id in state.pending:
-            candidate = state.pending[tool_use_id]
-            if candidate.payload.get("tool_name") == "AskUserQuestion":
-                pending = candidate
+        if state is None:
+            return False
+        pending = self._pending_ask_question(state, tool_use_id)
         if pending is None:
-            for tid, candidate in state.pending.items():
-                if candidate.payload.get("tool_name") == "AskUserQuestion":
-                    tool_use_id = tid
-                    pending = candidate
-                    break
-        if pending is None or tool_use_id is None:
-            return None
+            return False
         # Deny the tool and carry the answer in the message — the binary reads
         # that string as the tool_result, matching its own
         # "User has answered your questions: …" shape.
@@ -751,16 +761,89 @@ class ClaudeCliAdapter:
             ),
         )
         state.pending.pop(tool_use_id, None)
-        return tool_use_id
+        return True
 
-    def has_pending_ask_question(self, session_id: str) -> bool:
+    def pending_ask_question_ids(self, session_id: str) -> list[str]:
+        """AskUserQuestion requests parked on ``can_use_tool``, oldest first."""
         state = self._sessions.get(session_id)
         if state is None:
+            return []
+        return [
+            tool_use_id
+            for tool_use_id, entry in state.pending.items()
+            if entry.payload.get("tool_name") == "AskUserQuestion"
+        ]
+
+    def ask_question_liveness(
+        self, session_id: str, tool_use_ids: list[str]
+    ) -> dict[str, QuestionLiveness]:
+        state = self._sessions.get(session_id)
+        if state is None or not _process_writable(state):
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.CLOSED)
+        result: dict[str, QuestionLiveness] = {}
+        for tool_use_id in tool_use_ids:
+            if self._pending_ask_question(state, tool_use_id) is not None:
+                result[tool_use_id] = QuestionLiveness.ACTIONABLE
+            elif tool_use_id in state.seen_ask_question_ids:
+                # The tool_use streamed before its can_use_tool request.
+                result[tool_use_id] = QuestionLiveness.STARTING
+            else:
+                result[tool_use_id] = QuestionLiveness.CLOSED
+        return result
+
+    async def deny_ask_question(self, session_id: str, tool_use_id: str) -> bool:
+        """Decline exactly ``tool_use_id`` without an answer.
+
+        Returns ``True`` only once the deny reached the binary's stdin, so the
+        caller never records a cancellation the agent did not receive.
+        """
+        state = self._sessions.get(session_id)
+        if state is None or not _process_writable(state):
             return False
-        return any(
-            entry.payload.get("tool_name") == "AskUserQuestion"
-            for entry in state.pending.values()
+        pending = self._pending_ask_question(state, tool_use_id)
+        if pending is None or state.process.stdin is None:
+            return False
+        line = _control_response_line(
+            pending.request_id,
+            {
+                "subtype": "success",
+                "response": {
+                    "behavior": "deny",
+                    "message": "The user declined to answer this question.",
+                },
+            },
         )
+        try:
+            state.process.stdin.write(line)
+            await state.process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            log.warning(
+                "failed to decline AskUserQuestion: %s",
+                exc,
+                extra={"session_id": session_id},
+            )
+            return False
+        state.pending.pop(tool_use_id, None)
+        return True
+
+    @staticmethod
+    def _drop_ask_questions(
+        state: ClaudeSessionState,
+        matches: Callable[[ClaudePendingApproval], bool],
+    ) -> None:
+        for tool_use_id, entry in list(state.pending.items()):
+            if entry.payload.get("tool_name") == "AskUserQuestion" and matches(entry):
+                state.pending.pop(tool_use_id, None)
+                state.seen_ask_question_ids.discard(tool_use_id)
+
+    @staticmethod
+    def _pending_ask_question(
+        state: ClaudeSessionState, tool_use_id: str
+    ) -> ClaudePendingApproval | None:
+        pending = state.pending.get(tool_use_id)
+        if pending is None or pending.payload.get("tool_name") != "AskUserQuestion":
+            return None
+        return pending
 
     async def respond_to_approval(
         self,
@@ -1028,6 +1111,7 @@ class ClaudeCliAdapter:
             # register the pending entry so respond_to_ask_question answers it,
             # and mark the parked turn as waiting on the human.
             if tool_name == "AskUserQuestion":
+                state.seen_ask_question_ids.add(tool_use_id)
                 if self._on_session_update is not None:
                     await self._on_session_update(
                         state.session_id,
@@ -1102,11 +1186,7 @@ class ClaudeCliAdapter:
             return
         if state.process.stdin is None or state.process.stdin.is_closing():
             return
-        envelope = {
-            "type": "control_response",
-            "response": {"request_id": request_id, **response_body},
-        }
-        line = (json.dumps(envelope) + "\n").encode("utf-8")
+        line = _control_response_line(request_id, response_body)
         state.process.stdin.write(line)
         with suppress(BrokenPipeError, ConnectionResetError):
             await state.process.stdin.drain()
@@ -1603,8 +1683,17 @@ class ClaudeCliAdapter:
             await self._handle_user(state, event)
             return
         if event_type == "result":
+            # A parked AskUserQuestion holds its turn open, so one still
+            # pending when the turn ends (interrupt, error) is dead.
+            self._drop_ask_questions(state, lambda entry: True)
+            state.seen_ask_question_ids.clear()
             await self._handle_result(state, event)
             return
+        if event_type == "control_cancel_request":
+            request_id = event.get("request_id")
+            self._drop_ask_questions(
+                state, lambda entry: entry.request_id == request_id
+            )
         if event_type == "rate_limit_event":
             await self._emit_event(
                 state.session_id,
@@ -1789,6 +1878,7 @@ class ClaudeCliAdapter:
                     "status": call_status,
                 }
                 if tool_name == "AskUserQuestion":
+                    state.seen_ask_question_ids.add(tool_use_id)
                     question = question_interaction(
                         tool_use_id, (block.get("input") or {}).get("questions")
                     )

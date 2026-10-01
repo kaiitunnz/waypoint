@@ -24,6 +24,11 @@ from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConf
 from waypoint.git_meta import GitMeta
 from waypoint.launch_env import LaunchEnv
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.questions import (
+    ASK_QUESTION_ANSWER,
+    QuestionDecline,
+    QuestionLiveness,
+)
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -430,6 +435,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,
+                on_questions_changed=lambda sid: runtime.questions.mark_dirty(sid),
                 workdir=key[1],
                 extra_args=custom_args,
                 launch_env=dict(key[3]),
@@ -624,15 +630,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         # Drop this session from any in-flight reconnect-loop target set so
         # an explicit terminate can't be silently undone by a later loop
         # tick resurrecting it.
@@ -644,6 +642,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         adapter = self._adapters.get(key)
         if adapter is not None:
             await adapter.terminate_session(session.id)
+        await runtime.questions.reconcile(session.id)
 
     def clear_health_for_user_retry(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -654,15 +653,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         # observing. Also re-arms a fresh reconnect attempt: cancel any
         # active loop so the next `_get_or_create_adapter` call drives
         # the SSH spinup synchronously instead of racing the loop.
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         health = self._health.get(key)
         if health is not None:
             health.record_success()
@@ -690,19 +681,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         if self._shutting_down:
             return
-        adapter = self._adapters.get(
-            self._adapter_key(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
-                _agent_process_env(runtime, self.id, session.launch_env),
-            )
-        )
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
         if adapter is not None:
             task = asyncio.create_task(adapter.terminate_session(session.id))
             self._pending_tasks.add(task)
@@ -1252,30 +1231,68 @@ class OpenCodePlugin(DefaultLaunchContract):
                 detail="no pending question to answer",
             )
         structured_answers = self._serialize_question_answers(answer, answers)
-        success = await adapter.answer_question(
-            session.id,
-            request_id,
-            structured_answers,
-        )
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="failed to answer question",
+        with runtime.questions.operation(session.id, request_id):
+            success = await adapter.answer_question(
+                session.id,
+                request_id,
+                structured_answers,
             )
-        updated = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
-        metadata: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            metadata["answers"] = answers
-        metadata["tool_use_id"] = request_id
-        await runtime._record_user_event(
-            session.id,
-            answer,
-            submit=True,
-            extra_metadata=metadata,
-        )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="failed to answer question",
+                )
+            updated = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            metadata: dict[str, Any] = {"kind": ASK_QUESTION_ANSWER}
+            if answers:
+                metadata["answers"] = answers
+            metadata["tool_use_id"] = request_id
+            await runtime._record_user_event(
+                session.id,
+                answer,
+                submit=True,
+                extra_metadata=metadata,
+            )
         return updated
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        if adapter is None:
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
+        return adapter.question_liveness(session.id, tool_use_ids)
+
+    async def decline_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> QuestionDecline:
+        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        if adapter is None:
+            return QuestionDecline.FAILED
+        outcome = await adapter.reject_question(session.id, tool_use_id)
+        if outcome == "missing":
+            return QuestionDecline.MISSING
+        if outcome == "error":
+            return QuestionDecline.FAILED
+        return QuestionDecline.TURN_RESUMES
+
+    def _session_adapter_key(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapterKey:
+        return self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
+            _agent_process_env(runtime, self.id, session.launch_env),
+        )
 
     async def approve_plan(
         self,
@@ -1298,15 +1315,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         try:
             adapter = await self._get_or_create_adapter(
                 runtime,
@@ -1366,6 +1375,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             "OpenCode session restored from previous backend process",
             status=SessionStatus.IDLE,
         )
+        await runtime.questions.reconcile(session.id)
 
     async def fork_session(
         self,

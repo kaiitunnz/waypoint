@@ -11,17 +11,21 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+import aiohttp
 
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.opencode.client import (
     LocalOpenCodeClient,
     OpenCodeHttpClient,
+    OpenCodeHttpError,
     RemoteOpenCodeClient,
 )
 from waypoint.backends.opencode.normalize import map_event
 from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -90,6 +94,11 @@ class OpenCodeSessionState:
     opencode_session_id: str
     pending_permission_ids: list[str] = field(default_factory=list)
     pending_question_ids: list[str] = field(default_factory=list)
+    # Whether ``pending_question_ids`` is authoritative. A live session tracks
+    # questions from birth; a restored one only after listing the server's
+    # open questions, so until then an untracked question may still be live.
+    questions_seeded: bool = True
+    questions_seed_attempted_at: float = 0.0
     # partID -> part type (text|reasoning|tool|step-start|step-finish).
     # Populated on message.part.updated *-start, consulted to tag
     # message.part.delta events whose payload only carries field="text".
@@ -114,6 +123,10 @@ class OpenCodeSessionState:
 
 AgentChangedCallback = Callable[[str, str | None, str | None], Any]
 ServerDiedCallback = Callable[[list[str]], Any]
+QuestionsChangedCallback = Callable[[str], Any]
+
+# Minimum gap between retries of a failed open-question listing.
+QUESTION_SEED_RETRY_SECONDS = 30.0
 
 
 class OpenCodeAdapter:
@@ -131,8 +144,10 @@ class OpenCodeAdapter:
         workdir: str | None = None,
         extra_args: tuple[str, ...] = (),
         launch_env: dict[str, str] | None = None,
+        on_questions_changed: QuestionsChangedCallback | None = None,
     ) -> None:
         self._emit_event = emit_event
+        self._on_questions_changed = on_questions_changed
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
         self._binary = binary
@@ -148,6 +163,7 @@ class OpenCodeAdapter:
         self._remote_sessions: dict[str, str] = {}
         self._part_sessions: dict[str, str] = {}
         self._context_window_lookup_tasks: set[asyncio.Task[None]] = set()
+        self._question_seed_tasks: dict[str, asyncio.Task[None]] = {}
 
         self._server_process: asyncio.subprocess.Process | None = None
         self._sse_task: asyncio.Task[None] | None = None
@@ -1008,8 +1024,10 @@ class OpenCodeAdapter:
             model=model,
             agent=agent,
             effort=effort,
+            questions_seeded=False,
         )
         self._register_session(state)
+        await self._seed_pending_questions(state)
         # The plugin records the user-facing restore/import note; the adapter
         # stays silent here so the transcript only shows one entry.
 
@@ -1295,12 +1313,114 @@ class OpenCodeAdapter:
         except Exception:
             return {"all": [], "default": {}, "connected": []}
 
-    async def list_questions(self) -> list[dict[str, Any]]:
+    async def _seed_pending_questions(self, state: OpenCodeSessionState) -> None:
+        """Adopt the server's open questions for a restored session.
+
+        Merged with any ``question.asked`` the SSE stream delivered meanwhile; a
+        failed listing leaves the session unseeded rather than wrongly empty.
+        """
+        state.questions_seed_attempted_at = time.monotonic()
+        try:
+            data = await self._require_client().get(
+                "/question", params={"directory": state.cwd}
+            )
+        except Exception as exc:
+            log.warning(
+                "failed to list opencode questions: %s",
+                exc,
+                extra={"session_id": state.session_id},
+            )
+            return
+        if not isinstance(data, list):
+            return
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            request_id = item.get("id")
+            if (
+                item.get("sessionID") == state.opencode_session_id
+                and isinstance(request_id, str)
+                and request_id
+                and request_id not in state.pending_question_ids
+            ):
+                state.pending_question_ids.append(request_id)
+        state.questions_seeded = True
+
+    def question_liveness(
+        self, session_id: str, request_ids: list[str]
+    ) -> dict[str, QuestionLiveness]:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return dict.fromkeys(request_ids, QuestionLiveness.UNAVAILABLE)
+        if not state.questions_seeded:
+            # Questions the stream delivered since restore are known live; the
+            # rest wait for a successful listing.
+            self._schedule_question_seed(state)
+            return {
+                request_id: (
+                    QuestionLiveness.ACTIONABLE
+                    if request_id in state.pending_question_ids
+                    else QuestionLiveness.UNAVAILABLE
+                )
+                for request_id in request_ids
+            }
+        return {
+            request_id: (
+                QuestionLiveness.ACTIONABLE
+                if request_id in state.pending_question_ids
+                else QuestionLiveness.CLOSED
+            )
+            for request_id in request_ids
+        }
+
+    def _schedule_question_seed(self, state: OpenCodeSessionState) -> None:
+        if state.session_id in self._question_seed_tasks:
+            return
+        if (
+            time.monotonic() - state.questions_seed_attempted_at
+            < QUESTION_SEED_RETRY_SECONDS
+        ):
+            return
+
+        async def reseed() -> None:
+            await self._seed_pending_questions(state)
+            if state.questions_seeded and self._on_questions_changed is not None:
+                self._on_questions_changed(state.session_id)
+
+        task = asyncio.create_task(reseed())
+        self._question_seed_tasks[state.session_id] = task
+        task.add_done_callback(
+            lambda _: self._question_seed_tasks.pop(state.session_id, None)
+        )
+
+    async def reject_question(
+        self, session_id: str, request_id: str
+    ) -> Literal["ok", "missing", "error"]:
+        """Decline one question request; ``missing`` means the server no
+        longer has it."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return "error"
         client = self._require_client()
         try:
-            return await client.get("/question")
-        except Exception:
-            return []
+            await client.post(
+                f"/question/{request_id}/reject",
+                params={"directory": state.cwd},
+            )
+        except (aiohttp.ClientResponseError, OpenCodeHttpError) as exc:
+            log.warning("opencode question reject failed: %s", exc)
+            return "missing" if exc.status == 404 else "error"
+        except Exception as exc:
+            log.warning("opencode question reject failed: %s", exc)
+            return "error"
+        self._forget_question(state, request_id)
+        return "ok"
+
+    @staticmethod
+    def _forget_question(state: OpenCodeSessionState, request_id: str) -> None:
+        state.pending_question_ids = [
+            item for item in state.pending_question_ids if item != request_id
+        ]
 
     async def answer_question(
         self,
@@ -1319,9 +1439,7 @@ class OpenCodeAdapter:
             )
         except Exception:
             return False
-        state.pending_question_ids = [
-            item for item in state.pending_question_ids if item != request_id
-        ]
+        self._forget_question(state, request_id)
         return True
 
     def current_question_id(self, session_id: str) -> str | None:
@@ -1358,6 +1476,11 @@ class OpenCodeAdapter:
         return True
 
     async def shutdown(self) -> None:
+        for task in list(self._question_seed_tasks.values()):
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        self._question_seed_tasks.clear()
         if self._context_window_lookup_tasks:
             for task in list(self._context_window_lookup_tasks):
                 task.cancel()

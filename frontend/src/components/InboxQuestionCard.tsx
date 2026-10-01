@@ -1,6 +1,6 @@
 "use client";
 
-import { AskQuestionOptions } from "@/components/TranscriptCard";
+import { AskQuestionOptions } from "@/components/AskQuestion";
 import type { InboxQuestionBlock } from "@/lib/types";
 
 // Presentational, controlled variant of the transcript's AskUserQuestion card

@@ -22,6 +22,7 @@ import {
   ManagerSummary,
   ManagerTicketListQuery,
   ManagerTicketPage,
+  PendingQuestionsSnapshot,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
@@ -269,6 +270,8 @@ export async function fetchEvents(
     events: (payload.events ?? []) as EventRecord[],
     has_more: Boolean(payload.has_more),
     latest_todo: (payload.latest_todo as EventRecord | null) ?? null,
+    pending_questions:
+      (payload.pending_questions as PendingQuestionsSnapshot | null) ?? null,
   };
 }
 
@@ -1569,6 +1572,26 @@ export async function answerAskQuestion(
     },
   );
   await ensureOk(response, "failed to send answer");
+}
+
+export async function cancelAskQuestion(
+  host: string,
+  token: string,
+  sessionId: string,
+  toolUseId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/cancel-question`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tool_use_id: toolUseId }),
+    },
+  );
+  await ensureOk(response, "failed to cancel question");
 }
 
 export async function sendInput(

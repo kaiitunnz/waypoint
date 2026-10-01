@@ -1212,6 +1212,28 @@ class MeResponse(BaseModel):
     usage_provider_options: list[UsageProviderOption] = Field(default_factory=list)
 
 
+PendingQuestionAvailability = Literal["actionable", "starting", "unavailable"]
+
+
+class PendingQuestion(BaseModel):
+    tool_use_id: str
+    event: EventRecord
+    availability: PendingQuestionAvailability
+
+
+class PendingQuestionsSnapshot(BaseModel):
+    """Every open AskUserQuestion of a session, oldest first.
+
+    Clients order snapshots by ``(as_of_sequence, revision)``: the sequence is
+    the session's latest event when computed, and the revision bumps whenever
+    the list or an availability changes without a new event.
+    """
+
+    questions: list[PendingQuestion] = Field(default_factory=list)
+    as_of_sequence: int = 0
+    revision: int = 0
+
+
 class EventsPageResponse(BaseModel):
     events: list[EventRecord] = Field(default_factory=list)
     has_more: bool = False
@@ -1220,6 +1242,9 @@ class EventsPageResponse(BaseModel):
     # todo predates the loaded transcript window. ``None`` when the session
     # has no todos or when paginating older pages.
     latest_todo: EventRecord | None = None
+    # Open questions across the whole history, populated only in tail mode so
+    # a question older than the loaded window stays answerable.
+    pending_questions: PendingQuestionsSnapshot | None = None
 
 
 class SessionCreateRequest(BaseModel):
@@ -1500,6 +1525,10 @@ class SessionAnswerQuestionRequest(BaseModel):
     answer: str
     tool_use_id: str | None = None
     answers: list[AskQuestionAnswer] | None = None
+
+
+class SessionCancelQuestionRequest(BaseModel):
+    tool_use_id: str = Field(min_length=1)
 
 
 class ScheduleStatus(StrEnum):

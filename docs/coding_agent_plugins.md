@@ -453,6 +453,46 @@ async def post_approval(self, runtime, session) -> None: ...
   any structured approval response (Claude syncs the permission-mode pill when
   an ExitPlanMode approval flips the mode out of "plan").
 
+### Pending questions and cancellation (optional)
+
+An agent whose AskUserQuestion requests can be answered through Waypoint
+implements the `QuestionLifecycle` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def question_liveness(self, runtime, session, tool_use_ids) -> dict[str, QuestionLiveness]: ...
+async def decline_question(self, runtime, session, tool_use_id) -> QuestionDecline: ...
+```
+
+Durable events are the question state: an `AskUserQuestion` tool_call stays
+open until a correlated `tool_result`, an `ask_user_question_answer` user event,
+or an `ask_user_question_cancelled` / `ask_user_question_closed` system note
+carrying its `tool_use_id` resolves it (markers in
+[`questions.py`](../backend/src/waypoint/questions.py)). The runtime's
+`PendingQuestionTracker`
+([`pending_questions.py`](../backend/src/waypoint/pending_questions.py)) turns
+the open calls into the session's `pending_questions` snapshot (tail `/events`
+page and websocket) and asks the plugin how live each one is:
+
+- `ACTIONABLE` — the agent can take an answer or a cancel now.
+- `STARTING` — asked, but the agent cannot accept the reply yet.
+- `UNAVAILABLE` — not reachable now (detached pane, adapter not restored); may
+  become actionable again.
+- `CLOSED` — the provider ended the request. The tracker records an
+  `ask_user_question_closed` note.
+
+`decline_question` declines exactly one request with the provider and reports
+the outcome: `TURN_RESUMES` (the asking turn continues), `AGENT_IDLE` (nothing
+was sent; the agent no longer waits on it), `MISSING`, or `FAILED`. The tracker
+serializes the cancel, records the cancellation or closure, and settles the
+session status; on `FAILED` it records nothing. `answer_question` holds
+`runtime.questions.operation(session_id, tool_use_id)` from provider delivery
+until the answer event is persisted; a concurrent operation on the same request
+gets a 409. Provider-originated endings must carry the request id (OpenCode's
+`question.replied` / `question.rejected` normalize to correlated closure
+notes). Without the protocol the tracker closes the session's open questions
+and rejects cancels.
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should
@@ -621,7 +661,8 @@ renders for `claude_code` — and swallows the rejection so the card stays
 answerable. `answer_question` then delivers the answer as an ordinary user
 turn (the pane is back at the ready prompt), the way `claude_code` carries it
 on a denied tool, and emits a synthetic tool_result so the card resolves to
-answered.
+answered. Cancelling that card sends nothing to the pane and marks the session
+idle when nothing else waits on the human.
 
 ## The event envelope
 

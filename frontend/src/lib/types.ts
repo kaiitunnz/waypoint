@@ -591,6 +591,24 @@ export interface EventsPage {
   // The session's latest todo/task snapshot, sent only for the tail page so
   // the task dock survives a todo update that predates the loaded window.
   latest_todo: EventRecord | null;
+  // Every open AskUserQuestion of the session, sent only for the tail page.
+  pending_questions: PendingQuestionsSnapshot | null;
+}
+
+export type PendingQuestionAvailability = "actionable" | "starting" | "unavailable";
+
+export interface PendingQuestion {
+  tool_use_id: string;
+  event: EventRecord;
+  availability: PendingQuestionAvailability;
+}
+
+// Open questions oldest first. Snapshots order by (as_of_sequence, revision);
+// the revision bumps when availability changes without a new event.
+export interface PendingQuestionsSnapshot {
+  questions: PendingQuestion[];
+  as_of_sequence: number;
+  revision: number;
 }
 
 export interface LaunchTargetSummary {
@@ -864,6 +882,7 @@ export interface SessionEnvelope {
     | "clipboard_copy"
     | "side_question"
     | "held_messages"
+    | "pending_questions"
     | "inbox_update"
     | "telemetry_update"
     | "nl_insight_status";

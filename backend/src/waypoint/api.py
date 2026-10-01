@@ -97,6 +97,7 @@ from waypoint.schemas import (
     SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
+    SessionCancelQuestionRequest,
     SessionCompletionsResponse,
     SessionEffortRequest,
     SessionEnvelope,
@@ -1167,6 +1168,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.answer_question(
             session_id, request.answer, request.tool_use_id, answers
         )
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/cancel-question")
+    async def session_cancel_question(
+        session_id: str,
+        request: SessionCancelQuestionRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.cancel_question(session_id, request.tool_use_id)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/resume")
@@ -2354,6 +2364,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.send_json(
                 context.runtime.held.envelope(session_id).model_dump(mode="json")
             )
+            await websocket.send_json(
+                context.runtime.questions.envelope(
+                    context.runtime.questions.compute(session_id)
+                ).model_dump(mode="json")
+            )
+            context.runtime.questions.mark_dirty(session_id)
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)

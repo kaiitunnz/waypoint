@@ -19,7 +19,6 @@ import {
 } from "react";
 
 import {
-  answerAskQuestion,
   approvePlan,
   approveSession,
   cancelHeldMessages,
@@ -124,10 +123,14 @@ import {
   ToolCallRunGroup,
   TaskNotificationRunGroup,
   readToolName,
-  type AskAnswerEntry,
-  type AskQuestionResolution,
   type ToolPair,
 } from "@/components/TranscriptCard";
+import {
+  AskQuestionContext,
+  useAskQuestionState,
+  usePendingQuestionSnapshot,
+} from "@/components/AskQuestion";
+import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
@@ -145,6 +148,8 @@ import {
   BackendPermissionMode,
   EventRecord,
   HeldMessage,
+  PendingQuestion,
+  PendingQuestionsSnapshot,
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
@@ -471,6 +476,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
   const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
+  const { snapshot: pendingQuestions, applySnapshot: applyPendingQuestions } =
+    usePendingQuestionSnapshot(sessionId);
+  const [revealTarget, setRevealTarget] = useState<{
+    toolUseId: string;
+    pagesLeft: number;
+  } | null>(null);
+  useEffect(() => {
+    setRevealTarget(null);
+  }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
@@ -853,6 +867,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setLoadedTodoEvent(
           loadedPage.latest_todo ? sanitizeEvent(loadedPage.latest_todo) : null,
         );
+        if (loadedPage.pending_questions) {
+          applyPendingQuestions(loadedPage.pending_questions, false);
+        }
       } catch (loadError) {
         if (active) {
           if (isAuthError(loadError)) {
@@ -870,6 +887,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     let attempt = 0;
 
     function connect() {
+      let questionsHydrated = false;
       setConnection(attempt === 0 ? "connecting" : "reconnecting");
       socket = connectSessionSocket(
         host,
@@ -946,6 +964,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               });
             }
           }
+          if (message.type === "pending_questions") {
+            applyPendingQuestions(
+              message.payload as unknown as PendingQuestionsSnapshot,
+              !questionsHydrated,
+            );
+            questionsHydrated = true;
+          }
           if (message.type === "held_messages") {
             const payload = message.payload as {
               session_id?: string;
@@ -996,7 +1021,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       pendingEventsRef.current = [];
       socket?.close();
     };
-  }, [handleAuthFailure, host, token, sessionId, queueIncomingEvent]);
+  }, [
+    applyPendingQuestions,
+    handleAuthFailure,
+    host,
+    token,
+    sessionId,
+    queueIncomingEvent,
+  ]);
 
   useEffect(() => {
     if (!session) return;
@@ -1217,39 +1249,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       sessionId,
       handleAuthFailure,
     ],
-  );
-
-  const submitAskAnswer = useCallback(
-    async (
-      answer: string,
-      toolUseId?: string,
-      answers?: AskAnswerEntry[],
-    ) => {
-      if (!answer.trim()) {
-        return false;
-      }
-      try {
-        await answerAskQuestion(
-          host,
-          token,
-          sessionId,
-          answer,
-          toolUseId,
-          answers,
-        );
-        return true;
-      } catch (sendError) {
-        if (isAuthError(sendError)) {
-          handleAuthFailure();
-          return false;
-        }
-        setError(
-          sendError instanceof Error ? sendError.message : "failed to send answer",
-        );
-        return false;
-      }
-    },
-    [handleAuthFailure, host, token, sessionId],
   );
 
   const runAction = useCallback(async (action: "interrupt" | "resume") => {
@@ -1527,6 +1526,83 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     session && supportsReattachAfterExit(session.backend, catalog),
   );
   const dormantReattach = sessionExited && canReattachAfterExit;
+
+  const reportAskRequestError = useCallback(
+    (requestError: unknown, fallback: string) => {
+      if (isAuthError(requestError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(requestError instanceof Error ? requestError.message : fallback);
+    },
+    [handleAuthFailure],
+  );
+  const reattachForQuestion = useCallback(() => void reattach(), [reattach]);
+  const askController = useAskQuestionState({
+    host,
+    token,
+    sessionId,
+    snapshot: pendingQuestions,
+    events: displayEvents,
+    canReattach: dormantReattach,
+    reattach: reattachForQuestion,
+    onRequestError: reportAskRequestError,
+  });
+
+  const revealQuestion = useCallback((question: PendingQuestion) => {
+    setView("chat");
+    setRevealTarget({ toolUseId: question.tool_use_id, pagesLeft: 50 });
+  }, []);
+
+  // Show in transcript: page older messages until the question's card is
+  // loaded, then wait for it to render and scroll it into view.
+  useEffect(() => {
+    if (!revealTarget) return;
+    const { toolUseId } = revealTarget;
+    const loaded = events.some(
+      (event) => event.kind === "tool_call" && event.metadata?.tool_use_id === toolUseId,
+    );
+    if (!loaded) {
+      if (loadingOlder) return;
+      if (!hasOlderEvents || revealTarget.pagesLeft <= 0) {
+        setRevealTarget(null);
+        return;
+      }
+      setRevealTarget({ toolUseId, pagesLeft: revealTarget.pagesLeft - 1 });
+      void loadOlderEvents();
+      return;
+    }
+    let frame = 0;
+    let attempts = 0;
+    const tryScroll = () => {
+      const card = document.querySelector<HTMLElement>(
+        `[data-ask-tool-use-id="${CSS.escape(toolUseId)}"]`,
+      );
+      if (card) {
+        // Leave stick-to-bottom so the reflow re-anchor doesn't snap the view
+        // back down.
+        nearBottomRef.current = false;
+        card.scrollIntoView({ block: "center", behavior: "auto" });
+        card.classList.remove("ask-question-flash");
+        void card.offsetWidth;
+        card.classList.add("ask-question-flash");
+        window.setTimeout(() => card.classList.remove("ask-question-flash"), 2000);
+        setRevealTarget(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) {
+        setRevealTarget(null);
+        return;
+      }
+      frame = window.requestAnimationFrame(tryScroll);
+    };
+    // Two frames: let loadOlderEvents re-anchor its scroll first.
+    frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(tryScroll);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [revealTarget, events, hasOlderEvents, loadingOlder, loadOlderEvents]);
   const composerDisabled =
     !session || (sessionExited && !canReattachAfterExit);
   const composerPlaceholder = !session
@@ -2128,6 +2204,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           </button>
         </div>
       ) : null}
+      {pendingQuestions && pendingQuestions.questions.length > 0 ? (
+        <PendingQuestionDock
+          questions={pendingQuestions.questions}
+          onReveal={revealQuestion}
+        />
+      ) : null}
       {sideQuestions.size > 0 ? (
         <SideQuestionDock
           questions={[...sideQuestions.values()]}
@@ -2186,6 +2268,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
 
   return (
+    <AskQuestionContext.Provider value={askController}>
     <WorkspaceFileLinkProvider value={workspaceLink}>
     <SessionFilesLinkProvider value={filesLink}>
     <section className="stack" ref={sectionRef}>
@@ -2321,7 +2404,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             pair={child.pair}
                             transport={session.transport}
                             catalog={catalog}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`pair-${child.pair.itemId}`}
                           />
@@ -2331,7 +2413,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             modelOptions={modelOptions}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
@@ -2363,7 +2444,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             pair={child.pair}
                             transport={session.transport}
                             catalog={catalog}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`pair-${child.pair.itemId}`}
                           />
@@ -2373,7 +2453,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             modelOptions={modelOptions}
-                            onAnswerAskQuestion={submitAskAnswer}
                             onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
@@ -2388,7 +2467,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     pair={item.pair}
                     transport={session.transport}
                     catalog={catalog}
-                    onAnswerAskQuestion={submitAskAnswer}
                     onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`pair-${item.pair.itemId}`}
                   />
@@ -2398,7 +2476,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     transport={session.transport}
                     catalog={catalog}
                     modelOptions={modelOptions}
-                    onAnswerAskQuestion={submitAskAnswer}
                     onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
@@ -2666,6 +2743,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     </section>
     </SessionFilesLinkProvider>
     </WorkspaceFileLinkProvider>
+    </AskQuestionContext.Provider>
   );
 }
 
@@ -4493,49 +4571,9 @@ type TranscriptItem =
   | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
   | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
-// Positive proof that Waypoint accepted a human answer to an AskUserQuestion:
-// a user_input event tagged ask_user_question_answer carrying the resolved
-// tool_use_id. The latest by sequence wins.
-function indexAskQuestionAnswerEvents(
-  events: EventRecord[],
-): Map<string, EventRecord> {
-  const index = new Map<string, EventRecord>();
-  for (const event of events) {
-    if (event.kind !== "user_input") continue;
-    const metadata = event.metadata ?? {};
-    if (metadata.kind !== "ask_user_question_answer") continue;
-    const toolUseId =
-      typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
-    if (!toolUseId) continue;
-    const existing = index.get(toolUseId);
-    if (!existing || event.sequence >= existing.sequence) {
-      index.set(toolUseId, event);
-    }
-  }
-  return index;
-}
-
-// Resolve one question pair against the answer-evidence index: a correlated
-// answer wins; otherwise a paired result means the question closed without an
-// answer; otherwise it is still pending.
-function resolveAskQuestion(
-  pair: ToolPair,
-  answerIndex: Map<string, EventRecord>,
-): AskQuestionResolution {
-  const answerEvent = answerIndex.get(pair.itemId);
-  if (answerEvent) {
-    return { state: "answered", answerEvent };
-  }
-  if (pair.result) {
-    return { state: "closed_unanswered", resultEvent: pair.result };
-  }
-  return { state: "pending" };
-}
-
 function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
   const pairIndex = new Map<string, number>();
-  const answerIndex = indexAskQuestionAnswerEvents(events);
   for (const event of events) {
     if (event.kind !== "tool_call" && event.kind !== "tool_result") {
       result.push({ kind: "single", event });
@@ -4572,14 +4610,6 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     }
     item.pair.ts = event.ts;
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
-  }
-
-  // Resolve each AskUserQuestion pair's answer state once and attach it so
-  // every card reads the same derivation.
-  for (const item of result) {
-    if (item.kind !== "pair" || !item.pair.call) continue;
-    if (readToolName(item.pair.call) !== "AskUserQuestion") continue;
-    item.pair.askResolution = resolveAskQuestion(item.pair, answerIndex);
   }
 
   // Classify each item so the grouping loop is easy to reason about.

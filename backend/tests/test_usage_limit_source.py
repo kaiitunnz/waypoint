@@ -316,7 +316,8 @@ def _derive_runtime(
     tmp_path: Path, source_id: str, source_fields: dict[str, Any]
 ) -> tuple[SessionRuntime, Storage]:
     runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    _session(storage, source_id, **source_fields)
+    # Pinned so launches use the adapter double, not tmux, without a codex CLI.
+    _session(storage, source_id, transport="codex_app_server", **source_fields)
     runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
     return runtime, storage
 
@@ -454,7 +455,7 @@ def _child_request(**fields: Any) -> SessionCreateRequest:
 
 async def test_spawned_child_inherits_provider_source(tmp_path: Path) -> None:
     runtime, _ = _derive_runtime(tmp_path, "parent", _PROVIDER_FIELDS)
-    child = await runtime.create_session(_child_request())
+    child = await runtime.create_session(_child_request(transport="codex_app_server"))
     _assert_provider_source(runtime.get_session(child.id))
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/kaiitunnz/waypoint/compare/v0.24.2...v0.25.0) (2026-10-01)
+
+
+### Features
+
+* add Claude Sonnet 5.5 to the Claude Code model catalogue ([#485](https://github.com/kaiitunnz/waypoint/issues/485)) ([0a1d16a](https://github.com/kaiitunnz/waypoint/commit/0a1d16ad3ed894add8af9f02c8d5407600c3c302))
+
+
+### Bug Fixes
+
+* carry the usage limit source into /new, forks, subagents, and presets ([#495](https://github.com/kaiitunnz/waypoint/issues/495)) ([e744120](https://github.com/kaiitunnz/waypoint/commit/e744120242bdfb73ebdbbe861a5ed362de26192e))
+
 ## [0.24.2](https://github.com/kaiitunnz/waypoint/compare/v0.24.1...v0.24.2) (2026-09-25)
 
 

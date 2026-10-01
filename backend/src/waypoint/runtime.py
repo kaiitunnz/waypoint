@@ -5226,6 +5226,13 @@ class SessionRuntime:
         self._session_list_dirty = True
         self._broadcast_wake.set()
 
+    def _schedule_session_flush(self, session_id: str) -> None:
+        # Like _publish_session_state, without marking the session list dirty:
+        # for per-session work (pending-question re-checks) that changes
+        # nothing in the list.
+        self._dirty_session_states.add(session_id)
+        self._broadcast_wake.set()
+
     async def _broadcast_session_list(self) -> None:
         with debug_timer(log, "_broadcast_session_list"):
             sessions = [item.model_dump(mode="json") for item in self.list_sessions()]

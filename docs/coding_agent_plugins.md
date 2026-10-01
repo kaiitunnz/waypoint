@@ -489,8 +489,9 @@ delivery until the durable answer or cancel event is persisted, in both
 `answer_question` and `cancel_question`, so a concurrent operation on the same
 request gets a 409. Provider-originated endings must carry the request id
 (OpenCode's `question.replied` / `question.rejected` normalize to correlated
-closure notes). A plugin without the protocol reports every open question
-`UNAVAILABLE` and rejects cancels.
+closure notes). A plugin without the protocol can never answer, so the
+tracker closes its open questions (e.g. after a `claude_tty` session switches
+to the generic `tmux` interface) and rejects cancels.
 
 ### Terminal appearance (optional)
 

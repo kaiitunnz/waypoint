@@ -277,18 +277,33 @@ async def test_flusher_survives_a_failing_liveness_check(tmp_path, monkeypatch) 
     assert states == ["s1", "s1"]
 
 
-async def test_unsupported_plugin_has_no_actionable_questions(
+async def test_a_driver_that_cannot_answer_closes_open_questions(
     tmp_path, monkeypatch
 ) -> None:
+    # e.g. a claude_tty session switched to the generic tmux interface.
     runtime = make_runtime(tmp_path, monkeypatch, object())
     await ask(runtime, "q1")
 
     snapshot = runtime.questions.compute("s1")
     with pytest.raises(HTTPException) as exc:
         await runtime.cancel_question("s1", "q1")
+    await runtime.questions.reconcile("s1")
 
-    assert [q.availability for q in snapshot.questions] == ["unavailable"]
+    assert snapshot.questions == []
     assert exc.value.status_code == 400
+    assert runtime.storage.open_question_tool_use_ids("s1") == []
+
+
+async def test_hydration_recheck_does_not_rebroadcast_the_session_list(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch, FakeQuestionPlugin())
+    runtime._session_list_dirty = False
+
+    runtime.session_events_page("s1", message_limit=10)
+
+    assert "s1" in runtime._dirty_session_states
+    assert not runtime._session_list_dirty
 
 
 async def test_runtime_routes_cancel_to_the_plugin(tmp_path, monkeypatch) -> None:

@@ -140,7 +140,10 @@ class PendingQuestionTracker:
             return {}
         plugin = self._runtime.registry.plugin_for(session)
         if not isinstance(plugin, QuestionCancelling):
-            return {tid: QuestionLiveness.UNAVAILABLE for tid in tool_use_ids}
+            # This driver can never answer (e.g. the session switched from
+            # claude_tty to the generic tmux interface), so close the
+            # questions instead of stranding them in the dock.
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.CLOSED)
         result = plugin.question_liveness(self._runtime, session, tool_use_ids)
         return {
             tid: result.get(tid, QuestionLiveness.UNAVAILABLE) for tid in tool_use_ids
@@ -229,7 +232,7 @@ class PendingQuestionTracker:
 
     def mark_dirty(self, session_id: str) -> None:
         self._dirty.add(session_id)
-        self._runtime._publish_session_state(session_id)
+        self._runtime._schedule_session_flush(session_id)
 
     def note_event(self, event: EventRecord) -> None:
         """Flag the session when ``event`` can change its open questions."""

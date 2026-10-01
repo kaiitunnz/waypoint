@@ -435,6 +435,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,
+                on_questions_changed=lambda sid: runtime.questions.mark_dirty(sid),
                 workdir=key[1],
                 extra_args=custom_args,
                 launch_env=dict(key[3]),

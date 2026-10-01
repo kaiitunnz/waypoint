@@ -796,13 +796,44 @@ async def test_seeding_adopts_this_sessions_server_questions() -> None:
 async def test_failed_seeding_never_closes_questions(listing: Any) -> None:
     adapter = _build_adapter()
     state = _question_state(adapter, seeded=False)
+    state.pending_question_ids.append("que_sse")
     adapter._client = cast(Any, _QuestionClient(listing))
 
     await adapter._seed_pending_questions(state)
 
     assert not state.questions_seeded
+    # The stream's own questions stay answerable; the rest wait for a listing.
+    assert adapter.question_liveness("local-1", ["que_sse", "que_a"]) == {
+        "que_sse": QuestionLiveness.ACTIONABLE,
+        "que_a": QuestionLiveness.UNAVAILABLE,
+    }
+
+
+@pytest.mark.asyncio
+async def test_failed_seeding_is_retried_and_reported(monkeypatch) -> None:
+    changed: list[str] = []
+    adapter = OpenCodeAdapter(emit_event=_build_adapter()._emit_event)
+    adapter._on_questions_changed = changed.append
+    state = _question_state(adapter, seeded=False)
+    client = _QuestionClient(RuntimeError("down"))
+    adapter._client = cast(Any, client)
+    await adapter._seed_pending_questions(state)
+
+    # Within the retry gap nothing is re-listed.
+    adapter.question_liveness("local-1", ["que_a"])
+    assert adapter._question_seed_tasks == {}
+
+    client.listing = [{"id": "que_a", "sessionID": "ses_1"}]
+    monkeypatch.setattr(
+        "waypoint.backends.opencode.adapter.QUESTION_SEED_RETRY_SECONDS", 0.0
+    )
+    adapter.question_liveness("local-1", ["que_a"])
+    await asyncio.gather(*adapter._question_seed_tasks.values())
+
+    assert state.questions_seeded
+    assert changed == ["local-1"]
     assert adapter.question_liveness("local-1", ["que_a"]) == {
-        "que_a": QuestionLiveness.UNAVAILABLE
+        "que_a": QuestionLiveness.ACTIONABLE
     }
 
 

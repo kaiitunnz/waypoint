@@ -1703,7 +1703,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         `[data-ask-tool-use-id="${CSS.escape(toolUseId)}"]`,
       );
       if (card) {
-        card.scrollIntoView({ block: "center", behavior: "smooth" });
+        // Leave stick-to-bottom first; a smooth scroll that starts near the
+        // bottom would be snapped back by the reflow re-anchor.
+        nearBottomRef.current = false;
+        card.scrollIntoView({ block: "center", behavior: "auto" });
         card.classList.remove("ask-question-flash");
         void card.offsetWidth;
         card.classList.add("ask-question-flash");

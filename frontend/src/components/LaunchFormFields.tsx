@@ -209,7 +209,7 @@ export function useLaunchForm({
           providerId: spec.usage_provider_id ?? null,
           accountKey: spec.usage_provider_account_key ?? null,
         });
-      } else if (spec.usage_limit_source === "plugin") {
+      } else {
         setUsageSelection(PLUGIN_SELECTION);
       }
       // Backend-scoped fields: model/effort/env/transport are wiped by the

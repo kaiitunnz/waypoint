@@ -12,6 +12,7 @@ import type {
   SessionPresetSpec,
   SessionPresetSummary,
   SessionPresetWriteRequest,
+  UsageProviderOption,
 } from "@/lib/types";
 
 interface SummaryChip {
@@ -24,14 +25,17 @@ interface SummaryChip {
 // vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
 // The account profile rides the account hue (session identity, not tuning), and
 // resolves to its label from the current catalogue — an id no longer offered
-// falls back to the raw id marked unavailable. Used only in the save sheet's
-// captures readout.
+// falls back to the raw id marked unavailable. A usage-provider source resolves
+// the same way against the current provider options. Used only in the save
+// sheet's captures readout.
 function SpecSummary({
   spec,
   profiles,
+  usageProviders,
 }: {
   spec: SessionPresetSummary["spec"];
   profiles: AccountProfile[];
+  usageProviders: UsageProviderOption[];
 }) {
   const chips: SummaryChip[] = [];
   if (spec.model) chips.push({ text: spec.model });
@@ -46,6 +50,21 @@ function SpecSummary({
             text: spec.account_profile_id,
             className: "is-profile is-unavailable",
             title: "Account profile no longer available",
+          },
+    );
+  }
+  if (spec.usage_limit_source === "usage_provider") {
+    const provider = usageProviders.find((p) => p.id === spec.usage_provider_id);
+    const account = provider?.accounts.find(
+      (a) => a.account_key === spec.usage_provider_account_key,
+    );
+    chips.push(
+      provider && account
+        ? { text: `${provider.label} — ${account.account_label}` }
+        : {
+            text: spec.usage_provider_id ?? "usage provider",
+            className: "is-unavailable",
+            title: "Usage provider account no longer available",
           },
     );
   }
@@ -325,6 +344,7 @@ export function PresetSaveActions({
           seedDefault={seedDefault}
           spec={formSpec(form)}
           profiles={form.accountProfiles}
+          usageProviders={form.usageProviderOptions}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload) => {
             setBusy(true);
@@ -351,6 +371,7 @@ interface PresetSaveModalProps {
   seedDefault: boolean;
   spec: SessionPresetSpec;
   profiles: AccountProfile[];
+  usageProviders: UsageProviderOption[];
   onClose: () => void;
   onSave: (payload: SessionPresetWriteRequest) => Promise<void>;
 }
@@ -363,6 +384,7 @@ function PresetSaveModal({
   seedDefault,
   spec,
   profiles,
+  usageProviders,
   onClose,
   onSave,
 }: PresetSaveModalProps) {
@@ -378,6 +400,9 @@ function PresetSaveModal({
     effort: spec.effort,
     permission_mode: spec.permission_mode,
     account_profile_id: spec.account_profile_id,
+    usage_limit_source: spec.usage_limit_source,
+    usage_provider_id: spec.usage_provider_id,
+    usage_provider_account_key: spec.usage_provider_account_key,
     launch_env_keys: Object.keys(spec.launch_env ?? {}),
     args: spec.args,
   };
@@ -480,7 +505,11 @@ function PresetSaveModal({
             <span className="preset-modal-captures-label">
               Captures session context + tuning
             </span>
-            <SpecSummary spec={summarySpec} profiles={profiles} />
+            <SpecSummary
+              spec={summarySpec}
+              profiles={profiles}
+              usageProviders={usageProviders}
+            />
           </div>
           <label className="preset-modal-check">
             <input

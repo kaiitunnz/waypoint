@@ -4453,6 +4453,13 @@ html[data-theme="light"] .tool-call-run-children {
   border-style: dashed;
 }
 
+/* Cancelled by the human: settled and quiet, distinct from "not answered". */
+.badge.tool-status.cancelled {
+  background: transparent;
+  color: var(--muted-soft);
+  border-color: var(--line);
+}
+
 .approval {
   border-color: rgba(200, 169, 106, 0.42);
   box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.16);
@@ -5020,6 +5027,287 @@ html[data-theme="light"] .task-dock-scrim {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Pending-question dock — every open AskUserQuestion of the session, oldest
+ * first. Same family as the task and side-question docks: a glass strip above
+ * the composer that expands into a sheet (mobile) / popover (desktop). The
+ * sheet is an accordion — one flat answer form open, the rest one-line rows.
+ * ──────────────────────────────────────────────────────────────────────── */
+.qd-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  margin-top: -8px;
+  pointer-events: none;
+  min-width: 0;
+}
+
+.qd-dock.expanded {
+  z-index: 50;
+}
+
+.qd-dock-strip {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.qd-dock-toggle {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.qd-dock-glyph {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-cool);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 40%, var(--line));
+  border-radius: var(--radius-sm);
+}
+
+.qd-dock-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.qd-dock-kicker {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.qd-dock-prompt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.88rem;
+}
+
+.qd-dock-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-cool);
+}
+
+.qd-dock-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-soft);
+  transition: transform 160ms ease;
+}
+
+.qd-dock-toggle[aria-expanded="true"] .qd-dock-chevron {
+  transform: rotate(180deg);
+}
+
+.qd-dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .qd-dock-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+.qd-dock-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 7;
+  max-height: 70vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-line);
+  border-bottom: none;
+  border-radius: var(--radius-glass) var(--radius-glass) 0 0;
+  background: var(--glass-bg-thick);
+  backdrop-filter: var(--glass-blur);
+  pointer-events: auto;
+}
+
+.qd-dock.expanded .qd-dock-strip {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.qd-dock-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qd-dock-panel-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.qd-dock-collapse {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+}
+
+.qd-dock-collapse svg {
+  transform: rotate(180deg);
+}
+
+.qd-dock-entries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+/* The open request: flat content inside the sheet, tinted like its
+ * transcript card so the two read as the same question. */
+.qd-dock-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-cool) 6%, var(--bg-card));
+}
+
+.qd-dock-entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.qd-dock-entry-time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.qd-dock-reveal {
+  margin-left: auto;
+  font-size: 0.78rem;
+}
+
+.qd-dock-entry-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.qd-dock-row {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.qd-dock-row:hover {
+  border-color: var(--line-strong);
+}
+
+.qd-dock-row-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-soft);
+  transform: rotate(90deg);
+}
+
+.qd-dock-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.qd-dock-row-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+@media (min-width: 768px) {
+  .qd-dock-scrim,
+  html[data-theme="light"] .qd-dock-scrim {
+    background: transparent;
+  }
+
+  .qd-dock-panel {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: min(460px, 92vw);
+  }
+
+  .qd-dock.expanded .qd-dock-panel {
+    border-bottom: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass);
+    box-shadow:
+      inset 0 1px 0 var(--glass-hi),
+      var(--shadow);
+  }
+
+  .qd-dock.expanded .qd-dock-strip {
+    border-top-left-radius: var(--radius-glass);
+    border-top-right-radius: var(--radius-glass);
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -8321,6 +8609,64 @@ details.transcript.codex.task-notification > summary .transcript-role {
   font-size: 0.85rem;
 }
 
+/* Why an open question's form is disabled (agent not ready, session
+ * detached). */
+.ask-question-status {
+  margin: 0 0 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ask-question-status.warn {
+  color: var(--warn);
+}
+
+.ask-question-status > span {
+  flex: 1 1 14rem;
+}
+
+.ask-question-actions {
+  margin-top: 12px;
+}
+
+/* Declines the request: separated from Send/Clear and in the danger hue so it
+ * never reads as the local Clear reset. */
+.ask-question-cancel {
+  margin-left: auto;
+  color: var(--danger);
+}
+
+.ask-question-cancel:disabled {
+  color: var(--muted-soft);
+}
+
+/* Show in transcript lands here: a one-shot ring around the card. */
+.ask-user-question.ask-question-flash {
+  animation: ask-question-flash 1.8s ease-out;
+}
+
+@keyframes ask-question-flash {
+  0%,
+  35% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-user-question.ask-question-flash {
+    animation: none;
+    outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, transparent);
+    outline-offset: 2px;
+  }
+}
+
 .ask-question-pager {
   display: flex;
   align-items: center;
@@ -9669,6 +10015,7 @@ html[data-theme="light"] .term-bar-action.primary {
 /* The locked pane is a stacking context; lifting it while a slot dock is
    expanded lets the dock's scrim cover the page composer. */
 .session-terminal:has(
+    .term-notices .qd-dock.expanded,
     .term-notices .sq-dock.expanded,
     .term-notices .sched-dock.expanded,
     .term-notices .held-dock.expanded
@@ -9679,6 +10026,7 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-notices > .session-error-toast,
 .term-notices > .session-notice-toast,
 .term-notices > .clipboard-prompt,
+.term-notices > .qd-dock,
 .term-notices > .sq-dock,
 .term-notices > .sched-dock,
 .term-notices > .held-dock {
@@ -9689,6 +10037,7 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-notices > .session-error-toast,
 .term-notices > .session-notice-toast,
 .term-notices > .clipboard-prompt,
+.term-notices .qd-dock-strip,
 .term-notices .sq-dock-strip,
 .term-notices .sched-dock-strip,
 .term-notices .held-dock-strip {
@@ -9698,6 +10047,7 @@ html[data-theme="light"] .term-bar-action.primary {
 }
 
 .term-notices > .session-notice-toast,
+.term-notices .qd-dock-strip,
 .term-notices .sq-dock-strip,
 .term-notices .sched-dock-strip,
 .term-notices .held-dock-strip {
@@ -9718,6 +10068,7 @@ html[data-theme="light"] .term-bar-action.primary {
 }
 
 @media (min-width: 768px) {
+  .term-notices .qd-dock.expanded .qd-dock-strip,
   .term-notices .sq-dock.expanded .sq-dock-strip,
   .term-notices .sched-dock.expanded .sched-dock-strip,
   .term-notices .held-dock.expanded .held-dock-strip {

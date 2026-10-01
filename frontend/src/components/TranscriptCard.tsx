@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent,
 } from "react";
 
 import {
@@ -14,7 +13,6 @@ import {
   humaniseBackend,
   type BackendCatalog,
 } from "@/lib/backends";
-import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { fetchAttachmentPreview, type AttachmentPreview } from "@/lib/api";
 import {
   AttachmentSpec,
@@ -53,17 +51,19 @@ import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
+import {
+  AskQuestionForm,
+  askFormState,
+  askToolUseId,
+  parseAskUserQuestion,
+  useAskQuestionController,
+  type AskAnswerEntry,
+  type AskQuestionResolution,
+  type AskUserQuestion,
+} from "@/components/AskQuestion";
 
 // Claude Code's tool for handing local files to the human.
 const SEND_USER_FILE_TOOL = "SendUserFile";
-
-// Three-state resolution of an AskUserQuestion, derived once over the loaded
-// events from durable answer evidence: a correlated ask_user_question_answer
-// user event.
-export type AskQuestionResolution =
-  | { state: "pending" }
-  | { state: "answered"; answerEvent: EventRecord }
-  | { state: "closed_unanswered"; resultEvent: EventRecord };
 
 export interface ToolPair {
   call: EventRecord | null;
@@ -74,61 +74,6 @@ export interface ToolPair {
   // Set only for AskUserQuestion pairs; attached by buildTranscriptItems so
   // grouped runs and ordinary rows agree without re-scanning per card.
   askResolution?: AskQuestionResolution;
-}
-
-export interface AskQuestionOption {
-  label: string;
-  description?: string;
-}
-
-// The selectable option list shared by the transcript's AskUserQuestion card
-// and the inbox question block, so both render options identically.
-export function AskQuestionOptions({
-  options,
-  selected,
-  onToggle,
-  disabled = false,
-}: {
-  options: AskQuestionOption[];
-  selected: Set<string>;
-  onToggle: (label: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <ul className="ask-question-options">
-      {options.map((option) => {
-        const isSelected = selected.has(option.label);
-        return (
-          <li key={option.label}>
-            <button
-              type="button"
-              className={`ask-option ${isSelected ? "selected" : ""}`}
-              onClick={() => onToggle(option.label)}
-              disabled={disabled}
-            >
-              <span className="ask-option-label">{option.label}</span>
-              {option.description ? (
-                <span className="ask-option-desc">{option.description}</span>
-              ) : null}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-interface AskUserQuestion {
-  question: string;
-  header?: string;
-  options: AskQuestionOption[];
-  multiSelect?: boolean;
-}
-
-export interface AskAnswerEntry {
-  question: string;
-  answer: string | null;
-  notes?: string;
 }
 
 // Measure the meta strip's real width and surface it as `--meta-reserve`
@@ -1399,48 +1344,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function parseAskUserQuestion(event: EventRecord): AskUserQuestion[] | null {
-  if (readToolName(event) !== "AskUserQuestion") {
-    return null;
-  }
-  const payload = event.metadata?.payload as { input?: unknown } | undefined;
-  const input = payload?.input as { questions?: unknown } | undefined;
-  const raw = input?.questions;
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return null;
-  }
-  const parsed: AskUserQuestion[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const q = entry as Record<string, unknown>;
-    if (typeof q.question !== "string") continue;
-    const optionsRaw = Array.isArray(q.options) ? q.options : [];
-    const options: AskQuestionOption[] = [];
-    for (const opt of optionsRaw) {
-      if (!opt || typeof opt !== "object") continue;
-      const o = opt as Record<string, unknown>;
-      if (typeof o.label !== "string") continue;
-      options.push({
-        label: o.label,
-        description: typeof o.description === "string" ? o.description : undefined,
-      });
-    }
-    if (!options.length) continue;
-    parsed.push({
-      question: q.question,
-      header: typeof q.header === "string" ? q.header : undefined,
-      options,
-      multiSelect: q.multiSelect === true,
-    });
-  }
-  return parsed.length ? parsed : null;
-}
-
 function AskUserQuestionCard({
   event,
   questions,
   onAnswer,
-  resolution,
+  resolution: fallbackResolution,
 }: {
   event: EventRecord;
   questions: AskUserQuestion[];
@@ -1451,261 +1359,45 @@ function AskUserQuestionCard({
   ) => Promise<boolean> | void;
   resolution: AskQuestionResolution;
 }) {
-  const answered = resolution.state === "answered";
-  const closedUnanswered = resolution.state === "closed_unanswered";
+  const controller = useAskQuestionController();
+  const toolUseId = askToolUseId(event);
+  const resolution =
+    (toolUseId ? controller?.resolution(toolUseId) : null) ?? fallbackResolution;
+  const formState = askFormState(controller, event, resolution);
   const closedResultEvent =
     resolution.state === "closed_unanswered" ? resolution.resultEvent : null;
-  const [submitting, setSubmitting] = useState(false);
-  const [picked, setPicked] = useState<Record<number, Set<string>>>({});
-  const [notes, setNotes] = useState<Record<number, string>>({});
-  const [notesOpen, setNotesOpen] = useState<Record<number, boolean>>({});
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  const total = questions.length;
-  const safeIndex = Math.min(activeIndex, Math.max(0, total - 1));
-  const currentEntry = questions[safeIndex];
-  const paginated = total > 1;
-
-  function toggleOption(questionIndex: number, label: string, multiSelect: boolean) {
-    setPicked((current) => {
-      const next = { ...current };
-      const existing = next[questionIndex] ?? new Set<string>();
-      const updated = new Set(existing);
-      if (multiSelect) {
-        if (updated.has(label)) updated.delete(label);
-        else updated.add(label);
-      } else {
-        if (updated.has(label) && updated.size === 1) updated.clear();
-        else {
-          updated.clear();
-          updated.add(label);
-        }
-      }
-      next[questionIndex] = updated;
-      return next;
-    });
-  }
-
-  function toggleNote(questionIndex: number) {
-    setNotesOpen((current) => ({
-      ...current,
-      [questionIndex]: !current[questionIndex],
-    }));
-  }
-
-  async function submit() {
-    if (!onAnswer || resolution.state !== "pending" || submitting) return;
-    // Match the Claude binary's mapToolResultToToolResultBlockParam shape so
-    // the model parses the answer the same way native Claude Code does:
-    // `"<question>"="<answer>" user notes: <notes>`, joined by `, ` across
-    // questions. Questions with neither an answer nor notes are skipped.
-    const segments: string[] = [];
-    const structured: AskAnswerEntry[] = [];
-    questions.forEach((entry, index) => {
-      const selections = picked[index];
-      const note = (notes[index] ?? "").trim();
-      const hasSelections = Boolean(selections && selections.size > 0);
-      if (!hasSelections && !note) return;
-      const parts: string[] = [];
-      let answerValue: string | null = null;
-      if (hasSelections) {
-        answerValue = Array.from(selections!).join(", ");
-        parts.push(`"${entry.question}"="${answerValue}"`);
-      } else {
-        parts.push(`"${entry.question}"=(no option selected)`);
-      }
-      if (note) {
-        parts.push(`user notes: ${note}`);
-      }
-      segments.push(parts.join(" "));
-      structured.push({
-        question: entry.question,
-        answer: answerValue,
-        notes: note || undefined,
-      });
-    });
-    if (!segments.length) return;
-    setSubmitting(true);
-    const toolUseId =
-      typeof event.metadata?.tool_use_id === "string"
-        ? (event.metadata.tool_use_id as string)
-        : undefined;
-    try {
-      await onAnswer(segments.join(", "), toolUseId, structured);
-      setPicked({});
-      setNotes({});
-      setNotesOpen({});
-      setActiveIndex(0);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const totalPicked = Object.values(picked).reduce(
-    (acc, set) => acc + set.size,
-    0,
-  );
-  const totalNotes = Object.values(notes).filter((value) => value.trim()).length;
-  const interactive = Boolean(onAnswer) && resolution.state === "pending";
-  const canSubmit = interactive && !submitting && (totalPicked > 0 || totalNotes > 0);
-
-  function handleNoteKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!isModifiedEnterShortcut(event)) {
-      return;
-    }
-    event.preventDefault();
-    if (!canSubmit) {
-      return;
-    }
-    void submit();
-  }
+  const notAnswered = resolution.state === "closed_unanswered" || formState === "gone";
 
   return (
-    <article className="panel transcript codex tool_call ask-user-question">
+    <article
+      className="panel transcript codex tool_call ask-user-question"
+      data-ask-tool-use-id={toolUseId ?? undefined}
+    >
       <div className="transcript-role">
         <span className="tool-glyph task" aria-hidden>?</span>
         <span className="tool-name">Ask you</span>
-        {answered ? (
+        {resolution.state === "answered" ? (
           <span className="badge tool-status complete">answered</span>
-        ) : closedUnanswered ? (
+        ) : resolution.state === "cancelled" ? (
+          <span className="badge tool-status cancelled">cancelled</span>
+        ) : notAnswered ? (
           <span className="badge tool-status unanswered">not answered</span>
         ) : (
           <span className="badge tool-status pending">awaiting answer</span>
         )}
         <span className="role-time">{formatTime(event.ts)}</span>
       </div>
-      {currentEntry ? (() => {
-        const index = safeIndex;
-        const entry = currentEntry;
-        const selections = picked[index] ?? new Set<string>();
-        const filledForQuestion = (i: number) =>
-          (picked[i] && picked[i].size > 0) || Boolean((notes[i] ?? "").trim());
-        return (
-          <div className="ask-question" key={index}>
-            {paginated ? (
-              <div className="ask-question-pager">
-                <span className="muted">
-                  Question {index + 1} of {total}
-                  {filledForQuestion(index) ? " · answered" : ""}
-                </span>
-                <div className="ask-question-pager-dots" aria-hidden>
-                  {questions.map((_, dotIndex) => (
-                    <span
-                      key={dotIndex}
-                      className={`ask-question-pager-dot${
-                        dotIndex === index ? " current" : ""
-                      }${filledForQuestion(dotIndex) ? " filled" : ""}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <div className="ask-question-head">
-              {entry.header ? (
-                <span className="badge neutral ask-question-chip">
-                  {entry.header}
-                </span>
-              ) : null}
-              <p className="ask-question-text">{entry.question}</p>
-              {entry.multiSelect ? (
-                <span className="meta">multi-select</span>
-              ) : null}
-            </div>
-            <AskQuestionOptions
-              options={entry.options}
-              selected={selections}
-              onToggle={(label) =>
-                toggleOption(index, label, entry.multiSelect ?? false)
-              }
-              disabled={!interactive}
-            />
-            {interactive ? (
-              notesOpen[index] ? (
-                <div className="ask-question-note">
-                  <textarea
-                    className="ask-question-note-input"
-                    value={notes[index] ?? ""}
-                    onChange={(e) =>
-                      setNotes((current) => ({
-                        ...current,
-                        [index]: e.target.value,
-                      }))
-                    }
-                    onKeyDown={handleNoteKeyDown}
-                    placeholder="Type your own answer or add a note here…"
-                    rows={2}
-                    disabled={submitting}
-                    aria-keyshortcuts="Meta+Enter Control+Enter"
-                  />
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => toggleNote(index)}
-                    disabled={submitting}
-                  >
-                    Hide note
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="link-button ask-question-note-toggle"
-                  onClick={() => toggleNote(index)}
-                  disabled={submitting}
-                >
-                  + Other / Custom response
-                </button>
-              )
-            ) : null}
-            {paginated && interactive ? (
-              <div className="ask-question-nav">
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={submitting || index === 0}
-                  onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
-                >
-                  ← Previous
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={submitting || index === total - 1}
-                  onClick={() => setActiveIndex((i) => Math.min(total - 1, i + 1))}
-                >
-                  Next →
-                </button>
-              </div>
-            ) : null}
-          </div>
-        );
-      })() : null}
-      {interactive ? (
-        <div className="action-row">
-          <button
-            type="button"
-            className="primary"
-            disabled={!canSubmit}
-            onClick={() => void submit()}
-          >
-            {submitting ? "Sending…" : "Send answers"}
-          </button>
-          {totalPicked + totalNotes > 0 ? (
-            <button
-              type="button"
-              className="secondary"
-              disabled={submitting}
-              onClick={() => {
-                setPicked({});
-                setNotes({});
-              }}
-            >
-              Clear
-            </button>
-          ) : null}
+      <AskQuestionForm
+        event={event}
+        questions={questions}
+        resolution={resolution}
+        onAnswer={onAnswer}
+      />
+      {resolution.state === "cancelled" ? (
+        <div className="ask-question-closed">
+          <p className="ask-question-closed-note">You cancelled this question.</p>
         </div>
-      ) : null}
-      {closedUnanswered ? (
+      ) : notAnswered ? (
         <div className="ask-question-closed">
           <p className="ask-question-closed-note">
             This question ended without a recorded answer and can no longer be

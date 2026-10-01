@@ -20,6 +20,7 @@ import {
 
 import {
   answerAskQuestion,
+  cancelAskQuestion,
   approvePlan,
   approveSession,
   cancelHeldMessages,
@@ -124,10 +125,18 @@ import {
   ToolCallRunGroup,
   TaskNotificationRunGroup,
   readToolName,
-  type AskAnswerEntry,
-  type AskQuestionResolution,
   type ToolPair,
 } from "@/components/TranscriptCard";
+import {
+  AskQuestionContext,
+  EMPTY_ASK_DRAFT,
+  type AskAnswerEntry,
+  type AskDraft,
+  type AskOperation,
+  type AskQuestionController,
+  type AskQuestionResolution,
+} from "@/components/AskQuestion";
+import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
@@ -145,6 +154,8 @@ import {
   BackendPermissionMode,
   EventRecord,
   HeldMessage,
+  PendingQuestion,
+  PendingQuestionsSnapshot,
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
@@ -471,6 +482,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
   const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
+  // Null until the backend sends a pending-question snapshot (older backends
+  // never do).
+  const [pendingQuestions, setPendingQuestions] =
+    useState<PendingQuestionsSnapshot | null>(null);
+  const [askDrafts, setAskDrafts] = useState<Record<string, AskDraft>>({});
+  const [askOperations, setAskOperations] = useState<Record<string, AskOperation>>({});
+  const askOperationsRef = useRef<Set<string>>(new Set());
+  const [revealTarget, setRevealTarget] = useState<{
+    toolUseId: string;
+    pagesLeft: number;
+  } | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
@@ -830,6 +852,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     return () => setCurrentSession(null);
   }, [session, setCurrentSession]);
 
+  // Snapshots order by (as_of_sequence, revision). A socket's first frame
+  // replaces the list outright: the server's revision counter restarts with
+  // the backend, so a reconnect must not be compared against the old one.
+  const applyPendingQuestions = useCallback(
+    (next: PendingQuestionsSnapshot, replace: boolean) => {
+      setPendingQuestions((current) => {
+        if (replace || current === null) return next;
+        if (next.as_of_sequence !== current.as_of_sequence) {
+          return next.as_of_sequence > current.as_of_sequence ? next : current;
+        }
+        return next.revision >= current.revision ? next : current;
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     let active = true;
     async function load() {
@@ -853,6 +891,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setLoadedTodoEvent(
           loadedPage.latest_todo ? sanitizeEvent(loadedPage.latest_todo) : null,
         );
+        if (loadedPage.pending_questions) {
+          applyPendingQuestions(loadedPage.pending_questions, false);
+        }
       } catch (loadError) {
         if (active) {
           if (isAuthError(loadError)) {
@@ -870,6 +911,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     let attempt = 0;
 
     function connect() {
+      let questionsHydrated = false;
       setConnection(attempt === 0 ? "connecting" : "reconnecting");
       socket = connectSessionSocket(
         host,
@@ -946,6 +988,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               });
             }
           }
+          if (message.type === "pending_questions") {
+            applyPendingQuestions(
+              message.payload as unknown as PendingQuestionsSnapshot,
+              !questionsHydrated,
+            );
+            questionsHydrated = true;
+          }
           if (message.type === "held_messages") {
             const payload = message.payload as {
               session_id?: string;
@@ -996,7 +1045,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       pendingEventsRef.current = [];
       socket?.close();
     };
-  }, [handleAuthFailure, host, token, sessionId, queueIncomingEvent]);
+  }, [
+    applyPendingQuestions,
+    handleAuthFailure,
+    host,
+    token,
+    sessionId,
+    queueIncomingEvent,
+  ]);
 
   useEffect(() => {
     if (!session) return;
@@ -1479,9 +1535,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         : visibleEvents,
     [pendingPlanApprovalEvent, visibleEvents],
   );
+  const askEvidence = useMemo(
+    () => indexAskQuestionEvidence(displayEvents),
+    [displayEvents],
+  );
   const transcriptItems = useMemo(
-    () => buildTranscriptItems(transcriptEventsForDisplay),
-    [transcriptEventsForDisplay],
+    () => buildTranscriptItems(transcriptEventsForDisplay, askEvidence),
+    [transcriptEventsForDisplay, askEvidence],
   );
   const hasToolRuns = useMemo(
     () =>
@@ -1527,6 +1587,143 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     session && supportsReattachAfterExit(session.backend, catalog),
   );
   const dormantReattach = sessionExited && canReattachAfterExit;
+
+  const runAskOperation = useCallback(
+    async (
+      toolUseId: string,
+      operation: AskOperation,
+      perform: () => Promise<boolean>,
+    ): Promise<boolean> => {
+      if (askOperationsRef.current.has(toolUseId)) return false;
+      askOperationsRef.current.add(toolUseId);
+      setAskOperations((current) => ({ ...current, [toolUseId]: operation }));
+      try {
+        const ok = await perform();
+        if (ok) {
+          setAskDrafts((current) => {
+            const next = { ...current };
+            delete next[toolUseId];
+            return next;
+          });
+        }
+        return ok;
+      } finally {
+        askOperationsRef.current.delete(toolUseId);
+        setAskOperations((current) => {
+          const next = { ...current };
+          delete next[toolUseId];
+          return next;
+        });
+      }
+    },
+    [],
+  );
+
+  const cancelAsk = useCallback(
+    async (toolUseId: string) => {
+      try {
+        await cancelAskQuestion(host, token, sessionId, toolUseId);
+        return true;
+      } catch (cancelError) {
+        if (isAuthError(cancelError)) {
+          handleAuthFailure();
+          return false;
+        }
+        setError(
+          cancelError instanceof Error
+            ? cancelError.message
+            : "failed to cancel question",
+        );
+        return false;
+      }
+    },
+    [handleAuthFailure, host, token, sessionId],
+  );
+
+  const askController = useMemo<AskQuestionController>(
+    () => ({
+      snapshot: pendingQuestions,
+      draft: (toolUseId) => askDrafts[toolUseId] ?? EMPTY_ASK_DRAFT,
+      updateDraft: (toolUseId, update) =>
+        setAskDrafts((current) => ({
+          ...current,
+          [toolUseId]: update(current[toolUseId] ?? EMPTY_ASK_DRAFT),
+        })),
+      operation: (toolUseId) => askOperations[toolUseId] ?? null,
+      answer: (toolUseId, text, answers) =>
+        runAskOperation(toolUseId, "send", async () =>
+          Boolean(await submitAskAnswer(text, toolUseId, answers)),
+        ),
+      cancel: (toolUseId) =>
+        runAskOperation(toolUseId, "cancel", () => cancelAsk(toolUseId)),
+      resolution: (toolUseId) => resolveAskQuestionEvidence(toolUseId, askEvidence),
+      canReattach: dormantReattach,
+      reattach: () => void reattach(),
+    }),
+    [
+      askDrafts,
+      askEvidence,
+      askOperations,
+      cancelAsk,
+      dormantReattach,
+      pendingQuestions,
+      reattach,
+      runAskOperation,
+      submitAskAnswer,
+    ],
+  );
+
+  const revealQuestion = useCallback((question: PendingQuestion) => {
+    setView("chat");
+    setRevealTarget({ toolUseId: question.tool_use_id, pagesLeft: 50 });
+  }, []);
+
+  // Show in transcript: page older messages until the question's card is
+  // loaded, then wait for it to render and scroll it into view.
+  useEffect(() => {
+    if (!revealTarget) return;
+    const { toolUseId } = revealTarget;
+    const loaded = events.some(
+      (event) => event.kind === "tool_call" && event.metadata?.tool_use_id === toolUseId,
+    );
+    if (!loaded) {
+      if (loadingOlder) return;
+      if (!hasOlderEvents || revealTarget.pagesLeft <= 0) {
+        setRevealTarget(null);
+        return;
+      }
+      setRevealTarget({ toolUseId, pagesLeft: revealTarget.pagesLeft - 1 });
+      void loadOlderEvents();
+      return;
+    }
+    let frame = 0;
+    let attempts = 0;
+    const tryScroll = () => {
+      const card = document.querySelector<HTMLElement>(
+        `[data-ask-tool-use-id="${CSS.escape(toolUseId)}"]`,
+      );
+      if (card) {
+        card.scrollIntoView({ block: "center", behavior: "smooth" });
+        card.classList.remove("ask-question-flash");
+        void card.offsetWidth;
+        card.classList.add("ask-question-flash");
+        window.setTimeout(() => card.classList.remove("ask-question-flash"), 2000);
+        setRevealTarget(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) {
+        setRevealTarget(null);
+        return;
+      }
+      frame = window.requestAnimationFrame(tryScroll);
+    };
+    // Two frames: let loadOlderEvents re-anchor its scroll first.
+    frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(tryScroll);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [revealTarget, events, hasOlderEvents, loadingOlder, loadOlderEvents]);
   const composerDisabled =
     !session || (sessionExited && !canReattachAfterExit);
   const composerPlaceholder = !session
@@ -2128,6 +2325,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           </button>
         </div>
       ) : null}
+      {pendingQuestions && pendingQuestions.questions.length > 0 ? (
+        <PendingQuestionDock
+          questions={pendingQuestions.questions}
+          onReveal={revealQuestion}
+        />
+      ) : null}
       {sideQuestions.size > 0 ? (
         <SideQuestionDock
           questions={[...sideQuestions.values()]}
@@ -2186,6 +2389,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
 
   return (
+    <AskQuestionContext.Provider value={askController}>
     <WorkspaceFileLinkProvider value={workspaceLink}>
     <SessionFilesLinkProvider value={filesLink}>
     <section className="stack" ref={sectionRef}>
@@ -2666,6 +2870,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     </section>
     </SessionFilesLinkProvider>
     </WorkspaceFileLinkProvider>
+    </AskQuestionContext.Provider>
   );
 }
 
@@ -4493,49 +4698,89 @@ type TranscriptItem =
   | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
   | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
-// Positive proof that Waypoint accepted a human answer to an AskUserQuestion:
-// a user_input event tagged ask_user_question_answer carrying the resolved
-// tool_use_id. The latest by sequence wins.
-function indexAskQuestionAnswerEvents(
-  events: EventRecord[],
-): Map<string, EventRecord> {
-  const index = new Map<string, EventRecord>();
+// Durable evidence that resolved an AskUserQuestion, keyed by tool_use_id:
+// an accepted answer (user_input ask_user_question_answer), an explicit
+// cancellation note, or a provider ending (tool_result or closure note).
+// Indexed over every loaded event before transcript filtering so hiding a
+// system note never reopens its card.
+interface AskQuestionEvidence {
+  answers: Map<string, EventRecord>;
+  cancels: Map<string, EventRecord>;
+  endings: Map<string, EventRecord>;
+}
+
+function indexAskQuestionEvidence(events: EventRecord[]): AskQuestionEvidence {
+  const evidence: AskQuestionEvidence = {
+    answers: new Map(),
+    cancels: new Map(),
+    endings: new Map(),
+  };
+  const keep = (index: Map<string, EventRecord>, id: string, event: EventRecord) => {
+    const existing = index.get(id);
+    if (!existing || event.sequence < existing.sequence) index.set(id, event);
+  };
   for (const event of events) {
-    if (event.kind !== "user_input") continue;
     const metadata = event.metadata ?? {};
-    if (metadata.kind !== "ask_user_question_answer") continue;
     const toolUseId =
       typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
     if (!toolUseId) continue;
-    const existing = index.get(toolUseId);
-    if (!existing || event.sequence >= existing.sequence) {
-      index.set(toolUseId, event);
+    if (event.kind === "user_input" && metadata.kind === "ask_user_question_answer") {
+      keep(evidence.answers, toolUseId, event);
+    } else if (event.kind === "system_note") {
+      if (metadata.kind === "ask_user_question_cancelled") {
+        keep(evidence.cancels, toolUseId, event);
+      } else if (metadata.kind === "ask_user_question_closed") {
+        keep(evidence.endings, toolUseId, event);
+      }
+    } else if (event.kind === "tool_result") {
+      keep(evidence.endings, toolUseId, event);
     }
   }
-  return index;
+  return evidence;
 }
 
-// Resolve one question pair against the answer-evidence index: a correlated
-// answer wins; otherwise a paired result means the question closed without an
-// answer; otherwise it is still pending.
-function resolveAskQuestion(
-  pair: ToolPair,
-  answerIndex: Map<string, EventRecord>,
+// A correlated answer wins, then an explicit cancellation, then a provider
+// ending; otherwise the question is still pending. Both an answer and a cancel
+// for one request should be impossible; if history has both, the earlier
+// decision stands.
+function resolveAskQuestionEvidence(
+  toolUseId: string,
+  evidence: AskQuestionEvidence,
 ): AskQuestionResolution {
-  const answerEvent = answerIndex.get(pair.itemId);
-  if (answerEvent) {
-    return { state: "answered", answerEvent };
+  const answerEvent = evidence.answers.get(toolUseId);
+  const cancelEvent = evidence.cancels.get(toolUseId);
+  if (answerEvent && cancelEvent) {
+    console.warn(
+      `AskUserQuestion ${toolUseId} has both an answer and a cancellation; using the earlier`,
+    );
+    return answerEvent.sequence <= cancelEvent.sequence
+      ? { state: "answered", answerEvent }
+      : { state: "cancelled", cancelEvent };
   }
-  if (pair.result) {
-    return { state: "closed_unanswered", resultEvent: pair.result };
-  }
+  if (answerEvent) return { state: "answered", answerEvent };
+  if (cancelEvent) return { state: "cancelled", cancelEvent };
+  const resultEvent = evidence.endings.get(toolUseId);
+  if (resultEvent) return { state: "closed_unanswered", resultEvent };
   return { state: "pending" };
 }
 
-function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
+function resolveAskQuestion(
+  pair: ToolPair,
+  evidence: AskQuestionEvidence,
+): AskQuestionResolution {
+  const resolution = resolveAskQuestionEvidence(pair.itemId, evidence);
+  if (resolution.state === "pending" && pair.result) {
+    return { state: "closed_unanswered", resultEvent: pair.result };
+  }
+  return resolution;
+}
+
+function buildTranscriptItems(
+  events: EventRecord[],
+  askEvidence: AskQuestionEvidence,
+): TranscriptItem[] {
   const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
   const pairIndex = new Map<string, number>();
-  const answerIndex = indexAskQuestionAnswerEvents(events);
   for (const event of events) {
     if (event.kind !== "tool_call" && event.kind !== "tool_result") {
       result.push({ kind: "single", event });
@@ -4579,7 +4824,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   for (const item of result) {
     if (item.kind !== "pair" || !item.pair.call) continue;
     if (readToolName(item.pair.call) !== "AskUserQuestion") continue;
-    item.pair.askResolution = resolveAskQuestion(item.pair, answerIndex);
+    item.pair.askResolution = resolveAskQuestion(item.pair, askEvidence);
   }
 
   // Classify each item so the grouping loop is easy to reason about.

@@ -25,9 +25,8 @@ interface SummaryChip {
 // vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
 // The account profile rides the account hue (session identity, not tuning), and
 // resolves to its label from the current catalogue — an id no longer offered
-// falls back to the raw id marked unavailable. A usage-provider source resolves
-// the same way against the current provider options. Used only in the save
-// sheet's captures readout.
+// falls back to the raw id marked unavailable. Used only in the save sheet's
+// captures readout.
 function SpecSummary({
   spec,
   profiles,

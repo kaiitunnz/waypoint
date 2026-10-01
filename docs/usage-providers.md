@@ -91,19 +91,19 @@ Choose it under **Advanced → Usage limit source** in the launch sheet (New and
 Schedule) and in the session settings modal: a provider with one account is a
 single option (`Lumid — user@example.com`), one with several reveals an account
 picker. The CLI takes `--usage-limit-source`, `--usage-provider`, and
-`--usage-provider-account` on `sessions start` and `schedule create`; the API
+`--usage-provider-account` on `sessions start`, `schedule create`, and
+`presets create`/`update`; the API
 takes the same fields on create/schedule plus a dedicated non-restart
 `PATCH /api/sessions/{id}/usage-limit-source`, and `GET /api/usage-provider-options`
 (and launch bootstrap) list the current choices. Only opaque account keys and
 server-derived labels cross the wire.
 
-Sessions derived from another session carry its source: `/new`, fork, a
-side-question fork, and clearing the assistant's context on the same backend and
-account profile copy it. A spawned child that sets no source inherits its
-spawner's when it runs on the same backend, launch target, and account profile;
-an unavailable spawner selection leaves the child on the plugin source. A preset
-carries a provider selection (`presets create`/`update` take the same three
-flags); a preset's `plugin` source defers to that inheritance.
+`/new`, fork, side-question fork, and clearing the assistant's context copy the
+source session's selection, and fail with the reason when it is unavailable. A
+spawned child that sets no source inherits its spawner's when both run on the
+same backend, launch target, and account profile, and uses the plugin source
+when the spawner's selection is unavailable. A preset carries only a provider
+selection.
 
 Changing the source in settings never restarts or interrupts the agent.
 Switching to a provider projects that account's cached snapshot immediately;
@@ -113,10 +113,8 @@ only through its provider, coalesced onto one upstream request.
 A removed or unrefreshable provider/account retains its last-good projection
 marked stale/unavailable rather than falling back to plugin data, and a
 scheduled run with a now-unavailable selection fails instead of launching under
-an unintended source. Likewise, `/new`, a fork, or a context clear of a session whose
-selection is unavailable fails with the reason; change the source session's setting first.
-The projection reuses the provider's own dashboard card and telemetry facts, so
-it is never counted twice.
+an unintended source. The projection reuses the provider's own dashboard card
+and telemetry facts, so it is never counted twice.
 
 ## Security
 

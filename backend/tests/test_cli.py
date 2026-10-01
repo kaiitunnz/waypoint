@@ -3518,6 +3518,118 @@ def test_presets_create_account_profile_in_spec(
     assert body["spec"]["account_profile_id"] == "work"
 
 
+def _capture_preset_writes(
+    monkeypatch: pytest.MonkeyPatch, state: dict[str, object]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/session-presets") and request.method in {
+            "POST",
+            "PATCH",
+        }:
+            body = json.loads(request.content)
+            state["preset_body"] = body
+            return httpx.Response(200, json={"preset": {"id": "p1", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+
+
+def test_presets_create_usage_provider_in_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+    _capture_preset_writes(monkeypatch, state)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "presets",
+            "create",
+            "--name",
+            "lumid-preset",
+            "--usage-limit-source",
+            "usage_provider",
+            "--usage-provider",
+            "lumid",
+            "--usage-provider-account",
+            "hmac:v1:abc",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["preset_body"]
+    assert isinstance(body, dict)
+    assert body["spec"]["usage_limit_source"] == "usage_provider"
+    assert body["spec"]["usage_provider_id"] == "lumid"
+    assert body["spec"]["usage_provider_account_key"] == "hmac:v1:abc"
+
+
+def test_presets_update_plugin_source_clears_provider_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+    _capture_preset_writes(monkeypatch, state)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "presets",
+            "update",
+            "p1",
+            "--usage-limit-source",
+            "plugin",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["preset_body"]
+    assert isinstance(body, dict)
+    assert body["spec"] == {
+        "usage_limit_source": "plugin",
+        "usage_provider_id": None,
+        "usage_provider_account_key": None,
+    }
+
+
+def test_presets_update_without_usage_flags_omits_usage_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+    _capture_preset_writes(monkeypatch, state)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "presets", "update", "p1", "--model", "m"],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["preset_body"]
+    assert isinstance(body, dict)
+    assert body["spec"] == {"model": "m"}
+
+
+def test_presets_create_rejects_incomplete_usage_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+    _capture_preset_writes(monkeypatch, state)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "presets",
+            "create",
+            "--name",
+            "broken",
+            "--usage-limit-source",
+            "usage_provider",
+            "--usage-provider",
+            "lumid",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "preset_body" not in state
+
+
 def test_sessions_import_account_profile_in_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

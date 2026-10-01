@@ -50,6 +50,8 @@ waypoint presets create --name worker-codex-high \
   --backend codex --model <model> --effort high \
   --permission-mode <auto-approving-mode> \
   --launch-env KEY=VAL --config-override X --tag role=worker [--default] [ARGS...]
+# also: --account-profile <id>; --usage-limit-source plugin|usage_provider
+#       (usage_provider needs --usage-provider and --usage-provider-account)
 waypoint presets update <id-or-name> [same launch options]   # PATCH: only passed fields change
 waypoint presets delete <id-or-name>           # existing sessions/schedules are unaffected
 waypoint presets default [<id-or-name>]        # set the default, or print it with no arg

@@ -2,7 +2,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
@@ -262,6 +262,28 @@ class UsageWindow(BaseModel):
 
 
 UsageLimitSource = Literal["plugin", "usage_provider"]
+USAGE_SELECTION_FIELDS = (
+    "usage_limit_source",
+    "usage_provider_id",
+    "usage_provider_account_key",
+)
+
+
+class UsageSelection(NamedTuple):
+    source: UsageLimitSource
+    provider_id: str | None
+    account_key: str | None
+
+    @classmethod
+    def of(cls, obj: "SessionRecord | SessionCreateRequest") -> Self:
+        return cls(
+            obj.usage_limit_source,
+            obj.usage_provider_id,
+            obj.usage_provider_account_key,
+        )
+
+
+PLUGIN_USAGE_SELECTION = UsageSelection("plugin", None, None)
 
 
 class SessionRateLimitUsage(BaseModel):

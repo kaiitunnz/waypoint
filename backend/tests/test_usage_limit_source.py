@@ -107,22 +107,28 @@ def _make_runtime(
     return runtime, storage
 
 
-def _session(storage: Storage, session_id: str = "sess", **overrides) -> SessionRecord:
+def _record(session_id: str = "src", **overrides: Any) -> SessionRecord:
     now = datetime.now(UTC)
-    record = SessionRecord(
+    base: dict[str, Any] = dict(
         id=session_id,
         backend="codex",
         source=SessionSource.MANAGED,
         title="Session",
         cwd="/tmp",
-        status=SessionStatus.RUNNING,
+        status=SessionStatus.IDLE,
         created_at=now,
         updated_at=now,
         last_event_at=now,
         raw_log_path=f"/tmp/{session_id}.raw",
         structured_log_path=f"/tmp/{session_id}.json",
-        **overrides,
+        transport_state={"thread_id": f"thread-{session_id}"},
     )
+    base.update(overrides)
+    return SessionRecord(**base)
+
+
+def _session(storage: Storage, session_id: str = "sess", **overrides) -> SessionRecord:
+    record = _record(session_id, **overrides)
     storage.create_session(record)
     return record
 
@@ -293,50 +299,53 @@ _STALE_FIELDS: dict[str, Any] = {
 }
 
 
-def _record(tmp_path: Path, session_id: str = "src", **overrides: Any) -> SessionRecord:
-    now = datetime.now(UTC)
-    base: dict[str, Any] = dict(
-        id=session_id,
-        backend="codex",
-        source=SessionSource.MANAGED,
-        transport="codex_app_server",
-        title="Source",
-        cwd=str(tmp_path),
-        status=SessionStatus.IDLE,
-        created_at=now,
-        updated_at=now,
-        last_event_at=now,
-        raw_log_path=str(tmp_path / f"{session_id}.raw"),
-        structured_log_path=str(tmp_path / f"{session_id}.jsonl"),
-        transport_state={"thread_id": "thread-src"},
-    )
-    base.update(overrides)
-    return SessionRecord(**base)
+class _CodexAdapter:
+    """Minimal codex adapter double so create_session runs the real pipeline."""
+
+    async def start_session(self, *args: Any, **kwargs: Any) -> str:
+        return "thread-child"
+
+    async def register_rate_limit_probe(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def force_refresh_rate_limit_usage(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def _derive_runtime(
+    tmp_path: Path, source_id: str, source_fields: dict[str, Any]
+) -> tuple[SessionRuntime, Storage]:
+    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
+    _session(storage, source_id, **source_fields)
+    runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
+    return runtime, storage
+
+
+def _assert_provider_source(session: SessionRecord) -> None:
+    assert session.usage_limit_source == "usage_provider"
+    assert session.usage_provider_id == "lumid"
+    assert session.usage_provider_account_key == _ACCOUNT_KEY
+    assert session.rate_limit_usage is not None
+    assert session.rate_limit_usage.origin == "usage_provider"
+
+
+# ── fork ─────────────────────────────────────────────────────────────────────
 
 
 class _ForkPlugin:
     """Plugin double whose forks build a fresh plugin-source record, as the real
     plugins do."""
 
-    def __init__(self, tmp_path: Path) -> None:
-        self.tmp_path = tmp_path
-        self.capabilities = SimpleNamespace(supports_fork=True)
+    capabilities = SimpleNamespace(supports_fork=True)
+
+    def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def _child(self, runtime: SessionRuntime, new_session_id: str) -> SessionRecord:
-        child = _record(self.tmp_path, new_session_id)
-        runtime.storage.create_session(child)
-        return child
-
     async def fork_session(
-        self,
-        runtime: SessionRuntime,
-        session: SessionRecord,
-        new_session_id: str,
-        *_: Any,
+        self, runtime: SessionRuntime, session: SessionRecord, new_id: str, *_: Any
     ) -> SessionRecord:
         self.calls.append("fork")
-        return self._child(runtime, new_session_id)
+        return _session(runtime.storage, new_id)
 
     async def fork_side_question(
         self,
@@ -348,35 +357,34 @@ class _ForkPlugin:
         **_: Any,
     ) -> SessionRecord:
         self.calls.append("side_question")
-        return self._child(runtime, new_session_id)
+        return _session(runtime.storage, new_session_id)
+
+
+async def _fork(runtime: SessionRuntime, kind: str) -> SessionRecord:
+    if kind == "fork":
+        return await runtime.fork_session("src")
+    return await runtime.fork_side_question("src", "sq1")
 
 
 def _fork_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_fields: dict[str, Any]
 ) -> tuple[SessionRuntime, Storage, _ForkPlugin]:
-    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    storage.create_session(_record(tmp_path, **source_fields))
-    plugin = _ForkPlugin(tmp_path)
+    runtime, storage = _derive_runtime(tmp_path, "src", source_fields)
+    plugin = _ForkPlugin()
     monkeypatch.setattr(runtime.registry, "plugin_for", lambda _session: plugin)
     monkeypatch.setattr(runtime, "_warm_command_completions", lambda *_a, **_k: None)
     return runtime, storage, plugin
 
 
-# ── fork ─────────────────────────────────────────────────────────────────────
-
-
-async def test_fork_inherits_provider_source_and_projects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", ["fork", "side_question"])
+async def test_fork_inherits_provider_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     runtime, _, plugin = _fork_runtime(tmp_path, monkeypatch, _PROVIDER_FIELDS)
-    child = await runtime.fork_session("src")
-    assert plugin.calls == ["fork"]
+    child = await _fork(runtime, kind)
+    assert plugin.calls == [kind]
     assert child.id != "src"
-    assert child.usage_limit_source == "usage_provider"
-    assert child.usage_provider_id == "lumid"
-    assert child.usage_provider_account_key == _ACCOUNT_KEY
-    assert child.rate_limit_usage is not None
-    assert child.rate_limit_usage.origin == "usage_provider"
+    _assert_provider_source(child)
 
 
 async def test_fork_keeps_plugin_source(
@@ -388,123 +396,41 @@ async def test_fork_keeps_plugin_source(
     assert child.usage_provider_id is None
 
 
+@pytest.mark.parametrize("kind", ["fork", "side_question"])
 async def test_fork_with_stale_source_fails_before_spawning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     runtime, storage, plugin = _fork_runtime(tmp_path, monkeypatch, _STALE_FIELDS)
     with pytest.raises(HTTPException) as exc_info:
-        await runtime.fork_session("src")
+        await _fork(runtime, kind)
     assert exc_info.value.status_code == 409
     assert "cannot fork session src" in str(exc_info.value.detail)
     assert plugin.calls == []
     assert [s.id for s in storage.list_sessions()] == ["src"]
 
 
-async def test_side_question_fork_inherits_provider_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, _, plugin = _fork_runtime(tmp_path, monkeypatch, _PROVIDER_FIELDS)
-    child = await runtime.fork_side_question("src", "sq1")
-    assert plugin.calls == ["side_question"]
-    assert child.usage_limit_source == "usage_provider"
-    assert child.usage_provider_account_key == _ACCOUNT_KEY
-
-
-async def test_side_question_fork_with_stale_source_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, _, plugin = _fork_runtime(tmp_path, monkeypatch, _STALE_FIELDS)
-    with pytest.raises(HTTPException) as exc_info:
-        await runtime.fork_side_question("src", "sq1")
-    assert exc_info.value.status_code == 409
-    assert plugin.calls == []
-
-
 # ── /new (clone) ─────────────────────────────────────────────────────────────
 
 
-async def test_clone_request_carries_provider_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    storage.create_session(_record(tmp_path, **_PROVIDER_FIELDS))
-    captured: dict[str, SessionCreateRequest] = {}
-
-    async def fake_create_session(
-        request: SessionCreateRequest, **_: Any
-    ) -> SessionRecord:
-        captured["request"] = request
-        return _record(tmp_path, "child")
-
-    monkeypatch.setattr(runtime, "create_session", fake_create_session)
-    await runtime.clone_session_launch("src")
-    request = captured["request"]
-    assert request.usage_limit_source == "usage_provider"
-    assert request.usage_provider_id == "lumid"
-    assert request.usage_provider_account_key == _ACCOUNT_KEY
+async def test_clone_inherits_provider_source(tmp_path: Path) -> None:
+    runtime, _ = _derive_runtime(tmp_path, "src", _PROVIDER_FIELDS)
+    child = await runtime.clone_session_launch("src")
+    assert child.id != "src"
+    _assert_provider_source(runtime.get_session(child.id))
 
 
 async def test_clone_with_stale_source_fails_without_launching(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    storage.create_session(_record(tmp_path, **_STALE_FIELDS))
-    calls: list[SessionCreateRequest] = []
-
-    async def fake_create_session(
-        request: SessionCreateRequest, **_: Any
-    ) -> SessionRecord:
-        calls.append(request)
-        return _record(tmp_path, "child")
-
-    monkeypatch.setattr(runtime, "create_session", fake_create_session)
+    runtime, storage = _derive_runtime(tmp_path, "src", _STALE_FIELDS)
     with pytest.raises(HTTPException) as exc_info:
         await runtime.clone_session_launch("src")
     assert exc_info.value.status_code == 409
     assert "start a new session from session src" in str(exc_info.value.detail)
-    assert calls == []
+    assert [s.id for s in storage.list_sessions()] == ["src"]
 
 
 # ── spawned children ─────────────────────────────────────────────────────────
-
-
-def _spawn_runtime(
-    tmp_path: Path, spawner_fields: dict[str, Any]
-) -> tuple[SessionRuntime, Storage]:
-    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    storage.create_session(_record(tmp_path, "parent", **spawner_fields))
-    return runtime, storage
-
-
-async def test_child_inherits_same_backend_spawner_source(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    request = SessionCreateRequest(
-        backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-    )
-    assert runtime._effective_usage_selection(request) == (
-        "usage_provider",
-        "lumid",
-        _ACCOUNT_KEY,
-    )
-
-
-async def test_explicit_plugin_source_overrides_spawner(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    request = SessionCreateRequest(
-        backend="codex",
-        cwd=str(tmp_path),
-        spawner_session_id="parent",
-        usage_limit_source="plugin",
-    )
-    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
-
-
-async def test_cross_backend_child_keeps_plugin_source(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    request = SessionCreateRequest(
-        backend="claude_code", cwd=str(tmp_path), spawner_session_id="parent"
-    )
-    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
 
 
 def _seed_preset(storage: Storage, preset_id: str, **spec: Any) -> None:
@@ -520,14 +446,57 @@ def _seed_preset(storage: Storage, preset_id: str, **spec: Any) -> None:
     )
 
 
+def _child_request(**fields: Any) -> SessionCreateRequest:
+    return SessionCreateRequest(
+        **{"backend": "codex", "cwd": "/tmp", "spawner_session_id": "parent", **fields}
+    )
+
+
+async def test_spawned_child_inherits_provider_source(tmp_path: Path) -> None:
+    runtime, _ = _derive_runtime(tmp_path, "parent", _PROVIDER_FIELDS)
+    child = await runtime.create_session(_child_request())
+    _assert_provider_source(runtime.get_session(child.id))
+
+
+@pytest.mark.parametrize(
+    ("spawner", "request_fields"),
+    [
+        pytest.param(
+            _PROVIDER_FIELDS, {"usage_limit_source": "plugin"}, id="explicit-plugin"
+        ),
+        pytest.param(_PROVIDER_FIELDS, {"backend": "claude_code"}, id="cross-backend"),
+        pytest.param(
+            {**_PROVIDER_FIELDS, "account_profile_id": "work"}, {}, id="other-profile"
+        ),
+        pytest.param(
+            {**_PROVIDER_FIELDS, "launch_target_id": "remote-a"}, {}, id="other-target"
+        ),
+        pytest.param(_STALE_FIELDS, {}, id="stale-spawner"),
+    ],
+)
+async def test_spawned_child_keeps_plugin_source(
+    tmp_path: Path, spawner: dict[str, Any], request_fields: dict[str, Any]
+) -> None:
+    runtime, _ = _derive_runtime(tmp_path, "parent", spawner)
+    selection = runtime._effective_usage_selection(_child_request(**request_fields))
+    assert selection == ("plugin", None, None)
+
+
+async def test_partial_provider_fields_do_not_inherit(tmp_path: Path) -> None:
+    runtime, _ = _derive_runtime(tmp_path, "parent", _PROVIDER_FIELDS)
+    with pytest.raises(HTTPException) as exc_info:
+        runtime._effective_usage_selection(_child_request(usage_provider_id="lumid"))
+    assert exc_info.value.status_code == 400
+
+
 async def test_preset_provider_source_overrides_spawner(tmp_path: Path) -> None:
-    runtime, storage = _spawn_runtime(tmp_path, {})
+    runtime, storage = _derive_runtime(tmp_path, "parent", {})
     _seed_preset(storage, "provider-preset", **_PROVIDER_FIELDS)
     resolved, _ = resolve_session_create_request(
         storage,
         SessionLaunchRequest(
             backend="codex",
-            cwd=str(tmp_path),
+            cwd="/tmp",
             spawner_session_id="parent",
             preset_id="provider-preset",
         ),
@@ -544,114 +513,16 @@ async def test_default_preset_with_plugin_source_still_inherits(
 ) -> None:
     # The launch sheet saves ``plugin`` on every preset; that must not block a
     # spawned child from inheriting its spawner's provider source.
-    runtime, storage = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
+    runtime, storage = _derive_runtime(tmp_path, "parent", _PROVIDER_FIELDS)
     _seed_preset(storage, "ui-preset", backend="codex", usage_limit_source="plugin")
     storage.set_default_session_preset("ui-preset")
     resolved, _ = resolve_session_create_request(
         storage,
         SessionLaunchRequest(
-            cwd=str(tmp_path), spawner_session_id="parent", use_default_preset=True
+            cwd="/tmp", spawner_session_id="parent", use_default_preset=True
         ),
     )
-    assert runtime._effective_usage_selection(resolved)[0] == "usage_provider"
-
-
-async def test_child_with_different_account_profile_keeps_plugin_source(
-    tmp_path: Path,
-) -> None:
-    runtime, _ = _spawn_runtime(
-        tmp_path, {**_PROVIDER_FIELDS, "account_profile_id": "work"}
-    )
-    request = SessionCreateRequest(
-        backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-    )
-    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
-
-
-async def test_api_shaped_child_without_source_inherits(tmp_path: Path) -> None:
-    runtime, storage = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    resolved, _ = resolve_session_create_request(
-        storage,
-        SessionLaunchRequest(
-            backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-        ),
-    )
-    assert runtime._effective_usage_selection(resolved)[0] == "usage_provider"
-
-
-async def test_stale_spawner_source_falls_back_to_plugin(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _STALE_FIELDS)
-    request = SessionCreateRequest(
-        backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-    )
-    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
-
-
-async def test_child_on_different_launch_target_keeps_plugin_source(
-    tmp_path: Path,
-) -> None:
-    runtime, _ = _spawn_runtime(
-        tmp_path, {**_PROVIDER_FIELDS, "launch_target_id": "remote-a"}
-    )
-    request = SessionCreateRequest(
-        backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-    )
-    assert runtime._effective_usage_selection(request) == ("plugin", None, None)
-
-
-async def test_partial_provider_fields_do_not_inherit(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    request = SessionCreateRequest(
-        backend="codex",
-        cwd=str(tmp_path),
-        spawner_session_id="parent",
-        usage_provider_id="lumid",
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        runtime._effective_usage_selection(request)
-    assert exc_info.value.status_code == 400
-
-
-class _CodexAdapter:
-    """Minimal codex adapter double so create_session runs the real pipeline."""
-
-    async def start_session(self, *args: Any, **kwargs: Any) -> str:
-        return "thread-child"
-
-    async def register_rate_limit_probe(self, *args: Any, **kwargs: Any) -> None:
-        return None
-
-    async def force_refresh_rate_limit_usage(self, *args: Any, **kwargs: Any) -> None:
-        return None
-
-
-async def test_spawned_child_record_carries_provider_source(tmp_path: Path) -> None:
-    runtime, _ = _spawn_runtime(tmp_path, _PROVIDER_FIELDS)
-    runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
-    child = await runtime.create_session(
-        SessionCreateRequest(
-            backend="codex", cwd=str(tmp_path), spawner_session_id="parent"
-        )
-    )
-    stored = runtime.get_session(child.id)
-    assert stored.usage_limit_source == "usage_provider"
-    assert stored.usage_provider_id == "lumid"
-    assert stored.usage_provider_account_key == _ACCOUNT_KEY
-    assert stored.rate_limit_usage is not None
-    assert stored.rate_limit_usage.origin == "usage_provider"
-
-
-async def test_clone_record_carries_provider_source(tmp_path: Path) -> None:
-    runtime, storage = _make_runtime(tmp_path, _FakeProvider())
-    storage.create_session(_record(tmp_path, **_PROVIDER_FIELDS))
-    runtime.registry.get("codex").adapter = _CodexAdapter()  # type: ignore[attr-defined]
-    child = await runtime.clone_session_launch("src")
-    stored = runtime.get_session(child.id)
-    assert stored.id != "src"
-    assert stored.usage_limit_source == "usage_provider"
-    assert stored.usage_provider_account_key == _ACCOUNT_KEY
-    assert stored.rate_limit_usage is not None
-    assert stored.rate_limit_usage.origin == "usage_provider"
+    assert runtime._effective_usage_selection(resolved).source == "usage_provider"
 
 
 # ── assistant clear-context ──────────────────────────────────────────────────
@@ -662,19 +533,13 @@ def _assistant_runtime(
 ) -> tuple[SessionRuntime, dict[str, Any]]:
     runtime, storage = _make_runtime(tmp_path, _FakeProvider())
     runtime.settings.assistant = AssistantConfig(backend="codex")
-    storage.create_session(
-        _record(
-            tmp_path, "assistant-live", source=SessionSource.ASSISTANT, **live_fields
-        )
-    )
+    _session(storage, "assistant-live", source=SessionSource.ASSISTANT, **live_fields)
     runtime.assistant_session_id = "assistant-live"
     captured: dict[str, Any] = {}
 
     async def fake_create(backend: str, **kwargs: Any) -> SessionRecord:
         captured.update(backend=backend, **kwargs)
-        child = _record(tmp_path, "assistant-fresh", source=SessionSource.ASSISTANT)
-        storage.create_session(child)
-        return child
+        return _session(storage, "assistant-fresh", source=SessionSource.ASSISTANT)
 
     async def fake_retire(*_: Any) -> None:
         return None

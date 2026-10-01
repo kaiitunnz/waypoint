@@ -22,6 +22,7 @@ from fastapi import HTTPException, status
 from pydantic import ValidationError
 
 from waypoint.schemas import (
+    USAGE_SELECTION_FIELDS,
     ScheduleCreateRequest,
     ScheduleLaunchRequest,
     SessionCreateRequest,
@@ -53,20 +54,6 @@ _SCALAR_FIELDS = (
 )
 _LIST_FIELDS = ("args", "config_overrides")
 _MAP_FIELDS = ("launch_env", "tags")
-
-# The usage-limit-source selection is a coupled triple, not three independent
-# scalars: overlaying the provider fields alone would let an explicit
-# ``usage_limit_source: "plugin"`` request inherit a provider id from the preset
-# (an invalid combination). Resolve it as a unit — inherit all three from the
-# preset only when the request omitted ``usage_limit_source`` entirely. A
-# preset's ``plugin`` source is the server default and the launch sheet saves it
-# on every preset, so it is not carried: it would otherwise read as an explicit
-# choice and block a spawned child from inheriting its spawner's source.
-_USAGE_SELECTION_FIELDS = (
-    "usage_limit_source",
-    "usage_provider_id",
-    "usage_provider_account_key",
-)
 
 # Request-only control fields that must never flow into the resolved launch.
 _CONTROL_FIELDS = ("preset_id", "use_default_preset")
@@ -267,17 +254,16 @@ def _merge(request: object, preset: SessionPresetRecord | None) -> dict[str, obj
             value = getattr(spec, name)
             if value:
                 merged[name] = dict(value)
-    # Coupled usage-selection triple (see _USAGE_SELECTION_FIELDS). Only inherit
-    # a provider selection, and only when the request left the source unset; an
-    # explicit source (even "plugin") takes the whole triple from the request.
+    # The usage selection is a coupled triple: overlaying the provider fields
+    # alone could pair an explicit "plugin" source with a preset's provider.
+    # A preset's "plugin" source is not carried: the launch sheet saves it on
+    # every preset, so carrying it would block spawner inheritance.
     if (
         "usage_limit_source" in req_fields
         and "usage_limit_source" not in explicit
         and spec.usage_limit_source == "usage_provider"
     ):
-        merged["usage_limit_source"] = spec.usage_limit_source
-        merged["usage_provider_id"] = spec.usage_provider_id
-        merged["usage_provider_account_key"] = spec.usage_provider_account_key
+        merged.update({name: getattr(spec, name) for name in USAGE_SELECTION_FIELDS})
     return merged
 
 

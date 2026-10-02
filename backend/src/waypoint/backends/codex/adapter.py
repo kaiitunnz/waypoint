@@ -203,6 +203,7 @@ class CodexSessionState:
     # An interrupt that arrived before the compaction turn's id was known.
     interrupt_pending: bool = False
     unknown_methods_logged: set[str] = field(default_factory=set)
+    logged_methods: set[str] = field(default_factory=set)
     file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
     # override that persists, so we apply it on every turn_start to keep the
@@ -890,6 +891,14 @@ class CodexAppServerAdapter:
         rendered = render_notification(method, payload)
         if rendered is None or not rendered.text:
             return
+        if rendered.log_once and method not in state.logged_methods:
+            state.logged_methods.add(method)
+            log.warning(
+                "codex %s: %s",
+                method,
+                rendered.text,
+                extra={"session_id": state.session_id},
+            )
         kind = rendered.kind
         status: SessionStatus | None = rendered.status
         if method == "turn/completed":

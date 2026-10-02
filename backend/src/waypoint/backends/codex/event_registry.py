@@ -48,6 +48,9 @@ class Rendered:
     status: SessionStatus = SessionStatus.RUNNING
     # Merged into the event's metadata after the adapter's envelope keys.
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Also log the text once per session: it is addressed to Waypoint's
+    # developers more than to the human.
+    log_once: bool = False
 
     def triple(self) -> tuple[EventKind, str, SessionStatus]:
         return self.kind, self.text, self.status
@@ -561,6 +564,16 @@ def _summary_note(payload: dict[str, Any]) -> Rendered | None:
     return _important_note(text) if text else None
 
 
+def _deprecation_notice(payload: dict[str, Any]) -> Rendered | None:
+    parts = [_text(payload.get("summary")), _text(payload.get("details"))]
+    text = "\n".join(part for part in parts if part)
+    if not text:
+        return None
+    return Rendered(
+        EventKind.SYSTEM_NOTE, text, metadata=mark_detail({}), log_once=True
+    )
+
+
 def _model_rerouted(payload: dict[str, Any]) -> Rendered:
     reason = payload.get("reason")
     suffix = f" ({reason})" if isinstance(reason, str) and reason else ""
@@ -645,7 +658,8 @@ NOTIFICATIONS: dict[str, NotificationSpec] = {
         else None
     ),
     "configWarning": _summary_note,
-    "deprecationNotice": _summary_note,
+    # Codex deprecates calls Waypoint makes (e.g. on every thread resume).
+    "deprecationNotice": _deprecation_notice,
     "model/rerouted": _model_rerouted,
     "model/verification": Ignored("Provider verification metadata"),
     "model/safetyBuffering/updated": Ignored("Provider buffering hint"),

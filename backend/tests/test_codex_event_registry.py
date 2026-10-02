@@ -293,7 +293,6 @@ def test_mcp_tool_call_completion_carries_its_result() -> None:
             {"summary": "Unknown key", "details": "line 3"},
             "Unknown key\nline 3",
         ),
-        ("deprecationNotice", {"summary": "Old flag"}, "Old flag"),
         (
             "model/rerouted",
             {
@@ -317,6 +316,16 @@ def test_known_notifications_render_important_notes(
     assert rendered is not None
     assert (rendered.kind, rendered.text) == (EventKind.SYSTEM_NOTE, text)
     assert _visibility(rendered) == IMPORTANT_VISIBILITY
+
+
+def test_deprecation_notice_is_a_logged_detail_note() -> None:
+    rendered = render_notification(
+        "deprecationNotice", {"summary": "Old call", "details": "Use the new one"}
+    )
+    assert rendered is not None
+    assert rendered.text == "Old call\nUse the new one"
+    assert _visibility(rendered) == DETAIL_VISIBILITY
+    assert rendered.log_once is True
 
 
 def test_guardian_warning_is_a_detail_note() -> None:

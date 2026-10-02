@@ -2017,3 +2017,24 @@ def test_input_refused_while_compacting_maps_to_conflict() -> None:
         "Codex is compacting the conversation; send again when it finishes"
     )
     assert input_http_error(RuntimeError("bad")).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_deprecation_notice_logs_once_per_session(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    with caplog.at_level("WARNING", logger="waypoint.codex"):
+        for _ in range(2):
+            fake.global_notifications.put_nowait(
+                FakeNotification("deprecationNotice", {"summary": "Old call"})
+            )
+        for _ in range(100):
+            if len(emitted) == 2:
+                break
+            await asyncio.sleep(0.01)
+    assert [entry[3]["visibility"] for entry in emitted] == ["detail", "detail"]
+    lines = [r.getMessage() for r in caplog.records if "Old call" in r.getMessage()]
+    assert lines == ["codex deprecationNotice: Old call"]

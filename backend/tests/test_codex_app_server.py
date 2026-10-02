@@ -1635,3 +1635,102 @@ async def test_approval_raised_during_an_interrupt_is_cancelled_at_once() -> Non
     assert not [entry for entry in emitted if entry[1] == EventKind.APPROVAL_REQUEST]
     state.interrupting = False
     await adapter.terminate_session("sess")
+
+
+def _codex_error(
+    message: str, will_retry: bool | None, details: str | None = None
+) -> FakeNotification:
+    payload: dict[str, Any] = {
+        "error": {"message": message, "additionalDetails": details},
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+    }
+    if will_retry is not None:
+        payload["willRetry"] = will_retry
+    return FakeNotification("error", payload)
+
+
+def _agent_delta(text: str) -> FakeNotification:
+    return FakeNotification("item/agentMessage/delta", {"delta": text})
+
+
+async def _run_turn_errors(
+    *notifications: FakeNotification,
+) -> list[tuple[str, SessionStatus]]:
+    emitted = await _run_turn(set(), *notifications)
+    return [
+        (text, status)
+        for _, _, text, metadata, status in emitted
+        if metadata.get("method") == "error"
+    ]
+
+
+def test_map_notification_retryable_error_keeps_running_with_details() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    notification = _codex_error("Reconnecting... 2/5", True, "unauthorized (401)")
+    kind, text, status = map_notification("error", notification.payload)
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == "Reconnecting... 2/5 — unauthorized (401)"
+    assert status == SessionStatus.RUNNING
+
+
+def test_map_notification_error_without_will_retry_is_error() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    notification = _codex_error("boom", None)
+    kind, text, status = map_notification("error", notification.payload)
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == "boom"
+    assert status == SessionStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_retry_streak_emits_one_running_note() -> None:
+    errors = await _run_turn_errors(
+        _codex_error("Reconnecting... 1/5", True, "unauthorized (401)"),
+        _codex_error("Reconnecting... 2/5", True, "unauthorized (401)"),
+        _codex_error("Reconnecting... 3/5", True, "unauthorized (401)"),
+        _agent_delta("recovered"),
+        _turn_completed(),
+    )
+
+    assert errors == [
+        ("Reconnecting... 1/5 — unauthorized (401)", SessionStatus.RUNNING)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retry_streaks_split_by_other_notifications() -> None:
+    errors = await _run_turn_errors(
+        _codex_error("Reconnecting... 1/5", True),
+        _codex_error("Reconnecting... 2/5", True),
+        _agent_delta("partial"),
+        _codex_error("Reconnecting... 1/5", True),
+        _codex_error("Reconnecting... 2/5", True),
+        _turn_completed(),
+    )
+
+    assert errors == [
+        ("Reconnecting... 1/5", SessionStatus.RUNNING),
+        ("Reconnecting... 1/5", SessionStatus.RUNNING),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retry_streak_ending_in_final_error_reports_error() -> None:
+    errors = await _run_turn_errors(
+        _codex_error("Reconnecting... 1/5", True, "unauthorized (401)"),
+        _codex_error("Reconnecting... 5/5", True, "unauthorized (401)"),
+        _codex_error("unauthorized (401)", False),
+        FakeNotification(
+            "turn/completed", {"turn": {"id": "turn-1", "status": "failed"}}
+        ),
+    )
+
+    assert errors == [
+        ("Reconnecting... 1/5 — unauthorized (401)", SessionStatus.RUNNING),
+        ("unauthorized (401)", SessionStatus.ERROR),
+    ]

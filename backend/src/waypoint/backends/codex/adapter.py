@@ -16,10 +16,12 @@ from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 from waypoint.backends.codex.normalize import (
     diff_preview_for_approval,
     diff_preview_for_notification,
+    error_text,
     extract_item,
     extract_item_id,
     extract_tool_name,
     format_approval_text,
+    is_retryable_error,
     map_notification,
     payload_to_dict,
     plan_metadata_for_item,
@@ -688,12 +690,26 @@ class CodexAppServerAdapter:
         return True
 
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
+        # One note per consecutive run of retryable errors; any other
+        # notification ends the run.
+        in_retry_streak = False
         try:
             while True:
                 notification = await asyncio.to_thread(
                     state.client.next_turn_notification, turn_id
                 )
                 payload = payload_to_dict(notification.payload)
+                if notification.method == "error" and is_retryable_error(payload):
+                    if in_retry_streak:
+                        log.debug(
+                            "codex retry suppressed: %s",
+                            error_text(payload),
+                            extra={"session_id": state.session_id},
+                        )
+                        continue
+                    in_retry_streak = True
+                else:
+                    in_retry_streak = False
                 if notification.method == "thread/tokenUsage/updated":
                     snapshot = _context_usage_snapshot_from_thread_token_usage(payload)
                     if snapshot is not None:

@@ -65,7 +65,7 @@ from waypoint.backends.codex.schemas import (
 )
 from waypoint.backends.codex.subagents import (
     REPORT_FETCH_TIMEOUT_SECONDS,
-    final_report,
+    read_report,
 )
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
@@ -1655,8 +1655,8 @@ class CodexPlugin(DefaultLaunchContract):
 
         async def read(client: CodexClient, child: str) -> str | None:
             try:
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(client.thread_read, child, True),
+                return await asyncio.wait_for(
+                    asyncio.to_thread(read_report, client, child),
                     REPORT_FETCH_TIMEOUT_SECONDS,
                 )
             except Exception:  # noqa: BLE001
@@ -1666,7 +1666,6 @@ class CodexPlugin(DefaultLaunchContract):
                     extra={"thread_id": child},
                 )
                 return None
-            return final_report(response.thread)
 
         async def operation(client: CodexClient) -> dict[str, str | None]:
             # Concurrent on one client: responses route by request id.

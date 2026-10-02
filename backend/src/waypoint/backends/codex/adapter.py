@@ -41,7 +41,7 @@ from waypoint.backends.codex.subagents import (
     REPORT_FETCH_TIMEOUT_SECONDS,
     SUBAGENT_ITEM_TYPE,
     SubagentReport,
-    final_report,
+    read_report,
     report_child,
     with_report,
 )
@@ -921,8 +921,8 @@ class CodexAppServerAdapter:
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(state.client.thread_read, child_thread_id, True),
+            return await asyncio.wait_for(
+                asyncio.to_thread(read_report, state.client, child_thread_id),
                 REPORT_FETCH_TIMEOUT_SECONDS,
             )
         except Exception:  # noqa: BLE001
@@ -932,7 +932,6 @@ class CodexAppServerAdapter:
                 extra={"session_id": state.session_id, "thread_id": child_thread_id},
             )
             return None
-        return final_report(response.thread)
 
     def _pump_notifications(
         self, state: CodexSessionState, loop: asyncio.AbstractEventLoop

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 from openai_codex.client import CodexClient
+from openai_codex.errors import MethodNotFoundError
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
 from waypoint.backends.codex import adapter as adapter_module
@@ -122,6 +123,7 @@ class FakeCodexClient:
         self.turn_notification_ids: list[str] = []
         self.unregistered_turn_notification_ids: list[str] = []
         self.child_threads: dict[str, Any] = {}
+        self.turns_list_unsupported = False
         self.skill_payload: dict[str, Any] = {
             "description": "Humanize prose",
             "enabled": True,
@@ -190,6 +192,10 @@ class FakeCodexClient:
                     ]
                 }
             )
+        if method == "thread/turns/list":
+            if self.turns_list_unsupported:
+                raise MethodNotFoundError(-32601, "method not found")
+            return SimpleNamespace(data=self._child_thread(params["threadId"]).turns)
         raise AssertionError(f"unexpected request: {method}")
 
     def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
@@ -197,6 +203,9 @@ class FakeCodexClient:
 
     def thread_read(self, thread_id: str, include_turns: bool = False) -> Any:
         self.calls.append(("thread_read", (thread_id, include_turns)))
+        return SimpleNamespace(thread=self._child_thread(thread_id))
+
+    def _child_thread(self, thread_id: str) -> Any:
         thread = self.child_threads.get(thread_id)
         if isinstance(thread, BaseException):
             raise thread
@@ -204,7 +213,7 @@ class FakeCodexClient:
             thread = thread()
         if thread is None:
             raise RuntimeError(f"no thread {thread_id}")
-        return SimpleNamespace(thread=thread)
+        return thread
 
     def next_notification(self) -> Any:
         return self._next_notification(self.global_notifications)
@@ -2198,7 +2207,7 @@ async def test_subagent_spawn_and_message_are_subagent_tool_entries() -> None:
         (EventKind.TOOL_RESULT, "Messaged reviewer"),
     ]
     assert all(entry[3]["tool_name"] == "Subagent" for entry in emitted)
-    assert not [call for call in fake.calls if call[0] == "thread_read"]
+    assert not [call for call in fake.calls if call[0] in {"thread_read", "request"}]
 
 
 @pytest.mark.asyncio
@@ -2212,7 +2221,10 @@ async def test_subagent_completion_is_a_task_card_with_the_child_report() -> Non
         [_activity("completed", "subagent-completed-a")], child
     )
 
-    assert ("thread_read", ("child-1", True)) in fake.calls
+    assert (
+        "request",
+        ("thread/turns/list", {"threadId": "child-1", "limit": 1, "itemsView": "full"}),
+    ) in fake.calls
     [(_, kind, text, metadata, _)] = emitted
     assert kind is EventKind.SYSTEM_NOTE
     assert text == 'Agent "reviewer" finished'
@@ -2319,7 +2331,7 @@ async def test_subagent_activity_from_another_thread_is_ignored() -> None:
     )
 
     assert emitted == []
-    assert not [call for call in fake.calls if call[0] == "thread_read"]
+    assert not [call for call in fake.calls if call[0] in {"thread_read", "request"}]
 
 
 @pytest.mark.asyncio
@@ -2374,3 +2386,26 @@ async def test_late_subagent_completion_on_the_pump_becomes_a_task_card() -> Non
     assert kind is EventKind.SYSTEM_NOTE
     assert status is None
     assert metadata["task_notification"]["result_preview"] == "Late verdict."
+
+
+@pytest.mark.asyncio
+async def test_subagent_report_falls_back_to_thread_read_on_an_older_cli() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    fake.turns_list_unsupported = True
+    fake.child_threads["child-1"] = _child_thread(("Old CLI verdict.", "final_answer"))
+    await adapter.start_session("sess", "/tmp/work")
+    fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
+        )
+    )
+    await adapter.send_input("sess", "review it")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    assert ("thread_read", ("child-1", True)) in fake.calls
+    [card] = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
+    assert card["result_preview"] == "Old CLI verdict."

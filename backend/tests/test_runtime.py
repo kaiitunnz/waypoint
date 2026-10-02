@@ -2844,11 +2844,13 @@ async def test_import_codex_thread_shows_subagent_reports_read_from_children(
     )
 
     class ChildReader:
-        def thread_read(self, thread_id: str, include_turns: bool = False) -> Any:
-            assert include_turns
-            if thread_id == "broken":
+        def request(
+            self, method: str, params: dict[str, Any], *, response_model: Any
+        ) -> Any:
+            assert method == "thread/turns/list"
+            if params["threadId"] == "broken":
                 raise RuntimeError("no such thread")
-            return SimpleNamespace(thread=SimpleNamespace(turns=[report]))
+            return SimpleNamespace(data=[report])
 
     async def fake_read(*_args: Any, **_kwargs: Any) -> Any:
         return thread

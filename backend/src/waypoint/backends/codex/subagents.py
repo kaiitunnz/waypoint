@@ -11,6 +11,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from openai_codex.client import CodexClient
+from openai_codex.errors import JsonRpcError
+from openai_codex.generated.v2_all import ThreadTurnsListResponse
+
 from waypoint.backends.task_notifications import (
     NOT_CAPTURED_ON_IMPORT,
     TaskNotification,
@@ -77,11 +81,25 @@ def report_children(items: Iterable[dict[str, Any]]) -> list[str]:
     return children
 
 
-def final_report(thread: Any) -> str | None:
-    """The child's report: its last turn's final answer. A completed turn
-    without one falls back to its last agent message; an unfinished or
+def read_report(client: CodexClient, child_thread_id: str) -> str | None:
+    """Read a subagent's report from its last turn. Blocking."""
+    try:
+        page = client.request(
+            "thread/turns/list",
+            {"threadId": child_thread_id, "limit": 1, "itemsView": "full"},
+            response_model=ThreadTurnsListResponse,
+        )
+        turns: list[Any] = page.data
+    except JsonRpcError:
+        # A CLI without the paginated turn list.
+        turns = client.thread_read(child_thread_id, True).thread.turns
+    return final_report(turns)
+
+
+def final_report(turns: list[Any]) -> str | None:
+    """The report in a child's turns: the last turn's final answer. A completed
+    turn without one falls back to its last agent message; an unfinished or
     interrupted turn's other messages are progress, not a report."""
-    turns = getattr(thread, "turns", None)
     if not turns:
         return None
     last_turn = turns[-1]

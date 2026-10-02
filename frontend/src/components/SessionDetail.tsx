@@ -4792,6 +4792,14 @@ function isApprovalResolutionEvent(event: EventRecord): boolean {
 }
 
 function isImportantEvent(event: EventRecord): boolean {
+  // A backend's own verdict on a note wins over the rules below.
+  const visibility = event.metadata?.visibility;
+  if (visibility === "detail") {
+    return false;
+  }
+  if (visibility === "important") {
+    return true;
+  }
   switch (event.kind) {
     case "user_input":
     case "agent_output":

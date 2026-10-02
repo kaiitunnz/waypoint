@@ -8328,7 +8328,8 @@ html[data-theme="light"] .composer-send {
   overflow-wrap: anywhere;
 }
 
-.send-user-file .message-attachments {
+.send-user-file .message-attachments,
+.tool-disclosure .message-attachments {
   margin-top: 8px;
   gap: 6px;
 }

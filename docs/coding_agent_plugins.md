@@ -493,6 +493,21 @@ gets a 409. Provider-originated endings must carry the request id (OpenCode's
 notes). Without the protocol the tracker closes the session's open questions
 and rejects cancels.
 
+An agent that keeps working after it asks has a stand-in card rather than a
+parked request. Its plugin delivers the answer as an ordinary message and
+records it with `runtime.questions.record_answer`, and its decline sends
+nothing (`AGENT_IDLE`). `claude_tty` and Codex both work this way. Codex's
+`request_user_input_async` tool arrives as an `agentMessage` with
+`delivery: "async"` and a `questions` list. The normalizer emits it once, on
+`item/completed`, as an `AskUserQuestion` tool_call whose `tool_use_id` is the
+item id, and the session stays running. The answer is a
+`<send_user_message_question_reply>` message listing one
+`{questionItemId, question, answer}` entry per question; it steers the running
+turn or starts a new one. A turn that ends with one of its own questions still
+open settles at `WAITING_INPUT`. A card copied from another thread (a fork) is
+`CLOSED`. A history import closes questions left unanswered before the final
+turn.
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should

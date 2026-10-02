@@ -453,7 +453,11 @@ function ReasoningDisclosure({
 }
 
 function reasoningPreview(text: string, max = 140): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
+  // The preview is plain text; summaries often open with **bold** headings.
+  const collapsed = text
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
   if (collapsed.length <= max) return collapsed;
   return `${collapsed.slice(0, max - 1).trimEnd()}…`;
 }

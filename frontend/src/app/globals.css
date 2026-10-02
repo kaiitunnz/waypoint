@@ -7893,8 +7893,7 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   font-size: 0.7rem;
   line-height: 1;
 }
-/* Stopping: the interrupt is in flight. Holds the danger hue and sweeps a thin
- * arc around the glyph until the request returns. */
+/* Interrupt request in flight. */
 .composer-bar .composer-interrupt-btn.is-stopping {
   position: relative;
   color: var(--danger);
@@ -7908,12 +7907,7 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--danger) 22%, transparent);
   border-top-color: var(--danger);
-  animation: interrupt-sweep 0.9s linear infinite;
-}
-@keyframes interrupt-sweep {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: session-spinner-spin 0.9s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-interrupt-btn.is-stopping::before {

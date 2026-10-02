@@ -406,7 +406,6 @@ function serializeAnswers(
     const selections = draft.picked[index] ?? [];
     const note = (draft.notes[index] ?? "").trim();
     if (!selections.length && !note) return;
-    // A free-text question has no options; the typed text is the answer.
     if (!entry.options.length) {
       segments.push(`"${entry.question}"="${note}"`);
       structured.push({ question: entry.question, answer: note });

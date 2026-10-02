@@ -2879,8 +2879,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const attachments = useAttachments({ host, token, sessionId, onError });
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  // Local-only: the interrupt request can take a moment to land, and the
-  // transcript records nothing until it does.
+  // The transcript records nothing until the interrupt request returns.
   const [stopping, setStopping] = useState(false);
   // Delayed-hover / long-press send menu (Send now / idle-delivery choices).
   const [sendMenuOpen, setSendMenuOpen] = useState(false);

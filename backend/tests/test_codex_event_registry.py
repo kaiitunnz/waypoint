@@ -288,7 +288,6 @@ def test_mcp_tool_call_completion_carries_its_result() -> None:
     ("method", "payload", "text"),
     [
         ("warning", {"message": "Disk almost full"}, "Disk almost full"),
-        ("guardianWarning", {"message": "Risky", "threadId": "t"}, "Risky"),
         (
             "configWarning",
             {"summary": "Unknown key", "details": "line 3"},
@@ -318,6 +317,16 @@ def test_known_notifications_render_important_notes(
     assert rendered is not None
     assert (rendered.kind, rendered.text) == (EventKind.SYSTEM_NOTE, text)
     assert _visibility(rendered) == IMPORTANT_VISIBILITY
+
+
+def test_guardian_warning_is_a_detail_note() -> None:
+    rendered = render_notification(
+        "guardianWarning",
+        {"message": "Automatic approval review approved", "threadId": "t"},
+    )
+    assert rendered is not None
+    assert rendered.text == "Automatic approval review approved"
+    assert _visibility(rendered) == DETAIL_VISIBILITY
 
 
 def test_auto_review_completion_merges_into_the_reviewed_item() -> None:

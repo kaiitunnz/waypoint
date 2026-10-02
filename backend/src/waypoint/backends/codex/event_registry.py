@@ -637,7 +637,13 @@ NOTIFICATIONS: dict[str, NotificationSpec] = {
     "turn/moderationMetadata": Ignored("Provider moderation metadata"),
     "error": _error,
     "warning": _message_note,
-    "guardianWarning": _message_note,
+    # Narrates each auto-review; the decision already merges into the reviewed
+    # item's card through item/autoApprovalReview/completed.
+    "guardianWarning": lambda payload: (
+        _detail_note(_text(payload.get("message")))
+        if _text(payload.get("message"))
+        else None
+    ),
     "configWarning": _summary_note,
     "deprecationNotice": _summary_note,
     "model/rerouted": _model_rerouted,

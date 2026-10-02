@@ -59,7 +59,8 @@ backend/src/waypoint/
     │   ├── plugin.py
     │   ├── adapter.py        ← App Server SDK driver
     │   ├── transport.py
-    │   ├── normalize.py      ← notification → EventEnvelope helpers
+    │   ├── event_registry.py ← item/notification → event dispositions
+    │   ├── normalize.py      ← payload helpers (ids, outcomes, previews)
     │   └── permission_modes.py
     ├── opencode/
     │   ├── plugin.py
@@ -707,7 +708,7 @@ pops each one, runs its sink, and never persists the key itself.
 | --- | --- | --- |
 | `capture_host_files` | host paths | pinned attachments on `metadata.attachments` |
 | `capture_host_text` | host paths | content within `inline_capture_max_bytes` on `metadata.captured_text`; anything larger, binary, or unreadable becomes an attachment |
-| `capture_inline_blobs` | `{filename, text, mime}` entries | pinned attachments, with their ids listed on `metadata.inline_attachment_ids` so a consumer can tell them from a separately captured report |
+| `capture_inline_blobs` | `{filename, text, mime}` or `{filename, base64, mime}` entries | pinned attachments, with their ids listed on `metadata.inline_attachment_ids` so a consumer can tell them from a separately captured report |
 
 A fourth transient key, `capture_origin`, tags every attachment the sinks
 create on that event with an `AttachmentOrigin` (`task_output` for
@@ -716,6 +717,24 @@ task-notification reports); the session Files panel shows it as a label.
 Each sink is best-effort and never raises into the emit path: a missing,
 oversized, or unreadable entry is skipped. The seams are backend-neutral —
 they read no plugin id and no per-agent schema.
+
+The sinks also run on events an agent's history converter returns to
+`seed_thread_history`, so an imported event can carry the same keys.
+
+### Visibility
+
+The transcript's Important view keeps every user, agent, tool, and approval
+event, and a system note only when one of its text rules matches. A plugin
+overrides that per note with `metadata.visibility`, built with `mark_detail` /
+`mark_important` from `backends/events.py`:
+
+| value | effect |
+| --- | --- |
+| `detail` | hidden from Important, shown under All events; for lifecycle notes such as turn started/completed |
+| `important` | shown in Important whatever its text; for warnings and notices the human should see |
+
+Errors, interruptions, and approvals stay important without a marker. The
+frontend reads only the key, never the backend id.
 
 ## Frontend catalog
 
@@ -928,8 +947,11 @@ Then a manual flow:
 
 When Claude or Codex ships a new protocol message:
 
-1. Add a branch in the relevant `backends/<id>/normalize.py` —
-   `map_notification` (Codex) or the `format_*` helpers (Claude).
+1. Codex: give each new item type or notification method an entry in
+   `backends/codex/event_registry.py` — a renderer, or `Ignored(reason)`.
+   `test_codex_event_registry.py` fails after an SDK bump until every name in
+   the SDK's `ThreadItem` union and notification registry has one. Claude: add
+   a branch to the `format_*` helpers in `backends/claude_code/normalize.py`.
 2. If the change introduces a new control knob, extend `BackendCapabilities`
    (and place the field on the matching axis — `AgentCapabilities` or
    `TransportCapabilities` — so the split stays a total cover) and the matching

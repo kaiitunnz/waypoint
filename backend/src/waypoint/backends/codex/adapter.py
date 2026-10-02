@@ -13,16 +13,15 @@ from typing import Any
 from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
+from waypoint.backends.codex.event_registry import extract_tool_name, map_notification
 from waypoint.backends.codex.normalize import (
     diff_preview_for_approval,
     diff_preview_for_notification,
     error_text,
     extract_item,
     extract_item_id,
-    extract_tool_name,
     format_approval_text,
     is_retryable_error,
-    map_notification,
     payload_to_dict,
     plan_metadata_for_item,
     plan_todo_items,

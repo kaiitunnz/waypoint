@@ -1,15 +1,8 @@
-"""Codex notification → canonical-event normalisation.
+"""Pure helpers over Codex notification payloads and thread items.
 
-The Codex App Server SDK delivers JSON-RPC notifications that need to
-land in Waypoint's `EventRecord` shape (kind / text / status /
-metadata). The adapter previously did this work inline; pulling it out
-into pure functions makes the wire-shape contract testable in
-isolation and keeps the adapter focused on session state.
-
-Each helper takes the raw notification payload (already coerced to a
-dict) and returns the canonical `(kind, text, status)` triple. The
-adapter wraps these triples in the persisted `EventRecord` along with
-its own `metadata.method` / `metadata.payload` envelope keys.
+The per-type mapping to ``(kind, text, status)`` lives in
+``event_registry``; these helpers extract ids, outcomes, diff previews, and
+plan/todo shapes that both the live adapter and history import share.
 """
 
 from dataclasses import asdict, is_dataclass
@@ -17,7 +10,6 @@ from typing import Any
 
 from openai_codex.models import UnknownNotification
 
-from waypoint.backends.codex.questions import async_questions, is_async_message
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,
     build_preview,
@@ -25,110 +17,7 @@ from waypoint.backends.diff_preview import (
     files_from_codex_legacy_file_changes,
     files_from_unified_diff,
 )
-from waypoint.schemas import EventKind, SessionStatus
-
-
-def map_notification(
-    method: str,
-    payload: dict[str, Any],
-) -> tuple[EventKind | None, str, SessionStatus]:
-    """Map a Codex App Server notification to (kind, text, status)."""
-
-    if method == "item/agentMessage/delta":
-        return (
-            EventKind.AGENT_OUTPUT,
-            str(payload.get("delta", "")),
-            SessionStatus.RUNNING,
-        )
-    if method == "item/commandExecution/outputDelta":
-        return (
-            EventKind.TOOL_RESULT,
-            str(payload.get("delta", "")),
-            SessionStatus.RUNNING,
-        )
-    if method == "item/fileChange/outputDelta":
-        return (
-            EventKind.TOOL_RESULT,
-            str(payload.get("delta", "")),
-            SessionStatus.RUNNING,
-        )
-    if method == "item/fileChange/patchUpdated":
-        changes = payload.get("changes", [])
-        paths = ", ".join(
-            str(change.get("path", ""))
-            for change in changes
-            if isinstance(change, dict) and change.get("path")
-        )
-        return (
-            EventKind.TOOL_RESULT,
-            f"File changes updated: {paths}".strip(),
-            SessionStatus.RUNNING,
-        )
-    if method == "turn/diff/updated":
-        diff = payload.get("diff")
-        additions = deletions = 0
-        if isinstance(diff, str):
-            preview = build_preview(
-                "aggregate", files_from_unified_diff(diff, "Turn changes")
-            )
-            if preview is not None:
-                additions = preview.total_additions
-                deletions = preview.total_deletions
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Turn changes: +{additions} -{deletions}",
-            SessionStatus.RUNNING,
-        )
-    if method == "turn/started":
-        turn = payload.get("turn", {})
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Turn started: {turn.get('id', '')}".strip(),
-            SessionStatus.RUNNING,
-        )
-    if method == "turn/completed":
-        turn = payload.get("turn", {})
-        status = map_turn_status(turn.get("status"))
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Turn {turn.get('status', 'completed')}",
-            status,
-        )
-    if method == "thread/compacted":
-        return (
-            EventKind.SYSTEM_NOTE,
-            "Codex thread compacted",
-            SessionStatus.IDLE,
-        )
-    if method == "item/started":
-        item = extract_item(payload)
-        return _format_item_started(item)
-    if method == "item/updated":
-        item = extract_item(payload)
-        return _format_item_updated(item)
-    if method == "item/completed":
-        item = extract_item(payload)
-        return _format_item_completed(item)
-    if method == "turn/plan/updated":
-        # Codex's update_plan tool. Surfaced as a todo_list (TOOL_RESULT) so it
-        # renders in the shared todo dock/card like other backends rather than
-        # as a plain system note; the adapter synthesizes the todo_list item.
-        return (
-            EventKind.TOOL_RESULT,
-            format_plan(payload.get("plan", [])),
-            SessionStatus.RUNNING,
-        )
-    if method == "error":
-        return (
-            EventKind.SYSTEM_NOTE,
-            error_text(payload),
-            (
-                SessionStatus.RUNNING
-                if is_retryable_error(payload)
-                else SessionStatus.ERROR
-            ),
-        )
-    return None, "", SessionStatus.RUNNING
+from waypoint.schemas import SessionStatus
 
 
 def is_retryable_error(payload: dict[str, Any]) -> bool:
@@ -151,182 +40,6 @@ def error_text(payload: dict[str, Any]) -> str:
     return f"{message} — {details}"
 
 
-def _collab_agent_messages(item: dict[str, Any]) -> list[str]:
-    """Subagent report bodies carried by a completed collab-agent tool item.
-
-    Codex collaboration mode records each waited-on subagent's reply under
-    ``agentsStates[threadId].message``.
-    """
-    states = item.get("agentsStates")
-    if not isinstance(states, dict):
-        return []
-    messages: list[str] = []
-    for state in states.values():
-        if isinstance(state, dict):
-            message = state.get("message")
-            if isinstance(message, str) and message.strip():
-                messages.append(message.strip())
-    return messages
-
-
-def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
-    """Text for a collab-agent tool item: the spawn prompt on the call, the
-    subagent reports on the result, falling back to the bare tool name."""
-    tool = str(item.get("tool") or "") or "collab agent tool call"
-    if completed:
-        bodies = _collab_agent_messages(item)
-    else:
-        prompt = item.get("prompt")
-        bodies = [prompt.strip()] if isinstance(prompt, str) and prompt.strip() else []
-    if not bodies:
-        return tool
-    return f"{tool}\n\n" + "\n\n".join(bodies)
-
-
-def _format_item_started(
-    item: dict[str, Any],
-) -> tuple[EventKind | None, str, SessionStatus]:
-    item_type = item.get("type")
-    if is_async_message(item):
-        # An async message arrives whole; it is emitted once, on completion.
-        return None, "", SessionStatus.RUNNING
-    if item_type == "commandExecution":
-        return (
-            EventKind.TOOL_CALL,
-            f"$ {item.get('command', '')}",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "fileChange":
-        paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
-        return (
-            EventKind.TOOL_CALL,
-            f"Preparing file changes: {paths}",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "mcpToolCall":
-        return (
-            EventKind.TOOL_CALL,
-            f"MCP {item.get('server', '')}:{item.get('tool', '')}",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "dynamicToolCall":
-        tool = item.get("tool", "")
-        ns = item.get("namespace", "")
-        label = f"{ns}:{tool}" if ns else str(tool)
-        return (
-            EventKind.TOOL_CALL,
-            label or "dynamic tool call",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "webSearch":
-        return (
-            EventKind.TOOL_CALL,
-            str(item.get("query", "web search")),
-            SessionStatus.RUNNING,
-        )
-    if item_type == "collabAgentToolCall":
-        return (
-            EventKind.TOOL_CALL,
-            _format_collab_agent_tool(item, completed=False),
-            SessionStatus.RUNNING,
-        )
-    if item_type == "plan":
-        return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
-    if item_type == "agentMessage":
-        return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
-    if item_type == "todo_list":
-        return (
-            EventKind.TOOL_CALL,
-            format_todo_list(item),
-            SessionStatus.RUNNING,
-        )
-    return (
-        EventKind.SYSTEM_NOTE,
-        f"Started {item_type or 'item'}",
-        SessionStatus.RUNNING,
-    )
-
-
-def _format_item_updated(
-    item: dict[str, Any],
-) -> tuple[EventKind, str, SessionStatus]:
-    item_type = item.get("type")
-    if item_type == "todo_list":
-        return (
-            EventKind.TOOL_RESULT,
-            format_todo_list(item),
-            SessionStatus.RUNNING,
-        )
-    return (
-        EventKind.SYSTEM_NOTE,
-        f"Updated {item_type or 'item'}",
-        SessionStatus.RUNNING,
-    )
-
-
-def _format_item_completed(
-    item: dict[str, Any],
-) -> tuple[EventKind | None, str, SessionStatus]:
-    item_type = item.get("type")
-    if is_async_message(item):
-        if async_questions(item):
-            return EventKind.TOOL_CALL, "Need your input", SessionStatus.RUNNING
-        return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
-    if item_type == "agentMessage":
-        return None, "", SessionStatus.RUNNING
-    # An item finishing isn't a turn finishing — the model usually has
-    # more tool calls or assistant output to emit before turn/completed
-    # lands. Always report RUNNING here; the session-level transition
-    # to IDLE belongs to the turn/completed handler.
-    if item_type == "commandExecution":
-        output = item.get("aggregatedOutput") or ""
-        suffix = f"\n{output}" if output else ""
-        return (
-            EventKind.TOOL_RESULT,
-            f"$ {item.get('command', '')}{suffix}",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "fileChange":
-        paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
-        return (
-            EventKind.TOOL_RESULT,
-            f"File changes completed: {paths}",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "todo_list":
-        return (
-            EventKind.TOOL_RESULT,
-            format_todo_list(item),
-            SessionStatus.RUNNING,
-        )
-    if item_type == "dynamicToolCall":
-        tool = item.get("tool", "")
-        ns = item.get("namespace", "")
-        label = f"{ns}:{tool}" if ns else str(tool)
-        return (
-            EventKind.TOOL_RESULT,
-            label or "dynamic tool call",
-            SessionStatus.RUNNING,
-        )
-    if item_type == "webSearch":
-        return (
-            EventKind.TOOL_RESULT,
-            str(item.get("query", "web search")),
-            SessionStatus.RUNNING,
-        )
-    if item_type == "collabAgentToolCall":
-        return (
-            EventKind.TOOL_RESULT,
-            _format_collab_agent_tool(item, completed=True),
-            SessionStatus.RUNNING,
-        )
-    return (
-        EventKind.SYSTEM_NOTE,
-        f"Completed {item_type or 'item'}",
-        SessionStatus.RUNNING,
-    )
-
-
 def extract_item_id(payload: dict[str, Any]) -> str | None:
     candidate = payload.get("itemId")
     if isinstance(candidate, str) and candidate:
@@ -346,29 +59,6 @@ def extract_item(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(root, dict):
             return root
     return item if isinstance(item, dict) else {}
-
-
-def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:
-    """Return a canonical tool name for metadata["tool_name"] given a Codex item."""
-    if item_type == "commandExecution":
-        return "Bash"
-    if item_type == "fileChange":
-        return "Edit"
-    if item_type == "mcpToolCall":
-        server = item.get("server", "")
-        tool = item.get("tool", "")
-        if server and tool:
-            return f"{server}:{tool}"
-        return str(tool or server) or None
-    if item_type in {"dynamicToolCall", "collabAgentToolCall"}:
-        ns = item.get("namespace", "")
-        tool = item.get("tool", "")
-        if ns and tool:
-            return f"{ns}:{tool}"
-        return str(tool) if tool else None
-    if item_type == "webSearch":
-        return "WebSearch"
-    return None
 
 
 # Codex item types whose completed form carries a terminal status (commands

@@ -3,7 +3,7 @@
 Feeds ``runtime.seed_thread_history`` when importing a Codex thread with
 ``import_history=True``. Converts each ``Turn``'s ``ThreadItem``s (from
 ``client.thread_read(thread_id, include_turns=True)``) into ``EventRecord``s,
-reusing ``codex/normalize.py``'s per-item-type formatters so a synthesized
+reusing ``codex/event_registry.py``'s per-item-type renderers so a synthesized
 historical tool item carries the same metadata envelope (``item_id``,
 ``item_type``, ``tool_name``, ``payload.item``, diff-preview keys) that the
 live adapter builds for ``item/started``/``item/completed`` notifications —
@@ -16,11 +16,13 @@ from typing import Any
 
 from openai_codex.generated.v2_all import Turn
 
-from waypoint.backends.codex.normalize import (
-    _format_item_completed,
-    _format_item_started,
-    diff_preview_for_notification,
+from waypoint.backends.codex.event_registry import (
     extract_tool_name,
+    render_item_completed,
+    render_item_started,
+)
+from waypoint.backends.codex.normalize import (
+    diff_preview_for_notification,
     plan_metadata_for_item,
     set_completed_outcome,
 )
@@ -112,9 +114,10 @@ def _item_to_events(
     item_dict = item.model_dump(mode="json", by_alias=True)
     if is_async_message(item_dict):
         return _async_message_events(item_dict, session_id, completed_at)
-    call_kind, call_text, call_status = _format_item_started(item_dict)
-    if call_kind is None or not call_text:
+    call = render_item_started(item_dict)
+    if call is None or not call.text:
         return []
+    call_kind, call_text, call_status = call.triple()
 
     item_id = item_dict.get("id")
     tool_name = extract_tool_name(item_type, item_dict)
@@ -126,8 +129,9 @@ def _item_to_events(
         return [call_event]
 
     events = [call_event]
-    result_kind, result_text, result_status = _format_item_completed(item_dict)
-    if result_kind is not None and result_text:
+    result = render_item_completed(item_dict)
+    if result is not None and result.text:
+        result_kind, result_text, result_status = result.triple()
         result_metadata = _envelope(
             "item/completed", item_dict, item_id, item_type, tool_name, result_status
         )
@@ -140,9 +144,10 @@ def _item_to_events(
 def _async_message_events(
     item_dict: dict[str, Any], session_id: str, completed_at: datetime
 ) -> list[EventRecord]:
-    kind, text, status = _format_item_completed(item_dict)
-    if kind is None or not text:
+    rendered = render_item_completed(item_dict)
+    if rendered is None or not rendered.text:
         return []
+    kind, text, status = rendered.triple()
     item_id = item_dict.get("id")
     metadata = _envelope(
         "item/completed", item_dict, item_id, "agentMessage", None, status

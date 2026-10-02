@@ -975,7 +975,7 @@ def test_plan_todo_items_maps_codex_statuses() -> None:
 
 
 def test_map_notification_turn_plan_updated_is_todo_result() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "turn/plan/updated",
@@ -987,7 +987,7 @@ def test_map_notification_turn_plan_updated_is_todo_result() -> None:
 
 
 def test_map_notification_agent_message_delta() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/agentMessage/delta",
@@ -999,7 +999,7 @@ def test_map_notification_agent_message_delta() -> None:
 
 
 def test_map_notification_command_execution_started() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1010,7 +1010,7 @@ def test_map_notification_command_execution_started() -> None:
 
 
 def test_map_notification_collab_spawn_started_surfaces_prompt() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1029,7 +1029,7 @@ def test_map_notification_collab_spawn_started_surfaces_prompt() -> None:
 
 
 def test_map_notification_collab_wait_completed_surfaces_subagent_report() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1050,7 +1050,7 @@ def test_map_notification_collab_wait_completed_surfaces_subagent_report() -> No
 
 
 def test_map_notification_collab_wait_without_message_falls_back_to_tool_name() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1061,7 +1061,7 @@ def test_map_notification_collab_wait_without_message_falls_back_to_tool_name() 
 
 
 def test_map_notification_collab_completed_without_message_falls_back() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1078,7 +1078,7 @@ def test_map_notification_collab_completed_without_message_falls_back() -> None:
 
 
 def test_map_notification_collab_wait_joins_multiple_subagent_reports() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1098,10 +1098,8 @@ def test_map_notification_collab_wait_joins_multiple_subagent_reports() -> None:
 
 
 def test_map_notification_file_change_patch_updated_has_preview() -> None:
-    from waypoint.backends.codex.normalize import (
-        diff_preview_for_notification,
-        map_notification,
-    )
+    from waypoint.backends.codex.event_registry import map_notification
+    from waypoint.backends.codex.normalize import diff_preview_for_notification
 
     payload = {
         "itemId": "item_1",
@@ -1202,7 +1200,7 @@ def test_codex_apply_patch_approval_preview_handles_legacy_file_changes() -> Non
 
 
 def test_map_notification_todo_list_updated() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/updated",
@@ -1244,7 +1242,7 @@ def test_format_todo_list_empty_returns_placeholder() -> None:
 
 
 def test_format_item_started_routes_todo_list_as_tool_call() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1261,7 +1259,7 @@ def test_format_item_started_routes_todo_list_as_tool_call() -> None:
 
 
 def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1281,7 +1279,7 @@ def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
 
 
 def test_format_item_completed_drops_agent_message_duplicate() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1666,7 +1664,7 @@ async def _run_turn_errors(
 
 
 def test_map_notification_retryable_error_keeps_running_with_details() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("Reconnecting... 2/5", True, "unauthorized (401)")
     kind, text, status = map_notification("error", notification.payload)
@@ -1677,7 +1675,7 @@ def test_map_notification_retryable_error_keeps_running_with_details() -> None:
 
 
 def test_map_notification_error_skips_details_repeating_message() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("unauthorized (401)", False, "unauthorized (401)")
     _, text, _ = map_notification("error", notification.payload)
@@ -1686,7 +1684,7 @@ def test_map_notification_error_skips_details_repeating_message() -> None:
 
 
 def test_map_notification_error_without_will_retry_is_error() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("boom", None)
     kind, text, status = map_notification("error", notification.payload)

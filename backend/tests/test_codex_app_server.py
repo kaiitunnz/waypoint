@@ -1,4 +1,7 @@
 import asyncio
+import queue
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -65,11 +68,32 @@ class FakeTurnStartResponse:
     turn: FakeTurn
 
 
+_CLOSED = object()
+
+
+class NotificationQueue:
+    """Thread-safe stand-in for the SDK's notification routing."""
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[Any] = queue.Queue()
+
+    def put_nowait(self, item: Any) -> None:
+        self._queue.put(item)
+
+    async def put(self, item: Any) -> None:
+        self._queue.put(item)
+
+    def get_blocking(self) -> Any:
+        return self._queue.get()
+
+
 class FakeCodexClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
-        self.notifications: asyncio.Queue[Any] = asyncio.Queue()
-        self.approval_handler = None
+        self.notifications = NotificationQueue()
+        self.approval_handler: (
+            Callable[[str, dict[str, Any] | None], dict[str, Any]] | None
+        ) = None
         self.started = False
         self.initialized = False
         self.closed = False
@@ -94,6 +118,7 @@ class FakeCodexClient:
 
     def close(self) -> None:
         self.closed = True
+        self.notifications.put_nowait(_CLOSED)
 
     def thread_start(self, params: dict[str, Any]) -> FakeStartResponse:
         self.calls.append(("thread_start", (params,)))
@@ -159,12 +184,13 @@ class FakeCodexClient:
 
     def _next_notification(self) -> Any:
         # Synchronous calls in adapter go through asyncio.to_thread so this
-        # blocks the worker thread until a notification is enqueued.
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(self.notifications.get())
-        finally:
-            loop.close()
+        # blocks the worker thread until a notification is enqueued; close()
+        # unblocks it the way the real client fails pending reads.
+        notification = self.notifications.get_blocking()
+        if notification is _CLOSED:
+            self.notifications.put_nowait(_CLOSED)
+            raise RuntimeError("client closed")
+        return notification
 
 
 @dataclass
@@ -274,6 +300,7 @@ async def test_set_model_persists_and_re_emits_on_turn_start() -> None:
         ("turn_start", (state.thread_id, "hello", {"model": "gpt-5"})),
     ]
     if state.stream_task:
+        fake.close()
         state.stream_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await state.stream_task
@@ -294,6 +321,7 @@ async def test_send_input_per_turn_params_override_session_model() -> None:
         (state.thread_id, "hi", {"model": "gpt-5-fast"}),
     )
     if state.stream_task:
+        fake.close()
         state.stream_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await state.stream_task
@@ -340,6 +368,7 @@ async def test_send_input_starts_then_steers_turn() -> None:
     assert methods.count("turn_steer") == 1
     # Cancel the dangling stream task so the loop can shut down cleanly.
     if state.stream_task is not None:
+        fake.close()
         state.stream_task.cancel()
         try:
             await state.stream_task
@@ -402,6 +431,7 @@ async def test_send_input_items_starts_structured_turn() -> None:
 
     assert ("turn_start", (state.thread_id, items)) in fake.calls
     if state.stream_task is not None:
+        fake.close()
         state.stream_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await state.stream_task
@@ -420,6 +450,7 @@ async def test_send_input_items_accepts_per_turn_params() -> None:
 
     assert ("turn_start", (state.thread_id, items, params)) in fake.calls
     if state.stream_task is not None:
+        fake.close()
         state.stream_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await state.stream_task
@@ -489,6 +520,7 @@ async def test_send_input_after_interrupt_starts_fresh_turn() -> None:
     assert state.active_turn_id == "turn-1"
 
     if state.stream_task is not None:
+        fake.close()
         state.stream_task.cancel()
         try:
             await state.stream_task
@@ -512,6 +544,130 @@ async def test_respond_to_approval_resolves_pending() -> None:
     assert handled is True
     assert pending.event.is_set()
     assert pending.response == {"decision": "accept"}
+
+
+class ParkedStreamClient(FakeCodexClient):
+    """A client whose turn stream blocks until closed, like a long reasoning
+    item with no notifications."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+
+    def next_turn_notification(self, turn_id: str) -> Any:
+        self.turn_notification_ids.append(turn_id)
+        self.release.wait()
+        raise RuntimeError("client closed")
+
+    def close(self) -> None:
+        super().close()
+        self.release.set()
+
+
+def make_parked_adapter(
+    emitted: list | None = None,
+) -> tuple[CodexAppServerAdapter, ParkedStreamClient]:
+    async def emit(session_id, kind, text, metadata, status):
+        if emitted is not None:
+            emitted.append((session_id, kind, text, metadata, status))
+
+    fake = ParkedStreamClient()
+
+    def factory(cwd, approval_handler):
+        fake.approval_handler = approval_handler
+        return fake
+
+    return CodexAppServerAdapter(emit, client_factory=factory), fake
+
+
+@pytest.mark.asyncio
+async def test_steer_and_interrupt_do_not_wait_for_a_parked_stream() -> None:
+    adapter, fake = make_parked_adapter()
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    await asyncio.sleep(0.05)
+    assert fake.turn_notification_ids == ["turn-1"]
+
+    await asyncio.wait_for(adapter.send_input("sess", "steer"), timeout=2)
+    await asyncio.wait_for(adapter.interrupt("sess"), timeout=2)
+
+    names = [call[0] for call in fake.calls]
+    assert names[-2:] == ["turn_steer", "turn_interrupt"]
+    assert await adapter.terminate_session("sess") is True
+
+
+@pytest.mark.asyncio
+async def test_interrupt_cancels_a_pending_approval_first() -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    state = adapter._sessions["sess"]
+    interrupt_saw_resolved: list[bool] = []
+
+    def turn_interrupt(thread_id: str, turn_id: str) -> None:
+        pending = state.pending_approval
+        interrupt_saw_resolved.append(pending is None or pending.event.is_set())
+
+    fake.turn_interrupt = turn_interrupt  # type: ignore[method-assign]
+    # The SDK calls the approval handler on its reader thread and blocks there.
+    handler = fake.approval_handler
+    assert handler is not None
+    reader: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/commandExecution/requestApproval",
+            {"itemId": "cmd-1", "command": "ls"},
+        )
+    )
+    while state.pending_approval is None:
+        await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(adapter.interrupt("sess"), timeout=2)
+
+    assert await asyncio.wait_for(reader, timeout=2) == {"decision": "cancel"}
+    assert interrupt_saw_resolved == [True]
+    assert state.pending_approval is None
+    assert [
+        metadata["method"]
+        for _, kind, _, metadata, _ in emitted
+        if kind == EventKind.SYSTEM_NOTE
+    ] == ["approval.invalidated"]
+    # A late approve on the already-cancelled request is a no-op.
+    assert await adapter.respond_to_approval("sess", "approve") is False
+    await adapter.terminate_session("sess")
+
+
+@pytest.mark.asyncio
+async def test_interrupt_tolerates_no_active_turn_after_approval_cancel() -> None:
+    adapter, fake = make_parked_adapter()
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    state = adapter._sessions["sess"]
+
+    def turn_interrupt(thread_id: str, turn_id: str) -> None:
+        raise RuntimeError("no active turn to interrupt")
+
+    fake.turn_interrupt = turn_interrupt  # type: ignore[method-assign]
+    handler = fake.approval_handler
+    assert handler is not None
+    reader: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/fileChange/requestApproval",
+            {"itemId": "patch-1"},
+        )
+    )
+    while state.pending_approval is None:
+        await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(adapter.interrupt("sess"), timeout=2)
+    assert await asyncio.wait_for(reader, timeout=2) == {"decision": "cancel"}
+
+    # Without an approval to cancel, an interrupt failure still surfaces.
+    with pytest.raises(RuntimeError):
+        await adapter.interrupt("sess")
+    await adapter.terminate_session("sess")
 
 
 @pytest.mark.asyncio
@@ -1206,7 +1362,7 @@ async def test_context_usage_snapshot_deduplicates_repeated_updates() -> None:
         session_id="sess",
         cwd="/tmp",
         client=cast(CodexClient, fake),
-        transport_lock=asyncio.Lock(),
+        request_lock=asyncio.Lock(),
         thread_id="thread-1",
     )
     snapshot = _context_usage_snapshot_from_thread_token_usage(
@@ -1254,7 +1410,7 @@ async def test_token_usage_record_uses_turn_id_and_provider_total() -> None:
         session_id="sess",
         cwd="/tmp",
         client=cast(CodexClient, fake),
-        transport_lock=asyncio.Lock(),
+        request_lock=asyncio.Lock(),
         thread_id="thread-1",
     )
     snapshot = _context_usage_snapshot_from_thread_token_usage(
@@ -1312,7 +1468,7 @@ async def test_token_usage_record_threads_sticky_model_and_effort() -> None:
         session_id="sess",
         cwd="/tmp",
         client=cast(CodexClient, fake),
-        transport_lock=asyncio.Lock(),
+        request_lock=asyncio.Lock(),
         thread_id="thread-1",
         model="gpt-5-codex",
         effort="high",

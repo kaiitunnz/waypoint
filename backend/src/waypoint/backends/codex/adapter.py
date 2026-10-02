@@ -41,6 +41,19 @@ from waypoint.schemas import (
 
 log = logging.getLogger("waypoint.codex")
 
+# What ends each server request without granting it when the human
+# interrupts the turn. Command/file approvals take `cancel` (decline and end
+# the turn); the other request types have their own "no" shapes.
+_INTERRUPT_RESPONSES: dict[str, dict[str, Any]] = {
+    "item/commandExecution/requestApproval": {"decision": "cancel"},
+    "item/fileChange/requestApproval": {"decision": "cancel"},
+    "applyPatchApproval": {"decision": "abort"},
+    "execCommandApproval": {"decision": "abort"},
+    "mcpServer/elicitation/request": {"action": "cancel"},
+    "item/tool/requestUserInput": {"answers": {}},
+    "item/permissions/requestApproval": {"permissions": {}},
+}
+
 ApprovalDecisionHandler = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
     Coroutine[Any, Any, None],
@@ -138,7 +151,11 @@ class CodexSessionState:
     session_id: str
     cwd: str
     client: CodexClient
-    transport_lock: asyncio.Lock
+    # Orders Waypoint-initiated requests among themselves. Notification reads
+    # never take it: the SDK routes responses and notifications on its own
+    # reader thread, so a stream parked on the next notification must not
+    # delay a steer or an interrupt.
+    request_lock: asyncio.Lock
     thread_id: str
     active_turn_id: str | None = None
     stream_task: asyncio.Task[None] | None = None
@@ -360,7 +377,8 @@ class CodexAppServerAdapter:
                     self._loop,
                 )
             pending.event.wait()
-            state.pending_approval = None
+            if state.pending_approval is pending:
+                state.pending_approval = None
             return pending.response or {"decision": "decline"}
 
         factory = client_factory_override or self._client_factory
@@ -371,7 +389,7 @@ class CodexAppServerAdapter:
             session_id=session_id,
             cwd=cwd,
             client=client,
-            transport_lock=asyncio.Lock(),
+            request_lock=asyncio.Lock(),
             thread_id=thread_id,
             model=model,
             effort=effort,
@@ -495,9 +513,50 @@ class CodexAppServerAdapter:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
             return
-        await self._call_client(
-            state, state.client.turn_interrupt, state.thread_id, state.active_turn_id
+        cancelled_approval = self._cancel_pending_approval(state)
+        if cancelled_approval:
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                "Pending approval cancelled by interrupt",
+                {"method": "approval.invalidated", "status": SessionStatus.RUNNING},
+                SessionStatus.RUNNING,
+            )
+        try:
+            await self._call_client(
+                state,
+                state.client.turn_interrupt,
+                state.thread_id,
+                state.active_turn_id,
+            )
+        except Exception:
+            # Cancelling a command/file approval already ends the turn, so the
+            # interrupt can race it and find no active turn.
+            if not cancelled_approval:
+                raise
+            log.debug(
+                "codex turn_interrupt after approval cancel failed",
+                exc_info=True,
+                extra={"session_id": session_id},
+            )
+
+    def _cancel_pending_approval(self, state: CodexSessionState) -> bool:
+        """Resolve an open approval so the SDK reader thread can route again.
+
+        The SDK runs the approval handler on its only reader thread, so no
+        response (an interrupt's included) is routed while one is open.
+        Resolving it first also frees a steer already waiting on its response
+        while holding the request lock.
+        """
+        pending = state.pending_approval
+        if pending is None or pending.event.is_set():
+            return False
+        pending.response = dict(
+            _INTERRUPT_RESPONSES.get(pending.method, {"decision": "decline"})
         )
+        state.pending_approval = None
+        pending.event.set()
+        return True
 
     async def compact_thread(self, session_id: str) -> None:
         """Issue thread/compact/start and stream resulting notifications.
@@ -571,9 +630,10 @@ class CodexAppServerAdapter:
     ) -> bool:
         state = self._require_session(session_id)
         pending = state.pending_approval
-        if pending is None:
+        if pending is None or pending.event.is_set():
             return False
         pending.response = {"decision": self._map_decision(decision)}
+        state.pending_approval = None
         pending.event.set()
         return True
 
@@ -597,12 +657,10 @@ class CodexAppServerAdapter:
             state.pending_approval.response = {"decision": "decline"}
             state.pending_approval.event.set()
         # Close the client first. The streaming task is parked in an
-        # uncancellable `asyncio.to_thread(next_*_notification)` while holding
-        # `state.transport_lock`; sending turn_interrupt would deadlock waiting
-        # for the same lock, and `await stream_task` cannot proceed until the
-        # blocking thread returns. Closing the transport drops EOF on the
-        # codex stdio pipes, which unblocks notification reads and makes both
-        # the lock release and the cancel observable.
+        # uncancellable `asyncio.to_thread(next_*_notification)`, so
+        # `await stream_task` cannot proceed until the blocking thread returns.
+        # Closing the transport drops EOF on the codex stdio pipes, which fails
+        # every pending notification read and makes the cancel observable.
         try:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
@@ -616,8 +674,8 @@ class CodexAppServerAdapter:
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
         try:
             while True:
-                notification = await self._call_client(
-                    state, state.client.next_turn_notification, turn_id
+                notification = await asyncio.to_thread(
+                    state.client.next_turn_notification, turn_id
                 )
                 payload = payload_to_dict(notification.payload)
                 if notification.method == "thread/tokenUsage/updated":
@@ -729,9 +787,7 @@ class CodexAppServerAdapter:
     async def _stream_compact(self, state: CodexSessionState) -> None:
         try:
             while True:
-                notification = await self._call_client(
-                    state, state.client.next_notification
-                )
+                notification = await asyncio.to_thread(state.client.next_notification)
                 payload = payload_to_dict(notification.payload)
                 kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
@@ -768,7 +824,7 @@ class CodexAppServerAdapter:
     async def _call_client(
         self, state: CodexSessionState, func: Callable[..., Any], *args: Any
     ) -> Any:
-        async with state.transport_lock:
+        async with state.request_lock:
             return await asyncio.to_thread(func, *args)
 
     async def _publish_context_usage(

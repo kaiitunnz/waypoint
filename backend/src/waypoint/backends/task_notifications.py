@@ -14,9 +14,6 @@ from typing import Any
 from waypoint.schemas import AttachmentOrigin, SessionStatus
 
 TASK_NOTIFICATION_METHOD = "task_notification"
-# Stored events from before the contract was backend-neutral; the frontend
-# still renders them.
-LEGACY_TASK_NOTIFICATION_METHODS = frozenset({"claude.task_notification"})
 TASK_NOTIFICATION_ITEM_TYPE = "task_notification"
 TASK_NOTIFICATION_VERSION = 1
 # Largest body field (result/event/note) kept verbatim in event metadata, which

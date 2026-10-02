@@ -37,9 +37,10 @@ from waypoint.backends.codex.questions import (
 )
 from waypoint.backends.codex.subagents import (
     SUBAGENT_ITEM_TYPE,
+    ReportSource,
     SubagentReport,
-    report_child,
-    report_children,
+    report_source,
+    report_sources,
     with_report,
 )
 from waypoint.backends.diff_preview import preview_to_metadata
@@ -59,12 +60,12 @@ from waypoint.schemas import EventKind, EventRecord
 def turns_to_events(
     turns: list[Turn],
     session_id: str,
-    subagent_reports: Mapping[str, str | None] | None = None,
+    subagent_reports: Mapping[ReportSource, str | None] | None = None,
 ) -> list[EventRecord]:
     """Replay a Codex thread's turns into ``EventRecord``s in sequence order.
 
-    ``subagent_reports`` maps a subagent's thread id to its report, read by the
-    caller from the child thread. A task card whose id was already replayed is
+    ``subagent_reports`` maps where a subagent's report lives to the report,
+    read by the caller from the child thread. A task card whose id was already replayed is
     skipped.
 
     Async questions left unanswered before the final turn get a closure note;
@@ -128,9 +129,9 @@ def _turn_timestamp(primary: int | None, fallback: int | None) -> datetime:
     return datetime.fromtimestamp(epoch or 0, UTC)
 
 
-def subagent_report_children(turns: list[Turn]) -> list[str]:
-    """Child threads whose reports a replay of ``turns`` shows."""
-    return report_children(
+def subagent_report_sources(turns: list[Turn]) -> list[ReportSource]:
+    """Where the reports a replay of ``turns`` shows live."""
+    return report_sources(
         item.root.model_dump(mode="json", by_alias=True)
         for turn in turns
         for item in turn.items
@@ -151,7 +152,7 @@ def _item_to_events(
     session_id: str,
     started_at: datetime,
     completed_at: datetime,
-    subagent_reports: Mapping[str, str | None],
+    subagent_reports: Mapping[ReportSource, str | None],
 ) -> list[EventRecord]:
     item_type = getattr(item, "type", None)
     if item_type == "userMessage":
@@ -171,11 +172,11 @@ def _item_to_events(
         # has no use for it.
         return []
 
-    child = report_child(item_dict)
-    if child is not None:
+    source = report_source(item_dict)
+    if source is not None:
         item_dict = with_report(
             item_dict,
-            SubagentReport(subagent_reports.get(child), NOT_CAPTURED_ON_IMPORT),
+            SubagentReport(subagent_reports.get(source), NOT_CAPTURED_ON_IMPORT),
         )
 
     item_id = item_dict.get("id")

@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 from openai_codex.client import CodexClient
-from openai_codex.errors import MethodNotFoundError
+from openai_codex.errors import InvalidRequestError, ServerBusyError
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
 from waypoint.backends.codex import adapter as adapter_module
@@ -123,7 +123,7 @@ class FakeCodexClient:
         self.turn_notification_ids: list[str] = []
         self.unregistered_turn_notification_ids: list[str] = []
         self.child_threads: dict[str, Any] = {}
-        self.turns_list_unsupported = False
+        self.paginated_reads_error: Exception | None = None
         self.skill_payload: dict[str, Any] = {
             "description": "Humanize prose",
             "enabled": True,
@@ -192,10 +192,18 @@ class FakeCodexClient:
                     ]
                 }
             )
-        if method == "thread/turns/list":
-            if self.turns_list_unsupported:
-                raise MethodNotFoundError(-32601, "method not found")
-            return SimpleNamespace(data=self._child_thread(params["threadId"]).turns)
+        if method in {"thread/turns/list", "thread/items/list"}:
+            if self.paginated_reads_error is not None:
+                raise self.paginated_reads_error
+            turns = self._child_thread(params["threadId"]).turns
+            if method == "thread/turns/list":
+                return SimpleNamespace(data=turns[-1:])
+            [turn] = [turn for turn in turns if turn.id == params["turnId"]]
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(item=entry.root) for entry in reversed(turn.items)
+                ]
+            )
         raise AssertionError(f"unexpected request: {method}")
 
     def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
@@ -2140,7 +2148,9 @@ async def test_compaction_waits_out_a_starting_turn() -> None:
     assert state.compacting is False
 
 
-def _child_thread(*messages: tuple[str, str | None], status: str = "completed") -> Any:
+def _child_thread(
+    *messages: tuple[str, str | None], status: str = "completed", turn_id: str = "a"
+) -> Any:
     items = [
         SimpleNamespace(
             root=AgentMessageThreadItem.model_validate(
@@ -2154,7 +2164,9 @@ def _child_thread(*messages: tuple[str, str | None], status: str = "completed") 
         )
         for index, (text, phase) in enumerate(messages)
     ]
-    return SimpleNamespace(turns=[SimpleNamespace(items=items, status=status)])
+    return SimpleNamespace(
+        turns=[SimpleNamespace(id=turn_id, items=items, status=status)]
+    )
 
 
 def _activity(kind: str, item_id: str, thread_id: str = "thread-1") -> Any:
@@ -2223,7 +2235,15 @@ async def test_subagent_completion_is_a_task_card_with_the_child_report() -> Non
 
     assert (
         "request",
-        ("thread/turns/list", {"threadId": "child-1", "limit": 1, "itemsView": "full"}),
+        (
+            "thread/items/list",
+            {
+                "threadId": "child-1",
+                "turnId": "a",
+                "limit": 50,
+                "sortDirection": "desc",
+            },
+        ),
     ) in fake.calls
     [(_, kind, text, metadata, _)] = emitted
     assert kind is EventKind.SYSTEM_NOTE
@@ -2371,7 +2391,9 @@ async def test_long_subagent_report_is_not_spilled_when_capture_is_off() -> None
 async def test_late_subagent_completion_on_the_pump_becomes_a_task_card() -> None:
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
     adapter, fake = make_adapter(emitted)
-    fake.child_threads["child-1"] = _child_thread(("Late verdict.", "final_answer"))
+    fake.child_threads["child-1"] = _child_thread(
+        ("Late verdict.", "final_answer"), turn_id="late"
+    )
     await adapter.start_session("sess", "/tmp/work")
 
     fake.global_notifications.put_nowait(
@@ -2392,7 +2414,7 @@ async def test_late_subagent_completion_on_the_pump_becomes_a_task_card() -> Non
 async def test_subagent_report_falls_back_to_thread_read_on_an_older_cli() -> None:
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
     adapter, fake = make_adapter(emitted)
-    fake.turns_list_unsupported = True
+    fake.paginated_reads_error = InvalidRequestError(-32600, "unknown variant")
     fake.child_threads["child-1"] = _child_thread(("Old CLI verdict.", "final_answer"))
     await adapter.start_session("sess", "/tmp/work")
     fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
@@ -2409,3 +2431,43 @@ async def test_subagent_report_falls_back_to_thread_read_on_an_older_cli() -> No
     assert ("thread_read", ("child-1", True)) in fake.calls
     [card] = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
     assert card["result_preview"] == "Old CLI verdict."
+
+
+@pytest.mark.asyncio
+async def test_transient_report_read_error_does_not_fall_back_to_full_history() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    fake.paginated_reads_error = ServerBusyError(-32001, "busy")
+    fake.child_threads["child-1"] = _child_thread(("Verdict.", "final_answer"))
+    await adapter.start_session("sess", "/tmp/work")
+    fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
+        )
+    )
+    await adapter.send_input("sess", "review it")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    assert not [call for call in fake.calls if call[0] == "thread_read"]
+    [card] = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
+    assert card["output_unavailable_reason"] == REPORT_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_completion_reads_the_turn_it_reports_on() -> None:
+    child = SimpleNamespace(
+        turns=[
+            _child_thread(("Old verdict.", "final_answer"), turn_id="a").turns[0],
+            _child_thread(
+                ("Busy again.", "commentary"), status="inProgress", turn_id="b"
+            ).turns[0],
+        ]
+    )
+    emitted, _ = await _run_subagent_turn(
+        [_activity("completed", "subagent-completed-a")], child
+    )
+
+    assert emitted[0][3]["task_notification"]["result_preview"] == "Old verdict."

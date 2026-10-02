@@ -12,8 +12,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai_codex.client import CodexClient
-from openai_codex.errors import JsonRpcError
-from openai_codex.generated.v2_all import ThreadTurnsListResponse
+from openai_codex.errors import InvalidRequestError, MethodNotFoundError
+from openai_codex.generated.v2_all import (
+    ThreadItemsListResponse,
+    ThreadTurnsListResponse,
+)
 
 from waypoint.backends.task_notifications import (
     NOT_CAPTURED_ON_IMPORT,
@@ -30,11 +33,23 @@ REPORT_UNAVAILABLE = "subagent report unavailable"
 # Transient item key: set before rendering, stripped before persisting.
 SUBAGENT_REPORT_KEY = "_waypointSubagentReport"
 
+# A completion's item id is ``subagent-completed-<child turn id>``.
+_COMPLETED_ID_PREFIX = "subagent-completed-"
+# Items read from the end of a finished turn to find its report.
+_REPORT_ITEMS_PAGE = 50
+
 _TOOL_VERBS = {"started": "Spawned", "interacted": "Messaged"}
 _CARD_STATES = {
     "completed": ("completed", "finished"),
     "interrupted": ("stopped", "stopped"),
 }
+
+
+@dataclass(frozen=True)
+class ReportSource:
+    thread_id: str
+    # The child turn a completion reports on; ``None`` reads the newest turn.
+    turn_id: str | None
 
 
 @dataclass(frozen=True)
@@ -64,48 +79,78 @@ def display_name(agent_path: Any) -> str:
     return "subagent"
 
 
-def report_child(item: dict[str, Any]) -> str | None:
-    """The child thread to read a report from, for an item that ends a run."""
+def report_source(item: dict[str, Any]) -> ReportSource | None:
+    """Where to read the report for an item that ends a run."""
     if item.get("type") != SUBAGENT_ITEM_TYPE or _kind(item) not in REPORT_KINDS:
         return None
-    return _child_thread_id(item)
+    child = _child_thread_id(item)
+    if child is None:
+        return None
+    item_id = item.get("id")
+    turn_id = (
+        item_id.removeprefix(_COMPLETED_ID_PREFIX)
+        if isinstance(item_id, str) and item_id.startswith(_COMPLETED_ID_PREFIX)
+        else None
+    )
+    return ReportSource(child, turn_id or None)
 
 
-def report_children(items: Iterable[dict[str, Any]]) -> list[str]:
-    """Distinct child threads whose report the given items need, in order."""
-    children: list[str] = []
+def report_sources(items: Iterable[dict[str, Any]]) -> list[ReportSource]:
+    """Distinct report sources the given items need, in order."""
+    sources: list[ReportSource] = []
     for item in items:
-        child = report_child(item)
-        if child is not None and child not in children:
-            children.append(child)
-    return children
+        source = report_source(item)
+        if source is not None and source not in sources:
+            sources.append(source)
+    return sources
 
 
-def read_report(client: CodexClient, child_thread_id: str) -> str | None:
-    """Read a subagent's report from its last turn. Blocking."""
+def read_report(client: CodexClient, source: ReportSource) -> str | None:
+    """Read a subagent's report from the turn it finished, or from its newest
+    turn when the item does not name one. Blocking."""
     try:
-        page = client.request(
+        if source.turn_id is not None:
+            page = client.request(
+                "thread/items/list",
+                {
+                    "threadId": source.thread_id,
+                    "turnId": source.turn_id,
+                    "limit": _REPORT_ITEMS_PAGE,
+                    "sortDirection": "desc",
+                },
+                response_model=ThreadItemsListResponse,
+            )
+            # A completion names a turn that has finished.
+            return _report([entry.item for entry in reversed(page.data)], True)
+        turns: list[Any] = client.request(
             "thread/turns/list",
-            {"threadId": child_thread_id, "limit": 1, "itemsView": "full"},
+            {"threadId": source.thread_id, "limit": 1, "itemsView": "full"},
             response_model=ThreadTurnsListResponse,
-        )
-        turns: list[Any] = page.data
-    except JsonRpcError:
-        # A CLI without the paginated turn list.
-        turns = client.thread_read(child_thread_id, True).thread.turns
+        ).data
+    except (InvalidRequestError, MethodNotFoundError):
+        # A CLI without the paginated thread reads.
+        turns = client.thread_read(source.thread_id, True).thread.turns
+        if source.turn_id is not None:
+            turns = [turn for turn in turns if turn.id == source.turn_id]
     return final_report(turns)
 
 
 def final_report(turns: list[Any]) -> str | None:
-    """The report in a child's turns: the last turn's final answer. A completed
-    turn without one falls back to its last agent message; an unfinished or
-    interrupted turn's other messages are progress, not a report."""
+    """The report in the last of ``turns``."""
     if not turns:
         return None
     last_turn = turns[-1]
+    completed = _value(getattr(last_turn, "status", None)) == "completed"
+    return _report(last_turn.items, completed)
+
+
+def _report(entries: list[Any], turn_completed: bool) -> str | None:
+    """A turn's final answer. A completed turn without one falls back to its
+    last agent message; an unfinished or interrupted turn's other messages are
+    progress, not a report."""
     messages = [
         item
-        for item in (entry.root for entry in last_turn.items)
+        for item in (getattr(entry, "root", entry) for entry in entries)
         if getattr(item, "type", None) == "agentMessage"
         and isinstance(getattr(item, "text", None), str)
         and item.text.strip()
@@ -113,9 +158,9 @@ def final_report(turns: list[Any]) -> str | None:
     final = [
         message
         for message in messages
-        if getattr(getattr(message, "phase", None), "value", None) == "final_answer"
+        if _value(getattr(message, "phase", None)) == "final_answer"
     ]
-    if not final and _value(getattr(last_turn, "status", None)) == "completed":
+    if not final and turn_completed:
         final = messages
     if not final:
         return None

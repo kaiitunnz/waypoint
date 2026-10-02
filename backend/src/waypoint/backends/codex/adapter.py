@@ -40,9 +40,10 @@ from waypoint.backends.codex.questions import apply_async_question
 from waypoint.backends.codex.subagents import (
     REPORT_FETCH_TIMEOUT_SECONDS,
     SUBAGENT_ITEM_TYPE,
+    ReportSource,
     SubagentReport,
     read_report,
-    report_child,
+    report_source,
     with_report,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
@@ -906,9 +907,9 @@ class CodexAppServerAdapter:
         thread_id = payload.get("threadId")
         if isinstance(thread_id, str) and thread_id != state.thread_id:
             return False
-        child = report_child(item) if method == "item/completed" else None
-        if child is not None:
-            report = await self._read_subagent_report(state, child)
+        source = report_source(item) if method == "item/completed" else None
+        if source is not None:
+            report = await self._read_subagent_report(state, source)
             no_spill_reason = (
                 None if self._task_output_capture_enabled else CAPTURE_DISABLED
             )
@@ -916,20 +917,20 @@ class CodexAppServerAdapter:
         return True
 
     async def _read_subagent_report(
-        self, state: CodexSessionState, child_thread_id: str
+        self, state: CodexSessionState, source: ReportSource
     ) -> str | None:
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(read_report, state.client, child_thread_id),
+                asyncio.to_thread(read_report, state.client, source),
                 REPORT_FETCH_TIMEOUT_SECONDS,
             )
         except Exception:  # noqa: BLE001
             log.warning(
                 "codex subagent report unavailable",
                 exc_info=True,
-                extra={"session_id": state.session_id, "thread_id": child_thread_id},
+                extra={"session_id": state.session_id, "thread_id": source.thread_id},
             )
             return None
 

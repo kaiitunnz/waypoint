@@ -41,7 +41,7 @@ from waypoint.backends.codex.adapter import (
     default_client_factory,
 )
 from waypoint.backends.codex.history import (
-    subagent_report_children,
+    subagent_report_sources,
     turns_to_events,
 )
 from waypoint.backends.codex.pane import composer_ready, composer_submitted
@@ -65,6 +65,7 @@ from waypoint.backends.codex.schemas import (
 )
 from waypoint.backends.codex.subagents import (
     REPORT_FETCH_TIMEOUT_SECONDS,
+    ReportSource,
     read_report,
 )
 from waypoint.backends.codex.transport import input_http_error
@@ -97,6 +98,8 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.codex")
+# Subagent reports an import reads at once.
+_IMPORT_REPORT_READS = 4
 
 
 def _event_thread_id(event: EventRecord) -> str | None:
@@ -1644,38 +1647,42 @@ class CodexPlugin(DefaultLaunchContract):
     async def _read_subagent_reports(
         self,
         runtime: "SessionRuntime",
-        child_thread_ids: list[str],
+        sources: list[ReportSource],
         launch_target_id: str | None,
         launch_env: dict[str, str] | None,
-    ) -> dict[str, str | None]:
+    ) -> dict[ReportSource, str | None]:
         """Each subagent's report, read from its own thread; ``None`` when the
         read fails or times out."""
-        if not child_thread_ids:
+        if not sources:
             return {}
+        # Responses route by request id, so reads share one client; the bound
+        # keeps a large import off most of the default executor, and each
+        # read's timeout starts only once it runs.
+        slots = asyncio.Semaphore(_IMPORT_REPORT_READS)
 
-        async def read(client: CodexClient, child: str) -> str | None:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(read_report, client, child),
-                    REPORT_FETCH_TIMEOUT_SECONDS,
-                )
-            except Exception:  # noqa: BLE001
-                log.warning(
-                    "codex subagent report unavailable on import",
-                    exc_info=True,
-                    extra={"thread_id": child},
-                )
-                return None
+        async def read(client: CodexClient, source: ReportSource) -> str | None:
+            async with slots:
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(read_report, client, source),
+                        REPORT_FETCH_TIMEOUT_SECONDS,
+                    )
+                except Exception:  # noqa: BLE001
+                    log.warning(
+                        "codex subagent report unavailable on import",
+                        exc_info=True,
+                        extra={"thread_id": source.thread_id},
+                    )
+                    return None
 
-        async def operation(client: CodexClient) -> dict[str, str | None]:
-            # Concurrent on one client: responses route by request id.
+        async def operation(client: CodexClient) -> dict[ReportSource, str | None]:
             reports = await asyncio.gather(
-                *(read(client, child) for child in child_thread_ids)
+                *(read(client, source) for source in sources)
             )
-            return dict(zip(child_thread_ids, reports, strict=True))
+            return dict(zip(sources, reports, strict=True))
 
         try:
-            result: dict[str, str | None] = await self.run_client_operation(
+            result: dict[ReportSource, str | None] = await self.run_client_operation(
                 runtime, launch_target_id, operation=operation, launch_env=launch_env
             )
         except Exception:  # noqa: BLE001
@@ -1976,7 +1983,7 @@ class CodexPlugin(DefaultLaunchContract):
         async def read_history() -> list[EventRecord]:
             reports = await self._read_subagent_reports(
                 runtime,
-                subagent_report_children(thread.turns),
+                subagent_report_sources(thread.turns),
                 request.launch_target_id,
                 request.launch_env,
             )

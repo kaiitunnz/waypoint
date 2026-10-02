@@ -2,8 +2,12 @@ import base64
 
 from openai_codex.generated.v2_all import Turn
 
-from waypoint.backends.codex.history import subagent_report_children, turns_to_events
-from waypoint.backends.codex.subagents import REPORT_UNAVAILABLE, SUBAGENT_REPORT_KEY
+from waypoint.backends.codex.history import subagent_report_sources, turns_to_events
+from waypoint.backends.codex.subagents import (
+    REPORT_UNAVAILABLE,
+    SUBAGENT_REPORT_KEY,
+    ReportSource,
+)
 from waypoint.backends.task_notifications import (
     NOT_CAPTURED_ON_IMPORT,
     TASK_NOTIFICATION_INLINE_LIMIT,
@@ -232,7 +236,12 @@ def test_subagent_activity_imports_as_tool_entries_and_task_cards() -> None:
         ]
     )
     events = turns_to_events(
-        [turn], "sess-1", {"child-1": "Verdict: approve.", "child-2": None}
+        [turn],
+        "sess-1",
+        {
+            ReportSource("child-1", "a"): "Verdict: approve.",
+            ReportSource("child-2", None): None,
+        },
     )
 
     assert [(event.kind, event.text) for event in events] == [
@@ -263,7 +272,7 @@ def test_subagent_card_without_a_children_map_says_report_unavailable() -> None:
 def test_long_imported_subagent_report_is_a_truncated_preview() -> None:
     report = "r" * (TASK_NOTIFICATION_INLINE_LIMIT + 10)
     turn = _turn(items=[_activity("completed", "subagent-completed-a")])
-    [event] = turns_to_events([turn], "sess-1", {"child-1": report})
+    [event] = turns_to_events([turn], "sess-1", {ReportSource("child-1", "a"): report})
 
     card = event.metadata["task_notification"]
     assert card["result_truncated"] is True
@@ -277,17 +286,47 @@ def test_imported_task_card_ids_are_deduplicated() -> None:
         _turn(id="turn1", items=[_activity("completed", "subagent-completed-a")]),
         _turn(id="turn2", items=[_activity("completed", "subagent-completed-a")]),
     ]
-    events = turns_to_events(turns, "sess-1", {"child-1": "Done."})
+    events = turns_to_events(turns, "sess-1", {ReportSource("child-1", "a"): "Done."})
     assert len(events) == 1
 
 
-def test_subagent_report_children_lists_each_finished_child_once() -> None:
+def test_each_completion_of_a_retasked_subagent_shows_its_own_report() -> None:
+    turn = _turn(
+        items=[
+            _activity("completed", "subagent-completed-t1"),
+            _activity("interacted", "call-2"),
+            _activity("completed", "subagent-completed-t2"),
+        ]
+    )
+    events = turns_to_events(
+        [turn],
+        "sess-1",
+        {
+            ReportSource("child-1", "t1"): "First verdict.",
+            ReportSource("child-1", "t2"): "Second verdict.",
+        },
+    )
+
+    cards = [
+        event.metadata["task_notification"]["result_preview"]
+        for event in events
+        if event.metadata.get("method") == TASK_NOTIFICATION_METHOD
+    ]
+    assert cards == ["First verdict.", "Second verdict."]
+
+
+def test_subagent_report_sources_name_each_finished_turn_once() -> None:
     turn = _turn(
         items=[
             _activity("started", "call-1"),
-            _activity("completed", "subagent-completed-a"),
-            _activity("interrupted", "subagent-interrupted-a"),
-            _activity("completed", "subagent-completed-b", child="child-2"),
+            _activity("completed", "subagent-completed-t1"),
+            _activity("completed", "subagent-completed-t1"),
+            _activity("interrupted", "call-3"),
+            _activity("completed", "subagent-completed-t9", child="child-2"),
         ]
     )
-    assert subagent_report_children([turn]) == ["child-1", "child-2"]
+    assert subagent_report_sources([turn]) == [
+        ReportSource("child-1", "t1"),
+        ReportSource("child-1", None),
+        ReportSource("child-2", "t9"),
+    ]

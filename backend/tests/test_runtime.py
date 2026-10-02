@@ -2824,7 +2824,10 @@ async def test_import_codex_thread_shows_subagent_reports_read_from_children(
             "status": "completed",
             "startedAt": 1_700_000_000,
             "completedAt": 1_700_000_010,
-            "items": [activity("subagent-completed-a", "ok"), activity("x", "broken")],
+            "items": [
+                activity("subagent-completed-ok", "ok"),
+                activity("subagent-completed-broken", "broken"),
+            ],
         }
     )
     thread = make_thread(id="thread-9", turns=[turn])
@@ -2847,10 +2850,13 @@ async def test_import_codex_thread_shows_subagent_reports_read_from_children(
         def request(
             self, method: str, params: dict[str, Any], *, response_model: Any
         ) -> Any:
-            assert method == "thread/turns/list"
+            assert method == "thread/items/list"
+            assert params["turnId"] == params["threadId"]
             if params["threadId"] == "broken":
                 raise RuntimeError("no such thread")
-            return SimpleNamespace(data=[report])
+            return SimpleNamespace(
+                data=[SimpleNamespace(item=entry.root) for entry in report.items]
+            )
 
     async def fake_read(*_args: Any, **_kwargs: Any) -> Any:
         return thread
@@ -2871,8 +2877,11 @@ async def test_import_codex_thread_shows_subagent_reports_read_from_children(
         for event in storage.list_events(session.id)
         if event.metadata.get("method") == "task_notification"
     }
-    assert cards["subagent-completed-a"]["result_preview"] == "All good."
-    assert cards["x"]["output_unavailable_reason"] == "subagent report unavailable"
+    assert cards["subagent-completed-ok"]["result_preview"] == "All good."
+    assert (
+        cards["subagent-completed-broken"]["output_unavailable_reason"]
+        == "subagent report unavailable"
+    )
 
 
 def _make_claude_thread_info(**overrides: Any) -> ClaudeThreadInfo:

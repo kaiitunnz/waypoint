@@ -1978,10 +1978,11 @@ async def test_pump_emits_turnless_notifications_without_status() -> None:
     assert "status" not in metadata
     assert metadata["visibility"] == "important"
 
-    pump = adapter._sessions["sess"].notification_task
-    assert pump is not None
+    pump = adapter._sessions["sess"].notification_thread
+    assert pump is not None and pump.is_alive()
     await adapter.terminate_session("sess")
-    assert pump.done()
+    await asyncio.to_thread(pump.join, 2)
+    assert not pump.is_alive()
 
 
 @pytest.mark.asyncio
@@ -2038,3 +2039,48 @@ async def test_deprecation_notice_logs_once_per_session(
     assert [entry[3]["visibility"] for entry in emitted] == ["detail", "detail"]
     lines = [r.getMessage() for r in caplog.records if "Old call" in r.getMessage()]
     assert lines == ["codex deprecationNotice: Old call"]
+
+
+@pytest.mark.asyncio
+async def test_idle_sessions_do_not_hold_shared_pool_workers() -> None:
+    async def emit(*_args: Any) -> None:
+        return None
+
+    adapter = CodexAppServerAdapter(
+        emit, client_factory=lambda *_: cast(CodexClient, FakeCodexClient())
+    )
+    for index in range(40):
+        await adapter.start_session(f"sess-{index}", "/tmp/work")
+    assert await asyncio.wait_for(asyncio.to_thread(lambda: 7), timeout=2) == 7
+    await adapter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_failed_thread_rpc_disposes_of_the_client() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+
+    def thread_resume(thread_id: str) -> Any:
+        raise RuntimeError("no such thread")
+
+    fake.thread_resume = thread_resume
+    with pytest.raises(RuntimeError, match="no such thread"):
+        await adapter.restore_session("sess", "/tmp/work", "thread-9")
+    assert "sess" not in adapter._sessions
+    assert fake.closed is True
+
+
+@pytest.mark.asyncio
+async def test_compaction_reservation_blocks_a_second_request() -> None:
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    adapter.begin_compaction("sess")
+    with pytest.raises(RuntimeError, match="already compacting"):
+        adapter.begin_compaction("sess")
+    with pytest.raises(CodexCompactingError):
+        await adapter.send_input("sess", "hi")
+
+    adapter.abandon_compaction("sess")
+    adapter.begin_compaction("sess")

@@ -952,35 +952,34 @@ class CodexPlugin(DefaultLaunchContract):
         if command_name != "/compact":
             return None
         adapter = self._require_adapter()
-        if adapter.is_busy(session.id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="cannot compact while a codex turn is active; interrupt first",
-            )
-        # Recorded before the compaction starts, so its own settle to idle
-        # always lands after this RUNNING write.
-        await runtime._record_user_event(
-            session.id,
-            request.text,
-            submit=request.submit,
-            status=session.status,
-        )
-        await runtime._record_system_event(
-            session.id,
-            "Compacting codex thread…",
-            status=SessionStatus.RUNNING,
-            metadata={"builtin_command": "/compact"},
-        )
-        running = runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
         try:
-            await adapter.compact_thread(session.id)
+            adapter.begin_compaction(session.id)
         except Exception as exc:  # noqa: BLE001
-            runtime.storage.update_session(session.id, status=session.status)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+        # Recorded before the compaction starts, so its own settle to idle
+        # always lands after this RUNNING write.
+        try:
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
+            await runtime._record_system_event(
+                session.id,
+                "Compacting codex thread…",
+                status=SessionStatus.RUNNING,
+                metadata={"builtin_command": "/compact"},
+            )
+            running = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+        except BaseException:
+            adapter.abandon_compaction(session.id)
+            raise
+        await adapter.compact_thread(session.id, reserved=True)
         return running
 
     async def fork_session(

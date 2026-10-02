@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import threading
@@ -197,7 +198,7 @@ class CodexSessionState:
     streamed_tool_result_ids: set[str] = field(default_factory=set)
     streamed_reasoning_ids: set[str] = field(default_factory=set)
     # Drains notifications that carry no turn id for the client's lifetime.
-    notification_task: asyncio.Task[None] | None = None
+    notification_thread: threading.Thread | None = None
     # A manual compaction owns the thread from /compact until its turn ends.
     compacting: bool = False
     # An interrupt that arrived before the compaction turn's id was known.
@@ -272,11 +273,12 @@ class CodexAppServerAdapter:
             # Codex SDK accepts the level under thread `config` per
             # `model_reasoning_effort`; this seeds the thread default.
             thread_params["config"] = {"model_reasoning_effort": effort}
-        started = await self._call_client(
+        started = await self._open_thread(
             state, state.client.thread_start, thread_params
         )
         state.thread_id = started.thread.id
         state.model = model or getattr(started, "model", None)
+        self._start_notification_pump(state)
         return state.thread_id
 
     async def restore_session(
@@ -305,8 +307,9 @@ class CodexAppServerAdapter:
             model=model,
             effort=effort,
         )
-        resumed = await self._call_client(state, state.client.thread_resume, thread_id)
+        resumed = await self._open_thread(state, state.client.thread_resume, thread_id)
         state.model = model or getattr(resumed, "model", None)
+        self._start_notification_pump(state)
 
     async def fork_session(
         self,
@@ -338,11 +341,12 @@ class CodexAppServerAdapter:
             fork_params["model"] = model
         if effort:
             fork_params["config"] = {"model_reasoning_effort": effort}
-        forked = await self._call_client(
+        forked = await self._open_thread(
             state, state.client.thread_fork, thread_id, fork_params
         )
         state.thread_id = forked.thread.id
         state.model = model or getattr(forked, "model", None)
+        self._start_notification_pump(state)
         return state.thread_id
 
     async def register_rate_limit_probe(
@@ -449,8 +453,28 @@ class CodexAppServerAdapter:
         )
         holder["state"] = state
         self._sessions[session_id] = state
-        state.notification_task = asyncio.create_task(self._pump_notifications(state))
         return state
+
+    async def _open_thread(
+        self, state: CodexSessionState, func: Callable[..., Any], *args: Any
+    ) -> Any:
+        """Run the RPC that binds the client to its thread, disposing of the
+        client when it fails."""
+        try:
+            return await self._call_client(state, func, *args)
+        except BaseException:
+            await self.terminate_session(state.session_id)
+            raise
+
+    def _start_notification_pump(self, state: CodexSessionState) -> None:
+        thread = threading.Thread(
+            target=self._pump_notifications,
+            args=(state, asyncio.get_running_loop()),
+            name=f"codex-notifications-{state.session_id}",
+            daemon=True,
+        )
+        state.notification_thread = thread
+        thread.start()
 
     async def send_input(
         self,
@@ -617,17 +641,9 @@ class CodexAppServerAdapter:
         pending.event.set()
         return True
 
-    def is_busy(self, session_id: str) -> bool:
-        """A turn or a manual compaction owns the thread."""
-        state = self._require_session(session_id)
-        return state.active_turn_id is not None or state.compacting
-
-    async def compact_thread(self, session_id: str) -> None:
-        """Start a manual compaction and stream it as a turn.
-
-        Returns once the compaction is queued; its progress, the "Context
-        compacted" note, and the settle to idle arrive through the stream.
-        """
+    def begin_compaction(self, session_id: str) -> None:
+        """Reserve the thread for a manual compaction, before the caller awaits
+        anything, so a concurrent request sees it as busy."""
         state = self._require_session(session_id)
         if state.active_turn_id is not None:
             raise RuntimeError(
@@ -636,6 +652,23 @@ class CodexAppServerAdapter:
         if state.compacting:
             raise RuntimeError("codex is already compacting this thread")
         state.compacting = True
+
+    def abandon_compaction(self, session_id: str) -> None:
+        """Release a reservation whose compaction never started."""
+        state = self._sessions.get(session_id)
+        if state is not None and state.stream_task is None:
+            state.compacting = False
+
+    async def compact_thread(self, session_id: str, *, reserved: bool = False) -> None:
+        """Start a manual compaction and stream it as a turn.
+
+        Returns once the compaction is queued; its progress, the "Context
+        compacted" note, and the settle to idle arrive through the stream.
+        ``reserved`` means the caller already holds ``begin_compaction``.
+        """
+        if not reserved:
+            self.begin_compaction(session_id)
+        state = self._require_session(session_id)
         state.stream_task = asyncio.create_task(self._run_compaction(state))
 
     async def _run_compaction(self, state: CodexSessionState) -> None:
@@ -778,11 +811,11 @@ class CodexAppServerAdapter:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
             log.exception("codex client close failed", extra={"session_id": session_id})
-        for task in (state.stream_task, state.notification_task):
-            if task is not None:
-                task.cancel()
-                with suppress(asyncio.CancelledError, Exception):
-                    await task
+        # The pump thread exits on its own: closing the client fails its read.
+        if state.stream_task is not None:
+            state.stream_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await state.stream_task
         return True
 
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
@@ -846,14 +879,18 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
 
-    async def _pump_notifications(self, state: CodexSessionState) -> None:
+    def _pump_notifications(
+        self, state: CodexSessionState, loop: asyncio.AbstractEventLoop
+    ) -> None:
         """Drain notifications that carry no turn id (warnings, config and
-        deprecation notices, thread state). They never change session status."""
+        deprecation notices, thread state). They never change session status.
+
+        Runs on its own thread for the client's lifetime, so an idle session
+        never holds a worker of the event loop's shared pool.
+        """
         while True:
             try:
-                notification = await asyncio.to_thread(state.client.next_notification)
-            except asyncio.CancelledError:
-                raise
+                notification = state.client.next_notification()
             except Exception:  # noqa: BLE001
                 # The client closed; every pending read fails the same way.
                 return
@@ -862,10 +899,22 @@ class CodexAppServerAdapter:
             if isinstance(thread_id, str) and thread_id != state.thread_id:
                 continue
             try:
-                await self._emit_notification(
-                    state, notification.method, payload, settle=False
+                # Waiting for each emit keeps the notifications in order.
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_notification(
+                        state, notification.method, payload, settle=False
+                    ),
+                    loop,
+                ).result()
+            except RuntimeError:
+                if loop.is_closed():
+                    return
+                log.exception(
+                    "codex notification pump failed to emit %s",
+                    notification.method,
+                    extra={"session_id": state.session_id},
                 )
-            except Exception:  # noqa: BLE001
+            except (Exception, concurrent.futures.CancelledError):  # noqa: BLE001
                 log.exception(
                     "codex notification pump failed to emit %s",
                     notification.method,

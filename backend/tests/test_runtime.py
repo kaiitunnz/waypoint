@@ -1749,7 +1749,13 @@ async def test_handle_input_builtin_compact_invokes_codex_thread_compact(
             super().__init__()
             self.compact_calls: list[str] = []
 
-        async def compact_thread(self, session_id: str) -> None:
+        def begin_compaction(self, session_id: str) -> None:
+            return None
+
+        async def compact_thread(
+            self, session_id: str, *, reserved: bool = False
+        ) -> None:
+            assert reserved
             self.compact_calls.append(session_id)
 
     fake = CodexFake()

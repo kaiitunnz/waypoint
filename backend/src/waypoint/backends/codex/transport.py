@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
+from waypoint.backends.codex.adapter import CodexCompactingError
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -52,9 +53,7 @@ class CodexTransport(TransportAdapter):
             else:
                 await self.adapter.send_input(session.id, text, turn_params=turn_params)
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
+            raise input_http_error(exc) from exc
 
     async def interrupt(self, session: SessionRecord) -> None:
         await self.adapter.interrupt(session.id)
@@ -74,6 +73,13 @@ class CodexTransport(TransportAdapter):
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.adapter.has_pending_approval(session.id)
+
+
+def input_http_error(exc: Exception) -> HTTPException:
+    """The HTTP error for input Codex refused."""
+    if isinstance(exc, CodexCompactingError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 def _input_items(

@@ -1,7 +1,9 @@
 import asyncio
+import base64
 import queue
 import threading
-from collections.abc import Callable
+import weakref
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -10,12 +12,15 @@ from typing import Any, cast
 import pytest
 from openai_codex.client import CodexClient
 
+from waypoint.backends.codex import adapter as adapter_module
 from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
+    CodexCompactingError,
     CodexSessionState,
     _context_usage_snapshot_from_thread_token_usage,
 )
 from waypoint.backends.codex.normalize import tool_result_is_error
+from waypoint.backends.codex.transport import input_http_error
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -87,10 +92,24 @@ class NotificationQueue:
         return self._queue.get()
 
 
+_LIVE_FAKES: "weakref.WeakSet[FakeCodexClient]" = weakref.WeakSet()
+
+
+@pytest.fixture(autouse=True)
+async def _close_fake_clients() -> AsyncIterator[None]:
+    """Unpark worker threads still reading a fake client so the test loop's
+    executor can shut down."""
+    yield
+    for fake in list(_LIVE_FAKES):
+        fake.close()
+
+
 class FakeCodexClient:
     def __init__(self) -> None:
+        _LIVE_FAKES.add(self)
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.notifications = NotificationQueue()
+        self.global_notifications = NotificationQueue()
         self.approval_handler: (
             Callable[[str, dict[str, Any] | None], dict[str, Any]] | None
         ) = None
@@ -119,6 +138,7 @@ class FakeCodexClient:
     def close(self) -> None:
         self.closed = True
         self.notifications.put_nowait(_CLOSED)
+        self.global_notifications.put_nowait(_CLOSED)
 
     def thread_start(self, params: dict[str, Any]) -> FakeStartResponse:
         self.calls.append(("thread_start", (params,)))
@@ -173,22 +193,22 @@ class FakeCodexClient:
         self.calls.append(("turn_interrupt", (thread_id, turn_id)))
 
     def next_notification(self) -> Any:
-        return self._next_notification()
+        return self._next_notification(self.global_notifications)
 
     def next_turn_notification(self, turn_id: str) -> Any:
         self.turn_notification_ids.append(turn_id)
-        return self._next_notification()
+        return self._next_notification(self.notifications)
 
     def unregister_turn_notifications(self, turn_id: str) -> None:
         self.unregistered_turn_notification_ids.append(turn_id)
 
-    def _next_notification(self) -> Any:
+    def _next_notification(self, source: NotificationQueue) -> Any:
         # Synchronous calls in adapter go through asyncio.to_thread so this
         # blocks the worker thread until a notification is enqueued; close()
         # unblocks it the way the real client fails pending reads.
-        notification = self.notifications.get_blocking()
+        notification = source.get_blocking()
         if notification is _CLOSED:
-            self.notifications.put_nowait(_CLOSED)
+            source.put_nowait(_CLOSED)
             raise RuntimeError("client closed")
         return notification
 
@@ -679,32 +699,133 @@ async def test_respond_to_approval_returns_false_when_idle() -> None:
     assert handled is False
 
 
+def _compaction_notifications(turn_id: str) -> list[FakeNotification]:
+    item = {"type": "contextCompaction", "id": "cc1"}
+    payload = {"item": item, "threadId": "thread-1", "turnId": turn_id}
+    return [
+        FakeNotification(
+            "turn/started", {"threadId": "thread-1", "turn": {"id": turn_id}}
+        ),
+        FakeNotification("item/started", dict(payload)),
+        FakeNotification("item/completed", dict(payload)),
+        FakeNotification(
+            "turn/completed",
+            {"threadId": "thread-1", "turn": {"id": turn_id, "status": "completed"}},
+        ),
+    ]
+
+
+def _patch_compaction_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    turn_id: str | None,
+    gate: threading.Event | None = None,
+) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = []
+
+    def start(
+        client: Any, thread_id: str, timeout: float, cancelled: Any = None
+    ) -> str | None:
+        calls.append((thread_id, timeout))
+        if gate is not None:
+            gate.wait(timeout=2)
+        return turn_id
+
+    monkeypatch.setattr(adapter_module, "start_compaction_turn", start)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_compact_thread_invokes_sdk_and_drains_until_compacted() -> None:
+async def test_compact_thread_streams_the_compaction_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
-    fake.calls.clear()
-
-    def thread_compact(thread_id: str):
-        fake.calls.append(("thread_compact", (thread_id,)))
-        return {}
-
-    fake.thread_compact = thread_compact
+    calls = _patch_compaction_turn(monkeypatch, "turn-c")
+    for notification in _compaction_notifications("turn-c"):
+        fake.notifications.put_nowait(notification)
 
     await adapter.compact_thread("sess")
     state = adapter._sessions["sess"]
-    assert ("thread_compact", ("thread-1",)) in fake.calls
-    assert state.stream_task is not None
+    assert state.compacting is True
+    stream = state.stream_task
+    assert stream is not None
+    await asyncio.wait_for(stream, timeout=2)
 
-    await fake.notifications.put(
-        FakeNotification(method="thread/compacted", payload={})
-    )
-    await state.stream_task
-    assert state.stream_task is None
-    kinds = [item[1] for item in emitted]
-    assert EventKind.SYSTEM_NOTE in kinds
-    assert any("compacted" in item[2].lower() for item in emitted)
+    assert calls == [("thread-1", adapter_module.COMPACTION_TURN_TIMEOUT_SECONDS)]
+    assert fake.turn_notification_ids[0] == "turn-c"
+    texts = [entry[2] for entry in emitted]
+    assert "Compacting context" in texts
+    assert "Context compacted" in texts
+    assert emitted[-1][4] is SessionStatus.IDLE
+    assert state.compacting is False
+    assert state.active_turn_id is None
+
+
+@pytest.mark.asyncio
+async def test_input_during_compaction_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    _patch_compaction_turn(monkeypatch, "turn-c")
+    await adapter.compact_thread("sess")
+
+    with pytest.raises(CodexCompactingError):
+        await adapter.send_input("sess", "hello")
+    with pytest.raises(CodexCompactingError):
+        await adapter.send_input_items("sess", [{"type": "text", "text": "hi"}])
+    with pytest.raises(RuntimeError, match="already compacting"):
+        await adapter.compact_thread("sess")
+    assert all(call[0] not in {"turn_start", "turn_steer"} for call in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_during_compaction_interrupts_its_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    gate = threading.Event()
+    _patch_compaction_turn(monkeypatch, "turn-c", gate)
+    await adapter.compact_thread("sess")
+    state = adapter._sessions["sess"]
+
+    # Before the turn id is known the interrupt is held, then sent on capture.
+    await adapter.interrupt("sess")
+    assert state.interrupt_pending is True
+    gate.set()
+    for _ in range(100):
+        if ("turn_interrupt", ("thread-1", "turn-c")) in fake.calls:
+            break
+        await asyncio.sleep(0.01)
+    assert ("turn_interrupt", ("thread-1", "turn-c")) in fake.calls
+    assert state.interrupt_pending is False
+
+    await adapter.interrupt("sess")
+    assert fake.calls.count(("turn_interrupt", ("thread-1", "turn-c"))) == 2
+
+
+@pytest.mark.asyncio
+async def test_compaction_without_a_turn_settles_idle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    _patch_compaction_turn(monkeypatch, None)
+    await adapter.compact_thread("sess")
+    state = adapter._sessions["sess"]
+    stream = state.stream_task
+    assert stream is not None
+    await asyncio.wait_for(stream, timeout=2)
+
+    assert emitted[-1][2] == "Compaction started; progress is unavailable"
+    assert emitted[-1][4] is SessionStatus.IDLE
+    assert state.compacting is False
+    await adapter.send_input("sess", "next")
 
 
 @pytest.mark.asyncio
@@ -975,7 +1096,7 @@ def test_plan_todo_items_maps_codex_statuses() -> None:
 
 
 def test_map_notification_turn_plan_updated_is_todo_result() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "turn/plan/updated",
@@ -987,7 +1108,7 @@ def test_map_notification_turn_plan_updated_is_todo_result() -> None:
 
 
 def test_map_notification_agent_message_delta() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/agentMessage/delta",
@@ -999,7 +1120,7 @@ def test_map_notification_agent_message_delta() -> None:
 
 
 def test_map_notification_command_execution_started() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1010,7 +1131,7 @@ def test_map_notification_command_execution_started() -> None:
 
 
 def test_map_notification_collab_spawn_started_surfaces_prompt() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1029,7 +1150,7 @@ def test_map_notification_collab_spawn_started_surfaces_prompt() -> None:
 
 
 def test_map_notification_collab_wait_completed_surfaces_subagent_report() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1050,7 +1171,7 @@ def test_map_notification_collab_wait_completed_surfaces_subagent_report() -> No
 
 
 def test_map_notification_collab_wait_without_message_falls_back_to_tool_name() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1061,7 +1182,7 @@ def test_map_notification_collab_wait_without_message_falls_back_to_tool_name() 
 
 
 def test_map_notification_collab_completed_without_message_falls_back() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1078,7 +1199,7 @@ def test_map_notification_collab_completed_without_message_falls_back() -> None:
 
 
 def test_map_notification_collab_wait_joins_multiple_subagent_reports() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1098,10 +1219,8 @@ def test_map_notification_collab_wait_joins_multiple_subagent_reports() -> None:
 
 
 def test_map_notification_file_change_patch_updated_has_preview() -> None:
-    from waypoint.backends.codex.normalize import (
-        diff_preview_for_notification,
-        map_notification,
-    )
+    from waypoint.backends.codex.event_registry import map_notification
+    from waypoint.backends.codex.normalize import diff_preview_for_notification
 
     payload = {
         "itemId": "item_1",
@@ -1202,7 +1321,7 @@ def test_codex_apply_patch_approval_preview_handles_legacy_file_changes() -> Non
 
 
 def test_map_notification_todo_list_updated() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/updated",
@@ -1244,7 +1363,7 @@ def test_format_todo_list_empty_returns_placeholder() -> None:
 
 
 def test_format_item_started_routes_todo_list_as_tool_call() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/started",
@@ -1261,7 +1380,7 @@ def test_format_item_started_routes_todo_list_as_tool_call() -> None:
 
 
 def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1281,7 +1400,7 @@ def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
 
 
 def test_format_item_completed_drops_agent_message_duplicate() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     kind, text, status = map_notification(
         "item/completed",
@@ -1666,7 +1785,7 @@ async def _run_turn_errors(
 
 
 def test_map_notification_retryable_error_keeps_running_with_details() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("Reconnecting... 2/5", True, "unauthorized (401)")
     kind, text, status = map_notification("error", notification.payload)
@@ -1677,7 +1796,7 @@ def test_map_notification_retryable_error_keeps_running_with_details() -> None:
 
 
 def test_map_notification_error_skips_details_repeating_message() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("unauthorized (401)", False, "unauthorized (401)")
     _, text, _ = map_notification("error", notification.payload)
@@ -1686,7 +1805,7 @@ def test_map_notification_error_skips_details_repeating_message() -> None:
 
 
 def test_map_notification_error_without_will_retry_is_error() -> None:
-    from waypoint.backends.codex.normalize import map_notification
+    from waypoint.backends.codex.event_registry import map_notification
 
     notification = _codex_error("boom", None)
     kind, text, status = map_notification("error", notification.payload)
@@ -1743,3 +1862,256 @@ async def test_retry_streak_ending_in_final_error_reports_error() -> None:
         ("Reconnecting... 1/5 — unauthorized (401)", SessionStatus.RUNNING),
         ("unauthorized (401)", SessionStatus.ERROR),
     ]
+
+
+def _reasoning(item_id: str = "rs1", **fields: Any) -> dict[str, Any]:
+    return {"type": "reasoning", "id": item_id, "summary": [], "content": [], **fields}
+
+
+def _turn_payload(**fields: Any) -> dict[str, Any]:
+    return {"threadId": "thread-1", "turnId": "turn-1", **fields}
+
+
+@pytest.mark.asyncio
+async def test_streamed_reasoning_is_not_repeated_on_completion() -> None:
+    item = _reasoning(summary=["Plan.", "Act."])
+    emitted = await _run_turn(
+        set(),
+        _item_notification("item/started", _reasoning()),
+        FakeNotification(
+            "item/reasoning/summaryTextDelta",
+            _turn_payload(itemId="rs1", delta="Plan.", summaryIndex=0),
+        ),
+        FakeNotification(
+            "item/reasoning/summaryPartAdded",
+            _turn_payload(itemId="rs1", summaryIndex=1),
+        ),
+        FakeNotification(
+            "item/reasoning/summaryTextDelta",
+            _turn_payload(itemId="rs1", delta="Act.", summaryIndex=1),
+        ),
+        _item_notification("item/completed", item),
+        _turn_completed(),
+    )
+    thinking = [entry for entry in emitted if entry[3].get("item_kind") == "reasoning"]
+    assert "".join(entry[2] for entry in thinking) == "Plan.\n\nAct."
+    assert {entry[3]["item_id"] for entry in thinking} == {"rs1"}
+    assert all(entry[1] is EventKind.AGENT_OUTPUT for entry in thinking)
+
+
+@pytest.mark.asyncio
+async def test_unstreamed_reasoning_summary_is_emitted_once_on_completion() -> None:
+    emitted = await _run_turn(
+        set(),
+        _item_notification("item/completed", _reasoning(summary=["Only this."])),
+        _turn_completed(),
+    )
+    thinking = [entry for entry in emitted if entry[3].get("item_kind") == "reasoning"]
+    assert [entry[2] for entry in thinking] == ["Only this."]
+
+
+@pytest.mark.asyncio
+async def test_empty_reasoning_and_user_echo_stay_out_of_the_transcript() -> None:
+    emitted = await _run_turn(
+        set(),
+        FakeNotification(
+            "turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}}
+        ),
+        _item_notification(
+            "item/started", {"type": "userMessage", "id": "u1", "content": []}
+        ),
+        _item_notification(
+            "item/completed", {"type": "userMessage", "id": "u1", "content": []}
+        ),
+        _item_notification("item/started", _reasoning()),
+        _item_notification("item/completed", _reasoning()),
+        _turn_completed(),
+    )
+    assert [(entry[2], entry[3].get("visibility")) for entry in emitted] == [
+        ("Turn started", "detail"),
+        ("Reasoning", "detail"),
+        ("Turn completed", "detail"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generated_image_is_captured_and_not_persisted_inline() -> None:
+    encoded = base64.b64encode(b"\x89PNG\r\n\x1a\nrest").decode()
+    item = {
+        "type": "imageGeneration",
+        "id": "ig1",
+        "status": "completed",
+        "result": encoded,
+        "revisedPrompt": "A circle",
+        "savedPath": None,
+        "failure": None,
+    }
+    emitted = await _run_turn(
+        set(), _item_notification("item/completed", item), _turn_completed()
+    )
+    _, kind, text, metadata, _ = emitted[0]
+    assert (kind, text) == (EventKind.TOOL_RESULT, "completed")
+    assert metadata["tool_name"] == "ImageGeneration"
+    assert metadata["payload"]["item"]["result"] == ""
+    assert metadata["capture_inline_blobs"][0]["base64"] == encoded
+
+
+@pytest.mark.asyncio
+async def test_pump_emits_turnless_notifications_without_status() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    fake.global_notifications.put_nowait(
+        FakeNotification("warning", {"message": "Other thread", "threadId": "t-x"})
+    )
+    fake.global_notifications.put_nowait(
+        FakeNotification("warning", {"message": "Heads up", "threadId": "thread-1"})
+    )
+    fake.global_notifications.put_nowait(
+        FakeNotification("thread/status/changed", {"threadId": "thread-1"})
+    )
+    for _ in range(100):
+        if emitted:
+            break
+        await asyncio.sleep(0.01)
+    assert len(emitted) == 1
+    _, kind, text, metadata, status = emitted[0]
+    assert (kind, text, status) == (EventKind.SYSTEM_NOTE, "Heads up", None)
+    assert "status" not in metadata
+    assert metadata["visibility"] == "important"
+
+    pump = adapter._sessions["sess"].notification_thread
+    assert pump is not None and pump.is_alive()
+    await adapter.terminate_session("sess")
+    await asyncio.to_thread(pump.join, 2)
+    assert not pump.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_unknown_notification_logs_once_per_method(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    with caplog.at_level("WARNING", logger="waypoint.codex"):
+        for _ in range(2):
+            fake.global_notifications.put_nowait(
+                FakeNotification("future/thing", {"secret": "value", "n": 1})
+            )
+        fake.global_notifications.put_nowait(
+            FakeNotification("warning", {"message": "done"})
+        )
+        for _ in range(100):
+            if emitted:
+                break
+            await asyncio.sleep(0.01)
+    lines = [r.getMessage() for r in caplog.records if "future/thing" in r.getMessage()]
+    assert lines == [
+        "codex notification future/thing has no registry entry (keys: n, secret)"
+    ]
+    assert "value" not in lines[0]
+
+
+def test_input_refused_while_compacting_maps_to_conflict() -> None:
+    conflict = input_http_error(CodexCompactingError())
+    assert conflict.status_code == 409
+    assert conflict.detail == (
+        "Codex is compacting the conversation; send again when it finishes"
+    )
+    assert input_http_error(RuntimeError("bad")).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_deprecation_notice_logs_once_per_session(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    with caplog.at_level("WARNING", logger="waypoint.codex"):
+        for _ in range(2):
+            fake.global_notifications.put_nowait(
+                FakeNotification("deprecationNotice", {"summary": "Old call"})
+            )
+        for _ in range(100):
+            if len(emitted) == 2:
+                break
+            await asyncio.sleep(0.01)
+    assert [entry[3]["visibility"] for entry in emitted] == ["detail", "detail"]
+    lines = [r.getMessage() for r in caplog.records if "Old call" in r.getMessage()]
+    assert lines == ["codex deprecationNotice: Old call"]
+
+
+@pytest.mark.asyncio
+async def test_idle_sessions_do_not_hold_shared_pool_workers() -> None:
+    async def emit(*_args: Any) -> None:
+        return None
+
+    adapter = CodexAppServerAdapter(
+        emit, client_factory=lambda *_: cast(CodexClient, FakeCodexClient())
+    )
+    for index in range(40):
+        await adapter.start_session(f"sess-{index}", "/tmp/work")
+    assert await asyncio.wait_for(asyncio.to_thread(lambda: 7), timeout=2) == 7
+    await adapter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_failed_thread_rpc_disposes_of_the_client() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+
+    def thread_resume(thread_id: str) -> Any:
+        raise RuntimeError("no such thread")
+
+    fake.thread_resume = thread_resume
+    with pytest.raises(RuntimeError, match="no such thread"):
+        await adapter.restore_session("sess", "/tmp/work", "thread-9")
+    assert "sess" not in adapter._sessions
+    assert fake.closed is True
+
+
+@pytest.mark.asyncio
+async def test_compaction_reservation_blocks_a_second_request() -> None:
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    adapter.begin_compaction("sess")
+    with pytest.raises(RuntimeError, match="already compacting"):
+        adapter.begin_compaction("sess")
+    with pytest.raises(CodexCompactingError):
+        await adapter.send_input("sess", "hi")
+
+    adapter.abandon_compaction("sess")
+    adapter.begin_compaction("sess")
+
+
+@pytest.mark.asyncio
+async def test_compaction_waits_out_a_starting_turn() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    gate = threading.Event()
+    original_turn_start = fake.turn_start
+
+    def slow_turn_start(*args: Any) -> FakeTurnStartResponse:
+        gate.wait(timeout=2)
+        return original_turn_start(*args)
+
+    fake.turn_start = slow_turn_start
+    sending = asyncio.create_task(adapter.send_input("sess", "go"))
+    for _ in range(100):
+        if adapter._sessions["sess"].starting_turns:
+            break
+        await asyncio.sleep(0.01)
+
+    with pytest.raises(RuntimeError, match="turn is active"):
+        adapter.begin_compaction("sess")
+    gate.set()
+    await sending
+    state = adapter._sessions["sess"]
+    assert state.active_turn_id == "turn-1"
+    assert state.starting_turns == 0
+    assert state.compacting is False

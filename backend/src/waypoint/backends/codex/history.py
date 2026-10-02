@@ -3,7 +3,7 @@
 Feeds ``runtime.seed_thread_history`` when importing a Codex thread with
 ``import_history=True``. Converts each ``Turn``'s ``ThreadItem``s (from
 ``client.thread_read(thread_id, include_turns=True)``) into ``EventRecord``s,
-reusing ``codex/normalize.py``'s per-item-type formatters so a synthesized
+reusing ``codex/event_registry.py``'s per-item-type renderers so a synthesized
 historical tool item carries the same metadata envelope (``item_id``,
 ``item_type``, ``tool_name``, ``payload.item``, diff-preview keys) that the
 live adapter builds for ``item/started``/``item/completed`` notifications —
@@ -16,11 +16,15 @@ from typing import Any
 
 from openai_codex.generated.v2_all import Turn
 
-from waypoint.backends.codex.normalize import (
-    _format_item_completed,
-    _format_item_started,
-    diff_preview_for_notification,
+from waypoint.backends.codex.event_registry import (
     extract_tool_name,
+    persisted_item,
+    reasoning_text,
+    render_item_completed,
+    render_item_started,
+)
+from waypoint.backends.codex.normalize import (
+    diff_preview_for_notification,
     plan_metadata_for_item,
     set_completed_outcome,
 )
@@ -112,37 +116,35 @@ def _item_to_events(
     item_dict = item.model_dump(mode="json", by_alias=True)
     if is_async_message(item_dict):
         return _async_message_events(item_dict, session_id, completed_at)
-    call_kind, call_text, call_status = _format_item_started(item_dict)
-    if call_kind is None or not call_text:
+    if item_type == "reasoning" and not reasoning_text(item_dict):
+        # Live sessions mark encrypted reasoning with a detail note; an import
+        # has no use for it.
         return []
 
     item_id = item_dict.get("id")
     tool_name = extract_tool_name(item_type, item_dict)
-    call_metadata = _envelope(
-        "item/started", item_dict, item_id, item_type, tool_name, call_status
-    )
-    call_event = _event(session_id, started_at, call_kind, call_text, call_metadata)
-    if call_kind != EventKind.TOOL_CALL:
-        return [call_event]
-
-    events = [call_event]
-    result_kind, result_text, result_status = _format_item_completed(item_dict)
-    if result_kind is not None and result_text:
-        result_metadata = _envelope(
-            "item/completed", item_dict, item_id, item_type, tool_name, result_status
+    events: list[EventRecord] = []
+    for method, rendered, ts in (
+        ("item/started", render_item_started(item_dict), started_at),
+        ("item/completed", render_item_completed(item_dict), completed_at),
+    ):
+        if rendered is None or not rendered.text:
+            continue
+        metadata = _envelope(
+            method, item_dict, item_id, item_type, tool_name, rendered.status
         )
-        events.append(
-            _event(session_id, completed_at, result_kind, result_text, result_metadata)
-        )
+        metadata.update(rendered.metadata)
+        events.append(_event(session_id, ts, rendered.kind, rendered.text, metadata))
     return events
 
 
 def _async_message_events(
     item_dict: dict[str, Any], session_id: str, completed_at: datetime
 ) -> list[EventRecord]:
-    kind, text, status = _format_item_completed(item_dict)
-    if kind is None or not text:
+    rendered = render_item_completed(item_dict)
+    if rendered is None or not rendered.text:
         return []
+    kind, text, status = rendered.triple()
     item_id = item_dict.get("id")
     metadata = _envelope(
         "item/completed", item_dict, item_id, "agentMessage", None, status
@@ -188,7 +190,7 @@ def _envelope(
     tool_name: str | None,
     status: Any,
 ) -> dict[str, Any]:
-    payload = {"item": item_dict}
+    payload = {"item": persisted_item(item_dict)}
     metadata: dict[str, Any] = {
         "method": method,
         "payload": payload,

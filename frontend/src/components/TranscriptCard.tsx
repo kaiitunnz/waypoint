@@ -453,7 +453,11 @@ function ReasoningDisclosure({
 }
 
 function reasoningPreview(text: string, max = 140): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
+  // The preview is plain text; summaries often open with **bold** headings.
+  const collapsed = text
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
   if (collapsed.length <= max) return collapsed;
   return `${collapsed.slice(0, max - 1).trimEnd()}…`;
 }
@@ -795,6 +799,7 @@ function ToolDisclosure({
           <span className="role-time">{formatTime(event.ts)}</span>
         </div>
         {preview ? <p className="transcript-preview">{preview}</p> : null}
+        <MessageAttachments specs={attachmentSpecsFor(event)} />
       </summary>
       {diffPreview ? (
         <DiffPreview preview={diffPreview} onOpenWorkspaceFile={onOpenWorkspaceFile} />
@@ -853,6 +858,7 @@ function ToolPairCard({
           <span className="role-time">{formatTime(pair.ts)}</span>
         </div>
         {summary ? <p className="transcript-preview">{summary}</p> : null}
+        <MessageAttachments specs={toolPairAttachments(pair)} />
       </summary>
       <div className="tool-pair-body">
         {diffPreview ? (
@@ -880,6 +886,21 @@ function ToolPairCard({
       </div>
     </details>
   );
+}
+
+// A pair's attachments may ride on its call or its result.
+function toolPairAttachments({ call, result }: ToolPair): AttachmentSpec[] {
+  const seen = new Set<string>();
+  const specs: AttachmentSpec[] = [];
+  for (const event of [call, result]) {
+    if (!event) continue;
+    for (const spec of attachmentSpecsFor(event)) {
+      if (seen.has(spec.id)) continue;
+      seen.add(spec.id);
+      specs.push(spec);
+    }
+  }
+  return specs;
 }
 
 function sendUserFileInput(event: EventRecord): {

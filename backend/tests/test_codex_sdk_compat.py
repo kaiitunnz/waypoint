@@ -6,12 +6,18 @@ Fixtures are real responses captured from codex 0.144.0. The SDK's own
 installs the ``ThreadItem`` union tolerance.
 """
 
+import inspect
 import json
 import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from openai_codex._message_router import MessageRouter, _TurnState
+from openai_codex.client import CodexClient
 from openai_codex.generated.notification_registry import NOTIFICATION_MODELS
 from openai_codex.generated.v2_all import (
     ItemStartedNotification,
@@ -23,12 +29,14 @@ from openai_codex.generated.v2_all import (
     ThreadStartResponse,
     Turn,
 )
+from openai_codex.models import Notification, UnknownNotification
 from pydantic import ValidationError
 
 import waypoint.backends.codex  # noqa: F401  (installs the shim on import)
 from waypoint.backends.codex._sdk_compat import (
     install_activity_kind_tolerance,
     install_thread_item_tolerance,
+    start_compaction_turn,
 )
 from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.codex.plugin import CodexPlugin, CodexPluginConfig
@@ -318,3 +326,102 @@ def test_activity_kind_tolerance_is_idempotent() -> None:
     install_activity_kind_tolerance()
     install_activity_kind_tolerance()
     assert SubAgentActivityKind("completed").value == "completed"
+
+
+def _routed(method: str, **params: Any) -> Notification:
+    return Notification(method=method, payload=UnknownNotification(params=params))
+
+
+class _CompactingClient:
+    """The private client surface ``start_compaction_turn`` uses, backed by a
+    real ``MessageRouter``; ``thread_compact`` routes what Codex would emit."""
+
+    def __init__(self, emits_turn: bool = True) -> None:
+        self._router = MessageRouter()
+        self.emits_turn = emits_turn
+
+    @contextmanager
+    def _thread_start_lock(self, thread_id: str) -> Iterator[None]:
+        yield
+
+    def thread_compact(self, thread_id: str) -> dict[str, Any]:
+        if self.emits_turn:
+            route = self._router.route_notification
+            route(_routed("turn/started", threadId=thread_id, turn={"id": "c1"}))
+            item = {"type": "contextCompaction", "id": "cc1"}
+            route(_routed("item/started", threadId=thread_id, turnId="c1", item=item))
+        return {}
+
+    def next_turn_notification(self, turn_id: str) -> Notification:
+        return self._router.next_turn_notification(turn_id)
+
+
+def test_start_compaction_turn_replays_the_buffered_turn() -> None:
+    client = _CompactingClient()
+    turn_id = start_compaction_turn(cast(CodexClient, client), "th1", timeout=1)
+    assert turn_id == "c1"
+    client._router.route_notification(
+        _routed(
+            "turn/completed", threadId="th1", turn={"id": "c1", "status": "completed"}
+        )
+    )
+    methods = [client.next_turn_notification("c1").method for _ in range(3)]
+    assert methods == ["turn/started", "item/started", "turn/completed"]
+
+
+def test_start_compaction_turn_ignores_other_threads_and_times_out() -> None:
+    client = _CompactingClient(emits_turn=False)
+    client._router.route_notification(
+        _routed("turn/started", threadId="other", turn={"id": "o1"})
+    )
+    assert start_compaction_turn(cast(CodexClient, client), "th1", timeout=0.1) is None
+
+
+def test_start_compaction_turn_ignores_late_events_of_finished_turns() -> None:
+    client = _CompactingClient(emits_turn=False)
+    real_compact = client.thread_compact
+
+    def compact_with_late_event(thread_id: str) -> dict[str, Any]:
+        # A finished turn's trailing event recreates its buffer while pruning
+        # is held; it must not be taken for the compaction turn.
+        client._router.route_notification(
+            _routed("item/completed", threadId=thread_id, turnId="old", item={})
+        )
+        return real_compact(thread_id)
+
+    client.thread_compact = compact_with_late_event  # type: ignore[method-assign]
+    assert start_compaction_turn(cast(CodexClient, client), "th1", timeout=0.1) is None
+
+
+def test_start_compaction_turn_stops_when_cancelled() -> None:
+    client = _CompactingClient(emits_turn=False)
+    cancelled = threading.Event()
+    cancelled.set()
+    started = time.monotonic()
+    turn_id = start_compaction_turn(
+        cast(CodexClient, client), "th1", timeout=5, cancelled=cancelled
+    )
+    assert turn_id is None
+    assert time.monotonic() - started < 1
+
+
+def test_private_sdk_surface_for_compaction_exists() -> None:
+    """Fails on an SDK bump that moves the seam ``start_compaction_turn`` uses."""
+    client_attrs = {"_thread_start_lock", "thread_compact", "next_turn_notification"}
+    for name in client_attrs:
+        assert callable(getattr(CodexClient, name, None)), name
+    router = MessageRouter()
+    for name in ("pending_turn", "prepare_turn"):
+        assert callable(getattr(router, name, None)), name
+    assert isinstance(router._turn_states, dict)
+    turn_state = _TurnState("t")
+    assert isinstance(turn_state.events, dict)
+    assert turn_state.first_event == 0
+    assert hasattr(router._lock, "acquire")
+    assert list(inspect.signature(router.prepare_turn).parameters) == [
+        "turn_id",
+        "thread_id",
+        "cursors",
+        "for_handle",
+    ]
+    assert "self._router = MessageRouter()" in inspect.getsource(CodexClient.__init__)

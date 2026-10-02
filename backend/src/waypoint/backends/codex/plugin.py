@@ -60,6 +60,7 @@ from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
 )
+from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import (
     AccountProfileConfig,
@@ -820,9 +821,7 @@ class CodexPlugin(DefaultLaunchContract):
             )
         except Exception as exc:  # noqa: BLE001
             runtime.storage.update_session(session.id, status=previous_status)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
+            raise input_http_error(exc) from exc
 
         if accept:
             await runtime.set_permission_mode(session.id, target_mode)
@@ -943,9 +942,7 @@ class CodexPlugin(DefaultLaunchContract):
                 )
             except Exception as exc:  # noqa: BLE001
                 runtime.storage.update_session(session.id, status=previous_status)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
+                raise input_http_error(exc) from exc
             return running
 
         # Codex's app-server doesn't parse user text as control commands.
@@ -954,12 +951,14 @@ class CodexPlugin(DefaultLaunchContract):
         # explicitly above.
         if command_name != "/compact":
             return None
-        try:
-            await self._require_adapter().compact_thread(session.id)
-        except Exception as exc:  # noqa: BLE001
+        adapter = self._require_adapter()
+        if adapter.is_busy(session.id):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cannot compact while a codex turn is active; interrupt first",
+            )
+        # Recorded before the compaction starts, so its own settle to idle
+        # always lands after this RUNNING write.
         await runtime._record_user_event(
             session.id,
             request.text,
@@ -972,7 +971,17 @@ class CodexPlugin(DefaultLaunchContract):
             status=SessionStatus.RUNNING,
             metadata={"builtin_command": "/compact"},
         )
-        return runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        running = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        try:
+            await adapter.compact_thread(session.id)
+        except Exception as exc:  # noqa: BLE001
+            runtime.storage.update_session(session.id, status=session.status)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        return running
 
     async def fork_session(
         self,

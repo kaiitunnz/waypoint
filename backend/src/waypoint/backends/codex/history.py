@@ -18,6 +18,8 @@ from openai_codex.generated.v2_all import Turn
 
 from waypoint.backends.codex.event_registry import (
     extract_tool_name,
+    persisted_item,
+    reasoning_text,
     render_item_completed,
     render_item_started,
 )
@@ -114,30 +116,25 @@ def _item_to_events(
     item_dict = item.model_dump(mode="json", by_alias=True)
     if is_async_message(item_dict):
         return _async_message_events(item_dict, session_id, completed_at)
-    call = render_item_started(item_dict)
-    if call is None or not call.text:
+    if item_type == "reasoning" and not reasoning_text(item_dict):
+        # Live sessions mark encrypted reasoning with a detail note; an import
+        # has no use for it.
         return []
-    call_kind, call_text, call_status = call.triple()
 
     item_id = item_dict.get("id")
     tool_name = extract_tool_name(item_type, item_dict)
-    call_metadata = _envelope(
-        "item/started", item_dict, item_id, item_type, tool_name, call_status
-    )
-    call_event = _event(session_id, started_at, call_kind, call_text, call_metadata)
-    if call_kind != EventKind.TOOL_CALL:
-        return [call_event]
-
-    events = [call_event]
-    result = render_item_completed(item_dict)
-    if result is not None and result.text:
-        result_kind, result_text, result_status = result.triple()
-        result_metadata = _envelope(
-            "item/completed", item_dict, item_id, item_type, tool_name, result_status
+    events: list[EventRecord] = []
+    for method, rendered, ts in (
+        ("item/started", render_item_started(item_dict), started_at),
+        ("item/completed", render_item_completed(item_dict), completed_at),
+    ):
+        if rendered is None or not rendered.text:
+            continue
+        metadata = _envelope(
+            method, item_dict, item_id, item_type, tool_name, rendered.status
         )
-        events.append(
-            _event(session_id, completed_at, result_kind, result_text, result_metadata)
-        )
+        metadata.update(rendered.metadata)
+        events.append(_event(session_id, ts, rendered.kind, rendered.text, metadata))
     return events
 
 
@@ -193,7 +190,7 @@ def _envelope(
     tool_name: str | None,
     status: Any,
 ) -> dict[str, Any]:
-    payload = {"item": item_dict}
+    payload = {"item": persisted_item(item_dict)}
     metadata: dict[str, Any] = {
         "method": method,
         "payload": payload,

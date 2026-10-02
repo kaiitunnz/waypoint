@@ -29,11 +29,20 @@ The shim is scoped deliberately -- a genuinely malformed response still fails
 loudly. Remove the ``ThreadItem`` widening once the pinned SDK's union catches up
 to the CLI, and the ``SubAgentActivityKind`` fallback once the pinned SDK models
 ``completed`` natively.
+
+``start_compaction_turn`` -- ``thread/compact/start`` returns ``{}``, yet the
+compaction runs as an ordinary turn whose notifications carry a fresh turn id.
+The helper reuses the router's own turn-start buffering (``pending_turn`` /
+``prepare_turn``, as ``CodexClient._start_turn`` does around ``turn/start``) to
+learn that id and subscribe to the turn. Delete it once ``thread/compact/start``
+returns the turn id.
 """
 
+import time
 import typing
 
 import openai_codex.generated.v2_all as _v2
+from openai_codex.client import CodexClient
 from openai_codex.generated.v2_all import SubAgentActivityKind, ThreadItem
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -232,6 +241,50 @@ def install_activity_kind_tolerance() -> None:
     SubAgentActivityKind._missing_ = classmethod(_missing_)  # type: ignore[assignment]
     setattr(SubAgentActivityKind, _ACTIVITY_KIND_SENTINEL, True)
 
+
+_COMPACTION_POLL_SECONDS = 0.05
+
+
+def start_compaction_turn(
+    client: CodexClient, thread_id: str, timeout: float
+) -> str | None:
+    """Start a manual compaction and register its turn for streaming.
+
+    Blocking; run it on a worker thread. Returns the compaction turn's id, after
+    which ``client.next_turn_notification(turn_id)`` replays the buffered
+    ``turn/started`` and everything after it, or ``None`` when no new turn for
+    the thread appears within ``timeout`` seconds.
+    """
+    router = client._router
+    with client._thread_start_lock(thread_id):
+        # Holds off pruning of this thread's turn events until a consumer
+        # attaches, so nothing the compaction emits early is lost.
+        with router.pending_turn(thread_id) as cursors:
+            client.thread_compact(thread_id)
+            turn_id = _await_new_turn(router, thread_id, cursors, timeout)
+            if turn_id is not None:
+                router.prepare_turn(turn_id, thread_id, cursors, for_handle=False)
+            return turn_id
+
+
+def _await_new_turn(
+    router: typing.Any, thread_id: str, cursors: dict[str, int], timeout: float
+) -> str | None:
+    deadline = time.monotonic() + timeout
+    while True:
+        with router._lock:
+            for turn_id, state in router._turn_states.items():
+                if turn_id not in cursors and state.thread_id == thread_id:
+                    return str(turn_id)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(_COMPACTION_POLL_SECONDS)
+
+
+# The pinned SDK's thread item ``type`` literals, captured before widening.
+KNOWN_THREAD_ITEM_TYPES = _known_thread_item_types(
+    ThreadItem.model_fields["root"].annotation
+)
 
 install_thread_item_tolerance()
 install_activity_kind_tolerance()

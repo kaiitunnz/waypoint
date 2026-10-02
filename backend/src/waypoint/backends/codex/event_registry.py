@@ -2,10 +2,16 @@
 
 ``ITEMS`` maps a thread item ``type`` to the renderers for its started,
 updated, and completed notifications. ``NOTIFICATIONS`` maps a notification
-method to a handler or an ``Ignored`` marker. Lookups that miss either table
+method to a handler or an ``Ignored`` marker. ``test_codex_event_registry``
+pins both tables to the SDK's item union and notification registry, so an SDK
+bump fails CI until each new name has a disposition. Lookups that miss a table
 take the fallback path, which only a CLI newer than the pinned SDK reaches.
 """
 
+import base64
+import binascii
+import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +26,19 @@ from waypoint.backends.codex.normalize import (
 )
 from waypoint.backends.codex.questions import async_questions, is_async_message
 from waypoint.backends.diff_preview import build_preview, files_from_unified_diff
+from waypoint.backends.events import mark_detail, mark_important
 from waypoint.schemas import EventKind, SessionStatus
+
+REASONING_ITEM_KIND = "reasoning"
+# Methods whose deltas stream a reasoning item's text.
+REASONING_DELTA_METHODS = frozenset(
+    {
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/summaryPartAdded",
+        "item/reasoning/textDelta",
+    }
+)
+UNKNOWN_ITEM_MAX_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -45,6 +63,9 @@ class ItemSpec:
     started: ItemRenderer | None = None
     updated: ItemRenderer | None = None
     completed: ItemRenderer | None = None
+    # The item as stored in event metadata, for items carrying bulk the
+    # transcript must not persist.
+    persisted: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,12 +79,26 @@ NotificationSpec = NotificationHandler | Ignored
 # ─── Item renderers ───
 
 
-def _tool_call(text: str) -> Rendered:
-    return Rendered(EventKind.TOOL_CALL, text)
+def _tool_call(text: str, metadata: dict[str, Any] | None = None) -> Rendered:
+    return Rendered(EventKind.TOOL_CALL, text, metadata=metadata or {})
 
 
-def _tool_result(text: str) -> Rendered:
-    return Rendered(EventKind.TOOL_RESULT, text)
+def _tool_result(text: str, metadata: dict[str, Any] | None = None) -> Rendered:
+    return Rendered(EventKind.TOOL_RESULT, text, metadata=metadata or {})
+
+
+def _note(text: str) -> Rendered:
+    return Rendered(EventKind.SYSTEM_NOTE, text)
+
+
+def _detail_note(text: str) -> Rendered:
+    return Rendered(EventKind.SYSTEM_NOTE, text, metadata=mark_detail({}))
+
+
+def _important_note(
+    text: str, status: SessionStatus = SessionStatus.RUNNING
+) -> Rendered:
+    return Rendered(EventKind.SYSTEM_NOTE, text, status, mark_important({}))
 
 
 def _joined_paths(changes: Any) -> str:
@@ -74,10 +109,14 @@ def _joined_paths(changes: Any) -> str:
     )
 
 
-def _namespaced(item: dict[str, Any]) -> str:
-    tool = item.get("tool", "")
+def _namespaced(item: dict[str, Any], key: str = "tool") -> str:
+    name = item.get(key, "")
     namespace = item.get("namespace", "")
-    return f"{namespace}:{tool}" if namespace else str(tool)
+    return f"{namespace}:{name}" if namespace else str(name)
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _collab_agent_messages(item: dict[str, Any]) -> list[str]:
@@ -126,6 +165,35 @@ def _mcp_tool_name(item: dict[str, Any]) -> str | None:
     return str(tool or server) or None
 
 
+def _mcp_completed(item: dict[str, Any]) -> Rendered:
+    error = item.get("error")
+    if isinstance(error, dict) and _text(error.get("message")):
+        return _tool_result(_text(error.get("message")))
+    result = item.get("result")
+    content = result.get("content") if isinstance(result, dict) else None
+    texts = _content_texts(content)
+    if texts:
+        return _tool_result("\n".join(texts))
+    return _tool_result(f"MCP {item.get('server', '')}:{item.get('tool', '')}")
+
+
+def _content_texts(content: Any) -> list[str]:
+    """Text of an MCP / function-call content list; non-text parts become a
+    bracketed type label."""
+    if not isinstance(content, list):
+        return []
+    texts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text")
+        if isinstance(text, str):
+            texts.append(text)
+        elif isinstance(part.get("type"), str):
+            texts.append(f"[{part['type']}]")
+    return texts
+
+
 def _namespaced_tool_name(item: dict[str, Any]) -> str | None:
     return _namespaced(item) or None
 
@@ -144,6 +212,126 @@ def _agent_message_completed(item: dict[str, Any]) -> Rendered | None:
     if async_questions(item):
         return _tool_call("Need your input")
     return Rendered(EventKind.AGENT_OUTPUT, item.get("text", ""))
+
+
+def reasoning_text(item: dict[str, Any]) -> str:
+    """A reasoning item's summary parts as paragraphs, falling back to its raw
+    content."""
+    for key in ("summary", "content"):
+        parts = item.get(key)
+        if isinstance(parts, list):
+            text = "\n\n".join(part for part in parts if isinstance(part, str) and part)
+            if text.strip():
+                return text
+    return ""
+
+
+def _reasoning_output(text: str) -> Rendered:
+    return Rendered(
+        EventKind.AGENT_OUTPUT, text, metadata={"item_kind": REASONING_ITEM_KIND}
+    )
+
+
+def _reasoning_completed(item: dict[str, Any]) -> Rendered:
+    text = reasoning_text(item)
+    if text:
+        return _reasoning_output(text)
+    # Encrypted reasoning carries no text; the note only marks that it ran.
+    return _detail_note("Reasoning")
+
+
+def _sub_agent_activity(item: dict[str, Any]) -> Rendered:
+    kind = _text(item.get("kind")) or "activity"
+    path = _text(item.get("agentPath"))
+    return _detail_note(f"Subagent {kind}: {path}" if path else f"Subagent {kind}")
+
+
+def _seconds(item: dict[str, Any]) -> str:
+    duration = item.get("durationMs")
+    if isinstance(duration, int | float) and not isinstance(duration, bool):
+        return f"{duration / 1000:g}s"
+    return "sleep"
+
+
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str, str], ...] = (
+    (b"\x89PNG", "image/png", "png"),
+    (b"\xff\xd8\xff", "image/jpeg", "jpg"),
+    (b"GIF8", "image/gif", "gif"),
+    (b"RIFF", "image/webp", "webp"),
+)
+
+
+def _decoded_image(result: Any) -> bytes | None:
+    if not isinstance(result, str) or not result:
+        return None
+    try:
+        return base64.b64decode(result, validate=True) or None
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _image_capture(item: dict[str, Any]) -> dict[str, Any]:
+    """Capture keys that save a generated image as a pinned attachment.
+
+    ``result`` is the base64 image, which also reaches a remote session's
+    image; ``savedPath`` is only a host path, so it is the fallback.
+    """
+    saved_path = _text(item.get("savedPath"))
+    result = item.get("result")
+    data = _decoded_image(result)
+    if data is not None:
+        mime, extension = "image/png", "png"
+        for signature, sig_mime, sig_extension in _IMAGE_SIGNATURES:
+            if data.startswith(signature):
+                mime, extension = sig_mime, sig_extension
+                break
+        filename = (
+            os.path.basename(saved_path)
+            if saved_path
+            else f"{item.get('id') or 'image'}.{extension}"
+        )
+        return {
+            "capture_inline_blobs": [
+                {"filename": filename, "base64": result, "mime": mime}
+            ]
+        }
+    if saved_path:
+        return {"capture_host_files": [saved_path]}
+    return {}
+
+
+def _image_generation_completed(item: dict[str, Any]) -> Rendered:
+    status = _text(item.get("status")) or "completed"
+    failed = item.get("failure") is not None or status == "failed"
+    metadata: dict[str, Any] = {"is_error": failed}
+    if not failed:
+        metadata.update(_image_capture(item))
+    return _tool_result(status, metadata)
+
+
+def _without_image_bytes(item: dict[str, Any]) -> dict[str, Any]:
+    return {**item, "result": ""}
+
+
+def _hook_prompt(item: dict[str, Any]) -> Rendered | None:
+    fragments = item.get("fragments")
+    if not isinstance(fragments, list):
+        return None
+    texts = [
+        _text(fragment.get("text"))
+        for fragment in fragments
+        if isinstance(fragment, dict) and _text(fragment.get("text"))
+    ]
+    return _note("\n\n".join(texts)) if texts else None
+
+
+def _function_call_output(item: dict[str, Any]) -> Rendered:
+    output = item.get("output")
+    if isinstance(output, str):
+        text = output
+    else:
+        text = "\n".join(_content_texts(output))
+    return _tool_result(text or _namespaced(item, "name") or "function call output")
 
 
 ITEMS: dict[str, ItemSpec] = {
@@ -166,6 +354,7 @@ ITEMS: dict[str, ItemSpec] = {
         started=lambda item: _tool_call(
             f"MCP {item.get('server', '')}:{item.get('tool', '')}"
         ),
+        completed=_mcp_completed,
     ),
     "dynamicToolCall": ItemSpec(
         tool_name=_namespaced_tool_name,
@@ -187,12 +376,53 @@ ITEMS: dict[str, ItemSpec] = {
         completed=lambda item: _tool_result(str(item.get("query", "web search"))),
     ),
     "plan": ItemSpec(
-        started=lambda item: Rendered(EventKind.SYSTEM_NOTE, item.get("text", "")),
-        completed=lambda item: Rendered(EventKind.SYSTEM_NOTE, "Completed plan"),
+        started=lambda item: _note(item.get("text", "")),
+        completed=lambda item: _note("Completed plan"),
     ),
     "agentMessage": ItemSpec(
         started=_agent_message_started,
         completed=_agent_message_completed,
+    ),
+    # Codex echoes the human's message, which the runtime already recorded.
+    "userMessage": ItemSpec(),
+    "reasoning": ItemSpec(completed=_reasoning_completed),
+    "contextCompaction": ItemSpec(
+        started=lambda item: _detail_note("Compacting context"),
+        completed=lambda item: _important_note("Context compacted"),
+    ),
+    "subAgentActivity": ItemSpec(completed=_sub_agent_activity),
+    "imageView": ItemSpec(
+        tool_name=lambda item: "ViewImage",
+        started=lambda item: _tool_call(_text(item.get("path")) or "view image"),
+        completed=lambda item: _tool_result(_text(item.get("path")) or "view image"),
+    ),
+    "imageGeneration": ItemSpec(
+        tool_name=lambda item: "ImageGeneration",
+        started=lambda item: _tool_call(
+            _text(item.get("revisedPrompt")) or "Generating image"
+        ),
+        completed=_image_generation_completed,
+        persisted=_without_image_bytes,
+    ),
+    "enteredReviewMode": ItemSpec(
+        started=lambda item: _important_note(
+            f"Review started: {_text(item.get('review'))}".rstrip(": ")
+        ),
+    ),
+    "exitedReviewMode": ItemSpec(
+        completed=lambda item: Rendered(
+            EventKind.AGENT_OUTPUT, _text(item.get("review"))
+        ),
+    ),
+    "sleep": ItemSpec(
+        tool_name=lambda item: "Sleep",
+        started=lambda item: _tool_call(_seconds(item)),
+        completed=lambda item: _tool_result(_seconds(item)),
+    ),
+    "hookPrompt": ItemSpec(completed=_hook_prompt),
+    "functionCallOutput": ItemSpec(
+        tool_name=lambda item: _namespaced(item, "name") or None,
+        completed=_function_call_output,
     ),
     # Synthesized by the adapter from ``turn/plan/updated``.
     "todo_list": ItemSpec(
@@ -203,28 +433,34 @@ ITEMS: dict[str, ItemSpec] = {
 }
 
 
-def _fallback_started(item: dict[str, Any]) -> Rendered:
-    return Rendered(EventKind.SYSTEM_NOTE, f"Started {item.get('type') or 'item'}")
+def _unknown_item_type(item: dict[str, Any]) -> str:
+    return _text(item.get("type")) or "item"
 
 
-def _fallback_updated(item: dict[str, Any]) -> Rendered:
-    return Rendered(EventKind.SYSTEM_NOTE, f"Updated {item.get('type') or 'item'}")
+def _unknown_item_body(item: dict[str, Any]) -> str:
+    body = json.dumps(
+        {key: value for key, value in item.items() if key not in {"id", "type"}},
+        separators=(",", ":"),
+        default=str,
+    )
+    encoded = body.encode("utf-8")
+    if len(encoded) <= UNKNOWN_ITEM_MAX_BYTES:
+        return body
+    return encoded[: UNKNOWN_ITEM_MAX_BYTES - 3].decode("utf-8", "ignore") + "…"
 
 
-def _fallback_completed(item: dict[str, Any]) -> Rendered:
-    return Rendered(EventKind.SYSTEM_NOTE, f"Completed {item.get('type') or 'item'}")
-
-
-_FALLBACK_ITEM = ItemSpec(
-    started=_fallback_started,
-    updated=_fallback_updated,
-    completed=_fallback_completed,
+# An item type a newer CLI emits: rendered as a generic tool so it folds into
+# tool runs and its payload stays inspectable.
+_UNKNOWN_ITEM = ItemSpec(
+    tool_name=_unknown_item_type,
+    started=lambda item: _tool_call(_unknown_item_type(item)),
+    completed=lambda item: _tool_result(_unknown_item_body(item)),
 )
 
 
 def item_spec(item_type: Any) -> ItemSpec:
     spec = ITEMS.get(item_type) if isinstance(item_type, str) else None
-    return spec if spec is not None else _FALLBACK_ITEM
+    return spec if spec is not None else _UNKNOWN_ITEM
 
 
 def render_item_started(item: dict[str, Any]) -> Rendered | None:
@@ -250,11 +486,27 @@ def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None
     return tool_name(item) if tool_name is not None else None
 
 
+def persisted_item(item: dict[str, Any]) -> dict[str, Any]:
+    persisted = item_spec(item.get("type")).persisted
+    return persisted(item) if persisted is not None else item
+
+
 # ─── Notification handlers ───
 
 
 def _delta(kind: EventKind) -> NotificationHandler:
     return lambda payload: Rendered(kind, str(payload.get("delta", "")))
+
+
+def _reasoning_delta(payload: dict[str, Any]) -> Rendered:
+    return _reasoning_output(str(payload.get("delta", "")))
+
+
+def _reasoning_part_added(payload: dict[str, Any]) -> Rendered | None:
+    index = payload.get("summaryIndex")
+    if isinstance(index, int) and index > 0:
+        return _reasoning_output("\n\n")
+    return None
 
 
 def _patch_updated(payload: dict[str, Any]) -> Rendered:
@@ -277,23 +529,17 @@ def _turn_diff_updated(payload: dict[str, Any]) -> Rendered:
         if preview is not None:
             additions = preview.total_additions
             deletions = preview.total_deletions
-    return Rendered(EventKind.SYSTEM_NOTE, f"Turn changes: +{additions} -{deletions}")
-
-
-def _turn_started(payload: dict[str, Any]) -> Rendered:
-    turn = payload.get("turn", {})
-    return Rendered(
-        EventKind.SYSTEM_NOTE, f"Turn started: {turn.get('id', '')}".strip()
-    )
+    return _note(f"Turn changes: +{additions} -{deletions}")
 
 
 def _turn_completed(payload: dict[str, Any]) -> Rendered:
     turn = payload.get("turn", {})
-    return Rendered(
-        EventKind.SYSTEM_NOTE,
-        f"Turn {turn.get('status', 'completed')}",
-        map_turn_status(turn.get("status")),
-    )
+    raw_status = turn.get("status", "completed")
+    status = map_turn_status(raw_status)
+    text = f"Turn {raw_status}"
+    if raw_status == "completed":
+        return Rendered(EventKind.SYSTEM_NOTE, text, status, mark_detail({}))
+    return _important_note(text, status)
 
 
 def _error(payload: dict[str, Any]) -> Rendered:
@@ -304,27 +550,179 @@ def _error(payload: dict[str, Any]) -> Rendered:
     )
 
 
+def _message_note(payload: dict[str, Any]) -> Rendered | None:
+    message = _text(payload.get("message"))
+    return _important_note(message) if message else None
+
+
+def _summary_note(payload: dict[str, Any]) -> Rendered | None:
+    parts = [_text(payload.get("summary")), _text(payload.get("details"))]
+    text = "\n".join(part for part in parts if part)
+    return _important_note(text) if text else None
+
+
+def _model_rerouted(payload: dict[str, Any]) -> Rendered:
+    reason = payload.get("reason")
+    suffix = f" ({reason})" if isinstance(reason, str) and reason else ""
+    return _important_note(
+        f"Model rerouted: {payload.get('fromModel', '')} → "
+        f"{payload.get('toModel', '')}{suffix}"
+    )
+
+
+def _auto_review_completed(payload: dict[str, Any]) -> Rendered:
+    review = payload.get("review")
+    review = review if isinstance(review, dict) else {}
+    decision = _text(review.get("status")) or "completed"
+    rationale = _text(review.get("rationale"))
+    text = f"Auto-review {decision}" + (f": {rationale}" if rationale else "")
+    target = payload.get("targetItemId")
+    if isinstance(target, str) and target:
+        # Merged into the reviewed item's card; the trailing newline keeps the
+        # item's later output on its own line.
+        return _tool_result(f"{text}\n", {"item_id": target})
+    return _important_note(text)
+
+
+def _hook_completed(payload: dict[str, Any]) -> Rendered | None:
+    run = payload.get("run")
+    if not isinstance(run, dict):
+        return None
+    status = _text(run.get("status"))
+    if status == "completed":
+        return None
+    event_name = _text(run.get("eventName")) or "hook"
+    message = _text(run.get("statusMessage"))
+    text = f"Hook {event_name} {status or 'ended'}"
+    return _important_note(f"{text}: {message}" if message else text)
+
+
+_TURN_LESS_STATE = "Thread state Waypoint tracks through its own requests"
+_NOT_A_SESSION_SURFACE = "Not part of a Waypoint session's transcript"
+
 NOTIFICATIONS: dict[str, NotificationSpec] = {
     "item/started": lambda payload: render_item_started(extract_item(payload)),
+    # Not in the pinned SDK registry; older CLIs send it for todo lists.
     "item/updated": lambda payload: render_item_updated(extract_item(payload)),
     "item/completed": lambda payload: render_item_completed(extract_item(payload)),
     "item/agentMessage/delta": _delta(EventKind.AGENT_OUTPUT),
     "item/commandExecution/outputDelta": _delta(EventKind.TOOL_RESULT),
     "item/fileChange/outputDelta": _delta(EventKind.TOOL_RESULT),
     "item/fileChange/patchUpdated": _patch_updated,
-    "turn/diff/updated": _turn_diff_updated,
-    "turn/started": _turn_started,
-    "turn/completed": _turn_completed,
-    "thread/compacted": lambda payload: Rendered(
-        EventKind.SYSTEM_NOTE, "Codex thread compacted", SessionStatus.IDLE
+    "item/mcpToolCall/progress": lambda payload: (
+        _tool_result(_text(payload.get("message")))
+        if _text(payload.get("message"))
+        else None
     ),
+    "item/reasoning/summaryTextDelta": _reasoning_delta,
+    "item/reasoning/summaryPartAdded": _reasoning_part_added,
+    "item/reasoning/textDelta": _reasoning_delta,
+    "item/autoApprovalReview/completed": _auto_review_completed,
+    "item/autoApprovalReview/started": Ignored("The completed review carries it"),
+    "autoApprovalReview/strictReviewRequired": lambda payload: _important_note(
+        "Strict auto-review required"
+    ),
+    "item/plan/delta": Ignored("The completed plan item carries the full text"),
+    "item/commandExecution/terminalInteraction": Ignored(
+        "Stdin written to a running command; its output carries the effect"
+    ),
+    "turn/diff/updated": _turn_diff_updated,
+    "turn/started": lambda payload: _detail_note("Turn started"),
+    "turn/completed": _turn_completed,
     # Codex's update_plan tool, surfaced as a todo_list result so it renders in
     # the shared todo dock/card; the adapter synthesizes the todo_list item.
     "turn/plan/updated": lambda payload: _tool_result(
         format_plan(payload.get("plan", []))
     ),
+    "turn/moderationMetadata": Ignored("Provider moderation metadata"),
     "error": _error,
+    "warning": _message_note,
+    "guardianWarning": _message_note,
+    "configWarning": _summary_note,
+    "deprecationNotice": _summary_note,
+    "model/rerouted": _model_rerouted,
+    "model/verification": Ignored("Provider verification metadata"),
+    "model/safetyBuffering/updated": Ignored("Provider buffering hint"),
+    "hook/started": Ignored("Only a hook that does not succeed is shown"),
+    "hook/completed": _hook_completed,
+    "thread/tokenUsage/updated": Ignored("Handled by the adapter's usage path"),
+    "thread/compacted": Ignored(
+        "Deprecated upstream for the contextCompaction item; not sent to v2 clients"
+    ),
+    "thread/started": Ignored(_TURN_LESS_STATE),
+    "thread/status/changed": Ignored(_TURN_LESS_STATE),
+    "thread/name/updated": Ignored(_TURN_LESS_STATE),
+    "thread/settings/updated": Ignored(_TURN_LESS_STATE),
+    "thread/archived": Ignored(_TURN_LESS_STATE),
+    "thread/unarchived": Ignored(_TURN_LESS_STATE),
+    "thread/closed": Ignored(_TURN_LESS_STATE),
+    "thread/deleted": Ignored(_TURN_LESS_STATE),
+    "thread/reverted": Ignored(_TURN_LESS_STATE),
+    "thread/goal/updated": Ignored(_TURN_LESS_STATE),
+    "thread/goal/cleared": Ignored(_TURN_LESS_STATE),
+    "thread/queue/changed": Ignored(_TURN_LESS_STATE),
+    "thread/project/updated": Ignored(_TURN_LESS_STATE),
+    "thread/attachment/updated": Ignored(_TURN_LESS_STATE),
+    "thread/environment/connected": Ignored(_TURN_LESS_STATE),
+    "thread/environment/disconnected": Ignored(_TURN_LESS_STATE),
+    "serverRequest/resolved": Ignored("Waypoint resolves its own server requests"),
+    "account/rateLimits/updated": Ignored("Owned by the Codex rate-limit source"),
+    "account/updated": Ignored(_NOT_A_SESSION_SURFACE),
+    "account/login/completed": Ignored("Login-scoped; routed to the login flow"),
+    "account/gatewayOAuth/changed": Ignored(_NOT_A_SESSION_SURFACE),
+    "modelProvider/authRecoveryStarted": Ignored(_NOT_A_SESSION_SURFACE),
+    "modelProvider/authRecoveryCompleted": Ignored(_NOT_A_SESSION_SURFACE),
+    "mcpServer/startupStatus/updated": Ignored(_NOT_A_SESSION_SURFACE),
+    "mcpServer/oauthLogin/completed": Ignored(_NOT_A_SESSION_SURFACE),
+    "mcpServer/event/stream/notification": Ignored(_NOT_A_SESSION_SURFACE),
+    "skills/changed": Ignored("Skill lists are fetched on demand"),
+    "app/list/updated": Ignored(_NOT_A_SESSION_SURFACE),
+    "project/changed": Ignored(_NOT_A_SESSION_SURFACE),
+    "remoteControl/status/changed": Ignored(_NOT_A_SESSION_SURFACE),
+    "externalAgentConfig/import/progress": Ignored(_NOT_A_SESSION_SURFACE),
+    "externalAgentConfig/import/completed": Ignored(_NOT_A_SESSION_SURFACE),
+    "fs/changed": Ignored("Response to a request Waypoint does not make"),
+    "fuzzyFileSearch/sessionUpdated": Ignored(
+        "Response to a request Waypoint does not make"
+    ),
+    "fuzzyFileSearch/sessionCompleted": Ignored(
+        "Response to a request Waypoint does not make"
+    ),
+    "command/exec/outputDelta": Ignored("Response to a request Waypoint does not make"),
+    "process/outputDelta": Ignored("Response to a request Waypoint does not make"),
+    "process/exited": Ignored("Response to a request Waypoint does not make"),
+    "thread/realtime/started": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/closed": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/error": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/sdp": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/itemAdded": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/item/started": Ignored("Realtime voice is not a Waypoint surface"),
+    "thread/realtime/item/completed": Ignored(
+        "Realtime voice is not a Waypoint surface"
+    ),
+    "thread/realtime/item/transcript/delta": Ignored(
+        "Realtime voice is not a Waypoint surface"
+    ),
+    "thread/realtime/transcript/delta": Ignored(
+        "Realtime voice is not a Waypoint surface"
+    ),
+    "thread/realtime/transcript/done": Ignored(
+        "Realtime voice is not a Waypoint surface"
+    ),
+    "thread/realtime/outputAudio/delta": Ignored(
+        "Realtime voice is not a Waypoint surface"
+    ),
+    "windows/worldWritableWarning": Ignored(
+        "Windows sandbox setup; host is not Windows"
+    ),
+    "windowsSandbox/setupCompleted": Ignored(
+        "Windows sandbox setup; host is not Windows"
+    ),
 }
+
+
+def is_known_method(method: str) -> bool:
+    return method in NOTIFICATIONS
 
 
 def render_notification(method: str, payload: dict[str, Any]) -> Rendered | None:

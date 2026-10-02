@@ -116,3 +116,21 @@ def question_interaction(
         body=body,
         choices=choices,
     )
+
+
+# How the transcript's Important view treats a system note. ``detail`` keeps a
+# lifecycle note out of it (All events still shows it); ``important`` keeps a
+# note in it regardless of its text. Unset leaves the frontend's own rules.
+VISIBILITY_METADATA_KEY = "visibility"
+DETAIL_VISIBILITY = "detail"
+IMPORTANT_VISIBILITY = "important"
+
+
+def mark_detail(metadata: dict[str, Any]) -> dict[str, Any]:
+    metadata[VISIBILITY_METADATA_KEY] = DETAIL_VISIBILITY
+    return metadata
+
+
+def mark_important(metadata: dict[str, Any]) -> dict[str, Any]:
+    metadata[VISIBILITY_METADATA_KEY] = IMPORTANT_VISIBILITY
+    return metadata

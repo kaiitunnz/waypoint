@@ -1749,6 +1749,9 @@ async def test_handle_input_builtin_compact_invokes_codex_thread_compact(
             super().__init__()
             self.compact_calls: list[str] = []
 
+        def is_busy(self, session_id: str) -> bool:
+            return False
+
         async def compact_thread(self, session_id: str) -> None:
             self.compact_calls.append(session_id)
 

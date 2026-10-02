@@ -1,6 +1,8 @@
 """Unit tests for the backend-neutral capture seams that turn host paths and
 in-memory text into pinned session attachments or inline event text."""
 
+import base64
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -268,6 +270,68 @@ async def test_inline_blobs_skip_malformed_entries(tmp_path: Path) -> None:
     )
 
     assert metadata == {}
+
+
+async def test_inline_base64_blobs_are_decoded_and_bounded(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, max_upload_bytes=16)
+    metadata: dict[str, Any] = {}
+    image = b"\x89PNG\r\n\x1a\nbytes"
+
+    await runtime._capture_inline_blobs(
+        "sess-1",
+        [
+            {
+                "filename": "img.png",
+                "base64": base64.b64encode(image).decode(),
+                "mime": "image/png",
+            },
+            {"filename": "bad.png", "base64": "not base64!"},
+            {"filename": "big.png", "base64": base64.b64encode(b"z" * 64).decode()},
+        ],
+        metadata,
+        None,
+    )
+
+    (spec,) = metadata["attachments"]
+    assert spec["filename"] == "img.png"
+    resolved = runtime.attachments.resolve("sess-1", spec["id"])
+    assert resolved is not None
+    assert resolved[1].read_bytes() == image
+
+
+async def test_seeded_history_runs_the_capture_seams(tmp_path: Path) -> None:
+    runtime, _ = _emit_runtime(tmp_path)
+    seeded: list[EventRecord] = []
+
+    def _seed(_sid: str, events: list[EventRecord]) -> list[EventRecord]:
+        seeded.extend(events)
+        return events
+
+    runtime.storage.seed_events = _seed
+    runtime.storage.update_session = lambda *_args, **_kwargs: None
+    runtime.storage.get_session = lambda _sid: SimpleNamespace(
+        worktree_path=None, cwd=str(tmp_path), transport_state={"adopted_thread": True}
+    )
+    event = EventRecord(
+        session_id="sess-1",
+        ts=datetime.now(UTC),
+        kind=EventKind.TOOL_RESULT,
+        text="completed",
+        metadata={
+            "capture_inline_blobs": [
+                {"filename": "img.png", "base64": base64.b64encode(b"img").decode()}
+            ]
+        },
+        sequence=0,
+    )
+
+    async def _reader() -> list[EventRecord]:
+        return [event]
+
+    assert await runtime.seed_thread_history("sess-1", _reader, enabled=True) == 1
+    (metadata,) = [seeded_event.metadata for seeded_event in seeded]
+    assert "capture_inline_blobs" not in metadata
+    assert [spec["filename"] for spec in metadata["attachments"]] == ["img.png"]
 
 
 # ─── the emit gate ───

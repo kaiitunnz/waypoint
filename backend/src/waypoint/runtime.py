@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import fnmatch
 import json
 import logging
@@ -402,6 +404,22 @@ class BroadcastHub:
         if inbox_id is not None:
             for queue in list(self.inbox_queues.get(inbox_id, set())):
                 await queue.put(payload)
+
+
+def _inline_blob_bytes(entry: dict[str, Any]) -> bytes | None:
+    text = entry.get("text")
+    if isinstance(text, str):
+        return text.encode("utf-8")
+    encoded = entry.get("base64")
+    if not isinstance(encoded, str):
+        return None
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        log.warning(
+            "capture_inline_blobs: malformed base64 for %s", entry.get("filename")
+        )
+        return None
 
 
 def _capture_origin(raw: Any) -> AttachmentOrigin | None:
@@ -4993,6 +5011,8 @@ class SessionRuntime:
             return 0
         if not events:
             return 0
+        for event in events:
+            await self._run_capture_sinks(session_id, event.metadata)
         persisted = self.storage.seed_events(session_id, events)
         for event in persisted:
             self._append_structured_log(session_id, event)
@@ -5826,15 +5846,7 @@ class SessionRuntime:
         status: SessionStatus | None,
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
-        origin = _capture_origin(metadata.pop("capture_origin", None))
-        for key, sink in (
-            ("capture_host_files", self._capture_host_files),
-            ("capture_host_text", self._capture_host_text),
-            ("capture_inline_blobs", self._capture_inline_blobs),
-        ):
-            raw = metadata.pop(key, None)
-            if isinstance(raw, list) and raw:
-                await sink(session_id, raw, metadata, origin)
+        await self._run_capture_sinks(session_id, metadata)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -5868,6 +5880,20 @@ class SessionRuntime:
             persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
+
+    async def _run_capture_sinks(
+        self, session_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Pop the transient ``capture_*`` keys and run their sinks."""
+        origin = _capture_origin(metadata.pop("capture_origin", None))
+        for key, sink in (
+            ("capture_host_files", self._capture_host_files),
+            ("capture_host_text", self._capture_host_text),
+            ("capture_inline_blobs", self._capture_inline_blobs),
+        ):
+            raw = metadata.pop(key, None)
+            if isinstance(raw, list) and raw:
+                await sink(session_id, raw, metadata, origin)
 
     async def _capture_host_files(
         self,
@@ -6050,20 +6076,20 @@ class SessionRuntime:
         entries: list[Any],
         origin: AttachmentOrigin | None,
     ) -> list[AttachmentSpec]:
-        """Save each in-memory text blob as a pinned attachment, skipping
-        malformed or oversized entries. Blocking; run off the event loop."""
+        """Save each in-memory blob (UTF-8 ``text`` or ``base64`` bytes) as a
+        pinned attachment, skipping malformed or oversized entries. Blocking;
+        run off the event loop."""
         max_bytes = self.settings.max_upload_bytes
         out: list[AttachmentSpec] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            text = entry.get("text")
             filename = entry.get("filename")
-            if not isinstance(text, str) or not isinstance(filename, str):
+            if not isinstance(filename, str) or not filename:
                 continue
-            if not text or not filename:
+            data = _inline_blob_bytes(entry)
+            if not data:
                 continue
-            data = text.encode("utf-8")
             if len(data) > max_bytes:
                 log.warning(
                     "capture_inline_blobs: %s exceeds %d byte limit",

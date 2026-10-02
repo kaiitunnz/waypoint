@@ -13,7 +13,15 @@ from typing import Any
 from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
-from waypoint.backends.codex.event_registry import extract_tool_name, map_notification
+from waypoint.backends.codex._sdk_compat import start_compaction_turn
+from waypoint.backends.codex.event_registry import (
+    REASONING_DELTA_METHODS,
+    REASONING_ITEM_KIND,
+    extract_tool_name,
+    is_known_method,
+    persisted_item,
+    render_notification,
+)
 from waypoint.backends.codex.normalize import (
     diff_preview_for_approval,
     diff_preview_for_notification,
@@ -43,6 +51,23 @@ from waypoint.schemas import (
 
 log = logging.getLogger("waypoint.codex")
 
+# How long a manual compaction may take to surface its turn before the session
+# settles without progress.
+COMPACTION_TURN_TIMEOUT_SECONDS = 10.0
+_TOOL_RESULT_DELTA_METHODS = frozenset(
+    {"item/commandExecution/outputDelta", "item/fileChange/outputDelta"}
+)
+
+
+class CodexCompactingError(RuntimeError):
+    """Input arrived while a manual compaction owns the thread."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Codex is compacting the conversation; send again when it finishes"
+        )
+
+
 # Refusals for each server request when the turn is interrupted. `cancel` on
 # command/file approvals also ends the turn.
 _INTERRUPT_RESPONSES: dict[str, dict[str, Any]] = {
@@ -61,7 +86,7 @@ def _interrupt_response(method: str) -> dict[str, Any]:
 
 
 ApprovalDecisionHandler = Callable[
-    [str, EventKind, str, dict[str, Any], SessionStatus],
+    [str, EventKind, str, dict[str, Any], SessionStatus | None],
     Coroutine[Any, Any, None],
 ]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
@@ -170,6 +195,14 @@ class CodexSessionState:
     # Set while an interrupt is in flight; read on the SDK reader thread.
     interrupting: bool = False
     streamed_tool_result_ids: set[str] = field(default_factory=set)
+    streamed_reasoning_ids: set[str] = field(default_factory=set)
+    # Drains notifications that carry no turn id for the client's lifetime.
+    notification_task: asyncio.Task[None] | None = None
+    # A manual compaction owns the thread from /compact until its turn ends.
+    compacting: bool = False
+    # An interrupt that arrived before the compaction turn's id was known.
+    interrupt_pending: bool = False
+    unknown_methods_logged: set[str] = field(default_factory=set)
     file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
     # override that persists, so we apply it on every turn_start to keep the
@@ -415,6 +448,7 @@ class CodexAppServerAdapter:
         )
         holder["state"] = state
         self._sessions[session_id] = state
+        state.notification_task = asyncio.create_task(self._pump_notifications(state))
         return state
 
     async def send_input(
@@ -424,6 +458,8 @@ class CodexAppServerAdapter:
         turn_params: dict[str, Any] | None = None,
     ) -> None:
         state = self._require_session(session_id)
+        if state.compacting:
+            raise CodexCompactingError()
         if state.active_turn_id is None:
             # turn_steer doesn't accept params in the current Codex SDK;
             # policy / reviewer / model overrides only land via turn_start.
@@ -460,6 +496,8 @@ class CodexAppServerAdapter:
         turn_params: dict[str, Any] | None = None,
     ) -> None:
         state = self._require_session(session_id)
+        if state.compacting:
+            raise CodexCompactingError()
         if state.active_turn_id is None:
             merged = self._build_turn_params(state, turn_params)
             if merged:
@@ -530,6 +568,9 @@ class CodexAppServerAdapter:
 
     async def interrupt(self, session_id: str) -> None:
         state = self._require_session(session_id)
+        if state.compacting and state.active_turn_id is None:
+            state.interrupt_pending = True
+            return
         if state.active_turn_id is None:
             return
         state.interrupting = True
@@ -575,21 +616,75 @@ class CodexAppServerAdapter:
         pending.event.set()
         return True
 
-    async def compact_thread(self, session_id: str) -> None:
-        """Issue thread/compact/start and stream resulting notifications.
+    def is_busy(self, session_id: str) -> bool:
+        """A turn or a manual compaction owns the thread."""
+        state = self._require_session(session_id)
+        return state.active_turn_id is not None or state.compacting
 
-        Compaction is rejected by the codex app-server while a turn is in
-        flight, so callers must interrupt first. Drains notifications until
-        a `thread/compacted` (or `turn/completed`) arrives so progress events
-        and the final marker show up in the transcript.
+    async def compact_thread(self, session_id: str) -> None:
+        """Start a manual compaction and stream it as a turn.
+
+        Returns once the compaction is queued; its progress, the "Context
+        compacted" note, and the settle to idle arrive through the stream.
         """
         state = self._require_session(session_id)
         if state.active_turn_id is not None:
             raise RuntimeError(
                 "cannot compact while a codex turn is active; interrupt first"
             )
-        await self._call_client(state, state.client.thread_compact, state.thread_id)
-        state.stream_task = asyncio.create_task(self._stream_compact(state))
+        if state.compacting:
+            raise RuntimeError("codex is already compacting this thread")
+        state.compacting = True
+        state.stream_task = asyncio.create_task(self._run_compaction(state))
+
+    async def _run_compaction(self, state: CodexSessionState) -> None:
+        try:
+            turn_id = await asyncio.to_thread(
+                start_compaction_turn,
+                state.client,
+                state.thread_id,
+                COMPACTION_TURN_TIMEOUT_SECONDS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _end_turn(state)
+            log.exception(
+                "codex compaction failed to start",
+                extra={"session_id": state.session_id, "thread_id": state.thread_id},
+            )
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                f"Codex compaction failed: {exc}",
+                {"status": SessionStatus.IDLE},
+                SessionStatus.IDLE,
+            )
+            return
+        if turn_id is None:
+            _end_turn(state)
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                "Compaction started; progress is unavailable",
+                {"status": SessionStatus.IDLE},
+                SessionStatus.IDLE,
+            )
+            return
+        state.active_turn_id = turn_id
+        if state.interrupt_pending:
+            state.interrupt_pending = False
+            try:
+                await self._call_client(
+                    state, state.client.turn_interrupt, state.thread_id, turn_id
+                )
+            except Exception:  # noqa: BLE001
+                log.debug(
+                    "codex compaction interrupt failed",
+                    exc_info=True,
+                    extra={"session_id": state.session_id},
+                )
+        await self._stream_turn(state, turn_id)
 
     async def set_model(self, session_id: str, model: str | None) -> None:
         """Update the session's sticky model.
@@ -682,10 +777,11 @@ class CodexAppServerAdapter:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
             log.exception("codex client close failed", extra={"session_id": session_id})
-        if state.stream_task is not None:
-            state.stream_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await state.stream_task
+        for task in (state.stream_task, state.notification_task):
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
         return True
 
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
@@ -697,8 +793,9 @@ class CodexAppServerAdapter:
                 notification = await asyncio.to_thread(
                     state.client.next_turn_notification, turn_id
                 )
+                method = notification.method
                 payload = payload_to_dict(notification.payload)
-                if notification.method == "error" and is_retryable_error(payload):
+                if method == "error" and is_retryable_error(payload):
                     if in_retry_streak:
                         log.debug(
                             "codex retry suppressed: %s",
@@ -709,15 +806,15 @@ class CodexAppServerAdapter:
                     in_retry_streak = True
                 else:
                     in_retry_streak = False
-                if notification.method == "thread/tokenUsage/updated":
+                if method == "thread/tokenUsage/updated":
                     snapshot = _context_usage_snapshot_from_thread_token_usage(payload)
                     if snapshot is not None:
                         await self._publish_context_usage(state, snapshot)
                         await self._publish_token_usage(state, turn_id, snapshot)
                     continue
-                if notification.method == "turn/plan/updated":
+                if method == "turn/plan/updated":
                     # Synthesize a todo_list item so the generic metadata path
-                    # below emits a canonical todo event (rendered in the shared
+                    # emits a canonical todo event (rendered in the shared
                     # dock/card). Keying the item by turnId collapses successive
                     # plan updates within a turn into one evolving card.
                     payload["item"] = {
@@ -725,73 +822,8 @@ class CodexAppServerAdapter:
                         "id": payload.get("turnId"),
                         "items": plan_todo_items(payload.get("plan")),
                     }
-                kind, text, status = map_notification(notification.method, payload)
-                if notification.method == "turn/completed":
-                    status = self._settled_turn_status(state, status)
-                if kind is not None and text:
-                    diff_preview = diff_preview_for_notification(
-                        notification.method, payload
-                    )
-                    metadata: dict[str, Any] = {
-                        "method": notification.method,
-                        "payload": payload,
-                        "status": status,
-                        **preview_to_metadata(diff_preview),
-                    }
-                    item_id = extract_item_id(payload)
-                    if item_id is not None:
-                        metadata["item_id"] = item_id
-                        if diff_preview is not None:
-                            state.file_diff_previews[item_id] = diff_preview
-                    item = extract_item(payload) if "item" in payload else None
-                    if isinstance(item, dict):
-                        # Replace the wrapped {"root": {...}} form with the
-                        # unwrapped item so downstream consumers (frontend
-                        # transcript renderers, telemetry) don't each need to
-                        # re-implement the unwrap.
-                        payload["item"] = item
-                        item_type = item.get("type")
-                        if isinstance(item_type, str) and item_type:
-                            metadata["item_type"] = item_type
-                        tool_name = extract_tool_name(item_type, item)
-                        if tool_name:
-                            metadata["tool_name"] = tool_name
-                        if notification.method == "item/completed":
-                            set_completed_outcome(metadata, item_type, item)
-                        plan_envelope = plan_metadata_for_item(item)
-                        if plan_envelope is not None:
-                            metadata["plan"] = plan_envelope
-                        if apply_async_question(metadata, item):
-                            state.turn_question_ids.add(metadata["tool_use_id"])
-                    if (
-                        kind == EventKind.TOOL_RESULT
-                        and notification.method
-                        in {
-                            "item/commandExecution/outputDelta",
-                            "item/fileChange/outputDelta",
-                        }
-                        and item_id
-                    ):
-                        state.streamed_tool_result_ids.add(item_id)
-                    if (
-                        kind == EventKind.TOOL_RESULT
-                        and notification.method == "item/completed"
-                        and item_id in state.streamed_tool_result_ids
-                        and diff_preview is None
-                        and "is_error" not in metadata
-                    ):
-                        # An outcome-bearing completed is kept so telemetry can
-                        # resolve the streamed call; the frontend merges it into
-                        # the delta by item_id.
-                        continue
-                    await self._emit_event(
-                        state.session_id,
-                        kind,
-                        text,
-                        metadata,
-                        status,
-                    )
-                if notification.method == "turn/completed":
+                await self._emit_notification(state, method, payload, settle=True)
+                if method == "turn/completed":
                     _end_turn(state)
                     break
         except asyncio.CancelledError:
@@ -813,6 +845,126 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
 
+    async def _pump_notifications(self, state: CodexSessionState) -> None:
+        """Drain notifications that carry no turn id (warnings, config and
+        deprecation notices, thread state). They never change session status."""
+        while True:
+            try:
+                notification = await asyncio.to_thread(state.client.next_notification)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                # The client closed; every pending read fails the same way.
+                return
+            payload = payload_to_dict(notification.payload)
+            thread_id = payload.get("threadId")
+            if isinstance(thread_id, str) and thread_id != state.thread_id:
+                continue
+            try:
+                await self._emit_notification(
+                    state, notification.method, payload, settle=False
+                )
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "codex notification pump failed to emit %s",
+                    notification.method,
+                    extra={"session_id": state.session_id},
+                )
+
+    async def _emit_notification(
+        self,
+        state: CodexSessionState,
+        method: str,
+        payload: dict[str, Any],
+        *,
+        settle: bool,
+    ) -> None:
+        """Render one notification through the registry and emit it.
+
+        ``settle`` is false for turn-less notifications, which emit with no
+        status so they leave the session's status as stored.
+        """
+        if not is_known_method(method):
+            self._log_unknown_method(state, method, payload)
+            return
+        rendered = render_notification(method, payload)
+        if rendered is None or not rendered.text:
+            return
+        kind = rendered.kind
+        status: SessionStatus | None = rendered.status
+        if method == "turn/completed":
+            status = self._settled_turn_status(state, rendered.status)
+        diff_preview = diff_preview_for_notification(method, payload)
+        metadata: dict[str, Any] = {
+            "method": method,
+            "payload": payload,
+            **preview_to_metadata(diff_preview),
+        }
+        item_id = extract_item_id(payload)
+        if item_id is not None:
+            metadata["item_id"] = item_id
+            if diff_preview is not None:
+                state.file_diff_previews[item_id] = diff_preview
+        item = extract_item(payload) if "item" in payload else None
+        if isinstance(item, dict):
+            # Store the unwrapped item (not the {"root": {...}} form) so
+            # downstream consumers don't each re-implement the unwrap.
+            payload["item"] = persisted_item(item)
+            item_type = item.get("type")
+            if isinstance(item_type, str) and item_type:
+                metadata["item_type"] = item_type
+            tool_name = extract_tool_name(item_type, item)
+            if tool_name:
+                metadata["tool_name"] = tool_name
+            if method == "item/completed":
+                set_completed_outcome(metadata, item_type, item)
+            plan_envelope = plan_metadata_for_item(item)
+            if plan_envelope is not None:
+                metadata["plan"] = plan_envelope
+            if apply_async_question(metadata, item):
+                state.turn_question_ids.add(metadata["tool_use_id"])
+        metadata.update(rendered.metadata)
+        item_id = metadata.get("item_id")
+        if kind == EventKind.TOOL_RESULT and method in _TOOL_RESULT_DELTA_METHODS:
+            if isinstance(item_id, str):
+                state.streamed_tool_result_ids.add(item_id)
+        if method in REASONING_DELTA_METHODS and isinstance(item_id, str):
+            state.streamed_reasoning_ids.add(item_id)
+        if method == "item/completed" and item_id is not None:
+            if (
+                kind == EventKind.TOOL_RESULT
+                and item_id in state.streamed_tool_result_ids
+                and diff_preview is None
+                and "is_error" not in metadata
+            ):
+                # An outcome-bearing completed is kept so telemetry can
+                # resolve the streamed call; the frontend merges it into the
+                # delta by item_id.
+                return
+            if (
+                metadata.get("item_kind") == REASONING_ITEM_KIND
+                and item_id in state.streamed_reasoning_ids
+            ):
+                return
+        if status is not None and settle:
+            metadata["status"] = status
+        await self._emit_event(
+            state.session_id, kind, rendered.text, metadata, status if settle else None
+        )
+
+    def _log_unknown_method(
+        self, state: CodexSessionState, method: str, payload: dict[str, Any]
+    ) -> None:
+        if method in state.unknown_methods_logged:
+            return
+        state.unknown_methods_logged.add(method)
+        log.warning(
+            "codex notification %s has no registry entry (keys: %s)",
+            method,
+            ", ".join(sorted(payload)),
+            extra={"session_id": state.session_id},
+        )
+
     def _settled_turn_status(
         self, state: CodexSessionState, status: SessionStatus
     ) -> SessionStatus:
@@ -828,43 +980,6 @@ class CodexAppServerAdapter:
         if state.turn_question_ids & open_ids:
             return SessionStatus.WAITING_INPUT
         return status
-
-    async def _stream_compact(self, state: CodexSessionState) -> None:
-        try:
-            while True:
-                notification = await asyncio.to_thread(state.client.next_notification)
-                payload = payload_to_dict(notification.payload)
-                kind, text, status = map_notification(notification.method, payload)
-                if kind is not None and text:
-                    metadata: dict[str, Any] = {
-                        "method": notification.method,
-                        "payload": payload,
-                        "status": status,
-                    }
-                    item_id = extract_item_id(payload)
-                    if item_id is not None:
-                        metadata["item_id"] = item_id
-                    await self._emit_event(
-                        state.session_id, kind, text, metadata, status
-                    )
-                if notification.method in {"thread/compacted", "turn/completed"}:
-                    state.stream_task = None
-                    break
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            state.stream_task = None
-            log.exception(
-                "codex compact stream failed",
-                extra={"session_id": state.session_id, "thread_id": state.thread_id},
-            )
-            await self._emit_event(
-                state.session_id,
-                EventKind.SYSTEM_NOTE,
-                f"Codex compact stream failed: {exc}",
-                {"status": SessionStatus.ERROR},
-                SessionStatus.ERROR,
-            )
 
     async def _call_client(
         self, state: CodexSessionState, func: Callable[..., Any], *args: Any
@@ -974,8 +1089,11 @@ class CodexAppServerAdapter:
 def _end_turn(state: CodexSessionState) -> None:
     state.active_turn_id = None
     state.stream_task = None
+    state.compacting = False
+    state.interrupt_pending = False
     state.turn_question_ids.clear()
     state.streamed_tool_result_ids.clear()
+    state.streamed_reasoning_ids.clear()
     state.file_diff_previews.clear()
 
 

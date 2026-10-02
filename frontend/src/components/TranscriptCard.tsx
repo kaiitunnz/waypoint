@@ -487,6 +487,8 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
   spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
   Wait: { glyph: "◈", variant: "task", label: "Wait" },
   closeAgent: { glyph: "◇", variant: "task", label: "closeAgent" },
+  // Codex subagent mode: spawning or messaging a subagent.
+  Subagent: { glyph: "◇", variant: "task", label: "Subagent" },
   Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
   SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
   PushNotification: { glyph: "✉", variant: "web", label: "PushNotification" },
@@ -548,7 +550,8 @@ function isAgentToolName(toolName: string | null | undefined): boolean {
     toolName === "Agent" ||
     toolName === "spawnAgent" ||
     toolName === "Wait" ||
-    toolName === "closeAgent"
+    toolName === "closeAgent" ||
+    toolName === "Subagent"
   );
 }
 
@@ -963,7 +966,7 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
   );
 }
 
-// Claude task lifecycle card: subagent/Agent completion, Monitor events and
+// Task lifecycle card: subagent/Agent completion, Monitor events and
 // terminal state, or background-command completion. Kind reads from the left
 // (glyph + label), terminal state from the right (status lamp — text, never
 // colour alone). A captured full report reuses the shared attachment row.

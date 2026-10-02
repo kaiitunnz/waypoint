@@ -352,8 +352,14 @@ export interface TaskNotificationView {
   usage: TaskNotificationUsage | null;
 }
 
+// Events stored before the contract was backend-neutral carry the legacy method.
+const TASK_NOTIFICATION_METHODS: ReadonlySet<unknown> = new Set([
+  "task_notification",
+  "claude.task_notification",
+]);
+
 export function isTaskNotificationEvent(event: EventRecord): boolean {
-  return event.metadata?.method === "claude.task_notification";
+  return TASK_NOTIFICATION_METHODS.has(event.metadata?.method);
 }
 
 const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
@@ -364,7 +370,7 @@ const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
 ]);
 
 /**
- * Read a Claude task-notification event into a typed view model. Accepts only
+ * Read a task-notification event into a typed view model. Accepts only
  * the v1 backend contract and returns ``null`` for a malformed or future
  * payload, so the caller can fall back to the generic system-note renderer.
  */

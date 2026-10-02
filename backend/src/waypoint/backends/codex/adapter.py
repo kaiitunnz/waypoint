@@ -937,7 +937,11 @@ class CodexAppServerAdapter:
         loop = asyncio.get_running_loop()
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
-        future = state.report_reader.submit(read_report, state.client, source)
+        try:
+            future = state.report_reader.submit(read_report, state.client, source)
+        except RuntimeError:
+            # The session terminated while this completion was in flight.
+            return None
         try:
             return await asyncio.wait_for(
                 asyncio.wrap_future(future), REPORT_FETCH_TIMEOUT_SECONDS

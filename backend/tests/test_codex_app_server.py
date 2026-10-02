@@ -2595,3 +2595,48 @@ async def test_hung_report_read_pauses_reads_only_while_it_is_stuck(
     report = await adapter._read_subagent_report(state, ReportSource("child-1", "a"))
     assert report == "Back again."
     assert await adapter.terminate_session("sess")
+
+
+@pytest.mark.asyncio
+async def test_report_read_timing_out_in_the_queue_is_not_counted_stuck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    unblock = threading.Event()
+
+    def hung_read() -> Any:
+        unblock.wait(5)
+        return _child_thread(("Late.", "final_answer"))
+
+    fake.child_threads["child-1"] = hung_read
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+
+    reports = await asyncio.gather(
+        adapter._read_subagent_report(state, ReportSource("child-1", "a")),
+        adapter._read_subagent_report(state, ReportSource("child-1", "a")),
+    )
+
+    assert reports == [None, None]
+    assert state.stuck_report_reads == 1
+    unblock.set()
+    for _ in range(200):
+        if not state.stuck_report_reads:
+            break
+        await asyncio.sleep(0.01)
+    assert state.stuck_report_reads == 0
+
+
+@pytest.mark.asyncio
+async def test_report_read_after_terminate_yields_no_report() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, _fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    assert await adapter.terminate_session("sess")
+
+    assert (
+        await adapter._read_subagent_report(state, ReportSource("child-1", "a")) is None
+    )

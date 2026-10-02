@@ -17,6 +17,11 @@ from typing import Any
 
 from openai_codex.models import UnknownNotification
 
+from waypoint.backends.codex.questions import (
+    async_questions,
+    is_async_message,
+    question_call_metadata,
+)
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,
     build_preview,
@@ -161,8 +166,11 @@ def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
 
 def _format_item_started(
     item: dict[str, Any],
-) -> tuple[EventKind, str, SessionStatus]:
+) -> tuple[EventKind | None, str, SessionStatus]:
     item_type = item.get("type")
+    if is_async_message(item):
+        # An async message arrives whole; it is emitted once, on completion.
+        return None, "", SessionStatus.RUNNING
     if item_type == "commandExecution":
         return (
             EventKind.TOOL_CALL,
@@ -241,6 +249,11 @@ def _format_item_completed(
     item: dict[str, Any],
 ) -> tuple[EventKind | None, str, SessionStatus]:
     item_type = item.get("type")
+    if is_async_message(item):
+        # Delivered mid-turn by an async tool; the turn keeps running.
+        if async_questions(item):
+            return EventKind.TOOL_CALL, "Need your input", SessionStatus.RUNNING
+        return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
     if item_type == "agentMessage":
         return None, "", SessionStatus.RUNNING
     # An item finishing isn't a turn finishing — the model usually has
@@ -315,6 +328,24 @@ def extract_item(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(root, dict):
             return root
     return item if isinstance(item, dict) else {}
+
+
+def apply_async_question(
+    metadata: dict[str, Any], payload: dict[str, Any], item: dict[str, Any]
+) -> bool:
+    """Turn an async-question item's event into an AskUserQuestion card.
+
+    Merges the card keys into ``metadata`` and the canonical questions into
+    ``payload["input"]``, where the frontend reads them. Returns whether
+    ``item`` was an async question.
+    """
+    item_id = item.get("id")
+    questions = async_questions(item)
+    if questions is None or not isinstance(item_id, str) or not item_id:
+        return False
+    payload["input"] = {"questions": questions}
+    metadata.update(question_call_metadata(item_id, questions))
+    return True
 
 
 def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:

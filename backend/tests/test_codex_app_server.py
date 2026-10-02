@@ -1489,3 +1489,123 @@ async def test_token_usage_record_threads_sticky_model_and_effort() -> None:
     record = records[0][1]
     assert record.model == "gpt-5-codex"
     assert record.effort == "high"
+
+
+def _async_question_item(item_id: str = "call_q1") -> dict[str, Any]:
+    return {
+        "type": "agentMessage",
+        "id": item_id,
+        "text": "Which identity?\n- A\n- B",
+        "phase": "final_answer",
+        "delivery": "async",
+        "questions": [{"title": "Which identity?", "options": ["A", "B"]}],
+    }
+
+
+def _item_notification(method: str, item: dict[str, Any]) -> FakeNotification:
+    return FakeNotification(
+        method=method,
+        payload={"item": item, "threadId": "thread-1", "turnId": "turn-1"},
+    )
+
+
+def _turn_completed() -> FakeNotification:
+    return FakeNotification(
+        method="turn/completed",
+        payload={
+            "threadId": "thread-1",
+            "turn": {"id": "turn-1", "status": "completed"},
+        },
+    )
+
+
+async def _run_turn(
+    open_ids: set[str], *notifications: FakeNotification
+) -> list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]]:
+    emitted: list = []
+
+    async def emit(session_id, kind, text, metadata, status):
+        emitted.append((session_id, kind, text, metadata, status))
+
+    fake = FakeCodexClient()
+    adapter = CodexAppServerAdapter(
+        emit,
+        client_factory=lambda *_: cast(CodexClient, fake),
+        open_question_ids=lambda session_id: open_ids,
+    )
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "go")
+    state = adapter._sessions["sess"]
+    stream = state.stream_task
+    assert stream is not None
+    for notification in notifications:
+        fake.notifications.put_nowait(notification)
+    await asyncio.wait_for(stream, timeout=2)
+    return emitted
+
+
+@pytest.mark.asyncio
+async def test_async_question_emits_one_question_card_and_keeps_running() -> None:
+    item = _async_question_item()
+    emitted = await _run_turn(
+        set(),
+        _item_notification("item/started", item),
+        _item_notification("item/completed", item),
+        _turn_completed(),
+    )
+
+    cards = [entry for entry in emitted if entry[1] == EventKind.TOOL_CALL]
+    assert len(cards) == 1
+    _, _, text, metadata, status = cards[0]
+    assert text == "Need your input"
+    assert status == SessionStatus.RUNNING
+    assert metadata["tool_name"] == "AskUserQuestion"
+    assert metadata["tool_use_id"] == "call_q1"
+    assert metadata["payload"]["input"] == {
+        "questions": [
+            {"question": "Which identity?", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+    }
+    assert metadata["payload"]["threadId"] == "thread-1"
+    assert metadata["interaction"]["kind"] == "question"
+    assert not [entry for entry in emitted if entry[1] == EventKind.AGENT_OUTPUT]
+
+
+@pytest.mark.parametrize(
+    ("open_ids", "expected"),
+    [({"call_q1"}, SessionStatus.WAITING_INPUT), (set(), SessionStatus.IDLE)],
+)
+@pytest.mark.asyncio
+async def test_turn_end_waits_only_on_its_own_open_question(
+    open_ids: set[str], expected: SessionStatus
+) -> None:
+    item = _async_question_item()
+    emitted = await _run_turn(
+        open_ids, _item_notification("item/completed", item), _turn_completed()
+    )
+    assert emitted[-1][2] == "Turn completed"
+    assert emitted[-1][4] == expected
+
+
+@pytest.mark.asyncio
+async def test_turn_end_ignores_open_questions_from_earlier_turns() -> None:
+    emitted = await _run_turn({"call_old"}, _turn_completed())
+    assert emitted[-1][4] == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_async_message_without_questions_is_agent_output() -> None:
+    item = {
+        "type": "agentMessage",
+        "id": "msg_async",
+        "text": "Still working on the migration.",
+        "delivery": "async",
+    }
+    emitted = await _run_turn(
+        set(),
+        _item_notification("item/started", item),
+        _item_notification("item/completed", item),
+        _turn_completed(),
+    )
+    outputs = [entry for entry in emitted if entry[1] == EventKind.AGENT_OUTPUT]
+    assert [entry[2] for entry in outputs] == ["Still working on the migration."]

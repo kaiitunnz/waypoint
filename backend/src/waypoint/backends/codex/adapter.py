@@ -14,6 +14,7 @@ from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
 from waypoint.backends.codex.normalize import (
+    apply_async_question,
     diff_preview_for_approval,
     diff_preview_for_notification,
     extract_item,
@@ -160,6 +161,8 @@ class CodexSessionState:
     active_turn_id: str | None = None
     stream_task: asyncio.Task[None] | None = None
     pending_approval: PendingApproval | None = None
+    # Async question ids the active turn asked.
+    turn_question_ids: set[str] = field(default_factory=set)
     streamed_tool_result_ids: set[str] = field(default_factory=set)
     file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
@@ -188,8 +191,10 @@ class CodexAppServerAdapter:
         on_session_update: SessionUpdateCallback | None = None,
         on_token_usage: TokenUsageCallback | None = None,
         client_factory: ClientFactory | None = None,
+        open_question_ids: Callable[[str], set[str]] | None = None,
     ) -> None:
         self._emit_event = emit_event
+        self._open_question_ids = open_question_ids
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
         self._client_factory = client_factory or default_client_factory
@@ -695,6 +700,8 @@ class CodexAppServerAdapter:
                         "items": plan_todo_items(payload.get("plan")),
                     }
                 kind, text, status = map_notification(notification.method, payload)
+                if notification.method == "turn/completed":
+                    status = self._settled_turn_status(state, status)
                 if kind is not None and text:
                     diff_preview = diff_preview_for_notification(
                         notification.method, payload
@@ -728,6 +735,8 @@ class CodexAppServerAdapter:
                         plan_envelope = plan_metadata_for_item(item)
                         if plan_envelope is not None:
                             metadata["plan"] = plan_envelope
+                        if apply_async_question(metadata, payload, item):
+                            state.turn_question_ids.add(metadata["tool_use_id"])
                     if (
                         kind == EventKind.TOOL_RESULT
                         and notification.method
@@ -759,6 +768,7 @@ class CodexAppServerAdapter:
                 if notification.method == "turn/completed":
                     state.active_turn_id = None
                     state.stream_task = None
+                    state.turn_question_ids.clear()
                     state.streamed_tool_result_ids.clear()
                     state.file_diff_previews.clear()
                     break
@@ -783,6 +793,20 @@ class CodexAppServerAdapter:
         finally:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
+
+    def _settled_turn_status(
+        self, state: CodexSessionState, status: SessionStatus
+    ) -> SessionStatus:
+        """A turn that ends with one of its own async questions still open
+        waits on the human instead of going idle."""
+        if status is not SessionStatus.IDLE or not state.turn_question_ids:
+            return status
+        if self._open_question_ids is None:
+            return status
+        open_ids = self._open_question_ids(state.session_id)
+        if state.turn_question_ids & open_ids:
+            return SessionStatus.WAITING_INPUT
+        return status
 
     async def _stream_compact(self, state: CodexSessionState) -> None:
         try:

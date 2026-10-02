@@ -49,6 +49,7 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PLAN_MODE,
     codex_turn_params_for,
 )
+from waypoint.backends.codex.questions import build_reply
 from waypoint.backends.codex.rate_limits import (
     codex_auth_present,
     probe_codex_status,
@@ -68,6 +69,7 @@ from waypoint.backends.plugin_config import (
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig, _resolve_local_binary
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -87,6 +89,22 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.codex")
+
+
+def _event_thread_id(event: EventRecord) -> str | None:
+    payload = event.metadata.get("payload")
+    thread_id = payload.get("threadId") if isinstance(payload, dict) else None
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _settled_status(runtime: "SessionRuntime", session: SessionRecord) -> SessionStatus:
+    """Keep a carried-over wait on an open question across a restore."""
+    if session.status is SessionStatus.WAITING_INPUT and (
+        runtime.storage.open_question_tool_use_ids(session.id)
+    ):
+        return SessionStatus.WAITING_INPUT
+    return SessionStatus.IDLE
+
 
 _PLAN_PREFIX = "plan: "
 _DEFAULT_SEED_NOTES = {"CLI OAuth", "remote OAuth"}
@@ -234,6 +252,9 @@ class CodexPlugin(DefaultLaunchContract):
             runtime._emit_adapter_event,
             runtime.session_update_callback(),
             on_token_usage=runtime.token_usage_callback(),
+            open_question_ids=lambda session_id: set(
+                runtime.storage.open_question_tool_use_ids(session_id)
+            ),
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
@@ -689,10 +710,84 @@ class CodexPlugin(DefaultLaunchContract):
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="answer-question is only supported for Claude sessions",
+        """Answer an async question with Codex's reply envelope.
+
+        Codex keeps working after asking, so the reply is an ordinary message:
+        it steers the running turn or starts a new one.
+        """
+        open_events = {
+            event.metadata["tool_use_id"]: event
+            for event in runtime.storage.open_question_events(session.id)
+        }
+        if tool_use_id is None:
+            if not open_events:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="no pending question for this session",
+                )
+            tool_use_id = list(open_events)[-1]
+        event = open_events.get(tool_use_id)
+        if event is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="question is no longer open",
+            )
+        transport = runtime.transport_for(session)
+        if transport.has_pending_approval(session):
+            # The SDK routes no responses while an approval is open, so the
+            # reply would hang until it is resolved.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="resolve the pending approval before answering",
+            )
+        tool_input = event.metadata.get("tool_input")
+        questions = (
+            tool_input.get("questions") if isinstance(tool_input, dict) else None
         )
+        reply = build_reply(
+            tool_use_id,
+            questions if isinstance(questions, list) else [],
+            answers,
+            answer,
+        )
+        with runtime.questions.operation(session.id, tool_use_id):
+            await transport.send_input(session, reply)
+            return await runtime.questions.record_answer(
+                session.id, tool_use_id, answer, answers
+            )
+
+    def question_liveness(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        tool_use_ids: list[str],
+    ) -> dict[str, QuestionLiveness]:
+        # A question asked on another thread (a fork's copy of its parent's
+        # card) can never be resolved by this thread's agent.
+        thread_id = session.transport_state.get("thread_id")
+        asked_on = {
+            event.metadata["tool_use_id"]: _event_thread_id(event)
+            for event in runtime.storage.open_question_events(session.id)
+        }
+        reachable = (
+            QuestionLiveness.UNAVAILABLE
+            if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}
+            else QuestionLiveness.ACTIONABLE
+        )
+        liveness: dict[str, QuestionLiveness] = {}
+        for tool_use_id in tool_use_ids:
+            question_thread = asked_on.get(tool_use_id)
+            if question_thread and thread_id and question_thread != thread_id:
+                liveness[tool_use_id] = QuestionLiveness.CLOSED
+            else:
+                liveness[tool_use_id] = reachable
+        return liveness
+
+    async def decline_question(
+        self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
+    ) -> QuestionDecline:
+        # Codex is not parked on the question, so there is nothing to send.
+        return QuestionDecline.AGENT_IDLE
 
     async def post_approval(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1105,7 +1200,8 @@ class CodexPlugin(DefaultLaunchContract):
                 status=SessionStatus.ERROR,
             )
             return
-        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        settled = _settled_status(runtime, session)
+        runtime.storage.update_session(session.id, status=settled)
         await self._register_rate_limit_probe(
             runtime,
             session.id,
@@ -1115,7 +1211,7 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
-            status=SessionStatus.IDLE,
+            status=settled,
         )
 
     async def restart_unpersisted_session(
@@ -1852,12 +1948,18 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime.seed_thread_history(
             session.id, read_history, enabled=request.import_history
         )
-        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        # The imported thread's last turn may have ended waiting on its question.
+        settled = (
+            SessionStatus.WAITING_INPUT
+            if runtime.storage.open_question_tool_use_ids(session.id)
+            else SessionStatus.IDLE
+        )
+        runtime.storage.update_session(session.id, status=settled)
         await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),
-            status=SessionStatus.IDLE,
+            status=settled,
             metadata={"imported_thread_id": thread.id},
         )
         return runtime.get_session(session.id)

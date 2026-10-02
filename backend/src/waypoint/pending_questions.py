@@ -91,14 +91,38 @@ class PendingQuestionTracker:
             self._operations.discard(key)
             self.mark_dirty(session_id)
 
-    def _require_open(self, session_id: str, tool_use_id: str) -> None:
-        if tool_use_id not in self._runtime.storage.open_question_tool_use_ids(
-            session_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="question is no longer open",
-            )
+    def resolve_open(self, session_id: str, tool_use_id: str | None) -> EventRecord:
+        """The open question ``tool_use_id`` names, or the newest when it is
+        ``None``."""
+        events = self._runtime.storage.open_question_events(session_id)
+        if tool_use_id is None:
+            if not events:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="no pending question for this session",
+                )
+            return events[-1]
+        for event in events:
+            if event.metadata.get("tool_use_id") == tool_use_id:
+                return event
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="question is no longer open",
+        )
+
+    def restored_status(self, session: SessionRecord) -> SessionStatus:
+        """Only a question asked since the human's last message keeps
+        ``WAITING_INPUT`` across a restore; a wait on an approval ends with the
+        process that held it."""
+        if session.status is not SessionStatus.WAITING_INPUT:
+            return SessionStatus.IDLE
+        events = self._runtime.storage.open_question_events(session.id)
+        last_input = self._runtime.storage.latest_event_sequence(
+            session.id, EventKind.USER_INPUT
+        )
+        if events and (last_input is None or events[-1].sequence > last_input):
+            return SessionStatus.WAITING_INPUT
+        return SessionStatus.IDLE
 
     # ── Answers ─────────────────────────────────────────────────────────
 
@@ -109,13 +133,9 @@ class PendingQuestionTracker:
         answer: str,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        """Record an answer the plugin has already delivered as a message.
-
-        For agents whose question card is a stand-in (the agent is not parked
-        on a provider request), the answer is an ordinary message; this writes
-        the durable answer event and a synthetic tool_result that closes the
-        card. Call it inside :meth:`operation`.
-        """
+        """Record an answer the plugin delivered as an ordinary message: the
+        durable answer event, then a synthetic tool_result that closes the
+        stand-in card. Call inside :meth:`operation`."""
         extra: dict[str, Any] = {
             "kind": ASK_QUESTION_ANSWER,
             "tool_use_id": tool_use_id,
@@ -162,7 +182,7 @@ class PendingQuestionTracker:
                 detail=f"cancelling questions is not supported for {session.backend}",
             )
         with self.operation(session.id, tool_use_id):
-            self._require_open(session.id, tool_use_id)
+            self.resolve_open(session.id, tool_use_id)
             self._require_actionable(session, tool_use_id)
             outcome = await plugin.decline_question(self._runtime, session, tool_use_id)
             if outcome is QuestionDecline.MISSING:

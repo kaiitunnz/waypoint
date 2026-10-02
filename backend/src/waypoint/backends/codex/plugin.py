@@ -73,7 +73,6 @@ from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
-    EventKind,
     EventRecord,
     LaunchMode,
     SessionCreateRequest,
@@ -96,22 +95,6 @@ def _event_thread_id(event: EventRecord) -> str | None:
     payload = event.metadata.get("payload")
     thread_id = payload.get("threadId") if isinstance(payload, dict) else None
     return thread_id if isinstance(thread_id, str) and thread_id else None
-
-
-def _settled_status(runtime: "SessionRuntime", session: SessionRecord) -> SessionStatus:
-    """Keep a carried-over wait on an open question across a restore.
-
-    Only a question asked since the human's last message holds the wait; an
-    older open card doesn't, and a wait that was for an approval ends with the
-    process that held it.
-    """
-    if session.status is not SessionStatus.WAITING_INPUT:
-        return SessionStatus.IDLE
-    questions = runtime.storage.open_question_events(session.id)
-    last_input = runtime.storage.latest_event_sequence(session.id, EventKind.USER_INPUT)
-    if questions and (last_input is None or questions[-1].sequence > last_input):
-        return SessionStatus.WAITING_INPUT
-    return SessionStatus.IDLE
 
 
 _PLAN_PREFIX = "plan: "
@@ -718,28 +701,10 @@ class CodexPlugin(DefaultLaunchContract):
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        """Answer an async question with Codex's reply envelope.
-
-        Codex keeps working after asking, so the reply is an ordinary message:
-        it steers the running turn or starts a new one.
-        """
-        open_events = {
-            event.metadata["tool_use_id"]: event
-            for event in runtime.storage.open_question_events(session.id)
-        }
-        if tool_use_id is None:
-            if not open_events:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="no pending question for this session",
-                )
-            tool_use_id = list(open_events)[-1]
-        event = open_events.get(tool_use_id)
-        if event is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="question is no longer open",
-            )
+        """Deliver the answer as a reply-envelope message, which steers the
+        running turn or starts a new one."""
+        event = runtime.questions.resolve_open(session.id, tool_use_id)
+        tool_use_id = event.metadata["tool_use_id"]
         transport = runtime.transport_for(session)
         if transport.has_pending_approval(session):
             # The SDK routes no responses while an approval is open, so the
@@ -1208,7 +1173,7 @@ class CodexPlugin(DefaultLaunchContract):
                 status=SessionStatus.ERROR,
             )
             return
-        settled = _settled_status(runtime, session)
+        settled = runtime.questions.restored_status(session)
         runtime.storage.update_session(session.id, status=settled)
         await self._register_rate_limit_probe(
             runtime,

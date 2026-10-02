@@ -1416,19 +1416,8 @@ class ClaudeTtyPlugin:
         open can be answered, oldest included. A synthetic tool_result closes
         the card and a styled answers card records the choices.
         """
-        open_ids = runtime.storage.open_question_tool_use_ids(session.id)
-        if tool_use_id is None:
-            if not open_ids:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="no pending question for this session",
-                )
-            tool_use_id = open_ids[-1]
-        elif tool_use_id not in open_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="question is no longer open",
-            )
+        event = runtime.questions.resolve_open(session.id, tool_use_id)
+        tool_use_id = event.metadata["tool_use_id"]
         with runtime.questions.operation(session.id, tool_use_id):
             transport = runtime.transport_for(session)
             await transport.send_input(

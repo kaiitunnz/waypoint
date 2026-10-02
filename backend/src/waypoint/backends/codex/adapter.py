@@ -14,7 +14,6 @@ from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
 from waypoint.backends.codex.normalize import (
-    apply_async_question,
     diff_preview_for_approval,
     diff_preview_for_notification,
     extract_item,
@@ -27,6 +26,7 @@ from waypoint.backends.codex.normalize import (
     plan_todo_items,
     set_completed_outcome,
 )
+from waypoint.backends.codex.questions import apply_async_question
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
@@ -42,9 +42,8 @@ from waypoint.schemas import (
 
 log = logging.getLogger("waypoint.codex")
 
-# What ends each server request without granting it when the human
-# interrupts the turn. Command/file approvals take `cancel` (decline and end
-# the turn); the other request types have their own "no" shapes.
+# Refusals for each server request when the turn is interrupted. `cancel` on
+# command/file approvals also ends the turn.
 _INTERRUPT_RESPONSES: dict[str, dict[str, Any]] = {
     "item/commandExecution/requestApproval": {"decision": "cancel"},
     "item/fileChange/requestApproval": {"decision": "cancel"},
@@ -54,6 +53,11 @@ _INTERRUPT_RESPONSES: dict[str, dict[str, Any]] = {
     "item/tool/requestUserInput": {"answers": {}},
     "item/permissions/requestApproval": {"permissions": {}},
 }
+
+
+def _interrupt_response(method: str) -> dict[str, Any]:
+    return dict(_INTERRUPT_RESPONSES.get(method, {"decision": "decline"}))
+
 
 ApprovalDecisionHandler = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
@@ -152,10 +156,9 @@ class CodexSessionState:
     session_id: str
     cwd: str
     client: CodexClient
-    # Orders Waypoint-initiated requests among themselves. Notification reads
-    # never take it: the SDK routes responses and notifications on its own
-    # reader thread, so a stream parked on the next notification must not
-    # delay a steer or an interrupt.
+    # Serializes Waypoint-initiated requests. Notification reads skip it: the
+    # SDK routes responses on its own reader thread, so a stream parked on the
+    # next notification must not block a steer or interrupt.
     request_lock: asyncio.Lock
     thread_id: str
     active_turn_id: str | None = None
@@ -350,10 +353,9 @@ class CodexAppServerAdapter:
             state = holder["state"]
             payload = params or {}
             if state.interrupting:
-                # The turn is being interrupted; a request raised before Codex
-                # handles the interrupt would park this reader thread and the
-                # interrupt's response behind it.
-                return dict(_INTERRUPT_RESPONSES.get(method, {"decision": "decline"}))
+                # Parking here would hold the interrupt's response behind this
+                # reader thread.
+                return _interrupt_response(method)
             pending = PendingApproval(method=method, params=payload)
             state.pending_approval = pending
             item_id = payload.get("itemId")
@@ -394,8 +396,7 @@ class CodexAppServerAdapter:
             if self._loop is not None:
                 asyncio.run_coroutine_threadsafe(emit_request(), self._loop)
             pending.event.wait()
-            if state.pending_approval is pending:
-                state.pending_approval = None
+            state.pending_approval = None
             return pending.response or {"decision": "decline"}
 
         factory = client_factory_override or self._client_factory
@@ -443,7 +444,6 @@ class CodexAppServerAdapter:
                     state, state.client.turn_start, state.thread_id, text
                 )
             state.active_turn_id = started.turn.id
-            state.turn_question_ids.clear()
             state.stream_task = asyncio.create_task(
                 self._stream_turn(state, started.turn.id)
             )
@@ -474,7 +474,6 @@ class CodexAppServerAdapter:
                     state, state.client.turn_start, state.thread_id, items
                 )
             state.active_turn_id = started.turn.id
-            state.turn_question_ids.clear()
             state.stream_task = asyncio.create_task(
                 self._stream_turn(state, started.turn.id)
             )
@@ -564,19 +563,13 @@ class CodexAppServerAdapter:
             state.interrupting = False
 
     def _cancel_pending_approval(self, state: CodexSessionState) -> bool:
-        """Resolve an open approval so the SDK reader thread can route again.
-
-        The SDK runs the approval handler on its only reader thread, so no
-        response (an interrupt's included) is routed while one is open.
-        Resolving it first also frees a steer already waiting on its response
-        while holding the request lock.
-        """
+        """The SDK runs the approval handler on its only reader thread, so
+        while one is open no response is routed: not the interrupt's, and not
+        that of a steer holding the request lock."""
         pending = state.pending_approval
-        if pending is None or pending.event.is_set():
+        if pending is None:
             return False
-        pending.response = dict(
-            _INTERRUPT_RESPONSES.get(pending.method, {"decision": "decline"})
-        )
+        pending.response = _interrupt_response(pending.method)
         state.pending_approval = None
         pending.event.set()
         return True
@@ -653,7 +646,7 @@ class CodexAppServerAdapter:
     ) -> bool:
         state = self._require_session(session_id)
         pending = state.pending_approval
-        if pending is None or pending.event.is_set():
+        if pending is None:
             return False
         pending.response = {"decision": self._map_decision(decision)}
         state.pending_approval = None
@@ -753,7 +746,7 @@ class CodexAppServerAdapter:
                         plan_envelope = plan_metadata_for_item(item)
                         if plan_envelope is not None:
                             metadata["plan"] = plan_envelope
-                        if apply_async_question(metadata, payload, item):
+                        if apply_async_question(metadata, item):
                             state.turn_question_ids.add(metadata["tool_use_id"])
                     if (
                         kind == EventKind.TOOL_RESULT
@@ -784,20 +777,12 @@ class CodexAppServerAdapter:
                         status,
                     )
                 if notification.method == "turn/completed":
-                    state.active_turn_id = None
-                    state.stream_task = None
-                    state.turn_question_ids.clear()
-                    state.streamed_tool_result_ids.clear()
-                    state.file_diff_previews.clear()
+                    _end_turn(state)
                     break
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            state.active_turn_id = None
-            state.stream_task = None
-            state.turn_question_ids.clear()
-            state.streamed_tool_result_ids.clear()
-            state.file_diff_previews.clear()
+            _end_turn(state)
             log.exception(
                 "codex stream failed",
                 extra={"session_id": state.session_id, "thread_id": state.thread_id},
@@ -816,11 +801,13 @@ class CodexAppServerAdapter:
     def _settled_turn_status(
         self, state: CodexSessionState, status: SessionStatus
     ) -> SessionStatus:
-        """A turn that ends with one of its own async questions still open
-        waits on the human instead of going idle."""
-        if status is not SessionStatus.IDLE or not state.turn_question_ids:
-            return status
-        if self._open_question_ids is None:
+        """A turn that ends with one of its own async questions open waits on
+        the human."""
+        if (
+            status is not SessionStatus.IDLE
+            or not state.turn_question_ids
+            or self._open_question_ids is None
+        ):
             return status
         open_ids = self._open_question_ids(state.session_id)
         if state.turn_question_ids & open_ids:
@@ -967,6 +954,14 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _end_turn(state: CodexSessionState) -> None:
+    state.active_turn_id = None
+    state.stream_task = None
+    state.turn_question_ids.clear()
+    state.streamed_tool_result_ids.clear()
+    state.file_diff_previews.clear()
 
 
 def _context_usage_snapshot_from_thread_token_usage(

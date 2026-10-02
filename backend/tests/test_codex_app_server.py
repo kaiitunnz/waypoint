@@ -1635,16 +1635,3 @@ async def test_approval_raised_during_an_interrupt_is_cancelled_at_once() -> Non
     assert not [entry for entry in emitted if entry[1] == EventKind.APPROVAL_REQUEST]
     state.interrupting = False
     await adapter.terminate_session("sess")
-
-
-@pytest.mark.asyncio
-async def test_a_new_turn_forgets_the_previous_turns_questions() -> None:
-    adapter, fake = make_parked_adapter()
-    await adapter.start_session("sess", "/tmp/work")
-    state = adapter._sessions["sess"]
-    state.turn_question_ids.add("call_old")
-
-    await adapter.send_input("sess", "start")
-
-    assert state.turn_question_ids == set()
-    await adapter.terminate_session("sess")

@@ -9,13 +9,13 @@ from fastapi import HTTPException
 from openai_codex.generated.v2_all import Turn
 
 from waypoint.backends.codex.history import turns_to_events
-from waypoint.backends.codex.plugin import CodexPlugin, _settled_status
+from waypoint.backends.codex.plugin import CodexPlugin
 from waypoint.backends.codex.questions import (
     async_questions,
     build_reply,
     parse_reply,
 )
-from waypoint.questions import QuestionDecline, QuestionLiveness
+from waypoint.questions import QuestionLiveness
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 from waypoint.settings import Settings
@@ -111,14 +111,13 @@ def test_parse_reply_round_trips_and_rejects_other_text() -> None:
         "call_1", QUESTIONS, [{"question": "Which identity?", "answer": "A"}], ""
     )
     (entry,) = parse_reply(reply) or []
-    assert (entry.tool_use_id, entry.index, entry.answer) == ("call_1", 0, "A")
+    assert (entry.tool_use_id, entry.answer) == ("call_1", "A")
 
     bare = parse_reply(
         '<send_user_message_question_reply>{"questionItemId":"call_2",'
         '"question":"Q","answer":"yes"}</send_user_message_question_reply>'
     )
     assert bare is not None and bare[0].tool_use_id == "call_2"
-    assert bare[0].index is None
 
     for text in (
         "plain message",
@@ -259,10 +258,6 @@ async def test_cancel_sends_nothing_and_settles_idle(tmp_path, monkeypatch) -> N
     runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
     monkeypatch.setattr(runtime.registry, "plugin_for", lambda session: CodexPlugin())
 
-    outcome = await CodexPlugin().decline_question(
-        runtime, runtime.get_session("s1"), "call_1"
-    )
-    assert outcome is QuestionDecline.AGENT_IDLE
     session = await runtime.questions.cancel(runtime.get_session("s1"), "call_1")
 
     transport.send_input.assert_not_called()
@@ -277,7 +272,7 @@ async def test_restore_keeps_a_wait_only_for_a_question_since_the_last_message(
     await runtime._record_user_event("s1", "go", submit=True)
     await ask(runtime, "call_1")
     runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
-    assert _settled_status(runtime, runtime.get_session("s1")) is (
+    assert runtime.questions.restored_status(runtime.get_session("s1")) is (
         SessionStatus.WAITING_INPUT
     )
 
@@ -285,10 +280,16 @@ async def test_restore_keeps_a_wait_only_for_a_question_since_the_last_message(
     # that died with the process) must not resurrect the old card's wait.
     await runtime._record_user_event("s1", "do something else", submit=True)
     runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
-    assert _settled_status(runtime, runtime.get_session("s1")) is SessionStatus.IDLE
+    assert (
+        runtime.questions.restored_status(runtime.get_session("s1"))
+        is SessionStatus.IDLE
+    )
 
     runtime.storage.update_session("s1", status=SessionStatus.INTERRUPTED)
-    assert _settled_status(runtime, runtime.get_session("s1")) is SessionStatus.IDLE
+    assert (
+        runtime.questions.restored_status(runtime.get_session("s1"))
+        is SessionStatus.IDLE
+    )
 
 
 # ── History import ──────────────────────────────────────────────────────

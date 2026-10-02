@@ -4,7 +4,7 @@ Codex's ``request_user_input_async`` tool surfaces as an ``agentMessage`` item
 with ``delivery: "async"`` and a ``questions`` list; the turn keeps running.
 The agent reads the human's reply from an ordinary user message carrying a
 ``<send_user_message_question_reply>`` envelope, so the Waypoint card is a
-stand-in, like ``claude_tty``'s.
+stand-in.
 """
 
 import json
@@ -15,25 +15,26 @@ from typing import Any
 from waypoint.backends.events import INTERACTION_METADATA_KEY, question_interaction
 from waypoint.questions import ASK_USER_QUESTION_TOOL
 
-ASYNC_DELIVERY = "async"
-REPLY_TAG = "send_user_message_question_reply"
-QUESTION_TOOL = "request_user_input_async"
+_ASYNC_DELIVERY = "async"
+_REPLY_TAG = "send_user_message_question_reply"
+_QUESTION_TOOL = "request_user_input_async"
 # Codex bounds the quoted question in a reply to 512 bytes.
-MAX_REPLY_QUESTION_BYTES = 512
+_MAX_REPLY_QUESTION_BYTES = 512
 
-_REPLY_PATTERN = re.compile(rf"\s*<{REPLY_TAG}>(.*)</{REPLY_TAG}>\s*", re.DOTALL)
+_REPLY_PATTERN = re.compile(rf"\s*<{_REPLY_TAG}>(.*)</{_REPLY_TAG}>\s*", re.DOTALL)
 
 
 @dataclass(frozen=True)
 class ReplyEntry:
     tool_use_id: str
-    index: int | None
     question: str
     answer: str
 
 
 def is_async_message(item: dict[str, Any]) -> bool:
-    return item.get("type") == "agentMessage" and item.get("delivery") == ASYNC_DELIVERY
+    return (
+        item.get("type") == "agentMessage" and item.get("delivery") == _ASYNC_DELIVERY
+    )
 
 
 def async_questions(item: dict[str, Any]) -> list[dict[str, Any]] | None:
@@ -62,19 +63,24 @@ def async_questions(item: dict[str, Any]) -> list[dict[str, Any]] | None:
     return questions or None
 
 
-def question_call_metadata(
-    item_id: str, questions: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Metadata keys that make an event an open AskUserQuestion card."""
-    metadata: dict[str, Any] = {
-        "tool_name": ASK_USER_QUESTION_TOOL,
-        "tool_use_id": item_id,
-        "tool_input": {"questions": questions},
-    }
+def apply_async_question(metadata: dict[str, Any], item: dict[str, Any]) -> bool:
+    """Mark ``metadata`` as an AskUserQuestion card when ``item`` is an async
+    question, copying the questions to ``payload["input"]`` where the frontend
+    reads them. Returns whether it was one."""
+    item_id = item.get("id")
+    questions = async_questions(item)
+    if questions is None or not isinstance(item_id, str) or not item_id:
+        return False
+    metadata["payload"]["input"] = {"questions": questions}
+    metadata.update(
+        tool_name=ASK_USER_QUESTION_TOOL,
+        tool_use_id=item_id,
+        tool_input={"questions": questions},
+    )
     interaction = question_interaction(item_id, questions)
     if interaction is not None:
         metadata[INTERACTION_METADATA_KEY] = interaction.to_metadata()
-    return metadata
+    return True
 
 
 def build_reply(
@@ -119,7 +125,7 @@ def build_reply(
             }
         )
     body = json.dumps(entries, ensure_ascii=False, separators=(",", ":"))
-    return f"<{REPLY_TAG}>\n{body}\n</{REPLY_TAG}>"
+    return f"<{_REPLY_TAG}>\n{body}\n</{_REPLY_TAG}>"
 
 
 def parse_reply(text: str) -> list[ReplyEntry] | None:
@@ -147,28 +153,27 @@ def parse_reply(text: str) -> list[ReplyEntry] | None:
             and isinstance(answer, str)
         ):
             return None
-        tool_use_id, index = _parse_item_ref(item_ref)
-        entries.append(ReplyEntry(tool_use_id, index, question, answer))
+        entries.append(ReplyEntry(_parse_item_ref(item_ref), question, answer))
     return entries
 
 
 def _question_item_id(item_id: str, index: int) -> str:
-    return json.dumps([QUESTION_TOOL, item_id, index], separators=(",", ":"))
+    return json.dumps([_QUESTION_TOOL, item_id, index], separators=(",", ":"))
 
 
-def _parse_item_ref(item_ref: str) -> tuple[str, int | None]:
+def _parse_item_ref(item_ref: str) -> str:
     try:
         decoded = json.loads(item_ref)
     except json.JSONDecodeError:
-        return item_ref, None
+        return item_ref
     if (
         isinstance(decoded, list)
         and len(decoded) == 3
         and isinstance(decoded[1], str)
         and isinstance(decoded[2], int)
     ):
-        return decoded[1], decoded[2]
-    return item_ref, None
+        return decoded[1]
+    return item_ref
 
 
 def _answer_text(entry: dict[str, Any]) -> str:
@@ -194,6 +199,6 @@ def _question_index(
 def _reply_question(title: str) -> str:
     flattened = title.replace("\n", " ")
     encoded = flattened.encode()
-    if len(encoded) <= MAX_REPLY_QUESTION_BYTES:
+    if len(encoded) <= _MAX_REPLY_QUESTION_BYTES:
         return flattened
-    return encoded[:MAX_REPLY_QUESTION_BYTES].decode(errors="ignore")
+    return encoded[:_MAX_REPLY_QUESTION_BYTES].decode(errors="ignore")

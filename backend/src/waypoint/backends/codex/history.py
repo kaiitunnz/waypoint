@@ -19,13 +19,17 @@ from openai_codex.generated.v2_all import Turn
 from waypoint.backends.codex.normalize import (
     _format_item_completed,
     _format_item_started,
-    apply_async_question,
     diff_preview_for_notification,
     extract_tool_name,
     plan_metadata_for_item,
     set_completed_outcome,
 )
-from waypoint.backends.codex.questions import ReplyEntry, is_async_message, parse_reply
+from waypoint.backends.codex.questions import (
+    ReplyEntry,
+    apply_async_question,
+    is_async_message,
+    parse_reply,
+)
 from waypoint.backends.diff_preview import preview_to_metadata
 from waypoint.questions import (
     ASK_QUESTION_ANSWER,
@@ -39,51 +43,52 @@ from waypoint.schemas import EventKind, EventRecord
 def turns_to_events(turns: list[Turn], session_id: str) -> list[EventRecord]:
     """Replay a Codex thread's turns into ``EventRecord``s in sequence order.
 
-    Async questions left unanswered before the final turn are closed: the
-    agent moved past them. The final turn's stay open, since it may have
-    ended waiting on the answer.
+    Async questions left unanswered before the final turn get a closure note;
+    the final turn's stay open because it may have ended waiting on the answer.
     """
+    if not turns:
+        return []
     events: list[EventRecord] = []
-    stale_questions: list[str] = []
-    final_ts = datetime.fromtimestamp(0, UTC)
-    for position, turn in enumerate(turns):
+    for turn in turns:
+        earlier = len(events)
         started_at = _turn_timestamp(turn.started_at, turn.completed_at)
         completed_at = _turn_timestamp(turn.completed_at, turn.started_at)
-        final_ts = completed_at
         for item in turn.items:
-            item_events = _item_to_events(
-                item.root, session_id, started_at, completed_at
+            events.extend(
+                _item_to_events(item.root, session_id, started_at, completed_at)
             )
-            if position < len(turns) - 1:
-                stale_questions.extend(
-                    event.metadata["tool_use_id"]
-                    for event in item_events
-                    if event.kind == EventKind.TOOL_CALL
-                    and event.metadata.get("tool_name") == ASK_USER_QUESTION_TOOL
-                )
-            events.extend(item_events)
+    return events + _close_abandoned_questions(
+        events, earlier, session_id, completed_at
+    )
+
+
+def _close_abandoned_questions(
+    events: list[EventRecord], earlier: int, session_id: str, ts: datetime
+) -> list[EventRecord]:
+    """Closure notes for questions asked in ``events[:earlier]`` that no
+    answer resolved."""
     answered = {
         event.metadata.get("tool_use_id")
         for event in events
         if event.metadata.get("kind") == ASK_QUESTION_ANSWER
     }
-    for tool_use_id in stale_questions:
-        if tool_use_id in answered:
-            continue
-        events.append(
-            _event(
-                session_id,
-                final_ts,
-                EventKind.SYSTEM_NOTE,
-                "Question closed: the agent moved on without an answer",
-                {
-                    "kind": ASK_QUESTION_CLOSED,
-                    "tool_use_id": tool_use_id,
-                    "reason": QuestionCloseReason.PROVIDER_CLOSED.value,
-                },
-            )
+    return [
+        _event(
+            session_id,
+            ts,
+            EventKind.SYSTEM_NOTE,
+            "Question closed: the agent moved on without an answer",
+            {
+                "kind": ASK_QUESTION_CLOSED,
+                "tool_use_id": event.metadata["tool_use_id"],
+                "reason": QuestionCloseReason.PROVIDER_CLOSED.value,
+            },
         )
-    return events
+        for event in events[:earlier]
+        if event.kind == EventKind.TOOL_CALL
+        and event.metadata.get("tool_name") == ASK_USER_QUESTION_TOOL
+        and event.metadata["tool_use_id"] not in answered
+    ]
 
 
 def _turn_timestamp(primary: int | None, fallback: int | None) -> datetime:
@@ -142,15 +147,14 @@ def _async_message_events(
     metadata = _envelope(
         "item/completed", item_dict, item_id, "agentMessage", None, status
     )
-    apply_async_question(metadata, metadata["payload"], item_dict)
+    apply_async_question(metadata, item_dict)
     return [_event(session_id, completed_at, kind, text, metadata)]
 
 
 def _reply_events(
     replies: list[ReplyEntry], session_id: str, ts: datetime
 ) -> list[EventRecord]:
-    """One answer event per answered question card, shaped like the answers
-    Waypoint records live."""
+    """One answer event per question card, in the live answer-event shape."""
     by_card: dict[str, list[ReplyEntry]] = {}
     for reply in replies:
         by_card.setdefault(reply.tool_use_id, []).append(reply)

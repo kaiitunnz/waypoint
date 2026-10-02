@@ -111,7 +111,6 @@ export function parseAskUserQuestion(event: EventRecord): AskUserQuestion[] | nu
         description: typeof o.description === "string" ? o.description : undefined,
       });
     }
-    if (!options.length) continue;
     parsed.push({
       question: q.question,
       header: typeof q.header === "string" ? q.header : undefined,
@@ -407,6 +406,12 @@ function serializeAnswers(
     const selections = draft.picked[index] ?? [];
     const note = (draft.notes[index] ?? "").trim();
     if (!selections.length && !note) return;
+    // A free-text question has no options; the typed text is the answer.
+    if (!entry.options.length) {
+      segments.push(`"${entry.question}"="${note}"`);
+      structured.push({ question: entry.question, answer: note });
+      return;
+    }
     const parts: string[] = [];
     let answerValue: string | null = null;
     if (selections.length) {
@@ -479,6 +484,7 @@ export function AskQuestionForm({
   if (!entry) return null;
   const index = safeIndex;
   const selections = new Set(draft.picked[index] ?? []);
+  const freeText = entry.options.length === 0;
   const promptLabel = questions[0]?.question ?? "this question";
 
   return (
@@ -529,18 +535,20 @@ export function AskQuestionForm({
           <p className="ask-question-text">{entry.question}</p>
           {entry.multiSelect ? <span className="meta">multi-select</span> : null}
         </div>
-        <AskQuestionOptions
-          options={entry.options}
-          selected={selections}
-          onToggle={(label) =>
-            updateDraft((current) =>
-              toggleLabel(current, index, label, entry.multiSelect ?? false),
-            )
-          }
-          disabled={!actionable || busy}
-        />
+        {freeText ? null : (
+          <AskQuestionOptions
+            options={entry.options}
+            selected={selections}
+            onToggle={(label) =>
+              updateDraft((current) =>
+                toggleLabel(current, index, label, entry.multiSelect ?? false),
+              )
+            }
+            disabled={!actionable || busy}
+          />
+        )}
         {actionable ? (
-          draft.notesOpen[index] ? (
+          freeText || draft.notesOpen[index] ? (
             <div className="ask-question-note">
               <textarea
                 className="ask-question-note-input"
@@ -553,24 +561,29 @@ export function AskQuestionForm({
                   }));
                 }}
                 onKeyDown={handleNoteKeyDown}
-                placeholder="Type your own answer or add a note here…"
-                rows={2}
+                placeholder={
+                  freeText ? "Type your answer…" : "Type your own answer or add a note here…"
+                }
+                aria-label={freeText ? `Answer: ${entry.question}` : undefined}
+                rows={freeText ? 3 : 2}
                 disabled={busy}
                 aria-keyshortcuts="Meta+Enter Control+Enter"
               />
-              <button
-                type="button"
-                className="link-button"
-                onClick={() =>
-                  updateDraft((current) => ({
-                    ...current,
-                    notesOpen: { ...current.notesOpen, [index]: false },
-                  }))
-                }
-                disabled={busy}
-              >
-                Hide note
-              </button>
+              {freeText ? null : (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() =>
+                    updateDraft((current) => ({
+                      ...current,
+                      notesOpen: { ...current.notesOpen, [index]: false },
+                    }))
+                  }
+                  disabled={busy}
+                >
+                  Hide note
+                </button>
+              )}
             </div>
           ) : (
             <button

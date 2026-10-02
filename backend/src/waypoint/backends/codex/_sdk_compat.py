@@ -30,6 +30,14 @@ loudly. Remove the ``ThreadItem`` widening once the pinned SDK's union catches u
 to the CLI, and the ``SubAgentActivityKind`` fallback once the pinned SDK models
 ``completed`` natively.
 
+``install_ended_turn_rerouting`` -- a notification can name a turn that has
+already completed: a subagent that finishes after its parent's turn ended
+reports ``subAgentActivity`` ``completed`` on that ended turn. The router
+buffers it for a turn nobody streams any more and then drops it. The shim
+sends any notification for a turn whose ``turn/completed`` was already routed
+to the global queue instead, where Waypoint's notification pump reads it.
+Delete it once the SDK delivers late turn notifications.
+
 ``start_compaction_turn`` -- ``thread/compact/start`` returns ``{}``, yet the
 compaction runs as an ordinary turn whose notifications carry a fresh turn id.
 The helper reuses the router's own turn-start buffering (``pending_turn`` /
@@ -41,8 +49,10 @@ returns the turn id.
 import threading
 import time
 import typing
+from collections import OrderedDict
 
 import openai_codex.generated.v2_all as _v2
+from openai_codex._message_router import MessageRouter
 from openai_codex.client import CodexClient
 from openai_codex.generated.v2_all import SubAgentActivityKind, ThreadItem
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -50,6 +60,11 @@ from pydantic import BaseModel, ConfigDict, model_validator
 _THREAD_ITEM_SENTINEL = "_waypoint_thread_item_tolerant"
 _ACTIVITY_KIND_SENTINEL = "_waypoint_activity_kind_tolerant"
 _TOLERATED_ACTIVITY_KIND = "completed"
+_REROUTING_SENTINEL = "_waypoint_ended_turn_rerouting"
+_ENDED_TURNS_ATTR = "_waypoint_ended_turns"
+# Ended turns remembered per client; a late notification for an older one is
+# dropped as before.
+_ENDED_TURNS_LIMIT = 256
 
 
 def _known_thread_item_types(union: typing.Any) -> frozenset[str]:
@@ -243,6 +258,40 @@ def install_activity_kind_tolerance() -> None:
     setattr(SubAgentActivityKind, _ACTIVITY_KIND_SENTINEL, True)
 
 
+def install_ended_turn_rerouting() -> None:
+    """Route notifications for an already-completed turn to the global queue.
+
+    Idempotent. A thread with a goal operation keeps the SDK's routing, since
+    the goal consumes its turns' notifications itself.
+    """
+    if getattr(MessageRouter, _REROUTING_SENTINEL, False):
+        return
+    original = MessageRouter.route_notification
+
+    def route_notification(self: typing.Any, notification: typing.Any) -> None:
+        turn_id = self._notification_turn_id(notification)
+        if turn_id is not None:
+            thread_id = self._notification_thread_id(notification)
+            with self._lock:
+                ended = self.__dict__.setdefault(_ENDED_TURNS_ATTR, OrderedDict())
+                rerouted = (
+                    turn_id in ended
+                    and notification.method != "turn/completed"
+                    and (thread_id is None or thread_id not in self._goal_operations)
+                )
+                if notification.method == "turn/completed":
+                    ended[turn_id] = None
+                    while len(ended) > _ENDED_TURNS_LIMIT:
+                        ended.popitem(last=False)
+            if rerouted:
+                self._global_notifications.put(notification)
+                return
+        original(self, notification)
+
+    MessageRouter.route_notification = route_notification  # type: ignore[method-assign]
+    setattr(MessageRouter, _REROUTING_SENTINEL, True)
+
+
 _COMPACTION_POLL_SECONDS = 0.05
 
 
@@ -310,3 +359,4 @@ KNOWN_THREAD_ITEM_TYPES = _known_thread_item_types(
 
 install_thread_item_tolerance()
 install_activity_kind_tolerance()
+install_ended_turn_rerouting()

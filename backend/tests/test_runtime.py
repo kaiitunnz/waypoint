@@ -9,6 +9,7 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from openai_codex.generated.v2_all import Turn
 
 from waypoint.assistant_assets import AssistantAssetError
 from waypoint.backends.claude_code.models import SONNET55_MIN_CLI_VERSION
@@ -2799,6 +2800,77 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
     events = storage.list_events(session.id)
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Imported stored Codex thread via SSH target Devbox" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_import_codex_thread_shows_subagent_reports_read_from_children(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, _settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, FakeCodexRuntimeAdapter())
+
+    def activity(item_id: str, child: str) -> dict[str, Any]:
+        return {
+            "type": "subAgentActivity",
+            "id": item_id,
+            "kind": "completed",
+            "agentPath": f"/root/{child}",
+            "agentThreadId": child,
+        }
+
+    turn = Turn.model_validate(
+        {
+            "id": "turn-1",
+            "status": "completed",
+            "startedAt": 1_700_000_000,
+            "completedAt": 1_700_000_010,
+            "items": [activity("subagent-completed-a", "ok"), activity("x", "broken")],
+        }
+    )
+    thread = make_thread(id="thread-9", turns=[turn])
+    report = Turn.model_validate(
+        {
+            "id": "child-turn",
+            "status": "completed",
+            "items": [
+                {
+                    "type": "agentMessage",
+                    "id": "m1",
+                    "text": "All good.",
+                    "phase": "final_answer",
+                }
+            ],
+        }
+    )
+
+    class ChildReader:
+        def thread_read(self, thread_id: str, include_turns: bool = False) -> Any:
+            assert include_turns
+            if thread_id == "broken":
+                raise RuntimeError("no such thread")
+            return SimpleNamespace(thread=SimpleNamespace(turns=[report]))
+
+    async def fake_read(*_args: Any, **_kwargs: Any) -> Any:
+        return thread
+
+    async def fake_run(_runtime, launch_target_id, operation, **kwargs):
+        return await operation(ChildReader())
+
+    codex_plugin = runtime.registry.get("codex")
+    monkeypatch.setattr(codex_plugin, "_read_thread", fake_read)
+    monkeypatch.setattr(codex_plugin, "run_client_operation", fake_run)
+
+    session = await codex_plugin.import_thread(
+        runtime, CodexThreadImportRequest(thread_id="thread-9", import_history=True)
+    )
+
+    cards = {
+        event.metadata["task_notification"]["id"]: event.metadata["task_notification"]
+        for event in storage.list_events(session.id)
+        if event.metadata.get("method") == "task_notification"
+    }
+    assert cards["subagent-completed-a"]["result_preview"] == "All good."
+    assert cards["x"]["output_unavailable_reason"] == "subagent report unavailable"
 
 
 def _make_claude_thread_info(**overrides: Any) -> ClaudeThreadInfo:

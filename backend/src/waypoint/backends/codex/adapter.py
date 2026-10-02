@@ -37,11 +37,20 @@ from waypoint.backends.codex.normalize import (
     set_completed_outcome,
 )
 from waypoint.backends.codex.questions import apply_async_question
+from waypoint.backends.codex.subagents import (
+    REPORT_FETCH_TIMEOUT_SECONDS,
+    SUBAGENT_ITEM_TYPE,
+    SubagentReport,
+    final_report,
+    report_child,
+    with_report,
+)
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionEnvelope,
 )
+from waypoint.backends.task_notifications import CAPTURE_DISABLED
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -235,8 +244,10 @@ class CodexAppServerAdapter:
         on_token_usage: TokenUsageCallback | None = None,
         client_factory: ClientFactory | None = None,
         open_question_ids: Callable[[str], set[str]] | None = None,
+        task_output_capture_enabled: bool = True,
     ) -> None:
         self._emit_event = emit_event
+        self._task_output_capture_enabled = task_output_capture_enabled
         self._open_question_ids = open_question_ids
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
@@ -859,6 +870,8 @@ class CodexAppServerAdapter:
                         "id": payload.get("turnId"),
                         "items": plan_todo_items(payload.get("plan")),
                     }
+                if not await self._attach_subagent_report(state, method, payload):
+                    continue
                 await self._emit_notification(state, method, payload, settle=True)
                 if method == "turn/completed":
                     _end_turn(state)
@@ -882,11 +895,52 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
 
+    async def _attach_subagent_report(
+        self, state: CodexSessionState, method: str, payload: dict[str, Any]
+    ) -> bool:
+        """Attach a finished subagent's report to its activity item. False
+        drops an activity item that belongs to another thread."""
+        item = extract_item(payload) if "item" in payload else None
+        if not isinstance(item, dict) or item.get("type") != SUBAGENT_ITEM_TYPE:
+            return True
+        thread_id = payload.get("threadId")
+        if isinstance(thread_id, str) and thread_id != state.thread_id:
+            return False
+        child = report_child(item) if method == "item/completed" else None
+        if child is not None:
+            report = await self._read_subagent_report(state, child)
+            no_spill_reason = (
+                None if self._task_output_capture_enabled else CAPTURE_DISABLED
+            )
+            payload["item"] = with_report(item, SubagentReport(report, no_spill_reason))
+        return True
+
+    async def _read_subagent_report(
+        self, state: CodexSessionState, child_thread_id: str
+    ) -> str | None:
+        # Not under request_lock: responses route by request id, so the read
+        # never holds up a steer or interrupt sent meanwhile.
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(state.client.thread_read, child_thread_id, True),
+                REPORT_FETCH_TIMEOUT_SECONDS,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "codex subagent report unavailable",
+                exc_info=True,
+                extra={"session_id": state.session_id, "thread_id": child_thread_id},
+            )
+            return None
+        return final_report(response.thread)
+
     def _pump_notifications(
         self, state: CodexSessionState, loop: asyncio.AbstractEventLoop
     ) -> None:
         """Drain notifications that carry no turn id (warnings, config and
-        deprecation notices, thread state). They never change session status.
+        deprecation notices, thread state), plus late ones for an ended turn
+        (a subagent finishing after its parent's turn). They never change
+        session status.
 
         Runs on its own thread for the client's lifetime, so an idle session
         never holds a worker of the event loop's shared pool.
@@ -904,8 +958,8 @@ class CodexAppServerAdapter:
             try:
                 # Waiting for each emit keeps the notifications in order.
                 asyncio.run_coroutine_threadsafe(
-                    self._emit_notification(
-                        state, notification.method, payload, settle=False
+                    self._emit_turnless_notification(
+                        state, notification.method, payload
                     ),
                     loop,
                 ).result()
@@ -923,6 +977,12 @@ class CodexAppServerAdapter:
                     notification.method,
                     extra={"session_id": state.session_id},
                 )
+
+    async def _emit_turnless_notification(
+        self, state: CodexSessionState, method: str, payload: dict[str, Any]
+    ) -> None:
+        if await self._attach_subagent_report(state, method, payload):
+            await self._emit_notification(state, method, payload, settle=False)
 
     async def _emit_notification(
         self,

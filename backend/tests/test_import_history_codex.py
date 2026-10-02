@@ -2,7 +2,13 @@ import base64
 
 from openai_codex.generated.v2_all import Turn
 
-from waypoint.backends.codex.history import turns_to_events
+from waypoint.backends.codex.history import subagent_report_children, turns_to_events
+from waypoint.backends.codex.subagents import REPORT_UNAVAILABLE, SUBAGENT_REPORT_KEY
+from waypoint.backends.task_notifications import (
+    NOT_CAPTURED_ON_IMPORT,
+    TASK_NOTIFICATION_INLINE_LIMIT,
+    TASK_NOTIFICATION_METHOD,
+)
 from waypoint.schemas import EventKind
 
 
@@ -204,3 +210,84 @@ def test_image_generation_imports_with_an_attachment_blob() -> None:
     assert result.metadata["is_error"] is False
     assert call.metadata["payload"]["item"]["result"] == ""
     assert result.metadata["payload"]["item"]["result"] == ""
+
+
+def _activity(kind: str, item_id: str, child: str = "child-1") -> dict[str, object]:
+    return {
+        "type": "subAgentActivity",
+        "id": item_id,
+        "kind": kind,
+        "agentPath": "/root/reviewer",
+        "agentThreadId": child,
+    }
+
+
+def test_subagent_activity_imports_as_tool_entries_and_task_cards() -> None:
+    turn = _turn(
+        items=[
+            _activity("started", "call-1"),
+            _activity("interacted", "call-2"),
+            _activity("completed", "subagent-completed-a"),
+            _activity("interrupted", "subagent-interrupted-b", child="child-2"),
+        ]
+    )
+    events = turns_to_events(
+        [turn], "sess-1", {"child-1": "Verdict: approve.", "child-2": None}
+    )
+
+    assert [(event.kind, event.text) for event in events] == [
+        (EventKind.TOOL_RESULT, "Spawned reviewer"),
+        (EventKind.TOOL_RESULT, "Messaged reviewer"),
+        (EventKind.SYSTEM_NOTE, 'Agent "reviewer" finished'),
+        (EventKind.SYSTEM_NOTE, 'Agent "reviewer" stopped'),
+    ]
+    assert events[0].metadata["tool_name"] == "Subagent"
+    finished = events[2].metadata
+    assert finished["method"] == TASK_NOTIFICATION_METHOD
+    assert finished["task_notification"]["id"] == "subagent-completed-a"
+    assert finished["task_notification"]["result_preview"] == "Verdict: approve."
+    assert SUBAGENT_REPORT_KEY not in finished["payload"]["item"]
+    stopped = events[3].metadata["task_notification"]
+    assert stopped["status"] == "stopped"
+    assert stopped["output_unavailable_reason"] == REPORT_UNAVAILABLE
+
+
+def test_subagent_card_without_a_children_map_says_report_unavailable() -> None:
+    turn = _turn(items=[_activity("completed", "subagent-completed-a")])
+    [event] = turns_to_events([turn], "sess-1")
+    card = event.metadata["task_notification"]
+    assert card["result_preview"] is None
+    assert card["output_unavailable_reason"] == REPORT_UNAVAILABLE
+
+
+def test_long_imported_subagent_report_is_a_truncated_preview() -> None:
+    report = "r" * (TASK_NOTIFICATION_INLINE_LIMIT + 10)
+    turn = _turn(items=[_activity("completed", "subagent-completed-a")])
+    [event] = turns_to_events([turn], "sess-1", {"child-1": report})
+
+    card = event.metadata["task_notification"]
+    assert card["result_truncated"] is True
+    assert card["output_available"] is False
+    assert card["output_unavailable_reason"] == NOT_CAPTURED_ON_IMPORT
+    assert "capture_inline_blobs" not in event.metadata
+
+
+def test_imported_task_card_ids_are_deduplicated() -> None:
+    turns = [
+        _turn(id="turn1", items=[_activity("completed", "subagent-completed-a")]),
+        _turn(id="turn2", items=[_activity("completed", "subagent-completed-a")]),
+    ]
+    events = turns_to_events(turns, "sess-1", {"child-1": "Done."})
+    assert len(events) == 1
+
+
+def test_subagent_report_children_lists_each_finished_child_once() -> None:
+    turn = _turn(
+        items=[
+            _activity("started", "call-1"),
+            _activity("completed", "subagent-completed-a"),
+            _activity("interrupted", "subagent-interrupted-a"),
+            _activity("completed", "subagent-completed-b", child="child-2"),
+        ]
+    )
+    assert subagent_report_children([turn]) == ["child-1", "child-2"]

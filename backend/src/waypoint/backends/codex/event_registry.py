@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from waypoint.backends.codex import subagents
 from waypoint.backends.codex.normalize import (
     error_text,
     extract_item,
@@ -243,10 +244,16 @@ def _reasoning_completed(item: dict[str, Any]) -> Rendered:
     return _detail_note("Reasoning")
 
 
-def _sub_agent_activity(item: dict[str, Any]) -> Rendered:
-    kind = _text(item.get("kind")) or "activity"
-    path = _text(item.get("agentPath"))
-    return _detail_note(f"Subagent {kind}: {path}" if path else f"Subagent {kind}")
+def _sub_agent_activity(item: dict[str, Any]) -> Rendered | None:
+    text = subagents.tool_text(item)
+    if text is not None:
+        # The activity has already happened, so it is a finished tool entry
+        # rather than a call awaiting a result.
+        return _tool_result(text, {"agent_path": item.get("agentPath")})
+    card = subagents.task_card(item)
+    if card is None:
+        return None
+    return Rendered(EventKind.SYSTEM_NOTE, card[0], metadata=card[1])
 
 
 def _seconds(item: dict[str, Any]) -> str:
@@ -393,7 +400,11 @@ ITEMS: dict[str, ItemSpec] = {
         started=lambda item: _detail_note("Compacting context"),
         completed=lambda item: _important_note("Context compacted"),
     ),
-    "subAgentActivity": ItemSpec(completed=_sub_agent_activity),
+    "subAgentActivity": ItemSpec(
+        tool_name=subagents.tool_name,
+        completed=_sub_agent_activity,
+        persisted=subagents.without_report,
+    ),
     "imageView": ItemSpec(
         tool_name=lambda item: "ViewImage",
         started=lambda item: _tool_call(_text(item.get("path")) or "view image"),

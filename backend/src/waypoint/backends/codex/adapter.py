@@ -243,6 +243,7 @@ class CodexSessionState:
             max_workers=1, thread_name_prefix="codex-subagent-report"
         )
     )
+    report_reader_wedged: bool = False
 
 
 class CodexAppServerAdapter:
@@ -929,6 +930,8 @@ class CodexAppServerAdapter:
     async def _read_subagent_report(
         self, state: CodexSessionState, source: ReportSource
     ) -> str | None:
+        if state.report_reader_wedged:
+            return None
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
         try:
@@ -938,6 +941,15 @@ class CodexAppServerAdapter:
                 ),
                 REPORT_FETCH_TIMEOUT_SECONDS,
             )
+        except TimeoutError:
+            # The worker stays held until the client closes; a later read
+            # would only queue behind it until its own deadline.
+            state.report_reader_wedged = True
+            log.warning(
+                "codex subagent report read timed out; skipping later reads",
+                extra={"session_id": state.session_id, "thread_id": source.thread_id},
+            )
+            return None
         except Exception:  # noqa: BLE001
             log.warning(
                 "codex subagent report unavailable",

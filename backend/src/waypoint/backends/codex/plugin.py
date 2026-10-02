@@ -1667,13 +1667,27 @@ class CodexPlugin(DefaultLaunchContract):
         slots = asyncio.Semaphore(_IMPORT_REPORT_READS)
         loop = asyncio.get_running_loop()
 
+        timed_out = False
+
         async def read(client: CodexClient, source: ReportSource) -> str | None:
+            nonlocal timed_out
             async with slots:
+                if timed_out:
+                    # The app-server stopped answering; a later read would
+                    # only wait out its own deadline.
+                    return None
                 try:
                     return await asyncio.wait_for(
                         loop.run_in_executor(reader, read_report, client, source),
                         REPORT_FETCH_TIMEOUT_SECONDS,
                     )
+                except TimeoutError:
+                    timed_out = True
+                    log.warning(
+                        "codex subagent report read timed out on import",
+                        extra={"thread_id": source.thread_id},
+                    )
+                    return None
                 except Exception:  # noqa: BLE001
                     log.warning(
                         "codex subagent report unavailable on import",

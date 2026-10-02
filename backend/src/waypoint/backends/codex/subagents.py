@@ -57,6 +57,9 @@ class ReportSource:
     # Unix seconds. A newest turn that started later is a later task, not the
     # one the item reports on; an import sets it to the parent turn's end.
     started_by: int | None = None
+    # An interrupt of a subagent whose newest turn had already completed
+    # stopped nothing, so that turn's answer is not its report.
+    interrupted: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,7 @@ def report_source(
     )
     if turn_id:
         return ReportSource(child, turn_id)
-    return ReportSource(child, None, started_by)
+    return ReportSource(child, None, started_by, _kind(item) == "interrupted")
 
 
 def report_sources(
@@ -152,6 +155,12 @@ def read_report(client: CodexClient, source: ReportSource) -> str | None:
         started_at = getattr(turns[-1], "started_at", None)
         if isinstance(started_at, int) and started_at > source.started_by:
             return None
+    if (
+        turns
+        and source.interrupted
+        and _value(getattr(turns[-1], "status", None)) == "completed"
+    ):
+        return None
     return final_report(turns)
 
 

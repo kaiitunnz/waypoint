@@ -2506,6 +2506,18 @@ def _turn_at(started_at: int, text: str) -> Any:
     return turn
 
 
+def test_stopping_an_idle_subagent_shows_no_earlier_report() -> None:
+    finished = _turn_at(1, "Old verdict.")
+    client = cast(CodexClient, _ReportClient(finished))
+    assert read_report(client, ReportSource("child", None, interrupted=True)) is None
+    running = _child_thread(("Partial verdict.", "final_answer"), status="interrupted")
+    client = cast(CodexClient, _ReportClient(running.turns[0]))
+    assert (
+        read_report(client, ReportSource("child", None, interrupted=True))
+        == "Partial verdict."
+    )
+
+
 def test_newest_turn_started_after_the_bound_is_not_the_report() -> None:
     client = cast(CodexClient, _ReportClient(_turn_at(200, "Later task.")))
     assert read_report(client, ReportSource("child", None, 100)) is None
@@ -2568,8 +2580,9 @@ async def test_hung_report_read_holds_only_the_sessions_report_worker(
         REPORT_UNAVAILABLE,
         REPORT_UNAVAILABLE,
     ]
-    # The second read queued behind the hung one and timed out unstarted.
+    # After the first read timed out, the second is skipped without waiting.
     assert len(read_threads) == 1
+    assert state.report_reader_wedged
     assert read_threads[0].startswith("codex-subagent-report")
     unblock.set()
     assert await adapter.terminate_session("sess")

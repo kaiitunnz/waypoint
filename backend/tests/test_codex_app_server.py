@@ -722,7 +722,9 @@ def _patch_compaction_turn(
 ) -> list[tuple[Any, ...]]:
     calls: list[tuple[Any, ...]] = []
 
-    def start(client: Any, thread_id: str, timeout: float) -> str | None:
+    def start(
+        client: Any, thread_id: str, timeout: float, cancelled: Any = None
+    ) -> str | None:
         calls.append((thread_id, timeout))
         if gate is not None:
             gate.wait(timeout=2)
@@ -2084,3 +2086,32 @@ async def test_compaction_reservation_blocks_a_second_request() -> None:
 
     adapter.abandon_compaction("sess")
     adapter.begin_compaction("sess")
+
+
+@pytest.mark.asyncio
+async def test_compaction_waits_out_a_starting_turn() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    gate = threading.Event()
+    original_turn_start = fake.turn_start
+
+    def slow_turn_start(*args: Any) -> FakeTurnStartResponse:
+        gate.wait(timeout=2)
+        return original_turn_start(*args)
+
+    fake.turn_start = slow_turn_start
+    sending = asyncio.create_task(adapter.send_input("sess", "go"))
+    for _ in range(100):
+        if adapter._sessions["sess"].starting_turn:
+            break
+        await asyncio.sleep(0.01)
+
+    with pytest.raises(RuntimeError, match="turn is active"):
+        adapter.begin_compaction("sess")
+    gate.set()
+    await sending
+    state = adapter._sessions["sess"]
+    assert state.active_turn_id == "turn-1"
+    assert state.starting_turn is False
+    assert state.compacting is False

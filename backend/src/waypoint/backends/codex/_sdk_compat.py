@@ -38,6 +38,7 @@ learn that id and subscribe to the turn. Delete it once ``thread/compact/start``
 returns the turn id.
 """
 
+import threading
 import time
 import typing
 
@@ -246,14 +247,17 @@ _COMPACTION_POLL_SECONDS = 0.05
 
 
 def start_compaction_turn(
-    client: CodexClient, thread_id: str, timeout: float
+    client: CodexClient,
+    thread_id: str,
+    timeout: float,
+    cancelled: threading.Event | None = None,
 ) -> str | None:
     """Start a manual compaction and register its turn for streaming.
 
     Blocking; run it on a worker thread. Returns the compaction turn's id, after
     which ``client.next_turn_notification(turn_id)`` replays the buffered
     ``turn/started`` and everything after it, or ``None`` when no new turn for
-    the thread appears within ``timeout`` seconds.
+    the thread appears within ``timeout`` seconds or ``cancelled`` is set.
     """
     router = client._router
     with client._thread_start_lock(thread_id):
@@ -261,24 +265,42 @@ def start_compaction_turn(
         # attaches, so nothing the compaction emits early is lost.
         with router.pending_turn(thread_id) as cursors:
             client.thread_compact(thread_id)
-            turn_id = _await_new_turn(router, thread_id, cursors, timeout)
+            turn_id = _await_new_turn(router, thread_id, cursors, timeout, cancelled)
             if turn_id is not None:
                 router.prepare_turn(turn_id, thread_id, cursors, for_handle=False)
             return turn_id
 
 
 def _await_new_turn(
-    router: typing.Any, thread_id: str, cursors: dict[str, int], timeout: float
+    router: typing.Any,
+    thread_id: str,
+    cursors: dict[str, int],
+    timeout: float,
+    cancelled: threading.Event | None,
 ) -> str | None:
     deadline = time.monotonic() + timeout
     while True:
         with router._lock:
             for turn_id, state in router._turn_states.items():
-                if turn_id not in cursors and state.thread_id == thread_id:
+                if (
+                    turn_id not in cursors
+                    and state.thread_id == thread_id
+                    and _opens_with_turn_started(state)
+                ):
                     return str(turn_id)
-        if time.monotonic() >= deadline:
+        if (cancelled is not None and cancelled.is_set()) or (
+            time.monotonic() >= deadline
+        ):
             return None
         time.sleep(_COMPACTION_POLL_SECONDS)
+
+
+def _opens_with_turn_started(state: typing.Any) -> bool:
+    """A new turn's buffer starts at its ``turn/started``. A late event for a
+    finished turn also creates an entry while pruning is held, but never
+    with that first event."""
+    first = state.events.get(state.first_event)
+    return getattr(first, "method", None) == "turn/started"
 
 
 # The pinned SDK's thread item ``type`` literals, captured before widening.

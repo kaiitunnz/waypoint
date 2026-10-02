@@ -201,6 +201,8 @@ class CodexSessionState:
     notification_thread: threading.Thread | None = None
     # A manual compaction owns the thread from /compact until its turn ends.
     compacting: bool = False
+    # A turn_start request is in flight.
+    starting_turn: bool = False
     # An interrupt that arrived before the compaction turn's id was known.
     interrupt_pending: bool = False
     unknown_methods_logged: set[str] = field(default_factory=set)
@@ -492,23 +494,7 @@ class CodexAppServerAdapter:
             # so we re-emit the session's model on every turn_start to keep
             # waypoint's "set once, apply going forward" contract intact even
             # after a restore.
-            merged = self._build_turn_params(state, turn_params)
-            if merged:
-                started = await self._call_client(
-                    state,
-                    state.client.turn_start,
-                    state.thread_id,
-                    text,
-                    merged,
-                )
-            else:
-                started = await self._call_client(
-                    state, state.client.turn_start, state.thread_id, text
-                )
-            state.active_turn_id = started.turn.id
-            state.stream_task = asyncio.create_task(
-                self._stream_turn(state, started.turn.id)
-            )
+            await self._start_turn(state, text, turn_params)
             return
         await self._call_client(
             state, state.client.turn_steer, state.thread_id, state.active_turn_id, text
@@ -524,26 +510,40 @@ class CodexAppServerAdapter:
         if state.compacting:
             raise CodexCompactingError()
         if state.active_turn_id is None:
+            await self._start_turn(state, items, turn_params)
+            return
+        await self._call_client(
+            state, state.client.turn_steer, state.thread_id, state.active_turn_id, items
+        )
+
+    async def _start_turn(
+        self,
+        state: CodexSessionState,
+        turn_input: str | list[dict[str, Any]],
+        turn_params: dict[str, Any] | None,
+    ) -> None:
+        # Held across the turn_start round trip, while active_turn_id is still
+        # unset, so a /compact in that window sees the thread as busy.
+        state.starting_turn = True
+        try:
             merged = self._build_turn_params(state, turn_params)
             if merged:
                 started = await self._call_client(
                     state,
                     state.client.turn_start,
                     state.thread_id,
-                    items,
+                    turn_input,
                     merged,
                 )
             else:
                 started = await self._call_client(
-                    state, state.client.turn_start, state.thread_id, items
+                    state, state.client.turn_start, state.thread_id, turn_input
                 )
-            state.active_turn_id = started.turn.id
-            state.stream_task = asyncio.create_task(
-                self._stream_turn(state, started.turn.id)
-            )
-            return
-        await self._call_client(
-            state, state.client.turn_steer, state.thread_id, state.active_turn_id, items
+        finally:
+            state.starting_turn = False
+        state.active_turn_id = started.turn.id
+        state.stream_task = asyncio.create_task(
+            self._stream_turn(state, started.turn.id)
         )
 
     async def list_skills(
@@ -645,7 +645,7 @@ class CodexAppServerAdapter:
         """Reserve the thread for a manual compaction, before the caller awaits
         anything, so a concurrent request sees it as busy."""
         state = self._require_session(session_id)
-        if state.active_turn_id is not None:
+        if state.active_turn_id is not None or state.starting_turn:
             raise RuntimeError(
                 "cannot compact while a codex turn is active; interrupt first"
             )
@@ -672,17 +672,20 @@ class CodexAppServerAdapter:
         state.stream_task = asyncio.create_task(self._run_compaction(state))
 
     async def _run_compaction(self, state: CodexSessionState) -> None:
+        cancelled = threading.Event()
         try:
             turn_id = await asyncio.to_thread(
                 start_compaction_turn,
                 state.client,
                 state.thread_id,
                 COMPACTION_TURN_TIMEOUT_SECONDS,
+                cancelled,
             )
         except asyncio.CancelledError:
+            cancelled.set()
             raise
         except Exception as exc:  # noqa: BLE001
-            _end_turn(state)
+            _end_compaction(state)
             log.exception(
                 "codex compaction failed to start",
                 extra={"session_id": state.session_id, "thread_id": state.thread_id},
@@ -696,7 +699,7 @@ class CodexAppServerAdapter:
             )
             return
         if turn_id is None:
-            _end_turn(state)
+            _end_compaction(state)
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
@@ -1142,6 +1145,14 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _end_compaction(state: CodexSessionState) -> None:
+    """Release a compaction that never reached its turn."""
+    state.compacting = False
+    state.interrupt_pending = False
+    if state.stream_task is asyncio.current_task():
+        state.stream_task = None
 
 
 def _end_turn(state: CodexSessionState) -> None:

@@ -9,13 +9,14 @@ installs the ``ThreadItem`` union tolerance.
 import inspect
 import json
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from openai_codex._message_router import MessageRouter
+from openai_codex._message_router import MessageRouter, _TurnState
 from openai_codex.client import CodexClient
 from openai_codex.generated.notification_registry import NOTIFICATION_MODELS
 from openai_codex.generated.v2_all import (
@@ -376,6 +377,34 @@ def test_start_compaction_turn_ignores_other_threads_and_times_out() -> None:
     assert start_compaction_turn(cast(CodexClient, client), "th1", timeout=0.1) is None
 
 
+def test_start_compaction_turn_ignores_late_events_of_finished_turns() -> None:
+    client = _CompactingClient(emits_turn=False)
+    real_compact = client.thread_compact
+
+    def compact_with_late_event(thread_id: str) -> dict[str, Any]:
+        # A finished turn's trailing event recreates its buffer while pruning
+        # is held; it must not be taken for the compaction turn.
+        client._router.route_notification(
+            _routed("item/completed", threadId=thread_id, turnId="old", item={})
+        )
+        return real_compact(thread_id)
+
+    client.thread_compact = compact_with_late_event  # type: ignore[method-assign]
+    assert start_compaction_turn(cast(CodexClient, client), "th1", timeout=0.1) is None
+
+
+def test_start_compaction_turn_stops_when_cancelled() -> None:
+    client = _CompactingClient(emits_turn=False)
+    cancelled = threading.Event()
+    cancelled.set()
+    started = time.monotonic()
+    turn_id = start_compaction_turn(
+        cast(CodexClient, client), "th1", timeout=5, cancelled=cancelled
+    )
+    assert turn_id is None
+    assert time.monotonic() - started < 1
+
+
 def test_private_sdk_surface_for_compaction_exists() -> None:
     """Fails on an SDK bump that moves the seam ``start_compaction_turn`` uses."""
     client_attrs = {"_thread_start_lock", "thread_compact", "next_turn_notification"}
@@ -385,6 +414,9 @@ def test_private_sdk_surface_for_compaction_exists() -> None:
     for name in ("pending_turn", "prepare_turn"):
         assert callable(getattr(router, name, None)), name
     assert isinstance(router._turn_states, dict)
+    turn_state = _TurnState("t")
+    assert isinstance(turn_state.events, dict)
+    assert turn_state.first_event == 0
     assert hasattr(router._lock, "acquire")
     assert list(inspect.signature(router.prepare_turn).parameters) == [
         "turn_id",

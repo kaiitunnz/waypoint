@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai_codex.client import CodexClient
-from openai_codex.errors import InvalidRequestError, MethodNotFoundError
+from openai_codex.errors import (
+    InvalidRequestError,
+    JsonRpcError,
+    MethodNotFoundError,
+)
 from openai_codex.generated.v2_all import (
     ThreadItemsListResponse,
     ThreadTurnsListResponse,
@@ -50,6 +54,9 @@ class ReportSource:
     thread_id: str
     # The child turn a completion reports on; ``None`` reads the newest turn.
     turn_id: str | None
+    # Unix seconds. A newest turn that started later is a later task, not the
+    # one the item reports on; an import sets it to the parent turn's end.
+    started_by: int | None = None
 
 
 @dataclass(frozen=True)
@@ -79,8 +86,11 @@ def display_name(agent_path: Any) -> str:
     return "subagent"
 
 
-def report_source(item: dict[str, Any]) -> ReportSource | None:
-    """Where to read the report for an item that ends a run."""
+def report_source(
+    item: dict[str, Any], started_by: int | None = None
+) -> ReportSource | None:
+    """Where to read the report for an item that ends a run. ``started_by``
+    bounds the newest turn read for an item that names no turn."""
     if item.get("type") != SUBAGENT_ITEM_TYPE or _kind(item) not in REPORT_KINDS:
         return None
     child = _child_thread_id(item)
@@ -92,14 +102,19 @@ def report_source(item: dict[str, Any]) -> ReportSource | None:
         if isinstance(item_id, str) and item_id.startswith(_COMPLETED_ID_PREFIX)
         else None
     )
-    return ReportSource(child, turn_id or None)
+    if turn_id:
+        return ReportSource(child, turn_id)
+    return ReportSource(child, None, started_by)
 
 
-def report_sources(items: Iterable[dict[str, Any]]) -> list[ReportSource]:
-    """Distinct report sources the given items need, in order."""
+def report_sources(
+    items: Iterable[tuple[dict[str, Any], int | None]],
+) -> list[ReportSource]:
+    """Distinct report sources the given ``(item, started_by)`` pairs need, in
+    order."""
     sources: list[ReportSource] = []
-    for item in items:
-        source = report_source(item)
+    for item, started_by in items:
+        source = report_source(item, started_by)
         if source is not None and source not in sources:
             sources.append(source)
     return sources
@@ -127,12 +142,23 @@ def read_report(client: CodexClient, source: ReportSource) -> str | None:
             {"threadId": source.thread_id, "limit": 1, "itemsView": "full"},
             response_model=ThreadTurnsListResponse,
         ).data
-    except (InvalidRequestError, MethodNotFoundError):
-        # A CLI without the paginated thread reads.
+    except (InvalidRequestError, MethodNotFoundError) as exc:
+        if not _unsupported(exc):
+            raise
         turns = client.thread_read(source.thread_id, True).thread.turns
         if source.turn_id is not None:
             turns = [turn for turn in turns if turn.id == source.turn_id]
+    if turns and source.started_by is not None:
+        started_at = getattr(turns[-1], "started_at", None)
+        if isinstance(started_at, int) and started_at > source.started_by:
+            return None
     return final_report(turns)
+
+
+def _unsupported(exc: JsonRpcError) -> bool:
+    """A CLI without the paginated thread reads: an unknown method, or a
+    known one it does not serve yet."""
+    return isinstance(exc, MethodNotFoundError) or "unknown variant" in exc.message
 
 
 def final_report(turns: list[Any]) -> str | None:

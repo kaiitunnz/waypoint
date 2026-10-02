@@ -240,7 +240,7 @@ def test_subagent_activity_imports_as_tool_entries_and_task_cards() -> None:
         "sess-1",
         {
             ReportSource("child-1", "a"): "Verdict: approve.",
-            ReportSource("child-2", None): None,
+            ReportSource("child-2", None, 1_700_000_010): None,
         },
     )
 
@@ -327,6 +327,6 @@ def test_subagent_report_sources_name_each_finished_turn_once() -> None:
     )
     assert subagent_report_sources([turn]) == [
         ReportSource("child-1", "t1"),
-        ReportSource("child-1", None),
+        ReportSource("child-1", None, 1_700_000_010),
         ReportSource("child-2", "t9"),
     ]

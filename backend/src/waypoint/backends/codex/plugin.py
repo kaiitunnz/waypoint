@@ -9,6 +9,7 @@ Codex-only today; it surfaces here as a registered slash command.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -1655,16 +1656,22 @@ class CodexPlugin(DefaultLaunchContract):
         read fails or times out."""
         if not sources:
             return {}
-        # Responses route by request id, so reads share one client; the bound
-        # keeps a large import off most of the default executor, and each
-        # read's timeout starts only once it runs.
+        # Responses route by request id, so reads share one client. A request
+        # has no timeout of its own: a read outliving its deadline holds one of
+        # these workers until the client closes, never the shared pool that
+        # closing the client needs. Each read's deadline starts once it runs.
+        reader = concurrent.futures.ThreadPoolExecutor(
+            max_workers=_IMPORT_REPORT_READS,
+            thread_name_prefix="codex-subagent-report",
+        )
         slots = asyncio.Semaphore(_IMPORT_REPORT_READS)
+        loop = asyncio.get_running_loop()
 
         async def read(client: CodexClient, source: ReportSource) -> str | None:
             async with slots:
                 try:
                     return await asyncio.wait_for(
-                        asyncio.to_thread(read_report, client, source),
+                        loop.run_in_executor(reader, read_report, client, source),
                         REPORT_FETCH_TIMEOUT_SECONDS,
                     )
                 except Exception:  # noqa: BLE001
@@ -1688,6 +1695,8 @@ class CodexPlugin(DefaultLaunchContract):
         except Exception:  # noqa: BLE001
             log.warning("codex subagent reports unavailable on import", exc_info=True)
             return {}
+        finally:
+            reader.shutdown(wait=False, cancel_futures=True)
         return result
 
     def _find_imported_session(

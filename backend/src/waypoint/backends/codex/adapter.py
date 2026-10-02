@@ -235,6 +235,14 @@ class CodexSessionState:
         None
     )
     rate_limit_refresh_task: asyncio.Task[None] | None = None
+    # Reads subagent reports. A request has no timeout of its own, so a read
+    # outliving its deadline holds this one worker until the client closes,
+    # never a thread of the event loop's shared pool.
+    report_reader: concurrent.futures.ThreadPoolExecutor = field(
+        default_factory=lambda: concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="codex-subagent-report"
+        )
+    )
 
 
 class CodexAppServerAdapter:
@@ -826,6 +834,8 @@ class CodexAppServerAdapter:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
             log.exception("codex client close failed", extra={"session_id": session_id})
+        # Closing the client also fails any report read still waiting.
+        state.report_reader.shutdown(wait=False, cancel_futures=True)
         # The pump thread exits on its own: closing the client fails its read.
         if state.stream_task is not None:
             state.stream_task.cancel()
@@ -923,7 +933,9 @@ class CodexAppServerAdapter:
         # never holds up a steer or interrupt sent meanwhile.
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(read_report, state.client, source),
+                asyncio.get_running_loop().run_in_executor(
+                    state.report_reader, read_report, state.client, source
+                ),
                 REPORT_FETCH_TIMEOUT_SECONDS,
             )
         except Exception:  # noqa: BLE001

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,10 +17,12 @@ from waypoint.backends.claude_code.models import SONNET55_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
+from waypoint.backends.codex import plugin as codex_plugin_module
 from waypoint.backends.codex.permission_modes import (
     codex_mode_developer_instructions,
 )
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
+from waypoint.backends.codex.subagents import ReportSource
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import (
     CWD_NOT_FOUND_DETAIL,
@@ -2882,6 +2885,43 @@ async def test_import_codex_thread_shows_subagent_reports_read_from_children(
         cards["subagent-completed-broken"]["output_unavailable_reason"]
         == "subagent report unavailable"
     )
+
+
+@pytest.mark.asyncio
+async def test_hung_subagent_report_reads_stay_off_the_shared_pool(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _storage, _settings = make_runtime(tmp_path)
+    codex_plugin = _codex_plugin(runtime)
+    monkeypatch.setattr(codex_plugin_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
+    unblock = threading.Event()
+    read_threads: set[str] = set()
+
+    class HungReader:
+        def request(
+            self, method: str, params: dict[str, Any], *, response_model: Any
+        ) -> Any:
+            read_threads.add(threading.current_thread().name)
+            unblock.wait(5)
+            raise RuntimeError("closed")
+
+    async def fake_run(_runtime, launch_target_id, operation, **kwargs):
+        return await operation(HungReader())
+
+    monkeypatch.setattr(codex_plugin, "run_client_operation", fake_run)
+    sources = [ReportSource(f"child-{index}", f"turn-{index}") for index in range(20)]
+
+    try:
+        reports = await asyncio.wait_for(
+            codex_plugin._read_subagent_reports(runtime, sources, None, None), 5
+        )
+    finally:
+        unblock.set()
+
+    assert reports == dict.fromkeys(sources)
+    assert read_threads
+    assert all(name.startswith("codex-subagent-report") for name in read_threads)
+    assert len(read_threads) <= 4
 
 
 def _make_claude_thread_info(**overrides: Any) -> ClaudeThreadInfo:

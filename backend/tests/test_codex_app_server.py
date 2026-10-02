@@ -11,7 +11,11 @@ from typing import Any, cast
 
 import pytest
 from openai_codex.client import CodexClient
-from openai_codex.errors import InvalidRequestError, ServerBusyError
+from openai_codex.errors import (
+    InvalidRequestError,
+    MethodNotFoundError,
+    ServerBusyError,
+)
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
 from waypoint.backends.codex import adapter as adapter_module
@@ -22,7 +26,12 @@ from waypoint.backends.codex.adapter import (
     _context_usage_snapshot_from_thread_token_usage,
 )
 from waypoint.backends.codex.normalize import tool_result_is_error
-from waypoint.backends.codex.subagents import REPORT_UNAVAILABLE, SUBAGENT_REPORT_KEY
+from waypoint.backends.codex.subagents import (
+    REPORT_UNAVAILABLE,
+    SUBAGENT_REPORT_KEY,
+    ReportSource,
+    read_report,
+)
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -2471,3 +2480,96 @@ async def test_completion_reads_the_turn_it_reports_on() -> None:
     )
 
     assert emitted[0][3]["task_notification"]["result_preview"] == "Old verdict."
+
+
+class _ReportClient:
+    """Answers the paginated reads with one canned turn, or a given error."""
+
+    def __init__(self, turn: Any = None, error: Exception | None = None) -> None:
+        self.turn = turn
+        self.error = error
+        self.thread_reads = 0
+
+    def request(self, method: str, params: dict[str, Any], *, response_model) -> Any:
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(data=[self.turn])
+
+    def thread_read(self, thread_id: str, include_turns: bool = False) -> Any:
+        self.thread_reads += 1
+        return SimpleNamespace(thread=SimpleNamespace(turns=[self.turn]))
+
+
+def _turn_at(started_at: int, text: str) -> Any:
+    turn = _child_thread((text, "final_answer")).turns[0]
+    turn.started_at = started_at
+    return turn
+
+
+def test_newest_turn_started_after_the_bound_is_not_the_report() -> None:
+    client = cast(CodexClient, _ReportClient(_turn_at(200, "Later task.")))
+    assert read_report(client, ReportSource("child", None, 100)) is None
+    assert read_report(client, ReportSource("child", None, 300)) == "Later task."
+    assert read_report(client, ReportSource("child", None)) == "Later task."
+
+
+@pytest.mark.parametrize(
+    ("error", "falls_back"),
+    [
+        (InvalidRequestError(-32600, "Invalid request: unknown variant `x`"), True),
+        (MethodNotFoundError(-32601, "not supported yet"), True),
+        (InvalidRequestError(-32600, "thread not loaded: child"), False),
+    ],
+)
+def test_only_an_unsupported_paginated_read_falls_back(
+    error: Exception, falls_back: bool
+) -> None:
+    fake = _ReportClient(_turn_at(1, "Verdict."), error)
+    client = cast(CodexClient, fake)
+    if falls_back:
+        assert read_report(client, ReportSource("child", None)) == "Verdict."
+    else:
+        with pytest.raises(InvalidRequestError):
+            read_report(client, ReportSource("child", None))
+    assert fake.thread_reads == (1 if falls_back else 0)
+
+
+@pytest.mark.asyncio
+async def test_hung_report_read_holds_only_the_sessions_report_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    unblock = threading.Event()
+    read_threads: list[str] = []
+
+    def hung_read() -> Any:
+        read_threads.append(threading.current_thread().name)
+        unblock.wait(5)
+        return _child_thread(("Too late.", "final_answer"))
+
+    fake.child_threads["child-1"] = hung_read
+    await adapter.start_session("sess", "/tmp/work")
+    for item_id in ("subagent-completed-a", "subagent-completed-b"):
+        fake.notifications.put_nowait(_activity("completed", item_id))
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
+        )
+    )
+    await adapter.send_input("sess", "review it")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    cards = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
+    assert [card["output_unavailable_reason"] for card in cards] == [
+        REPORT_UNAVAILABLE,
+        REPORT_UNAVAILABLE,
+    ]
+    # The second read queued behind the hung one and timed out unstarted.
+    assert len(read_threads) == 1
+    assert read_threads[0].startswith("codex-subagent-report")
+    unblock.set()
+    assert await adapter.terminate_session("sess")

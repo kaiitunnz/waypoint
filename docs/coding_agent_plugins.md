@@ -503,6 +503,33 @@ Codex work this way; Codex's `request_user_input_async` mapping lives in
 Codex turn that ends with one of its own questions still open settles at
 `WAITING_INPUT`.
 
+### Task notifications (optional)
+
+A background task's lifecycle — a subagent finishing, a monitor firing, a
+background command exiting — renders as a task card when the plugin emits it as
+a task-notification `SYSTEM_NOTE`. The contract lives in
+[`task_notifications.py`](../backend/src/waypoint/backends/task_notifications.py):
+build a `TaskNotification` (`id`, `kind` of `agent` / `monitor` /
+`background_command` / `unknown`, `status`, `summary`, and optional `task_id`,
+`result`, `event`, `note`, `usage`) and pass it to `task_notification_event`,
+which returns the event's `(text, metadata)`. The metadata carries `method:
+"task_notification"` and the versioned `task_notification` payload; the frontend
+also renders stored events whose method is the legacy
+`claude.task_notification`.
+
+Bodies longer than 4 KiB are cut to a preview. With `allow_spill`, the full text
+is saved as a pinned session attachment through the `capture_inline_blobs` seam;
+without it, the card shows `no_spill_reason`. Live paths spill only when the
+operator's `task_output_capture_enabled` is on, and history import never spills.
+The card `id` must be stable across live and import so a replay does not
+duplicate it.
+
+Claude maps its `<task-notification>` records onto the contract. Codex maps
+`subAgentActivity`: `started` and `interacted` become `Subagent` tool entries,
+and `completed` and `interrupted` become `agent` cards whose report is read from
+the subagent's own thread
+([`codex/subagents.py`](../backend/src/waypoint/backends/codex/subagents.py)).
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should

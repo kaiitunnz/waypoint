@@ -163,6 +163,8 @@ class CodexSessionState:
     pending_approval: PendingApproval | None = None
     # Async question ids the active turn asked.
     turn_question_ids: set[str] = field(default_factory=set)
+    # Set while an interrupt is in flight; read on the SDK reader thread.
+    interrupting: bool = False
     streamed_tool_result_ids: set[str] = field(default_factory=set)
     file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
@@ -347,6 +349,11 @@ class CodexAppServerAdapter:
         ) -> dict[str, Any]:
             state = holder["state"]
             payload = params or {}
+            if state.interrupting:
+                # The turn is being interrupted; a request raised before Codex
+                # handles the interrupt would park this reader thread and the
+                # interrupt's response behind it.
+                return dict(_INTERRUPT_RESPONSES.get(method, {"decision": "decline"}))
             pending = PendingApproval(method=method, params=payload)
             state.pending_approval = pending
             item_id = payload.get("itemId")
@@ -364,23 +371,28 @@ class CodexAppServerAdapter:
                 ),
                 title=approval_text,
             )
-            if self._loop is not None:
-                asyncio.run_coroutine_threadsafe(
-                    self._emit_event(
-                        state.session_id,
-                        EventKind.APPROVAL_REQUEST,
-                        approval_text,
-                        {
-                            "method": method,
-                            "request": payload,
-                            "status": SessionStatus.WAITING_INPUT,
-                            INTERACTION_METADATA_KEY: interaction.to_metadata(),
-                            **preview_to_metadata(diff_preview),
-                        },
-                        SessionStatus.WAITING_INPUT,
-                    ),
-                    self._loop,
+
+            async def emit_request() -> None:
+                # An interrupt may have cancelled the approval before this ran;
+                # a card recorded after its invalidation note would never clear.
+                if pending.event.is_set():
+                    return
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.APPROVAL_REQUEST,
+                    approval_text,
+                    {
+                        "method": method,
+                        "request": payload,
+                        "status": SessionStatus.WAITING_INPUT,
+                        INTERACTION_METADATA_KEY: interaction.to_metadata(),
+                        **preview_to_metadata(diff_preview),
+                    },
+                    SessionStatus.WAITING_INPUT,
                 )
+
+            if self._loop is not None:
+                asyncio.run_coroutine_threadsafe(emit_request(), self._loop)
             pending.event.wait()
             if state.pending_approval is pending:
                 state.pending_approval = None
@@ -431,6 +443,7 @@ class CodexAppServerAdapter:
                     state, state.client.turn_start, state.thread_id, text
                 )
             state.active_turn_id = started.turn.id
+            state.turn_question_ids.clear()
             state.stream_task = asyncio.create_task(
                 self._stream_turn(state, started.turn.id)
             )
@@ -461,6 +474,7 @@ class CodexAppServerAdapter:
                     state, state.client.turn_start, state.thread_id, items
                 )
             state.active_turn_id = started.turn.id
+            state.turn_question_ids.clear()
             state.stream_task = asyncio.create_task(
                 self._stream_turn(state, started.turn.id)
             )
@@ -518,32 +532,36 @@ class CodexAppServerAdapter:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
             return
-        cancelled_approval = self._cancel_pending_approval(state)
-        if cancelled_approval:
-            await self._emit_event(
-                state.session_id,
-                EventKind.SYSTEM_NOTE,
-                "Pending approval cancelled by interrupt",
-                {"method": "approval.invalidated", "status": SessionStatus.RUNNING},
-                SessionStatus.RUNNING,
-            )
+        state.interrupting = True
         try:
-            await self._call_client(
-                state,
-                state.client.turn_interrupt,
-                state.thread_id,
-                state.active_turn_id,
-            )
-        except Exception:
-            # Cancelling a command/file approval already ends the turn, so the
-            # interrupt can race it and find no active turn.
-            if not cancelled_approval:
-                raise
-            log.debug(
-                "codex turn_interrupt after approval cancel failed",
-                exc_info=True,
-                extra={"session_id": session_id},
-            )
+            cancelled_approval = self._cancel_pending_approval(state)
+            if cancelled_approval:
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.SYSTEM_NOTE,
+                    "Pending approval cancelled by interrupt",
+                    {"method": "approval.invalidated", "status": SessionStatus.RUNNING},
+                    SessionStatus.RUNNING,
+                )
+            try:
+                await self._call_client(
+                    state,
+                    state.client.turn_interrupt,
+                    state.thread_id,
+                    state.active_turn_id,
+                )
+            except Exception:
+                # Cancelling a command/file approval already ends the turn, so the
+                # interrupt can race it and find no active turn.
+                if not cancelled_approval:
+                    raise
+                log.debug(
+                    "codex turn_interrupt after approval cancel failed",
+                    exc_info=True,
+                    extra={"session_id": session_id},
+                )
+        finally:
+            state.interrupting = False
 
     def _cancel_pending_approval(self, state: CodexSessionState) -> bool:
         """Resolve an open approval so the SDK reader thread can route again.
@@ -777,6 +795,7 @@ class CodexAppServerAdapter:
         except Exception as exc:  # noqa: BLE001
             state.active_turn_id = None
             state.stream_task = None
+            state.turn_question_ids.clear()
             state.streamed_tool_result_ids.clear()
             state.file_diff_previews.clear()
             log.exception(

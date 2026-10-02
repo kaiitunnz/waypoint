@@ -1609,3 +1609,42 @@ async def test_async_message_without_questions_is_agent_output() -> None:
     )
     outputs = [entry for entry in emitted if entry[1] == EventKind.AGENT_OUTPUT]
     assert [entry[2] for entry in outputs] == ["Still working on the migration."]
+
+
+@pytest.mark.asyncio
+async def test_approval_raised_during_an_interrupt_is_cancelled_at_once() -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    state = adapter._sessions["sess"]
+    handler = fake.approval_handler
+    assert handler is not None
+    state.interrupting = True
+
+    response = await asyncio.wait_for(
+        asyncio.to_thread(
+            handler, "item/commandExecution/requestApproval", {"itemId": "cmd-2"}
+        ),
+        timeout=2,
+    )
+
+    assert response == {"decision": "cancel"}
+    assert state.pending_approval is None
+    await asyncio.sleep(0.05)
+    assert not [entry for entry in emitted if entry[1] == EventKind.APPROVAL_REQUEST]
+    state.interrupting = False
+    await adapter.terminate_session("sess")
+
+
+@pytest.mark.asyncio
+async def test_a_new_turn_forgets_the_previous_turns_questions() -> None:
+    adapter, fake = make_parked_adapter()
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    state.turn_question_ids.add("call_old")
+
+    await adapter.send_input("sess", "start")
+
+    assert state.turn_question_ids == set()
+    await adapter.terminate_session("sess")

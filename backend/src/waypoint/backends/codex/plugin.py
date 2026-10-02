@@ -73,6 +73,7 @@ from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
+    EventKind,
     EventRecord,
     LaunchMode,
     SessionCreateRequest,
@@ -98,10 +99,17 @@ def _event_thread_id(event: EventRecord) -> str | None:
 
 
 def _settled_status(runtime: "SessionRuntime", session: SessionRecord) -> SessionStatus:
-    """Keep a carried-over wait on an open question across a restore."""
-    if session.status is SessionStatus.WAITING_INPUT and (
-        runtime.storage.open_question_tool_use_ids(session.id)
-    ):
+    """Keep a carried-over wait on an open question across a restore.
+
+    Only a question asked since the human's last message holds the wait; an
+    older open card doesn't, and a wait that was for an approval ends with the
+    process that held it.
+    """
+    if session.status is not SessionStatus.WAITING_INPUT:
+        return SessionStatus.IDLE
+    questions = runtime.storage.open_question_events(session.id)
+    last_input = runtime.storage.latest_event_sequence(session.id, EventKind.USER_INPUT)
+    if questions and (last_input is None or questions[-1].sequence > last_input):
         return SessionStatus.WAITING_INPUT
     return SessionStatus.IDLE
 

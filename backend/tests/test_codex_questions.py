@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from openai_codex.generated.v2_all import Turn
 
 from waypoint.backends.codex.history import turns_to_events
-from waypoint.backends.codex.plugin import CodexPlugin
+from waypoint.backends.codex.plugin import CodexPlugin, _settled_status
 from waypoint.backends.codex.questions import (
     async_questions,
     build_reply,
@@ -78,6 +78,17 @@ def test_build_reply_without_structured_answers_answers_the_whole_item() -> None
     reply = build_reply("call_1", QUESTIONS, None, " use B ")
     assert _reply_body(reply) == [
         {"questionItemId": "call_1", "question": "Which identity?", "answer": "use B"}
+    ]
+
+
+def test_build_reply_plain_answer_to_one_question_uses_its_index() -> None:
+    reply = build_reply("call_1", QUESTIONS[:1], None, "B")
+    assert _reply_body(reply) == [
+        {
+            "questionItemId": '["request_user_input_async","call_1",0]',
+            "question": "Which identity?",
+            "answer": "B",
+        }
     ]
 
 
@@ -257,6 +268,27 @@ async def test_cancel_sends_nothing_and_settles_idle(tmp_path, monkeypatch) -> N
     transport.send_input.assert_not_called()
     assert session.status is SessionStatus.IDLE
     assert runtime.storage.open_question_tool_use_ids("s1") == []
+
+
+async def test_restore_keeps_a_wait_only_for_a_question_since_the_last_message(
+    tmp_path,
+) -> None:
+    runtime = make_runtime(tmp_path, status=SessionStatus.WAITING_INPUT)
+    await runtime._record_user_event("s1", "go", submit=True)
+    await ask(runtime, "call_1")
+    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
+    assert _settled_status(runtime, runtime.get_session("s1")) is (
+        SessionStatus.WAITING_INPUT
+    )
+
+    # The human moved on with an ordinary message; a later wait (an approval
+    # that died with the process) must not resurrect the old card's wait.
+    await runtime._record_user_event("s1", "do something else", submit=True)
+    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
+    assert _settled_status(runtime, runtime.get_session("s1")) is SessionStatus.IDLE
+
+    runtime.storage.update_session("s1", status=SessionStatus.INTERRUPTED)
+    assert _settled_status(runtime, runtime.get_session("s1")) is SessionStatus.IDLE
 
 
 # ── History import ──────────────────────────────────────────────────────

@@ -100,18 +100,20 @@ def build_reply(
         used.add(index)
         entries.append(
             {
-                "questionItemId": json.dumps(
-                    [QUESTION_TOOL, item_id, index], separators=(",", ":")
-                ),
+                "questionItemId": _question_item_id(item_id, index),
                 "question": _reply_question(questions[index]["question"]),
                 "answer": text,
             }
         )
     if not entries:
+        # One question takes the plain answer by index; for several, the bare
+        # item id answers the whole message (Codex's resolver accepts both).
         first = questions[0]["question"] if questions else ""
         entries.append(
             {
-                "questionItemId": item_id,
+                "questionItemId": (
+                    _question_item_id(item_id, 0) if len(questions) == 1 else item_id
+                ),
                 "question": _reply_question(first),
                 "answer": fallback_text.strip(),
             }
@@ -148,6 +150,10 @@ def parse_reply(text: str) -> list[ReplyEntry] | None:
         tool_use_id, index = _parse_item_ref(item_ref)
         entries.append(ReplyEntry(tool_use_id, index, question, answer))
     return entries
+
+
+def _question_item_id(item_id: str, index: int) -> str:
+    return json.dumps([QUESTION_TOOL, item_id, index], separators=(",", ":"))
 
 
 def _parse_item_ref(item_ref: str) -> tuple[str, int | None]:

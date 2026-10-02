@@ -94,12 +94,11 @@ from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.questions import ASK_QUESTION_ANSWER, QuestionDecline, QuestionLiveness
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
     CompletionDispatch,
-    EventKind,
     EventRecord,
     SessionContextUsage,
     SessionCreateRequest,
@@ -1438,35 +1437,8 @@ class ClaudeTtyPlugin:
                 "You can now continue with the user's answers in mind.",
             )
 
-            extra: dict[str, Any] = {
-                "kind": ASK_QUESTION_ANSWER,
-                "tool_use_id": tool_use_id,
-            }
-            if answers:
-                extra["answers"] = answers
-            # Flip status to RUNNING before recording the answer so the broadcast
-            # snapshot shows the spinner immediately, matching handle_input.
-            updated = runtime.storage.update_session(
-                session.id, status=SessionStatus.RUNNING
-            )
-            # Persist the durable answer event before the synthetic tool_result
-            # (FR6): the transcript derives "answered" from this user event, so a
-            # live client that saw the result first would briefly render the card
-            # as closed-unanswered.
-            await runtime._record_user_event(
-                session.id, answer, submit=True, extra_metadata=extra
-            )
-            await runtime._emit_adapter_event(
-                session.id,
-                EventKind.TOOL_RESULT,
-                "User answered the question.",
-                {
-                    "method": "user.tool_result",
-                    "item_id": tool_use_id,
-                    "tool_use_id": tool_use_id,
-                    "is_error": False,
-                },
-                SessionStatus.RUNNING,
+            updated = await runtime.questions.record_answer(
+                session.id, tool_use_id, answer, answers
             )
         return updated
 

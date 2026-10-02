@@ -12,7 +12,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
@@ -99,6 +99,54 @@ class PendingQuestionTracker:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="question is no longer open",
             )
+
+    # ── Answers ─────────────────────────────────────────────────────────
+
+    async def record_answer(
+        self,
+        session_id: str,
+        tool_use_id: str,
+        answer: str,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        """Record an answer the plugin has already delivered as a message.
+
+        For agents whose question card is a stand-in (the agent is not parked
+        on a provider request), the answer is an ordinary message; this writes
+        the durable answer event and a synthetic tool_result that closes the
+        card. Call it inside :meth:`operation`.
+        """
+        extra: dict[str, Any] = {
+            "kind": ASK_QUESTION_ANSWER,
+            "tool_use_id": tool_use_id,
+        }
+        if answers:
+            extra["answers"] = answers
+        # Flip status to RUNNING before recording the answer so the broadcast
+        # snapshot shows the spinner immediately, matching handle_input.
+        updated = self._runtime.storage.update_session(
+            session_id, status=SessionStatus.RUNNING
+        )
+        # Persist the durable answer event before the synthetic tool_result:
+        # the transcript derives "answered" from this user event, so a live
+        # client that saw the result first would briefly render the card as
+        # closed-unanswered.
+        await self._runtime._record_user_event(
+            session_id, answer, submit=True, extra_metadata=extra
+        )
+        await self._runtime._emit_adapter_event(
+            session_id,
+            EventKind.TOOL_RESULT,
+            "User answered the question.",
+            {
+                "method": "user.tool_result",
+                "item_id": tool_use_id,
+                "tool_use_id": tool_use_id,
+                "is_error": False,
+            },
+            SessionStatus.RUNNING,
+        )
+        return updated
 
     # ── Cancellation ────────────────────────────────────────────────────
 

@@ -119,13 +119,36 @@ def map_notification(
             SessionStatus.RUNNING,
         )
     if method == "error":
-        error = payload.get("error", {})
         return (
             EventKind.SYSTEM_NOTE,
-            str(error.get("message", "Codex error")),
-            SessionStatus.ERROR,
+            error_text(payload),
+            (
+                SessionStatus.RUNNING
+                if is_retryable_error(payload)
+                else SessionStatus.ERROR
+            ),
         )
     return None, "", SessionStatus.RUNNING
+
+
+def is_retryable_error(payload: dict[str, Any]) -> bool:
+    """Codex is retrying the model stream behind this ``error``; the turn
+    is still live."""
+    return payload.get("willRetry") is True
+
+
+def error_text(payload: dict[str, Any]) -> str:
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return "Codex error"
+    message = str(error.get("message") or "Codex error")
+    details = error.get("additionalDetails")
+    if not isinstance(details, str):
+        return message
+    details = details.strip()
+    if not details or details == message:
+        return message
+    return f"{message} — {details}"
 
 
 def _collab_agent_messages(item: dict[str, Any]) -> list[str]:

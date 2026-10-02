@@ -2547,7 +2547,7 @@ def test_only_an_unsupported_paginated_read_falls_back(
 
 
 @pytest.mark.asyncio
-async def test_hung_report_read_holds_only_the_sessions_report_worker(
+async def test_hung_report_read_pauses_reads_only_while_it_is_stuck(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
@@ -2582,7 +2582,16 @@ async def test_hung_report_read_holds_only_the_sessions_report_worker(
     ]
     # After the first read timed out, the second is skipped without waiting.
     assert len(read_threads) == 1
-    assert state.report_reader_wedged
+    assert state.stuck_report_reads == 1
     assert read_threads[0].startswith("codex-subagent-report")
     unblock.set()
+    for _ in range(200):
+        if not state.stuck_report_reads:
+            break
+        await asyncio.sleep(0.01)
+    assert state.stuck_report_reads == 0
+
+    fake.child_threads["child-1"] = _child_thread(("Back again.", "final_answer"))
+    report = await adapter._read_subagent_report(state, ReportSource("child-1", "a"))
+    assert report == "Back again."
     assert await adapter.terminate_session("sess")

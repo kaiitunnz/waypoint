@@ -243,7 +243,9 @@ class CodexSessionState:
             max_workers=1, thread_name_prefix="codex-subagent-report"
         )
     )
-    report_reader_wedged: bool = False
+    # Reads still running past their deadline. While any is, a new read would
+    # only queue behind it until its own deadline, so reads are skipped.
+    stuck_report_reads: int = 0
 
 
 class CodexAppServerAdapter:
@@ -930,23 +932,26 @@ class CodexAppServerAdapter:
     async def _read_subagent_report(
         self, state: CodexSessionState, source: ReportSource
     ) -> str | None:
-        if state.report_reader_wedged:
+        if state.stuck_report_reads:
             return None
+        loop = asyncio.get_running_loop()
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
+        future = state.report_reader.submit(read_report, state.client, source)
         try:
             return await asyncio.wait_for(
-                asyncio.get_running_loop().run_in_executor(
-                    state.report_reader, read_report, state.client, source
-                ),
-                REPORT_FETCH_TIMEOUT_SECONDS,
+                asyncio.wrap_future(future), REPORT_FETCH_TIMEOUT_SECONDS
             )
         except TimeoutError:
-            # The worker stays held until the client closes; a later read
-            # would only queue behind it until its own deadline.
-            state.report_reader_wedged = True
+            if not future.cancelled():
+                # Already running, so it holds the worker until it returns or
+                # the client closes.
+                state.stuck_report_reads += 1
+                future.add_done_callback(
+                    lambda _: _call_soon(loop, _release_stuck_read, state)
+                )
             log.warning(
-                "codex subagent report read timed out; skipping later reads",
+                "codex subagent report read timed out",
                 extra={"session_id": state.session_id, "thread_id": source.thread_id},
             )
             return None
@@ -1229,6 +1234,18 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _release_stuck_read(state: CodexSessionState) -> None:
+    state.stuck_report_reads -= 1
+
+
+def _call_soon(
+    loop: asyncio.AbstractEventLoop, callback: Callable[..., None], *args: Any
+) -> None:
+    with suppress(RuntimeError):
+        # The loop has closed; there is nothing left to update.
+        loop.call_soon_threadsafe(callback, *args)
 
 
 def _end_compaction(state: CodexSessionState) -> None:

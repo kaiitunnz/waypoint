@@ -5001,6 +5001,8 @@ class SessionRuntime:
             return 0
         try:
             events = await reader()
+            for event in events:
+                await self._run_capture_sinks(session_id, event.metadata)
         except Exception:
             log.exception("failed to import thread history for %s", session_id)
             await self._record_system_event(
@@ -5011,8 +5013,6 @@ class SessionRuntime:
             return 0
         if not events:
             return 0
-        for event in events:
-            await self._run_capture_sinks(session_id, event.metadata)
         persisted = self.storage.seed_events(session_id, events)
         for event in persisted:
             self._append_structured_log(session_id, event)

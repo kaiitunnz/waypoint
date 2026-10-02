@@ -201,8 +201,8 @@ class CodexSessionState:
     notification_thread: threading.Thread | None = None
     # A manual compaction owns the thread from /compact until its turn ends.
     compacting: bool = False
-    # A turn_start request is in flight.
-    starting_turn: bool = False
+    # turn_start requests in flight.
+    starting_turns: int = 0
     # An interrupt that arrived before the compaction turn's id was known.
     interrupt_pending: bool = False
     unknown_methods_logged: set[str] = field(default_factory=set)
@@ -524,7 +524,7 @@ class CodexAppServerAdapter:
     ) -> None:
         # Held across the turn_start round trip, while active_turn_id is still
         # unset, so a /compact in that window sees the thread as busy.
-        state.starting_turn = True
+        state.starting_turns += 1
         try:
             merged = self._build_turn_params(state, turn_params)
             if merged:
@@ -540,7 +540,7 @@ class CodexAppServerAdapter:
                     state, state.client.turn_start, state.thread_id, turn_input
                 )
         finally:
-            state.starting_turn = False
+            state.starting_turns -= 1
         state.active_turn_id = started.turn.id
         state.stream_task = asyncio.create_task(
             self._stream_turn(state, started.turn.id)
@@ -645,7 +645,7 @@ class CodexAppServerAdapter:
         """Reserve the thread for a manual compaction, before the caller awaits
         anything, so a concurrent request sees it as busy."""
         state = self._require_session(session_id)
-        if state.active_turn_id is not None or state.starting_turn:
+        if state.active_turn_id is not None or state.starting_turns:
             raise RuntimeError(
                 "cannot compact while a codex turn is active; interrupt first"
             )

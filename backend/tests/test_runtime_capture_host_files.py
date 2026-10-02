@@ -439,3 +439,36 @@ async def test_emit_ignores_an_unknown_origin(tmp_path: Path) -> None:
 
     (spec,) = persisted[0].metadata["attachments"]
     assert spec["origin"] is None
+
+
+async def test_a_failing_history_sink_degrades_to_the_unavailable_note(
+    tmp_path: Path,
+) -> None:
+    runtime, _ = _emit_runtime(tmp_path)
+    notes: list[str] = []
+
+    async def _note(_sid: str, text: str, **_kwargs: Any) -> None:
+        notes.append(text)
+
+    async def _boom(*_args: Any) -> None:
+        raise OSError("disk full")
+
+    runtime._record_system_event = _note
+    runtime._capture_inline_blobs = _boom
+    runtime.storage.get_session = lambda _sid: SimpleNamespace(
+        transport_state={"adopted_thread": True}
+    )
+    event = EventRecord(
+        session_id="sess-1",
+        ts=datetime.now(UTC),
+        kind=EventKind.TOOL_RESULT,
+        text="completed",
+        metadata={"capture_inline_blobs": [{"filename": "a.png", "base64": "aW1n"}]},
+        sequence=0,
+    )
+
+    async def _reader() -> list[EventRecord]:
+        return [event]
+
+    assert await runtime.seed_thread_history("sess-1", _reader, enabled=True) == 0
+    assert notes and "could not be imported" in notes[0]

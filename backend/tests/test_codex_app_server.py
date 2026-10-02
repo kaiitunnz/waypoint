@@ -2103,7 +2103,7 @@ async def test_compaction_waits_out_a_starting_turn() -> None:
     fake.turn_start = slow_turn_start
     sending = asyncio.create_task(adapter.send_input("sess", "go"))
     for _ in range(100):
-        if adapter._sessions["sess"].starting_turn:
+        if adapter._sessions["sess"].starting_turns:
             break
         await asyncio.sleep(0.01)
 
@@ -2113,5 +2113,5 @@ async def test_compaction_waits_out_a_starting_turn() -> None:
     await sending
     state = adapter._sessions["sess"]
     assert state.active_turn_id == "turn-1"
-    assert state.starting_turn is False
+    assert state.starting_turns == 0
     assert state.compacting is False

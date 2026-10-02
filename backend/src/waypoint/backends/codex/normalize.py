@@ -143,9 +143,12 @@ def error_text(payload: dict[str, Any]) -> str:
         return "Codex error"
     message = str(error.get("message") or "Codex error")
     details = error.get("additionalDetails")
-    if isinstance(details, str) and details.strip():
-        return f"{message} — {details.strip()}"
-    return message
+    if not isinstance(details, str):
+        return message
+    details = details.strip()
+    if not details or details == message:
+        return message
+    return f"{message} — {details}"
 
 
 def _collab_agent_messages(item: dict[str, Any]) -> list[str]:

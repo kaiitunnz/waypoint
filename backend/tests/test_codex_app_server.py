@@ -1676,6 +1676,15 @@ def test_map_notification_retryable_error_keeps_running_with_details() -> None:
     assert status == SessionStatus.RUNNING
 
 
+def test_map_notification_error_skips_details_repeating_message() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    notification = _codex_error("unauthorized (401)", False, "unauthorized (401)")
+    _, text, _ = map_notification("error", notification.payload)
+
+    assert text == "unauthorized (401)"
+
+
 def test_map_notification_error_without_will_retry_is_error() -> None:
     from waypoint.backends.codex.normalize import map_notification
 

@@ -19,7 +19,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from waypoint.schemas import AttachmentOrigin, SessionStatus
+from waypoint.backends.task_notifications import (
+    CAPTURE_DISABLED,
+    NOT_CAPTURED_ON_IMPORT,
+    TaskNotification,
+    task_notification_event,
+)
+from waypoint.schemas import SessionStatus
 
 
 def format_status_event(event: dict[str, Any]) -> tuple[str, SessionStatus]:
@@ -139,18 +145,8 @@ def is_injected_user_turn(content: Any) -> bool:
 # and background-command completion as a synthetic ``user`` record with
 # ``origin.kind == "task-notification"`` and a ``<task-notification>…</…>``
 # string payload. These are not human turns. Both the live tailer and history
-# import normalize them into a standalone SYSTEM_NOTE event carrying a versioned,
-# backend-private metadata contract.
-
-TASK_NOTIFICATION_METHOD = "claude.task_notification"
-TASK_NOTIFICATION_ITEM_TYPE = "task_notification"
-TASK_NOTIFICATION_VERSION = 1
-# Largest body field (result/event/note) kept verbatim in event metadata, which
-# every client receives whether or not the card is ever expanded. A larger body
-# spills to a session attachment and is read back on demand.
-TASK_NOTIFICATION_INLINE_LIMIT = 4 * 1024
-# A summary is a headline, not a body: bound it hard, and never spill it.
-TASK_NOTIFICATION_SUMMARY_LIMIT = 4 * 1024
+# import normalize them into the backend-neutral task-notification event
+# (``waypoint.backends.task_notifications``).
 
 
 @dataclass
@@ -296,19 +292,6 @@ def infer_task_notification_kind(parsed: ParsedTaskNotification) -> str:
     return "unknown"
 
 
-def _truncate_utf8(text: str, limit: int) -> str:
-    return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
-
-
-def _bounded(
-    text: str | None, limit: int = TASK_NOTIFICATION_INLINE_LIMIT
-) -> tuple[str | None, bool]:
-    """Cap ``text`` to ``limit`` bytes, reporting whether anything was cut."""
-    if text is None or len(text.encode("utf-8")) <= limit:
-        return text, False
-    return _truncate_utf8(text, limit), True
-
-
 def _stable_task_notification_id(
     parsed: ParsedTaskNotification, ts: datetime | None
 ) -> str:
@@ -359,12 +342,6 @@ def task_notification_dedup_key(content: str) -> str:
     return hashlib.sha1(content.strip().encode("utf-8")).hexdigest()
 
 
-def _compact_task_notification_text(summary: str | None, event: str | None) -> str:
-    # Takes the bounded values: this becomes ``EventRecord.text``.
-    parts = [part for part in (summary, event) if part]
-    return " — ".join(parts) if parts else "Task notification"
-
-
 def build_task_notification_metadata(
     parsed: ParsedTaskNotification,
     *,
@@ -373,7 +350,7 @@ def build_task_notification_metadata(
     capture_enabled: bool,
     ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the ``(text, metadata)`` for a task-notification SYSTEM_NOTE event.
+    """Build the ``(text, metadata)`` for a Claude task-notification event.
 
     ``allow_output_capture`` is True for the live tailer and False for history
     import, whose temp file is long gone; ``capture_enabled`` is the operator's
@@ -384,22 +361,12 @@ def build_task_notification_metadata(
     ``capture_host_text`` key and any over-long body spills its full text on
     ``capture_inline_blobs``.
     """
-    capture_allowed = allow_output_capture and capture_enabled
     # An imported transcript never had the file, so that explanation wins over
     # the operator switch, which was irrelevant at capture time.
     no_capture_reason = (
-        "full output not captured on import"
-        if not allow_output_capture
-        else "output capture is disabled"
+        NOT_CAPTURED_ON_IMPORT if not allow_output_capture else CAPTURE_DISABLED
     )
-    notification_id = record_uuid or _stable_task_notification_id(parsed, ts)
     kind = infer_task_notification_kind(parsed)
-
-    result_preview, result_truncated = _bounded(parsed.result)
-    event_text, event_truncated = _bounded(parsed.event)
-    note_text, note_truncated = _bounded(parsed.note)
-    summary_text, _ = _bounded(parsed.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
-
     # An Agent's ``output-file`` is its sidechain transcript; its report is the
     # last record, already inline on ``result``.
     report_is_inline = kind == "agent" and parsed.result is not None
@@ -407,77 +374,24 @@ def build_task_notification_metadata(
     captures_output = bool(
         output_file and os.path.isabs(output_file) and not report_is_inline
     )
-
-    spills: list[dict[str, Any]] = []
-    if capture_allowed:
-        for name, text, truncated in (
-            ("result", parsed.result, result_truncated),
-            # ``event`` samples the stream the ``output-file`` records, so
-            # capturing that file already keeps the text a spill would store.
-            ("event", parsed.event, event_truncated and not captures_output),
-            ("note", parsed.note, note_truncated),
-        ):
-            if truncated and text is not None:
-                spills.append(
-                    {
-                        "filename": f"task-{notification_id}-{name}.txt",
-                        "text": text,
-                        "mime": "text/plain; charset=utf-8",
-                    }
-                )
-
-    output_available = False
-    output_unavailable_reason: str | None = None
-    capture_path: str | None = None
-    if captures_output:
-        if capture_allowed:
-            capture_path = output_file
-            output_available = True
-        else:
-            output_unavailable_reason = no_capture_reason
-    elif spills:
-        output_available = True
-    elif not capture_allowed and (
-        result_truncated or event_truncated or note_truncated
-    ):
-        output_unavailable_reason = no_capture_reason
-
-    payload: dict[str, Any] = {
-        "version": TASK_NOTIFICATION_VERSION,
-        "id": notification_id,
-        "task_id": parsed.task_id,
-        "tool_use_id": parsed.tool_use_id,
-        "kind": kind,
-        "status": parsed.status,
-        "summary": summary_text,
-        "event": event_text,
-        "note": note_text,
-        "result_preview": result_preview,
-        "result_truncated": result_truncated,
-        "event_truncated": event_truncated,
-        "note_truncated": note_truncated,
-        "output_available": output_available,
-        "output_unavailable_reason": output_unavailable_reason,
-    }
-    if parsed.usage:
-        payload["usage"] = parsed.usage
-
-    metadata: dict[str, Any] = {
-        "method": TASK_NOTIFICATION_METHOD,
-        "item_type": TASK_NOTIFICATION_ITEM_TYPE,
-        "task_notification": payload,
-        "status": SessionStatus.RUNNING,
-    }
-    if capture_path is not None:
-        # Captured as *text*: a report small enough to render whole rides in
-        # the event itself, so the card needs no attachment and no fetch. Only
-        # an oversized one becomes a pinned attachment with a bounded preview.
-        metadata["capture_host_text"] = [capture_path]
-    if spills:
-        metadata["capture_inline_blobs"] = spills
-    if capture_path is not None or spills:
-        metadata["capture_origin"] = AttachmentOrigin.TASK_OUTPUT
-    return _compact_task_notification_text(summary_text, event_text), metadata
+    notification = TaskNotification(
+        id=record_uuid or _stable_task_notification_id(parsed, ts),
+        kind=kind,
+        status=parsed.status,
+        summary=parsed.summary,
+        task_id=parsed.task_id,
+        tool_use_id=parsed.tool_use_id,
+        result=parsed.result,
+        event=parsed.event,
+        note=parsed.note,
+        usage=parsed.usage,
+    )
+    return task_notification_event(
+        notification,
+        allow_spill=allow_output_capture and capture_enabled,
+        no_spill_reason=no_capture_reason,
+        output_path=output_file if captures_output else None,
+    )
 
 
 def stringify_tool_result(content: Any) -> str:

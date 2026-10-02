@@ -148,7 +148,7 @@ def test_import_task_notification_emits_system_note_without_capture() -> None:
     assert len(events) == 1
     ev = events[0]
     assert ev.kind == EventKind.SYSTEM_NOTE
-    assert ev.metadata["method"] == "claude.task_notification"
+    assert ev.metadata["method"] == "task_notification"
     payload = ev.metadata["task_notification"]
     assert payload["kind"] == "agent"
     assert payload["id"] == "rec-uuid"
@@ -201,7 +201,7 @@ def test_import_queue_operation_task_notification_emits_system_note() -> None:
     events = convert_transcript_records("sess-1", [_queue_enqueue(content)])
     assert len(events) == 1
     assert events[0].kind == EventKind.SYSTEM_NOTE
-    assert events[0].metadata["method"] == "claude.task_notification"
+    assert events[0].metadata["method"] == "task_notification"
     assert events[0].metadata["task_notification"]["kind"] == "agent"
 
 

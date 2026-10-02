@@ -493,6 +493,15 @@ gets a 409. Provider-originated endings must carry the request id (OpenCode's
 notes). Without the protocol the tracker closes the session's open questions
 and rejects cancels.
 
+An agent that keeps working after it asks gets a stand-in card instead of a
+parked request: its plugin delivers the answer as an ordinary message and
+records it with `runtime.questions.record_answer` inside the operation, and its
+`decline_question` sends nothing and returns `AGENT_IDLE`. `claude_tty` and
+Codex work this way; Codex's `request_user_input_async` mapping lives in
+[`codex/questions.py`](../backend/src/waypoint/backends/codex/questions.py). A
+Codex turn that ends with one of its own questions still open settles at
+`WAITING_INPUT`.
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should

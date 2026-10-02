@@ -17,6 +17,7 @@ from typing import Any
 
 from openai_codex.models import UnknownNotification
 
+from waypoint.backends.codex.questions import async_questions, is_async_message
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,
     build_preview,
@@ -161,8 +162,11 @@ def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
 
 def _format_item_started(
     item: dict[str, Any],
-) -> tuple[EventKind, str, SessionStatus]:
+) -> tuple[EventKind | None, str, SessionStatus]:
     item_type = item.get("type")
+    if is_async_message(item):
+        # An async message arrives whole; it is emitted once, on completion.
+        return None, "", SessionStatus.RUNNING
     if item_type == "commandExecution":
         return (
             EventKind.TOOL_CALL,
@@ -241,6 +245,10 @@ def _format_item_completed(
     item: dict[str, Any],
 ) -> tuple[EventKind | None, str, SessionStatus]:
     item_type = item.get("type")
+    if is_async_message(item):
+        if async_questions(item):
+            return EventKind.TOOL_CALL, "Need your input", SessionStatus.RUNNING
+        return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
     if item_type == "agentMessage":
         return None, "", SessionStatus.RUNNING
     # An item finishing isn't a turn finishing — the model usually has

@@ -2165,6 +2165,15 @@ class Storage:
         return row is not None
 
     @_synchronized
+    def latest_event_sequence(self, session_id: str, kind: EventKind) -> int | None:
+        """The sequence of the session's newest event of ``kind``, or ``None``."""
+        row = self.connection.execute(
+            "SELECT MAX(sequence) FROM events WHERE session_id = ? AND kind = ?",
+            [session_id, kind],
+        ).fetchone()
+        return row[0] if row is not None and row[0] is not None else None
+
+    @_synchronized
     def latest_todo_event(self, session_id: str) -> EventRecord | None:
         """Return the most recent todo/task event, or ``None``.
 

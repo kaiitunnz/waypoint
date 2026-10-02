@@ -1925,9 +1925,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const handleTerminalRefresh = useCallback(() => {
     setTerminalEpoch((e) => e + 1);
   }, []);
-  const interruptSession = useCallback(() => {
-    void runAction("interrupt");
-  }, [runAction]);
+  const interruptSession = useCallback(() => runAction("interrupt"), [runAction]);
   const resumeSession = useCallback(() => {
     void runAction("resume");
   }, [runAction]);
@@ -2881,6 +2879,8 @@ const ReplyComposer = memo(function ReplyComposer({
   const attachments = useAttachments({ host, token, sessionId, onError });
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  // The transcript records nothing until the interrupt request returns.
+  const [stopping, setStopping] = useState(false);
   // Delayed-hover / long-press send menu (Send now / idle-delivery choices).
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [idleSending, setIdleSending] = useState(false);
@@ -3978,11 +3978,20 @@ const ReplyComposer = memo(function ReplyComposer({
       </button>
       <button
         type="button"
-        className="composer-interrupt-btn"
-        onClick={() => void onInterrupt()}
+        className={`composer-interrupt-btn${stopping ? " is-stopping" : ""}`}
+        onClick={async () => {
+          if (stopping) return;
+          setStopping(true);
+          try {
+            await onInterrupt();
+          } finally {
+            setStopping(false);
+          }
+        }}
         disabled={disabled}
-        aria-label="Interrupt the agent"
-        title="Interrupt the agent"
+        aria-busy={stopping || undefined}
+        aria-label={stopping ? "Stopping…" : "Interrupt the agent"}
+        title={stopping ? "Stopping…" : "Interrupt the agent"}
       >
         <span className="glyph" aria-hidden>
           ■

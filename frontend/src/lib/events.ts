@@ -352,7 +352,7 @@ export interface TaskNotificationView {
   usage: TaskNotificationUsage | null;
 }
 
-// Events stored before the contract was backend-neutral carry the legacy method.
+// Stored Claude events keep the legacy `claude.task_notification` method.
 const TASK_NOTIFICATION_METHODS: ReadonlySet<unknown> = new Set([
   "task_notification",
   "claude.task_notification",

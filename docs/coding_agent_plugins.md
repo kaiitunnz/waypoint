@@ -506,23 +506,16 @@ Codex turn that ends with one of its own questions still open settles at
 ### Task notifications (optional)
 
 A background task's lifecycle — a subagent finishing, a monitor firing, a
-background command exiting — renders as a task card when the plugin emits it as
-a task-notification `SYSTEM_NOTE`. The contract lives in
-[`task_notifications.py`](../backend/src/waypoint/backends/task_notifications.py):
-build a `TaskNotification` (`id`, `kind` of `agent` / `monitor` /
-`background_command` / `unknown`, `status`, `summary`, and optional `task_id`,
-`result`, `event`, `note`, `usage`) and pass it to `task_notification_event`,
-which returns the event's `(text, metadata)`. The metadata carries `method:
-"task_notification"` and the versioned `task_notification` payload; the frontend
-also renders stored events whose method is the legacy
-`claude.task_notification`.
+background command exiting — renders as a task card. Build a `TaskNotification`
+and pass it to `task_notification_event`
+([`task_notifications.py`](../backend/src/waypoint/backends/task_notifications.py)),
+which returns the event's `(text, metadata)`.
 
-Bodies longer than 4 KiB are cut to a preview. With `allow_spill`, the full text
-is saved as a pinned session attachment through the `capture_inline_blobs` seam;
-without it, the card shows `no_spill_reason`. Live paths spill only when the
-operator's `task_output_capture_enabled` is on, and history import never spills.
-The card `id` must be stable across live and import so a replay does not
-duplicate it.
+Bodies longer than 4 KiB are cut to a preview, and the full text is saved as a
+pinned session attachment unless `no_spill_reason` is set, which the card shows
+instead. Live paths spill only when `task_output_capture_enabled` is on; history
+import never spills. Keep the card `id` stable across live and import so a
+replay does not duplicate it.
 
 Claude maps its `<task-notification>` records onto the contract. Codex maps
 `subAgentActivity`: `started` and `interacted` become `Subagent` tool entries,

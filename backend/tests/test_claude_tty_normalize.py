@@ -431,15 +431,19 @@ def test_quoted_peer_element_in_human_text_is_not_a_peer_message() -> None:
     assert norm.process_record({"type": "user", "message": {"content": quoting}}) == []
 
 
-def test_unparseable_peer_record_still_sets_running() -> None:
+def test_unparsable_peer_record_shows_raw_text_and_runs() -> None:
     norm = TranscriptNormalizer()
+    content = "Another Claude session sent a message:\n<odd/>"
     record = {
         "type": "user",
         "origin": {"kind": "peer"},
-        "message": {"content": "Another Claude session sent a message:\n<odd/>"},
+        "message": {"content": content},
     }
-    [status] = norm.process_record(record)
-    assert _is_running_status(status)
+    [event] = norm.process_record(record)
+    assert event.kind is EventKind.USER_INPUT
+    assert event.status is SessionStatus.RUNNING
+    assert event.text == content
+    assert "kind" not in event.metadata
 
 
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────

@@ -488,7 +488,7 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert all(r.effort is None for r in token_records)
 
 
-def test_import_unparseable_peer_record_keeps_raw_text() -> None:
+def test_import_unparsable_peer_record_keeps_raw_text() -> None:
     record = {
         "type": "user",
         "timestamp": "2026-04-29T15:47:13.000Z",

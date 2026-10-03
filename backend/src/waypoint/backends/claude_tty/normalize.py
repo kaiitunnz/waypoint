@@ -506,7 +506,14 @@ class TranscriptNormalizer:
             else []
         )
         if parsed is None:
-            return status_only
+            if operation != "user":
+                return []
+            # Unparsable but delivered: keep the raw text visible, as import does.
+            return [
+                NormalizedEvent(
+                    kind=EventKind.USER_INPUT, text=content, metadata={}, status=status
+                )
+            ]
         if parsed.is_handback:
             # The report renders in the task card of the notification that
             # follows; its task-id is the sender id.

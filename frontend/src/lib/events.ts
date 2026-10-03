@@ -421,6 +421,46 @@ export function parseTaskNotification(
   };
 }
 
+export type PeerMessageChannel = "cross_session" | "agent";
+
+export interface PeerMessageView {
+  channel: PeerMessageChannel;
+  senderAddress: string;
+  senderName: string | null;
+  senderMode: string | null;
+  /** The sender's display label: its name, else its address. */
+  label: string;
+}
+
+/**
+ * Read a peer message — input another agent session sent straight to this one
+ * — from a ``user_input`` event. Accepts only the v1 backend contract and
+ * returns ``null`` otherwise, so the caller falls back to the plain bubble.
+ */
+export function parsePeerMessage(event: EventRecord): PeerMessageView | null {
+  const metadata = event.metadata ?? {};
+  if (event.kind !== "user_input" || metadata.kind !== "peer_message") {
+    return null;
+  }
+  const payload = asRecord(metadata.peer_message);
+  if (!payload || payload.version !== 1) {
+    return null;
+  }
+  const channel = readString(payload, "channel");
+  const senderAddress = readString(payload, "sender_address");
+  if ((channel !== "cross_session" && channel !== "agent") || !senderAddress) {
+    return null;
+  }
+  const senderName = readString(payload, "sender_name") || null;
+  return {
+    channel,
+    senderAddress,
+    senderName,
+    senderMode: readString(payload, "sender_mode") || null,
+    label: senderName ?? senderAddress,
+  };
+}
+
 /**
  * Ids of attachments the runtime created from text the event already carried
  * inline (an oversized body spilled to a file), as opposed to a separately

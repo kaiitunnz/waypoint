@@ -531,8 +531,9 @@ a turn. Such a message is a `USER_INPUT` event with `metadata.kind` set to
 (`cross_session` or `agent`), `sender_address`, and optional `sender_name` and
 `sender_mode`. Build it with `peer_message_event`
 ([`peer_messages.py`](../backend/src/waypoint/backends/peer_messages.py)). The
-transcript renders it as a bubble labeled with the sender, and a payload it
-cannot read falls back to the plain user bubble.
+transcript renders it as a collapsed card, like a task card, labeled with the
+sender and the message's first line; a payload it cannot read falls back to the
+plain user bubble.
 
 Emit each message once, at arrival. A message that starts a turn sets `RUNNING`
 when delivered; one injected into the running turn leaves the status alone.

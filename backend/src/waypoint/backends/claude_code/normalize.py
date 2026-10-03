@@ -15,6 +15,7 @@ import json
 import os
 import re
 import textwrap
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -164,7 +165,8 @@ class ParsedTaskNotification:
 
 def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
     """Classify a harness-injected user turn: ``task_notification`` (normalize
-    it), ``continuation`` (a /compact summary — still dropped), or ``none``.
+    it), ``peer_message`` (another session's or agent's message), ``continuation``
+    (a /compact summary — still dropped), or ``none``.
 
     ``origin.kind`` is authoritative when present; otherwise the trimmed string
     content is matched. Only a plain-string user turn is ever injected.
@@ -181,6 +183,12 @@ def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
         stripped = content.lstrip()
         if origin_says_notification or stripped.startswith("<task-notification>"):
             return "task_notification"
+        origin_says_peer = isinstance(origin, dict) and origin.get("kind") == "peer"
+        if origin_says_peer or (
+            stripped.startswith(_PEER_MESSAGE_PREFIX)
+            and starts_with_peer_element(stripped)
+        ):
+            return "peer_message"
         if stripped.startswith("This session is being continued"):
             return "continuation"
     return "none"
@@ -306,29 +314,98 @@ def _stable_task_notification_id(
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
-_AGENT_MESSAGE_RE = re.compile(
-    r'<agent-message\s+from="([^"]+)"\s*>\n?(.*?)</agent-message>', re.DOTALL
+# ─── Peer messages (Claude Code native transcript) ───────────────────────────
+#
+# Another Claude session (``<cross-session-message>``) or an in-process agent
+# (``<agent-message>``) messages this session directly. Each is an ``enqueue``
+# of the bare element, then a ``remove`` echo (injected mid-turn) or a ``user``
+# record wrapping it in a preamble and trailing guidance. A subagent hand-back's
+# report belongs on its agent task notification.
+
+_PEER_MESSAGE_PREFIX = "Another Claude session sent a message:"
+# Greedy body: the last close tag wins, so a body quoting its own close tag stays
+# whole. Bodies are raw text (Claude does not escape them).
+_PEER_ELEMENT_RE = re.compile(
+    r'<(cross-session-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>(.*)</\1>',
+    re.DOTALL,
 )
+_PEER_ATTR_RE = re.compile(r'([\w-]+)="([^"]*)"')
 _HANDBACK_MARKER = "[Subagent hand-back]"
 _REPORT_FOLLOWS = "The report follows:\n"
 
 
-def parse_agent_handback(content: str) -> tuple[str, str] | None:
-    """Extract ``(sender_id, report)`` from a subagent hand-back message.
+@dataclass(frozen=True)
+class ParsedPeerMessage:
+    sender_address: str
+    sender_name: str | None
+    # For a hand-back, its report without the preamble.
+    body: str
+    is_handback: bool
+    # Hash of the element, shared by its enqueue/remove/user records.
+    dedup_key: str
 
-    Inter-agent messages are wrapped in ``<agent-message from="id">…</agent-message>``;
-    a hand-back carries the ``[Subagent hand-back]`` preamble, which is stripped
-    down to the report body. Returns ``None`` for a non-hand-back peer message or
-    a record that carries no agent-message block.
+
+def _strip_peer_prefix(content: str) -> str:
+    stripped = content.lstrip()
+    if stripped.startswith(_PEER_MESSAGE_PREFIX):
+        stripped = stripped[len(_PEER_MESSAGE_PREFIX) :].lstrip()
+    return stripped
+
+
+def starts_with_peer_element(content: str) -> bool:
+    """Whether ``content`` (after an optional peer preamble) opens a peer element.
+
+    Anchoring at the start keeps a human message that merely quotes one out.
     """
-    match = _AGENT_MESSAGE_RE.search(content)
+    return _strip_peer_prefix(content).startswith(
+        ("<cross-session-message", "<agent-message")
+    )
+
+
+def parse_peer_message(content: str) -> ParsedPeerMessage | None:
+    """Parse content that opens with a peer element, after an optional preamble.
+
+    ``None`` for anything else, including an element with no ``from`` sender, no
+    close tag, or an empty body.
+    """
+    match = _PEER_ELEMENT_RE.match(_strip_peer_prefix(content))
     if match is None:
         return None
-    inner = match.group(2)
-    if _HANDBACK_MARKER not in inner:
+    tag, raw_attrs, inner = match.groups()
+    attrs = {
+        key: html.unescape(value) for key, value in _PEER_ATTR_RE.findall(raw_attrs)
+    }
+    sender_address = attrs.get("from", "").strip()
+    if not sender_address:
         return None
-    report = inner.split(_REPORT_FOLLOWS, 1)[-1]
-    return match.group(1), textwrap.dedent(report).strip()
+    is_handback = tag == "agent-message" and _HANDBACK_MARKER in inner
+    if is_handback:
+        inner = inner.split(_REPORT_FOLLOWS, 1)[-1]
+    body = textwrap.dedent(inner).strip()
+    if not body:
+        return None
+    return ParsedPeerMessage(
+        sender_address=sender_address,
+        sender_name=attrs.get("from-name") or None,
+        body=body,
+        is_handback=is_handback,
+        dedup_key=hashlib.sha1(match.group(0).encode("utf-8")).hexdigest(),
+    )
+
+
+def claim_peer_message(queued: Counter[str], key: str, operation: str) -> bool:
+    """Whether this record shows the peer message's card.
+
+    ``queued`` counts messages shown from their ``enqueue`` whose ``remove`` or
+    ``user`` twin is pending; ``operation`` is the queue operation or ``user``.
+    """
+    if operation == "enqueue":
+        queued[key] += 1
+        return True
+    if queued[key] > 0:
+        queued[key] -= 1
+        return False
+    return operation == "user"
 
 
 def task_notification_dedup_key(content: str) -> str:
@@ -340,6 +417,16 @@ def task_notification_dedup_key(content: str) -> str:
     distinct notifications (different body) apart.
     """
     return hashlib.sha1(content.strip().encode("utf-8")).hexdigest()
+
+
+def _no_spill_reason(allow_output_capture: bool, capture_enabled: bool) -> str | None:
+    # An imported transcript never had the file, so that explanation wins over
+    # the operator switch, which was irrelevant at capture time.
+    if not allow_output_capture:
+        return NOT_CAPTURED_ON_IMPORT
+    if not capture_enabled:
+        return CAPTURE_DISABLED
+    return None
 
 
 def build_task_notification_metadata(
@@ -357,13 +444,7 @@ def build_task_notification_metadata(
     ``task_output_capture_enabled`` switch. Both must hold to capture, and each
     explains itself differently on the card.
     """
-    # An imported transcript never had the file, so that explanation wins over
-    # the operator switch, which was irrelevant at capture time.
-    no_spill_reason: str | None = None
-    if not allow_output_capture:
-        no_spill_reason = NOT_CAPTURED_ON_IMPORT
-    elif not capture_enabled:
-        no_spill_reason = CAPTURE_DISABLED
+    no_spill_reason = _no_spill_reason(allow_output_capture, capture_enabled)
     kind = infer_task_notification_kind(parsed)
     # An Agent's ``output-file`` is its sidechain transcript; its report is the
     # last record, already inline on ``result``.
@@ -388,6 +469,29 @@ def build_task_notification_metadata(
         notification,
         no_spill_reason=no_spill_reason,
         output_path=output_file if captures_output else None,
+    )
+
+
+def build_peer_message_metadata(
+    parsed: ParsedPeerMessage,
+    *,
+    record_uuid: str | None,
+    allow_output_capture: bool,
+    capture_enabled: bool,
+    ts: datetime | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build ``(text, metadata)`` for a peer message as a ``message`` task notification."""
+    basis = f"{ts.isoformat() if ts is not None else ''}|{parsed.dedup_key}"
+    notification = TaskNotification(
+        id=record_uuid or hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16],
+        kind="message",
+        status=None,
+        summary=f"Message from {parsed.sender_name or parsed.sender_address}",
+        result=parsed.body,
+    )
+    return task_notification_event(
+        notification,
+        no_spill_reason=_no_spill_reason(allow_output_capture, capture_enabled),
     )
 
 

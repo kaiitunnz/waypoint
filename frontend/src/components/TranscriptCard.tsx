@@ -720,11 +720,13 @@ export function TaskNotificationRunGroup({
   let agentCount = 0;
   let monitorCount = 0;
   let commandCount = 0;
+  let messageCount = 0;
   let otherCount = 0;
   for (const kind of kinds) {
     if (kind === "agent") agentCount++;
     else if (kind === "monitor") monitorCount++;
     else if (kind === "background_command") commandCount++;
+    else if (kind === "message") messageCount++;
     else otherCount++;
   }
 
@@ -751,6 +753,13 @@ export function TaskNotificationRunGroup({
               <span className="tool-run-glyph">›_</span>
               <span className="tool-run-label">command</span>
               <span className="tool-run-count">×{commandCount}</span>
+            </span>
+          )}
+          {messageCount > 0 && (
+            <span className="tool-run-chip other">
+              <span className="tool-run-glyph">↘</span>
+              <span className="tool-run-label">message</span>
+              <span className="tool-run-count">×{messageCount}</span>
             </span>
           )}
           {otherCount > 0 && (
@@ -977,6 +986,7 @@ const TASK_NOTIFICATION_BADGES: Record<
   agent: { glyph: "◇", variant: "task", label: "Agent" },
   monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
   background_command: { glyph: "›_", variant: "bash", label: "Command" },
+  message: { glyph: "↘", variant: "default", label: "Message" },
   unknown: { glyph: "⁂", variant: "default", label: "Task" },
 };
 

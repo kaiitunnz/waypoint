@@ -1,11 +1,11 @@
 """Backend-neutral task-notification contract.
 
 A task notification reports a background task's lifecycle — a subagent
-finishing, a monitor firing, a background command exiting — as a standalone
-``SYSTEM_NOTE`` event the frontend renders as a task card. Any agent plugin may
-emit one; each owns how it learns of the task and builds a
-:class:`TaskNotification`, and :func:`task_notification_event` turns that into
-the event's ``(text, metadata)``.
+finishing, a monitor firing, a background command exiting — or a message from
+another agent, as a standalone ``SYSTEM_NOTE`` event the frontend renders as a
+task card. Any agent plugin may emit one; each owns how it learns of the task
+and builds a :class:`TaskNotification`, and :func:`task_notification_event`
+turns that into the event's ``(text, metadata)``.
 """
 
 from dataclasses import dataclass, field
@@ -31,7 +31,7 @@ CAPTURE_DISABLED = "output capture is disabled"
 @dataclass(frozen=True)
 class TaskNotification:
     id: str
-    kind: str  # agent | monitor | background_command | unknown
+    kind: str  # agent | monitor | background_command | message | unknown
     status: str | None
     summary: str | None
     task_id: str | None = None

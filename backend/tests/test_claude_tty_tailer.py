@@ -532,3 +532,43 @@ async def test_queued_notification_keeps_status_until_delivered() -> None:
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", status=SessionStatus.RUNNING
     )
+
+
+async def test_queued_peer_message_shows_on_enqueue_and_runs_on_delivery() -> None:
+    session = _make_session()
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+    element = (
+        '<cross-session-message from="uds:/x.sock" from-name="peer-a">\n'
+        "Please re-verify.\n"
+        "</cross-session-message>"
+    )
+
+    source.feed(
+        _jsonl({"type": "queue-operation", "operation": "enqueue", "content": element})
+    )
+    await tailer._drain()
+    source.feed(
+        _jsonl(
+            {
+                "type": "user",
+                "origin": {"kind": "peer"},
+                "message": {
+                    "content": "Another Claude session sent a message:\n"
+                    + element
+                    + "\n\nThis came from another Claude session."
+                },
+            }
+        )
+    )
+    await tailer._drain()
+
+    message = runtime._emit_adapter_event.await_args_list[0].args
+    assert message[1] is EventKind.SYSTEM_NOTE
+    assert message[3]["task_notification"]["kind"] == "message"
+    assert message[3]["task_notification"]["result_preview"] == "Please re-verify."
+    assert message[4] is None
+    assert runtime._emit_adapter_event.await_count == 1
+    runtime.update_session_fields.assert_awaited_once_with(
+        "sess-1", status=SessionStatus.RUNNING
+    )

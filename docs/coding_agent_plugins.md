@@ -517,10 +517,14 @@ instead. Live paths spill only when `task_output_capture_enabled` is on; history
 import never spills. Keep the card `id` stable across live and import so a
 replay does not duplicate it.
 
-Claude maps its `<task-notification>` records onto the contract. Codex maps
-`subAgentActivity`: `started` and `interacted` become `Subagent` tool entries,
-and `completed` and `interrupted` become `agent` cards whose report is read from
-the subagent's own thread
+Claude maps its `<task-notification>` records onto the contract, and messages
+from another Claude session or agent (`<cross-session-message>`,
+`<agent-message>`) onto `message` cards labeled with the sender; a delivered
+message sets `RUNNING`. A subagent hand-back's report goes on its `agent` card.
+
+Codex maps `subAgentActivity`: `started` and `interacted` become `Subagent` tool
+entries, and `completed` and `interrupted` become `agent` cards whose report is
+read from the subagent's own thread
 ([`codex/subagents.py`](../backend/src/waypoint/backends/codex/subagents.py)).
 
 ### Terminal appearance (optional)

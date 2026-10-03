@@ -326,6 +326,7 @@ export type TaskNotificationKind =
   | "agent"
   | "monitor"
   | "background_command"
+  | "message"
   | "unknown";
 
 export interface TaskNotificationUsage {
@@ -366,6 +367,7 @@ const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
   "agent",
   "monitor",
   "background_command",
+  "message",
   "unknown",
 ]);
 

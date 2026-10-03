@@ -9,6 +9,7 @@ from waypoint.backends.claude_code.history import (
 )
 from waypoint.backends.claude_code.models import make_context_window_resolver
 from waypoint.backends.claude_code.threads import read_local_claude_transcript
+from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.schemas import BackendModelOption, EventKind
 
 
@@ -233,6 +234,74 @@ def test_import_handback_attaches_to_task_notification() -> None:
     assert len(events) == 1
     payload = events[0].metadata["task_notification"]
     assert payload["result_preview"] == "Report line one.\nReport line two."
+
+
+_PEER_ELEMENT = (
+    '<cross-session-message from="uds:/run/cc/42.sock" from-name="peer-a" '
+    'from-mode="prompting">\nPR is green.\n</cross-session-message>'
+)
+
+
+def _peer_user(element: str) -> dict:
+    return {
+        "type": "user",
+        "timestamp": "2026-04-29T15:47:13.000Z",
+        "origin": {"kind": "peer"},
+        "isMeta": True,
+        "message": {
+            "content": "Another Claude session sent a message:\n"
+            + element
+            + "\n\nThis came from another Claude session."
+        },
+    }
+
+
+def test_import_peer_message_is_a_message_task_card_and_dedupes() -> None:
+    records = [
+        _queue_enqueue(_PEER_ELEMENT),
+        {"type": "queue-operation", "operation": "dequeue"},
+        _peer_user(_PEER_ELEMENT),
+    ]
+    [event] = convert_transcript_records("sess-1", records)
+    assert event.kind == EventKind.SYSTEM_NOTE
+    # Stamped at arrival (the enqueue), not delivery.
+    assert event.ts == datetime(2026, 4, 29, 15, 47, 12, tzinfo=UTC)
+    payload = event.metadata["task_notification"]
+    assert payload["kind"] == "message"
+    assert payload["summary"] == "Message from peer-a"
+    assert payload["result_preview"] == "PR is green."
+
+
+def test_import_removed_and_user_only_peer_messages_each_emit_once() -> None:
+    removed = {**_queue_enqueue(_PEER_ELEMENT), "operation": "remove"}
+    records = [_queue_enqueue(_PEER_ELEMENT), removed, _peer_user(_PEER_ELEMENT)]
+    events = convert_transcript_records("sess-1", records)
+    assert [e.metadata["task_notification"]["kind"] for e in events] == [
+        "message",
+        "message",
+    ]
+
+
+def test_import_quoted_peer_element_stays_plain_human_text() -> None:
+    quoting = "What is this?\n" + _PEER_ELEMENT
+    record = {
+        "type": "user",
+        "timestamp": "2026-04-29T15:47:13.000Z",
+        "message": {"content": quoting},
+    }
+    [event] = convert_transcript_records("sess-1", [record])
+    assert event.kind == EventKind.USER_INPUT
+    assert event.text == quoting
+
+
+def test_import_peer_card_id_matches_live() -> None:
+    enqueue = _queue_enqueue(_PEER_ELEMENT)
+    [imported] = convert_transcript_records("sess-1", [enqueue])
+    [live] = TranscriptNormalizer().process_record(enqueue)
+    assert (
+        imported.metadata["task_notification"]["id"]
+        == live.metadata["task_notification"]["id"]
+    )
 
 
 def test_convert_transcript_records_preserves_source_timestamps() -> None:

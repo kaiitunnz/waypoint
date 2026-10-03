@@ -19,6 +19,9 @@ Key invariants (all verified against real transcripts in Phase 0):
   Monitor events and terminal state, background-command completion) are
   normalized into a standalone SYSTEM_NOTE task-notification event; context-window
   summaries beginning with "This session is being continued" are still dropped.
+- A peer message (``<cross-session-message>``, ``<agent-message>``) surfaces once
+  as a ``message`` task notification; its delivered ``user`` record sets RUNNING.
+  A subagent hand-back's report goes on its agent task notification.
 - A manual ``/compact`` produces only a ``compact_boundary`` system record and
   an injected continuation summary, with no terminal assistant record, so a
   synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
@@ -31,6 +34,7 @@ Key invariants (all verified against real transcripts in Phase 0):
 import json
 import re
 import uuid
+from collections import Counter
 from typing import Any
 
 from waypoint.backends.claude_code.adapter import _apply_plan_edit, _is_plan_file_path
@@ -38,17 +42,21 @@ from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
+    build_peer_message_metadata,
     build_task_notification_metadata,
+    claim_peer_message,
     classify_injected_user_turn,
     extract_created_task_id,
     format_task_snapshot,
     iter_content_blocks,
-    parse_agent_handback,
+    parse_peer_message,
     parse_task_notification,
     sent_user_file_paths,
+    starts_with_peer_element,
     stringify_tool_result,
     task_notification_dedup_key,
 )
+from waypoint.backends.claude_code.threads import parse_iso_timestamp
 from waypoint.backends.diff_preview import (
     build_preview,
     files_from_claude_tool_result,
@@ -112,6 +120,7 @@ class TranscriptNormalizer:
         # and whose task-id is the sender id). The report has no other home — the
         # task notification's own result only says "delivered as a message".
         self._pending_handback_bodies: dict[str, str] = {}
+        self._queued_peer_messages: Counter[str] = Counter()
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
         self._suppressed_result_tool_use_ids: set[str] = set()
@@ -445,13 +454,7 @@ class TranscriptNormalizer:
         if key in self._seen_task_notification_keys:
             # The queued copy already posted the note; this delivery starts the
             # turn, so only the status moves.
-            if status is None:
-                return []
-            return [
-                NormalizedEvent(
-                    kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
-                )
-            ]
+            return _status_only(status)
         self._seen_task_notification_keys.add(key)
         if parsed.task_id in self._pending_handback_bodies:
             # Agent's own result is only a "delivered as a message" placeholder;
@@ -472,31 +475,52 @@ class TranscriptNormalizer:
             )
         ]
 
-    def _buffer_handback(self, content: str) -> bool:
-        """Buffer a subagent hand-back report by sender id; True if it was one."""
-        handback = parse_agent_handback(content)
-        if handback is None:
-            return False
-        sender_id, report = handback
-        self._pending_handback_bodies[sender_id] = report
-        return True
+    def _peer_message_events(
+        self, content: str, operation: str, record: dict[str, Any]
+    ) -> list[NormalizedEvent]:
+        """Show a peer message once, as a ``message`` task notification.
+
+        A delivered (``user``) record starts a turn, so it sets RUNNING even when
+        the card was already shown.
+        """
+        status = SessionStatus.RUNNING if operation == "user" else None
+        parsed = parse_peer_message(content)
+        if parsed is None:
+            return _status_only(status)
+        if parsed.is_handback:
+            self._pending_handback_bodies[parsed.sender_address] = parsed.body
+            return _status_only(status)
+        if not claim_peer_message(
+            self._queued_peer_messages, parsed.dedup_key, operation
+        ):
+            return _status_only(status)
+        raw_ts = record.get("timestamp")
+        text, metadata = build_peer_message_metadata(
+            parsed,
+            record_uuid=record.get("uuid"),
+            allow_output_capture=True,
+            capture_enabled=self._capture_enabled,
+            # The record's own time, so the card id matches a history import.
+            ts=parse_iso_timestamp(raw_ts) if isinstance(raw_ts, str) else None,
+        )
+        return [
+            NormalizedEvent(
+                kind=EventKind.SYSTEM_NOTE, text=text, metadata=metadata, status=status
+            )
+        ]
 
     def _process_queue_operation(self, record: dict[str, Any]) -> list[NormalizedEvent]:
-        # A task notification or hand-back that arrives mid-turn is persisted only
-        # as an ``enqueue`` (``remove`` echoes the same content, ``dequeue`` has
-        # none). Surface the task notification as the user-turn path does; buffer a
-        # hand-back for the task notification that follows it.
-        if record.get("operation") != "enqueue":
-            return []
+        # A queued record is not delivered yet, so it never moves the session's status.
+        # A task notification's ``remove`` echo is ignored; a peer message's is matched
+        # to its ``enqueue``.
+        operation = record.get("operation")
         content = record.get("content")
-        if not isinstance(content, str):
+        if operation not in ("enqueue", "remove") or not isinstance(content, str):
             return []
-        if self._buffer_handback(content):
+        if starts_with_peer_element(content):
+            return self._peer_message_events(content, operation, record)
+        if operation != "enqueue" or "<task-notification>" not in content:
             return []
-        if "<task-notification>" not in content:
-            return []
-        # Queued behind the current turn or an open dialog: not delivered yet,
-        # so the note leaves the session's status alone.
         return self._task_notification_events(content, record.get("uuid"), None)
 
     def _process_user(self, record: dict[str, Any]) -> list[NormalizedEvent]:
@@ -508,9 +532,9 @@ class TranscriptNormalizer:
             return self._task_notification_events(
                 content, record.get("uuid"), SessionStatus.RUNNING
             )
+        if injected == "peer_message" and isinstance(content, str):
+            return self._peer_message_events(content, "user", record)
         if injected == "continuation":
-            return []
-        if isinstance(content, str) and self._buffer_handback(content):
             return []
 
         turn_aborted = _is_user_rejection(record)
@@ -618,6 +642,16 @@ class TranscriptNormalizer:
                 status=SessionStatus.RUNNING,
             )
         ]
+
+
+def _status_only(status: SessionStatus | None) -> list[NormalizedEvent]:
+    if status is None:
+        return []
+    return [
+        NormalizedEvent(
+            kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
+        )
+    ]
 
 
 def _diff_preview_from_tool_result(record: dict[str, Any]) -> dict[str, Any] | None:

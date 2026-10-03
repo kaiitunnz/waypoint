@@ -523,6 +523,23 @@ and `completed` and `interrupted` become `agent` cards whose report is read from
 the subagent's own thread
 ([`codex/subagents.py`](../backend/src/waypoint/backends/codex/subagents.py)).
 
+### Peer messages (optional)
+
+Another agent session can message this one directly, outside Waypoint, and start
+a turn. Such a message is a `USER_INPUT` event with `metadata.kind` set to
+`"peer_message"` and a `peer_message` payload carrying `version` (1), `channel`
+(`cross_session` or `agent`), `sender_address`, and optional `sender_name` and
+`sender_mode`. Build it with `peer_message_event`
+([`peer_messages.py`](../backend/src/waypoint/backends/peer_messages.py)). The
+transcript renders it as a bubble labeled with the sender, and a payload it
+cannot read falls back to the plain user bubble.
+
+Emit each message once, at arrival. A message that starts a turn sets `RUNNING`
+when delivered; one injected into the running turn leaves the status alone.
+Claude maps `<cross-session-message>` and `<agent-message>` records onto the
+contract. A subagent hand-back is an agent message too, but its report renders
+in the task card instead.
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should

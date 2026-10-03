@@ -425,3 +425,48 @@ def test_private_sdk_surface_for_compaction_exists() -> None:
         "for_handle",
     ]
     assert "self._router = MessageRouter()" in inspect.getsource(CodexClient.__init__)
+
+
+def test_notification_for_an_ended_turn_reaches_the_global_queue() -> None:
+    router = MessageRouter()
+    router.register_turn("t1")
+    router.route_notification(
+        _routed("turn/completed", threadId="th", turn={"id": "t1"})
+    )
+    router.unregister_turn("t1")
+
+    late = _routed("item/completed", threadId="th", turnId="t1", item={})
+    router.route_notification(late)
+
+    assert router.next_global_notification() is late
+
+
+def test_notification_for_a_live_turn_stays_on_the_turn() -> None:
+    router = MessageRouter()
+    router.register_turn("t1")
+    live = _routed("item/completed", threadId="th", turnId="t1", item={})
+    router.route_notification(live)
+
+    assert router.next_turn_notification("t1") is live
+    assert router._global_notifications.empty()
+
+
+def test_ended_turn_of_a_goal_thread_keeps_sdk_routing() -> None:
+    router = MessageRouter()
+    router.route_notification(
+        _routed("turn/completed", threadId="th", turn={"id": "t1"})
+    )
+    router._goal_operations["th"] = cast(
+        Any,
+        type(
+            "Goal",
+            (),
+            {"observe": lambda self, n: True, "is_finished": lambda self: False},
+        )(),
+    )
+
+    router.route_notification(
+        _routed("item/completed", threadId="th", turnId="t1", item={})
+    )
+
+    assert router._global_notifications.empty()

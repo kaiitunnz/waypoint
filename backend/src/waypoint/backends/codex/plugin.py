@@ -9,6 +9,7 @@ Codex-only today; it surfaces here as a registered slash command.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -40,7 +41,10 @@ from waypoint.backends.codex.adapter import (
     _apply_codex_args,
     default_client_factory,
 )
-from waypoint.backends.codex.history import turns_to_events
+from waypoint.backends.codex.history import (
+    subagent_report_sources,
+    turns_to_events,
+)
 from waypoint.backends.codex.pane import composer_ready, composer_submitted
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_IDS,
@@ -59,6 +63,11 @@ from waypoint.backends.codex.remote import build_remote_codex_client_factory
 from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
+)
+from waypoint.backends.codex.subagents import (
+    ReportReadTimeout,
+    ReportSource,
+    read_report_within_deadline,
 )
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
@@ -90,6 +99,8 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.codex")
+# Subagent reports an import reads at once.
+_IMPORT_REPORT_READS = 4
 
 
 def _event_thread_id(event: EventRecord) -> str | None:
@@ -247,6 +258,7 @@ class CodexPlugin(DefaultLaunchContract):
             open_question_ids=lambda session_id: set(
                 runtime.storage.open_question_tool_use_ids(session_id)
             ),
+            task_output_capture_enabled=runtime.settings.task_output_capture_enabled,
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
@@ -1633,6 +1645,56 @@ class CodexPlugin(DefaultLaunchContract):
                 detail=f"failed to read codex thread: {exc}",
             ) from exc
 
+    async def _read_subagent_reports(
+        self,
+        runtime: "SessionRuntime",
+        sources: list[ReportSource],
+        launch_target_id: str | None,
+        launch_env: dict[str, str] | None,
+    ) -> dict[ReportSource, str | None]:
+        """Each subagent's report, read from its own thread; ``None`` when the
+        read fails or times out."""
+        if not sources:
+            return {}
+        # Responses route by request id, so reads share one client. The
+        # semaphore starts each read's deadline only once a worker is free.
+        reader = concurrent.futures.ThreadPoolExecutor(
+            max_workers=_IMPORT_REPORT_READS,
+            thread_name_prefix="codex-subagent-report",
+        )
+        slots = asyncio.Semaphore(_IMPORT_REPORT_READS)
+        timed_out = False
+
+        async def read(client: CodexClient, source: ReportSource) -> str | None:
+            nonlocal timed_out
+            async with slots:
+                if timed_out:
+                    # The app-server stopped answering; a later read would
+                    # only wait out its own deadline.
+                    return None
+                try:
+                    return await read_report_within_deadline(reader, client, source)
+                except ReportReadTimeout:
+                    timed_out = True
+                    return None
+
+        async def operation(client: CodexClient) -> dict[ReportSource, str | None]:
+            reports = await asyncio.gather(
+                *(read(client, source) for source in sources)
+            )
+            return dict(zip(sources, reports, strict=True))
+
+        try:
+            result: dict[ReportSource, str | None] = await self.run_client_operation(
+                runtime, launch_target_id, operation=operation, launch_env=launch_env
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("codex subagent reports unavailable on import", exc_info=True)
+            return {}
+        finally:
+            reader.shutdown(wait=False, cancel_futures=True)
+        return result
+
     def _find_imported_session(
         self,
         runtime: "SessionRuntime",
@@ -1924,7 +1986,13 @@ class CodexPlugin(DefaultLaunchContract):
             ) from exc
 
         async def read_history() -> list[EventRecord]:
-            return turns_to_events(thread.turns, session.id)
+            reports = await self._read_subagent_reports(
+                runtime,
+                subagent_report_sources(thread.turns),
+                request.launch_target_id,
+                request.launch_env,
+            )
+            return turns_to_events(thread.turns, session.id, reports)
 
         await runtime.seed_thread_history(
             session.id, read_history, enabled=request.import_history

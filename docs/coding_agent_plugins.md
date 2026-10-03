@@ -503,6 +503,26 @@ Codex work this way; Codex's `request_user_input_async` mapping lives in
 Codex turn that ends with one of its own questions still open settles at
 `WAITING_INPUT`.
 
+### Task notifications (optional)
+
+A background task's lifecycle — a subagent finishing, a monitor firing, a
+background command exiting — renders as a task card. Build a `TaskNotification`
+and pass it to `task_notification_event`
+([`task_notifications.py`](../backend/src/waypoint/backends/task_notifications.py)),
+which returns the event's `(text, metadata)`.
+
+Bodies longer than 4 KiB are cut to a preview, and the full text is saved as a
+pinned session attachment unless `no_spill_reason` is set, which the card shows
+instead. Live paths spill only when `task_output_capture_enabled` is on; history
+import never spills. Keep the card `id` stable across live and import so a
+replay does not duplicate it.
+
+Claude maps its `<task-notification>` records onto the contract. Codex maps
+`subAgentActivity`: `started` and `interacted` become `Subagent` tool entries,
+and `completed` and `interrupted` become `agent` cards whose report is read from
+the subagent's own thread
+([`codex/subagents.py`](../backend/src/waypoint/backends/codex/subagents.py)).
+
 ### Terminal appearance (optional)
 
 A terminal pane is a host for an opaque TUI, so its light/dark surface should

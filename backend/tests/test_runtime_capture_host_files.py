@@ -346,7 +346,7 @@ async def test_emit_captures_for_non_tool_call_kind(tmp_path: Path) -> None:
     await _emit(
         runtime,
         {
-            "method": "claude.task_notification",
+            "method": "task_notification",
             "capture_host_files": [str(tmp_path / "report.md")],
         },
     )

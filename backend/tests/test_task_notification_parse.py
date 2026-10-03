@@ -3,13 +3,15 @@
 from datetime import UTC, datetime
 
 from waypoint.backends.claude_code.normalize import (
-    TASK_NOTIFICATION_INLINE_LIMIT,
-    TASK_NOTIFICATION_ITEM_TYPE,
-    TASK_NOTIFICATION_METHOD,
     build_task_notification_metadata,
     classify_injected_user_turn,
     infer_task_notification_kind,
     parse_task_notification,
+)
+from waypoint.backends.task_notifications import (
+    TASK_NOTIFICATION_INLINE_LIMIT,
+    TASK_NOTIFICATION_ITEM_TYPE,
+    TASK_NOTIFICATION_METHOD,
 )
 from waypoint.schemas import AttachmentOrigin, SessionStatus
 

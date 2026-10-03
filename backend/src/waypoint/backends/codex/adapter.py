@@ -37,11 +37,21 @@ from waypoint.backends.codex.normalize import (
     set_completed_outcome,
 )
 from waypoint.backends.codex.questions import apply_async_question
+from waypoint.backends.codex.subagents import (
+    SUBAGENT_ITEM_TYPE,
+    ReportReadTimeout,
+    ReportSource,
+    SubagentReport,
+    read_report_within_deadline,
+    report_source,
+    with_report,
+)
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionEnvelope,
 )
+from waypoint.backends.task_notifications import CAPTURE_DISABLED
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -225,6 +235,14 @@ class CodexSessionState:
         None
     )
     rate_limit_refresh_task: asyncio.Task[None] | None = None
+    report_reader: concurrent.futures.ThreadPoolExecutor = field(
+        default_factory=lambda: concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="codex-subagent-report"
+        )
+    )
+    # Reads still running past their deadline. While any is, a new read would
+    # only queue behind it until its own deadline, so reads are skipped.
+    stuck_report_reads: int = 0
 
 
 class CodexAppServerAdapter:
@@ -235,8 +253,10 @@ class CodexAppServerAdapter:
         on_token_usage: TokenUsageCallback | None = None,
         client_factory: ClientFactory | None = None,
         open_question_ids: Callable[[str], set[str]] | None = None,
+        task_output_capture_enabled: bool = True,
     ) -> None:
         self._emit_event = emit_event
+        self._task_output_capture_enabled = task_output_capture_enabled
         self._open_question_ids = open_question_ids
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
@@ -814,6 +834,8 @@ class CodexAppServerAdapter:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
             log.exception("codex client close failed", extra={"session_id": session_id})
+        # Closing the client also fails any report read still waiting.
+        state.report_reader.shutdown(wait=False, cancel_futures=True)
         # The pump thread exits on its own: closing the client fails its read.
         if state.stream_task is not None:
             state.stream_task.cancel()
@@ -882,11 +904,53 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
 
+    async def _prepare_subagent_item(
+        self, state: CodexSessionState, method: str, payload: dict[str, Any]
+    ) -> bool:
+        """Attach a finished subagent's report to its activity item. False
+        drops an activity item that belongs to another thread."""
+        item = extract_item(payload) if "item" in payload else None
+        if not isinstance(item, dict) or item.get("type") != SUBAGENT_ITEM_TYPE:
+            return True
+        thread_id = payload.get("threadId")
+        if isinstance(thread_id, str) and thread_id != state.thread_id:
+            return False
+        source = report_source(item) if method == "item/completed" else None
+        if source is not None:
+            report = await self._read_subagent_report(state, source)
+            no_spill_reason = (
+                None if self._task_output_capture_enabled else CAPTURE_DISABLED
+            )
+            payload["item"] = with_report(item, SubagentReport(report, no_spill_reason))
+        return True
+
+    async def _read_subagent_report(
+        self, state: CodexSessionState, source: ReportSource
+    ) -> str | None:
+        if state.stuck_report_reads:
+            return None
+        # Not under request_lock: responses route by request id, so the read
+        # never holds up a steer or interrupt sent meanwhile.
+        try:
+            return await read_report_within_deadline(
+                state.report_reader, state.client, source, state.session_id
+            )
+        except ReportReadTimeout as timeout:
+            if timeout.running is not None:
+                loop = asyncio.get_running_loop()
+                state.stuck_report_reads += 1
+                timeout.running.add_done_callback(
+                    lambda _: _call_soon(loop, _release_stuck_read, state)
+                )
+            return None
+
     def _pump_notifications(
         self, state: CodexSessionState, loop: asyncio.AbstractEventLoop
     ) -> None:
         """Drain notifications that carry no turn id (warnings, config and
-        deprecation notices, thread state). They never change session status.
+        deprecation notices, thread state), plus late ones for an ended turn
+        (a subagent finishing after its parent's turn). They never change
+        session status.
 
         Runs on its own thread for the client's lifetime, so an idle session
         never holds a worker of the event loop's shared pool.
@@ -939,6 +1003,8 @@ class CodexAppServerAdapter:
         """
         if not is_known_method(method):
             self._log_unknown_method(state, method, payload)
+            return
+        if not await self._prepare_subagent_item(state, method, payload):
             return
         rendered = render_notification(method, payload)
         if rendered is None or not rendered.text:
@@ -1145,6 +1211,18 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _release_stuck_read(state: CodexSessionState) -> None:
+    state.stuck_report_reads -= 1
+
+
+def _call_soon(
+    loop: asyncio.AbstractEventLoop, callback: Callable[..., None], *args: Any
+) -> None:
+    with suppress(RuntimeError):
+        # The loop has closed; there is nothing left to update.
+        loop.call_soon_threadsafe(callback, *args)
 
 
 def _end_compaction(state: CodexSessionState) -> None:

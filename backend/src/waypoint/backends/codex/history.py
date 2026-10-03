@@ -11,6 +11,7 @@ the frontend pairs tool cards solely on ``metadata.item_id``, and Codex items
 carry no ``tool_use_id`` to fall back on.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -34,7 +35,18 @@ from waypoint.backends.codex.questions import (
     is_async_message,
     parse_reply,
 )
+from waypoint.backends.codex.subagents import (
+    SUBAGENT_ITEM_TYPE,
+    ReportSource,
+    SubagentReport,
+    report_source,
+    with_report,
+)
 from waypoint.backends.diff_preview import preview_to_metadata
+from waypoint.backends.task_notifications import (
+    NOT_CAPTURED_ON_IMPORT,
+    TASK_NOTIFICATION_METHOD,
+)
 from waypoint.questions import (
     ASK_QUESTION_ANSWER,
     ASK_QUESTION_CLOSED,
@@ -44,23 +56,43 @@ from waypoint.questions import (
 from waypoint.schemas import EventKind, EventRecord
 
 
-def turns_to_events(turns: list[Turn], session_id: str) -> list[EventRecord]:
+def turns_to_events(
+    turns: list[Turn],
+    session_id: str,
+    subagent_reports: Mapping[ReportSource, str | None] | None = None,
+) -> list[EventRecord]:
     """Replay a Codex thread's turns into ``EventRecord``s in sequence order.
+
+    ``subagent_reports`` maps each report source to its report. A task card
+    whose id was already replayed is skipped.
 
     Async questions left unanswered before the final turn get a closure note;
     the final turn's stay open because it may have ended waiting on the answer.
     """
     if not turns:
         return []
+    reports = subagent_reports or {}
     events: list[EventRecord] = []
+    card_ids: set[str] = set()
     for turn in turns:
         earlier = len(events)
         started_at = _turn_timestamp(turn.started_at, turn.completed_at)
         completed_at = _turn_timestamp(turn.completed_at, turn.started_at)
         for item in turn.items:
-            events.extend(
-                _item_to_events(item.root, session_id, started_at, completed_at)
-            )
+            for event in _item_to_events(
+                item.root,
+                session_id,
+                started_at,
+                completed_at,
+                reports,
+                turn.completed_at,
+            ):
+                card_id = _task_card_id(event)
+                if card_id is not None:
+                    if card_id in card_ids:
+                        continue
+                    card_ids.add(card_id)
+                events.append(event)
     return events + _close_abandoned_questions(
         events, earlier, session_id, completed_at
     )
@@ -100,8 +132,34 @@ def _turn_timestamp(primary: int | None, fallback: int | None) -> datetime:
     return datetime.fromtimestamp(epoch or 0, UTC)
 
 
+def subagent_report_sources(turns: list[Turn]) -> list[ReportSource]:
+    """Where the reports a replay of ``turns`` shows live."""
+    sources = (
+        report_source(
+            item.root.model_dump(mode="json", by_alias=True), turn.completed_at
+        )
+        for turn in turns
+        for item in turn.items
+        if getattr(item.root, "type", None) == SUBAGENT_ITEM_TYPE
+    )
+    return list(dict.fromkeys(source for source in sources if source is not None))
+
+
+def _task_card_id(event: EventRecord) -> str | None:
+    if event.metadata.get("method") != TASK_NOTIFICATION_METHOD:
+        return None
+    card = event.metadata.get("task_notification")
+    card_id = card.get("id") if isinstance(card, dict) else None
+    return card_id if isinstance(card_id, str) else None
+
+
 def _item_to_events(
-    item: Any, session_id: str, started_at: datetime, completed_at: datetime
+    item: Any,
+    session_id: str,
+    started_at: datetime,
+    completed_at: datetime,
+    subagent_reports: Mapping[ReportSource, str | None],
+    report_bound: int | None,
 ) -> list[EventRecord]:
     item_type = getattr(item, "type", None)
     if item_type == "userMessage":
@@ -120,6 +178,13 @@ def _item_to_events(
         # Live sessions mark encrypted reasoning with a detail note; an import
         # has no use for it.
         return []
+
+    source = report_source(item_dict, report_bound)
+    if source is not None:
+        item_dict = with_report(
+            item_dict,
+            SubagentReport(subagent_reports.get(source), NOT_CAPTURED_ON_IMPORT),
+        )
 
     item_id = item_dict.get("id")
     tool_name = extract_tool_name(item_type, item_dict)

@@ -17,11 +17,18 @@ from waypoint.backends.codex.event_registry import (
     render_item_started,
     render_notification,
 )
+from waypoint.backends.codex.subagents import (
+    REPORT_UNAVAILABLE,
+    SUBAGENT_REPORT_KEY,
+    SubagentReport,
+    with_report,
+)
 from waypoint.backends.events import (
     DETAIL_VISIBILITY,
     IMPORTANT_VISIBILITY,
     VISIBILITY_METADATA_KEY,
 )
+from waypoint.backends.task_notifications import TASK_NOTIFICATION_METHOD
 from waypoint.schemas import EventKind, SessionStatus
 
 # The adapter synthesizes todo_list items from turn/plan/updated.
@@ -142,19 +149,81 @@ def test_context_compaction_marks_start_detail_and_completion_important() -> Non
     assert _visibility(completed) == IMPORTANT_VISIBILITY
 
 
-def test_sub_agent_activity_is_a_detail_note() -> None:
+@pytest.mark.parametrize(
+    ("kind", "text"), [("started", "Spawned worker"), ("interacted", "Messaged worker")]
+)
+def test_sub_agent_activity_is_a_finished_subagent_tool_entry(
+    kind: str, text: str
+) -> None:
     item = {
         "type": "subAgentActivity",
         "id": "a1",
-        "kind": "started",
+        "kind": kind,
         "agentPath": "/root/worker",
         "agentThreadId": "th2",
     }
     assert render_item_started(item) is None
     rendered = render_item_completed(item)
     assert rendered is not None
-    assert rendered.text == "Subagent started: /root/worker"
-    assert _visibility(rendered) == DETAIL_VISIBILITY
+    assert rendered.kind is EventKind.TOOL_RESULT
+    assert rendered.text == text
+    assert rendered.metadata["agent_path"] == "/root/worker"
+    assert extract_tool_name("subAgentActivity", item) == "Subagent"
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "summary"),
+    [
+        ("completed", "completed", 'Agent "worker" finished'),
+        ("interrupted", "stopped", 'Agent "worker" stopped'),
+    ],
+)
+def test_sub_agent_run_end_is_a_task_card_with_the_report(
+    kind: str, status: str, summary: str
+) -> None:
+    item = with_report(
+        {
+            "type": "subAgentActivity",
+            "id": "subagent-completed-x",
+            "kind": kind,
+            "agentPath": "/root/worker",
+            "agentThreadId": "th2",
+        },
+        SubagentReport("Verdict: approve.", None),
+    )
+    assert render_item_started(item) is None
+    rendered = render_item_completed(item)
+    assert rendered is not None
+    assert rendered.kind is EventKind.SYSTEM_NOTE
+    assert rendered.text == summary
+    assert extract_tool_name("subAgentActivity", item) is None
+    assert rendered.metadata["method"] == TASK_NOTIFICATION_METHOD
+    assert rendered.metadata["agent_path"] == "/root/worker"
+    card = rendered.metadata["task_notification"]
+    assert card["id"] == "subagent-completed-x"
+    assert card["task_id"] == "th2"
+    assert card["kind"] == "agent"
+    assert card["status"] == status
+    assert card["summary"] == summary
+    assert card["result_preview"] == "Verdict: approve."
+    assert card["output_unavailable_reason"] is None
+    assert SUBAGENT_REPORT_KEY not in persisted_item(item)
+
+
+def test_sub_agent_card_without_a_report_says_it_is_unavailable() -> None:
+    item = {
+        "type": "subAgentActivity",
+        "id": "subagent-completed-x",
+        "kind": "completed",
+        "agentPath": "/root/worker",
+        "agentThreadId": "th2",
+    }
+    rendered = render_item_completed(item)
+    assert rendered is not None
+    card = rendered.metadata["task_notification"]
+    assert card["result_preview"] is None
+    assert card["output_available"] is False
+    assert card["output_unavailable_reason"] == REPORT_UNAVAILABLE
 
 
 def test_image_view_is_a_view_image_tool_pair() -> None:

@@ -119,7 +119,7 @@ def test_task_notification_emits_one_system_note() -> None:
     assert ev.kind == EventKind.SYSTEM_NOTE
     assert ev.text == 'Agent "Review" finished'
     assert ev.status == SessionStatus.RUNNING
-    assert ev.metadata["method"] == "claude.task_notification"
+    assert ev.metadata["method"] == "task_notification"
     assert ev.metadata["item_type"] == "task_notification"
     payload = ev.metadata["task_notification"]
     assert payload["kind"] == "agent"
@@ -179,7 +179,7 @@ def test_queue_operation_enqueue_emits_one_system_note() -> None:
     assert ev.text == 'Agent "Queued" finished'
     # Queued, not delivered: the note keeps the session's status.
     assert ev.status is None
-    assert ev.metadata["method"] == "claude.task_notification"
+    assert ev.metadata["method"] == "task_notification"
 
 
 def test_queue_operation_remove_is_ignored() -> None:

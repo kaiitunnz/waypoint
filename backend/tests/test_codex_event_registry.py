@@ -139,12 +139,12 @@ def test_reasoning_deltas_stream_into_the_thinking_disclosure() -> None:
     assert later is not None and later.text == "\n\n"
 
 
-def test_context_compaction_marks_start_detail_and_completion_important() -> None:
+def test_context_compaction_start_and_completion_are_important() -> None:
     item = {"type": "contextCompaction", "id": "c1"}
     started = render_item_started(item)
     completed = render_item_completed(item)
     assert started is not None and started.text == "Compacting context"
-    assert _visibility(started) == DETAIL_VISIBILITY
+    assert _visibility(started) == IMPORTANT_VISIBILITY
     assert completed is not None and completed.text == "Context compacted"
     assert _visibility(completed) == IMPORTANT_VISIBILITY
 

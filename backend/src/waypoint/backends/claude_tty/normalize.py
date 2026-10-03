@@ -120,8 +120,6 @@ class TranscriptNormalizer:
         # and whose task-id is the sender id). The report has no other home — the
         # task notification's own result only says "delivered as a message".
         self._pending_handback_bodies: dict[str, str] = {}
-        # Dedup keys of peer messages shown from their ``enqueue`` whose ``remove`` or
-        # ``user`` twin is pending; counted so a later identical message still shows.
         self._queued_peer_messages: Counter[str] = Counter()
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}

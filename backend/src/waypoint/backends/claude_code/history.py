@@ -104,7 +104,6 @@ class _ImportState:
     # Subagent hand-back report bodies, keyed by sender id, awaiting the matching
     # "Agent … finished" task notification that follows.
     pending_handback: dict[str, str] = field(default_factory=dict)
-    # Peer messages emitted from their enqueue whose remove/user twin is pending.
     queued_peer_messages: Counter[str] = field(default_factory=Counter)
 
 

@@ -507,6 +507,8 @@ class TranscriptNormalizer:
         )
         if parsed is None:
             if operation != "user":
+                # Its twins differ outside the element, so with no parsed element
+                # there is no key to show it once; only the delivered copy shows.
                 return []
             # Unparsable but delivered: keep the raw text visible, as import does.
             return [

@@ -8,6 +8,7 @@ from waypoint.backends.claude_code.normalize import (
     parse_peer_message,
 )
 from waypoint.backends.task_notifications import (
+    CAPTURE_DISABLED,
     NOT_CAPTURED_ON_IMPORT,
     TASK_NOTIFICATION_INLINE_LIMIT,
 )
@@ -112,4 +113,12 @@ def test_peer_message_card_spills_a_long_body_like_any_task_report() -> None:
     )
     assert imported["task_notification"]["output_unavailable_reason"] == (
         NOT_CAPTURED_ON_IMPORT
+    )
+
+    _, disabled = build_peer_message_metadata(
+        parsed, record_uuid=None, allow_output_capture=True, capture_enabled=False
+    )
+    assert "capture_inline_blobs" not in disabled
+    assert disabled["task_notification"]["output_unavailable_reason"] == (
+        CAPTURE_DISABLED
     )

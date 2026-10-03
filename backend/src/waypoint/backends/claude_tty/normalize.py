@@ -56,6 +56,7 @@ from waypoint.backends.claude_code.normalize import (
     stringify_tool_result,
     task_notification_dedup_key,
 )
+from waypoint.backends.claude_code.threads import parse_iso_timestamp
 from waypoint.backends.diff_preview import (
     build_preview,
     files_from_claude_tool_result,
@@ -489,7 +490,7 @@ class TranscriptNormalizer:
         self,
         content: str,
         operation: str,
-        record_uuid: str | None,
+        record: dict[str, Any],
         status: SessionStatus | None,
     ) -> list[NormalizedEvent]:
         """Surface a peer message once, as a ``message`` task notification.
@@ -523,11 +524,14 @@ class TranscriptNormalizer:
             return []
         if operation == "enqueue":
             self._queued_peer_messages[key] += 1
+        raw_ts = record.get("timestamp")
         text, metadata = build_peer_message_metadata(
             parsed,
-            record_uuid=record_uuid,
+            record_uuid=record.get("uuid"),
             allow_output_capture=True,
             capture_enabled=self._capture_enabled,
+            # The record's own time, so the card id matches a history import.
+            ts=parse_iso_timestamp(raw_ts) if isinstance(raw_ts, str) else None,
         )
         return [
             NormalizedEvent(
@@ -545,9 +549,7 @@ class TranscriptNormalizer:
         if operation not in ("enqueue", "remove") or not isinstance(content, str):
             return []
         if starts_with_peer_element(content):
-            return self._peer_message_events(
-                content, operation, record.get("uuid"), None
-            )
+            return self._peer_message_events(content, operation, record, None)
         if operation != "enqueue" or "<task-notification>" not in content:
             return []
         return self._task_notification_events(content, record.get("uuid"), None)
@@ -563,7 +565,7 @@ class TranscriptNormalizer:
             )
         if injected == "peer_message" and isinstance(content, str):
             return self._peer_message_events(
-                content, "user", record.get("uuid"), SessionStatus.RUNNING
+                content, "user", record, SessionStatus.RUNNING
             )
         if injected == "continuation":
             return []

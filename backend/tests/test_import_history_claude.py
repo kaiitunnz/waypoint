@@ -9,6 +9,7 @@ from waypoint.backends.claude_code.history import (
 )
 from waypoint.backends.claude_code.models import make_context_window_resolver
 from waypoint.backends.claude_code.threads import read_local_claude_transcript
+from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.schemas import BackendModelOption, EventKind
 
 
@@ -483,3 +484,13 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert [r.record_id for r in token_records] == ["msg1", "msg2"]
     assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
     assert all(r.effort is None for r in token_records)
+
+
+def test_import_peer_card_id_matches_live() -> None:
+    enqueue = _queue_enqueue(_PEER_ELEMENT)
+    [imported] = convert_transcript_records("sess-1", [enqueue])
+    [live] = TranscriptNormalizer().process_record(enqueue)
+    assert (
+        imported.metadata["task_notification"]["id"]
+        == live.metadata["task_notification"]["id"]
+    )

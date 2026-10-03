@@ -247,8 +247,8 @@ def _reasoning_completed(item: dict[str, Any]) -> Rendered:
 def _sub_agent_activity(item: dict[str, Any]) -> Rendered | None:
     text = subagents.tool_text(item)
     if text is not None:
-        # The activity has already happened, so it is a finished tool entry
-        # rather than a call awaiting a result.
+        # The activity has already happened, so it renders as a finished entry
+        # with no pending call.
         return _tool_result(text, {"agent_path": item.get("agentPath")})
     card = subagents.task_card(item)
     if card is None:

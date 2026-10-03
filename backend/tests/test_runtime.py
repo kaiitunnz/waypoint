@@ -17,7 +17,7 @@ from waypoint.backends.claude_code.models import SONNET55_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
-from waypoint.backends.codex import plugin as codex_plugin_module
+from waypoint.backends.codex import subagents as codex_subagents_module
 from waypoint.backends.codex.permission_modes import (
     codex_mode_developer_instructions,
 )
@@ -2893,7 +2893,7 @@ async def test_hung_subagent_report_reads_stay_off_the_shared_pool(
 ) -> None:
     runtime, _storage, _settings = make_runtime(tmp_path)
     codex_plugin = _codex_plugin(runtime)
-    monkeypatch.setattr(codex_plugin_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(codex_subagents_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
     unblock = threading.Event()
     read_threads: set[str] = set()
 

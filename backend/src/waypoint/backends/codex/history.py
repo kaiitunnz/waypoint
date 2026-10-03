@@ -40,7 +40,6 @@ from waypoint.backends.codex.subagents import (
     ReportSource,
     SubagentReport,
     report_source,
-    report_sources,
     with_report,
 )
 from waypoint.backends.diff_preview import preview_to_metadata
@@ -82,7 +81,12 @@ def turns_to_events(
         completed_at = _turn_timestamp(turn.completed_at, turn.started_at)
         for item in turn.items:
             for event in _item_to_events(
-                item.root, session_id, started_at, completed_at, reports, turn
+                item.root,
+                session_id,
+                started_at,
+                completed_at,
+                reports,
+                turn.completed_at,
             ):
                 card_id = _task_card_id(event)
                 if card_id is not None:
@@ -131,12 +135,15 @@ def _turn_timestamp(primary: int | None, fallback: int | None) -> datetime:
 
 def subagent_report_sources(turns: list[Turn]) -> list[ReportSource]:
     """Where the reports a replay of ``turns`` shows live."""
-    return report_sources(
-        (item.root.model_dump(mode="json", by_alias=True), turn.completed_at)
+    sources = (
+        report_source(
+            item.root.model_dump(mode="json", by_alias=True), turn.completed_at
+        )
         for turn in turns
         for item in turn.items
         if getattr(item.root, "type", None) == SUBAGENT_ITEM_TYPE
     )
+    return list(dict.fromkeys(source for source in sources if source is not None))
 
 
 def _task_card_id(event: EventRecord) -> str | None:
@@ -153,7 +160,7 @@ def _item_to_events(
     started_at: datetime,
     completed_at: datetime,
     subagent_reports: Mapping[ReportSource, str | None],
-    turn: Turn,
+    report_bound: int | None,
 ) -> list[EventRecord]:
     item_type = getattr(item, "type", None)
     if item_type == "userMessage":
@@ -173,7 +180,7 @@ def _item_to_events(
         # has no use for it.
         return []
 
-    source = report_source(item_dict, turn.completed_at)
+    source = report_source(item_dict, report_bound)
     if source is not None:
         item_dict = with_report(
             item_dict,

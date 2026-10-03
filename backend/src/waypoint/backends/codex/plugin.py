@@ -65,9 +65,9 @@ from waypoint.backends.codex.schemas import (
     CodexThreadSummary,
 )
 from waypoint.backends.codex.subagents import (
-    REPORT_FETCH_TIMEOUT_SECONDS,
+    ReportReadTimeout,
     ReportSource,
-    read_report,
+    read_report_within_deadline,
 )
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
@@ -1656,17 +1656,13 @@ class CodexPlugin(DefaultLaunchContract):
         read fails or times out."""
         if not sources:
             return {}
-        # Responses route by request id, so reads share one client. A request
-        # has no timeout of its own: a read outliving its deadline holds one of
-        # these workers until the client closes, never the shared pool that
-        # closing the client needs. Each read's deadline starts once it runs.
+        # Responses route by request id, so reads share one client. The
+        # semaphore starts each read's deadline only once a worker is free.
         reader = concurrent.futures.ThreadPoolExecutor(
             max_workers=_IMPORT_REPORT_READS,
             thread_name_prefix="codex-subagent-report",
         )
         slots = asyncio.Semaphore(_IMPORT_REPORT_READS)
-        loop = asyncio.get_running_loop()
-
         timed_out = False
 
         async def read(client: CodexClient, source: ReportSource) -> str | None:
@@ -1677,23 +1673,9 @@ class CodexPlugin(DefaultLaunchContract):
                     # only wait out its own deadline.
                     return None
                 try:
-                    return await asyncio.wait_for(
-                        loop.run_in_executor(reader, read_report, client, source),
-                        REPORT_FETCH_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
+                    return await read_report_within_deadline(reader, client, source)
+                except ReportReadTimeout:
                     timed_out = True
-                    log.warning(
-                        "codex subagent report read timed out on import",
-                        extra={"thread_id": source.thread_id},
-                    )
-                    return None
-                except Exception:  # noqa: BLE001
-                    log.warning(
-                        "codex subagent report unavailable on import",
-                        exc_info=True,
-                        extra={"thread_id": source.thread_id},
-                    )
                     return None
 
         async def operation(client: CodexClient) -> dict[ReportSource, str | None]:

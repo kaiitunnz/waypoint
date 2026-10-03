@@ -48,7 +48,7 @@ def _truncate_utf8(text: str, limit: int) -> str:
     return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
 
 
-def bounded(
+def _bounded(
     text: str | None, limit: int = TASK_NOTIFICATION_INLINE_LIMIT
 ) -> tuple[str | None, bool]:
     """Cap ``text`` to ``limit`` bytes, reporting whether anything was cut."""
@@ -66,22 +66,22 @@ def _compact_text(summary: str | None, event: str | None) -> str:
 def task_notification_event(
     notification: TaskNotification,
     *,
-    allow_spill: bool,
-    no_spill_reason: str,
+    no_spill_reason: str | None,
     output_path: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the ``(text, metadata)`` for a task-notification event.
 
-    With ``allow_spill``, an over-long body spills its full text on
-    ``capture_inline_blobs``; without it, the card says ``no_spill_reason``.
-    ``output_path`` names a host file holding the task's full output: with
-    ``allow_spill`` it rides ``capture_host_text``, and since that file already
-    keeps the event stream, an over-long ``event`` is not spilled again.
+    An over-long body spills its full text on ``capture_inline_blobs`` unless
+    ``no_spill_reason`` says why not; the card shows that reason. ``output_path``
+    names a host file holding the task's full output, captured on
+    ``capture_host_text`` under the same rule; it already keeps the event
+    stream, so an over-long ``event`` is not spilled again.
     """
-    result_preview, result_truncated = bounded(notification.result)
-    event_text, event_truncated = bounded(notification.event)
-    note_text, note_truncated = bounded(notification.note)
-    summary_text, _ = bounded(notification.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
+    allow_spill = no_spill_reason is None
+    result_preview, result_truncated = _bounded(notification.result)
+    event_text, event_truncated = _bounded(notification.event)
+    note_text, note_truncated = _bounded(notification.note)
+    summary_text, _ = _bounded(notification.summary, TASK_NOTIFICATION_SUMMARY_LIMIT)
 
     spills: list[dict[str, Any]] = []
     if allow_spill:

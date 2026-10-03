@@ -7,7 +7,9 @@ caller reads it there and attaches it to the item under
 :data:`SUBAGENT_REPORT_KEY` before the item is rendered.
 """
 
-from collections.abc import Iterable
+import asyncio
+import concurrent.futures
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,15 +25,16 @@ from openai_codex.generated.v2_all import (
 )
 
 from waypoint.backends.task_notifications import (
-    NOT_CAPTURED_ON_IMPORT,
     TaskNotification,
     task_notification_event,
 )
 
+log = logging.getLogger("waypoint.codex")
+
 SUBAGENT_ITEM_TYPE = "subAgentActivity"
-SUBAGENT_TOOL_NAME = "Subagent"
+_SUBAGENT_TOOL_NAME = "Subagent"
 # Kinds that end a subagent's run and so carry its report.
-REPORT_KINDS = frozenset({"completed", "interrupted"})
+_REPORT_KINDS = frozenset({"completed", "interrupted"})
 REPORT_FETCH_TIMEOUT_SECONDS = 10.0
 REPORT_UNAVAILABLE = "subagent report unavailable"
 # Transient item key: set before rendering, stripped before persisting.
@@ -54,8 +57,8 @@ class ReportSource:
     thread_id: str
     # The child turn a completion reports on; ``None`` reads the newest turn.
     turn_id: str | None
-    # Unix seconds. A newest turn that started later is a later task, not the
-    # one the item reports on; an import sets it to the parent turn's end.
+    # Unix seconds; a newest turn that started after this is a later task with
+    # no report for this item.
     started_by: int | None = None
     # An interrupt of a subagent whose newest turn had already completed
     # stopped nothing, so that turn's answer is not its report.
@@ -80,7 +83,7 @@ def _child_thread_id(item: dict[str, Any]) -> str | None:
     return child if isinstance(child, str) and child else None
 
 
-def display_name(agent_path: Any) -> str:
+def _display_name(agent_path: Any) -> str:
     """The last segment of an ``agentPath`` such as ``/root/reviewer``."""
     if isinstance(agent_path, str):
         segments = [part for part in agent_path.split("/") if part.strip()]
@@ -94,7 +97,7 @@ def report_source(
 ) -> ReportSource | None:
     """Where to read the report for an item that ends a run. ``started_by``
     bounds the newest turn read for an item that names no turn."""
-    if item.get("type") != SUBAGENT_ITEM_TYPE or _kind(item) not in REPORT_KINDS:
+    if item.get("type") != SUBAGENT_ITEM_TYPE or _kind(item) not in _REPORT_KINDS:
         return None
     child = _child_thread_id(item)
     if child is None:
@@ -108,19 +111,6 @@ def report_source(
     if turn_id:
         return ReportSource(child, turn_id)
     return ReportSource(child, None, started_by, _kind(item) == "interrupted")
-
-
-def report_sources(
-    items: Iterable[tuple[dict[str, Any], int | None]],
-) -> list[ReportSource]:
-    """Distinct report sources the given ``(item, started_by)`` pairs need, in
-    order."""
-    sources: list[ReportSource] = []
-    for item, started_by in items:
-        source = report_source(item, started_by)
-        if source is not None and source not in sources:
-            sources.append(source)
-    return sources
 
 
 def read_report(client: CodexClient, source: ReportSource) -> str | None:
@@ -161,7 +151,7 @@ def read_report(client: CodexClient, source: ReportSource) -> str | None:
         and _value(getattr(turns[-1], "status", None)) == "completed"
     ):
         return None
-    return final_report(turns)
+    return _final_report(turns)
 
 
 def _unsupported(exc: JsonRpcError) -> bool:
@@ -170,7 +160,46 @@ def _unsupported(exc: JsonRpcError) -> bool:
     return isinstance(exc, MethodNotFoundError) or "unknown variant" in exc.message
 
 
-def final_report(turns: list[Any]) -> str | None:
+class ReportReadTimeout(Exception):
+    """A report read passed its deadline. ``running`` is its future when the
+    read still holds its worker."""
+
+    def __init__(self, running: concurrent.futures.Future[str | None] | None) -> None:
+        super().__init__("subagent report read timed out")
+        self.running = running
+
+
+async def read_report_within_deadline(
+    executor: concurrent.futures.Executor,
+    client: CodexClient,
+    source: ReportSource,
+    session_id: str | None = None,
+) -> str | None:
+    """Read a report on ``executor``; ``None`` when the read fails.
+
+    A request has no timeout, so a read past its deadline holds its worker until
+    the client closes; a dedicated executor keeps that off the loop's shared
+    pool. Raises :class:`ReportReadTimeout` past the deadline.
+    """
+    extra = {"session_id": session_id, "thread_id": source.thread_id}
+    try:
+        future = executor.submit(read_report, client, source)
+    except RuntimeError:
+        # The executor shut down with its session.
+        return None
+    try:
+        return await asyncio.wait_for(
+            asyncio.wrap_future(future), REPORT_FETCH_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        log.warning("codex subagent report read timed out", extra=extra)
+        raise ReportReadTimeout(None if future.cancelled() else future) from None
+    except Exception:  # noqa: BLE001
+        log.warning("codex subagent report unavailable", exc_info=True, extra=extra)
+        return None
+
+
+def _final_report(turns: list[Any]) -> str | None:
     """The report in the last of ``turns``."""
     if not turns:
         return None
@@ -218,7 +247,7 @@ def without_report(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_name(item: dict[str, Any]) -> str | None:
-    return SUBAGENT_TOOL_NAME if _kind(item) in _TOOL_VERBS else None
+    return _SUBAGENT_TOOL_NAME if _kind(item) in _TOOL_VERBS else None
 
 
 def tool_text(item: dict[str, Any]) -> str | None:
@@ -227,7 +256,7 @@ def tool_text(item: dict[str, Any]) -> str | None:
     verb = _TOOL_VERBS.get(_kind(item))
     if verb is None:
         return None
-    return f"{verb} {display_name(item.get('agentPath'))}"
+    return f"{verb} {_display_name(item.get('agentPath'))}"
 
 
 def task_card(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -239,24 +268,21 @@ def task_card(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     status, verb = state
     attached = item.get(SUBAGENT_REPORT_KEY)
     report = (
-        attached
-        if isinstance(attached, SubagentReport)
-        else SubagentReport(None, NOT_CAPTURED_ON_IMPORT)
+        attached if isinstance(attached, SubagentReport) else SubagentReport(None, None)
     )
     agent_path = item.get("agentPath")
     notification = TaskNotification(
         id=item_id,
         kind="agent",
         status=status,
-        summary=f'Agent "{display_name(agent_path)}" {verb}',
+        summary=f'Agent "{_display_name(agent_path)}" {verb}',
         task_id=_child_thread_id(item),
         result=report.text,
         output_unavailable_reason=None if report.text else REPORT_UNAVAILABLE,
     )
     text, metadata = task_notification_event(
         notification,
-        allow_spill=report.no_spill_reason is None,
-        no_spill_reason=report.no_spill_reason or "",
+        no_spill_reason=report.no_spill_reason,
     )
     if isinstance(agent_path, str) and agent_path:
         metadata["agent_path"] = agent_path

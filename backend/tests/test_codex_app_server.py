@@ -14,11 +14,11 @@ from openai_codex.client import CodexClient
 from openai_codex.errors import (
     InvalidRequestError,
     MethodNotFoundError,
-    ServerBusyError,
 )
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
 from waypoint.backends.codex import adapter as adapter_module
+from waypoint.backends.codex import subagents as subagents_module
 from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
     CodexCompactingError,
@@ -132,7 +132,6 @@ class FakeCodexClient:
         self.turn_notification_ids: list[str] = []
         self.unregistered_turn_notification_ids: list[str] = []
         self.child_threads: dict[str, Any] = {}
-        self.paginated_reads_error: Exception | None = None
         self.skill_payload: dict[str, Any] = {
             "description": "Humanize prose",
             "enabled": True,
@@ -202,8 +201,6 @@ class FakeCodexClient:
                 }
             )
         if method in {"thread/turns/list", "thread/items/list"}:
-            if self.paginated_reads_error is not None:
-                raise self.paginated_reads_error
             turns = self._child_thread(params["threadId"]).turns
             if method == "thread/turns/list":
                 return SimpleNamespace(data=turns[-1:])
@@ -217,10 +214,6 @@ class FakeCodexClient:
 
     def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
         self.calls.append(("turn_interrupt", (thread_id, turn_id)))
-
-    def thread_read(self, thread_id: str, include_turns: bool = False) -> Any:
-        self.calls.append(("thread_read", (thread_id, include_turns)))
-        return SimpleNamespace(thread=self._child_thread(thread_id))
 
     def _child_thread(self, thread_id: str) -> Any:
         thread = self.child_threads.get(thread_id)
@@ -261,6 +254,7 @@ class FakeNotification:
 
 def make_adapter(
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
+    **adapter_kwargs: Any,
 ):
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
@@ -272,7 +266,7 @@ def make_adapter(
         fake.calls.append(("factory", (cwd,)))
         return fake
 
-    adapter = CodexAppServerAdapter(emit, client_factory=factory)
+    adapter = CodexAppServerAdapter(emit, client_factory=factory, **adapter_kwargs)
     return adapter, fake
 
 
@@ -2196,10 +2190,14 @@ def _activity(kind: str, item_id: str, thread_id: str = "thread-1") -> Any:
 
 
 async def _run_subagent_turn(
-    notifications: list[Any], child: Any = None
-) -> tuple[list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]], Any]:
+    notifications: list[Any], child: Any = None, **adapter_kwargs: Any
+) -> tuple[
+    list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
+    Any,
+    CodexAppServerAdapter,
+]:
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
-    adapter, fake = make_adapter(emitted)
+    adapter, fake = make_adapter(emitted, **adapter_kwargs)
     if child is not None:
         fake.child_threads["child-1"] = child
     await adapter.start_session("sess", "/tmp/work")
@@ -2214,12 +2212,12 @@ async def _run_subagent_turn(
     state = adapter._sessions["sess"]
     if state.stream_task is not None:
         await state.stream_task
-    return [entry for entry in emitted if entry[2] != "Turn completed"], fake
+    return [entry for entry in emitted if entry[2] != "Turn completed"], fake, adapter
 
 
 @pytest.mark.asyncio
 async def test_subagent_spawn_and_message_are_subagent_tool_entries() -> None:
-    emitted, fake = await _run_subagent_turn(
+    emitted, fake, _ = await _run_subagent_turn(
         [_activity("started", "call-1"), _activity("interacted", "call-2")]
     )
 
@@ -2228,7 +2226,7 @@ async def test_subagent_spawn_and_message_are_subagent_tool_entries() -> None:
         (EventKind.TOOL_RESULT, "Messaged reviewer"),
     ]
     assert all(entry[3]["tool_name"] == "Subagent" for entry in emitted)
-    assert not [call for call in fake.calls if call[0] in {"thread_read", "request"}]
+    assert not [call for call in fake.calls if call[0] == "request"]
 
 
 @pytest.mark.asyncio
@@ -2238,7 +2236,7 @@ async def test_subagent_completion_is_a_task_card_with_the_child_report() -> Non
         ("Verdict: approve.", "final_answer"),
         ("Trailing note.", "commentary"),
     )
-    emitted, fake = await _run_subagent_turn(
+    emitted, fake, _ = await _run_subagent_turn(
         [_activity("completed", "subagent-completed-a")], child
     )
 
@@ -2269,7 +2267,7 @@ async def test_subagent_completion_is_a_task_card_with_the_child_report() -> Non
 
 @pytest.mark.asyncio
 async def test_subagent_report_falls_back_to_a_completed_turns_last_message() -> None:
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("completed", "subagent-completed-a")],
         _child_thread(("First.", None), ("Findings.", "commentary")),
     )
@@ -2279,7 +2277,7 @@ async def test_subagent_report_falls_back_to_a_completed_turns_last_message() ->
 
 @pytest.mark.asyncio
 async def test_interrupted_subagent_progress_is_not_its_report() -> None:
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("interrupted", "call-9")],
         _child_thread(("Still looking.", "commentary"), status="interrupted"),
     )
@@ -2293,7 +2291,7 @@ async def test_interrupted_subagent_progress_is_not_its_report() -> None:
 
 @pytest.mark.asyncio
 async def test_interrupted_subagent_keeps_a_final_answer() -> None:
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("interrupted", "call-9")],
         _child_thread(("Partial verdict.", "final_answer"), status="interrupted"),
     )
@@ -2304,7 +2302,7 @@ async def test_interrupted_subagent_keeps_a_final_answer() -> None:
 @pytest.mark.asyncio
 async def test_long_live_subagent_report_spills_to_an_attachment() -> None:
     report = "r" * 5000
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("completed", "subagent-completed-a")],
         _child_thread((report, "final_answer")),
     )
@@ -2317,7 +2315,7 @@ async def test_long_live_subagent_report_spills_to_an_attachment() -> None:
 
 @pytest.mark.asyncio
 async def test_failed_subagent_report_read_yields_an_unavailable_card() -> None:
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("completed", "subagent-completed-a")], RuntimeError("boom")
     )
 
@@ -2328,30 +2326,8 @@ async def test_failed_subagent_report_read_yields_an_unavailable_card() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slow_subagent_report_read_times_out(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
-    release = threading.Event()
-
-    def slow_read() -> Any:
-        release.wait(5)
-        return _child_thread(("Too late.", "final_answer"))
-
-    started = asyncio.get_running_loop().time()
-    emitted, _ = await _run_subagent_turn(
-        [_activity("completed", "subagent-completed-a")], slow_read
-    )
-    assert asyncio.get_running_loop().time() - started < 2
-    release.set()
-
-    card = emitted[0][3]["task_notification"]
-    assert card["output_unavailable_reason"] == REPORT_UNAVAILABLE
-
-
-@pytest.mark.asyncio
 async def test_subagent_activity_from_another_thread_is_ignored() -> None:
-    emitted, fake = await _run_subagent_turn(
+    emitted, fake, _ = await _run_subagent_turn(
         [
             _activity("started", "call-1", thread_id="fork-thread"),
             _activity("completed", "subagent-completed-a", thread_id="fork-thread"),
@@ -2360,34 +2336,16 @@ async def test_subagent_activity_from_another_thread_is_ignored() -> None:
     )
 
     assert emitted == []
-    assert not [call for call in fake.calls if call[0] in {"thread_read", "request"}]
+    assert not [call for call in fake.calls if call[0] == "request"]
 
 
 @pytest.mark.asyncio
 async def test_long_subagent_report_is_not_spilled_when_capture_is_off() -> None:
-    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
-
-    async def emit(session_id, kind, text, metadata, status):
-        emitted.append((session_id, kind, text, metadata, status))
-
-    fake = FakeCodexClient()
-    fake.child_threads["child-1"] = _child_thread(("r" * 5000, "final_answer"))
-    adapter = CodexAppServerAdapter(
-        emit,
-        client_factory=lambda cwd, handler: cast(CodexClient, fake),
+    emitted, _, _ = await _run_subagent_turn(
+        [_activity("completed", "subagent-completed-a")],
+        _child_thread(("r" * 5000, "final_answer")),
         task_output_capture_enabled=False,
     )
-    await adapter.start_session("sess", "/tmp/work")
-    fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
-    fake.notifications.put_nowait(
-        FakeNotification(
-            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
-        )
-    )
-    await adapter.send_input("sess", "review it")
-    state = adapter._sessions["sess"]
-    if state.stream_task is not None:
-        await state.stream_task
 
     [metadata] = [entry[3] for entry in emitted if "task_notification" in entry[3]]
     assert "capture_inline_blobs" not in metadata
@@ -2420,52 +2378,6 @@ async def test_late_subagent_completion_on_the_pump_becomes_a_task_card() -> Non
 
 
 @pytest.mark.asyncio
-async def test_subagent_report_falls_back_to_thread_read_on_an_older_cli() -> None:
-    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
-    adapter, fake = make_adapter(emitted)
-    fake.paginated_reads_error = InvalidRequestError(-32600, "unknown variant")
-    fake.child_threads["child-1"] = _child_thread(("Old CLI verdict.", "final_answer"))
-    await adapter.start_session("sess", "/tmp/work")
-    fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
-    fake.notifications.put_nowait(
-        FakeNotification(
-            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
-        )
-    )
-    await adapter.send_input("sess", "review it")
-    state = adapter._sessions["sess"]
-    if state.stream_task is not None:
-        await state.stream_task
-
-    assert ("thread_read", ("child-1", True)) in fake.calls
-    [card] = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
-    assert card["result_preview"] == "Old CLI verdict."
-
-
-@pytest.mark.asyncio
-async def test_transient_report_read_error_does_not_fall_back_to_full_history() -> None:
-    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
-    adapter, fake = make_adapter(emitted)
-    fake.paginated_reads_error = ServerBusyError(-32001, "busy")
-    fake.child_threads["child-1"] = _child_thread(("Verdict.", "final_answer"))
-    await adapter.start_session("sess", "/tmp/work")
-    fake.notifications.put_nowait(_activity("completed", "subagent-completed-a"))
-    fake.notifications.put_nowait(
-        FakeNotification(
-            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
-        )
-    )
-    await adapter.send_input("sess", "review it")
-    state = adapter._sessions["sess"]
-    if state.stream_task is not None:
-        await state.stream_task
-
-    assert not [call for call in fake.calls if call[0] == "thread_read"]
-    [card] = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
-    assert card["output_unavailable_reason"] == REPORT_UNAVAILABLE
-
-
-@pytest.mark.asyncio
 async def test_completion_reads_the_turn_it_reports_on() -> None:
     child = SimpleNamespace(
         turns=[
@@ -2475,7 +2387,7 @@ async def test_completion_reads_the_turn_it_reports_on() -> None:
             ).turns[0],
         ]
     )
-    emitted, _ = await _run_subagent_turn(
+    emitted, _, _ = await _run_subagent_turn(
         [_activity("completed", "subagent-completed-a")], child
     )
 
@@ -2510,12 +2422,6 @@ def test_stopping_an_idle_subagent_shows_no_earlier_report() -> None:
     finished = _turn_at(1, "Old verdict.")
     client = cast(CodexClient, _ReportClient(finished))
     assert read_report(client, ReportSource("child", None, interrupted=True)) is None
-    running = _child_thread(("Partial verdict.", "final_answer"), status="interrupted")
-    client = cast(CodexClient, _ReportClient(running.turns[0]))
-    assert (
-        read_report(client, ReportSource("child", None, interrupted=True))
-        == "Partial verdict."
-    )
 
 
 def test_newest_turn_started_after_the_bound_is_not_the_report() -> None:
@@ -2550,9 +2456,7 @@ def test_only_an_unsupported_paginated_read_falls_back(
 async def test_hung_report_read_pauses_reads_only_while_it_is_stuck(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
-    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
-    adapter, fake = make_adapter(emitted)
+    monkeypatch.setattr(subagents_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
     unblock = threading.Event()
     read_threads: list[str] = []
 
@@ -2561,19 +2465,14 @@ async def test_hung_report_read_pauses_reads_only_while_it_is_stuck(
         unblock.wait(5)
         return _child_thread(("Too late.", "final_answer"))
 
-    fake.child_threads["child-1"] = hung_read
-    await adapter.start_session("sess", "/tmp/work")
-    for item_id in ("subagent-completed-a", "subagent-completed-b"):
-        fake.notifications.put_nowait(_activity("completed", item_id))
-    fake.notifications.put_nowait(
-        FakeNotification(
-            "turn/completed", {"turn": {"id": "turn-1", "status": "completed"}}
-        )
+    emitted, fake, adapter = await _run_subagent_turn(
+        [
+            _activity("completed", "subagent-completed-a"),
+            _activity("completed", "subagent-completed-b"),
+        ],
+        hung_read,
     )
-    await adapter.send_input("sess", "review it")
     state = adapter._sessions["sess"]
-    if state.stream_task is not None:
-        await state.stream_task
 
     cards = [e[3]["task_notification"] for e in emitted if "task_notification" in e[3]]
     assert [card["output_unavailable_reason"] for card in cards] == [
@@ -2601,7 +2500,7 @@ async def test_hung_report_read_pauses_reads_only_while_it_is_stuck(
 async def test_report_read_timing_out_in_the_queue_is_not_counted_stuck(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(adapter_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(subagents_module, "REPORT_FETCH_TIMEOUT_SECONDS", 0.05)
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
     adapter, fake = make_adapter(emitted)
     unblock = threading.Event()

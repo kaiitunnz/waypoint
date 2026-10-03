@@ -38,11 +38,11 @@ from waypoint.backends.codex.normalize import (
 )
 from waypoint.backends.codex.questions import apply_async_question
 from waypoint.backends.codex.subagents import (
-    REPORT_FETCH_TIMEOUT_SECONDS,
     SUBAGENT_ITEM_TYPE,
+    ReportReadTimeout,
     ReportSource,
     SubagentReport,
-    read_report,
+    read_report_within_deadline,
     report_source,
     with_report,
 )
@@ -235,9 +235,6 @@ class CodexSessionState:
         None
     )
     rate_limit_refresh_task: asyncio.Task[None] | None = None
-    # Reads subagent reports. A request has no timeout of its own, so a read
-    # outliving its deadline holds this one worker until the client closes,
-    # never a thread of the event loop's shared pool.
     report_reader: concurrent.futures.ThreadPoolExecutor = field(
         default_factory=lambda: concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="codex-subagent-report"
@@ -884,8 +881,6 @@ class CodexAppServerAdapter:
                         "id": payload.get("turnId"),
                         "items": plan_todo_items(payload.get("plan")),
                     }
-                if not await self._attach_subagent_report(state, method, payload):
-                    continue
                 await self._emit_notification(state, method, payload, settle=True)
                 if method == "turn/completed":
                     _end_turn(state)
@@ -909,7 +904,7 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 state.client.unregister_turn_notifications(turn_id)
 
-    async def _attach_subagent_report(
+    async def _prepare_subagent_item(
         self, state: CodexSessionState, method: str, payload: dict[str, Any]
     ) -> bool:
         """Attach a finished subagent's report to its activity item. False
@@ -934,37 +929,19 @@ class CodexAppServerAdapter:
     ) -> str | None:
         if state.stuck_report_reads:
             return None
-        loop = asyncio.get_running_loop()
         # Not under request_lock: responses route by request id, so the read
         # never holds up a steer or interrupt sent meanwhile.
         try:
-            future = state.report_reader.submit(read_report, state.client, source)
-        except RuntimeError:
-            # The session terminated while this completion was in flight.
-            return None
-        try:
-            return await asyncio.wait_for(
-                asyncio.wrap_future(future), REPORT_FETCH_TIMEOUT_SECONDS
+            return await read_report_within_deadline(
+                state.report_reader, state.client, source, state.session_id
             )
-        except TimeoutError:
-            if not future.cancelled():
-                # Already running, so it holds the worker until it returns or
-                # the client closes.
+        except ReportReadTimeout as timeout:
+            if timeout.running is not None:
+                loop = asyncio.get_running_loop()
                 state.stuck_report_reads += 1
-                future.add_done_callback(
+                timeout.running.add_done_callback(
                     lambda _: _call_soon(loop, _release_stuck_read, state)
                 )
-            log.warning(
-                "codex subagent report read timed out",
-                extra={"session_id": state.session_id, "thread_id": source.thread_id},
-            )
-            return None
-        except Exception:  # noqa: BLE001
-            log.warning(
-                "codex subagent report unavailable",
-                exc_info=True,
-                extra={"session_id": state.session_id, "thread_id": source.thread_id},
-            )
             return None
 
     def _pump_notifications(
@@ -991,8 +968,8 @@ class CodexAppServerAdapter:
             try:
                 # Waiting for each emit keeps the notifications in order.
                 asyncio.run_coroutine_threadsafe(
-                    self._emit_turnless_notification(
-                        state, notification.method, payload
+                    self._emit_notification(
+                        state, notification.method, payload, settle=False
                     ),
                     loop,
                 ).result()
@@ -1011,12 +988,6 @@ class CodexAppServerAdapter:
                     extra={"session_id": state.session_id},
                 )
 
-    async def _emit_turnless_notification(
-        self, state: CodexSessionState, method: str, payload: dict[str, Any]
-    ) -> None:
-        if await self._attach_subagent_report(state, method, payload):
-            await self._emit_notification(state, method, payload, settle=False)
-
     async def _emit_notification(
         self,
         state: CodexSessionState,
@@ -1032,6 +1003,8 @@ class CodexAppServerAdapter:
         """
         if not is_known_method(method):
             self._log_unknown_method(state, method, payload)
+            return
+        if not await self._prepare_subagent_item(state, method, payload):
             return
         rendered = render_notification(method, payload)
         if rendered is None or not rendered.text:

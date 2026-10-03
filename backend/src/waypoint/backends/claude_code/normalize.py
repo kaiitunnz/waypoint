@@ -356,16 +356,14 @@ def build_task_notification_metadata(
     import, whose temp file is long gone; ``capture_enabled`` is the operator's
     ``task_output_capture_enabled`` switch. Both must hold to capture, and each
     explains itself differently on the card.
-
-    When capture is allowed, an absolute ``output-file`` rides the transient
-    ``capture_host_text`` key and any over-long body spills its full text on
-    ``capture_inline_blobs``.
     """
     # An imported transcript never had the file, so that explanation wins over
     # the operator switch, which was irrelevant at capture time.
-    no_capture_reason = (
-        NOT_CAPTURED_ON_IMPORT if not allow_output_capture else CAPTURE_DISABLED
-    )
+    no_spill_reason: str | None = None
+    if not allow_output_capture:
+        no_spill_reason = NOT_CAPTURED_ON_IMPORT
+    elif not capture_enabled:
+        no_spill_reason = CAPTURE_DISABLED
     kind = infer_task_notification_kind(parsed)
     # An Agent's ``output-file`` is its sidechain transcript; its report is the
     # last record, already inline on ``result``.
@@ -388,8 +386,7 @@ def build_task_notification_metadata(
     )
     return task_notification_event(
         notification,
-        allow_spill=allow_output_capture and capture_enabled,
-        no_spill_reason=no_capture_reason,
+        no_spill_reason=no_spill_reason,
         output_path=output_file if captures_output else None,
     )
 

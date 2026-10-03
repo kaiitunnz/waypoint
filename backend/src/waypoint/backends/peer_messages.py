@@ -3,7 +3,7 @@
 A peer message is input another agent session sends straight to this one,
 bypassing Waypoint: a turn the agent starts on its own. It is stored as a
 ``USER_INPUT`` event marked ``metadata.kind == "peer_message"``, which the
-frontend renders as a message bubble labeled with its sender. Any agent plugin
+frontend renders as a collapsible card labeled with its sender. Any agent plugin
 may emit one; each owns how it detects the message and builds a
 :class:`PeerMessage`, and :func:`peer_message_event` turns that into the event's
 ``(text, metadata)``.

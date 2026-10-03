@@ -486,3 +486,16 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert [r.record_id for r in token_records] == ["msg1", "msg2"]
     assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
     assert all(r.effort is None for r in token_records)
+
+
+def test_import_unparseable_peer_record_keeps_raw_text() -> None:
+    record = {
+        "type": "user",
+        "timestamp": "2026-04-29T15:47:13.000Z",
+        "origin": {"kind": "peer"},
+        "message": {"content": "Another Claude session sent a message:\n<odd/>"},
+    }
+    [event] = convert_transcript_records("sess-1", [record])
+    assert event.kind == EventKind.USER_INPUT
+    assert "<odd/>" in event.text
+    assert "kind" not in event.metadata

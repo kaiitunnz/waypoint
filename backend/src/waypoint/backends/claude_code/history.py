@@ -33,6 +33,7 @@ from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
 )
 from waypoint.backends.claude_code.normalize import (
+    ParsedPeerMessage,
     build_task_notification_metadata,
     classify_injected_user_turn,
     iter_content_blocks,
@@ -219,12 +220,13 @@ def _task_notification_event(
 
 
 def _peer_message_event(
-    session_id: str, content: str, operation: str, ts: datetime, state: _ImportState
+    session_id: str,
+    parsed: ParsedPeerMessage,
+    operation: str,
+    ts: datetime,
+    state: _ImportState,
 ) -> list[EventRecord]:
     """Mirror of the live normalizer's peer path, minus the status updates."""
-    parsed = parse_peer_message(content)
-    if parsed is None:
-        return []
     if parsed.is_handback:
         state.pending_handback[parsed.sender_address] = parsed.body
         return []
@@ -250,7 +252,10 @@ def _convert_queue_operation(
     if operation not in ("enqueue", "remove") or not isinstance(content, str):
         return []
     if starts_with_peer_element(content):
-        return _peer_message_event(session_id, content, operation, ts, state)
+        parsed = parse_peer_message(content)
+        if parsed is None:
+            return []
+        return _peer_message_event(session_id, parsed, operation, ts, state)
     if operation != "enqueue" or "<task-notification>" not in content:
         return []
     return _task_notification_event(session_id, content, record.get("uuid"), ts, state)
@@ -267,7 +272,10 @@ def _convert_user(
             session_id, content, record.get("uuid"), ts, state
         )
     if injected == "peer_message" and isinstance(content, str):
-        return _peer_message_event(session_id, content, "user", ts, state)
+        parsed = parse_peer_message(content)
+        if parsed is not None:
+            return _peer_message_event(session_id, parsed, "user", ts, state)
+        # Unparsable: keep the raw text visible rather than drop the turn.
     if injected == "continuation":
         return []
     blocks = iter_content_blocks(content)

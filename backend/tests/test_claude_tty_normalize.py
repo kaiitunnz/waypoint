@@ -261,7 +261,10 @@ def test_handback_via_user_turn_also_attaches() -> None:
             "content": "Another Claude session sent a message:\n" + _HANDBACK_CONTENT
         },
     }
-    assert norm.process_record(user_form) == []
+    # The delivered hand-back starts a turn but renders only in the task card.
+    [status] = norm.process_record(user_form)
+    assert status.kind is EventKind.STATUS_UPDATE
+    assert status.status is SessionStatus.RUNNING
     events = norm.process_record(_queue_op(_AGENT_NOTIFICATION))
     assert len(events) == 1
     assert events[0].metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
@@ -292,6 +295,151 @@ def test_notification_before_handback_keeps_placeholder() -> None:
         == "This agent's report was delivered as a message."
     )
     assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+
+
+# ── TranscriptNormalizer: peer messages ────────────────────────────────────────
+
+_PEER_ELEMENT = (
+    '<cross-session-message from="uds:/run/user/1000/cc-socks/42.sock" '
+    'from-name="flowmesh-v2-38" from-mode="prompting">\n'
+    "Review fixes pushed. Gate is green.\n"
+    "</cross-session-message>"
+)
+_PEER_GUIDANCE = (
+    "\n\nThis came from another Claude session — not typed by your user, but very "
+    "likely working on their behalf."
+)
+_AGENT_ELEMENT = (
+    '<agent-message from="a5481671">\nInterim: leg 18 is MIXED.\n</agent-message>'
+)
+
+
+def _peer_user_record(element: str, *, origin: bool = True) -> dict:
+    record: dict = {
+        "type": "user",
+        "isMeta": True,
+        "message": {
+            "content": "Another Claude session sent a message:\n"
+            + element
+            + _PEER_GUIDANCE
+        },
+    }
+    if origin:
+        record["origin"] = {"kind": "peer", "from": "uds:/x.sock"}
+    return record
+
+
+def _is_running_status(event: NormalizedEvent) -> bool:
+    return (
+        event.kind is EventKind.STATUS_UPDATE and event.status is SessionStatus.RUNNING
+    )
+
+
+def test_idle_peer_user_record_emits_message_and_running() -> None:
+    norm = TranscriptNormalizer()
+    [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
+    assert event.kind is EventKind.USER_INPUT
+    assert event.status is SessionStatus.RUNNING
+    assert event.text == "Review fixes pushed. Gate is green."
+    assert event.metadata["kind"] == "peer_message"
+    assert event.metadata["peer_message"] == {
+        "version": 1,
+        "channel": "cross_session",
+        "sender_address": "uds:/run/user/1000/cc-socks/42.sock",
+        "sender_name": "flowmesh-v2-38",
+        "sender_mode": "prompting",
+    }
+
+
+def test_busy_peer_enqueue_then_remove_emits_once_without_status() -> None:
+    norm = TranscriptNormalizer()
+    [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
+    assert event.kind is EventKind.USER_INPUT
+    assert event.status is None
+    assert norm.process_record(_queue_op(_PEER_ELEMENT, operation="remove")) == []
+
+
+def test_peer_enqueue_then_user_emits_once_then_running() -> None:
+    norm = TranscriptNormalizer()
+    [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
+    assert event.kind is EventKind.USER_INPUT
+    assert (
+        norm.process_record({"type": "queue-operation", "operation": "dequeue"}) == []
+    )
+    [status] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
+    assert _is_running_status(status)
+
+
+def test_identical_peer_messages_each_surface() -> None:
+    norm = TranscriptNormalizer()
+    for _ in range(2):
+        [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
+        assert event.kind is EventKind.USER_INPUT
+    for _ in range(2):
+        [status] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
+        assert _is_running_status(status)
+    # A third delivery with no pending enqueue is a new message.
+    [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
+    assert event.kind is EventKind.USER_INPUT
+
+
+def test_agent_message_has_agent_channel_and_no_sender_name() -> None:
+    norm = TranscriptNormalizer()
+    [event] = norm.process_record(_peer_user_record(_AGENT_ELEMENT))
+    assert event.kind is EventKind.USER_INPUT
+    assert event.status is SessionStatus.RUNNING
+    assert event.text == "Interim: leg 18 is MIXED."
+    assert event.metadata["peer_message"] == {
+        "version": 1,
+        "channel": "agent",
+        "sender_address": "a5481671",
+    }
+
+
+def test_originless_prefixed_peer_record_is_a_peer_message() -> None:
+    norm = TranscriptNormalizer()
+    [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT, origin=False))
+    assert event.kind is EventKind.USER_INPUT
+    assert event.metadata["kind"] == "peer_message"
+
+
+def test_handback_user_record_sets_running_and_feeds_task_card() -> None:
+    norm = TranscriptNormalizer()
+    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
+    [status] = norm.process_record(_peer_user_record(_HANDBACK_CONTENT))
+    assert _is_running_status(status)
+    [card] = norm.process_record(_queue_op(_AGENT_NOTIFICATION))
+    assert card.metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
+
+
+def test_peer_origin_task_notification_keeps_task_path() -> None:
+    norm = TranscriptNormalizer()
+    record = {
+        "type": "user",
+        "origin": {"kind": "peer"},
+        "message": {"content": _QUEUED_NOTIFICATION},
+    }
+    [event] = norm.process_record(record)
+    assert event.kind is EventKind.SYSTEM_NOTE
+    assert "task_notification" in event.metadata
+
+
+def test_quoted_peer_element_in_human_text_is_not_a_peer_message() -> None:
+    norm = TranscriptNormalizer()
+    quoting = "Why does this render oddly?\n" + _PEER_ELEMENT
+    assert norm.process_record(_queue_op(quoting)) == []
+    assert norm.process_record({"type": "user", "message": {"content": quoting}}) == []
+
+
+def test_unparseable_peer_record_still_sets_running() -> None:
+    norm = TranscriptNormalizer()
+    record = {
+        "type": "user",
+        "origin": {"kind": "peer"},
+        "message": {"content": "Another Claude session sent a message:\n<odd/>"},
+    }
+    [status] = norm.process_record(record)
+    assert _is_running_status(status)
 
 
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────

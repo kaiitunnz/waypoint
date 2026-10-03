@@ -235,6 +235,67 @@ def test_import_handback_attaches_to_task_notification() -> None:
     assert payload["result_preview"] == "Report line one.\nReport line two."
 
 
+_PEER_ELEMENT = (
+    '<cross-session-message from="uds:/run/cc/42.sock" from-name="peer-a" '
+    'from-mode="prompting">\nPR is green.\n</cross-session-message>'
+)
+
+
+def _peer_user(element: str, ts: str = "2026-04-29T15:47:13.000Z") -> dict:
+    return {
+        "type": "user",
+        "timestamp": ts,
+        "origin": {"kind": "peer"},
+        "isMeta": True,
+        "message": {
+            "content": "Another Claude session sent a message:\n"
+            + element
+            + "\n\nThis came from another Claude session."
+        },
+    }
+
+
+def test_import_peer_message_matches_live_contract_and_dedupes() -> None:
+    records = [
+        _queue_enqueue(_PEER_ELEMENT),
+        {"type": "queue-operation", "operation": "dequeue"},
+        _peer_user(_PEER_ELEMENT),
+    ]
+    [event] = convert_transcript_records("sess-1", records)
+    assert event.kind == EventKind.USER_INPUT
+    assert event.text == "PR is green."
+    # Stamped at arrival (the enqueue), not delivery.
+    assert event.ts == datetime(2026, 4, 29, 15, 47, 12, tzinfo=UTC)
+    assert event.metadata["kind"] == "peer_message"
+    assert event.metadata["peer_message"] == {
+        "version": 1,
+        "channel": "cross_session",
+        "sender_address": "uds:/run/cc/42.sock",
+        "sender_name": "peer-a",
+        "sender_mode": "prompting",
+    }
+
+
+def test_import_removed_and_user_only_peer_messages_each_emit_once() -> None:
+    removed = {**_queue_enqueue(_PEER_ELEMENT), "operation": "remove"}
+    records = [_queue_enqueue(_PEER_ELEMENT), removed, _peer_user(_PEER_ELEMENT)]
+    events = convert_transcript_records("sess-1", records)
+    assert [e.kind for e in events] == [EventKind.USER_INPUT, EventKind.USER_INPUT]
+
+
+def test_import_quoted_peer_element_stays_plain_human_text() -> None:
+    quoting = "What is this?\n" + _PEER_ELEMENT
+    record = {
+        "type": "user",
+        "timestamp": "2026-04-29T15:47:13.000Z",
+        "message": {"content": quoting},
+    }
+    [event] = convert_transcript_records("sess-1", [record])
+    assert event.kind == EventKind.USER_INPUT
+    assert event.text == quoting
+    assert "kind" not in event.metadata
+
+
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
     records = [_user_text("hello", ts="2026-01-01T00:00:00Z")]
 

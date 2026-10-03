@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from waypoint.backends.peer_messages import PeerMessage
 from waypoint.backends.task_notifications import (
     CAPTURE_DISABLED,
     NOT_CAPTURED_ON_IMPORT,
@@ -164,7 +165,8 @@ class ParsedTaskNotification:
 
 def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
     """Classify a harness-injected user turn: ``task_notification`` (normalize
-    it), ``continuation`` (a /compact summary — still dropped), or ``none``.
+    it), ``peer_message`` (another session's or agent's message), ``continuation``
+    (a /compact summary — still dropped), or ``none``.
 
     ``origin.kind`` is authoritative when present; otherwise the trimmed string
     content is matched. Only a plain-string user turn is ever injected.
@@ -181,6 +183,12 @@ def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
         stripped = content.lstrip()
         if origin_says_notification or stripped.startswith("<task-notification>"):
             return "task_notification"
+        origin_says_peer = isinstance(origin, dict) and origin.get("kind") == "peer"
+        if origin_says_peer or (
+            stripped.startswith(PEER_MESSAGE_PREFIX)
+            and starts_with_peer_element(stripped)
+        ):
+            return "peer_message"
         if stripped.startswith("This session is being continued"):
             return "continuation"
     return "none"
@@ -306,29 +314,101 @@ def _stable_task_notification_id(
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
-_AGENT_MESSAGE_RE = re.compile(
-    r'<agent-message\s+from="([^"]+)"\s*>\n?(.*?)</agent-message>', re.DOTALL
+# ─── Peer messages (Claude Code native transcript) ───────────────────────────
+#
+# Another Claude session (``<cross-session-message>``) or an in-process agent
+# (``<agent-message>``) can message this session directly. Claude records each
+# as a ``queue-operation`` enqueue holding the bare element, then either a
+# ``remove`` echoing it (injected into the running turn) or a ``user`` record
+# (``origin.kind == "peer"``) wrapping it in a preamble line and a trailing
+# guidance paragraph. A subagent hand-back is an agent message whose report
+# belongs to the matching task notification rather than the transcript.
+
+PEER_MESSAGE_PREFIX = "Another Claude session sent a message:"
+_PEER_CHANNELS = {"cross-session-message": "cross_session", "agent-message": "agent"}
+# Greedy body: the last close tag wins, so a body quoting its own close tag stays
+# whole. Bodies are raw text (Claude does not escape them).
+_PEER_ELEMENT_RE = re.compile(
+    r'<(cross-session-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>(.*)</\1>',
+    re.DOTALL,
 )
+_PEER_ATTR_RE = re.compile(r'([\w-]+)="([^"]*)"')
 _HANDBACK_MARKER = "[Subagent hand-back]"
 _REPORT_FOLLOWS = "The report follows:\n"
 
 
-def parse_agent_handback(content: str) -> tuple[str, str] | None:
-    """Extract ``(sender_id, report)`` from a subagent hand-back message.
+@dataclass(frozen=True)
+class ParsedPeerMessage:
+    channel: str  # cross_session | agent
+    sender_address: str
+    sender_name: str | None
+    sender_mode: str | None
+    # A hand-back's body is its report, with the hand-back preamble stripped.
+    body: str
+    is_handback: bool
+    # Identifies one message across its enqueue/remove/user records, which share
+    # the element verbatim but not the surrounding text.
+    dedup_key: str
 
-    Inter-agent messages are wrapped in ``<agent-message from="id">…</agent-message>``;
-    a hand-back carries the ``[Subagent hand-back]`` preamble, which is stripped
-    down to the report body. Returns ``None`` for a non-hand-back peer message or
-    a record that carries no agent-message block.
+
+def _strip_peer_prefix(content: str) -> str:
+    stripped = content.lstrip()
+    if stripped.startswith(PEER_MESSAGE_PREFIX):
+        stripped = stripped[len(PEER_MESSAGE_PREFIX) :].lstrip()
+    return stripped
+
+
+def starts_with_peer_element(content: str) -> bool:
+    """Whether ``content`` (after an optional peer preamble) opens a peer element.
+
+    Anchoring at the start keeps a human message that merely quotes one out.
     """
-    match = _AGENT_MESSAGE_RE.search(content)
+    return _strip_peer_prefix(content).startswith(
+        ("<cross-session-message", "<agent-message")
+    )
+
+
+def parse_peer_message(content: Any) -> ParsedPeerMessage | None:
+    """Parse a peer message whose content opens with its element (after an
+    optional peer preamble). Non-throwing; ``None`` for anything else, including
+    an element with no ``from`` sender, no close tag, or an empty body."""
+    if not isinstance(content, str):
+        return None
+    match = _PEER_ELEMENT_RE.match(_strip_peer_prefix(content))
     if match is None:
         return None
-    inner = match.group(2)
-    if _HANDBACK_MARKER not in inner:
+    tag, raw_attrs, inner = match.groups()
+    attrs = {
+        key: html.unescape(value) for key, value in _PEER_ATTR_RE.findall(raw_attrs)
+    }
+    sender_address = attrs.get("from", "").strip()
+    if not sender_address:
         return None
-    report = inner.split(_REPORT_FOLLOWS, 1)[-1]
-    return match.group(1), textwrap.dedent(report).strip()
+    is_handback = tag == "agent-message" and _HANDBACK_MARKER in inner
+    if is_handback:
+        inner = inner.split(_REPORT_FOLLOWS, 1)[-1]
+    body = textwrap.dedent(inner).strip()
+    if not body:
+        return None
+    return ParsedPeerMessage(
+        channel=_PEER_CHANNELS[tag],
+        sender_address=sender_address,
+        sender_name=attrs.get("from-name") or None,
+        sender_mode=attrs.get("from-mode") or None,
+        body=body,
+        is_handback=is_handback,
+        dedup_key=hashlib.sha1(match.group(0).encode("utf-8")).hexdigest(),
+    )
+
+
+def peer_message_from_parsed(parsed: ParsedPeerMessage) -> PeerMessage:
+    return PeerMessage(
+        channel=parsed.channel,
+        sender_address=parsed.sender_address,
+        body=parsed.body,
+        sender_name=parsed.sender_name,
+        sender_mode=parsed.sender_mode,
+    )
 
 
 def task_notification_dedup_key(content: str) -> str:

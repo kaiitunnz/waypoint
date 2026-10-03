@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/kaiitunnz/waypoint/compare/v0.26.0...v0.26.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* show the Codex compaction start in the Important view ([#503](https://github.com/kaiitunnz/waypoint/issues/503)) ([851cf1d](https://github.com/kaiitunnz/waypoint/commit/851cf1df5fb94d2aa4a21da0408f828178db6f9f))
+
 ## [0.26.0](https://github.com/kaiitunnz/waypoint/compare/v0.25.0...v0.26.0) (2026-10-03)
 
 

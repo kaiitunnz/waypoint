@@ -313,19 +313,17 @@ _AGENT_ELEMENT = (
 )
 
 
-def _peer_user_record(element: str, *, origin: bool = True) -> dict:
-    record: dict = {
+def _peer_user_record(element: str) -> dict:
+    return {
         "type": "user",
         "isMeta": True,
+        "origin": {"kind": "peer", "from": "uds:/x.sock"},
         "message": {
             "content": "Another Claude session sent a message:\n"
             + element
             + _PEER_GUIDANCE
         },
     }
-    if origin:
-        record["origin"] = {"kind": "peer", "from": "uds:/x.sock"}
-    return record
 
 
 def _is_running_status(event: NormalizedEvent) -> bool:

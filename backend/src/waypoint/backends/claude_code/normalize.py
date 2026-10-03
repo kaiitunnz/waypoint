@@ -338,7 +338,7 @@ _REPORT_FOLLOWS = "The report follows:\n"
 class ParsedPeerMessage:
     sender_address: str
     sender_name: str | None
-    # A hand-back's report, without its preamble.
+    # For a hand-back, its report without the preamble.
     body: str
     is_handback: bool
     # Hash of the element, shared by its enqueue/remove/user records.
@@ -399,12 +399,13 @@ def claim_peer_message(queued: Counter[str], key: str, operation: str) -> bool:
     ``queued`` counts messages shown from their ``enqueue`` whose ``remove`` or
     ``user`` twin is pending; ``operation`` is the queue operation or ``user``.
     """
-    if operation != "enqueue" and queued[key] > 0:
-        queued[key] -= 1
-        return False
     if operation == "enqueue":
         queued[key] += 1
-    return operation != "remove"
+        return True
+    if queued[key] > 0:
+        queued[key] -= 1
+        return False
+    return operation == "user"
 
 
 def task_notification_dedup_key(content: str) -> str:

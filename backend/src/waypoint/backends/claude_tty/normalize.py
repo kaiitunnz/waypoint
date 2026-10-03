@@ -456,13 +456,7 @@ class TranscriptNormalizer:
         if key in self._seen_task_notification_keys:
             # The queued copy already posted the note; this delivery starts the
             # turn, so only the status moves.
-            if status is None:
-                return []
-            return [
-                NormalizedEvent(
-                    kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
-                )
-            ]
+            return _status_only(status)
         self._seen_task_notification_keys.add(key)
         if parsed.task_id in self._pending_handback_bodies:
             # Agent's own result is only a "delivered as a message" placeholder;
@@ -492,25 +486,16 @@ class TranscriptNormalizer:
         the card was already shown.
         """
         status = SessionStatus.RUNNING if operation == "user" else None
-        status_only = (
-            [
-                NormalizedEvent(
-                    kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
-                )
-            ]
-            if status is not None
-            else []
-        )
         parsed = parse_peer_message(content)
         if parsed is None:
-            return status_only
+            return _status_only(status)
         if parsed.is_handback:
             self._pending_handback_bodies[parsed.sender_address] = parsed.body
-            return status_only
+            return _status_only(status)
         if not claim_peer_message(
             self._queued_peer_messages, parsed.dedup_key, operation
         ):
-            return status_only
+            return _status_only(status)
         raw_ts = record.get("timestamp")
         text, metadata = build_peer_message_metadata(
             parsed,
@@ -659,6 +644,16 @@ class TranscriptNormalizer:
                 status=SessionStatus.RUNNING,
             )
         ]
+
+
+def _status_only(status: SessionStatus | None) -> list[NormalizedEvent]:
+    if status is None:
+        return []
+    return [
+        NormalizedEvent(
+            kind=EventKind.STATUS_UPDATE, text="", metadata={}, status=status
+        )
+    ]
 
 
 def _diff_preview_from_tool_result(record: dict[str, Any]) -> dict[str, Any] | None:

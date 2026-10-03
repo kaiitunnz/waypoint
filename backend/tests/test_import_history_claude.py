@@ -242,10 +242,10 @@ _PEER_ELEMENT = (
 )
 
 
-def _peer_user(element: str, ts: str = "2026-04-29T15:47:13.000Z") -> dict:
+def _peer_user(element: str) -> dict:
     return {
         "type": "user",
-        "timestamp": ts,
+        "timestamp": "2026-04-29T15:47:13.000Z",
         "origin": {"kind": "peer"},
         "isMeta": True,
         "message": {

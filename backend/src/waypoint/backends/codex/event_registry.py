@@ -397,7 +397,7 @@ ITEMS: dict[str, ItemSpec] = {
     "userMessage": ItemSpec(),
     "reasoning": ItemSpec(completed=_reasoning_completed),
     "contextCompaction": ItemSpec(
-        started=lambda item: _detail_note("Compacting context"),
+        started=lambda item: _important_note("Compacting context"),
         completed=lambda item: _important_note("Context compacted"),
     ),
     "subAgentActivity": ItemSpec(

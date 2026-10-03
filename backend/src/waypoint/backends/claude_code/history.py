@@ -35,6 +35,7 @@ from waypoint.backends.claude_code.models import (
 from waypoint.backends.claude_code.normalize import (
     build_peer_message_metadata,
     build_task_notification_metadata,
+    claim_peer_message,
     classify_injected_user_turn,
     iter_content_blocks,
     parse_peer_message,
@@ -232,14 +233,8 @@ def _peer_message_event(
     if parsed.is_handback:
         state.pending_handback[parsed.sender_address] = parsed.body
         return []
-    key = parsed.dedup_key
-    if operation != "enqueue" and state.queued_peer_messages[key] > 0:
-        state.queued_peer_messages[key] -= 1
+    if not claim_peer_message(state.queued_peer_messages, parsed.dedup_key, operation):
         return []
-    if operation == "remove":
-        return []
-    if operation == "enqueue":
-        state.queued_peer_messages[key] += 1
     text, metadata = build_peer_message_metadata(
         parsed,
         record_uuid=record_uuid,
@@ -253,8 +248,8 @@ def _peer_message_event(
 def _convert_queue_operation(
     session_id: str, record: dict[str, Any], ts: datetime, state: _ImportState
 ) -> list[EventRecord]:
-    # A mid-turn peer message or task notification is persisted only as an
-    # ``enqueue`` (``remove`` echoes the same content, ``dequeue`` carries none).
+    # A task notification's ``remove`` echo is ignored; a peer message's is matched
+    # to its ``enqueue``.
     operation = record.get("operation")
     content = record.get("content")
     if operation not in ("enqueue", "remove") or not isinstance(content, str):

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import textwrap
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -184,7 +185,7 @@ def classify_injected_user_turn(record: dict[str, Any], content: Any) -> str:
             return "task_notification"
         origin_says_peer = isinstance(origin, dict) and origin.get("kind") == "peer"
         if origin_says_peer or (
-            stripped.startswith(PEER_MESSAGE_PREFIX)
+            stripped.startswith(_PEER_MESSAGE_PREFIX)
             and starts_with_peer_element(stripped)
         ):
             return "peer_message"
@@ -316,14 +317,12 @@ def _stable_task_notification_id(
 # ─── Peer messages (Claude Code native transcript) ───────────────────────────
 #
 # Another Claude session (``<cross-session-message>``) or an in-process agent
-# (``<agent-message>``) can message this session directly. Claude records each
-# as a ``queue-operation`` enqueue holding the bare element, then either a
-# ``remove`` echoing it (injected into the running turn) or a ``user`` record
-# (``origin.kind == "peer"``) wrapping it in a preamble line and a trailing
-# guidance paragraph. A subagent hand-back is an agent message whose report
-# belongs to the matching task notification rather than the transcript.
+# (``<agent-message>``) messages this session directly. Each is an ``enqueue``
+# of the bare element, then a ``remove`` echo (injected mid-turn) or a ``user``
+# record wrapping it in a preamble and trailing guidance. A subagent hand-back's
+# report belongs on its agent task notification.
 
-PEER_MESSAGE_PREFIX = "Another Claude session sent a message:"
+_PEER_MESSAGE_PREFIX = "Another Claude session sent a message:"
 # Greedy body: the last close tag wins, so a body quoting its own close tag stays
 # whole. Bodies are raw text (Claude does not escape them).
 _PEER_ELEMENT_RE = re.compile(
@@ -339,18 +338,17 @@ _REPORT_FOLLOWS = "The report follows:\n"
 class ParsedPeerMessage:
     sender_address: str
     sender_name: str | None
-    # A hand-back's body is its report, with the hand-back preamble stripped.
+    # A hand-back's report, without its preamble.
     body: str
     is_handback: bool
-    # Identifies one message across its enqueue/remove/user records, which share
-    # the element verbatim but not the surrounding text.
+    # Hash of the element, shared by its enqueue/remove/user records.
     dedup_key: str
 
 
 def _strip_peer_prefix(content: str) -> str:
     stripped = content.lstrip()
-    if stripped.startswith(PEER_MESSAGE_PREFIX):
-        stripped = stripped[len(PEER_MESSAGE_PREFIX) :].lstrip()
+    if stripped.startswith(_PEER_MESSAGE_PREFIX):
+        stripped = stripped[len(_PEER_MESSAGE_PREFIX) :].lstrip()
     return stripped
 
 
@@ -364,12 +362,12 @@ def starts_with_peer_element(content: str) -> bool:
     )
 
 
-def parse_peer_message(content: Any) -> ParsedPeerMessage | None:
-    """Parse a peer message whose content opens with its element (after an
-    optional peer preamble). Non-throwing; ``None`` for anything else, including
-    an element with no ``from`` sender, no close tag, or an empty body."""
-    if not isinstance(content, str):
-        return None
+def parse_peer_message(content: str) -> ParsedPeerMessage | None:
+    """Parse content that opens with a peer element, after an optional preamble.
+
+    ``None`` for anything else, including an element with no ``from`` sender, no
+    close tag, or an empty body.
+    """
     match = _PEER_ELEMENT_RE.match(_strip_peer_prefix(content))
     if match is None:
         return None
@@ -393,6 +391,20 @@ def parse_peer_message(content: Any) -> ParsedPeerMessage | None:
         is_handback=is_handback,
         dedup_key=hashlib.sha1(match.group(0).encode("utf-8")).hexdigest(),
     )
+
+
+def claim_peer_message(queued: Counter[str], key: str, operation: str) -> bool:
+    """Whether this record shows the peer message's card.
+
+    ``queued`` counts messages shown from their ``enqueue`` whose ``remove`` or
+    ``user`` twin is pending; ``operation`` is the queue operation or ``user``.
+    """
+    if operation != "enqueue" and queued[key] > 0:
+        queued[key] -= 1
+        return False
+    if operation == "enqueue":
+        queued[key] += 1
+    return operation != "remove"
 
 
 def task_notification_dedup_key(content: str) -> str:
@@ -467,8 +479,7 @@ def build_peer_message_metadata(
     capture_enabled: bool,
     ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the ``(text, metadata)`` for a peer message as a ``message`` task
-    notification; capture flags as for :func:`build_task_notification_metadata`."""
+    """Build ``(text, metadata)`` for a peer message as a ``message`` task notification."""
     basis = f"{ts.isoformat() if ts is not None else ''}|{parsed.dedup_key}"
     notification = TaskNotification(
         id=record_uuid or hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16],

@@ -19,10 +19,9 @@ Key invariants (all verified against real transcripts in Phase 0):
   Monitor events and terminal state, background-command completion) are
   normalized into a standalone SYSTEM_NOTE task-notification event; context-window
   summaries beginning with "This session is being continued" are still dropped.
-- A peer message (another Claude session's or an agent's) surfaces once as a
-  ``message`` task notification from whichever record is tailed first; its
-  delivered ``user`` record starts a turn, so it always sets RUNNING. A subagent
-  hand-back is buffered for its agent task notification instead.
+- A peer message (``<cross-session-message>``, ``<agent-message>``) surfaces once
+  as a ``message`` task notification; its delivered ``user`` record sets RUNNING.
+  A subagent hand-back's report goes on its agent task notification.
 - A manual ``/compact`` produces only a ``compact_boundary`` system record and
   an injected continuation summary, with no terminal assistant record, so a
   synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
@@ -45,6 +44,7 @@ from waypoint.backends.claude_code.normalize import (
     TaskListTracker,
     build_peer_message_metadata,
     build_task_notification_metadata,
+    claim_peer_message,
     classify_injected_user_turn,
     extract_created_task_id,
     format_task_snapshot,
@@ -120,11 +120,8 @@ class TranscriptNormalizer:
         # and whose task-id is the sender id). The report has no other home — the
         # task notification's own result only says "delivered as a message".
         self._pending_handback_bodies: dict[str, str] = {}
-        # Dedup keys of peer messages surfaced from their ``enqueue`` whose
-        # ``remove`` or ``user`` twin has not been tailed yet. A count rather than
-        # a seen-set, so a later message with identical text still surfaces. The
-        # state is per normalizer, so a backend restart between the two records
-        # can show the message twice.
+        # Dedup keys of peer messages shown from their ``enqueue`` whose ``remove`` or
+        # ``user`` twin is pending; counted so a later identical message still shows.
         self._queued_peer_messages: Counter[str] = Counter()
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
@@ -487,19 +484,14 @@ class TranscriptNormalizer:
         ]
 
     def _peer_message_events(
-        self,
-        content: str,
-        operation: str,
-        record: dict[str, Any],
-        status: SessionStatus | None,
+        self, content: str, operation: str, record: dict[str, Any]
     ) -> list[NormalizedEvent]:
-        """Surface a peer message once, as a ``message`` task notification.
+        """Show a peer message once, as a ``message`` task notification.
 
-        ``operation`` is the queue operation (``enqueue``/``remove``) or ``user``
-        for a delivered record, which alone carries ``status``: it starts a turn,
-        so the session moves even when the message was already shown.
+        A delivered (``user``) record starts a turn, so it sets RUNNING even when
+        the card was already shown.
         """
-        parsed = parse_peer_message(content)
+        status = SessionStatus.RUNNING if operation == "user" else None
         status_only = (
             [
                 NormalizedEvent(
@@ -509,21 +501,16 @@ class TranscriptNormalizer:
             if status is not None
             else []
         )
+        parsed = parse_peer_message(content)
         if parsed is None:
             return status_only
         if parsed.is_handback:
-            # The report renders in the task card of the notification that
-            # follows; its task-id is the sender id.
             self._pending_handback_bodies[parsed.sender_address] = parsed.body
             return status_only
-        key = parsed.dedup_key
-        if operation != "enqueue" and self._queued_peer_messages[key] > 0:
-            self._queued_peer_messages[key] -= 1
+        if not claim_peer_message(
+            self._queued_peer_messages, parsed.dedup_key, operation
+        ):
             return status_only
-        if operation == "remove":
-            return []
-        if operation == "enqueue":
-            self._queued_peer_messages[key] += 1
         raw_ts = record.get("timestamp")
         text, metadata = build_peer_message_metadata(
             parsed,
@@ -540,16 +527,15 @@ class TranscriptNormalizer:
         ]
 
     def _process_queue_operation(self, record: dict[str, Any]) -> list[NormalizedEvent]:
-        # A peer message or task notification that arrives mid-turn is persisted
-        # only as an ``enqueue`` (``remove`` echoes the same content, ``dequeue``
-        # has none). Queued behind the current turn or an open dialog, it is not
-        # delivered yet, so nothing here moves the session's status.
+        # A queued record is not delivered yet, so it never moves the session's status.
+        # A task notification's ``remove`` echo is ignored; a peer message's is matched
+        # to its ``enqueue``.
         operation = record.get("operation")
         content = record.get("content")
         if operation not in ("enqueue", "remove") or not isinstance(content, str):
             return []
         if starts_with_peer_element(content):
-            return self._peer_message_events(content, operation, record, None)
+            return self._peer_message_events(content, operation, record)
         if operation != "enqueue" or "<task-notification>" not in content:
             return []
         return self._task_notification_events(content, record.get("uuid"), None)
@@ -564,9 +550,7 @@ class TranscriptNormalizer:
                 content, record.get("uuid"), SessionStatus.RUNNING
             )
         if injected == "peer_message" and isinstance(content, str):
-            return self._peer_message_events(
-                content, "user", record, SessionStatus.RUNNING
-            )
+            return self._peer_message_events(content, "user", record)
         if injected == "continuation":
             return []
 

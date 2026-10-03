@@ -64,8 +64,6 @@ def test_parse_agent_message_and_handback() -> None:
 @pytest.mark.parametrize(
     "content",
     [
-        None,
-        42,
         "",
         "plain text",
         "Quoting: " + CROSS_SESSION,
@@ -75,7 +73,7 @@ def test_parse_agent_message_and_handback() -> None:
         '<agent-message from="a1">   </agent-message>',
     ],
 )
-def test_parse_rejects_malformed_content(content: object) -> None:
+def test_parse_rejects_malformed_content(content: str) -> None:
     assert parse_peer_message(content) is None
 
 

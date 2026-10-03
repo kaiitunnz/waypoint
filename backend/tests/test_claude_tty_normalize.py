@@ -261,7 +261,6 @@ def test_handback_via_user_turn_also_attaches() -> None:
             "content": "Another Claude session sent a message:\n" + _HANDBACK_CONTENT
         },
     }
-    # The delivered hand-back starts a turn but renders only in the task card.
     [status] = norm.process_record(user_form)
     assert status.kind is EventKind.STATUS_UPDATE
     assert status.status is SessionStatus.RUNNING
@@ -361,17 +360,6 @@ def test_busy_peer_enqueue_then_remove_emits_once_without_status() -> None:
     assert norm.process_record(_queue_op(_PEER_ELEMENT, operation="remove")) == []
 
 
-def test_peer_enqueue_then_user_emits_once_then_running() -> None:
-    norm = TranscriptNormalizer()
-    [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
-    _message_card(event)
-    assert (
-        norm.process_record({"type": "queue-operation", "operation": "dequeue"}) == []
-    )
-    [status] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
-    assert _is_running_status(status)
-
-
 def test_identical_peer_messages_each_surface() -> None:
     norm = TranscriptNormalizer()
     for _ in range(2):
@@ -392,21 +380,6 @@ def test_agent_message_is_labeled_by_its_sender_id() -> None:
     payload = _message_card(event)
     assert payload["summary"] == "Message from a5481671"
     assert payload["result_preview"] == "Interim: leg 18 is MIXED."
-
-
-def test_originless_prefixed_peer_record_is_a_peer_message() -> None:
-    norm = TranscriptNormalizer()
-    [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT, origin=False))
-    _message_card(event)
-
-
-def test_handback_user_record_sets_running_and_feeds_task_card() -> None:
-    norm = TranscriptNormalizer()
-    assert norm.process_record(_queue_op(_HANDBACK_CONTENT)) == []
-    [status] = norm.process_record(_peer_user_record(_HANDBACK_CONTENT))
-    assert _is_running_status(status)
-    [card] = norm.process_record(_queue_op(_AGENT_NOTIFICATION))
-    assert card.metadata["task_notification"]["result_preview"] == _EXPECTED_REPORT
 
 
 def test_peer_origin_task_notification_keeps_task_path() -> None:

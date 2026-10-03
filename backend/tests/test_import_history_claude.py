@@ -294,6 +294,16 @@ def test_import_quoted_peer_element_stays_plain_human_text() -> None:
     assert event.text == quoting
 
 
+def test_import_peer_card_id_matches_live() -> None:
+    enqueue = _queue_enqueue(_PEER_ELEMENT)
+    [imported] = convert_transcript_records("sess-1", [enqueue])
+    [live] = TranscriptNormalizer().process_record(enqueue)
+    assert (
+        imported.metadata["task_notification"]["id"]
+        == live.metadata["task_notification"]["id"]
+    )
+
+
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
     records = [_user_text("hello", ts="2026-01-01T00:00:00Z")]
 
@@ -484,13 +494,3 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert [r.record_id for r in token_records] == ["msg1", "msg2"]
     assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
     assert all(r.effort is None for r in token_records)
-
-
-def test_import_peer_card_id_matches_live() -> None:
-    enqueue = _queue_enqueue(_PEER_ELEMENT)
-    [imported] = convert_transcript_records("sess-1", [enqueue])
-    [live] = TranscriptNormalizer().process_record(enqueue)
-    assert (
-        imported.metadata["task_notification"]["id"]
-        == live.metadata["task_notification"]["id"]
-    )

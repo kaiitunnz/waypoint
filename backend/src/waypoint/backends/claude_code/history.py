@@ -33,13 +33,12 @@ from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
 )
 from waypoint.backends.claude_code.normalize import (
-    ParsedPeerMessage,
+    build_peer_message_metadata,
     build_task_notification_metadata,
     classify_injected_user_turn,
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
-    peer_message_from_parsed,
     starts_with_peer_element,
     stringify_tool_result,
     task_notification_dedup_key,
@@ -48,7 +47,6 @@ from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
     read_local_claude_transcript,
 )
-from waypoint.backends.peer_messages import peer_message_event
 from waypoint.schemas import EventKind, EventRecord, SessionStatus, TokenUsageRecord
 
 
@@ -221,12 +219,16 @@ def _task_notification_event(
 
 def _peer_message_event(
     session_id: str,
-    parsed: ParsedPeerMessage,
+    content: str,
     operation: str,
+    record_uuid: str | None,
     ts: datetime,
     state: _ImportState,
 ) -> list[EventRecord]:
     """Mirror of the live normalizer's peer path, minus the status updates."""
+    parsed = parse_peer_message(content)
+    if parsed is None:
+        return []
     if parsed.is_handback:
         state.pending_handback[parsed.sender_address] = parsed.body
         return []
@@ -238,8 +240,14 @@ def _peer_message_event(
         return []
     if operation == "enqueue":
         state.queued_peer_messages[key] += 1
-    text, metadata = peer_message_event(peer_message_from_parsed(parsed))
-    return [_event(session_id, ts, EventKind.USER_INPUT, text, metadata)]
+    text, metadata = build_peer_message_metadata(
+        parsed,
+        record_uuid=record_uuid,
+        allow_output_capture=False,
+        capture_enabled=False,
+        ts=ts,
+    )
+    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
 
 
 def _convert_queue_operation(
@@ -252,10 +260,9 @@ def _convert_queue_operation(
     if operation not in ("enqueue", "remove") or not isinstance(content, str):
         return []
     if starts_with_peer_element(content):
-        parsed = parse_peer_message(content)
-        if parsed is None:
-            return []
-        return _peer_message_event(session_id, parsed, operation, ts, state)
+        return _peer_message_event(
+            session_id, content, operation, record.get("uuid"), ts, state
+        )
     if operation != "enqueue" or "<task-notification>" not in content:
         return []
     return _task_notification_event(session_id, content, record.get("uuid"), ts, state)
@@ -272,10 +279,9 @@ def _convert_user(
             session_id, content, record.get("uuid"), ts, state
         )
     if injected == "peer_message" and isinstance(content, str):
-        parsed = parse_peer_message(content)
-        if parsed is not None:
-            return _peer_message_event(session_id, parsed, "user", ts, state)
-        # Unparsable: keep the raw text visible rather than drop the turn.
+        return _peer_message_event(
+            session_id, content, "user", record.get("uuid"), ts, state
+        )
     if injected == "continuation":
         return []
     blocks = iter_content_blocks(content)

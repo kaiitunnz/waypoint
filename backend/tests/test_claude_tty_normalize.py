@@ -335,26 +335,28 @@ def _is_running_status(event: NormalizedEvent) -> bool:
     )
 
 
-def test_idle_peer_user_record_emits_message_and_running() -> None:
+def _message_card(event: NormalizedEvent) -> dict:
+    assert event.kind is EventKind.SYSTEM_NOTE
+    assert event.metadata["method"] == "task_notification"
+    payload = event.metadata["task_notification"]
+    assert payload["kind"] == "message"
+    return payload
+
+
+def test_idle_peer_user_record_emits_message_card_and_running() -> None:
     norm = TranscriptNormalizer()
     [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
-    assert event.kind is EventKind.USER_INPUT
     assert event.status is SessionStatus.RUNNING
-    assert event.text == "Review fixes pushed. Gate is green."
-    assert event.metadata["kind"] == "peer_message"
-    assert event.metadata["peer_message"] == {
-        "version": 1,
-        "channel": "cross_session",
-        "sender_address": "uds:/run/user/1000/cc-socks/42.sock",
-        "sender_name": "flowmesh-v2-38",
-        "sender_mode": "prompting",
-    }
+    payload = _message_card(event)
+    assert payload["summary"] == "Message from flowmesh-v2-38"
+    assert payload["result_preview"] == "Review fixes pushed. Gate is green."
+    assert payload["status"] is None
 
 
 def test_busy_peer_enqueue_then_remove_emits_once_without_status() -> None:
     norm = TranscriptNormalizer()
     [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
-    assert event.kind is EventKind.USER_INPUT
+    _message_card(event)
     assert event.status is None
     assert norm.process_record(_queue_op(_PEER_ELEMENT, operation="remove")) == []
 
@@ -362,7 +364,7 @@ def test_busy_peer_enqueue_then_remove_emits_once_without_status() -> None:
 def test_peer_enqueue_then_user_emits_once_then_running() -> None:
     norm = TranscriptNormalizer()
     [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
-    assert event.kind is EventKind.USER_INPUT
+    _message_card(event)
     assert (
         norm.process_record({"type": "queue-operation", "operation": "dequeue"}) == []
     )
@@ -374,33 +376,28 @@ def test_identical_peer_messages_each_surface() -> None:
     norm = TranscriptNormalizer()
     for _ in range(2):
         [event] = norm.process_record(_queue_op(_PEER_ELEMENT))
-        assert event.kind is EventKind.USER_INPUT
+        _message_card(event)
     for _ in range(2):
         [status] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
         assert _is_running_status(status)
     # A third delivery with no pending enqueue is a new message.
     [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT))
-    assert event.kind is EventKind.USER_INPUT
+    _message_card(event)
 
 
-def test_agent_message_has_agent_channel_and_no_sender_name() -> None:
+def test_agent_message_is_labeled_by_its_sender_id() -> None:
     norm = TranscriptNormalizer()
     [event] = norm.process_record(_peer_user_record(_AGENT_ELEMENT))
-    assert event.kind is EventKind.USER_INPUT
     assert event.status is SessionStatus.RUNNING
-    assert event.text == "Interim: leg 18 is MIXED."
-    assert event.metadata["peer_message"] == {
-        "version": 1,
-        "channel": "agent",
-        "sender_address": "a5481671",
-    }
+    payload = _message_card(event)
+    assert payload["summary"] == "Message from a5481671"
+    assert payload["result_preview"] == "Interim: leg 18 is MIXED."
 
 
 def test_originless_prefixed_peer_record_is_a_peer_message() -> None:
     norm = TranscriptNormalizer()
     [event] = norm.process_record(_peer_user_record(_PEER_ELEMENT, origin=False))
-    assert event.kind is EventKind.USER_INPUT
-    assert event.metadata["kind"] == "peer_message"
+    _message_card(event)
 
 
 def test_handback_user_record_sets_running_and_feeds_task_card() -> None:
@@ -420,8 +417,7 @@ def test_peer_origin_task_notification_keeps_task_path() -> None:
         "message": {"content": _QUEUED_NOTIFICATION},
     }
     [event] = norm.process_record(record)
-    assert event.kind is EventKind.SYSTEM_NOTE
-    assert "task_notification" in event.metadata
+    assert event.metadata["task_notification"]["kind"] == "agent"
 
 
 def test_quoted_peer_element_in_human_text_is_not_a_peer_message() -> None:
@@ -431,19 +427,15 @@ def test_quoted_peer_element_in_human_text_is_not_a_peer_message() -> None:
     assert norm.process_record({"type": "user", "message": {"content": quoting}}) == []
 
 
-def test_unparsable_peer_record_shows_raw_text_and_runs() -> None:
+def test_unparsable_peer_record_sets_running_without_a_card() -> None:
     norm = TranscriptNormalizer()
-    content = "Another Claude session sent a message:\n<odd/>"
     record = {
         "type": "user",
         "origin": {"kind": "peer"},
-        "message": {"content": content},
+        "message": {"content": "Another Claude session sent a message:\n<odd/>"},
     }
-    [event] = norm.process_record(record)
-    assert event.kind is EventKind.USER_INPUT
-    assert event.status is SessionStatus.RUNNING
-    assert event.text == content
-    assert "kind" not in event.metadata
+    [status] = norm.process_record(record)
+    assert _is_running_status(status)
 
 
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────

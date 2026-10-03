@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from waypoint.backends.peer_messages import PeerMessage
 from waypoint.backends.task_notifications import (
     CAPTURE_DISABLED,
     NOT_CAPTURED_ON_IMPORT,
@@ -325,7 +324,6 @@ def _stable_task_notification_id(
 # belongs to the matching task notification rather than the transcript.
 
 PEER_MESSAGE_PREFIX = "Another Claude session sent a message:"
-_PEER_CHANNELS = {"cross-session-message": "cross_session", "agent-message": "agent"}
 # Greedy body: the last close tag wins, so a body quoting its own close tag stays
 # whole. Bodies are raw text (Claude does not escape them).
 _PEER_ELEMENT_RE = re.compile(
@@ -339,10 +337,8 @@ _REPORT_FOLLOWS = "The report follows:\n"
 
 @dataclass(frozen=True)
 class ParsedPeerMessage:
-    channel: str  # cross_session | agent
     sender_address: str
     sender_name: str | None
-    sender_mode: str | None
     # A hand-back's body is its report, with the hand-back preamble stripped.
     body: str
     is_handback: bool
@@ -391,23 +387,11 @@ def parse_peer_message(content: Any) -> ParsedPeerMessage | None:
     if not body:
         return None
     return ParsedPeerMessage(
-        channel=_PEER_CHANNELS[tag],
         sender_address=sender_address,
         sender_name=attrs.get("from-name") or None,
-        sender_mode=attrs.get("from-mode") or None,
         body=body,
         is_handback=is_handback,
         dedup_key=hashlib.sha1(match.group(0).encode("utf-8")).hexdigest(),
-    )
-
-
-def peer_message_from_parsed(parsed: ParsedPeerMessage) -> PeerMessage:
-    return PeerMessage(
-        channel=parsed.channel,
-        sender_address=parsed.sender_address,
-        body=parsed.body,
-        sender_name=parsed.sender_name,
-        sender_mode=parsed.sender_mode,
     )
 
 
@@ -420,6 +404,16 @@ def task_notification_dedup_key(content: str) -> str:
     distinct notifications (different body) apart.
     """
     return hashlib.sha1(content.strip().encode("utf-8")).hexdigest()
+
+
+def _no_spill_reason(allow_output_capture: bool, capture_enabled: bool) -> str | None:
+    # An imported transcript never had the file, so that explanation wins over
+    # the operator switch, which was irrelevant at capture time.
+    if not allow_output_capture:
+        return NOT_CAPTURED_ON_IMPORT
+    if not capture_enabled:
+        return CAPTURE_DISABLED
+    return None
 
 
 def build_task_notification_metadata(
@@ -437,13 +431,7 @@ def build_task_notification_metadata(
     ``task_output_capture_enabled`` switch. Both must hold to capture, and each
     explains itself differently on the card.
     """
-    # An imported transcript never had the file, so that explanation wins over
-    # the operator switch, which was irrelevant at capture time.
-    no_spill_reason: str | None = None
-    if not allow_output_capture:
-        no_spill_reason = NOT_CAPTURED_ON_IMPORT
-    elif not capture_enabled:
-        no_spill_reason = CAPTURE_DISABLED
+    no_spill_reason = _no_spill_reason(allow_output_capture, capture_enabled)
     kind = infer_task_notification_kind(parsed)
     # An Agent's ``output-file`` is its sidechain transcript; its report is the
     # last record, already inline on ``result``.
@@ -468,6 +456,30 @@ def build_task_notification_metadata(
         notification,
         no_spill_reason=no_spill_reason,
         output_path=output_file if captures_output else None,
+    )
+
+
+def build_peer_message_metadata(
+    parsed: ParsedPeerMessage,
+    *,
+    record_uuid: str | None,
+    allow_output_capture: bool,
+    capture_enabled: bool,
+    ts: datetime | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the ``(text, metadata)`` for a peer message as a ``message`` task
+    notification; capture flags as for :func:`build_task_notification_metadata`."""
+    basis = f"{ts.isoformat() if ts is not None else ''}|{parsed.dedup_key}"
+    notification = TaskNotification(
+        id=record_uuid or hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16],
+        kind="message",
+        status=None,
+        summary=f"Message from {parsed.sender_name or parsed.sender_address}",
+        result=parsed.body,
+    )
+    return task_notification_event(
+        notification,
+        no_spill_reason=_no_spill_reason(allow_output_capture, capture_enabled),
     )
 
 

@@ -564,9 +564,9 @@ async def test_queued_peer_message_shows_on_enqueue_and_runs_on_delivery() -> No
     await tailer._drain()
 
     message = runtime._emit_adapter_event.await_args_list[0].args
-    assert message[1] is EventKind.USER_INPUT
-    assert message[2] == "Please re-verify."
-    assert message[3]["kind"] == "peer_message"
+    assert message[1] is EventKind.SYSTEM_NOTE
+    assert message[3]["task_notification"]["kind"] == "message"
+    assert message[3]["task_notification"]["result_preview"] == "Please re-verify."
     assert message[4] is None
     assert runtime._emit_adapter_event.await_count == 1
     runtime.update_session_fields.assert_awaited_once_with(

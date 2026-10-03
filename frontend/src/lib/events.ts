@@ -326,6 +326,7 @@ export type TaskNotificationKind =
   | "agent"
   | "monitor"
   | "background_command"
+  | "message"
   | "unknown";
 
 export interface TaskNotificationUsage {
@@ -366,6 +367,7 @@ const TASK_NOTIFICATION_KINDS: ReadonlySet<TaskNotificationKind> = new Set([
   "agent",
   "monitor",
   "background_command",
+  "message",
   "unknown",
 ]);
 
@@ -418,46 +420,6 @@ export function parseTaskNotification(
     outputAvailable: payload.output_available === true,
     outputUnavailableReason: readString(payload, "output_unavailable_reason"),
     usage,
-  };
-}
-
-export type PeerMessageChannel = "cross_session" | "agent";
-
-export interface PeerMessageView {
-  channel: PeerMessageChannel;
-  senderAddress: string;
-  senderName: string | null;
-  senderMode: string | null;
-  /** The sender's display label: its name, else its address. */
-  label: string;
-}
-
-/**
- * Read a peer message — input another agent session sent straight to this one
- * — from a ``user_input`` event. Accepts only the v1 backend contract and
- * returns ``null`` otherwise, so the caller falls back to the plain bubble.
- */
-export function parsePeerMessage(event: EventRecord): PeerMessageView | null {
-  const metadata = event.metadata ?? {};
-  if (event.kind !== "user_input" || metadata.kind !== "peer_message") {
-    return null;
-  }
-  const payload = asRecord(metadata.peer_message);
-  if (!payload || payload.version !== 1) {
-    return null;
-  }
-  const channel = readString(payload, "channel");
-  const senderAddress = readString(payload, "sender_address");
-  if ((channel !== "cross_session" && channel !== "agent") || !senderAddress) {
-    return null;
-  }
-  const senderName = readString(payload, "sender_name") || null;
-  return {
-    channel,
-    senderAddress,
-    senderName,
-    senderMode: readString(payload, "sender_mode") || null,
-    label: senderName ?? senderAddress,
   };
 }
 

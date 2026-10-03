@@ -20,9 +20,9 @@ Key invariants (all verified against real transcripts in Phase 0):
   normalized into a standalone SYSTEM_NOTE task-notification event; context-window
   summaries beginning with "This session is being continued" are still dropped.
 - A peer message (another Claude session's or an agent's) surfaces once as a
-  ``peer_message`` USER_INPUT from whichever record is tailed first; its
+  ``message`` task notification from whichever record is tailed first; its
   delivered ``user`` record starts a turn, so it always sets RUNNING. A subagent
-  hand-back is buffered for its task-notification card instead.
+  hand-back is buffered for its agent task notification instead.
 - A manual ``/compact`` produces only a ``compact_boundary`` system record and
   an injected continuation summary, with no terminal assistant record, so a
   synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
@@ -43,6 +43,7 @@ from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
+    build_peer_message_metadata,
     build_task_notification_metadata,
     classify_injected_user_turn,
     extract_created_task_id,
@@ -50,7 +51,6 @@ from waypoint.backends.claude_code.normalize import (
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
-    peer_message_from_parsed,
     sent_user_file_paths,
     starts_with_peer_element,
     stringify_tool_result,
@@ -60,7 +60,6 @@ from waypoint.backends.diff_preview import (
     build_preview,
     files_from_claude_tool_result,
 )
-from waypoint.backends.peer_messages import peer_message_event
 from waypoint.schemas import EventKind, SessionStatus
 
 FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
@@ -487,9 +486,13 @@ class TranscriptNormalizer:
         ]
 
     def _peer_message_events(
-        self, content: str, operation: str, status: SessionStatus | None
+        self,
+        content: str,
+        operation: str,
+        record_uuid: str | None,
+        status: SessionStatus | None,
     ) -> list[NormalizedEvent]:
-        """Surface a peer message once across its records.
+        """Surface a peer message once, as a ``message`` task notification.
 
         ``operation`` is the queue operation (``enqueue``/``remove``) or ``user``
         for a delivered record, which alone carries ``status``: it starts a turn,
@@ -506,16 +509,7 @@ class TranscriptNormalizer:
             else []
         )
         if parsed is None:
-            if operation != "user":
-                # Its twins differ outside the element, so with no parsed element
-                # there is no key to show it once; only the delivered copy shows.
-                return []
-            # Unparsable but delivered: keep the raw text visible, as import does.
-            return [
-                NormalizedEvent(
-                    kind=EventKind.USER_INPUT, text=content, metadata={}, status=status
-                )
-            ]
+            return status_only
         if parsed.is_handback:
             # The report renders in the task card of the notification that
             # follows; its task-id is the sender id.
@@ -529,10 +523,15 @@ class TranscriptNormalizer:
             return []
         if operation == "enqueue":
             self._queued_peer_messages[key] += 1
-        text, metadata = peer_message_event(peer_message_from_parsed(parsed))
+        text, metadata = build_peer_message_metadata(
+            parsed,
+            record_uuid=record_uuid,
+            allow_output_capture=True,
+            capture_enabled=self._capture_enabled,
+        )
         return [
             NormalizedEvent(
-                kind=EventKind.USER_INPUT, text=text, metadata=metadata, status=status
+                kind=EventKind.SYSTEM_NOTE, text=text, metadata=metadata, status=status
             )
         ]
 
@@ -546,7 +545,9 @@ class TranscriptNormalizer:
         if operation not in ("enqueue", "remove") or not isinstance(content, str):
             return []
         if starts_with_peer_element(content):
-            return self._peer_message_events(content, operation, None)
+            return self._peer_message_events(
+                content, operation, record.get("uuid"), None
+            )
         if operation != "enqueue" or "<task-notification>" not in content:
             return []
         return self._task_notification_events(content, record.get("uuid"), None)
@@ -561,7 +562,9 @@ class TranscriptNormalizer:
                 content, record.get("uuid"), SessionStatus.RUNNING
             )
         if injected == "peer_message" and isinstance(content, str):
-            return self._peer_message_events(content, "user", SessionStatus.RUNNING)
+            return self._peer_message_events(
+                content, "user", record.get("uuid"), SessionStatus.RUNNING
+            )
         if injected == "continuation":
             return []
 

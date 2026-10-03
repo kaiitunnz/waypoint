@@ -28,11 +28,9 @@ import {
   isModelSwitchEvent,
   normalizeToolName,
   parseEvent,
-  parsePeerMessage,
   parseTaskNotification,
   planTextForEvent,
   type EventDiffPreview,
-  type PeerMessageView,
   type TaskNotificationKind,
   type TaskNotificationView,
 } from "@/lib/events";
@@ -209,10 +207,6 @@ function CodexCard({
       if (event.metadata?.kind === "ask_user_question_answer") {
         return <AskAnswerSummaryCard event={event} />;
       }
-      const peer = parsePeerMessage(event);
-      if (peer) {
-        return <PeerMessageCard event={event} peer={peer} />;
-      }
       return <UserMessageBubble event={event} />;
     }
     case "agent_output":
@@ -350,57 +344,6 @@ function UserMessageBubble({ event }: { event: EventRecord }) {
         <CopyMessageButton text={event.text} />
       </div>
     </article>
-  );
-}
-
-/** The first non-empty line of a markdown body as plain text. */
-function firstLineOf(text: string): string {
-  const line = text.split("\n").find((candidate) => candidate.trim()) ?? "";
-  return line
-    .trim()
-    .replace(/^(?:#{1,6}|>|[-*+]|\d+[.)])\s+/, "")
-    .replace(/[`*_]+/g, "");
-}
-
-function PeerMessageCard({
-  event,
-  peer,
-}: {
-  event: EventRecord;
-  peer: PeerMessageView;
-}) {
-  const senderTitle = peer.senderMode
-    ? `${peer.senderAddress} (${peer.senderMode})`
-    : peer.senderAddress;
-  const headline = firstLineOf(event.text);
-  return (
-    <details
-      className="panel transcript codex task-notification peer-message"
-      aria-label={`Message from ${peer.label}`}
-    >
-      <summary className="transcript-summary">
-        <div className="transcript-role">
-          <span className="tool-glyph peer" aria-hidden>
-            ↘
-          </span>
-          <span className="tool-name peer-message-sender" title={senderTitle}>
-            {peer.label}
-          </span>
-          <span className="task-note-summary" title={headline}>
-            {headline}
-          </span>
-          <span className="role-time">{formatTime(event.ts)}</span>
-        </div>
-      </summary>
-      <div className="task-note-body">
-        <div className="peer-message-body">
-          <MarkdownMessage text={event.text} />
-        </div>
-        <div className="peer-message-actions">
-          <CopyMessageButton text={event.text} />
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -1034,6 +977,7 @@ const TASK_NOTIFICATION_BADGES: Record<
   agent: { glyph: "◇", variant: "task", label: "Agent" },
   monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
   background_command: { glyph: "›_", variant: "bash", label: "Command" },
+  message: { glyph: "↘", variant: "default", label: "Message" },
   unknown: { glyph: "⁂", variant: "default", label: "Task" },
 };
 

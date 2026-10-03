@@ -255,32 +255,30 @@ def _peer_user(element: str, ts: str = "2026-04-29T15:47:13.000Z") -> dict:
     }
 
 
-def test_import_peer_message_matches_live_contract_and_dedupes() -> None:
+def test_import_peer_message_is_a_message_task_card_and_dedupes() -> None:
     records = [
         _queue_enqueue(_PEER_ELEMENT),
         {"type": "queue-operation", "operation": "dequeue"},
         _peer_user(_PEER_ELEMENT),
     ]
     [event] = convert_transcript_records("sess-1", records)
-    assert event.kind == EventKind.USER_INPUT
-    assert event.text == "PR is green."
+    assert event.kind == EventKind.SYSTEM_NOTE
     # Stamped at arrival (the enqueue), not delivery.
     assert event.ts == datetime(2026, 4, 29, 15, 47, 12, tzinfo=UTC)
-    assert event.metadata["kind"] == "peer_message"
-    assert event.metadata["peer_message"] == {
-        "version": 1,
-        "channel": "cross_session",
-        "sender_address": "uds:/run/cc/42.sock",
-        "sender_name": "peer-a",
-        "sender_mode": "prompting",
-    }
+    payload = event.metadata["task_notification"]
+    assert payload["kind"] == "message"
+    assert payload["summary"] == "Message from peer-a"
+    assert payload["result_preview"] == "PR is green."
 
 
 def test_import_removed_and_user_only_peer_messages_each_emit_once() -> None:
     removed = {**_queue_enqueue(_PEER_ELEMENT), "operation": "remove"}
     records = [_queue_enqueue(_PEER_ELEMENT), removed, _peer_user(_PEER_ELEMENT)]
     events = convert_transcript_records("sess-1", records)
-    assert [e.kind for e in events] == [EventKind.USER_INPUT, EventKind.USER_INPUT]
+    assert [e.metadata["task_notification"]["kind"] for e in events] == [
+        "message",
+        "message",
+    ]
 
 
 def test_import_quoted_peer_element_stays_plain_human_text() -> None:
@@ -293,7 +291,6 @@ def test_import_quoted_peer_element_stays_plain_human_text() -> None:
     [event] = convert_transcript_records("sess-1", [record])
     assert event.kind == EventKind.USER_INPUT
     assert event.text == quoting
-    assert "kind" not in event.metadata
 
 
 def test_convert_transcript_records_preserves_source_timestamps() -> None:
@@ -486,16 +483,3 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert [r.record_id for r in token_records] == ["msg1", "msg2"]
     assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
     assert all(r.effort is None for r in token_records)
-
-
-def test_import_unparsable_peer_record_keeps_raw_text() -> None:
-    record = {
-        "type": "user",
-        "timestamp": "2026-04-29T15:47:13.000Z",
-        "origin": {"kind": "peer"},
-        "message": {"content": "Another Claude session sent a message:\n<odd/>"},
-    }
-    [event] = convert_transcript_records("sess-1", [record])
-    assert event.kind == EventKind.USER_INPUT
-    assert "<odd/>" in event.text
-    assert "kind" not in event.metadata

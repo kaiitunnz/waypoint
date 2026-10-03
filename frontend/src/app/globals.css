@@ -18,7 +18,6 @@
   --success: #6cc99a;
   --todo-glyph: #c8a3eb;
   --skill-glyph: #d98fb5;
-  --peer: #a99bf0;
   /* Telemetry categorical series (token categories, backend/model/repo/session
    * groups). Values are the dataviz skill's validated 8-hue reference set,
    * fixed order — never cycled or reassigned by value. Status meaning
@@ -87,7 +86,6 @@ html[data-theme="light"] {
   --success: #257a50;
   --todo-glyph: #7040b0;
   --skill-glyph: #a83f78;
-  --peer: #5b47b5;
   --tm-series-1: #2a78d6;
   --tm-series-2: #1baf7a;
   --tm-series-3: #eda100;
@@ -8446,37 +8444,6 @@ details.transcript.codex.task-notification > summary .transcript-role {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-/* A peer message: input another agent session sent straight to this one,
- * collapsed like a task card. */
-.transcript.codex.task-notification .tool-glyph.peer {
-  color: var(--peer);
-  border-color: color-mix(in srgb, var(--peer) 32%, var(--line));
-}
-
-/* The sender names the card, so it keeps its width over the summary. */
-.transcript.codex.task-notification .peer-message-sender {
-  flex: 0 0 auto;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--peer);
-}
-
-.peer-message-body {
-  max-height: 320px;
-  overflow: auto;
-  padding: 9px 11px;
-  background: var(--bg-card-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow-wrap: anywhere;
-}
-
-.peer-message-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 /* The summary line is the hero — it carries "Agent … finished", the monitor

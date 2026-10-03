@@ -63,9 +63,8 @@ def turns_to_events(
 ) -> list[EventRecord]:
     """Replay a Codex thread's turns into ``EventRecord``s in sequence order.
 
-    ``subagent_reports`` maps where a subagent's report lives to the report,
-    read by the caller from the child thread. A task card whose id was already replayed is
-    skipped.
+    ``subagent_reports`` maps each report source to its report. A task card
+    whose id was already replayed is skipped.
 
     Async questions left unanswered before the final turn get a closure note;
     the final turn's stay open because it may have ended waiting on the answer.

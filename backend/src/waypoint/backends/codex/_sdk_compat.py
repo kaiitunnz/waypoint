@@ -63,7 +63,7 @@ _TOLERATED_ACTIVITY_KIND = "completed"
 _REROUTING_SENTINEL = "_waypoint_ended_turn_rerouting"
 _ENDED_TURNS_ATTR = "_waypoint_ended_turns"
 # Ended turns remembered per client; a late notification for an older one is
-# dropped as before.
+# dropped.
 _ENDED_TURNS_LIMIT = 256
 
 

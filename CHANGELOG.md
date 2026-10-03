@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.26.0](https://github.com/kaiitunnz/waypoint/compare/v0.25.0...v0.26.0) (2026-10-03)
+
+
+### Features
+
+* add a pending-question dock and per-question cancellation ([#496](https://github.com/kaiitunnz/waypoint/issues/496)) ([d4c1625](https://github.com/kaiitunnz/waypoint/commit/d4c162529f9081230aa34c9ac472c7df29b115c5))
+* answer Codex async questions and send steers without waiting ([#498](https://github.com/kaiitunnz/waypoint/issues/498)) ([e4884e0](https://github.com/kaiitunnz/waypoint/commit/e4884e05b82ef98ea6720bbaeed6e8579a53cd85))
+* cover every Codex item and notification type ([#500](https://github.com/kaiitunnz/waypoint/issues/500)) ([7c61587](https://github.com/kaiitunnz/waypoint/commit/7c61587cc8e051a18b34911b07e3c35e4b1130ee))
+* show Claude peer messages as task notifications and mark their turns ([#502](https://github.com/kaiitunnz/waypoint/issues/502)) ([54b0df6](https://github.com/kaiitunnz/waypoint/commit/54b0df6405ae51ccf385b8d34569cdcd1506ea4d))
+* show Codex subagents as task cards with their reports ([#501](https://github.com/kaiitunnz/waypoint/issues/501)) ([ff4b7d2](https://github.com/kaiitunnz/waypoint/commit/ff4b7d2aae90e5d57fc1ccb6e3c92401a3d134d3))
+
+
+### Bug Fixes
+
+* keep Codex sessions running through retryable stream errors ([#499](https://github.com/kaiitunnz/waypoint/issues/499)) ([d477239](https://github.com/kaiitunnz/waypoint/commit/d4772398384e940657363dd361b23d15da68f044))
+
 ## [0.25.0](https://github.com/kaiitunnz/waypoint/compare/v0.24.2...v0.25.0) (2026-10-01)
 
 

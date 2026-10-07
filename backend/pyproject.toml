@@ -21,7 +21,7 @@ dependencies = [
   "typer>=0.27.2",
   "tzdata>=2026.4",
   "uvicorn>=0.54.0",
-  "websockets>=17.1",
+  "websockets>=17.2",
 ]
 
 [dependency-groups]

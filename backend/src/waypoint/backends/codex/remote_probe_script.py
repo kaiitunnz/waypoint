@@ -2,9 +2,8 @@
 
 Designed to be piped to ``python3 -`` over SSH on a remote launch
 target. First tries the OAuth path (``~/.codex/auth.json`` →
-``chatgpt.com/backend-api/wham/usage``), reading the file as-is: the
-remote Codex CLI owns token rotation, and refreshing here without
-writing back would invalidate its refresh token. If that yields nothing,
+``chatgpt.com/backend-api/wham/usage``), using the token as stored: the
+remote Codex CLI owns its rotation. If that yields nothing,
 spawns ``codex -s read-only -a never`` with a local PTY on the
 remote, drives ``/status``, and emits the captured TUI output for the
 backend to parse with ``parse_codex_status``.
@@ -35,7 +34,7 @@ import signal
 import subprocess
 import sys
 import time
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 try:
@@ -163,13 +162,10 @@ def fetch_usage(credentials, usage_url):
     request = Request(usage_url, method="GET", headers=headers)
     try:
         with urlopen(request, timeout=HTTP_TIMEOUT) as response:
-            status = getattr(response, "status", 200)
-            if status != 200:
-                return None, "HTTP " + str(status)
             return json.loads(response.read().decode("utf-8")), None
     except HTTPError as exc:
         return None, "HTTP " + str(exc.code)
-    except (URLError, OSError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return None, repr(exc)
 
 
@@ -254,10 +250,10 @@ def main():
     extra = {"oauth_error": oauth_error} if oauth_error else {}
     status_text = run_codex_status_pty()
     if status_text and status_text.strip():
-        emit(dict({"status_text": status_text}, **extra))
+        emit({"status_text": status_text, **extra})
         return
 
-    emit(dict({"error": "no_data"}, **extra))
+    emit({"error": "no_data", **extra})
 
 
 if __name__ == "__main__":

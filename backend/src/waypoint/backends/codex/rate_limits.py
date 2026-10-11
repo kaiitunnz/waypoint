@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import errno
 import importlib.resources
@@ -17,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 try:
@@ -42,17 +40,10 @@ _PERCENT_USED_RE = re.compile(r"(?i)(\d{1,3}(?:\.\d+)?)\s*%\s*used")
 _CREDITS_RE = re.compile(r"(?i)credits:\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
 
 
-# Read-only view of auth.json. The Codex CLI/app-server own token rotation;
-# refreshing here without writing back would rotate the refresh token out from
-# under them, so the file is re-read on every probe instead.
 @dataclass(frozen=True)
 class _CodexOAuthCredentials:
     access_token: str
     account_id: str | None
-
-
-class _UsageFetchError(Exception):
-    pass
 
 
 def parse_codex_status(
@@ -281,9 +272,14 @@ async def _probe_codex_oauth_usage(
         response = await asyncio.wait_for(
             asyncio.to_thread(_fetch_url, request), timeout=timeout_seconds
         )
-    except (_UsageFetchError, TimeoutError) as exc:
+    except OSError as exc:
+        reason = (
+            f"HTTP {exc.code}"
+            if isinstance(exc, HTTPError)
+            else str(exc) or "timed out"
+        )
         log.warning(
-            f"codex OAuth usage request failed ({str(exc) or 'timed out'})",
+            f"codex OAuth usage request failed ({reason})",
             extra={"usage_url": usage_url},
         )
         return None
@@ -360,9 +356,8 @@ def parse_codex_usage_payload(
 
 
 def _collect_codex_windows(raw: dict[str, Any]) -> list[UsageWindow]:
-    # Window ids are telemetry identity as well as UI keys, so windows from
-    # secondary containers are namespaced by that container's name; only an
-    # additional limit with no name falls back to its position.
+    # Window ids are telemetry identity and UI keys, so windows outside the
+    # top-level rate_limit are prefixed with their container's name.
     groups: dict[tuple[str, ...], int] = {(): 0}
     windows: list[tuple[int, int, UsageWindow]] = []
     for path, candidate in _iter_window_candidates(raw):
@@ -381,7 +376,7 @@ def _collect_codex_windows(raw: dict[str, Any]) -> list[UsageWindow]:
             )
         windows.append((group, sort_key, window))
     windows.sort(key=lambda item: (item[0], item[1], item[2].label, item[2].id))
-    return _dedupe_window_ids([window for _, _, window in windows])
+    return [window for _, _, window in windows]
 
 
 def _codex_window_container(
@@ -390,7 +385,7 @@ def _codex_window_container(
     match path:
         case ("code_review_rate_limit", *_):
             return path[:1], "Code review"
-        case ("additional_rate_limits", index, *_) if index.isdigit() and isinstance(
+        case ("additional_rate_limits", index, *_) if isinstance(
             entries := raw.get("additional_rate_limits"), list
         ):
             entry = entries[int(index)]
@@ -401,24 +396,6 @@ def _codex_window_container(
                 )
             return path[:2], name or f"Limit {int(index) + 1}"
     return (), None
-
-
-def _dedupe_window_ids(windows: list[UsageWindow]) -> list[UsageWindow]:
-    seen: set[str] = set()
-    unique: list[UsageWindow] = []
-    for window in windows:
-        window_id = window.id
-        suffix = 2
-        while window_id in seen:
-            window_id = f"{window.id}-{suffix}"
-            suffix += 1
-        seen.add(window_id)
-        unique.append(
-            window
-            if window_id == window.id
-            else window.model_copy(update={"id": window_id})
-        )
-    return unique
 
 
 def _slug(value: str) -> str:
@@ -550,18 +527,12 @@ def _parse_epoch_datetime(value: Any) -> datetime | None:
 
 
 def _fetch_url(request: Request) -> bytes:
-    try:
-        with urlopen(request, timeout=30) as response:
-            status = getattr(response, "status", 200)
-            if status != 200:
-                raise _UsageFetchError(f"HTTP {status}")
-            return response.read()
-    except HTTPError as exc:
-        raise _UsageFetchError(f"HTTP {exc.code}") from exc
-    except (URLError, OSError) as exc:
-        raise _UsageFetchError(repr(exc)) from exc
+    with urlopen(request, timeout=30) as response:
+        return response.read()
 
 
+# auth.json is re-read on every probe: the Codex CLI and app-server rotate its
+# tokens, so a cached copy goes stale.
 def _load_oauth_credentials(env: dict[str, str]) -> _CodexOAuthCredentials | None:
     path = _codex_auth_path(env)
     if not path.is_file():

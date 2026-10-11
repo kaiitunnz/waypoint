@@ -1,6 +1,8 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from email.message import Message
+from urllib.error import HTTPError
 
 import pytest
 
@@ -24,7 +26,6 @@ from waypoint.backends.codex.rate_limits import (
     _probe_codex_oauth_usage,
     _resolve_usage_url,
     _run_codex_status,
-    _UsageFetchError,
     parse_codex_status,
     parse_codex_usage_payload,
     probe_codex_usage_remote,
@@ -174,7 +175,7 @@ def test_codex_oauth_probe_logs_http_status_on_failure(
     _write_codex_auth(codex_home, "expired-token")
 
     def _fake_fetch(request):
-        raise _UsageFetchError("HTTP 401")
+        raise HTTPError(request.full_url, 401, "Unauthorized", Message(), None)
 
     monkeypatch.setattr(codex_rate_limits, "_fetch_url", _fake_fetch)
     with caplog.at_level("WARNING", logger="waypoint.codex.rate_limits"):
@@ -693,22 +694,6 @@ def test_parse_codex_usage_payload_tolerates_non_list_additional_limits() -> Non
     )
     assert snapshot is not None
     assert [w.id for w in snapshot.windows] == ["five-hour"]
-
-
-def test_parse_codex_usage_payload_dedupes_colliding_window_ids() -> None:
-    snapshot = parse_codex_usage_payload(
-        {
-            "rate_limit": {
-                "primary_window": {"used_percent": 10, "limit_window_seconds": 604800},
-                "secondary_window": {
-                    "used_percent": 20,
-                    "limit_window_seconds": 604800,
-                },
-            }
-        }
-    )
-    assert snapshot is not None
-    assert [w.id for w in snapshot.windows] == ["weekly", "weekly-2"]
 
 
 def test_parse_codex_usage_payload_emits_empty_snapshot_for_education_plan() -> None:

@@ -681,6 +681,20 @@ def test_parse_codex_usage_payload_names_windows_by_container() -> None:
     ]
 
 
+def test_parse_codex_usage_payload_tolerates_non_list_additional_limits() -> None:
+    snapshot = parse_codex_usage_payload(
+        {
+            "additional_rate_limits": {
+                "sol": {
+                    "primary_window": {"used_percent": 5, "limit_window_seconds": 18000}
+                }
+            }
+        }
+    )
+    assert snapshot is not None
+    assert [w.id for w in snapshot.windows] == ["five-hour"]
+
+
 def test_parse_codex_usage_payload_dedupes_colliding_window_ids() -> None:
     snapshot = parse_codex_usage_payload(
         {

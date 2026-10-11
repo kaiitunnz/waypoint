@@ -361,8 +361,8 @@ def parse_codex_usage_payload(
 
 def _collect_codex_windows(raw: dict[str, Any]) -> list[UsageWindow]:
     # Window ids are telemetry identity as well as UI keys, so windows from
-    # secondary containers are namespaced by that container's name rather than
-    # by position.
+    # secondary containers are namespaced by that container's name; only an
+    # additional limit with no name falls back to its position.
     groups: dict[tuple[str, ...], int] = {(): 0}
     windows: list[tuple[int, int, UsageWindow]] = []
     for path, candidate in _iter_window_candidates(raw):
@@ -390,9 +390,10 @@ def _codex_window_container(
     match path:
         case ("code_review_rate_limit", *_):
             return path[:1], "Code review"
-        case ("additional_rate_limits", index, *_):
-            entries = raw.get("additional_rate_limits")
-            entry = entries[int(index)] if isinstance(entries, list) else None
+        case ("additional_rate_limits", index, *_) if index.isdigit() and isinstance(
+            entries := raw.get("additional_rate_limits"), list
+        ):
+            entry = entries[int(index)]
             name = None
             if isinstance(entry, dict):
                 name = _string_value(entry, "limit_name", "limitName") or _string_value(

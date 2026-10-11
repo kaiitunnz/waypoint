@@ -37,30 +37,22 @@ _WINDOW_LABELS: dict[str, tuple[str, int]] = {
 _DEFAULT_CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/"
 _CHATGPT_USAGE_PATH = "/wham/usage"
 _CODEX_USAGE_PATH = "/api/codex/usage"
-_CODEX_OAUTH_REFRESH_ENDPOINT = "https://auth.openai.com/oauth/token"
-_CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _PERCENT_LEFT_RE = re.compile(r"(?i)(\d{1,3}(?:\.\d+)?)\s*%\s*left")
 _PERCENT_USED_RE = re.compile(r"(?i)(\d{1,3}(?:\.\d+)?)\s*%\s*used")
 _CREDITS_RE = re.compile(r"(?i)credits:\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
-_CACHED_OAUTH_CREDENTIALS: _CodexOAuthCredentials | None = None
-_CACHED_OAUTH_ACCOUNT_ID: str | None = None
 
 
+# Read-only view of auth.json. The Codex CLI/app-server own token rotation;
+# refreshing here without writing back would rotate the refresh token out from
+# under them, so the file is re-read on every probe instead.
 @dataclass(frozen=True)
 class _CodexOAuthCredentials:
     access_token: str
-    refresh_token: str
     account_id: str | None
-    last_refresh: datetime | None
 
-    @property
-    def needs_refresh(self) -> bool:
-        if not self.refresh_token:
-            return False
-        if self.last_refresh is None:
-            return True
-        eight_days = 8 * 24 * 60 * 60
-        return (datetime.now(UTC) - self.last_refresh).total_seconds() > eight_days
+
+class _UsageFetchError(Exception):
+    pass
 
 
 def parse_codex_status(
@@ -181,6 +173,9 @@ async def probe_codex_usage_remote(
     )
     if payload is None:
         return None
+    oauth_error = payload.get("oauth_error")
+    if isinstance(oauth_error, str) and oauth_error:
+        log.warning(f"codex remote OAuth usage request failed ({oauth_error})")
     error = payload.get("error")
     if error == "no_data":
         log.warning("codex remote rate-limit probe yielded no data")
@@ -268,24 +263,9 @@ async def _probe_codex_oauth_usage(
         log.warning("codex OAuth credentials not found")
         return None
 
-    global _CACHED_OAUTH_ACCOUNT_ID
-    global _CACHED_OAUTH_CREDENTIALS
-    if (
-        _CACHED_OAUTH_CREDENTIALS is not None
-        and credentials.account_id is not None
-        and _CACHED_OAUTH_ACCOUNT_ID == credentials.account_id
-    ):
-        credentials = _CACHED_OAUTH_CREDENTIALS
-
-    if credentials.needs_refresh:
-        refreshed = await _refresh_oauth_credentials(credentials)
-        if refreshed is not None:
-            credentials = refreshed
-            _CACHED_OAUTH_CREDENTIALS = refreshed
-            _CACHED_OAUTH_ACCOUNT_ID = refreshed.account_id
-
+    usage_url = _resolve_usage_url(env)
     request = Request(
-        _resolve_usage_url(env),
+        usage_url,
         method="GET",
         headers={
             "Authorization": f"Bearer {credentials.access_token}",
@@ -297,13 +277,14 @@ async def _probe_codex_oauth_usage(
     if credentials.account_id:
         request.add_header("ChatGPT-Account-Id", credentials.account_id)
 
-    response = await asyncio.wait_for(
-        asyncio.to_thread(_fetch_url, request), timeout=timeout_seconds
-    )
-    if response is None:
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_url, request), timeout=timeout_seconds
+        )
+    except (_UsageFetchError, TimeoutError) as exc:
         log.warning(
-            "codex OAuth usage request failed before receiving a response",
-            extra={"usage_url": _resolve_usage_url(env)},
+            f"codex OAuth usage request failed ({str(exc) or 'timed out'})",
+            extra={"usage_url": usage_url},
         )
         return None
     snapshot = parse_codex_usage_payload(
@@ -518,55 +499,17 @@ def _parse_epoch_datetime(value: Any) -> datetime | None:
         return None
 
 
-def _fetch_url(request: Request) -> bytes | None:
+def _fetch_url(request: Request) -> bytes:
     try:
         with urlopen(request, timeout=30) as response:
-            if getattr(response, "status", 200) != 200:
-                return None
+            status = getattr(response, "status", 200)
+            if status != 200:
+                raise _UsageFetchError(f"HTTP {status}")
             return response.read()
-    except (HTTPError, URLError, OSError):
-        return None
-
-
-async def _refresh_oauth_credentials(
-    credentials: _CodexOAuthCredentials,
-) -> _CodexOAuthCredentials | None:
-    if not credentials.refresh_token:
-        return None
-
-    body = {
-        "client_id": _CODEX_OAUTH_CLIENT_ID,
-        "grant_type": "refresh_token",
-        "refresh_token": credentials.refresh_token,
-        "scope": "openid profile email",
-    }
-    request = Request(
-        _CODEX_OAUTH_REFRESH_ENDPOINT,
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    response = await asyncio.to_thread(_fetch_url, request)
-    if response is None:
-        return None
-    try:
-        raw = json.loads(response.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    access_token = raw.get("access_token")
-    if not isinstance(access_token, str) or not access_token:
-        return None
-    refresh_token = raw.get("refresh_token")
-    if not isinstance(refresh_token, str) or not refresh_token:
-        refresh_token = credentials.refresh_token
-    return _CodexOAuthCredentials(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        account_id=credentials.account_id,
-        last_refresh=datetime.now(UTC),
-    )
+    except HTTPError as exc:
+        raise _UsageFetchError(f"HTTP {exc.code}") from exc
+    except (URLError, OSError) as exc:
+        raise _UsageFetchError(repr(exc)) from exc
 
 
 def _load_oauth_credentials(env: dict[str, str]) -> _CodexOAuthCredentials | None:
@@ -583,29 +526,18 @@ def _load_oauth_credentials(env: dict[str, str]) -> _CodexOAuthCredentials | Non
 
     api_key = payload.get("OPENAI_API_KEY")
     if isinstance(api_key, str) and api_key.strip():
-        return _CodexOAuthCredentials(
-            access_token=api_key.strip(),
-            refresh_token="",
-            account_id=None,
-            last_refresh=None,
-        )
+        return _CodexOAuthCredentials(access_token=api_key.strip(), account_id=None)
 
     tokens = payload.get("tokens")
     if not isinstance(tokens, dict):
         return None
     access_token = _string_value(tokens, "access_token", "accessToken")
-    refresh_token = _string_value(tokens, "refresh_token", "refreshToken") or ""
     account_id = _string_value(tokens, "account_id", "accountId")
     if account_id is None:
         account_id = _string_value(payload, "chatgpt_account_id", "chatgptAccountId")
     if not access_token:
         return None
-    return _CodexOAuthCredentials(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        account_id=account_id,
-        last_refresh=_parse_last_refresh(payload.get("last_refresh")),
-    )
+    return _CodexOAuthCredentials(access_token=access_token, account_id=account_id)
 
 
 def _codex_auth_path(env: dict[str, str]) -> Path:
@@ -695,18 +627,6 @@ def _string_value(
     return None
 
 
-def _parse_last_refresh(raw: Any) -> datetime | None:
-    if not isinstance(raw, str) or not raw:
-        return None
-    text = raw.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
-
-
 def _run_codex_status(
     binary: str,
     cwd: str,
@@ -719,7 +639,7 @@ def _run_codex_status(
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
-            [binary, "-s", "read-only", "-a", "untrusted"],
+            [binary, "-s", "read-only", "-a", "never"],
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,

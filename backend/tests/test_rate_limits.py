@@ -1,6 +1,8 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from email.message import Message
+from urllib.error import HTTPError
 
 import pytest
 
@@ -17,10 +19,13 @@ from waypoint.backends.claude_code.rate_limits import (
     probe_claude_usage_remote,
     probe_claude_usage_shared,
 )
+from waypoint.backends.codex import rate_limits as codex_rate_limits
 from waypoint.backends.codex.rate_limits import (
     _load_oauth_credentials,
     _oauth_snapshot_is_actionable,
+    _probe_codex_oauth_usage,
     _resolve_usage_url,
+    _run_codex_status,
     parse_codex_status,
     parse_codex_usage_payload,
     probe_codex_usage_remote,
@@ -108,9 +113,92 @@ def test_load_oauth_credentials_reads_auth_json(
     creds = _load_oauth_credentials({"CODEX_HOME": str(codex_home)})
     assert creds is not None
     assert creds.access_token == "access-token"
-    assert creds.refresh_token == "refresh-token"
     assert creds.account_id == "account-123"
-    assert creds.last_refresh == datetime(2026, 5, 1, 12, 34, 56, tzinfo=UTC)
+
+
+def _write_codex_auth(codex_home, access_token: str) -> None:
+    (codex_home / "auth.json").write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": access_token,
+                    "refresh_token": "refresh-token",
+                    "account_id": "account-123",
+                },
+                "last_refresh": "2020-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_codex_oauth_probe_rereads_rotated_auth_json_and_never_refreshes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    requests = []
+
+    def _fake_fetch(request):
+        requests.append(request)
+        return json.dumps(
+            {
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 30,
+                        "limit_window_seconds": 18000,
+                    }
+                }
+            }
+        ).encode()
+
+    monkeypatch.setattr(codex_rate_limits, "_fetch_url", _fake_fetch)
+    env = {"CODEX_HOME": str(codex_home)}
+
+    _write_codex_auth(codex_home, "token-before-rotation")
+    assert asyncio.run(_probe_codex_oauth_usage(env)) is not None
+    _write_codex_auth(codex_home, "token-after-rotation")
+    assert asyncio.run(_probe_codex_oauth_usage(env)) is not None
+
+    assert [r.get_header("Authorization") for r in requests] == [
+        "Bearer token-before-rotation",
+        "Bearer token-after-rotation",
+    ]
+    assert all(r.full_url.endswith("/wham/usage") for r in requests)
+
+
+def test_codex_oauth_probe_logs_http_status_on_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    _write_codex_auth(codex_home, "expired-token")
+
+    def _fake_fetch(request):
+        raise HTTPError(request.full_url, 401, "Unauthorized", Message(), None)
+
+    monkeypatch.setattr(codex_rate_limits, "_fetch_url", _fake_fetch)
+    with caplog.at_level("WARNING", logger="waypoint.codex.rate_limits"):
+        snapshot = asyncio.run(
+            _probe_codex_oauth_usage({"CODEX_HOME": str(codex_home)})
+        )
+    assert snapshot is None
+    assert "codex OAuth usage request failed (HTTP 401)" in caplog.text
+
+
+def test_codex_status_fallback_uses_supported_approval_policy(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = []
+
+    def _fake_popen(argv, *args, **kwargs):
+        captured.append(argv)
+        raise OSError("not spawning in tests")
+
+    monkeypatch.setattr(codex_rate_limits.subprocess, "Popen", _fake_popen)
+    with pytest.raises(OSError):
+        _run_codex_status("codex", str(tmp_path), {}, 0.1)
+    assert captured == [["codex", "-s", "read-only", "-a", "never"]]
 
 
 def test_resolve_usage_url_prefers_chatgpt_backend_api(tmp_path) -> None:
@@ -559,6 +647,55 @@ def test_probe_claude_usage_surfaces_401_as_expired(
     ]
 
 
+def test_parse_codex_usage_payload_names_windows_by_container() -> None:
+    def _window(percent: int, seconds: int) -> dict[str, int]:
+        return {"used_percent": percent, "limit_window_seconds": seconds}
+
+    snapshot = parse_codex_usage_payload(
+        {
+            "rate_limit": {
+                "primary_window": _window(18, 18000),
+                "secondary_window": _window(21, 604800),
+            },
+            "code_review_rate_limit": {"primary_window": _window(3, 604800)},
+            "additional_rate_limits": [
+                {
+                    "limit_name": "GPT-6.1 Sol",
+                    "metered_feature": "codex_sol",
+                    "rate_limit": {
+                        "primary_window": _window(40, 18000),
+                        "secondary_window": _window(50, 604800),
+                    },
+                },
+                {"rate_limit": {"secondary_window": _window(60, 604800)}},
+            ],
+        }
+    )
+    assert snapshot is not None
+    assert [(w.id, w.label, w.used_percent) for w in snapshot.windows] == [
+        ("five-hour", "5h", 18.0),
+        ("weekly", "Weekly", 21.0),
+        ("code-review-weekly", "Code review Weekly", 3.0),
+        ("gpt-6-1-sol-five-hour", "GPT-6.1 Sol 5h", 40.0),
+        ("gpt-6-1-sol-weekly", "GPT-6.1 Sol Weekly", 50.0),
+        ("limit-2-weekly", "Limit 2 Weekly", 60.0),
+    ]
+
+
+def test_parse_codex_usage_payload_tolerates_non_list_additional_limits() -> None:
+    snapshot = parse_codex_usage_payload(
+        {
+            "additional_rate_limits": {
+                "sol": {
+                    "primary_window": {"used_percent": 5, "limit_window_seconds": 18000}
+                }
+            }
+        }
+    )
+    assert snapshot is not None
+    assert [w.id for w in snapshot.windows] == ["five-hour"]
+
+
 def test_parse_codex_usage_payload_emits_empty_snapshot_for_education_plan() -> None:
     snapshot = parse_codex_usage_payload(
         {
@@ -806,6 +943,30 @@ def test_probe_codex_usage_remote_returns_none_for_no_data(
     )
     snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
     assert snapshot is None
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"error": "no_data", "oauth_error": "HTTP 401"},
+        {"status_text": "5h limit: 12% used\n", "oauth_error": "HTTP 401"},
+    ],
+)
+def test_probe_codex_usage_remote_logs_oauth_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    result: dict[str, str],
+) -> None:
+    async def _fake_runner(launch_target, binary, timeout_seconds, launch_env=None):
+        return result
+
+    monkeypatch.setattr(
+        "waypoint.backends.codex.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    with caplog.at_level("WARNING", logger="waypoint.codex.rate_limits"):
+        asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
+    assert "codex remote OAuth usage request failed (HTTP 401)" in caplog.text
 
 
 def test_oauth_snapshot_is_actionable_recognizes_useful_data() -> None:

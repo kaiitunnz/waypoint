@@ -2,8 +2,9 @@
 
 Designed to be piped to ``python3 -`` over SSH on a remote launch
 target. First tries the OAuth path (``~/.codex/auth.json`` →
-``chatgpt.com/backend-api/wham/usage``). If that yields nothing,
-spawns ``codex -s read-only -a untrusted`` with a local PTY on the
+``chatgpt.com/backend-api/wham/usage``), using the token as stored: the
+remote Codex CLI owns its rotation. If that yields nothing,
+spawns ``codex -s read-only -a never`` with a local PTY on the
 remote, drives ``/status``, and emits the captured TUI output for the
 backend to parse with ``parse_codex_status``.
 
@@ -19,6 +20,9 @@ Output schema (always one line of JSON on stdout, ``\\n``-terminated):
     {"payload": {usage-json from server}, "usage_url": str}
     {"status_text": "..."}    # /status PTY scrape
     {"error": "no_data" | "internal", ...}
+
+A failed OAuth request adds ``"oauth_error": str`` to the
+``status_text`` and ``no_data`` shapes.
 """
 
 import json
@@ -30,7 +34,7 @@ import signal
 import subprocess
 import sys
 import time
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 try:
@@ -41,9 +45,7 @@ except ImportError:
 DEFAULT_CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/"
 CHATGPT_USAGE_PATH = "/wham/usage"
 CODEX_USAGE_PATH = "/api/codex/usage"
-OAUTH_REFRESH_ENDPOINT = "https://auth.openai.com/oauth/token"
-OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-HTTP_TIMEOUT = 25
+HTTP_TIMEOUT = 15
 CODEX_BIN_ENV = "WAYPOINT_REMOTE_PROBE_CODEX_BIN"
 STATUS_TIMEOUT = 8.0
 
@@ -92,11 +94,7 @@ def load_credentials():
 
     api_key = payload.get("OPENAI_API_KEY")
     if isinstance(api_key, str) and api_key.strip():
-        return {
-            "access_token": api_key.strip(),
-            "refresh_token": "",
-            "account_id": None,
-        }
+        return {"access_token": api_key.strip(), "account_id": None}
 
     tokens = payload.get("tokens")
     if not isinstance(tokens, dict):
@@ -107,11 +105,7 @@ def load_credentials():
     account_id = _string_value(tokens, "account_id", "accountId") or _string_value(
         payload, "chatgpt_account_id", "chatgptAccountId"
     )
-    return {
-        "access_token": access_token,
-        "refresh_token": _string_value(tokens, "refresh_token", "refreshToken") or "",
-        "account_id": account_id,
-    }
+    return {"access_token": access_token, "account_id": account_id}
 
 
 def _resolve_chatgpt_base_url():
@@ -156,48 +150,6 @@ def resolve_usage_url():
     return base + path
 
 
-def _post_json(url, payload, headers):
-    body = json.dumps(payload).encode("utf-8")
-    request = Request(url, data=body, method="POST", headers=headers)
-    try:
-        with urlopen(request, timeout=HTTP_TIMEOUT) as response:
-            if getattr(response, "status", 200) != 200:
-                return None
-            return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, OSError, json.JSONDecodeError, ValueError):
-        return None
-
-
-def refresh_credentials(credentials):
-    if not credentials.get("refresh_token"):
-        return credentials
-    refreshed = _post_json(
-        OAUTH_REFRESH_ENDPOINT,
-        {
-            "client_id": OAUTH_CLIENT_ID,
-            "grant_type": "refresh_token",
-            "refresh_token": credentials["refresh_token"],
-            "scope": "openid profile email",
-        },
-        {"Content-Type": "application/json"},
-    )
-    if not isinstance(refreshed, dict):
-        return credentials
-    access_token = refreshed.get("access_token")
-    if not isinstance(access_token, str) or not access_token:
-        return credentials
-    new_refresh = refreshed.get("refresh_token")
-    return {
-        "access_token": access_token,
-        "refresh_token": (
-            new_refresh
-            if isinstance(new_refresh, str) and new_refresh
-            else credentials["refresh_token"]
-        ),
-        "account_id": credentials.get("account_id"),
-    }
-
-
 def fetch_usage(credentials, usage_url):
     headers = {
         "Authorization": "Bearer " + credentials["access_token"],
@@ -210,11 +162,11 @@ def fetch_usage(credentials, usage_url):
     request = Request(usage_url, method="GET", headers=headers)
     try:
         with urlopen(request, timeout=HTTP_TIMEOUT) as response:
-            if getattr(response, "status", 200) != 200:
-                return None
-            return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, OSError, json.JSONDecodeError, ValueError):
-        return None
+            return json.loads(response.read().decode("utf-8")), None
+    except HTTPError as exc:
+        return None, "HTTP " + str(exc.code)
+    except (OSError, ValueError) as exc:
+        return None, repr(exc)
 
 
 def run_codex_status_pty(timeout_seconds=STATUS_TIMEOUT):
@@ -224,7 +176,7 @@ def run_codex_status_pty(timeout_seconds=STATUS_TIMEOUT):
     try:
         try:
             proc = subprocess.Popen(
-                [binary, "-s", "read-only", "-a", "untrusted"],
+                [binary, "-s", "read-only", "-a", "never"],
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
@@ -286,21 +238,22 @@ def run_codex_status_pty(timeout_seconds=STATUS_TIMEOUT):
 
 
 def main():
+    oauth_error = None
     credentials = load_credentials()
     if credentials is not None:
-        credentials = refresh_credentials(credentials)
         usage_url = resolve_usage_url()
-        payload = fetch_usage(credentials, usage_url)
+        payload, oauth_error = fetch_usage(credentials, usage_url)
         if payload is not None:
             emit({"payload": payload, "usage_url": usage_url})
             return
 
+    extra = {"oauth_error": oauth_error} if oauth_error else {}
     status_text = run_codex_status_pty()
     if status_text and status_text.strip():
-        emit({"status_text": status_text})
+        emit({"status_text": status_text, **extra})
         return
 
-    emit({"error": "no_data"})
+    emit({"error": "no_data", **extra})
 
 
 if __name__ == "__main__":

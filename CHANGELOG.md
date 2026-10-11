@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.1](https://github.com/kaiitunnz/waypoint/compare/v0.26.0...v0.26.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* read Codex usage credentials from auth.json on every probe ([#515](https://github.com/kaiitunnz/waypoint/issues/515)) ([9096ffc](https://github.com/kaiitunnz/waypoint/commit/9096ffc8522e849e9ce4d43387dd108d0a7c4214))
+* show the Codex compaction start in the Important view ([#503](https://github.com/kaiitunnz/waypoint/issues/503)) ([851cf1d](https://github.com/kaiitunnz/waypoint/commit/851cf1df5fb94d2aa4a21da0408f828178db6f9f))
+
 ## [0.26.0](https://github.com/kaiitunnz/waypoint/compare/v0.25.0...v0.26.0) (2026-10-03)
 
 

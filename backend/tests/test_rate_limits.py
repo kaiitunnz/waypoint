@@ -646,6 +646,57 @@ def test_probe_claude_usage_surfaces_401_as_expired(
     ]
 
 
+def test_parse_codex_usage_payload_names_windows_by_container() -> None:
+    def _window(percent: int, seconds: int) -> dict[str, int]:
+        return {"used_percent": percent, "limit_window_seconds": seconds}
+
+    snapshot = parse_codex_usage_payload(
+        {
+            "rate_limit": {
+                "primary_window": _window(18, 18000),
+                "secondary_window": _window(21, 604800),
+            },
+            "code_review_rate_limit": {"primary_window": _window(3, 604800)},
+            "additional_rate_limits": [
+                {
+                    "limit_name": "GPT-6.1 Sol",
+                    "metered_feature": "codex_sol",
+                    "rate_limit": {
+                        "primary_window": _window(40, 18000),
+                        "secondary_window": _window(50, 604800),
+                    },
+                },
+                {"rate_limit": {"secondary_window": _window(60, 604800)}},
+            ],
+        }
+    )
+    assert snapshot is not None
+    assert [(w.id, w.label, w.used_percent) for w in snapshot.windows] == [
+        ("five-hour", "5h", 18.0),
+        ("weekly", "Weekly", 21.0),
+        ("code-review-weekly", "Code review Weekly", 3.0),
+        ("gpt-6-1-sol-five-hour", "GPT-6.1 Sol 5h", 40.0),
+        ("gpt-6-1-sol-weekly", "GPT-6.1 Sol Weekly", 50.0),
+        ("limit-2-weekly", "Limit 2 Weekly", 60.0),
+    ]
+
+
+def test_parse_codex_usage_payload_dedupes_colliding_window_ids() -> None:
+    snapshot = parse_codex_usage_payload(
+        {
+            "rate_limit": {
+                "primary_window": {"used_percent": 10, "limit_window_seconds": 604800},
+                "secondary_window": {
+                    "used_percent": 20,
+                    "limit_window_seconds": 604800,
+                },
+            }
+        }
+    )
+    assert snapshot is not None
+    assert [w.id for w in snapshot.windows] == ["weekly", "weekly-2"]
+
+
 def test_parse_codex_usage_payload_emits_empty_snapshot_for_education_plan() -> None:
     snapshot = parse_codex_usage_payload(
         {

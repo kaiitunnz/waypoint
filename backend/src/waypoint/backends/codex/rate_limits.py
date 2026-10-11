@@ -360,19 +360,68 @@ def parse_codex_usage_payload(
 
 
 def _collect_codex_windows(raw: dict[str, Any]) -> list[UsageWindow]:
-    windows: list[tuple[int, UsageWindow]] = []
+    # Window ids are telemetry identity as well as UI keys, so windows from
+    # secondary containers are namespaced by that container's name rather than
+    # by position.
+    groups: dict[tuple[str, ...], int] = {(): 0}
+    windows: list[tuple[int, int, UsageWindow]] = []
     for path, candidate in _iter_window_candidates(raw):
         window = _parse_codex_window(candidate, path=path)
         if window is None:
             continue
-        sort_key = 2
-        if window.label == "5h":
-            sort_key = 0
-        elif window.label == "Weekly":
-            sort_key = 1
-        windows.append((sort_key, window))
-    windows.sort(key=lambda item: (item[0], item[1].label, item[1].id))
-    return [window for _, window in windows]
+        container, name = _codex_window_container(raw, path)
+        group = groups.setdefault(container, len(groups))
+        sort_key = {"5h": 0, "Weekly": 1}.get(window.label, 2)
+        if name is not None:
+            window = window.model_copy(
+                update={
+                    "id": f"{_slug(name)}-{window.id}",
+                    "label": f"{name} {window.label}",
+                }
+            )
+        windows.append((group, sort_key, window))
+    windows.sort(key=lambda item: (item[0], item[1], item[2].label, item[2].id))
+    return _dedupe_window_ids([window for _, _, window in windows])
+
+
+def _codex_window_container(
+    raw: dict[str, Any], path: tuple[str, ...]
+) -> tuple[tuple[str, ...], str | None]:
+    match path:
+        case ("code_review_rate_limit", *_):
+            return path[:1], "Code review"
+        case ("additional_rate_limits", index, *_):
+            entries = raw.get("additional_rate_limits")
+            entry = entries[int(index)] if isinstance(entries, list) else None
+            name = None
+            if isinstance(entry, dict):
+                name = _string_value(entry, "limit_name", "limitName") or _string_value(
+                    entry, "metered_feature", "meteredFeature"
+                )
+            return path[:2], name or f"Limit {int(index) + 1}"
+    return (), None
+
+
+def _dedupe_window_ids(windows: list[UsageWindow]) -> list[UsageWindow]:
+    seen: set[str] = set()
+    unique: list[UsageWindow] = []
+    for window in windows:
+        window_id = window.id
+        suffix = 2
+        while window_id in seen:
+            window_id = f"{window.id}-{suffix}"
+            suffix += 1
+        seen.add(window_id)
+        unique.append(
+            window
+            if window_id == window.id
+            else window.model_copy(update={"id": window_id})
+        )
+    return unique
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "limit"
 
 
 def _iter_window_candidates(

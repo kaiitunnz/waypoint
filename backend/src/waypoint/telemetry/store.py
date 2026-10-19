@@ -129,6 +129,7 @@ class TelemetryStore:
     def __init__(self, conn: sqlite3.Connection, lock: threading.RLock) -> None:
         self._conn = conn
         self._lock = lock
+        self._instance_generation = 0
 
     def init_schema(self) -> None:
         with self._lock:
@@ -532,9 +533,19 @@ class TelemetryStore:
 
     # ── instance health & capacity (PRD FR-4) ─────────────────────────────
 
-    def set_instance_current(self, payload_json: str) -> None:
+    def instance_snapshot_generation(self) -> int:
+        """Capture before dispatching collection so deletion can invalidate it."""
+        with self._lock:
+            return self._instance_generation
+
+    def set_instance_current(
+        self, payload_json: str, *, generation: int | None = None
+    ) -> None:
         """Cache the current instance-health snapshot (a single latest slot)."""
-        self.set_meta(_INSTANCE_CURRENT_META_KEY, payload_json)
+        with self._lock:
+            if generation is not None and generation != self._instance_generation:
+                return
+            self.set_meta(_INSTANCE_CURRENT_META_KEY, payload_json)
 
     def get_instance_current(self) -> str | None:
         return self.get_meta(_INSTANCE_CURRENT_META_KEY)
@@ -575,6 +586,7 @@ class TelemetryStore:
         data_quality: str,
         total_bytes: int,
         payload_json: str,
+        generation: int | None = None,
     ) -> bool:
         """Store today's daily point, honoring first-complete-wins semantics.
 
@@ -584,6 +596,8 @@ class TelemetryStore:
         duplicated. Returns whether a row was written.
         """
         with self._lock:
+            if generation is not None and generation != self._instance_generation:
+                return False
             existing = self.instance_daily_quality(day, utc_offset_minutes)
             if existing == "complete":
                 return False
@@ -640,7 +654,9 @@ class TelemetryStore:
             return cursor.rowcount or 0
 
     def clear_instance_snapshots(self) -> None:
+        """Clear retained instance data and invalidate previously dispatched work."""
         with self._lock:
+            self._instance_generation += 1
             self._conn.execute("DELETE FROM telemetry_instance_snapshot")
             self.clear_instance_current()
             self._conn.commit()

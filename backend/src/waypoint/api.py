@@ -1420,16 +1420,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         require_telemetry_enabled()
+        generation = context.storage.telemetry.instance_snapshot_generation()
         result = await asyncio.to_thread(
             instance_service.build_instance,
             context.storage,
             context.settings,
             refresh=False,
+            generation=generation,
         )
         # A ≥5-minute-old cache is served immediately and revalidated off the
         # request path (never inline), so the walk never blocks the response.
         if result.refresh_due:
-            context.runtime.schedule_instance_refresh()
+            context.runtime.schedule_instance_refresh(generation=generation)
         return result.model_dump(mode="json")
 
     @app.post("/api/telemetry/instance/refresh")
@@ -1442,6 +1444,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context.storage,
             context.settings,
             refresh=True,
+            generation=context.storage.telemetry.instance_snapshot_generation(),
         )
         context.runtime.mark_telemetry_dirty()
         return result.model_dump(mode="json")

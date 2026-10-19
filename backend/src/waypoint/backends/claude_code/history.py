@@ -198,7 +198,7 @@ def _convert_assistant(
                     progress_event_metadata(record, ordinal),
                 )
             )
-        # Other thinking and block types render no card live either.
+        # Hidden thinking and other block types render no card live either.
     return events
 
 

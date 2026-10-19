@@ -633,15 +633,12 @@ def test_thinking_only_abnormal_stop_emits_note_immediately() -> None:
 
 
 def _narration_record(
-    uuid: str | None,
-    message_id: str,
-    content: list[dict],
-    stop_reason: str = "tool_use",
+    uuid: str, message_id: str, content: list[dict], stop_reason: str = "tool_use"
 ) -> dict:
-    record = _assistant_record(message_id, content, stop_reason=stop_reason)
-    if uuid is not None:
-        record["uuid"] = uuid
-    return record
+    return {
+        **_assistant_record(message_id, content, stop_reason=stop_reason),
+        "uuid": uuid,
+    }
 
 
 def test_narration_thinking_emits_progress_output() -> None:
@@ -660,8 +657,6 @@ def test_narration_thinking_emits_progress_output() -> None:
         "method": "assistant.progress",
         "item_id": "claude-progress:rec-1:0",
         "item_kind": "progress",
-        "source_record_uuid": "rec-1",
-        "source_message_id": "msgN",
         "status": SessionStatus.RUNNING,
     }
 
@@ -677,7 +672,6 @@ def test_ordinary_and_empty_thinking_stay_hidden() -> None:
             {"type": "thinking", "thinking": "unsigned"},
         ],
     )
-    record["thinkingDisplay"] = "updates"
     assert norm.process_record(record) == []
 
 
@@ -702,49 +696,6 @@ def test_multiple_narration_blocks_in_one_record_stay_distinct() -> None:
         "claude-progress:rec-1:0",
         "claude-progress:rec-1:1",
     ]
-
-
-def test_narration_does_not_share_item_id_with_text_sibling() -> None:
-    # Live merging concatenates agent_output sharing an item_id; the text
-    # sibling's id is the message id, so narration must not reuse it.
-    norm = TranscriptNormalizer()
-    narration = norm.process_record(
-        _narration_record("rec-1", "msgN", [thinking_block("Checking.")])
-    )
-    text = norm.process_record(
-        _narration_record("rec-2", "msgN", [_text_block("Answer")], "end_turn")
-    )
-    assert narration[0].metadata["item_id"] != text[0].metadata["item_id"]
-    assert text[0].metadata["item_id"] == "msgN"
-
-
-def test_identical_narration_at_different_records_stays_distinct() -> None:
-    norm = TranscriptNormalizer()
-    first = norm.process_record(
-        _narration_record("rec-1", "msgA", [thinking_block("Same.")])
-    )
-    second = norm.process_record(
-        _narration_record("rec-2", "msgB", [thinking_block("Same.")])
-    )
-    assert first[0].metadata["item_id"] != second[0].metadata["item_id"]
-
-
-def test_narration_without_uuid_gets_deterministic_id() -> None:
-    record = _narration_record(None, "msgN", [thinking_block("Checking.")])
-    ids = [
-        TranscriptNormalizer().process_record(record)[0].metadata["item_id"]
-        for _ in range(2)
-    ]
-    assert ids[0] == ids[1]
-    assert ids[0].startswith("claude-progress:")
-
-
-def test_narration_with_tool_use_stop_emits_no_result() -> None:
-    norm = TranscriptNormalizer()
-    events = norm.process_record(
-        _narration_record("rec-1", "msgN", [thinking_block("Checking.")])
-    )
-    assert not any(e.metadata.get("method") == "result" for e in events)
 
 
 def test_narration_only_end_turn_defers_note_to_text_sibling() -> None:

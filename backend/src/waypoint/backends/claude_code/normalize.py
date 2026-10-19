@@ -127,16 +127,8 @@ def iter_content_blocks(content: Any) -> list[dict[str, Any]]:
     return blocks
 
 
-PROGRESS_METHOD = "assistant.progress"
-PROGRESS_ITEM_KIND = "progress"
-
-
 def visible_progress_text(block: dict[str, Any]) -> str | None:
-    """The body of a thinking block the TUI shows as a progress update, else None.
-
-    Ordinary thinking stays hidden; only a recognized narration envelope
-    qualifies (see ``thinking_signature``).
-    """
+    """Text of a thinking block the TUI shows as a progress update, else None."""
     if block.get("type") != "thinking":
         return None
     text = block.get("thinking")
@@ -146,25 +138,15 @@ def visible_progress_text(block: dict[str, Any]) -> str | None:
 
 
 def progress_event_metadata(record: dict[str, Any], ordinal: int) -> dict[str, Any]:
-    """Event metadata for a progress update at ``ordinal`` in ``record``'s content.
+    """Event metadata for the progress update at ``ordinal`` in ``record``'s content.
 
-    Each update gets its own ``item_id``: live merging concatenates
-    ``agent_output`` events sharing an id, and the record's ``message.id`` is
-    already the id of its sibling text blocks.
+    The ``item_id`` is per block: live merging concatenates ``agent_output``
+    events sharing one, and ``message.id`` belongs to the record's text siblings.
     """
-    message: dict[str, Any] = record.get("message") or {}
-    record_uuid = record.get("uuid")
-    if isinstance(record_uuid, str) and record_uuid:
-        source_key = record_uuid
-    else:
-        canonical = json.dumps(record, sort_keys=True, default=str)
-        source_key = hashlib.sha256(canonical.encode()).hexdigest()[:16]
     return {
-        "method": PROGRESS_METHOD,
-        "item_id": f"claude-progress:{source_key}:{ordinal}",
-        "item_kind": PROGRESS_ITEM_KIND,
-        "source_record_uuid": record_uuid if isinstance(record_uuid, str) else None,
-        "source_message_id": str(message.get("id") or "") or None,
+        "method": "assistant.progress",
+        "item_id": f"claude-progress:{record.get('uuid')}:{ordinal}",
+        "item_kind": "progress",
     }
 
 

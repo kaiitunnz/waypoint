@@ -66,9 +66,7 @@ def _fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_module, "ONE_SHOT_POLL_INTERVAL_SECONDS", 0.01)
 
 
-def test_assemble_agent_reply_concatenates_deltas_and_skips_reasoning_and_progress() -> (
-    None
-):
+def test_assemble_agent_reply_skips_reasoning_and_progress() -> None:
     now = datetime.now(UTC)
     events = [
         EventRecord(

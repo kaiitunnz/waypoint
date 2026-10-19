@@ -40,7 +40,7 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 | ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Claude Code | `2.1.178` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
 | Codex CLI   | `0.139.0` | `codex app-server --listen stdio://`                                 | Driven via the `openai-codex` Python SDK (`thread_*` / `turn_*` RPCs). Managed local sessions run the bundled `openai-codex-cli-bin` binary, currently `0.136.0` — the PyPI cli-bin channel lags the npm `@openai/codex` channel, so it trails the tested `0.139.0`. |
-| Codex SDK   | `0.1.0b3` | `openai-codex` on PyPI (pre-release)                                | Pinned in `backend/pyproject.toml`; `backend/pyproject.toml` overrides the bundled `openai-codex-cli-bin` to the latest stable (`0.136.0`). |
+| Codex SDK   | `0.163.0` | `openai-codex` on PyPI                                              | Pinned in `backend/pyproject.toml`; `backend/pyproject.toml` overrides the bundled `openai-codex-cli-bin` to the latest stable (`0.136.0`). |
 | OpenCode   | `1.17.4`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
 
 To extend this matrix:

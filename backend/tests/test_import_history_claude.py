@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 
+from claude_signatures import thinking_block
 from waypoint.backends.claude_code.history import (
     convert_transcript_records,
     read_local_claude_history,
@@ -335,6 +336,53 @@ def test_convert_transcript_records_skips_non_chat_record_types() -> None:
     events = convert_transcript_records("sess-1", records)
 
     assert [e.kind for e in events] == [EventKind.AGENT_OUTPUT]
+
+
+def _assistant_thinking(
+    record_uuid: str, msg_id: str, blocks: list[dict], ts: str
+) -> dict:
+    return {
+        "type": "assistant",
+        "uuid": record_uuid,
+        "timestamp": ts,
+        "message": {"id": msg_id, "content": blocks, "stop_reason": "tool_use"},
+    }
+
+
+def test_import_narration_emits_progress_with_source_timestamp() -> None:
+    records = [
+        _assistant_thinking(
+            "rec-1",
+            "msg1",
+            [
+                thinking_block("hidden", label=b"thinking"),
+                thinking_block("Found two issues so far."),
+            ],
+            "2026-10-19T06:41:20.652Z",
+        ),
+        _assistant_tool_use("msg1", "tu1", "Bash", {"command": "ls"}),
+    ]
+
+    events = convert_transcript_records("sess-1", records)
+
+    assert [e.kind for e in events] == [EventKind.AGENT_OUTPUT, EventKind.TOOL_CALL]
+    progress = events[0]
+    assert progress.text == "Found two issues so far."
+    assert progress.ts == datetime(2026, 10, 19, 6, 41, 20, 652000, tzinfo=UTC)
+    assert progress.metadata["method"] == "assistant.progress"
+    assert progress.metadata["item_id"] == "claude-progress:rec-1:1"
+
+
+def test_import_narration_matches_live_contract() -> None:
+    record = _assistant_thinking(
+        "rec-1", "msg1", [thinking_block("Checking.")], "2026-10-19T06:40:00Z"
+    )
+
+    [imported] = convert_transcript_records("sess-1", [record])
+    [live] = TranscriptNormalizer().process_record(record)
+
+    assert imported.text == live.text
+    assert imported.metadata == live.metadata
 
 
 def test_read_local_claude_transcript_reads_entire_file(monkeypatch, tmp_path) -> None:

@@ -40,9 +40,11 @@ from waypoint.backends.claude_code.normalize import (
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
+    progress_event_metadata,
     starts_with_peer_element,
     stringify_tool_result,
     task_notification_dedup_key,
+    visible_progress_text,
 )
 from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
@@ -75,9 +77,10 @@ def convert_transcript_records(
 ) -> list[EventRecord]:
     """Convert ordered raw transcript records into ordered EventRecords.
 
-    Only ``assistant`` text/tool_use and ``user`` text/tool_result records
-    produce events; other record types (system notes, compact boundaries,
-    summaries) carry no chat content worth replaying and are dropped.
+    Only ``assistant`` text/tool_use/progress-update and ``user``
+    text/tool_result records produce events; other record types (system
+    notes, compact boundaries, summaries) carry no chat content worth
+    replaying and are dropped.
     """
     events: list[EventRecord] = []
     last_ts = datetime.now(UTC)
@@ -147,7 +150,7 @@ def _convert_assistant(
     message: dict[str, Any] = record.get("message") or {}
     message_id = str(message.get("id") or "")
     events: list[EventRecord] = []
-    for block in iter_content_blocks(message.get("content")):
+    for ordinal, block in enumerate(iter_content_blocks(message.get("content"))):
         block_type = block.get("type")
         if block_type == "text":
             text = str(block.get("text") or "")
@@ -185,7 +188,17 @@ def _convert_assistant(
                     },
                 )
             )
-        # "thinking" and other block types render no card live either.
+        elif (progress := visible_progress_text(block)) is not None:
+            events.append(
+                _event(
+                    session_id,
+                    ts,
+                    EventKind.AGENT_OUTPUT,
+                    progress,
+                    progress_event_metadata(record, ordinal),
+                )
+            )
+        # Hidden thinking and other block types render no card live either.
     return events
 
 

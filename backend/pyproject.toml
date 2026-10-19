@@ -75,6 +75,7 @@ known_first_party = ["waypoint"]
 
 [tool.ruff]
 target-version = "py312"
+src = ["src", "tests"]
 extend-exclude = [".venv", "build", "dist"]
 
 [tool.ruff.lint]

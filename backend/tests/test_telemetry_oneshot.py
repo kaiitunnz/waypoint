@@ -66,7 +66,7 @@ def _fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_module, "ONE_SHOT_POLL_INTERVAL_SECONDS", 0.01)
 
 
-def test_assemble_agent_reply_concatenates_deltas_and_skips_reasoning() -> None:
+def test_assemble_agent_reply_skips_reasoning_and_progress() -> None:
     now = datetime.now(UTC)
     events = [
         EventRecord(
@@ -75,6 +75,14 @@ def test_assemble_agent_reply_concatenates_deltas_and_skips_reasoning() -> None:
             kind=EventKind.AGENT_OUTPUT,
             text="thinking...",
             metadata={"item_id": "r1", "item_kind": "reasoning"},
+            sequence=1,
+        ),
+        EventRecord(
+            session_id="s",
+            ts=now,
+            kind=EventKind.AGENT_OUTPUT,
+            text="Checking the payload.",
+            metadata={"item_id": "p1", "item_kind": "progress"},
             sequence=1,
         ),
         EventRecord(

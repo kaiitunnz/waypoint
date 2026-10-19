@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from waypoint.backends.claude_code.thinking_signature import is_narration_signature
 from waypoint.backends.task_notifications import (
     CAPTURE_DISABLED,
     NOT_CAPTURED_ON_IMPORT,
@@ -124,6 +125,29 @@ def iter_content_blocks(content: Any) -> list[dict[str, Any]]:
         elif isinstance(entry, str):
             blocks.append({"type": "text", "text": entry})
     return blocks
+
+
+def visible_progress_text(block: dict[str, Any]) -> str | None:
+    """Text of a thinking block the TUI shows as a progress update, else None."""
+    if block.get("type") != "thinking":
+        return None
+    text = block.get("thinking")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return text if is_narration_signature(block.get("signature")) else None
+
+
+def progress_event_metadata(record: dict[str, Any], ordinal: int) -> dict[str, Any]:
+    """Event metadata for the progress update at ``ordinal`` in ``record``'s content.
+
+    The ``item_id`` is per block: live merging concatenates ``agent_output``
+    events sharing one, and ``message.id`` belongs to the record's text siblings.
+    """
+    return {
+        "method": "assistant.progress",
+        "item_id": f"claude-progress:{record.get('uuid')}:{ordinal}",
+        "item_kind": "progress",
+    }
 
 
 def is_injected_user_turn(content: Any) -> bool:

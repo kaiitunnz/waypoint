@@ -244,16 +244,20 @@ def require_existing_local_dir(cwd: str) -> str:
     return resolved
 
 
+_NON_REPLY_ITEM_KINDS = frozenset({"reasoning", "progress"})
+
+
 def _assemble_agent_reply(events: list[EventRecord]) -> str:
     """Reconstruct the full agent reply text from a session's raw events.
 
     ``agent_output`` events sharing ``metadata.item_id`` are streamed deltas —
     the frontend's live merge concatenates their text in sequence order
     (``mergeEventText``); this replays that same rule offline over the whole
-    event list. Reasoning-item output (``metadata.item_kind == "reasoning"``)
-    is excluded — a one-shot summarizer wants the model's final prose, not its
-    chain of thought. Multiple distinct reply items (rare for a single-turn
-    one-shot) join with a blank line.
+    event list. Reasoning and progress-update output (``metadata.item_kind``
+    ``"reasoning"`` / ``"progress"``) is excluded — a one-shot summarizer wants
+    the model's final prose, not its chain of thought or narration. Multiple
+    distinct reply items (rare for a single-turn one-shot) join with a blank
+    line.
     """
     groups: dict[str, list[EventRecord]] = {}
     order: list[str] = []
@@ -261,7 +265,7 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
         if event.kind != EventKind.AGENT_OUTPUT:
             continue
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
-        if metadata.get("item_kind") == "reasoning":
+        if metadata.get("item_kind") in _NON_REPLY_ITEM_KINDS:
             continue
         item_id = metadata.get("item_id")
         key = (

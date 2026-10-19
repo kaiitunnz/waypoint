@@ -15,6 +15,8 @@ Key invariants (all verified against real transcripts in Phase 0):
 - A synthesized result (SYSTEM_NOTE, status=IDLE) is emitted when the last
   assistant record in a turn has a terminal ``stop_reason`` (anything other than
   ``tool_use``) and contains no ``tool_use`` blocks.
+- ``thinking`` blocks stay hidden, except the TUI's progress updates (thinking
+  with a narration signature), which surface as ``agent_output``.
 - ``<task-notification>`` injected user turns (subagent/Agent completion,
   Monitor events and terminal state, background-command completion) are
   normalized into a standalone SYSTEM_NOTE task-notification event; context-window
@@ -51,10 +53,12 @@ from waypoint.backends.claude_code.normalize import (
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
+    progress_event_metadata,
     sent_user_file_paths,
     starts_with_peer_element,
     stringify_tool_result,
     task_notification_dedup_key,
+    visible_progress_text,
 )
 from waypoint.backends.claude_code.threads import parse_iso_timestamp
 from waypoint.backends.diff_preview import (
@@ -246,7 +250,7 @@ class TranscriptNormalizer:
         had_text = False
         had_thinking = False
 
-        for block in blocks:
+        for ordinal, block in enumerate(blocks):
             bt = block.get("type")
             if bt == "text":
                 text = str(block.get("text") or "")
@@ -369,8 +373,20 @@ class TranscriptNormalizer:
                     )
                 )
             elif bt == "thinking":
+                # Progress updates still defer the end_turn note to the text sibling.
                 had_thinking = True
-            # thinking blocks emit nothing; tracked only to defer the note below
+                if (progress := visible_progress_text(block)) is not None:
+                    events.append(
+                        NormalizedEvent(
+                            kind=EventKind.AGENT_OUTPUT,
+                            text=progress,
+                            metadata={
+                                **progress_event_metadata(record, ordinal),
+                                "status": SessionStatus.RUNNING,
+                            },
+                            status=SessionStatus.RUNNING,
+                        )
+                    )
 
         # Synthesize a result event when the turn is complete: stop_reason is
         # terminal (not "tool_use") and no tool_use blocks were in this record.

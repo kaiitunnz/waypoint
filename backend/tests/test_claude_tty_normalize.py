@@ -2,6 +2,7 @@
 
 import pytest
 
+from claude_signatures import thinking_block
 from waypoint.backends.claude_code.normalize import is_injected_user_turn
 from waypoint.backends.claude_tty.normalize import (
     NormalizedEvent,
@@ -629,6 +630,93 @@ def test_thinking_only_abnormal_stop_emits_note_immediately() -> None:
     )
     assert note.status == SessionStatus.IDLE
     assert note.metadata["stop_reason"] == "max_tokens"
+
+
+def _narration_record(
+    uuid: str, message_id: str, content: list[dict], stop_reason: str = "tool_use"
+) -> dict:
+    return {
+        **_assistant_record(message_id, content, stop_reason=stop_reason),
+        "uuid": uuid,
+    }
+
+
+def test_narration_thinking_emits_progress_output() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [thinking_block("Found two issues so far."), _tool_use_block("t1", "Bash", {})],
+    )
+    events = norm.process_record(record)
+    assert [e.kind for e in events] == [EventKind.AGENT_OUTPUT, EventKind.TOOL_CALL]
+    progress = events[0]
+    assert progress.text == "Found two issues so far."
+    assert progress.status == SessionStatus.RUNNING
+    assert progress.metadata == {
+        "method": "assistant.progress",
+        "item_id": "claude-progress:rec-1:0",
+        "item_kind": "progress",
+        "status": SessionStatus.RUNNING,
+    }
+
+
+def test_ordinary_and_empty_thinking_stay_hidden() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [
+            thinking_block("private reasoning", label=b"thinking"),
+            thinking_block("   ", label=b"narration"),
+            {"type": "thinking", "thinking": "unsigned"},
+        ],
+    )
+    assert norm.process_record(record) == []
+
+
+def test_multiple_narration_blocks_in_one_record_stay_distinct() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [
+            thinking_block("First."),
+            thinking_block("Second."),
+            _tool_use_block("t1", "Bash", {}),
+        ],
+    )
+    events = norm.process_record(record)
+    assert [(e.kind, e.text) for e in events[:2]] == [
+        (EventKind.AGENT_OUTPUT, "First."),
+        (EventKind.AGENT_OUTPUT, "Second."),
+    ]
+    assert events[2].kind == EventKind.TOOL_CALL
+    assert [e.metadata["item_id"] for e in events[:2]] == [
+        "claude-progress:rec-1:0",
+        "claude-progress:rec-1:1",
+    ]
+
+
+def test_narration_only_end_turn_defers_note_to_text_sibling() -> None:
+    norm = TranscriptNormalizer()
+    narration = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Wrapping up.")], "end_turn")
+    )
+    assert [e.metadata["method"] for e in narration] == ["assistant.progress"]
+    text = norm.process_record(
+        _narration_record("rec-2", "msgN", [_text_block("Done.")], "end_turn")
+    )
+    assert [e.metadata["method"] for e in text] == ["assistant.text", "result"]
+
+
+def test_narration_with_abnormal_stop_emits_note_after_it() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Checking.")], "refusal")
+    )
+    assert [e.metadata["method"] for e in events] == ["assistant.progress", "result"]
+    assert events[-1].status == SessionStatus.IDLE
 
 
 def test_usage_counted_for_different_message_ids() -> None:

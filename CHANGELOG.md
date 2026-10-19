@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.26.1](https://github.com/kaiitunnz/waypoint/compare/v0.26.0...v0.26.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* prevent deleted telemetry snapshots from being restored ([#524](https://github.com/kaiitunnz/waypoint/issues/524)) ([67eaec9](https://github.com/kaiitunnz/waypoint/commit/67eaec912c45e2f5d1b3a29e7f78d96be801c7ce))
+* read Codex usage credentials from auth.json on every probe ([#515](https://github.com/kaiitunnz/waypoint/issues/515)) ([9096ffc](https://github.com/kaiitunnz/waypoint/commit/9096ffc8522e849e9ce4d43387dd108d0a7c4214))
+* show Claude TUI progress updates in claude_tty transcripts ([#522](https://github.com/kaiitunnz/waypoint/issues/522)) ([14831d3](https://github.com/kaiitunnz/waypoint/commit/14831d33b7194a630004e7b024dad6bb3adfd496))
+* show the Codex compaction start in the Important view ([#503](https://github.com/kaiitunnz/waypoint/issues/503)) ([851cf1d](https://github.com/kaiitunnz/waypoint/commit/851cf1df5fb94d2aa4a21da0408f828178db6f9f))
+
 ## [0.26.0](https://github.com/kaiitunnz/waypoint/compare/v0.25.0...v0.26.0) (2026-10-03)
 
 

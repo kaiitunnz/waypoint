@@ -86,8 +86,12 @@ def _load_current(storage: Storage) -> InstanceSnapshot | None:
         return None
 
 
-def _store_current(storage: Storage, snapshot: InstanceSnapshot) -> None:
-    storage.telemetry.set_instance_current(snapshot.model_dump_json())
+def _store_current(
+    storage: Storage, snapshot: InstanceSnapshot, generation: int
+) -> None:
+    storage.telemetry.set_instance_current(
+        snapshot.model_dump_json(), generation=generation
+    )
 
 
 def _history(
@@ -121,12 +125,18 @@ def _history(
 
 
 def compute_current_snapshot(
-    storage: Storage, settings: Settings, *, now: datetime | None = None
+    storage: Storage,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    generation: int | None = None,
 ) -> InstanceSnapshot:
     """Collect a fresh snapshot and refresh the current cache. Off the request path."""
+    if generation is None:
+        generation = storage.telemetry.instance_snapshot_generation()
     observed = now or datetime.now(UTC)
     snapshot = collect_snapshot(settings, now=observed)
-    _store_current(storage, snapshot)
+    _store_current(storage, snapshot, generation)
     return snapshot
 
 
@@ -136,18 +146,25 @@ def build_instance(
     *,
     refresh: bool = False,
     now: datetime | None = None,
+    generation: int | None = None,
 ) -> TelemetryInstance:
+    if generation is None:
+        generation = storage.telemetry.instance_snapshot_generation()
     now = now or datetime.now(UTC)
 
     if refresh:
-        snapshot = compute_current_snapshot(storage, settings, now=now)
+        snapshot = compute_current_snapshot(
+            storage, settings, now=now, generation=generation
+        )
         stale, reason, refresh_due, age = False, None, False, 0.0
     else:
         cached = _load_current(storage)
         if cached is None:
             # First observation before any background/maintenance collection ran:
             # bootstrap synchronously this once, then the cache serves later reads.
-            snapshot = compute_current_snapshot(storage, settings, now=now)
+            snapshot = compute_current_snapshot(
+                storage, settings, now=now, generation=generation
+            )
             stale, reason, refresh_due, age = False, None, False, 0.0
         else:
             age = max(0.0, (now - cached.observed_at).total_seconds())
@@ -186,6 +203,7 @@ def record_instance_daily_if_due(
     *,
     now: datetime | None = None,
     snapshot: InstanceSnapshot | None = None,
+    generation: int | None = None,
 ) -> bool:
     """Write today's daily point if due (PRD FR-4).
 
@@ -194,6 +212,8 @@ def record_instance_daily_if_due(
     later tick. A stored *complete* point for the date is never overwritten; a
     stored *partial* one is replaced. Also refreshes the current cache.
     """
+    if generation is None:
+        generation = storage.telemetry.instance_snapshot_generation()
     now = now or datetime.now(UTC)
     offset = host_utc_offset_minutes()
     day = _day_key(now)
@@ -209,7 +229,7 @@ def record_instance_daily_if_due(
             return False
 
     snap = snapshot or collect_snapshot(settings, now=now)
-    _store_current(storage, snap)
+    _store_current(storage, snap, generation)
     return storage.telemetry.upsert_instance_daily(
         day=day,
         utc_offset_minutes=offset,
@@ -218,4 +238,5 @@ def record_instance_daily_if_due(
         data_quality=snap.data_quality.value,
         total_bytes=snap.total_bytes,
         payload_json=snap.model_dump_json(),
+        generation=generation,
     )

@@ -629,7 +629,10 @@ class SessionRuntime:
             # Compute an initial current snapshot + (on first enablement or a due
             # tick) a daily history point, off the boot path.
             self._instance_bootstrap_task = asyncio.create_task(
-                self._bootstrap_instance_snapshot(), name="instance-bootstrap"
+                self._bootstrap_instance_snapshot(
+                    self.storage.telemetry.instance_snapshot_generation()
+                ),
+                name="instance-bootstrap",
             )
         # Reap any one-shot session orphaned by a crash before the restore
         # loop below tries to reconnect it — it has no state worth resuming.
@@ -5332,6 +5335,7 @@ class SessionRuntime:
                     instance_service.record_instance_daily_if_due,
                     self.storage,
                     self.settings,
+                    generation=self.storage.telemetry.instance_snapshot_generation(),
                 )
                 if wrote:
                     self.mark_telemetry_dirty()
@@ -5342,24 +5346,24 @@ class SessionRuntime:
             except Exception:
                 log.debug("telemetry NL digest tick failed", exc_info=True)
 
-    async def _bootstrap_instance_snapshot(self) -> None:
+    async def _bootstrap_instance_snapshot(self, generation: int) -> None:
         """Compute the initial current snapshot + a due daily point, off boot."""
         try:
-            wrote = await asyncio.to_thread(self._bootstrap_instance_sync)
+            wrote = await asyncio.to_thread(self._bootstrap_instance_sync, generation)
             if wrote:
                 self.mark_telemetry_dirty()
         except Exception:
             log.debug("instance snapshot bootstrap failed", exc_info=True)
 
-    def _bootstrap_instance_sync(self) -> bool:
+    def _bootstrap_instance_sync(self, generation: int) -> bool:
         snapshot = instance_service.compute_current_snapshot(
-            self.storage, self.settings
+            self.storage, self.settings, generation=generation
         )
         return instance_service.record_instance_daily_if_due(
-            self.storage, self.settings, snapshot=snapshot
+            self.storage, self.settings, snapshot=snapshot, generation=generation
         )
 
-    def schedule_instance_refresh(self) -> None:
+    def schedule_instance_refresh(self, *, generation: int | None = None) -> None:
         """Recompute the current instance snapshot in the background (deduped).
 
         Called when a ``GET /api/telemetry/instance`` serves a ≥5-minute-old
@@ -5373,16 +5377,19 @@ class SessionRuntime:
             and not self._instance_refresh_task.done()
         ):
             return
+        if generation is None:
+            generation = self.storage.telemetry.instance_snapshot_generation()
         self._instance_refresh_task = asyncio.create_task(
-            self._refresh_instance_snapshot(), name="instance-refresh"
+            self._refresh_instance_snapshot(generation), name="instance-refresh"
         )
 
-    async def _refresh_instance_snapshot(self) -> None:
+    async def _refresh_instance_snapshot(self, generation: int) -> None:
         try:
             await asyncio.to_thread(
                 instance_service.compute_current_snapshot,
                 self.storage,
                 self.settings,
+                generation=generation,
             )
             self.mark_telemetry_dirty()
         except Exception:
@@ -5648,7 +5655,10 @@ class SessionRuntime:
         """
         try:
             result = await asyncio.to_thread(
-                instance_service.build_instance, self.storage, self.settings
+                instance_service.build_instance,
+                self.storage,
+                self.settings,
+                generation=self.storage.telemetry.instance_snapshot_generation(),
             )
             if result.snapshot.data_quality == InstanceDataQuality.UNAVAILABLE:
                 return []

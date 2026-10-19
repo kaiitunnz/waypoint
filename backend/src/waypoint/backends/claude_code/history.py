@@ -78,8 +78,9 @@ def convert_transcript_records(
     """Convert ordered raw transcript records into ordered EventRecords.
 
     Only ``assistant`` text/tool_use/progress-update and ``user``
-    text/tool_result records produce events; other record types (system notes, compact boundaries,
-    summaries) carry no chat content worth replaying and are dropped.
+    text/tool_result records produce events; other record types (system
+    notes, compact boundaries, summaries) carry no chat content worth
+    replaying and are dropped.
     """
     events: list[EventRecord] = []
     last_ts = datetime.now(UTC)

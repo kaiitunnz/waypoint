@@ -255,8 +255,9 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
     (``mergeEventText``); this replays that same rule offline over the whole
     event list. Reasoning and progress-update output (``metadata.item_kind``
     ``"reasoning"`` / ``"progress"``) is excluded — a one-shot summarizer wants
-    the model's final prose, not its chain of thought or narration. Multiple distinct reply items (rare for a single-turn
-    one-shot) join with a blank line.
+    the model's final prose, not its chain of thought or narration. Multiple
+    distinct reply items (rare for a single-turn one-shot) join with a blank
+    line.
     """
     groups: dict[str, list[EventRecord]] = {}
     order: list[str] = []

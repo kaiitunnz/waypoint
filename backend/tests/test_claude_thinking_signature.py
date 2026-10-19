@@ -106,7 +106,7 @@ def test_skips_fixed_width_fields() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    [None, "", 42, "not base64!", "QUJD=x", signature()[:-3]],
+    [None, "", 42, "not base64!", "QUJD=x", "QUJDé", "\ud800", signature()[:-3]],
 )
 def test_rejects_non_signatures(value: Any) -> None:
     assert not is_narration_signature(value)

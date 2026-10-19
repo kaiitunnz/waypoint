@@ -11,7 +11,6 @@ a missed update is preferable to showing hidden reasoning.
 """
 
 import base64
-import binascii
 from typing import Any
 
 # Largest observed decoded signature is ~180 KB; this leaves ample headroom
@@ -28,6 +27,8 @@ _WIRE_LEN = 2
 type _Field = tuple[int, int, int | bytes]
 
 
+# Subclasses ValueError so one handler also covers b64decode's binascii.Error
+# and its ValueError for non-ASCII input.
 class _MalformedEnvelope(ValueError):
     pass
 
@@ -46,7 +47,7 @@ def is_narration_signature(signature: Any) -> bool:
         body = _only(envelope, 2, _WIRE_LEN)
         header = _only(_fields(_as_bytes(body)), 1, _WIRE_LEN)
         label = _only(_fields(_as_bytes(header)), 8, _WIRE_LEN)
-    except (binascii.Error, _MalformedEnvelope):
+    except ValueError:
         return False
     return label == _NARRATION_LABEL
 

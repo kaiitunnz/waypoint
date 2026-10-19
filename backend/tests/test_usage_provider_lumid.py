@@ -120,6 +120,23 @@ async def test_success_selects_matching_row(
     await provider.aclose()
 
 
+@pytest.mark.parametrize("percent", [0.01, 0.5, 1])
+async def test_refresh_preserves_low_percentages(
+    percent: float, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LUMID_TEST_TOKENS", "tok_a")
+    storage = _storage(tmp_path)
+    row = _row(five=int(percent * 20_000), seven=int(percent * 200_000))
+    provider = _provider(storage, _routes(_user_ok(), _usage_ok([row])))
+    try:
+        result = await provider.refresh(force=True)
+        assert result.ok_count == 1
+        windows = provider.buckets()[0].snapshot.windows
+        assert [window.used_percent for window in windows] == [percent, percent]
+    finally:
+        await provider.aclose()
+
+
 async def test_case_insensitive_match(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

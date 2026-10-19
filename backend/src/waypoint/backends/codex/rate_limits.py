@@ -501,8 +501,6 @@ def _parse_percent_value(value: Any) -> float | None:
         return None
     if isinstance(value, (int, float)):
         percent = float(value)
-        if 0.0 <= percent <= 1.0:
-            percent *= 100.0
         return _clamp_percent(percent)
     if isinstance(value, str):
         cleaned = value.strip().replace("%", "")
@@ -510,8 +508,6 @@ def _parse_percent_value(value: Any) -> float | None:
             percent = float(cleaned)
         except ValueError:
             return None
-        if 0.0 <= percent <= 1.0:
-            percent *= 100.0
         return _clamp_percent(percent)
     return None
 

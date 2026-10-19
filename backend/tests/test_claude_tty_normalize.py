@@ -2,6 +2,7 @@
 
 import pytest
 
+from claude_signatures import thinking_block
 from waypoint.backends.claude_code.normalize import is_injected_user_turn
 from waypoint.backends.claude_tty.normalize import (
     NormalizedEvent,
@@ -629,6 +630,142 @@ def test_thinking_only_abnormal_stop_emits_note_immediately() -> None:
     )
     assert note.status == SessionStatus.IDLE
     assert note.metadata["stop_reason"] == "max_tokens"
+
+
+def _narration_record(
+    uuid: str | None,
+    message_id: str,
+    content: list[dict],
+    stop_reason: str = "tool_use",
+) -> dict:
+    record = _assistant_record(message_id, content, stop_reason=stop_reason)
+    if uuid is not None:
+        record["uuid"] = uuid
+    return record
+
+
+def test_narration_thinking_emits_progress_output() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [thinking_block("Found two issues so far."), _tool_use_block("t1", "Bash", {})],
+    )
+    events = norm.process_record(record)
+    assert [e.kind for e in events] == [EventKind.AGENT_OUTPUT, EventKind.TOOL_CALL]
+    progress = events[0]
+    assert progress.text == "Found two issues so far."
+    assert progress.status == SessionStatus.RUNNING
+    assert progress.metadata == {
+        "method": "assistant.progress",
+        "item_id": "claude-progress:rec-1:0",
+        "item_kind": "progress",
+        "source_record_uuid": "rec-1",
+        "source_message_id": "msgN",
+        "status": SessionStatus.RUNNING,
+    }
+
+
+def test_ordinary_and_empty_thinking_stay_hidden() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [
+            thinking_block("private reasoning", label=b"thinking"),
+            thinking_block("   ", label=b"narration"),
+            {"type": "thinking", "thinking": "unsigned"},
+        ],
+    )
+    record["thinkingDisplay"] = "updates"
+    assert norm.process_record(record) == []
+
+
+def test_multiple_narration_blocks_in_one_record_stay_distinct() -> None:
+    norm = TranscriptNormalizer()
+    record = _narration_record(
+        "rec-1",
+        "msgN",
+        [
+            thinking_block("First."),
+            thinking_block("Second."),
+            _tool_use_block("t1", "Bash", {}),
+        ],
+    )
+    events = norm.process_record(record)
+    assert [(e.kind, e.text) for e in events[:2]] == [
+        (EventKind.AGENT_OUTPUT, "First."),
+        (EventKind.AGENT_OUTPUT, "Second."),
+    ]
+    assert events[2].kind == EventKind.TOOL_CALL
+    assert [e.metadata["item_id"] for e in events[:2]] == [
+        "claude-progress:rec-1:0",
+        "claude-progress:rec-1:1",
+    ]
+
+
+def test_narration_does_not_share_item_id_with_text_sibling() -> None:
+    # Live merging concatenates agent_output sharing an item_id; the text
+    # sibling's id is the message id, so narration must not reuse it.
+    norm = TranscriptNormalizer()
+    narration = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Checking.")])
+    )
+    text = norm.process_record(
+        _narration_record("rec-2", "msgN", [_text_block("Answer")], "end_turn")
+    )
+    assert narration[0].metadata["item_id"] != text[0].metadata["item_id"]
+    assert text[0].metadata["item_id"] == "msgN"
+
+
+def test_identical_narration_at_different_records_stays_distinct() -> None:
+    norm = TranscriptNormalizer()
+    first = norm.process_record(
+        _narration_record("rec-1", "msgA", [thinking_block("Same.")])
+    )
+    second = norm.process_record(
+        _narration_record("rec-2", "msgB", [thinking_block("Same.")])
+    )
+    assert first[0].metadata["item_id"] != second[0].metadata["item_id"]
+
+
+def test_narration_without_uuid_gets_deterministic_id() -> None:
+    record = _narration_record(None, "msgN", [thinking_block("Checking.")])
+    ids = [
+        TranscriptNormalizer().process_record(record)[0].metadata["item_id"]
+        for _ in range(2)
+    ]
+    assert ids[0] == ids[1]
+    assert ids[0].startswith("claude-progress:")
+
+
+def test_narration_with_tool_use_stop_emits_no_result() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Checking.")])
+    )
+    assert not any(e.metadata.get("method") == "result" for e in events)
+
+
+def test_narration_only_end_turn_defers_note_to_text_sibling() -> None:
+    norm = TranscriptNormalizer()
+    narration = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Wrapping up.")], "end_turn")
+    )
+    assert [e.metadata["method"] for e in narration] == ["assistant.progress"]
+    text = norm.process_record(
+        _narration_record("rec-2", "msgN", [_text_block("Done.")], "end_turn")
+    )
+    assert [e.metadata["method"] for e in text] == ["assistant.text", "result"]
+
+
+def test_narration_with_abnormal_stop_emits_note_after_it() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(
+        _narration_record("rec-1", "msgN", [thinking_block("Checking.")], "refusal")
+    )
+    assert [e.metadata["method"] for e in events] == ["assistant.progress", "result"]
+    assert events[-1].status == SessionStatus.IDLE
 
 
 def test_usage_counted_for_different_message_ids() -> None:

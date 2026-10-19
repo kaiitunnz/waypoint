@@ -91,6 +91,24 @@ def test_parse_codex_usage_payload_extracts_windows_and_credits() -> None:
     assert snapshot.credits_currency == "USD"
 
 
+@pytest.mark.parametrize("percent", [0, 0.01, 0.5, 1, 2, 100])
+@pytest.mark.parametrize("as_string", [False, True])
+def test_parse_codex_usage_payload_preserves_percentages(
+    percent: float, as_string: bool
+) -> None:
+    value = str(percent) if as_string else percent
+    snapshot = parse_codex_usage_payload(
+        {
+            "rate_limit": {
+                "primary_window": {"used_percent": value},
+                "secondary_window": {"used_percent": value},
+            }
+        }
+    )
+    assert snapshot is not None
+    assert [window.used_percent for window in snapshot.windows] == [percent, percent]
+
+
 def test_load_oauth_credentials_reads_auth_json(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -145,7 +163,7 @@ def test_codex_oauth_probe_rereads_rotated_auth_json_and_never_refreshes(
             {
                 "rate_limit": {
                     "primary_window": {
-                        "used_percent": 30,
+                        "used_percent": 1,
                         "limit_window_seconds": 18000,
                     }
                 }
@@ -156,9 +174,13 @@ def test_codex_oauth_probe_rereads_rotated_auth_json_and_never_refreshes(
     env = {"CODEX_HOME": str(codex_home)}
 
     _write_codex_auth(codex_home, "token-before-rotation")
-    assert asyncio.run(_probe_codex_oauth_usage(env)) is not None
+    before = asyncio.run(_probe_codex_oauth_usage(env))
+    assert before is not None
+    assert before.windows[0].used_percent == 1.0
     _write_codex_auth(codex_home, "token-after-rotation")
-    assert asyncio.run(_probe_codex_oauth_usage(env)) is not None
+    after = asyncio.run(_probe_codex_oauth_usage(env))
+    assert after is not None
+    assert after.windows[0].used_percent == 1.0
 
     assert [r.get_header("Authorization") for r in requests] == [
         "Bearer token-before-rotation",
@@ -216,7 +238,7 @@ def test_parse_claude_usage_payload_normalizes_windows() -> None:
     snapshot = parse_claude_usage_payload(
         {
             "five_hour": {
-                "utilization": 0.54,
+                "utilization": 54.0,
                 "resets_at": "2026-05-10T12:34:56Z",
             },
             "seven_day": {
@@ -224,7 +246,7 @@ def test_parse_claude_usage_payload_normalizes_windows() -> None:
                 "resets_at": "2026-05-12T01:00:00Z",
             },
             "seven_day_opus": {
-                "utilization": 0.12,
+                "utilization": 12.0,
                 "resets_at": "2026-05-12T01:00:00Z",
             },
         },
@@ -243,6 +265,22 @@ def test_parse_claude_usage_payload_normalizes_windows() -> None:
     )
     assert snapshot.windows[1].used_percent == 81.2
     assert snapshot.windows[2].used_percent == 12.0
+
+
+@pytest.mark.parametrize("percent", [0, 0.01, 0.5, 1, 2, 100])
+@pytest.mark.parametrize("as_string", [False, True])
+def test_parse_claude_usage_payload_preserves_percentages(
+    percent: float, as_string: bool
+) -> None:
+    value = str(percent) if as_string else percent
+    snapshot = parse_claude_usage_payload(
+        {
+            key: {"utilization": value, "resets_at": "2026-05-12T01:00:00Z"}
+            for key in ("five_hour", "seven_day", "seven_day_sonnet")
+        }
+    )
+    assert snapshot is not None
+    assert [window.used_percent for window in snapshot.windows] == [percent] * 3
 
 
 def test_read_cli_credentials_prefers_file_before_keychain(
@@ -339,7 +377,7 @@ def test_parse_claude_rate_limit_headers_extracts_windows() -> None:
             "Anthropic-RateLimit-Unified-5h-Reset": str(
                 datetime(2026, 5, 10, 13, 0, tzinfo=UTC).timestamp()
             ),
-            "anthropic-ratelimit-unified-7d-utilization": "81.2",
+            "anthropic-ratelimit-unified-7d-utilization": "0.812",
             "anthropic-ratelimit-unified-7d-reset": str(
                 datetime(2026, 5, 12, 1, 0, tzinfo=UTC).timestamp()
             ),
@@ -356,6 +394,18 @@ def test_parse_claude_rate_limit_headers_extracts_windows() -> None:
     assert snapshot.windows[0].resets_at == datetime(2026, 5, 10, 13, 0, tzinfo=UTC)
     assert snapshot.windows[1].used_percent == 81.2
     assert snapshot.windows[1].resets_at == datetime(2026, 5, 12, 1, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("fraction", [0, 0.01, 0.5, 1])
+def test_parse_claude_rate_limit_headers_converts_fractions(fraction: float) -> None:
+    snapshot = parse_claude_rate_limit_headers(
+        {
+            f"anthropic-ratelimit-unified-{window}-utilization": str(fraction)
+            for window in ("5h", "7d")
+        }
+    )
+    assert snapshot is not None
+    assert [window.used_percent for window in snapshot.windows] == [fraction * 100] * 2
 
 
 def test_probe_claude_usage_surfaces_rate_limit_state(
@@ -500,8 +550,8 @@ def test_probe_claude_usage_prefers_oauth_usage_endpoint(
     )
     body = json.dumps(
         {
-            "five_hour": {"utilization": 11.0, "resets_at": "2026-06-21T09:20:00Z"},
-            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
+            "five_hour": {"utilization": 1, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": "0.5", "resets_at": "2026-06-23T12:00:00Z"},
             # Armed once Sonnet usage accrues this week.
             "seven_day_sonnet": {
                 "utilization": 3.0,
@@ -528,6 +578,8 @@ def test_probe_claude_usage_prefers_oauth_usage_endpoint(
     assert snapshot is not None
     assert snapshot.source == "claude_code"
     assert [window.label for window in snapshot.windows] == ["5h", "Weekly", "Sonnet"]
+    assert snapshot.windows[0].used_percent == 1.0
+    assert snapshot.windows[1].used_percent == 0.5
     assert snapshot.windows[2].used_percent == 3.0
     assert snapshot.notes == ["CLI creds", "org: lumid"]
 
@@ -579,8 +631,8 @@ def test_probe_claude_usage_falls_back_when_usage_endpoint_disabled(
 def test_parse_claude_usage_payload_skips_unarmed_per_model_window() -> None:
     snapshot = parse_claude_usage_payload(
         {
-            "five_hour": {"utilization": 0.04, "resets_at": "2026-06-21T09:20:00Z"},
-            "seven_day": {"utilization": 0.02, "resets_at": "2026-06-23T12:00:00Z"},
+            "five_hour": {"utilization": 4.0, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
             # Before any Sonnet usage: 0% utilization and no reset → skipped.
             "seven_day_sonnet": {"utilization": 0.0, "resets_at": None},
         },
@@ -593,8 +645,8 @@ def test_parse_claude_usage_payload_skips_unarmed_per_model_window() -> None:
 def test_parse_claude_usage_payload_shows_armed_zero_per_model_window() -> None:
     snapshot = parse_claude_usage_payload(
         {
-            "five_hour": {"utilization": 0.04, "resets_at": "2026-06-21T09:20:00Z"},
-            "seven_day": {"utilization": 0.02, "resets_at": "2026-06-23T12:00:00Z"},
+            "five_hour": {"utilization": 4.0, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
             # Armed once Sonnet usage accrues: 0% but a reset is set → surfaced,
             # so the row appears before weekly usage rounds above 0%.
             "seven_day_sonnet": {
@@ -774,8 +826,8 @@ def test_probe_claude_usage_remote_parses_oauth_usage_payload(
 ) -> None:
     payload = {
         "usage": {
-            "five_hour": {"utilization": 11.0, "resets_at": "2026-06-21T09:20:00Z"},
-            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
+            "five_hour": {"utilization": "1", "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 0.5, "resets_at": "2026-06-23T12:00:00Z"},
             "seven_day_sonnet": {
                 "utilization": 3.0,
                 "resets_at": "2026-06-23T12:00:00Z",
@@ -796,6 +848,7 @@ def test_probe_claude_usage_remote_parses_oauth_usage_payload(
     assert snapshot is not None
     assert snapshot.source == "claude_code"
     assert [w.label for w in snapshot.windows] == ["5h", "Weekly", "Sonnet"]
+    assert [w.used_percent for w in snapshot.windows] == [1.0, 0.5, 3.0]
     assert snapshot.notes == ["remote CLI creds", "org: lumid"]
 
 
@@ -886,7 +939,7 @@ def test_probe_codex_usage_remote_parses_oauth_payload(
                 "plan_type": "pro",
                 "rate_limit": {
                     "primary_window": {
-                        "used_percent": 30,
+                        "used_percent": "1",
                         "limit_window_seconds": 18000,
                     }
                 },
@@ -903,7 +956,7 @@ def test_probe_codex_usage_remote_parses_oauth_payload(
     assert snapshot is not None
     assert snapshot.source == "codex"
     assert [w.label for w in snapshot.windows] == ["5h"]
-    assert snapshot.windows[0].used_percent == 30.0
+    assert snapshot.windows[0].used_percent == 1.0
     assert "remote OAuth" in snapshot.notes
     assert "plan: pro" in snapshot.notes
 

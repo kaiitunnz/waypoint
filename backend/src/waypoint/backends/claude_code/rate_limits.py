@@ -64,7 +64,7 @@ def parse_claude_usage_payload(
         window = raw.get(key)
         if not isinstance(window, dict):
             continue
-        percent = _parse_utilization(window.get("utilization"))
+        percent = _parse_utilization(window.get("utilization"), fractional=False)
         if percent is None:
             continue
         resets_at = _parse_iso_datetime(window.get("resets_at"))
@@ -567,7 +567,7 @@ def parse_claude_rate_limit_headers(
         resets_at = _header_value(
             normalized, f"anthropic-ratelimit-unified-{header_prefix}-reset"
         )
-        percent = _parse_utilization(utilization)
+        percent = _parse_utilization(utilization, fractional=True)
         if percent is None:
             continue
         reset_at = _parse_iso_datetime_from_unix_seconds(resets_at)
@@ -951,12 +951,13 @@ def _parse_iso_datetime_from_unix_seconds(value: Any) -> datetime | None:
     return None
 
 
-def _parse_utilization(value: Any) -> float | None:
+def _parse_utilization(value: Any, *, fractional: bool) -> float | None:
+    # OAuth usage is already percent; Messages API headers carry fractions.
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         percent = float(value)
-        if 0.0 <= percent <= 1.0:
+        if fractional:
             percent *= 100.0
         return max(0.0, min(100.0, percent))
     if isinstance(value, str):
@@ -965,7 +966,7 @@ def _parse_utilization(value: Any) -> float | None:
             percent = float(cleaned)
         except ValueError:
             return None
-        if 0.0 <= percent <= 1.0:
+        if fractional:
             percent *= 100.0
         return max(0.0, min(100.0, percent))
     return None

@@ -455,10 +455,7 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
     return PlanDialog(options=options, plan_path=plan_path)
 
 
-# Dialog-body labels Claude renders above the question. These are the reliable
-# source of the tool + target: the `● Tool(arg)` header line is often absent
-# (e.g. a Bash dialog shows a "Running…" spinner there instead), so it is only
-# a fallback.
+# Dialog labels are more reliable than transient tool headers.
 _BODY_TOOL_LABELS: dict[str, str] = {
     "Bash command": "Bash",
     "Create file": "Write",
@@ -468,50 +465,40 @@ _BODY_TOOL_LABELS: dict[str, str] = {
 }
 
 
+def _extract_bash_command(lines: list[str]) -> str | None:
+    rules = [
+        i for i, line in enumerate(lines) if re.fullmatch(r"[╌─]{20,}", line.strip())
+    ]
+    if rules:
+        if len(rules) < 2:
+            return None
+        # Hints and descriptions sit outside the ruled command body.
+        command = "\n".join(
+            re.sub(r"^\s*│", "", line) for line in lines[rules[0] + 1 : rules[1]]
+        )
+        return dedent(command).strip() or None
+    if _compact("\n".join(lines)).startswith(
+        _compact("Tip: auto mode handles these prompts for you")
+    ):
+        return None
+    return next((line.strip() for line in lines if line.strip()), None)
+
+
 def _extract_tool_target(
     head_lines: list[str], question: str
 ) -> tuple[str | None, str | None]:
     stripped = [line.strip() for line in head_lines]
 
-    # 1. Body label → tool; the next non-empty line is the command/path. Scan
-    # bottom-up: the active dialog is the lowest block on the pane, so an
-    # identical label string sitting earlier in the scrollback can't win. The
-    # Legacy layouts put the command/path directly below the label. Newer Bash
-    # dialogs put hints above a ruled command box, which can span several lines.
+    # The lowest labelled block is the active dialog.
     for i in range(len(stripped) - 1, -1, -1):
         tool = _BODY_TOOL_LABELS.get(stripped[i])
-        if tool is not None:
-            if tool == "Bash":
-                body = head_lines[i + 1 :]
-                rules = [
-                    j
-                    for j, line in enumerate(body)
-                    if re.fullmatch(r"[╌─]{20,}", line.strip())
-                ]
-                if rules:
-                    # Newer dialogs put a teaching hint and description above
-                    # the ruled command box. Neither is executable input.
-                    if len(rules) < 2:
-                        return tool, None
-                    command = dedent(
-                        "\n".join(
-                            (
-                                line.lstrip().removeprefix("│")
-                                if line.lstrip().startswith("│")
-                                else line
-                            )
-                            for line in body[rules[0] + 1 : rules[1]]
-                        )
-                    ).strip()
-                    return tool, command or None
-                if _compact("\n".join(body)).startswith(
-                    _compact("Tip: auto mode handles these prompts for you")
-                ):
-                    return tool, None
-            target = next((s for s in stripped[i + 1 :] if s), None)
-            return tool, target
+        if tool is None:
+            continue
+        if tool == "Bash":
+            return tool, _extract_bash_command(head_lines[i + 1 :])
+        return tool, next((s for s in stripped[i + 1 :] if s), None)
 
-    # 2. File operations name the path in the question itself.
+    # File operations name the path in the question itself.
     qmatch = re.match(
         r"Do you want to (create|write to|edit|update) (.+?)\?$", question
     )
@@ -520,7 +507,7 @@ def _extract_tool_target(
         tool = "Write" if verb in {"create", "write to"} else "Edit"
         return tool, qmatch.group(2)
 
-    # 3. Fallback: the `● Tool(arg)` header line, if present.
+    # Fall back to the tool header when the body is offscreen.
     header_tool: str | None = None
     header_target: str | None = None
     for line in head_lines:

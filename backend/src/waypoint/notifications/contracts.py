@@ -13,8 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 IntentKind = Literal["inbox", "approval", "question", "plan_approval"]
 
-# Why a delivery row was skipped rather than sent: filtered by a per-signal
-# switch, handled internally, or already visible in an active browser tab.
 SuppressionReason = Literal[
     "signal_disabled", "internal_telemetry_session", "active_session_presence"
 ]

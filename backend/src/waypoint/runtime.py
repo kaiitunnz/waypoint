@@ -248,20 +248,12 @@ _NON_REPLY_ITEM_KINDS = frozenset({"reasoning", "progress"})
 
 
 def _assemble_agent_reply(events: list[EventRecord]) -> str:
-    """Reconstruct the full agent reply text from a session's raw events.
+    """Join final-answer deltas by item id in sequence order.
 
-    ``agent_output`` events sharing ``metadata.item_id`` are streamed deltas —
-    the frontend's live merge concatenates their text in sequence order
-    (``mergeEventText``); this replays that same rule offline over the whole
-    event list. Reasoning and progress-update output (``metadata.item_kind``
-    ``"reasoning"`` / ``"progress"``) is excluded — a one-shot summarizer wants
-    the model's final prose, not its chain of thought or narration. Multiple
-    distinct reply items (rare for a single-turn one-shot) join with a blank
-    line. Text preceding a user input or tool boundary is intermediate
-    narration, so only candidates after the last such boundary are returned.
+    User and tool events discard earlier narration. Reasoning and progress
+    are excluded; distinct answer items are separated by blank lines.
     """
-    groups: dict[str, list[EventRecord]] = {}
-    order: list[str] = []
+    groups: dict[str, list[str]] = {}
     for event in sorted(events, key=lambda event: event.sequence):
         if event.kind in {
             EventKind.USER_INPUT,
@@ -269,11 +261,10 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
             EventKind.TOOL_RESULT,
         }:
             groups.clear()
-            order.clear()
             continue
         if event.kind != EventKind.AGENT_OUTPUT:
             continue
-        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        metadata = event.metadata
         if metadata.get("item_kind") in _NON_REPLY_ITEM_KINDS:
             continue
         item_id = metadata.get("item_id")
@@ -282,14 +273,8 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
             if isinstance(item_id, str) and item_id
             else f"_solo:{event.sequence}"
         )
-        if key not in groups:
-            groups[key] = []
-            order.append(key)
-        groups[key].append(event)
-    parts = [
-        "".join(e.text for e in sorted(groups[key], key=lambda e: e.sequence))
-        for key in order
-    ]
+        groups.setdefault(key, []).append(event.text)
+    parts = ["".join(chunks) for chunks in groups.values()]
     return "\n\n".join(part for part in parts if part.strip())
 
 
@@ -2052,46 +2037,13 @@ class SessionRuntime:
         permission_mode: str | None = None,
         timeout_s: float = ONE_SHOT_DEFAULT_TIMEOUT_SECONDS,
     ) -> str | None:
-        """Run one prompt through a throwaway managed session and return the reply.
+        """Run one prompt in a temporary telemetry session and return its final answer.
 
-        Generic across backends — dispatches through the normal
-        ``create_session``/``handle_input`` launch path exactly like every
-        other runtime entry point, so there is no per-backend branch here.
-        The session is created under the dedicated ``SessionSource.TELEMETRY``
-        (excluded from the session list the same way the assistant is),
-        relabeled after creation exactly like ``_create_assistant_session``
-        does. Config-dir/account-profile handling comes for free from that
-        normal launch path — the reason a managed session (``claude_tty`` by
-        default) is preferred over a raw ``claude -p`` subprocess.
+        Use normal session launch settings and pass ``permission_mode`` unchanged.
+        Pane transports read the payload from a file to avoid input-size limits;
+        other transports receive it inline. Tool approvals are automatic.
 
-        ``permission_mode`` passes through to the launched session unchanged
-        (``None`` lets the backend pick its own default) — the summarizer
-        resolves it from a configured preset when one is set.
-
-        ``instruction`` is a short natural-language contract (rules + the
-        expected reply shape); ``payload`` is the (potentially large,
-        multi-KB) data to act on. How they're delivered is dispatched on the
-        *resolved* (agent, transport) pair's ``has_terminal_pane`` capability
-        — never a backend-id check, so any plugin/transport/preset works:
-
-        - Pane-injected transports (``has_terminal_pane`` — claude_tty,
-          tmux) drive input via ``tmux send-keys``, which has a practical
-          command-length limit a multi-KB payload blows past ("command too
-          long"). ``payload`` is written to a file in the one-shot's
-          workspace instead, and the submitted prompt is just ``instruction``
-          plus a pointer at that filename — the agent reads it with a tool
-          call. Auto-approved generically for any ``TELEMETRY``-source
-          session (see ``_maybe_auto_approve``) so that Read is never left
-          hanging with no one to click approve.
-        - Programmatic-input transports (claude_code structured, codex,
-          opencode) submit ``instruction`` + ``payload`` together as the
-          prompt — no tool call needed, so no approval risk either.
-
-        Awaits turn completion (status settles to idle/waiting-input, or
-        exited/error on failure) up to ``timeout_s``, then reads back the
-        assembled ``agent_output`` text. Always torn down (terminate +
-        delete, payload file included) in a ``finally``. Never raises — any
-        failure, including a timeout, returns ``None``.
+        Return ``None`` on failure or timeout. Always delete the session and payload.
         """
         session: SessionRecord | None = None
         payload_path: Path | None = None
@@ -4126,12 +4078,7 @@ class SessionRuntime:
     def _notification_suppression_reason(
         self, intent: NotificationIntent
     ) -> SuppressionReason | None:
-        """Why this intent must not be delivered, or ``None`` if it may be.
-
-        Internal telemetry interactions are handled by the one-shot runner.
-        Other session interactions are suppressed while visibly open. Inbox
-        intents are exempt from both rules (they may target another session).
-        """
+        """Return why a notification is suppressed, or ``None``."""
         if not self.settings.notifications.allows_intent(intent.kind):
             return "signal_disabled"
         if intent.source_session_id is not None and intent.kind != "inbox":
@@ -5204,15 +5151,7 @@ class SessionRuntime:
             await self._maybe_auto_approve_oneshot(event)
 
     async def _maybe_auto_approve_oneshot(self, event: EventRecord) -> None:
-        """Auto-approve any approval request on a ``TELEMETRY`` one-shot session.
-
-        A one-shot has no user to click approve; leaving a request pending
-        would hang the turn forever — in particular the file-hand-off Read
-        call pane-injected transports need (CONTRACT-NL fix-nl-input).
-        Generic: dispatches on ``session.source``, never on backend id, so it
-        covers whichever plugin/transport a one-shot happens to be configured
-        with, via the same ``approve()`` entry point the UI uses.
-        """
+        """Approve internal telemetry tools so unattended runs can finish."""
         session = self.storage.get_session(event.session_id)
         if session is None or session.source != SessionSource.TELEMETRY:
             return

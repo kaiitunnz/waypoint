@@ -15,6 +15,7 @@ Verified against fixtures captured from Claude Code 2.1.177 in
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from textwrap import dedent
 
 from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
@@ -475,12 +476,38 @@ def _extract_tool_target(
     # 1. Body label → tool; the next non-empty line is the command/path. Scan
     # bottom-up: the active dialog is the lowest block on the pane, so an
     # identical label string sitting earlier in the scrollback can't win. The
-    # target is taken as a single line — at the fixed 120-col launch width with
-    # `capture-pane -J` joining wraps this holds; a label rendered without its
-    # body is the only degenerate case and yields no worse than a None target.
+    # Legacy layouts put the command/path directly below the label. Newer Bash
+    # dialogs put hints above a ruled command box, which can span several lines.
     for i in range(len(stripped) - 1, -1, -1):
         tool = _BODY_TOOL_LABELS.get(stripped[i])
         if tool is not None:
+            if tool == "Bash":
+                body = head_lines[i + 1 :]
+                rules = [
+                    j
+                    for j, line in enumerate(body)
+                    if re.fullmatch(r"[╌─]{20,}", line.strip())
+                ]
+                if rules:
+                    # Newer dialogs put a teaching hint and description above
+                    # the ruled command box. Neither is executable input.
+                    if len(rules) < 2:
+                        return tool, None
+                    command = dedent(
+                        "\n".join(
+                            (
+                                line.lstrip().removeprefix("│")
+                                if line.lstrip().startswith("│")
+                                else line
+                            )
+                            for line in body[rules[0] + 1 : rules[1]]
+                        )
+                    ).strip()
+                    return tool, command or None
+                if _compact("\n".join(body)).startswith(
+                    _compact("Tip: auto mode handles these prompts for you")
+                ):
+                    return tool, None
             target = next((s for s in stripped[i + 1 :] if s), None)
             return tool, target
 

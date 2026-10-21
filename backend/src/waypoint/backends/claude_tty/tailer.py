@@ -569,14 +569,14 @@ class TranscriptTailer:
     ) -> tuple[str, dict[str, Any]]:
         """Tool name and input for the approval card.
 
-        A dialog whose box overflows the pane drops its tool label, so
-        `parse_approval` yields tool_name=None; recover the tool and its full,
-        untruncated input from the pending transcript tool_use in that case.
+        Prefer the full transcript input when it matches the visible tool, or
+        when an overflowing dialog has lost its tool label. A different pending
+        tool must not override the live dialog.
         """
-        if dialog.tool_name is None:
-            pending = self._normalizer.pending_tool_use
-            if pending is not None:
-                name, tool_input = pending
+        pending = self._normalizer.pending_tool_use
+        if pending is not None:
+            name, tool_input = pending
+            if dialog.tool_name is None or name == dialog.tool_name:
                 return name, dict(tool_input)
         tool_name = dialog.tool_name or "Unknown"
         target = dialog.target or ""

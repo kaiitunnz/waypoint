@@ -1,5 +1,8 @@
 """Unit tests for the claude_tty transcript normalizer."""
 
+import json
+from datetime import UTC, datetime
+
 import pytest
 
 from claude_signatures import thinking_block
@@ -8,7 +11,11 @@ from waypoint.backends.claude_tty.normalize import (
     NormalizedEvent,
     TranscriptNormalizer,
 )
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.runtime import _assemble_agent_reply
+from waypoint.schemas import EventKind, EventRecord, SessionStatus
+from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
+from waypoint.telemetry.nl import NLInsightRequest
+from waypoint.telemetry.summarizer import _parse_reply, _parse_selections
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +58,64 @@ def _tool_result_block(tool_use_id: str, result: str, is_error: bool = False) ->
 
 def _text_block(text: str) -> dict:
     return {"type": "text", "text": text}
+
+
+@pytest.mark.parametrize("instance", [False, True])
+def test_oneshot_uses_final_json_after_narration_and_tools(instance: bool) -> None:
+    reply = (
+        [{"template_id": "total_footprint", "evidence_ids": ["total_bytes"]}]
+        if instance
+        else {
+            "prose": "- You used 32k tokens.",
+            "evidence": [
+                {"statement": "32k tokens", "metric": "tokens", "value": "32000"}
+            ],
+            "confidence": "medium",
+        }
+    )
+    records = [
+        _assistant_record(
+            "narration",
+            [_text_block("I'll inspect the rest of the payload.")],
+            stop_reason="tool_use",
+        ),
+        _assistant_record(
+            "tool",
+            [_tool_use_block("read", "Bash", {"command": "tail payload.json"})],
+            stop_reason="tool_use",
+        ),
+        _user_record([_tool_result_block("read", "payload data")]),
+        _assistant_record("final", [_text_block(json.dumps(reply))]),
+    ]
+    norm = TranscriptNormalizer()
+    now = datetime.now(UTC)
+    events: list[EventRecord] = []
+    for record in records:
+        for event in norm.process_record(record):
+            events.append(
+                EventRecord(
+                    session_id="s",
+                    ts=now,
+                    kind=event.kind,
+                    text=event.text,
+                    metadata=event.metadata,
+                    sequence=len(events) + 1,
+                )
+            )
+    raw = _assemble_agent_reply(events)
+    assert json.loads(raw) == reply
+    if instance:
+        assert _parse_selections(raw) == reply
+    else:
+        request = NLInsightRequest(
+            range=TelemetryRange(start=now, end=now, tz="UTC"),
+            filters=TelemetryFilter(),
+        )
+        insight = _parse_reply(raw, request, backend="claude_code", model="haiku")
+        assert insight is not None
+        assert insight.prose == "- You used 32k tokens."
+        assert insight.confidence == "medium"
+        assert len(insight.evidence) == 1
 
 
 def _edit_result_record(

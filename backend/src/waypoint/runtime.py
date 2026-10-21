@@ -257,11 +257,20 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
     ``"reasoning"`` / ``"progress"``) is excluded — a one-shot summarizer wants
     the model's final prose, not its chain of thought or narration. Multiple
     distinct reply items (rare for a single-turn one-shot) join with a blank
-    line.
+    line. Text preceding a user input or tool boundary is intermediate
+    narration, so only candidates after the last such boundary are returned.
     """
     groups: dict[str, list[EventRecord]] = {}
     order: list[str] = []
-    for event in events:
+    for event in sorted(events, key=lambda event: event.sequence):
+        if event.kind in {
+            EventKind.USER_INPUT,
+            EventKind.TOOL_CALL,
+            EventKind.TOOL_RESULT,
+        }:
+            groups.clear()
+            order.clear()
+            continue
         if event.kind != EventKind.AGENT_OUTPUT:
             continue
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
@@ -4119,18 +4128,18 @@ class SessionRuntime:
     ) -> SuppressionReason | None:
         """Why this intent must not be delivered, or ``None`` if it may be.
 
-        Backend-neutral: reads only the persisted intent. A disabled per-signal
-        switch wins over presence; a session interaction whose session has an
-        active visible lease is suppressed. Inbox intents are never
-        presence-suppressed (they may target a different session)."""
+        Internal telemetry interactions are handled by the one-shot runner.
+        Other session interactions are suppressed while visibly open. Inbox
+        intents are exempt from both rules (they may target another session).
+        """
         if not self.settings.notifications.allows_intent(intent.kind):
             return "signal_disabled"
-        if (
-            intent.source_session_id is not None
-            and intent.kind != "inbox"
-            and self.session_presence.is_active(intent.source_session_id)
-        ):
-            return "active_session_presence"
+        if intent.source_session_id is not None and intent.kind != "inbox":
+            session = self.storage.get_session(intent.source_session_id)
+            if session is not None and session.source == SessionSource.TELEMETRY:
+                return "internal_telemetry_session"
+            if self.session_presence.is_active(intent.source_session_id):
+                return "active_session_presence"
         return None
 
     async def post_inbox_item(self, request: InboxPostRequest) -> InboxItem:

@@ -247,6 +247,32 @@ async def test_overflow_dialog_without_transcript_falls_back_to_unknown() -> Non
     assert meta["tool_input"] == {"description": ""}
 
 
+@pytest.mark.parametrize("pending_name", [None, "Bash", "Read"])
+async def test_auto_hint_dialog_surfaces_command_not_tip(
+    pending_name: str | None,
+) -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("approval_bash_auto_hint.txt"))
+    tailer = _make_tailer(plugin, runtime)
+    if pending_name is not None:
+        tailer._normalizer._pending_tool_uses["tu-1"] = (
+            pending_name,
+            {"command": "full transcript command"},
+        )
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    command = meta["tool_input"]["command"]
+    assert meta["tool_name"] == "Bash"
+    assert command == (
+        "full transcript command"
+        if pending_name == "Bash"
+        else "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' | head -80"
+    )
+    assert meta["interaction"]["body"] == f"Approve Bash command:\n{command}"
+
+
 async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")

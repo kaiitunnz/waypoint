@@ -88,10 +88,18 @@ def test_assemble_agent_reply_skips_reasoning_and_progress() -> None:
         EventRecord(
             session_id="s",
             ts=now,
+            kind=EventKind.TOOL_CALL,
+            text="ignored",
+            metadata={},
+            sequence=2,
+        ),
+        EventRecord(
+            session_id="s",
+            ts=now,
             kind=EventKind.AGENT_OUTPUT,
             text="Hello ",
             metadata={"item_id": "m1"},
-            sequence=2,
+            sequence=3,
         ),
         EventRecord(
             session_id="s",
@@ -99,18 +107,70 @@ def test_assemble_agent_reply_skips_reasoning_and_progress() -> None:
             kind=EventKind.AGENT_OUTPUT,
             text="world",
             metadata={"item_id": "m1"},
-            sequence=3,
+            sequence=4,
         ),
         EventRecord(
             session_id="s",
             ts=now,
-            kind=EventKind.TOOL_CALL,
+            kind=EventKind.SYSTEM_NOTE,
             text="ignored",
             metadata={},
-            sequence=4,
+            sequence=5,
         ),
     ]
     assert _assemble_agent_reply(events) == "Hello world"
+
+
+@pytest.mark.parametrize(
+    "barrier", [EventKind.USER_INPUT, EventKind.TOOL_CALL, EventKind.TOOL_RESULT]
+)
+@pytest.mark.parametrize("with_final", [False, True])
+def test_assemble_agent_reply_discards_text_before_work(
+    barrier: EventKind, with_final: bool
+) -> None:
+    now = datetime.now(UTC)
+    events = [
+        EventRecord(
+            session_id="s",
+            ts=now,
+            kind=kind,
+            text=text,
+            metadata=metadata,
+            sequence=sequence,
+        )
+        for sequence, (kind, text, metadata) in enumerate(
+            [
+                (EventKind.AGENT_OUTPUT, "I'll inspect the payload.", {"item_id": "m"}),
+                (barrier, "work", {}),
+                (EventKind.AGENT_OUTPUT, "Thinking", {"item_kind": "reasoning"}),
+                (EventKind.AGENT_OUTPUT, "Checking", {"item_kind": "progress"}),
+            ],
+            start=1,
+        )
+    ]
+    if with_final:
+        events.extend(
+            [
+                EventRecord(
+                    session_id="s",
+                    ts=now,
+                    kind=EventKind.AGENT_OUTPUT,
+                    text=text,
+                    metadata={"item_id": item_id} if item_id else {},
+                    sequence=sequence,
+                )
+                for sequence, text, item_id in [
+                    (5, "Final ", "m"),
+                    (6, "answer", "m"),
+                    (7, "Another paragraph", "second"),
+                    (8, "No item id", None),
+                ]
+            ]
+        )
+    # Sequence, rather than caller list order, governs both barriers and deltas.
+    assert _assemble_agent_reply(list(reversed(events))) == (
+        "Final answer\n\nAnother paragraph\n\nNo item id" if with_final else ""
+    )
 
 
 async def test_run_oneshot_returns_assembled_reply_and_tears_down(

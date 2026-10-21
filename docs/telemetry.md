@@ -125,6 +125,12 @@ only the numeric aggregates plus a bounded set of **redacted** drill-down rows
 prompts, tool arguments, or paths. A weekly digest is generated on the runtime's
 maintenance task; a digest can also be regenerated on demand from the card.
 
+Telemetry one-shots handle their tool approvals internally and do not send
+permission, plan, or question notifications. Their final answer is assembled
+after the last tool interaction; intermediate narration is excluded so the
+usage digest retains its structured evidence and confidence, and instance
+selections remain valid JSON.
+
 #### Regeneration lifecycle
 
 A regeneration is **observable across reloads and clients**, not just in the tab

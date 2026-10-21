@@ -256,19 +256,24 @@ async def test_auto_hint_dialog_surfaces_command_not_tip(
     runtime = _make_runtime(session, _load("approval_bash_auto_hint.txt"))
     tailer = _make_tailer(plugin, runtime)
     if pending_name is not None:
+        # An earlier tool can still be running when this dialog appears.
+        # Matching the name alone does not identify the permission-blocked call.
         tailer._normalizer._pending_tool_uses["tu-1"] = (
             pending_name,
-            {"command": "full transcript command"},
+            {"command": "earlier running command"},
+        )
+        tailer._normalizer._pending_tool_uses["tu-2"] = (
+            "Bash",
+            {"command": "currently blocked command"},
         )
     await tailer._poll_dialog()
     await tailer._poll_dialog()
     meta = runtime._emit_adapter_event.call_args.args[3]
     command = meta["tool_input"]["command"]
     assert meta["tool_name"] == "Bash"
-    assert command == (
-        "full transcript command"
-        if pending_name == "Bash"
-        else "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' | head -80"
+    assert (
+        command
+        == "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' | head -80"
     )
     assert meta["interaction"]["body"] == f"Approve Bash command:\n{command}"
 

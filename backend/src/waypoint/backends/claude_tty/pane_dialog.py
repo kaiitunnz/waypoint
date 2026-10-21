@@ -15,6 +15,7 @@ Verified against fixtures captured from Claude Code 2.1.177 in
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from textwrap import dedent
 
 from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
@@ -467,22 +468,38 @@ _BODY_TOOL_LABELS: dict[str, str] = {
 }
 
 
+def _extract_bash_command(lines: list[str]) -> str | None:
+    rules = [
+        i for i, line in enumerate(lines) if re.fullmatch(r"[╌─]{20,}", line.strip())
+    ]
+    if rules:
+        if len(rules) < 2:
+            return None
+        # Hints and descriptions sit outside the ruled command body.
+        command = "\n".join(
+            re.sub(r"^\s*│", "", line) for line in lines[rules[0] + 1 : rules[1]]
+        )
+        return dedent(command).strip() or None
+    if _compact("\n".join(lines)).startswith(
+        _compact("Tip: auto mode handles these prompts for you")
+    ):
+        return None
+    return next((line.strip() for line in lines if line.strip()), None)
+
+
 def _extract_tool_target(
     head_lines: list[str], question: str
 ) -> tuple[str | None, str | None]:
     stripped = [line.strip() for line in head_lines]
 
-    # 1. Body label → tool; the next non-empty line is the command/path. Scan
-    # bottom-up: the active dialog is the lowest block on the pane, so an
-    # identical label string sitting earlier in the scrollback can't win. The
-    # target is taken as a single line — at the fixed 120-col launch width with
-    # `capture-pane -J` joining wraps this holds; a label rendered without its
-    # body is the only degenerate case and yields no worse than a None target.
+    # 1. The lowest labelled block is the active dialog.
     for i in range(len(stripped) - 1, -1, -1):
         tool = _BODY_TOOL_LABELS.get(stripped[i])
-        if tool is not None:
-            target = next((s for s in stripped[i + 1 :] if s), None)
-            return tool, target
+        if tool is None:
+            continue
+        if tool == "Bash":
+            return tool, _extract_bash_command(head_lines[i + 1 :])
+        return tool, next((s for s in stripped[i + 1 :] if s), None)
 
     # 2. File operations name the path in the question itself.
     qmatch = re.match(

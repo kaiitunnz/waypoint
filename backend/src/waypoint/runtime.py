@@ -248,23 +248,23 @@ _NON_REPLY_ITEM_KINDS = frozenset({"reasoning", "progress"})
 
 
 def _assemble_agent_reply(events: list[EventRecord]) -> str:
-    """Reconstruct the full agent reply text from a session's raw events.
+    """Join final-answer deltas by item id in sequence order.
 
-    ``agent_output`` events sharing ``metadata.item_id`` are streamed deltas —
-    the frontend's live merge concatenates their text in sequence order
-    (``mergeEventText``); this replays that same rule offline over the whole
-    event list. Reasoning and progress-update output (``metadata.item_kind``
-    ``"reasoning"`` / ``"progress"``) is excluded — a one-shot summarizer wants
-    the model's final prose, not its chain of thought or narration. Multiple
-    distinct reply items (rare for a single-turn one-shot) join with a blank
-    line.
+    User and tool events discard earlier narration. Reasoning and progress
+    are excluded; distinct answer items are separated by blank lines.
     """
-    groups: dict[str, list[EventRecord]] = {}
-    order: list[str] = []
-    for event in events:
+    groups: dict[str, list[str]] = {}
+    for event in sorted(events, key=lambda event: event.sequence):
+        if event.kind in {
+            EventKind.USER_INPUT,
+            EventKind.TOOL_CALL,
+            EventKind.TOOL_RESULT,
+        }:
+            groups.clear()
+            continue
         if event.kind != EventKind.AGENT_OUTPUT:
             continue
-        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        metadata = event.metadata
         if metadata.get("item_kind") in _NON_REPLY_ITEM_KINDS:
             continue
         item_id = metadata.get("item_id")
@@ -273,14 +273,8 @@ def _assemble_agent_reply(events: list[EventRecord]) -> str:
             if isinstance(item_id, str) and item_id
             else f"_solo:{event.sequence}"
         )
-        if key not in groups:
-            groups[key] = []
-            order.append(key)
-        groups[key].append(event)
-    parts = [
-        "".join(e.text for e in sorted(groups[key], key=lambda e: e.sequence))
-        for key in order
-    ]
+        groups.setdefault(key, []).append(event.text)
+    parts = ["".join(chunks) for chunks in groups.values()]
     return "\n\n".join(part for part in parts if part.strip())
 
 
@@ -4117,20 +4111,15 @@ class SessionRuntime:
     def _notification_suppression_reason(
         self, intent: NotificationIntent
     ) -> SuppressionReason | None:
-        """Why this intent must not be delivered, or ``None`` if it may be.
-
-        Backend-neutral: reads only the persisted intent. A disabled per-signal
-        switch wins over presence; a session interaction whose session has an
-        active visible lease is suppressed. Inbox intents are never
-        presence-suppressed (they may target a different session)."""
+        """Return why a notification is suppressed, or ``None``."""
         if not self.settings.notifications.allows_intent(intent.kind):
             return "signal_disabled"
-        if (
-            intent.source_session_id is not None
-            and intent.kind != "inbox"
-            and self.session_presence.is_active(intent.source_session_id)
-        ):
-            return "active_session_presence"
+        if intent.source_session_id is not None and intent.kind != "inbox":
+            session = self.storage.get_session(intent.source_session_id)
+            if session is not None and session.source == SessionSource.TELEMETRY:
+                return "internal_telemetry_session"
+            if self.session_presence.is_active(intent.source_session_id):
+                return "active_session_presence"
         return None
 
     async def post_inbox_item(self, request: InboxPostRequest) -> InboxItem:

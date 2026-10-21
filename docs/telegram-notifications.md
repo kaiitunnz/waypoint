@@ -96,6 +96,9 @@ notifications:
 Turning a signal off stops only its notifications; the inbox item or session
 request still appears in Waypoint as usual. Unknown keys are rejected.
 
+Telemetry insight sessions handle approvals automatically and skip interaction
+notifications. Inbox items still arrive.
+
 ## Active-session presence
 
 While you have a session's page open and visible, Waypoint skips that session's

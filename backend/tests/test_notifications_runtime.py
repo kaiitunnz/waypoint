@@ -1,9 +1,11 @@
 """Integration coverage for the runtime notification seams and status API."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from waypoint.api import create_app
 from waypoint.backends.events import InteractionChoice, InteractionEnvelope
@@ -19,6 +21,8 @@ from waypoint.schemas import (
     EventKind,
     InboxMarkdownBlockInput,
     InboxPostRequest,
+    SessionRecord,
+    SessionSource,
     SessionStatus,
 )
 from waypoint.settings import (
@@ -92,6 +96,26 @@ async def _emit_approval(runtime: SessionRuntime, session_id: str) -> None:
     )
 
 
+def _store_session(storage: Storage, source: SessionSource) -> SessionRecord:
+    now = datetime.now(UTC)
+    return storage.create_session(
+        SessionRecord(
+            id="internal-session",
+            backend="codex",
+            source=source,
+            transport="tmux",
+            title="Telemetry insight",
+            cwd="/tmp",
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="/tmp/raw.log",
+            structured_log_path="/tmp/events.jsonl",
+        )
+    )
+
+
 async def test_interaction_suppressed_by_active_presence(tmp_path: Path) -> None:
     runtime, storage, service = await _runtime_with_channel(tmp_path, _notifications())
     try:
@@ -110,6 +134,58 @@ async def test_interaction_delivered_when_not_present(tmp_path: Path) -> None:
         await _emit_approval(runtime, "sessX")
         assert len(storage.list_events("sessX")) == 1
         assert storage.count_deliveries_by_status() == {"queued": 1}
+    finally:
+        await service.stop()
+
+
+@pytest.mark.parametrize("kind", ["approval", "question", "plan_approval"])
+async def test_telemetry_interactions_stay_internal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    runtime, storage, service = await _runtime_with_channel(tmp_path, _notifications())
+    session = _store_session(storage, SessionSource.TELEMETRY)
+    approved: list[str] = []
+
+    async def approve(session_id: str, request: Any) -> Any:
+        approved.append(session_id)
+        return storage.get_session(session_id)
+
+    monkeypatch.setattr(runtime, "approve", approve)
+    interaction = InteractionEnvelope.model_validate(
+        {"kind": kind, "request_id": "internal-req", "title": "Internal request"}
+    )
+    event_kind = (
+        EventKind.TOOL_CALL if kind == "question" else EventKind.APPROVAL_REQUEST
+    )
+    try:
+        await runtime._emit_adapter_event(
+            session.id,
+            event_kind,
+            "internal request",
+            {"interaction": interaction.to_metadata()},
+            SessionStatus.WAITING_INPUT,
+        )
+        assert len(storage.list_events(session.id)) == 1
+        assert storage.count_deliveries_by_status() == {}
+        assert approved == ([] if kind == "question" else [session.id])
+    finally:
+        await service.stop()
+
+
+async def test_queued_interaction_suppressed_after_session_becomes_telemetry(
+    tmp_path: Path,
+) -> None:
+    runtime, storage, service = await _runtime_with_channel(tmp_path, _notifications())
+    session = _store_session(storage, SessionSource.MANAGED)
+    try:
+        await _emit_approval(runtime, session.id)
+        assert storage.count_deliveries_by_status() == {"queued": 1}
+        storage.update_session(session.id, source=SessionSource.TELEMETRY)
+        await service._drain_once()
+        assert storage.count_deliveries_by_status() == {"suppressed": 1}
+        channel = service._channels["t"]
+        assert isinstance(channel, FakeChannel)
+        assert channel.sent == []
     finally:
         await service.stop()
 
@@ -153,6 +229,23 @@ async def test_inbox_not_affected_by_session_presence(tmp_path: Path) -> None:
         assert storage.get_inbox_item(item.id) is not None
         # Inbox is never presence-suppressed even when its origin session is open.
         assert storage.count_deliveries_by_status() == {"queued": 1}
+    finally:
+        await service.stop()
+
+
+async def test_inbox_from_telemetry_session_is_still_delivered(tmp_path: Path) -> None:
+    runtime, storage, service = await _runtime_with_channel(tmp_path, _notifications())
+    session = _store_session(storage, SessionSource.TELEMETRY)
+    try:
+        await runtime.post_inbox_item(
+            InboxPostRequest(
+                from_session_id=session.id,
+                subject="Diagnostic report",
+                blocks=[InboxMarkdownBlockInput(text="Review the report")],
+            )
+        )
+        await service._drain_once()
+        assert storage.count_deliveries_by_status() == {"sent": 1}
     finally:
         await service.stop()
 

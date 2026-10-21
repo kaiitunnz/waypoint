@@ -176,6 +176,57 @@ def test_parse_bash_approval() -> None:
     assert dialog.options[1].label.startswith("Yes, and always allow")
 
 
+@pytest.mark.parametrize("wrapped_hint", [False, True])
+def test_parse_bash_command_below_auto_mode_hint(wrapped_hint: bool) -> None:
+    screen = _load("approval_bash_auto_hint.txt")
+    if wrapped_hint:
+        screen = screen.replace('— choose "switch', '—\n choose "switch')
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.tool_name == "Bash"
+    assert dialog.target == (
+        "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' | head -80"
+    )
+    assert dialog.approve_option is not None and dialog.approve_option.number == 1
+    assert dialog.decline_option is not None and dialog.decline_option.number == 3
+
+
+def test_parse_bash_command_preserves_multiline_indentation() -> None:
+    screen = _load("approval_bash_auto_hint.txt")
+    command_line = next(line for line in screen.splitlines() if line.startswith("│"))
+    screen = screen.replace(
+        command_line, "│ python - <<'PY'\n│ if True:\n│     print('ok')\n│ PY"
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.target == "python - <<'PY'\nif True:\n    print('ok')\nPY"
+
+
+@pytest.mark.parametrize("boxed", [False, True])
+def test_parse_bash_hint_without_command_has_no_target(boxed: bool) -> None:
+    screen = _load("approval_bash_auto_hint.txt")
+    command_line = next(line for line in screen.splitlines() if line.startswith("│"))
+    screen = screen.replace(command_line, "")
+    if not boxed:
+        screen = "\n".join(
+            line for line in screen.splitlines() if not line.startswith("╌")
+        )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.tool_name == "Bash"
+    assert dialog.target is None
+
+
+def test_legacy_command_mentioning_auto_mode_tip_is_preserved() -> None:
+    command = 'echo "Tip: auto mode handles these prompts for you"'
+    screen = _load("approval_bash.txt").replace(
+        "mkdir /tmp/cc-tty-probe/probe_subdir", command
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.target == command
+
+
 def test_diff_preview_numbers_are_not_options() -> None:
     # The Write dialog renders a numbered diff line ("  1 waypoint-probe") that
     # must not be parsed as a fourth option.

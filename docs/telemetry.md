@@ -125,6 +125,9 @@ only the numeric aggregates plus a bounded set of **redacted** drill-down rows
 prompts, tool arguments, or paths. A weekly digest is generated on the runtime's
 maintenance task; a digest can also be regenerated on demand from the card.
 
+Tool approvals are automatic; insight sessions do not send interaction
+notifications.
+
 #### Regeneration lifecycle
 
 A regeneration is **observable across reloads and clients**, not just in the tab

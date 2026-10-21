@@ -96,9 +96,8 @@ notifications:
 Turning a signal off stops only its notifications; the inbox item or session
 request still appears in Waypoint as usual. Unknown keys are rejected.
 
-Internal telemetry insight sessions do not send permission, plan, or question
-notifications: the one-shot runner handles their approvals automatically.
-Inbox items are still delivered even when posted by an internal session.
+Telemetry insight sessions handle approvals automatically and skip interaction
+notifications. Inbox items still arrive.
 
 ## Active-session presence
 

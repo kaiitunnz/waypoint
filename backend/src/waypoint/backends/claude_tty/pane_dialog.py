@@ -455,7 +455,10 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
     return PlanDialog(options=options, plan_path=plan_path)
 
 
-# Dialog labels are more reliable than transient tool headers.
+# Dialog-body labels Claude renders above the question. These are the reliable
+# source of the tool + target: the `● Tool(arg)` header line is often absent
+# (e.g. a Bash dialog shows a "Running…" spinner there instead), so it is only
+# a fallback.
 _BODY_TOOL_LABELS: dict[str, str] = {
     "Bash command": "Bash",
     "Create file": "Write",
@@ -489,7 +492,7 @@ def _extract_tool_target(
 ) -> tuple[str | None, str | None]:
     stripped = [line.strip() for line in head_lines]
 
-    # The lowest labelled block is the active dialog.
+    # 1. The lowest labelled block is the active dialog.
     for i in range(len(stripped) - 1, -1, -1):
         tool = _BODY_TOOL_LABELS.get(stripped[i])
         if tool is None:
@@ -498,7 +501,7 @@ def _extract_tool_target(
             return tool, _extract_bash_command(head_lines[i + 1 :])
         return tool, next((s for s in stripped[i + 1 :] if s), None)
 
-    # File operations name the path in the question itself.
+    # 2. File operations name the path in the question itself.
     qmatch = re.match(
         r"Do you want to (create|write to|edit|update) (.+?)\?$", question
     )
@@ -507,7 +510,7 @@ def _extract_tool_target(
         tool = "Write" if verb in {"create", "write to"} else "Edit"
         return tool, qmatch.group(2)
 
-    # Fall back to the tool header when the body is offscreen.
+    # 3. Fallback: the `● Tool(arg)` header line, if present.
     header_tool: str | None = None
     header_target: str | None = None
     for line in head_lines:

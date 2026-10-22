@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from waypoint.cli import (
     _backend_choices,
+    _database_write_locked,
     _json_safe,
     _settings_from_arg,
     app,
@@ -4425,8 +4426,7 @@ def test_rebuild_telemetry_refuses_when_database_write_locked(
     db_path = _settings_from_arg(str(cfg)).database_path
     _seed_telemetry_source(db_path)
     # Real lock probe against a sibling connection holding an open write txn.
-    monkeypatch.undo()
-    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+    monkeypatch.setattr("waypoint.cli._database_write_locked", _database_write_locked)
 
     holder = sqlite3.connect(str(db_path))
     try:
@@ -4477,8 +4477,7 @@ def test_rebuild_telemetry_real_lock_probe_passes_when_unlocked(
     _seed_telemetry_source(db_path)
     # Exercise the real _database_write_locked against an unlocked DB; keep the
     # network probe stubbed so the test never depends on a live host backend.
-    monkeypatch.undo()
-    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+    monkeypatch.setattr("waypoint.cli._database_write_locked", _database_write_locked)
 
     result = runner.invoke(
         app, ["--config", str(cfg), "maintenance", "rebuild-telemetry"]

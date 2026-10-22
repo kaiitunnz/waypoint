@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.2](https://github.com/kaiitunnz/waypoint/compare/v0.26.1...v0.26.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* keep telemetry insight approvals internal and preserve replies ([#538](https://github.com/kaiitunnz/waypoint/issues/538)) ([25814ad](https://github.com/kaiitunnz/waypoint/commit/25814ad4b9d633cdf976e391c3cb26a8c1d4ad35))
+* preserve OAuth usage percentages for Codex and Claude ([#525](https://github.com/kaiitunnz/waypoint/issues/525)) ([ef4a130](https://github.com/kaiitunnz/waypoint/commit/ef4a1309fbecd62d90e6a562a9fc3f76f4fec039))
+
 ## [0.26.1](https://github.com/kaiitunnz/waypoint/compare/v0.26.0...v0.26.1) (2026-10-19)
 
 

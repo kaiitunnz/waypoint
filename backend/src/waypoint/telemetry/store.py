@@ -22,6 +22,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from waypoint.telemetry.facts import (
+    ApprovalDecision,
     ContextSnapshotFact,
     LimitSnapshotFact,
     SessionLifecycleFact,
@@ -282,18 +283,19 @@ class TelemetryStore:
         existing = self._conn.execute(
             """
             SELECT revision, occurred_at, backend, model_at_turn, repo_name,
-                   src_source, transport, is_child, outcome, duration_ms
+                   src_source, transport, is_child, outcome, duration_ms,
+                   tool_name, approval_decision
             FROM telemetry_facts WHERE kind = ? AND source = ? AND fact_id = ?
             """,
             (fact.kind, fact.source, fact.fact_id),
         ).fetchone()
         if existing is not None and existing["revision"] > fact.revision:
             return None
-        if existing is not None and existing["revision"] == fact.revision:
-            upgraded = self._upgraded_tool_outcome(existing, fact)
-            if upgraded is None:
+        if existing is not None:
+            merged = self._merge_tool_fact(existing, fact)
+            if merged is None:
                 return None
-            fact = upgraded
+            fact = merged
 
         row = _row_from_fact(fact)
         columns = list(row)
@@ -355,24 +357,43 @@ class TelemetryStore:
         return keys_to_recompute
 
     @staticmethod
-    def _upgraded_tool_outcome(
+    def _merge_tool_fact(
         existing: sqlite3.Row, fact: TelemetryFact
     ) -> TelemetryFact | None:
-        """Let a terminal tool outcome supersede an ``UNKNOWN`` result at the
-        same revision (a preview/streamed result and the outcome-bearing one
-        share a ``(fact_id, revision)``), carrying the earlier duration forward
-        when the terminal result has none. Any other same-revision write is a
-        no-op.
-        """
+        """Approval annotations and tool outcomes can arrive independently."""
         if not isinstance(fact, ToolCallFact):
+            return fact if existing["revision"] < fact.revision else None
+        outcome_upgrade = (
+            existing["outcome"] == ToolOutcome.UNKNOWN.value
+            and fact.outcome != ToolOutcome.UNKNOWN
+        )
+        approval_upgrade = fact.approval_decision is not None and (
+            existing["approval_decision"] is None
+            or (
+                existing["approval_decision"] == ApprovalDecision.REQUESTED.value
+                and fact.approval_decision != ApprovalDecision.REQUESTED
+            )
+        )
+        name_upgrade = (
+            existing["tool_name"] == "unknown" and fact.tool_name != "unknown"
+        )
+        if existing["revision"] == fact.revision and not (
+            outcome_upgrade or approval_upgrade or name_upgrade
+        ):
             return None
-        if existing["outcome"] != ToolOutcome.UNKNOWN.value:
-            return None
+        updates: dict[str, Any] = {}
         if fact.outcome == ToolOutcome.UNKNOWN:
-            return None
+            updates["outcome"] = ToolOutcome(existing["outcome"])
+        if fact.approval_decision is None or (
+            fact.approval_decision == ApprovalDecision.REQUESTED
+            and existing["approval_decision"] is not None
+        ):
+            updates["approval_decision"] = existing["approval_decision"]
+        if fact.tool_name == "unknown" and existing["tool_name"]:
+            updates["tool_name"] = existing["tool_name"]
         if fact.duration_ms is None and existing["duration_ms"] is not None:
-            return fact.model_copy(update={"duration_ms": existing["duration_ms"]})
-        return fact
+            updates["duration_ms"] = existing["duration_ms"]
+        return fact.model_copy(update=updates)
 
     # ── maintenance ───────────────────────────────────────────────────────
 

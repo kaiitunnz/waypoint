@@ -447,6 +447,7 @@ class CodexAppServerAdapter:
                     {
                         "method": method,
                         "approval_id": pending.approval_id,
+                        "item_id": item_id,
                         "request": payload,
                         "status": SessionStatus.WAITING_INPUT,
                         INTERACTION_METADATA_KEY: interaction.to_metadata(),
@@ -627,7 +628,11 @@ class CodexAppServerAdapter:
                     state.session_id,
                     EventKind.SYSTEM_NOTE,
                     "Pending approval cancelled by interrupt",
-                    {"method": "approval.invalidated", "status": SessionStatus.RUNNING},
+                    {
+                        "method": "approval.invalidated",
+                        "approval_id": cancelled_approval.approval_id,
+                        "status": SessionStatus.RUNNING,
+                    },
                     SessionStatus.RUNNING,
                 )
             try:
@@ -650,17 +655,19 @@ class CodexAppServerAdapter:
         finally:
             state.interrupting = False
 
-    def _cancel_pending_approval(self, state: CodexSessionState) -> bool:
+    def _cancel_pending_approval(
+        self, state: CodexSessionState
+    ) -> PendingApproval | None:
         """The SDK runs the approval handler on its only reader thread, so
         while one is open no response is routed: not the interrupt's, and not
         that of a steer holding the request lock."""
         pending = state.pending_approval
         if pending is None:
-            return False
+            return None
         pending.response = _interrupt_response(pending.method)
         state.pending_approval = None
         pending.event.set()
-        return True
+        return pending
 
     def begin_compaction(self, session_id: str) -> None:
         """Reserve the thread for a manual compaction, before the caller awaits

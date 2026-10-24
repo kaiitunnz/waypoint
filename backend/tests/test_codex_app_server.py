@@ -677,6 +677,7 @@ async def test_interrupt_cancels_a_pending_approval_first() -> None:
     )
     while state.pending_approval is None:
         await asyncio.sleep(0.01)
+    approval_id = state.pending_approval.approval_id
 
     await asyncio.wait_for(adapter.interrupt("sess"), timeout=2)
 
@@ -688,6 +689,14 @@ async def test_interrupt_cancels_a_pending_approval_first() -> None:
         for _, kind, _, metadata, _ in emitted
         if kind == EventKind.SYSTEM_NOTE
     ] == ["approval.invalidated"]
+    assert (
+        next(
+            metadata["approval_id"]
+            for _, kind, _, metadata, _ in emitted
+            if kind == EventKind.SYSTEM_NOTE
+        )
+        == approval_id
+    )
     # A late approve on the already-cancelled request is a no-op.
     assert await adapter.respond_to_approval("sess", "approve") is False
     await adapter.terminate_session("sess")
@@ -2601,6 +2610,7 @@ async def test_approval_event_exposes_the_responder_identity() -> None:
             event for event in emitted if event[1] == EventKind.APPROVAL_REQUEST
         )
         assert event[3]["approval_id"] == pending.approval_id
+        assert event[3]["item_id"] == "command-1"
         assert event[3]["interaction"]["request_id"] == pending.approval_id
         assert await adapter.respond_to_approval(
             "sess", "approve", approval_id=pending.approval_id

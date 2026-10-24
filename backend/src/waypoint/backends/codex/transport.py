@@ -68,8 +68,9 @@ class CodexTransport(TransportAdapter):
         text: str | None,
         approval_id: str | None = None,
     ) -> bool:
-        # Note: Codex does not support multiple concurrent approvals so approval_id is ignored
-        return await self.adapter.respond_to_approval(session.id, decision, text)
+        return await self.adapter.respond_to_approval(
+            session.id, decision, text, approval_id
+        )
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.adapter.has_pending_approval(session.id)

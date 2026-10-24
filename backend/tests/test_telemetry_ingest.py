@@ -10,6 +10,7 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -509,6 +510,290 @@ def test_approval_request_then_decision_updates_fact(tmp_path: Path) -> None:
     lifecycle = [r for r in _facts(storage, "s1") if r["kind"] == "session_lifecycle"]
     assert len(lifecycle) == 1
     assert lifecycle[0]["transition"] == "running"
+
+
+@pytest.mark.parametrize("explicit_id", [True, False])
+@pytest.mark.parametrize("approval_first", [True, False])
+@pytest.mark.parametrize("result_first", [True, False])
+def test_separate_approval_identity_annotates_one_tool_call(
+    tmp_path: Path, explicit_id: bool, approval_first: bool, result_first: bool
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+    call: tuple[EventKind, str, dict[str, Any]] = (
+        EventKind.TOOL_CALL,
+        "command",
+        {"item_id": "cmd-1", "tool_name": "Bash"},
+    )
+    request = (
+        EventKind.APPROVAL_REQUEST,
+        "Approve command",
+        {"item_id": "cmd-1", "approval_id": "request-1"},
+    )
+    result = (EventKind.TOOL_RESULT, "done", {"item_id": "cmd-1", "is_error": False})
+    decision = (
+        EventKind.SYSTEM_NOTE,
+        "Approval response sent: accept",
+        {"approval_id": "request-1"} if explicit_id else {},
+    )
+    events = [request, call] if approval_first else [call, request]
+    events += [result, decision] if result_first else [decision, result]
+    for sequence, (kind, text, metadata) in enumerate(events, start=1):
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session.id,
+                ts=now + timedelta(seconds=sequence),
+                kind=kind,
+                text=text,
+                metadata=metadata,
+                sequence=sequence,
+            ),
+        )
+        ingester._drain_available()
+        rows = [r for r in _facts(storage, "s1") if r["kind"] == "tool_call"]
+        assert len(rows) == 1
+        assert rows[0]["fact_id"] == "cmd-1"
+        if kind == EventKind.APPROVAL_REQUEST:
+            assert rows[0]["approval_decision"] == "requested"
+
+    assert rows[0]["tool_name"] == "Bash"
+    assert rows[0]["approval_decision"] == "approved"
+    assert rows[0]["outcome"] == "succeeded"
+    assert rows[0]["duration_ms"] > 0
+    assert ingester._pending_approvals == {}
+    assert (
+        sum(
+            json.loads(row[0])["tool_calls"]
+            for row in storage.connection.execute(
+                "SELECT metrics_json FROM telemetry_daily_rollup"
+            )
+        )
+        == 1
+    )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id=session.id,
+            ts=now + timedelta(seconds=5),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Approval response sent: accept",
+            metadata={"approval_id": "request-1"},
+            sequence=5,
+        ),
+    )
+    ingester._drain_available()
+    assert len([r for r in _facts(storage, "s1") if r["kind"] == "tool_call"]) == 1
+
+
+def test_idless_approval_decision_only_resolves_oldest_in_its_session(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+    for session_id, approval_id in [("s2", "other"), ("s1", "first"), ("s1", "second")]:
+        session = storage.get_session(session_id) or _make_session(storage, session_id)
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session_id,
+                ts=now,
+                kind=EventKind.APPROVAL_REQUEST,
+                text="Allow?",
+                metadata={"approval_id": approval_id, "tool_name": "Bash"},
+                sequence=1,
+            ),
+        )
+    target_session = storage.get_session("s1")
+    assert target_session is not None
+    ingester.derive_from_event(
+        target_session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="Approval response sent: decline",
+            sequence=2,
+        ),
+    )
+    ingester._drain_available()
+    rows = {r["fact_id"]: r for r in _facts(storage)}
+    assert rows["first"]["approval_decision"] == "declined"
+    assert rows["second"]["approval_decision"] == "requested"
+    assert rows["other"]["approval_decision"] == "requested"
+    assert set(ingester._pending_approvals) == {("s1", "second"), ("s2", "other")}
+
+
+@pytest.mark.parametrize(
+    ("kind", "metadata"),
+    [(EventKind.USER_INPUT, {}), (EventKind.SYSTEM_NOTE, {"approval_id": "unknown"})],
+)
+def test_unmatched_approval_decision_leaves_pending_request(
+    tmp_path: Path, kind: EventKind, metadata: dict[str, str]
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+    for sequence, event_kind, text, event_metadata in [
+        (1, EventKind.APPROVAL_REQUEST, "Allow?", {"approval_id": "pending"}),
+        (2, kind, "Approval response sent: accept", metadata),
+    ]:
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session.id,
+                ts=now,
+                kind=event_kind,
+                text=text,
+                metadata=event_metadata,
+                sequence=sequence,
+            ),
+        )
+    ingester._drain_available()
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "tool_call"]
+    assert len(rows) == 1
+    assert rows[0]["approval_decision"] == "requested"
+    assert set(ingester._pending_approvals) == {("s1", "pending")}
+
+
+def test_approval_decision_after_restart_updates_existing_fact(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1").model_copy(
+        update={"backend": "claude_code", "transport": "claude_tty"}
+    )
+    now = datetime.now(UTC)
+    ingester = TelemetryIngester(storage)
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id=session.id,
+            ts=now,
+            kind=EventKind.APPROVAL_REQUEST,
+            text="Allow Bash?",
+            metadata={"approval_id": "a1", "tool_name": "Bash"},
+            sequence=1,
+        ),
+    )
+    ingester._drain_available()
+    ingester = TelemetryIngester(storage)
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id=session.id,
+            ts=now + timedelta(seconds=1),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Approval response sent: accept",
+            metadata={"approval_id": "a1"},
+            sequence=2,
+        ),
+    )
+    ingester._drain_available()
+    rows = [r for r in _facts(storage, session.id) if r["kind"] == "tool_call"]
+    assert len(rows) == 1
+    assert rows[0]["fact_id"] == "a1"
+    assert rows[0]["approval_decision"] == "approved"
+    assert rows[0]["tool_name"] == "Bash"
+    assert ingester._pending_approvals == {}
+
+
+@pytest.mark.parametrize("explicit_id", [True, False])
+def test_cancelled_approval_is_not_credited_with_next_idless_decision(
+    tmp_path: Path, explicit_id: bool
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+    events = [
+        (
+            EventKind.APPROVAL_REQUEST,
+            "Allow A?",
+            {"approval_id": "a1", "item_id": "cmdA"},
+        ),
+        (
+            EventKind.SYSTEM_NOTE,
+            "Pending approval cancelled by interrupt",
+            {
+                "method": "approval.invalidated",
+                **({"approval_id": "a1"} if explicit_id else {}),
+            },
+        ),
+        (
+            EventKind.APPROVAL_REQUEST,
+            "Allow B?",
+            {"approval_id": "b1", "item_id": "cmdB"},
+        ),
+        (EventKind.SYSTEM_NOTE, "Approval response sent: accept", {}),
+    ]
+    for sequence, (kind, text, metadata) in enumerate(events, start=1):
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session.id,
+                ts=now + timedelta(seconds=sequence),
+                kind=kind,
+                text=text,
+                metadata=metadata,
+                sequence=sequence,
+            ),
+        )
+        if sequence == 2:
+            assert ingester._pending_approvals == {}
+    ingester._drain_available()
+    rows = {r["fact_id"]: r for r in _facts(storage, session.id)}
+    assert rows["cmdA"]["approval_decision"] != "approved"
+    assert rows["cmdB"]["approval_decision"] == "approved"
+    assert ingester._pending_approvals == {}
+
+
+@pytest.mark.parametrize(
+    ("approval_id", "remaining"),
+    [(None, ["b1"]), ("b1", ["a1"]), ("unknown", ["a1", "b1"])],
+)
+def test_approval_invalidation_only_removes_the_matching_pending_entry(
+    tmp_path: Path, approval_id: str | None, remaining: list[str]
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    other = _make_session(storage, "s2")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+    for sequence, (target, request_id) in enumerate(
+        [(other, "other"), (session, "a1"), (session, "b1")], start=1
+    ):
+        ingester.derive_from_event(
+            target,
+            EventRecord(
+                session_id=target.id,
+                ts=now,
+                kind=EventKind.APPROVAL_REQUEST,
+                text="Allow?",
+                metadata={"approval_id": request_id},
+                sequence=sequence,
+            ),
+        )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id=session.id,
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="Dialog closed",
+            metadata={
+                "method": "approval.invalidated",
+                **({"approval_id": approval_id} if approval_id is not None else {}),
+            },
+            sequence=4,
+        ),
+    )
+    assert set(ingester._pending_approvals) == {
+        ("s2", "other"),
+        *(("s1", request_id) for request_id in remaining),
+    }
 
 
 def test_approval_decline_maps_to_declined(tmp_path: Path) -> None:

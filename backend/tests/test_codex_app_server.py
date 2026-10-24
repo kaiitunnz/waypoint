@@ -23,6 +23,7 @@ from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
     CodexCompactingError,
     CodexSessionState,
+    PendingApproval,
     _context_usage_snapshot_from_thread_token_usage,
 )
 from waypoint.backends.codex.normalize import tool_result_is_error
@@ -32,7 +33,7 @@ from waypoint.backends.codex.subagents import (
     ReportSource,
     read_report,
 )
-from waypoint.backends.codex.transport import input_http_error
+from waypoint.backends.codex.transport import CodexTransport, input_http_error
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -676,6 +677,7 @@ async def test_interrupt_cancels_a_pending_approval_first() -> None:
     )
     while state.pending_approval is None:
         await asyncio.sleep(0.01)
+    approval_id = state.pending_approval.approval_id
 
     await asyncio.wait_for(adapter.interrupt("sess"), timeout=2)
 
@@ -687,6 +689,14 @@ async def test_interrupt_cancels_a_pending_approval_first() -> None:
         for _, kind, _, metadata, _ in emitted
         if kind == EventKind.SYSTEM_NOTE
     ] == ["approval.invalidated"]
+    assert (
+        next(
+            metadata["approval_id"]
+            for _, kind, _, metadata, _ in emitted
+            if kind == EventKind.SYSTEM_NOTE
+        )
+        == approval_id
+    )
     # A late approve on the already-cancelled request is a no-op.
     assert await adapter.respond_to_approval("sess", "approve") is False
     await adapter.terminate_session("sess")
@@ -2539,3 +2549,75 @@ async def test_report_read_after_terminate_yields_no_report() -> None:
     assert (
         await adapter._read_subagent_report(state, ReportSource("child-1", "a")) is None
     )
+
+
+@pytest.mark.asyncio
+async def test_approval_id_cannot_resolve_a_replacement_request() -> None:
+    adapter, _ = make_adapter([])
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    first = PendingApproval(
+        method="item/commandExecution/requestApproval", params={"itemId": "same-item"}
+    )
+    state.pending_approval = first
+    assert await adapter.respond_to_approval(
+        "sess", "approve", approval_id=first.approval_id
+    )
+    second = PendingApproval(method=first.method, params=first.params)
+    assert second.approval_id != first.approval_id
+    state.pending_approval = second
+    transport = CodexTransport(
+        cast(Any, SimpleNamespace()), cast(Any, SimpleNamespace(adapter=adapter))
+    )
+    session = cast(Any, SimpleNamespace(id="sess"))
+    assert not await transport.respond_to_approval(
+        session, "accept", None, first.approval_id
+    )
+    assert state.pending_approval is second
+    assert not second.event.is_set()
+    assert second.response is None
+    assert await transport.respond_to_approval(
+        session, "decline", None, second.approval_id
+    )
+    assert second.event.is_set()
+    assert second.response == {"decision": "decline"}
+    await adapter.terminate_session("sess")
+
+
+@pytest.mark.asyncio
+async def test_approval_event_exposes_the_responder_identity() -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    handler = fake.approval_handler
+    assert handler is not None
+    reader = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/commandExecution/requestApproval",
+            {"itemId": "command-1", "command": "pwd"},
+        )
+    )
+    state = adapter._sessions["sess"]
+    try:
+        while state.pending_approval is None or not any(
+            event[1] == EventKind.APPROVAL_REQUEST for event in emitted
+        ):
+            await asyncio.sleep(0.01)
+        pending = state.pending_approval
+        assert pending is not None
+        event = next(
+            event for event in emitted if event[1] == EventKind.APPROVAL_REQUEST
+        )
+        assert event[3]["approval_id"] == pending.approval_id
+        assert event[3]["item_id"] == "command-1"
+        assert event[3]["interaction"]["request_id"] == pending.approval_id
+        assert await adapter.respond_to_approval(
+            "sess", "approve", approval_id=pending.approval_id
+        )
+        assert await asyncio.wait_for(reader, timeout=2) == {"decision": "accept"}
+    finally:
+        if state.pending_approval is not None:
+            adapter._cancel_pending_approval(state)
+        await asyncio.wait_for(reader, timeout=2)
+        await adapter.terminate_session("sess")

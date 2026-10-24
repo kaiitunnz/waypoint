@@ -124,6 +124,28 @@ def test_new_fact_writes_and_replay_is_ignored(tmp_path: Path) -> None:
     assert rows["n"] == 1
 
 
+def test_tool_call_name_lookup_matches_session_source_and_fact(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    storage.telemetry.ingest_fact(
+        ToolCallFact(
+            fact_id="a1",
+            source="codex",
+            session_id="s1",
+            occurred_at=now,
+            dims=_dims(),
+            tool_name="Bash",
+        )
+    )
+    assert storage.telemetry.tool_call_name("s1", "codex", "a1") == "Bash"
+    assert storage.telemetry.tool_call_name("s2", "codex", "a1") is None
+    assert storage.telemetry.tool_call_name("s1", "claude_code", "a1") is None
+    assert storage.telemetry.tool_call_name("s1", "codex", "missing") is None
+    lifecycle = _lifecycle_fact("s1", LifecycleTransition.CREATED, occurred_at=now)
+    storage.telemetry.ingest_fact(lifecycle)
+    assert storage.telemetry.tool_call_name("s1", "runtime", lifecycle.fact_id) is None
+
+
 def test_lower_or_equal_revision_is_ignored_higher_replaces(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     now = _make_session(storage, "s1")

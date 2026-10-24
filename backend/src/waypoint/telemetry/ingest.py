@@ -103,9 +103,11 @@ def _approval_id(metadata: Mapping[str, Any]) -> str | None:
 
 def _approval_decision_from_event(
     event: EventRecord,
-) -> tuple[str, ApprovalDecision] | None:
+) -> tuple[str | None, ApprovalDecision] | None:
     approval_id = _approval_id(event.metadata)
-    if approval_id is None or not event.text.startswith(_APPROVAL_DECISION_PREFIX):
+    if event.kind != EventKind.SYSTEM_NOTE or not event.text.startswith(
+        _APPROVAL_DECISION_PREFIX
+    ):
         return None
     word = event.text[len(_APPROVAL_DECISION_PREFIX) :].strip()
     # An unrecognized word is treated as a decline, never skipped — skipping
@@ -177,7 +179,7 @@ class TelemetryIngester:
         self._pending_tool_calls: dict[tuple[str, str], tuple[datetime, str | None]] = (
             {}
         )
-        self._pending_approvals: dict[tuple[str, str], str | None] = {}
+        self._pending_approvals: dict[tuple[str, str], tuple[str, str | None]] = {}
         # Nearly every event stamps ``metadata["status"]`` (STATUS_UPDATE is
         # never actually emitted; see the note below), so without this a
         # single turn's worth of same-status events would each mint their own
@@ -357,11 +359,16 @@ class TelemetryIngester:
         elif event.kind == EventKind.APPROVAL_REQUEST:
             approval_id = _approval_id(event.metadata)
             if approval_id is not None:
-                tool_name = _tool_name(event.metadata)
-                self._pending_approvals[(session.id, approval_id)] = tool_name
+                tool_use_id = _tool_use_id(event.metadata) or approval_id
+                call = self._pending_tool_calls.get((session.id, tool_use_id))
+                tool_name = _tool_name(event.metadata) or (call[1] if call else None)
+                self._pending_approvals[(session.id, approval_id)] = (
+                    tool_use_id,
+                    tool_name,
+                )
                 self._enqueue(
                     ToolCallFact(
-                        fact_id=approval_id,
+                        fact_id=tool_use_id,
                         source=session.backend,
                         session_id=session.id,
                         occurred_at=event.ts,
@@ -373,13 +380,30 @@ class TelemetryIngester:
                     tags,
                 )
 
+        if (
+            event.kind == EventKind.SYSTEM_NOTE
+            and event.metadata.get("method") == "approval.invalidated"
+        ):
+            self._pop_pending_approval(session.id, _approval_id(event.metadata))
+            return
+
         decision = _approval_decision_from_event(event)
         if decision is not None:
             approval_id, mapped = decision
-            tool_name = self._pending_approvals.pop((session.id, approval_id), None)
+            pending_approval = self._pop_pending_approval(session.id, approval_id)
+            if pending_approval is None:
+                if approval_id is None:
+                    return
+                tool_name = self._store.tool_call_name(
+                    session.id, session.backend, approval_id
+                )
+                if tool_name is None:
+                    return
+                pending_approval = (approval_id, tool_name)
+            tool_use_id, tool_name = pending_approval
             self._enqueue(
                 ToolCallFact(
-                    fact_id=approval_id,
+                    fact_id=tool_use_id,
                     source=session.backend,
                     session_id=session.id,
                     occurred_at=event.ts,
@@ -391,6 +415,22 @@ class TelemetryIngester:
                 ),
                 tags,
             )
+
+    def _pop_pending_approval(
+        self, session_id: str, approval_id: str | None
+    ) -> tuple[str, str | None] | None:
+        if approval_id is None:
+            approval_id = next(
+                (
+                    request_id
+                    for pending_session_id, request_id in self._pending_approvals
+                    if pending_session_id == session_id
+                ),
+                None,
+            )
+        if approval_id is None:
+            return None
+        return self._pending_approvals.pop((session_id, approval_id), None)
 
     def _derive_from_token_record(
         self, session: SessionRecord, record: TokenUsageRecord

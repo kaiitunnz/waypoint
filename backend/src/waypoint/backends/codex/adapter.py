@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
@@ -184,6 +185,7 @@ def _apply_codex_args(
 class PendingApproval:
     method: str
     params: dict[str, Any]
+    approval_id: str = field(default_factory=lambda: str(uuid4()))
     event: threading.Event = field(default_factory=threading.Event)
     response: dict[str, Any] | None = None
 
@@ -429,9 +431,7 @@ class CodexAppServerAdapter:
             approval_text = format_approval_text(method, payload)
             interaction = InteractionEnvelope(
                 kind="approval",
-                request_id=(
-                    str(item_id) if isinstance(item_id, str) and item_id else method
-                ),
+                request_id=pending.approval_id,
                 title=approval_text,
             )
 
@@ -446,6 +446,7 @@ class CodexAppServerAdapter:
                     approval_text,
                     {
                         "method": method,
+                        "approval_id": pending.approval_id,
                         "request": payload,
                         "status": SessionStatus.WAITING_INPUT,
                         INTERACTION_METADATA_KEY: interaction.to_metadata(),
@@ -795,11 +796,17 @@ class CodexAppServerAdapter:
                 await asyncio.to_thread(client.close)
 
     async def respond_to_approval(
-        self, session_id: str, decision: str, text: str | None = None
+        self,
+        session_id: str,
+        decision: str,
+        text: str | None = None,
+        approval_id: str | None = None,
     ) -> bool:
         state = self._require_session(session_id)
         pending = state.pending_approval
-        if pending is None:
+        if pending is None or (
+            approval_id is not None and approval_id != pending.approval_id
+        ):
             return False
         pending.response = {"decision": self._map_decision(decision)}
         state.pending_approval = None

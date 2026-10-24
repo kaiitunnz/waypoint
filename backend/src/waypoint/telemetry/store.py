@@ -771,6 +771,17 @@ class TelemetryStore:
 
     # ── queries ───────────────────────────────────────────────────────────
 
+    def tool_call_name(self, session_id: str, source: str, fact_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT tool_name FROM telemetry_facts
+                WHERE kind = ? AND source = ? AND fact_id = ? AND session_id = ?
+                """,
+                (TelemetryFactKind.TOOL_CALL, source, fact_id, session_id),
+            ).fetchone()
+            return row["tool_name"] if row is not None else None
+
     def query_facts(
         self,
         kind: TelemetryFactKind,

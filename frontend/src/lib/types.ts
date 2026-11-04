@@ -201,6 +201,9 @@ export interface SessionRecord {
   structured_log_path: string;
   pinned_at?: string | null;
   focus?: boolean;
+  // Sequence of the todo snapshot dismissed from the task dock; any other
+  // snapshot shows the dock again.
+  task_dock_dismissed_sequence?: number | null;
   permission_mode?: string | null;
   model?: string | null;
   // The concrete model id the backend actually resolved and ran (e.g.

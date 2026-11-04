@@ -1374,7 +1374,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const request = ++taskDockRequestRef.current;
       setPendingTaskDock({ sessionId, sequence });
       try {
-        setSession(await setTaskDockDismissed(host, token, sessionId, sequence));
+        const updated = await setTaskDockDismissed(host, token, sessionId, sequence);
+        if (request === taskDockRequestRef.current) {
+          setSession(updated);
+        }
       } catch (dockError) {
         if (isAuthError(dockError)) {
           handleAuthFailure();

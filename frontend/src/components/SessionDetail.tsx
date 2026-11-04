@@ -456,6 +456,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setRevealTarget(null);
   }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
+  // An in-flight dismiss/show wins over the session record until its request
+  // settles; otherwise a session_state push read before the write commits
+  // would flash the dock back.
+  const [pendingTaskDock, setPendingTaskDock] = useState<{
+    sessionId: string;
+    sequence: number | null;
+  } | null>(null);
+  const taskDockRequestRef = useRef(0);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
   // update to a rehydrated aside doesn't expand the dock.
@@ -1363,16 +1371,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
   const handleTaskDockDismissal = useCallback(
     async (sequence: number | null) => {
-      const previous = session?.task_dock_dismissed_sequence ?? null;
-      setSession((current) =>
-        current ? { ...current, task_dock_dismissed_sequence: sequence } : current,
-      );
+      const request = ++taskDockRequestRef.current;
+      setPendingTaskDock({ sessionId, sequence });
       try {
         setSession(await setTaskDockDismissed(host, token, sessionId, sequence));
       } catch (dockError) {
-        setSession((current) =>
-          current ? { ...current, task_dock_dismissed_sequence: previous } : current,
-        );
         if (isAuthError(dockError)) {
           handleAuthFailure();
           return;
@@ -1380,9 +1383,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setError(
           dockError instanceof Error ? dockError.message : "failed to update task progress",
         );
+      } finally {
+        if (request === taskDockRequestRef.current) {
+          setPendingTaskDock(null);
+        }
       }
     },
-    [host, token, sessionId, session?.task_dock_dismissed_sequence, handleAuthFailure],
+    [host, token, sessionId, handleAuthFailure],
   );
 
   const runHeldAction = useCallback(
@@ -1647,9 +1654,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       : view;
   // The dismissal lives on the session record, so it follows the session
   // across tabs and devices; any newer todo snapshot shows the dock again.
+  const dismissedTaskSequence =
+    pendingTaskDock?.sessionId === sessionId
+      ? pendingTaskDock.sequence
+      : (session?.task_dock_dismissed_sequence ?? null);
   const taskDockDismissed =
-    currentTaskEvent !== null &&
-    currentTaskEvent.sequence === (session?.task_dock_dismissed_sequence ?? null);
+    currentTaskEvent !== null && currentTaskEvent.sequence === dismissedTaskSequence;
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&

@@ -40,6 +40,7 @@ import {
   setSessionEffort,
   setSessionModel,
   setSessionFocus,
+  setTaskDockDismissed,
   setSessionPermissionMode,
   setSessionPinned,
   setSessionTitle,
@@ -346,13 +347,6 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
 
-// Per-session dismissal of the task progress dock, persisted so a refresh
-// keeps it dismissed. We store the dismissed todo-event sequence: any later
-// task update emits a higher-sequence event and re-shows the dock, while a
-// bare refresh (no new event) keeps the same sequence and stays dismissed.
-// sessionStorage (not localStorage) scopes it to the tab and self-cleans.
-const TASK_DOCK_DISMISSED_STORAGE_PREFIX = "waypoint-task-dock-dismissed:";
-
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
@@ -410,30 +404,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // Equality stays side-dock: a dock exactly viewport-wide still contains its
   // right-inset close button.
   const dockSheet = viewportWidth <= 640 || dockWidth > viewportWidth;
-  // The todo-event sequence the user last dismissed from the progress dock.
-  // `undefined` means we haven't read the persisted value yet — the dock stays
-  // hidden until then so a dismissed dock doesn't flash on load (and to avoid
-  // an SSR hydration mismatch from reading sessionStorage during render).
-  const [dismissedTaskSequence, setDismissedTaskSequence] = useState<
-    number | null | undefined
-  >(undefined);
-  // Read the persisted dismissal after mount (never during render) so SSR and
-  // the first client render agree. Re-reads when the session changes, since
-  // the route can reuse this component across `/session/[id]` navigations.
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    try {
-      const raw = window.sessionStorage.getItem(
-        `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
-      );
-      const parsed = raw !== null ? Number(raw) : NaN;
-      setDismissedTaskSequence(Number.isFinite(parsed) ? parsed : null);
-    } catch {
-      setDismissedTaskSequence(null);
-    }
-  }, [sessionId]);
   useEffect(() => {
     setSideQuestions(new Map());
     sqLiveSeenRef.current = new Set();
@@ -486,6 +456,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setRevealTarget(null);
   }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
+  // An in-flight dismiss/show wins over the session record until its request
+  // settles; otherwise a session_state push read before the write commits
+  // would flash the dock back.
+  const [pendingTaskDock, setPendingTaskDock] = useState<{
+    sessionId: string;
+    sequence: number | null;
+  } | null>(null);
+  const taskDockRequestRef = useRef(0);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   // The ref holds every id already seen, hydrated ones included, so a later
   // update to a rehydrated aside doesn't expand the dock.
@@ -1391,6 +1369,32 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [host, token, sessionId, handleAuthFailure],
   );
 
+  const handleTaskDockDismissal = useCallback(
+    async (sequence: number | null) => {
+      const request = ++taskDockRequestRef.current;
+      setPendingTaskDock({ sessionId, sequence });
+      try {
+        const updated = await setTaskDockDismissed(host, token, sessionId, sequence);
+        if (request === taskDockRequestRef.current) {
+          setSession(updated);
+        }
+      } catch (dockError) {
+        if (isAuthError(dockError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(
+          dockError instanceof Error ? dockError.message : "failed to update task progress",
+        );
+      } finally {
+        if (request === taskDockRequestRef.current) {
+          setPendingTaskDock(null);
+        }
+      }
+    },
+    [host, token, sessionId, handleAuthFailure],
+  );
+
   const runHeldAction = useCallback(
     async (action: () => Promise<void>) => {
       try {
@@ -1651,12 +1655,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     : !canShowTerminal
       ? "chat"
       : view;
+  // The dismissal lives on the session record, so it follows the session
+  // across tabs and devices; any newer todo snapshot shows the dock again.
+  const dismissedTaskSequence =
+    pendingTaskDock?.sessionId === sessionId
+      ? pendingTaskDock.sequence
+      : (session?.task_dock_dismissed_sequence ?? null);
+  const taskDockDismissed =
+    currentTaskEvent !== null && currentTaskEvent.sequence === dismissedTaskSequence;
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
-    currentTaskEvent !== null &&
-    dismissedTaskSequence !== undefined &&
-    currentTaskEvent.sequence !== dismissedTaskSequence;
+    !taskDockDismissed;
+  const canShowTasks =
+    activeView === "chat" && taskProgress !== null && taskDockDismissed;
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
   // Bumped to reconnect the terminal WS: on EXITED → live transitions and
@@ -2232,18 +2244,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         <TaskProgressDock
           progress={taskProgress}
           onDismiss={() => {
-            const sequence = currentTaskEvent?.sequence ?? null;
-            setDismissedTaskSequence(sequence);
-            if (sequence !== null && typeof window !== "undefined") {
-              try {
-                window.sessionStorage.setItem(
-                  `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
-                  String(sequence),
-                );
-              } catch {
-                // sessionStorage unavailable (private mode, quota) — the
-                // in-memory dismissal above still applies for this view.
-              }
+            if (currentTaskEvent) {
+              void handleTaskDockDismissal(currentTaskEvent.sequence);
             }
           }}
         />
@@ -2697,6 +2699,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
             setToolRunsExpanded(next);
           }}
+          canShowTasks={canShowTasks}
+          onShowTasks={() => void handleTaskDockDismissal(null)}
           onDelete={removeFromList}
           onInterrupt={interruptSession}
           onModeChange={handlePermissionModeChange}
@@ -2766,6 +2770,8 @@ interface ReplyComposerProps {
   hasToolRuns: boolean;
   toolRunsExpanded: boolean;
   onToggleToolRuns: () => void;
+  canShowTasks: boolean;
+  onShowTasks: () => void;
   canDelete: boolean;
   canReattach: boolean;
   canTerminate: boolean;
@@ -2862,6 +2868,8 @@ const ReplyComposer = memo(function ReplyComposer({
   hasToolRuns,
   toolRunsExpanded,
   onToggleToolRuns,
+  canShowTasks,
+  onShowTasks,
   onDelete,
   onInterrupt,
   onModeChange,
@@ -4263,6 +4271,17 @@ const ReplyComposer = memo(function ReplyComposer({
                     >
                       <span className="glyph">{toolRunsExpanded ? "⊟" : "⊞"}</span>
                       {toolRunsExpanded ? "Collapse tools" : "Expand tools"}
+                    </button>
+                  ) : null}
+                  {canShowTasks ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      onClick={() => { onShowTasks(); setOverflowOpen(false); }}
+                    >
+                      <span className="glyph">☑</span>
+                      Show tasks
                     </button>
                   ) : null}
                   {/* The assistant is a protected singleton — no terminate or

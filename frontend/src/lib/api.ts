@@ -992,6 +992,28 @@ export async function setSessionFocus(
   return body.session as SessionRecord;
 }
 
+export async function setTaskDockDismissed(
+  host: string,
+  token: string,
+  sessionId: string,
+  sequence: number | null,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/task-dock/dismiss`, {
+    method: sequence === null ? "DELETE" : "POST",
+    headers:
+      sequence === null
+        ? { Authorization: `Bearer ${token}` }
+        : { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: sequence === null ? undefined : JSON.stringify({ sequence }),
+  });
+  await ensureOk(
+    response,
+    sequence === null ? "failed to show task progress" : "failed to dismiss task progress",
+  );
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function releaseHeldMessages(
   host: string,
   token: string,

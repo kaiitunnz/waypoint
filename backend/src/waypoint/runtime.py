@@ -4680,6 +4680,18 @@ class SessionRuntime:
             self.held.drain({session_id})
         return updated
 
+    def set_task_dock_dismissed(
+        self, session_id: str, sequence: int | None
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.task_dock_dismissed_sequence == sequence:
+            return session
+        updated = self.storage.update_session(
+            session_id, task_dock_dismissed_sequence=sequence
+        )
+        self._publish_session_state(session_id)
+        return updated
+
     async def answer_question(
         self,
         session_id: str,

@@ -52,16 +52,24 @@ export function ScheduledSessionsGroup({
   useEffect(() => {
     const modelCatalogs = new Map(
       schedules.map((schedule) => [
-        scheduleModelCacheKey(schedule.backend, schedule.launch_target_id ?? null),
+        scheduleModelCacheKey(
+          schedule.backend,
+          schedule.launch_target_id ?? null,
+          schedule.account_profile_id ?? null,
+        ),
         {
           backend: schedule.backend,
           launchTargetId: schedule.launch_target_id ?? null,
+          accountProfileId: schedule.account_profile_id ?? null,
         },
       ]),
     );
     for (const [cacheKey, target] of modelCatalogs) {
       if (!modelsByBackend[cacheKey]) {
-        fetchBackendModels(host, token, target.backend, { launchTargetId: target.launchTargetId })
+        fetchBackendModels(host, token, target.backend, {
+          launchTargetId: target.launchTargetId,
+          accountProfileId: target.accountProfileId,
+        })
           .then((response) => {
             setModelsByBackend((prev) => ({ ...prev, [cacheKey]: response.models }));
           })
@@ -158,6 +166,7 @@ function ScheduleRow({
   const modelCacheKey = scheduleModelCacheKey(
     schedule.backend,
     schedule.launch_target_id ?? null,
+    schedule.account_profile_id ?? null,
   );
   const modeLabel = permissionModeLabel(
     schedule.backend,
@@ -247,6 +256,10 @@ function ScheduleRow({
   );
 }
 
-function scheduleModelCacheKey(backend: Backend, launchTargetId: string | null): string {
-  return `${backend}::${launchTargetId ?? "local"}`;
+function scheduleModelCacheKey(
+  backend: Backend,
+  launchTargetId: string | null,
+  accountProfileId: string | null,
+): string {
+  return `${backend}::${launchTargetId ?? "local"}::${accountProfileId ?? "default"}`;
 }

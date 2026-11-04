@@ -588,6 +588,7 @@ class Storage:
             "INTEGER NOT NULL DEFAULT 0",
         )
         self._ensure_column("sessions", "focus", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("sessions", "task_dock_dismissed_sequence", "INTEGER")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)

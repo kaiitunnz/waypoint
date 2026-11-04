@@ -114,6 +114,7 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTagsUpdateRequest,
     SessionTitleRequest,
+    TaskDockDismissRequest,
     TicketCreateRequest,
     TicketTransitionRequest,
     TicketUpdateRequest,
@@ -1901,6 +1902,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = context.runtime.set_focus(session_id, enabled=False)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/task-dock/dismiss")
+    async def session_task_dock_dismiss(
+        session_id: str,
+        body: TaskDockDismissRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = context.runtime.set_task_dock_dismissed(session_id, body.sequence)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}/task-dock/dismiss")
+    async def session_task_dock_show(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = context.runtime.set_task_dock_dismissed(session_id, None)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/held-messages/release")

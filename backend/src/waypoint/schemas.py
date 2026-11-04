@@ -476,6 +476,9 @@ class SessionRecord(BaseModel):
     # Focus holds agent sends, scheduled firings, and board/inbox wakes as
     # ``HeldMessageRecord``s.
     focus: bool = False
+    # Sequence of the todo snapshot the human dismissed from the task dock; any
+    # other snapshot shows the dock again. ``None`` = not dismissed.
+    task_dock_dismissed_sequence: int | None = None
     permission_mode: str | None = None
     model: str | None = None
     # The concrete model id the backend actually resolved and ran (e.g.
@@ -1346,6 +1349,10 @@ ViewerId = Annotated[
 class SessionPresenceRequest(BaseModel):
     # Opaque client-generated per-tab identifier; never a user identity.
     viewer_id: ViewerId
+
+
+class TaskDockDismissRequest(BaseModel):
+    sequence: Annotated[int, Field(ge=0)]
 
 
 class SessionTitleRequest(BaseModel):

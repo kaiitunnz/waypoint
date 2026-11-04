@@ -627,14 +627,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [host, token, session, handleAuthFailure, confirmTurnInterrupt],
   );
 
-  // Refresh the model picker whenever the active backend or launch target
-  // changes. Codex's list is auth/account scoped so it can shift between
-  // remote SSH targets; for Claude this just reads the curated config list.
+  // Refresh the model picker whenever the active backend, launch target, or
+  // account profile changes. Codex resolves its list from the profile's own
+  // config, so it can shift between profiles and remote SSH targets; for
+  // Claude this just reads the curated config list.
   // Depend only on the specific fields we read — including `session` itself
   // would re-fire on every poll-induced reference change and stampede the
   // backend with /models calls.
   const sessionBackend = session?.backend;
   const sessionLaunchTargetId = session?.launch_target_id;
+  const sessionAccountProfileId = session?.account_profile_id ?? null;
   useEffect(() => {
     if (!sessionBackend) {
       return;
@@ -642,6 +644,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     let cancelled = false;
     fetchBackendModels(host, token, sessionBackend, {
       launchTargetId: sessionLaunchTargetId,
+      accountProfileId: sessionAccountProfileId,
     })
       .then((response) => {
         if (cancelled) return;
@@ -668,7 +671,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     return () => {
       cancelled = true;
     };
-  }, [host, token, sessionBackend, sessionLaunchTargetId, handleAuthFailure]);
+  }, [
+    host,
+    token,
+    sessionBackend,
+    sessionLaunchTargetId,
+    sessionAccountProfileId,
+    handleAuthFailure,
+  ]);
 
   const handleModelChange = useCallback(
     async (nextModel: string, confirmed = false) => {

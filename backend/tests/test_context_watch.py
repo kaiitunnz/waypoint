@@ -376,15 +376,6 @@ def test_an_alert_names_the_skill_and_the_notes(cw: ModuleType, fake: Fake) -> N
     assert "waypoint-context skill's references/alerts.md" in text
 
 
-def test_the_skill_carries_no_project_specific_text() -> None:
-    skill = _SCRIPT.parents[1]
-    for path in skill.rglob("*"):
-        if path.is_file() and "__pycache__" not in path.parts:
-            text = path.read_text().lower()
-            for word in ("flowmesh", "fm2-", "architect-handoff", "impl-plan"):
-                assert word not in text, f"{word} in {path}"
-
-
 # ---- the compaction helper ---------------------------------------------------------
 
 

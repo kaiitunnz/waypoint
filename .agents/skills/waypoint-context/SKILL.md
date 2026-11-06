@@ -1,6 +1,6 @@
 ---
 name: waypoint-context
-description: Use when a Waypoint session — your own, one you spawned, or one the user named — is long-running and should compact its context at a checkpoint rather than wherever the harness's auto-compaction lands. A detached watcher alerts a lead at usage thresholds; the lead parks the session and compacts it.
+description: Use when a Waypoint session — your own, one you spawned, or one the user named — is long-running and should compact its context at a checkpoint, before the harness's auto-compaction fires. A detached watcher alerts a lead at usage thresholds; the lead parks the session and compacts it.
 ---
 
 # Waypoint Context
@@ -9,7 +9,7 @@ A detached watcher reads one session's context usage from `waypoint sessions lis
 
 **Notes** are whatever durable record the target needs to resume: its project's handoff or plan file, or the file named with `--handoff`. A target with no notes still has its compaction summary.
 
-One watcher per target; a replacement session needs its own. A watcher survives compactions and restarts of either session, and exits on `stop` or once its target has been gone for 10 minutes. A host reboot ends every watcher: `status` shows them `running: false`, and `start` brings them back.
+One watcher per target; a replacement session needs its own. A watcher survives compactions and restarts of either session, and exits on `stop` or once its target has been gone for 10 minutes. A host reboot ends every watcher: `status` shows them `running: false`, and `start` brings them back with their settings.
 
 ## Ownership
 
@@ -30,13 +30,11 @@ $W stop --target <sid>          # or --all, which covers the watchers you lead
 
 `--lead` defaults to your own session. `status` and `stop --all` cover the watchers you lead unless you pass `--all-leads`.
 
-`start` warns when a target has reported no usage yet. A first turn normally reports it, so check `status` after that turn: `usage: null` means this watcher will never alert for that session.
+Record every decision with `phase`: it is what a compacted lead resumes from. A phase lapses on its own once the watcher re-arms after a compaction; `user-held` lasts until you clear it.
 
 ## Backends
 
 Claude Code, Codex and opencode sessions can all be targets. tmux sessions rarely report usage, and `compact` refuses them. Lead a sandboxed Codex session from another session: its shell can't reach the `waypoint` API or the state directory.
-
-Record every decision with `phase`: it is what a compacted lead resumes from. A phase lapses on its own once the watcher re-arms after a compaction; `user-held` lasts until you clear it.
 
 ## Next
 

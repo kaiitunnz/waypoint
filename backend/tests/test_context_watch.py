@@ -1,13 +1,13 @@
 """The context watcher behind the waypoint-context skill.
 
-The script ships inside the skill rather than the backend package, so it is loaded
-by path. `poll` and the compaction helper run against a fake session table; the last
+The script ships inside the skill, so it is loaded by path. `poll` and the compaction helper run against a fake session table; the last
 tests cross the real process boundary with a fake `waypoint` executable.
 """
 
 import importlib.util
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -220,6 +220,20 @@ def test_a_gone_target_ends_the_watcher_after_the_grace(
     assert cw.poll(T, st)
     fake.t += cw.GONE_EXIT_SEC
     assert not cw.poll(T, st)
+
+
+def test_a_target_that_returns_restarts_the_gone_clock(
+    cw: ModuleType, fake: Fake
+) -> None:
+    st = _watch(cw)
+    fake.sessions[T]["status"] = "exited"
+    assert cw.poll(T, st)
+    fake.t += cw.GONE_EXIT_SEC - 1
+    fake.sessions[T]["status"] = "idle"
+    assert cw.poll(T, st)
+    fake.sessions[T]["status"] = "exited"
+    fake.t += 2
+    assert cw.poll(T, st)
 
 
 def test_a_gone_lead_holds_alerts(cw: ModuleType, fake: Fake) -> None:
@@ -489,6 +503,7 @@ def test_a_target_that_never_gets_ready_fails_the_pair_with_nothing_sent(
     assert [sid for sid, _ in fake.sent] == [L]
     assert fake.levels() == ["pair-failed"]
     assert named in fake.sent[0][1]
+    assert "nothing went out" in fake.sent[0][1]
     assert cw.current_phase(T) == "normal"
 
 
@@ -551,6 +566,14 @@ def test_grounding_only_skips_compact_and_still_checks_the_phase(
     ]
     assert cw.current_phase(T) == "compacting"
 
+    fake.sent.clear()
+    cw.write_phase(T, "deferred")
+    _pair(cw, grounding_only=True)
+    assert [sid for sid, _ in fake.sent] == [L]
+    assert fake.levels() == ["pair-failed"]
+    assert "the phase changed to deferred; nothing went out" in fake.sent[0][1]
+    assert cw.current_phase(T) == "deferred"
+
 
 def test_a_refused_send_retries_while_the_target_is_ready(
     cw: ModuleType, fake: Fake
@@ -564,6 +587,17 @@ def test_a_refused_send_retries_while_the_target_is_ready(
         "Ground yourself comprehensively and proceed",
         "Ground yourself comprehensively and proceed",
     ]
+
+
+def test_a_refused_grounding_only_send_retries_after_its_stamp(
+    cw: ModuleType, fake: Fake
+) -> None:
+    _parked(cw, fake)
+    fake.send_results = [None, "delivered"]
+    _pair(cw, grounding_only=True)
+    grounding = "Ground yourself comprehensively and proceed"
+    assert [text for _, text in fake.sent] == [grounding, grounding]
+    assert cw.current_phase(T) == "compacting"
 
 
 def test_a_refused_send_is_not_repeated_while_the_target_is_busy(
@@ -610,6 +644,7 @@ def test_a_compaction_that_never_ends_fails_the_pair_and_leaves_compacting(
     _pair(cw)
     assert [text for sid, text in fake.sent if sid == T] == ["/compact"]
     assert fake.levels() == ["pair-failed"]
+    assert "/compact went out" in fake.sent[-1][1]
     assert cw.current_phase(T) == "compacting"
 
 
@@ -807,15 +842,24 @@ def test_compact_refuses_a_live_helper_tmux_and_a_gone_target(
 
 
 def test_scoping_of_status_and_stop_all(
-    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+    cw: ModuleType,
+    fake: Fake,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    def status(target: str | None, all_leads: bool) -> tuple[bool, bool]:
+        cw.cmd_status(cw.argparse.Namespace(target=target, all_leads=all_leads))
+        out = capsys.readouterr().out
+        return '"target": "a"' in out, '"target": "b"' in out
+
     _watch(cw, "a", lead="me")
     _watch(cw, "b", lead="other")
     monkeypatch.setenv("WAYPOINT_SESSION_ID", "me")
-    assert cw.owned_targets(False) == ["a"]
-    assert cw.owned_targets(True) == ["a", "b"]
+    assert status(None, False) == (True, False)
+    assert status(None, True) == (True, True)
+    assert status("b", False) == (False, True)
     monkeypatch.delenv("WAYPOINT_SESSION_ID")
-    assert cw.owned_targets(False) == ["a", "b"]
+    assert status(None, False) == (True, True)
 
     monkeypatch.setenv("WAYPOINT_SESSION_ID", "me")
     cw.cmd_stop(cw.argparse.Namespace(all=True, all_leads=False, target=None))
@@ -824,10 +868,7 @@ def test_scoping_of_status_and_stop_all(
 
 
 def test_status_reports_usage_or_its_absence(
-    cw: ModuleType,
-    fake: Fake,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    cw: ModuleType, fake: Fake, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _watch(cw)
     cw.cmd_status(cw.argparse.Namespace(target=T, all_leads=False))
@@ -861,9 +902,7 @@ def test_status_shows_the_self_compact_command_only_for_this_session(
     assert out["allow_rule"] == "Bash(python3 /skills/ctx_watch.py self-compact:*)"
 
 
-def test_set_updates_the_handoff(
-    cw: ModuleType, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_set_updates_the_handoff(cw: ModuleType) -> None:
     _watch(cw)
     cw.cmd_set(
         cw.argparse.Namespace(
@@ -871,6 +910,13 @@ def test_set_updates_the_handoff(
         )
     )
     assert cw.read_json(cw.tdir(T) / "config.json")["handoff"] == "notes.md"
+    with pytest.raises(SystemExit, match="thresholds"):
+        cw.cmd_set(
+            cw.argparse.Namespace(
+                target=T, first=0.9, second=None, lead=None, handoff=None
+            )
+        )
+    assert cw.read_json(cw.tdir(T) / "config.json")["first"] == 0.6
 
 
 def test_a_gone_target_removes_the_watchers_directory(
@@ -903,13 +949,43 @@ def test_cli_resolution_order(
     assert cw.waypoint_cli() == "/override"
 
 
-def test_send_returns_none_on_a_missing_cli_or_a_refusal(
+@pytest.mark.parametrize(
+    ("stdout", "code", "expected"),
+    [
+        ('{"session": {"id": "x"}}', 0, "delivered"),
+        ('{"session": {"id": "x", "send": "held"}}', 0, "held"),
+        ('{"session": {"id": "x", "send": "unknown"}}', 1, "unknown"),
+        ("", 1, None),
+    ],
+)
+def test_send_reads_the_clis_result(
+    cw: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stdout: str,
+    code: int,
+    expected: str | None,
+) -> None:
+    cli = tmp_path / "waypoint"
+    cli.write_text(f"#!/bin/sh\nprintf '%s' '{stdout}'\nexit {code}\n")
+    cli.chmod(0o755)
+    monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(cli))
+    assert cw.send(T, "hello") == expected
+
+
+def test_send_returns_none_on_a_missing_cli_or_a_timeout(
     cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(tmp_path / "missing"))
     assert cw.send(T, "hello") is None
     with pytest.raises(OSError):
         cw.list_sessions()
+
+    def timed_out(*args: Any, **kwargs: Any) -> None:
+        raise subprocess.TimeoutExpired("waypoint", 1)
+
+    monkeypatch.setattr(cw.subprocess, "run", timed_out)
+    assert cw.send(T, "hello") is None
 
 
 def test_live_process_matches_only_this_targets_role(
@@ -923,14 +999,15 @@ def test_live_process_matches_only_this_targets_role(
     assert cw.live_process(pid_file, "run", T) is None
 
     code = "import time; time.sleep(30)"
+    longer = f"{T}2"
     proc = subprocess.Popen(
-        [sys.executable, "-c", code, "ctx_watch", "run", "--target", T, "--x"]
+        [sys.executable, "-c", code, "ctx_watch", "run", "--target", longer, "--x"]
     )
     try:
         pid_file.write_text(str(proc.pid))
-        assert cw.live_process(pid_file, "run", T) == proc.pid
-        assert cw.live_process(pid_file, "pair", T) is None
-        assert cw.live_process(pid_file, "run", "target-12") is None
+        assert cw.live_process(pid_file, "run", longer) == proc.pid
+        assert cw.live_process(pid_file, "pair", longer) is None
+        assert cw.live_process(pid_file, "run", T) is None
     finally:
         proc.kill()
         proc.wait()
@@ -939,7 +1016,8 @@ def test_live_process_matches_only_this_targets_role(
 def test_a_live_process_without_the_script_name_is_not_a_watcher(
     cw: ModuleType, tmp_path: Path
 ) -> None:
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    code = "import time; time.sleep(30)"
+    proc = subprocess.Popen([sys.executable, "-c", code, "run", "--target", T, "--x"])
     try:
         pid_file = tmp_path / "x.pid"
         pid_file.write_text(str(proc.pid))
@@ -952,10 +1030,11 @@ def test_a_live_process_without_the_script_name_is_not_a_watcher(
 # ---- real processes, with a fake waypoint executable ---------------------------------
 
 _FAKE_WAYPOINT = """#!{python}
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 root = Path(os.environ["FAKE_WAYPOINT_DIR"])
 if sys.argv[1:3] == ["sessions", "list"]:
+    time.sleep(float(os.environ.get("FAKE_LIST_DELAY", 0)))
     print((root / "sessions.json").read_text())
 elif sys.argv[1:3] == ["sessions", "send"]:
     with open(root / "sends.log", "a") as f:
@@ -1016,6 +1095,15 @@ class Stack:
             timeout=30,
         )
 
+    def kill_watcher(self) -> None:
+        os.kill(int((self.state / T / "watcher.pid").read_text()), signal.SIGKILL)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if '"running": false' in self.run("status", "--target", T).stdout:
+                return
+            time.sleep(0.1)
+        raise AssertionError("the watcher outlived SIGKILL")
+
     def sends(self) -> list[list[str]]:
         log = self.root / "sends.log"
         return (
@@ -1066,12 +1154,75 @@ def test_start_warns_when_the_target_reports_no_usage(stack: Stack) -> None:
     assert "allow_rule" not in started
 
 
-def test_start_clears_a_helper_pid_left_by_a_reboot(stack: Stack) -> None:
+def test_a_restart_keeps_the_watchers_settings(stack: Stack) -> None:
     stack.sessions(0.2)
-    (stack.state / T).mkdir(parents=True)
-    (stack.state / T / "pair.pid").write_text("999999999")
-    assert stack.run("start", "--target", T).returncode == 0
-    assert not (stack.state / T / "pair.pid").exists()
+    flags = [
+        "--first",
+        "0.8",
+        "--second",
+        "0.9",
+        "--handoff",
+        "n.md",
+        "--interval",
+        "30",
+    ]
+    assert stack.run("start", "--target", T, *flags).returncode == 0
+    stack.kill_watcher()
+    out = json.loads(stack.run("start", "--target", T).stdout)
+    assert (out["first"], out["second"]) == (0.8, 0.9)
+    assert (out["handoff"], out["interval"], out["lead"]) == ("n.md", 30, L)
+    stack.kill_watcher()
+    out = json.loads(stack.run("start", "--target", T, "--first", "0.7").stdout)
+    assert (out["first"], out["second"]) == (0.7, 0.9)
+
+
+def test_a_restart_leaves_a_running_helper_in_place(stack: Stack) -> None:
+    stack.sessions(0.2, status="running")
+    assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
+    assert stack.run("compact", "--target", T, "--grounding", "proceed").returncode == 0
+    stack.kill_watcher()
+    assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
+    assert '"pair_running": true' in stack.run("status", "--target", T).stdout
+    refused = stack.run("compact", "--target", T, "--grounding", "proceed")
+    assert "already running" in refused.stderr
+
+
+def test_start_refuses_an_unknown_lead(stack: Stack) -> None:
+    stack.sessions(0.2)
+    out = stack.run("start", "--target", T, "--lead", "nobody")
+    assert out.returncode != 0
+    assert "session nobody not found" in out.stderr
+
+
+@pytest.mark.parametrize("sid", ["", ".", "..", "a/b"])
+def test_stop_refuses_anything_but_a_session_id(stack: Stack, sid: str) -> None:
+    stack.sessions(0.2)
+    assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
+    out = stack.run("stop", "--target", sid)
+    assert out.returncode != 0
+    assert "not a session id" in out.stderr
+    assert (stack.state / T / "config.json").exists()
+    assert (stack.root / "sessions.json").exists()
+
+
+def test_two_compacts_at_once_start_one_helper(stack: Stack) -> None:
+    stack.sessions(0.2, status="running")
+    assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
+    stack.env["FAKE_LIST_DELAY"] = "0.5"
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(_SCRIPT), "compact", "--target", T]
+            + ["--grounding", "proceed"],
+            env=stack.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    errors = [proc.communicate(timeout=30)[1] for proc in procs]
+    assert sorted(proc.returncode for proc in procs) == [0, 1]
+    assert "already running" in "".join(errors)
 
 
 def test_start_fails_in_one_line_without_a_cli(stack: Stack) -> None:

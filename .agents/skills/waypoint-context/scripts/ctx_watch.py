@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Watch one Waypoint session's context usage and alert its lead session.
 
 The watcher runs detached from every agent process, so it survives the lead's
@@ -9,8 +8,10 @@ session's compaction pair once the session's turn has ended.
 
 import argparse
 import contextlib
+import fcntl
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -28,9 +29,12 @@ if sys.version_info < (3, 11):
 ROOT = Path(
     os.environ.get("CTX_WATCH_DIR", Path.home() / ".waypoint" / "context-watch")
 )
+SESSION_ID = re.compile(r"\w[\w.-]*")
 GONE = {"exited"}
 IDLE = {"idle", "waiting_input"}
 PHASES = ["normal", "deferred", "parking", "compacting", "user-held"]
+GROUNDINGS = ["proceed", "park"]
+DEFAULTS = {"first": 0.60, "second": 0.70, "interval": 60, "handoff": None}
 GONE_EXIT_SEC = 600
 REMINDER_SEC = 900
 STALL_SEC = 600
@@ -65,8 +69,8 @@ host reboot ends every watcher; start them again with `start`.
 Remove everything: stop every watcher, then delete this directory.
 
 Per target, `<sid>/` holds `config.json`, `state.json` (watcher-written),
-`phase.json` (lead- and helper-written), `watcher.pid`, `pair.pid` while a
-compaction helper runs, and `watcher.log`. `stop` removes it.
+`phase.json` (lead- and helper-written), `watcher.pid`, `pair.lock`, `pair.pid`
+while a compaction helper runs, and `watcher.log`. `stop` removes it.
 """
 
 
@@ -83,6 +87,9 @@ def now() -> float:
 
 
 def tdir(sid: str) -> Path:
+    # `stop` deletes what this returns, so `--target ..` must never reach it.
+    if not SESSION_ID.fullmatch(sid):
+        sys.exit(f"not a session id: {sid!r}")
     return ROOT / sid
 
 
@@ -174,13 +181,15 @@ def send(sid: str, text: str) -> str | None:
     session = data.get("session") if isinstance(data, dict) else None
     if not isinstance(session, dict):
         return None
-    return str(
-        session.get("send") or ("delivered" if out.returncode == 0 else "unknown")
-    )
+    return str(session.get("send") or "delivered")
 
 
-def check_thresholds(first: float, second: float) -> None:
-    if not 0 < first < second < 1:
+def apply_flags(cfg: dict[str, Any], args: argparse.Namespace) -> None:
+    """Overlay the flags the caller passed on `cfg`."""
+    for key in ("first", "second", "lead", "interval", "handoff"):
+        if (value := getattr(args, key, None)) is not None:
+            cfg[key] = value
+    if not 0 < cfg["first"] < cfg["second"] < 1:
         sys.exit("thresholds must satisfy 0 < first < second < 1")
 
 
@@ -269,9 +278,7 @@ def poll(sid: str, st: dict[str, Any]) -> bool:
     t = now()
     if target is None or target.get("status") in GONE:
         st.setdefault("gone_since", t)
-        if t - st["gone_since"] >= GONE_EXIT_SEC:
-            return False
-        return True
+        return t - st["gone_since"] < GONE_EXIT_SEC
     st.pop("gone_since", None)
     lead = sessions.get(cfg["lead"])
     if lead is None or lead.get("status") in GONE:
@@ -420,10 +427,18 @@ def cmd_run(args: argparse.Namespace) -> None:
 def cmd_start(args: argparse.Namespace) -> None:
     sid = args.target
     me = os.environ.get("WAYPOINT_SESSION_ID")
-    lead = args.lead or me
+    d = tdir(sid)
+    # A restart keeps the watcher's settings unless a flag changes them.
+    cfg = {
+        "target": sid,
+        "lead": me,
+        **DEFAULTS,
+        **(read_json(d / "config.json") or {}),
+    }
+    apply_flags(cfg, args)
+    lead = cfg["lead"]
     if not lead:
         sys.exit("no --lead and no WAYPOINT_SESSION_ID")
-    check_thresholds(args.first, args.second)
     if pid := live_pid(sid):
         sys.exit(f"a watcher for {sid} is already running (pid {pid})")
     try:
@@ -433,21 +448,11 @@ def cmd_start(args: argparse.Namespace) -> None:
     for who in (sid, lead):
         if who not in sessions:
             sys.exit(f"session {who} not found")
-    d = tdir(sid)
     d.mkdir(parents=True, exist_ok=True)
     (ROOT / "README.md").write_text(README.format(script=Path(sys.argv[0]).absolute()))
-    cfg = {
-        "target": sid,
-        "lead": lead,
-        "first": args.first,
-        "second": args.second,
-        "interval": args.interval,
-        "handoff": args.handoff,
-    }
     write_json(d / "config.json", cfg)
     if not (d / "state.json").exists():
         write_json(d / "state.json", {"cycle": "armed", "cycle_id": 1})
-    (d / "pair.pid").unlink(missing_ok=True)
     out = {
         "pid": spawn_detached(sid, ["run", "--target", sid], "watcher.pid"),
         **cfg,
@@ -496,10 +501,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_set(args: argparse.Namespace) -> None:
     path = tdir(args.target) / "config.json"
     cfg = read_json(path) or sys.exit(f"no watcher config for {args.target}")
-    for key in ("first", "second", "lead", "handoff"):
-        if (value := getattr(args, key)) is not None:
-            cfg[key] = value
-    check_thresholds(cfg["first"], cfg["second"])
+    apply_flags(cfg, args)
     write_json(path, cfg)
     print(json.dumps(cfg, indent=2))
 
@@ -512,22 +514,25 @@ def begin_pair(sid: str, grounding: str, grounding_only: bool = False) -> None:
     """Hand a session's compaction pair to a detached helper."""
     if not (tdir(sid) / "state.json").exists():
         sys.exit(f"no watcher for {sid}; run start --target {sid}")
-    if pid := pair_pid(sid):
-        sys.exit(f"a compaction of {sid} is already running (pid {pid})")
-    try:
-        target = list_sessions().get(sid)
-    except OSError as e:
-        sys.exit(f"cannot list sessions through {waypoint_cli()}: {e}")
-    if target is None or target.get("status") in GONE:
-        sys.exit(f"session {sid} is gone")
-    if target.get("transport") == "tmux":
-        sys.exit(
-            "a tmux session has no reliable idle status; "
-            "send it /compact and the grounding message yourself"
-        )
-    write_phase(sid, "parking", grounding)
-    argv = ["pair", "--target", sid, "--grounding", grounding]
-    spawn_detached(sid, argv + ["--grounding-only"] * grounding_only, "pair.pid")
+    # Two callers at once must not both find no helper running.
+    with open(tdir(sid) / "pair.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if pid := pair_pid(sid):
+            sys.exit(f"a compaction of {sid} is already running (pid {pid})")
+        try:
+            target = list_sessions().get(sid)
+        except OSError as e:
+            sys.exit(f"cannot list sessions through {waypoint_cli()}: {e}")
+        if target is None or target.get("status") in GONE:
+            sys.exit(f"session {sid} is gone")
+        if target.get("transport") == "tmux":
+            sys.exit(
+                "a tmux session has no reliable idle status; "
+                "send it /compact and the grounding message yourself"
+            )
+        write_phase(sid, "parking", grounding)
+        argv = ["pair", "--target", sid, "--grounding", grounding]
+        spawn_detached(sid, argv + ["--grounding-only"] * grounding_only, "pair.pid")
 
 
 def cmd_compact(args: argparse.Namespace) -> None:
@@ -605,7 +610,7 @@ def cmd_pair(args: argparse.Namespace) -> None:
 
     def require_parking() -> None:
         if (phase := current_phase(sid)) != "parking":
-            raise PairFailed(f"nothing sent: the phase changed to {phase}")
+            raise PairFailed(f"the phase changed to {phase}")
 
     def stamp_compacting() -> None:
         # A reading from the compaction or the turn before it is older than this
@@ -615,7 +620,8 @@ def cmd_pair(args: argparse.Namespace) -> None:
             write_phase(sid, "compacting", grounding)
 
     def before_grounding() -> None:
-        if args.grounding_only:
+        # A refused send comes back here with the phase already stamped.
+        if args.grounding_only and current_phase(sid) != "compacting":
             require_parking()
         stamp_compacting()
 
@@ -645,7 +651,8 @@ def cmd_pair(args: argparse.Namespace) -> None:
             stamp_compacting()
         elif current_phase(sid) == "parking":
             write_phase(sid, "normal")
-        pair_alert(sid, "pair-failed", reason, compact_sent)
+        went_out = "/compact went out" if compact_sent else "nothing went out"
+        pair_alert(sid, "pair-failed", f"{reason}; {went_out}", compact_sent)
     finally:
         (tdir(sid) / "pair.pid").unlink(missing_ok=True)
 
@@ -662,9 +669,9 @@ def main() -> None:
     s = sub.add_parser("start")
     s.add_argument("--target", required=True)
     s.add_argument("--lead")
-    s.add_argument("--first", type=float, default=0.60)
-    s.add_argument("--second", type=float, default=0.70)
-    s.add_argument("--interval", type=int, default=60)
+    s.add_argument("--first", type=float)
+    s.add_argument("--second", type=float)
+    s.add_argument("--interval", type=int)
     s.add_argument("--handoff", help="where the target keeps its notes")
     s.set_defaults(fn=cmd_start)
     s = sub.add_parser("run")
@@ -684,19 +691,19 @@ def main() -> None:
     s = sub.add_parser("phase")
     s.add_argument("--target", required=True)
     s.add_argument("phase", choices=PHASES)
-    s.add_argument("--grounding", choices=["proceed", "park"])
+    s.add_argument("--grounding", choices=GROUNDINGS)
     s.set_defaults(fn=cmd_phase)
     s = sub.add_parser("compact")
     s.add_argument("--target", required=True)
-    s.add_argument("--grounding", choices=["proceed", "park"], required=True)
+    s.add_argument("--grounding", choices=GROUNDINGS, required=True)
     s.add_argument("--grounding-only", action="store_true")
     s.set_defaults(fn=cmd_compact)
     s = sub.add_parser("self-compact")
-    s.add_argument("--grounding", choices=["proceed", "park"], required=True)
+    s.add_argument("--grounding", choices=GROUNDINGS, required=True)
     s.set_defaults(fn=cmd_self_compact)
     s = sub.add_parser("pair")
     s.add_argument("--target", required=True)
-    s.add_argument("--grounding", choices=["proceed", "park"], required=True)
+    s.add_argument("--grounding", choices=GROUNDINGS, required=True)
     s.add_argument("--grounding-only", action="store_true")
     s.set_defaults(fn=cmd_pair)
     s = sub.add_parser("stop")

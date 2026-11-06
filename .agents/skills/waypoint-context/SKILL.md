@@ -30,6 +30,8 @@ $W stop --target <sid>          # or --all, which covers the watchers you lead
 
 `--lead` defaults to your own session. `status` and `stop --all` cover the watchers you lead unless you pass `--all-leads`.
 
+Watching your own session on Claude Code: `start` prints an `allow_rule`. Show it to the user right away, because auto mode denies `self-compact` until they add it.
+
 Record every decision with `phase`: it is what a compacted lead resumes from. A phase lapses on its own once the watcher re-arms after a compaction; `user-held` lasts until you clear it.
 
 ## Backends

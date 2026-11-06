@@ -2,8 +2,9 @@
 
 The watcher runs detached from every agent process, so it survives the lead's
 and the target's compactions and restarts. It exits on `stop`, or once its
-target has been gone for GONE_EXIT_SEC. A separate detached helper sends a
-session's compaction pair once the session's turn has ended.
+target has been gone for GONE_EXIT_SEC. Claude Code queues /compact until its turn
+ends, so its compaction pair goes out at once. A separate detached helper sends
+whatever has to wait for a turn to end.
 """
 
 import argparse
@@ -35,6 +36,9 @@ IDLE = {"idle", "waiting_input"}
 PHASES = ["normal", "deferred", "parking", "compacting", "user-held"]
 GROUNDINGS = ["proceed", "park"]
 DEFAULTS = {"first": 0.60, "second": 0.70, "interval": 60, "handoff": None}
+QUEUES_COMPACT = {"claude_cli", "claude_tty"}
+TURN_ENDED = ("idle", "interrupted", "exited", "error")
+STOPPED = ("error", "interrupted")
 GONE_EXIT_SEC = 600
 REMINDER_SEC = 900
 STALL_SEC = 600
@@ -42,8 +46,14 @@ REFILL_SEC = 1800
 MAX_BACKOFF_SEC = 300
 PAIR_QUIET_SEC = 30
 PAIR_SETTLE_SEC = 5
+# Measured: Codex never leaves idle without input and rejects an early /compact
+# cleanly; opencode reads idle between the steps of a turn for under a second.
+QUIET_SEC = {"codex_app_server": 2, "opencode_http": 5}
+SETTLE_SEC = {"codex_app_server": 2}
 PAIR_POLL_SEC = 10
 PAIR_GIVE_UP_SEC = 600
+PAIR_TURN_GIVE_UP_SEC = 6 * 3600
+PAIR_RECENT_SEC = 60
 STOP_WAIT_SEC = 2
 FOLLOW = "Follow the waypoint-context skill's references/alerts.md."
 NO_USAGE = (
@@ -200,15 +210,29 @@ def effective_phase(sid: str, cycle_id: int) -> dict[str, Any]:
     return {"phase": "normal"}
 
 
-def current_phase(sid: str) -> str | None:
+def phase_record(sid: str) -> dict[str, Any]:
     st = read_json(tdir(sid) / "state.json", {}) or {}
-    return effective_phase(sid, st.get("cycle_id", 0)).get("phase")
+    return effective_phase(sid, st.get("cycle_id", 0))
 
 
-def write_phase(sid: str, phase: str, grounding: str | None = None) -> dict[str, Any]:
+def current_phase(sid: str) -> str | None:
+    return phase_record(sid).get("phase")
+
+
+def write_phase(
+    sid: str,
+    phase: str,
+    grounding: str | None = None,
+    pending: bool = False,
+    sent: bool = False,
+) -> dict[str, Any]:
     d = tdir(sid)
     st = read_json(d / "state.json") or sys.exit(f"no watcher state for {sid}")
     ph = {"phase": phase, "phase_at": now(), "cycle_id": st["cycle_id"]}
+    if pending:
+        ph["grounding_pending"] = True
+    if sent:
+        ph["sent_at"] = ph["phase_at"]
     if grounding:
         ph["grounding"] = grounding
     elif (old := read_json(d / "phase.json", {}) or {}).get("cycle_id") == st[
@@ -298,8 +322,11 @@ def poll(sid: str, st: dict[str, Any]) -> bool:
     ph = effective_phase(sid, st["cycle_id"])
     compacting = ph.get("phase") == "compacting"
     # Usage updates only at the target's next turn, so a reading from before the
-    # pair would look like a refill.
-    fresh = not compacting or epoch(cu.get("updated_at")) > ph.get("phase_at", 0)
+    # pair would look like a refill, as would the last turn's before its grounding.
+    fresh = not compacting or (
+        not ph.get("grounding_pending")
+        and epoch(cu.get("updated_at")) > ph.get("phase_at", 0)
+    )
 
     if pct < cfg["first"] and (st["cycle"] != "armed" or (compacting and fresh)):
         st.update(cycle="armed", cycle_id=st["cycle_id"] + 1)
@@ -510,15 +537,60 @@ def cmd_phase(args: argparse.Namespace) -> None:
     print(json.dumps(write_phase(args.target, args.phase, args.grounding)))
 
 
-def begin_pair(sid: str, grounding: str, grounding_only: bool = False) -> None:
-    """Hand a session's compaction pair to a detached helper."""
+def spawn_helper(sid: str, grounding: str, *flags: str) -> None:
+    argv = ["pair", "--target", sid, "--grounding", grounding, *flags]
+    spawn_detached(sid, argv, "pair.pid")
+
+
+def send_queued_pair(
+    sid: str, grounding: str, grounding_only: bool, target_idle: bool
+) -> None:
+    """Send a pair to a backend that queues /compact until its turn ends.
+
+    A running turn consumes plain text, so its grounding waits for the turn's end.
+    """
+    held = False
+    if not grounding_only:
+        status = send(sid, "/compact")
+        if status in (None, "unknown"):
+            sys.exit(
+                f"/compact not confirmed (send: {status}); grounding not scheduled"
+            )
+        print(f"'/compact': {status}")
+        held = status == "held"
+    if held or target_idle:
+        write_phase(sid, "compacting", grounding, sent=True)
+        cfg = read_json(tdir(sid) / "config.json") or {}
+        status = send(sid, grounding_text(cfg, grounding))
+        if status is not None:
+            print(f"grounding: {status}")
+            if held or status == "held":
+                # The grounding is queued too, so the lead needs no second one.
+                pair_alert(sid, "pair-held", "the pair is held for the human", False)
+            return
+    write_phase(sid, "compacting", grounding, pending=True, sent=True)
+    spawn_helper(sid, grounding, "--after-compact")
+    print("the grounding follows once the turn has ended")
+
+
+def begin_pair(
+    sid: str, grounding: str, grounding_only: bool = False, own_turn: bool = False
+) -> None:
+    """Send a session's compaction pair, or hand it to a detached helper."""
     if not (tdir(sid) / "state.json").exists():
         sys.exit(f"no watcher for {sid}; run start --target {sid}")
-    # Two callers at once must not both find no helper running.
+    # Two callers at once must not both find nothing in progress.
     with open(tdir(sid) / "pair.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if pid := pair_pid(sid):
             sys.exit(f"a compaction of {sid} is already running (pid {pid})")
+        # From the file itself: the re-arm a finished pair brings lapses the phase.
+        sent_at = (read_json(tdir(sid) / "phase.json", {}) or {}).get("sent_at", 0)
+        if (left := PAIR_RECENT_SEC - (now() - sent_at)) > 0:
+            sys.exit(
+                f"a compaction pair went to {sid} just now; "
+                f"wait {left:.0f}s and re-run only if it is still needed"
+            )
         try:
             target = list_sessions().get(sid)
         except OSError as e:
@@ -530,31 +602,76 @@ def begin_pair(sid: str, grounding: str, grounding_only: bool = False) -> None:
                 "a tmux session has no reliable idle status; "
                 "send it /compact and the grounding message yourself"
             )
+        status = target.get("status")
+        # A Bash dialog answered in the terminal leaves the caller at waiting_input
+        # until the tool returns, and a real dialog comes back held.
+        if status in STOPPED or (status == "waiting_input" and not own_turn):
+            sys.exit(f"session {sid} is {status} and needs a person first")
+        if target.get("transport") in QUEUES_COMPACT:
+            target_idle = status == "idle" and not own_turn
+            send_queued_pair(sid, grounding, grounding_only, target_idle)
+            return
         write_phase(sid, "parking", grounding)
-        argv = ["pair", "--target", sid, "--grounding", grounding]
-        spawn_detached(sid, argv + ["--grounding-only"] * grounding_only, "pair.pid")
+        spawn_helper(sid, grounding, *["--grounding-only"] * grounding_only)
+        print(
+            "compaction follows once this turn ends"
+            if own_turn
+            else f"compaction of {sid} follows once it is idle"
+        )
 
 
 def cmd_compact(args: argparse.Namespace) -> None:
     if args.target == os.environ.get("WAYPOINT_SESSION_ID"):
         sys.exit("that is this session; use self-compact")
     begin_pair(args.target, args.grounding, args.grounding_only)
-    print(f"compaction of {args.target} follows once it is idle")
 
 
 def cmd_self_compact(args: argparse.Namespace) -> None:
     sid = os.environ.get("WAYPOINT_SESSION_ID") or sys.exit("no WAYPOINT_SESSION_ID")
-    begin_pair(sid, args.grounding)
-    print("compaction follows once this turn ends")
+    begin_pair(sid, args.grounding, own_turn=True)
 
 
-def deliver(sid: str, text: str, quiet: float, before_send: Callable[[], None]) -> str:
+def quiet_sec(target: dict[str, Any]) -> float:
+    return QUIET_SEC.get(target.get("transport", ""), PAIR_QUIET_SEC)
+
+
+def settle_sec(target: dict[str, Any]) -> float:
+    return SETTLE_SEC.get(target.get("transport", ""), PAIR_SETTLE_SEC)
+
+
+def await_turn_end(sid: str, timeout: float) -> None:
+    """Block until the target's turn ends; each CLI call costs too much to poll with."""
+    try:
+        out = subprocess.run(
+            [waypoint_cli(), "sessions", "wait", sid]
+            + ["--until", ",".join(TURN_ENDED), "--timeout", str(int(timeout) + 1)],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 60,
+        )
+        status = json.loads(out.stdout)["session"]["status"]
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        status = None
+    # A server that is down exits like a timeout and prints no status.
+    if status not in TURN_ENDED:
+        time.sleep(PAIR_POLL_SEC)
+
+
+def deliver(
+    sid: str,
+    text: str,
+    quiet_for: Callable[[dict[str, Any]], float],
+    before_send: Callable[[], None],
+    give_up: float = PAIR_GIVE_UP_SEC,
+    send_in_focus: bool = False,
+) -> str:
     """Send `text` once the target is idle and quiet; return the delivery status.
 
     Readiness is checked before every attempt, so a refused send is retried only
-    while the target is ready for it.
+    while the target is ready for it. `send_in_focus` sends during Focus, where the
+    message waits for the human behind whatever is already held.
     """
-    deadline = now() + PAIR_GIVE_UP_SEC
+    deadline = now() + give_up
     seen = "unreadable"
     while now() < deadline:
         try:
@@ -565,18 +682,31 @@ def deliver(sid: str, text: str, quiet: float, before_send: Callable[[], None]) 
         if target is None or target.get("status") in GONE:
             raise TargetGone
         seen = str(target.get("status"))
-        if seen in ("error", "interrupted"):
+        if seen in STOPPED:
             raise PairFailed(f"the target is {seen}")
-        if target.get("focus"):
+        focus = target.get("focus")
+        if focus and not send_in_focus:
             seen = "in Focus"
-        elif seen == "idle" and now() - epoch(target.get("last_event_at")) >= quiet:
-            before_send()
-            status = send(sid, text)
-            if status is not None:
-                return status
-            log(sid, f"{text!r} refused; retrying")
+            time.sleep(PAIR_POLL_SEC)
+            continue
+        if not focus:
+            if seen != "idle":
+                await_turn_end(sid, deadline - now())
+                continue
+            quiet_left = quiet_for(target) - (
+                now() - epoch(target.get("last_event_at"))
+            )
+            if quiet_left > 0:
+                time.sleep(quiet_left)
+                continue
+        before_send()
+        status = send(sid, text)
+        if status is not None:
+            return status
+        log(sid, f"{text!r} refused; retrying")
+        deadline = min(deadline, now() + PAIR_GIVE_UP_SEC)
         time.sleep(PAIR_POLL_SEC)
-    raise PairFailed(f"gave up after {PAIR_GIVE_UP_SEC}s with the target {seen}")
+    raise PairFailed(f"gave up with the target {seen}")
 
 
 def pair_alert(sid: str, level: str, reason: str, compact_sent: bool) -> None:
@@ -591,6 +721,9 @@ def pair_alert(sid: str, level: str, reason: str, compact_sent: bool) -> None:
     lead = sessions.get(cfg.get("lead", ""))
     if lead is None or lead.get("status") in GONE:
         return
+    # A send would start a session working again that stopped for a person.
+    if sid == cfg["lead"] and lead.get("status") in STOPPED:
+        return
     title = (sessions.get(sid) or {}).get("title") or ""
     text = (
         f'[ctx-watch target={sid} "{title}" cycle={st.get("cycle_id")} level={level}] '
@@ -602,32 +735,33 @@ def pair_alert(sid: str, level: str, reason: str, compact_sent: bool) -> None:
 
 
 def cmd_pair(args: argparse.Namespace) -> None:
-    """Send the pair: /compact once the turn has ended, then the grounding after it."""
+    """Send what has to wait for the target's turn: /compact, then the grounding."""
     sid, grounding = args.target, args.grounding
     cfg = read_json(tdir(sid) / "config.json") or {}
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    compact_sent = False
+    compact_sent = args.after_compact
 
     def require_parking() -> None:
         if (phase := current_phase(sid)) != "parking":
             raise PairFailed(f"the phase changed to {phase}")
 
-    def stamp_compacting() -> None:
+    def stamp_compacting(sent: bool = False) -> None:
         # A reading from the compaction or the turn before it is older than this
         # stamp, so it cannot look like a refill. A re-arm already lapsed the phase
         # when usage fell, and the grounding still goes out.
-        if current_phase(sid) == "parking":
-            write_phase(sid, "compacting", grounding)
+        ph = phase_record(sid)
+        if ph.get("phase") == "parking" or ph.get("grounding_pending"):
+            write_phase(sid, "compacting", grounding, sent=sent)
 
     def before_grounding() -> None:
         # A refused send comes back here with the phase already stamped.
         if args.grounding_only and current_phase(sid) != "compacting":
             require_parking()
-        stamp_compacting()
+        stamp_compacting(sent=True)
 
     try:
-        if not args.grounding_only:
-            status = deliver(sid, "/compact", PAIR_QUIET_SEC, require_parking)
+        if not (args.grounding_only or args.after_compact):
+            status = deliver(sid, "/compact", quiet_sec, require_parking)
             compact_sent = True
             log(sid, f"/compact sent (send: {status})")
             if status == "held":
@@ -635,16 +769,21 @@ def cmd_pair(args: argparse.Namespace) -> None:
                 pair_alert(sid, "pair-held", "/compact is held for the human", True)
                 return
         # Some backends read idle for a moment between the steps of a compaction.
-        quiet = PAIR_QUIET_SEC if args.grounding_only else PAIR_SETTLE_SEC
+        quiet_for = quiet_sec if args.grounding_only else settle_sec
+        # A queued /compact can wait out a long turn, and blocking on it is cheap.
+        give_up = PAIR_TURN_GIVE_UP_SEC if args.after_compact else PAIR_GIVE_UP_SEC
         text = grounding_text(cfg, grounding)
-        status = deliver(sid, text, quiet, before_grounding)
+        status = deliver(
+            sid, text, quiet_for, before_grounding, give_up, args.after_compact
+        )
         log(sid, f"grounding sent (send: {status})")
         if status == "held":
-            pair_alert(
-                sid, "pair-held", "the grounding is held for the human", compact_sent
-            )
+            # The grounding is queued, so the lead needs no second one.
+            pair_alert(sid, "pair-held", "the grounding is held for the human", False)
     except TargetGone:
         log(sid, "target gone; pair abandoned")
+        if phase_record(sid).get("grounding_pending"):
+            stamp_compacting()
     except Exception as e:  # a detached helper's only report is its alert
         reason = str(e) if isinstance(e, PairFailed) else f"helper error: {e!r}"
         if compact_sent:
@@ -705,6 +844,7 @@ def main() -> None:
     s.add_argument("--target", required=True)
     s.add_argument("--grounding", choices=GROUNDINGS, required=True)
     s.add_argument("--grounding-only", action="store_true")
+    s.add_argument("--after-compact", action="store_true")
     s.set_defaults(fn=cmd_pair)
     s = sub.add_parser("stop")
     g = s.add_mutually_exclusive_group(required=True)

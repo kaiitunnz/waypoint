@@ -1,6 +1,6 @@
 # On an alert
 
-Alerts read `[ctx-watch target=<sid> ... cycle=<id> level=<level> [refill-fast]] ...`. First run `$W status --target <sid>`. Ignore the alert if its cycle is not the current one or the phase is `user-held`. Also ignore a threshold or reminder alert while `pair_running` is true: a compaction is already on its way.
+Alerts read `[ctx-watch target=<sid> ... cycle=<id> level=<level> [refill-fast]] ...`. First run `$W status --target <sid>`. Ignore the alert if its cycle is not the current one or the phase is `user-held`. Also ignore a threshold or reminder alert while `pair_running` is true, or when the phase is `compacting` and the alert has no `refill-fast` tag: a compaction is already on its way.
 
 Then act on the target's **current** state; the first matching bullet wins:
 
@@ -8,7 +8,9 @@ Then act on the target's **current** state; the first matching bullet wins:
 - **`pair-failed`, `pair-held` or `pair-stalled`** → follow "When a pair does not finish" in [`compaction.md`](compaction.md).
 - **Idle target, phase `parking`** → it parked: run `compact` with the recorded grounding.
 - **`refill-fast`** → read `waypoint sessions events <sid> --compact --messages 30` for a compaction note.
-  - No note: the compaction failed. Run `compact` again.
+  - No note and a `pair-held` earlier in this cycle: its messages may still be queued. Tell the user and send nothing.
+  - No note and the target busy: its `/compact` may still be queued. Wait for the turn to end and re-check.
+  - No note and the target idle: the compaction failed. Run `compact` again.
   - A note: grounding alone refills the window, so compacting again would loop. At `second`, ask the target to stop and park. Set `user-held` and tell the user the usage and the choice: raise the thresholds or slim the notes.
 - **Idle target, otherwise** → a natural stop. Set `deferred` and handle the stop normally. Compact only when you re-drive it (below).
 - **`first` (or its reminder), target running** → read its recent work (`waypoint sessions output <sid> --messages 20 --text`) and its notes.
@@ -26,7 +28,7 @@ Before sending a watched target follow-up work, check its usage in `status`. At 
 2. Send `[wp-msg …] Update your notes and park for context compaction, with nothing still running. Ping me once parked.`
 3. Set `parking --grounding park`.
 4. Run `compact --grounding park` on its ping.
-5. Send the follow-up once the target has run and gone idle again.
+5. Send the follow-up once the target has run a turn after the compaction note.
 
 ## Your own session
 

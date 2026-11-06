@@ -8,6 +8,7 @@ Then act on the target's **current** state; the first matching bullet wins:
 - **`pair-failed`, `pair-held` or `pair-stalled`** → follow "When a pair does not finish" in [`compaction.md`](compaction.md).
 - **Idle target, phase `parking`** → it parked: run `compact` with the recorded grounding.
 - **`refill-fast`** → read `waypoint sessions events <sid> --compact --messages 30` for a compaction note.
+  - No note and a `pair-held` earlier in this cycle: its messages may still be queued. Tell the user and send nothing.
   - No note and the target busy: its `/compact` may still be queued. Wait for the turn to end and re-check.
   - No note and the target idle: the compaction failed. Run `compact` again.
   - A note: grounding alone refills the window, so compacting again would loop. At `second`, ask the target to stop and park. Set `user-held` and tell the user the usage and the choice: raise the thresholds or slim the notes.

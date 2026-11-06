@@ -38,6 +38,7 @@ GROUNDINGS = ["proceed", "park"]
 DEFAULTS = {"first": 0.60, "second": 0.70, "interval": 60, "handoff": None}
 QUEUES_COMPACT = {"claude_cli", "claude_tty"}
 TURN_ENDED = ("idle", "interrupted", "exited", "error")
+STOPPED = ("error", "interrupted")
 GONE_EXIT_SEC = 600
 REMINDER_SEC = 900
 STALL_SEC = 600
@@ -583,7 +584,8 @@ def begin_pair(
         fcntl.flock(lock, fcntl.LOCK_EX)
         if pid := pair_pid(sid):
             sys.exit(f"a compaction of {sid} is already running (pid {pid})")
-        sent_at = phase_record(sid).get("sent_at", 0)
+        # From the file itself: the re-arm a finished pair brings lapses the phase.
+        sent_at = (read_json(tdir(sid) / "phase.json", {}) or {}).get("sent_at", 0)
         if (left := PAIR_RECENT_SEC - (now() - sent_at)) > 0:
             sys.exit(
                 f"a compaction pair went to {sid} just now; "
@@ -603,9 +605,7 @@ def begin_pair(
         status = target.get("status")
         # A Bash dialog answered in the terminal leaves the caller at waiting_input
         # until the tool returns, and a real dialog comes back held.
-        if status in ("error", "interrupted") or (
-            status == "waiting_input" and not own_turn
-        ):
+        if status in STOPPED or (status == "waiting_input" and not own_turn):
             sys.exit(f"session {sid} is {status} and needs a person first")
         if target.get("transport") in QUEUES_COMPACT:
             target_idle = status == "idle" and not own_turn
@@ -682,7 +682,7 @@ def deliver(
         if target is None or target.get("status") in GONE:
             raise TargetGone
         seen = str(target.get("status"))
-        if seen in ("error", "interrupted"):
+        if seen in STOPPED:
             raise PairFailed(f"the target is {seen}")
         focus = target.get("focus")
         if focus and not send_in_focus:
@@ -721,6 +721,9 @@ def pair_alert(sid: str, level: str, reason: str, compact_sent: bool) -> None:
     lead = sessions.get(cfg.get("lead", ""))
     if lead is None or lead.get("status") in GONE:
         return
+    # A send would start a session working again that stopped for a person.
+    if sid == cfg["lead"] and lead.get("status") in STOPPED:
+        return
     title = (sessions.get(sid) or {}).get("title") or ""
     text = (
         f'[ctx-watch target={sid} "{title}" cycle={st.get("cycle_id")} level={level}] '
@@ -742,19 +745,19 @@ def cmd_pair(args: argparse.Namespace) -> None:
         if (phase := current_phase(sid)) != "parking":
             raise PairFailed(f"the phase changed to {phase}")
 
-    def stamp_compacting() -> None:
+    def stamp_compacting(sent: bool = False) -> None:
         # A reading from the compaction or the turn before it is older than this
         # stamp, so it cannot look like a refill. A re-arm already lapsed the phase
         # when usage fell, and the grounding still goes out.
         ph = phase_record(sid)
         if ph.get("phase") == "parking" or ph.get("grounding_pending"):
-            write_phase(sid, "compacting", grounding)
+            write_phase(sid, "compacting", grounding, sent=sent)
 
     def before_grounding() -> None:
         # A refused send comes back here with the phase already stamped.
         if args.grounding_only and current_phase(sid) != "compacting":
             require_parking()
-        stamp_compacting()
+        stamp_compacting(sent=True)
 
     try:
         if not (args.grounding_only or args.after_compact):

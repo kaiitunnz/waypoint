@@ -427,6 +427,22 @@ def _parked(cw: ModuleType, fake: Fake, **cfg: Any) -> dict[str, Any]:
     return st
 
 
+def _time_sends(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, float]:
+    real_send = fake.send
+    sent_at: dict[str, float] = {}
+
+    def timed_send(sid: str, text: str) -> str | None:
+        sent_at[text] = fake.t
+        if text == "/compact":
+            fake.sessions[T]["last_event_at"] = _iso(fake.t)
+        return real_send(sid, text)
+
+    monkeypatch.setattr(cw, "send", timed_send)
+    return sent_at
+
+
 def test_a_pair_sends_compact_then_stamps_then_grounds(
     cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -440,10 +456,7 @@ def test_a_pair_sends_compact_then_stamps_then_grounds(
 
     monkeypatch.setattr(cw, "send", spying_send)
     _pair(cw)
-    assert [text for _, text in fake.sent] == [
-        "/compact",
-        G,
-    ]
+    assert [text for _, text in fake.sent] == ["/compact", G]
     assert all(sid == T for sid, _ in fake.sent)
     assert phases_at_send == ["parking", "compacting"]
     assert not (cw.tdir(T) / "pair.pid").exists()
@@ -487,16 +500,7 @@ def test_the_grounding_waits_out_an_idle_flicker_during_the_compaction(
     cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _parked(cw, fake)
-    real_send = fake.send
-    sent_at: dict[str, float] = {}
-
-    def timed_send(sid: str, text: str) -> str | None:
-        sent_at[text] = fake.t
-        if text == "/compact":
-            fake.sessions[T]["last_event_at"] = _iso(fake.t)
-        return real_send(sid, text)
-
-    monkeypatch.setattr(cw, "send", timed_send)
+    sent_at = _time_sends(cw, fake, monkeypatch)
     _pair(cw)
     assert sent_at[G] - sent_at["/compact"] >= cw.SETTLE_SEC["codex_app_server"]
 
@@ -519,16 +523,7 @@ def test_each_backend_waits_its_own_quiet_and_settle(
 ) -> None:
     _parked(cw, fake)
     fake.sessions[T].update(transport=transport, last_event_at=_iso(fake.t))
-    real_send = fake.send
-    sent_at: dict[str, float] = {}
-
-    def timed_send(sid: str, text: str) -> str | None:
-        sent_at[text] = fake.t
-        if text == "/compact":
-            fake.sessions[T]["last_event_at"] = _iso(fake.t)
-        return real_send(sid, text)
-
-    monkeypatch.setattr(cw, "send", timed_send)
+    sent_at = _time_sends(cw, fake, monkeypatch)
     start = fake.t
     _pair(cw)
     assert sent_at["/compact"] - start == quiet
@@ -628,12 +623,7 @@ def test_a_refused_send_retries_while_the_target_is_ready(
     _parked(cw, fake)
     fake.send_results = [None, "delivered", None, "delivered"]
     _pair(cw)
-    assert [text for _, text in fake.sent] == [
-        "/compact",
-        "/compact",
-        G,
-        G,
-    ]
+    assert [text for _, text in fake.sent] == ["/compact", "/compact", G, G]
 
 
 def test_a_refused_grounding_only_send_retries_after_its_stamp(
@@ -698,10 +688,7 @@ def test_an_unknown_compact_is_not_resent(cw: ModuleType, fake: Fake) -> None:
     _parked(cw, fake)
     fake.send_results = ["unknown"]
     _pair(cw)
-    assert [text for _, text in fake.sent] == [
-        "/compact",
-        G,
-    ]
+    assert [text for _, text in fake.sent] == ["/compact", G]
 
 
 def test_a_held_compact_counts_as_sent_and_a_stall_can_follow(
@@ -916,8 +903,9 @@ def _claude(
     status: str = "idle",
     transport: str = "claude_tty",
     lead: str = L,
+    **cfg: Any,
 ) -> list[list[str]]:
-    _watch(cw, lead=lead)
+    _watch(cw, lead=lead, **cfg)
     fake.sessions[T].update(status=status, transport=transport)
     return _capture_spawn(cw, monkeypatch)
 
@@ -953,6 +941,56 @@ def test_a_running_claude_target_gets_compact_now_and_its_grounding_after_the_tu
     assert cw.phase_record(T)["grounding_pending"] is True
 
 
+NOTES_PARK = "Re-read docs/notes.md, then ground yourself comprehensively and park"
+
+
+def test_the_at_once_pair_sends_the_recorded_grounding_with_the_notes(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claude(cw, fake, monkeypatch, handoff="docs/notes.md")
+    cw.begin_pair(T, "park")
+    assert fake.sent == [(T, "/compact"), (T, NOTES_PARK)]
+    assert cw.phase_record(T)["grounding"] == "park"
+
+
+def test_the_helper_gets_the_recorded_grounding_and_sends_it_with_the_notes(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawned = _claude(cw, fake, monkeypatch, status="running", handoff="docs/notes.md")
+    cw.begin_pair(T, "park")
+    assert spawned == [
+        ["pair", "--target", T, "--grounding", "park", "--after-compact"]
+    ]
+    fake.sent.clear()
+    fake.sessions[T]["status"] = "idle"
+    _pair(cw, grounding="park", after_compact=True)
+    assert fake.sent == [(T, NOTES_PARK)]
+    assert cw.phase_record(T)["grounding"] == "park"
+
+
+@pytest.mark.parametrize("status", ["error", "interrupted"])
+def test_self_compact_is_refused_when_the_session_needs_a_person(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    spawned = _claude(cw, fake, monkeypatch, status=status)
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", T)
+    with pytest.raises(SystemExit, match="needs a person"):
+        cw.cmd_self_compact(cw.argparse.Namespace(grounding="proceed"))
+    assert fake.sent == [] and spawned == []
+    assert cw.current_phase(T) == "normal"
+
+
+@pytest.mark.parametrize("status", ["error", "interrupted"])
+def test_a_failed_helper_sends_nothing_to_a_stopped_session_leading_itself(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    _claude(cw, fake, monkeypatch, status=status, lead=T)
+    cw.write_phase(T, "compacting", "proceed", pending=True)
+    _pair(cw, after_compact=True)
+    assert fake.sent == []
+    assert "grounding_pending" not in cw.phase_record(T)
+
+
 @pytest.mark.parametrize("status", ["idle", "running", "waiting_input"])
 def test_claude_self_compact_sends_compact_in_its_own_turn(
     cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch, status: str
@@ -983,15 +1021,25 @@ def test_an_unconfirmed_claude_compact_fails_the_command(
     assert fake.sent[-1] == (T, G)
 
 
-@pytest.mark.parametrize("status", ["idle", "running"])
+@pytest.mark.parametrize(
+    ("status", "results"),
+    [
+        ("idle", ["held", "held"]),
+        ("running", ["held", "held"]),
+        ("idle", ["held", "delivered"]),
+        ("running", ["held", "delivered"]),
+        ("idle", ["delivered", "held"]),
+    ],
+)
 def test_a_held_claude_pair_queues_both_and_alerts(
     cw: ModuleType,
     fake: Fake,
     monkeypatch: pytest.MonkeyPatch,
     status: str,
+    results: list[str],
 ) -> None:
     spawned = _claude(cw, fake, monkeypatch, status=status, lead=T)
-    fake.send_results = ["held", "held", "held"]
+    fake.send_results = [*results, "held"]
     cw.begin_pair(T, "proceed")
     assert fake.sent[:2] == [(T, "/compact"), (T, G)]
     assert fake.levels() == ["pair-held"]
@@ -1030,6 +1078,53 @@ def test_a_pair_just_sent_refuses_another_until_the_window_passes(
     fake.t += cw.PAIR_RECENT_SEC
     cw.begin_pair(T, "proceed")
     assert fake.sent == [(T, "/compact"), (T, G)]
+
+
+def test_the_window_outlives_the_rearm_a_finished_pair_brings(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claude(cw, fake, monkeypatch)
+    cw.begin_pair(T, "proceed")
+    fake.t += 5
+    fake.usage(0.2)
+    st = cw.read_json(cw.tdir(T) / "state.json")
+    cw.poll(T, st)
+    _sync(cw, st)
+    assert st["cycle_id"] == 2 and cw.current_phase(T) == "normal"
+    fake.sent.clear()
+    with pytest.raises(SystemExit, match="just now"):
+        cw.begin_pair(T, "proceed")
+    assert fake.sent == []
+
+
+def test_the_window_outlives_a_helper_that_died(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claude(cw, fake, monkeypatch, status="running")
+    cw.begin_pair(T, "proceed")
+    with pytest.raises(SystemExit, match="just now"):
+        cw.begin_pair(T, "proceed")
+    assert fake.sent == [(T, "/compact")]
+
+
+@pytest.mark.parametrize("after_compact", [True, False])
+def test_a_pair_the_helper_finished_refuses_another_until_the_window_passes(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch, after_compact: bool
+) -> None:
+    if after_compact:
+        _claude(cw, fake, monkeypatch)
+        cw.write_phase(T, "compacting", "proceed", pending=True)
+    else:
+        _parked(cw, fake)
+    spawned = _capture_spawn(cw, monkeypatch)
+    _pair(cw, after_compact=after_compact)
+    fake.sent.clear()
+    with pytest.raises(SystemExit, match="just now"):
+        cw.begin_pair(T, "proceed")
+    assert fake.sent == [] and spawned == []
+    fake.t += cw.PAIR_RECENT_SEC
+    cw.begin_pair(T, "proceed")
+    assert fake.sent or spawned
 
 
 def test_the_window_does_not_refuse_recovery_right_after_a_pair_failed(
@@ -1128,7 +1223,7 @@ def test_after_compact_sends_only_the_grounding_once_the_turn_ends(
     assert writes == ["compacting"], "stamped once, not on every attempt"
     ph = cw.phase_record(T)
     assert ph["phase"] == "compacting"
-    assert "grounding_pending" not in ph and "sent_at" not in ph
+    assert "grounding_pending" not in ph and "sent_at" in ph
 
 
 def test_after_compact_sends_during_focus_and_alerts(
@@ -1561,6 +1656,29 @@ class Stack:
             time.sleep(0.1)
         return self.sends()
 
+    def await_path(self, path: Path, exists: bool = True, within: float = 15) -> None:
+        deadline = time.time() + within
+        while time.time() < deadline and path.exists() != exists:
+            time.sleep(0.1)
+
+    def two_compacts(self) -> str:
+        """Run `compact` twice at once; assert one succeeded and return the errors."""
+        self.env["FAKE_LIST_DELAY"] = "0.5"
+        procs = [
+            subprocess.Popen(
+                [sys.executable, str(_SCRIPT), "compact", "--target", T]
+                + ["--grounding", "proceed"],
+                env=self.env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(2)
+        ]
+        errors = [proc.communicate(timeout=30)[1] for proc in procs]
+        assert sorted(proc.returncode for proc in procs) == [0, 1]
+        return "".join(errors)
+
 
 @pytest.fixture
 def stack(tmp_path: Path) -> Iterator[Stack]:
@@ -1651,21 +1769,7 @@ def test_stop_refuses_anything_but_a_session_id(stack: Stack, sid: str) -> None:
 def test_two_compacts_at_once_start_one_helper(stack: Stack) -> None:
     stack.sessions(0.2, status="running")
     assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
-    stack.env["FAKE_LIST_DELAY"] = "0.5"
-    procs = [
-        subprocess.Popen(
-            [sys.executable, str(_SCRIPT), "compact", "--target", T]
-            + ["--grounding", "proceed"],
-            env=stack.env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for _ in range(2)
-    ]
-    errors = [proc.communicate(timeout=30)[1] for proc in procs]
-    assert sorted(proc.returncode for proc in procs) == [0, 1]
-    assert "already running" in "".join(errors)
+    assert "already running" in stack.two_compacts()
 
 
 def test_start_fails_in_one_line_without_a_cli(stack: Stack) -> None:
@@ -1704,9 +1808,7 @@ def test_a_running_claude_target_gets_its_grounding_once_status_flips(
     out = stack.run("compact", "--target", T, "--grounding", "proceed")
     assert out.returncode == 0, out.stderr
     assert [text for _, text in stack.sends()] == ["/compact"]
-    deadline = time.time() + 15
-    while time.time() < deadline and not (stack.root / "waits.log").exists():
-        time.sleep(0.1)
+    stack.await_path(stack.root / "waits.log")
     assert (stack.root / "waits.log").exists(), "the helper blocks on the turn"
     flipped_at = time.time()
     stack.sessions(0.2, status="idle", last_event_at=_iso(flipped_at))
@@ -1720,21 +1822,7 @@ def test_two_compacts_at_once_on_an_idle_claude_target_send_one_pair(
 ) -> None:
     stack.sessions(0.2)
     assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
-    stack.env["FAKE_LIST_DELAY"] = "0.5"
-    procs = [
-        subprocess.Popen(
-            [sys.executable, str(_SCRIPT), "compact", "--target", T]
-            + ["--grounding", "proceed"],
-            env=stack.env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for _ in range(2)
-    ]
-    errors = [proc.communicate(timeout=30)[1] for proc in procs]
-    assert sorted(proc.returncode for proc in procs) == [0, 1]
-    assert "just now" in "".join(errors)
+    assert "just now" in stack.two_compacts()
     assert [text for _, text in stack.sends()] == ["/compact", G]
 
 
@@ -1745,9 +1833,7 @@ def test_compact_elsewhere_spawns_a_helper_that_delivers_the_pair(stack: Stack) 
     assert out.returncode == 0, out.stderr
     sends = stack.await_sends(2)
     assert [text for _, text in sends] == ["/compact", G]
-    deadline = time.time() + 5
-    while time.time() < deadline and (stack.state / T / "pair.pid").exists():
-        time.sleep(0.1)
+    stack.await_path(stack.state / T / "pair.pid", exists=False, within=5)
     assert not (stack.state / T / "pair.pid").exists()
     status = stack.run("status", "--target", T)
     assert '"phase": "compacting"' in status.stdout
@@ -1759,9 +1845,7 @@ def test_stop_ends_a_helper_and_its_wait_for_the_target(stack: Stack) -> None:
     assert stack.run("start", "--target", T, "--interval", "60").returncode == 0
     assert stack.run("compact", "--target", T, "--grounding", "proceed").returncode == 0
     pid = int((stack.state / T / "pair.pid").read_text())
-    deadline = time.time() + 15
-    while time.time() < deadline and not (stack.root / "waits.log").exists():
-        time.sleep(0.1)
+    stack.await_path(stack.root / "waits.log")
     wait_pid = int((stack.root / "waits.log").read_text().split()[0])
     status = stack.run("status", "--target", T)
     assert '"pair_running": true' in status.stdout

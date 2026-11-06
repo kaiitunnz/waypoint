@@ -30,7 +30,11 @@ $W stop --target <sid>          # or --all, which covers the watchers you lead
 
 `--lead` defaults to your own session. `status` and `stop --all` cover the watchers you lead unless you pass `--all-leads`.
 
-`start` warns when a target has reported no usage yet. A first turn normally reports it, so check `status` after that turn: `usage: null` means this watcher will never alert for that session. tmux sessions rarely report usage.
+`start` warns when a target has reported no usage yet. A first turn normally reports it, so check `status` after that turn: `usage: null` means this watcher will never alert for that session.
+
+## Backends
+
+Claude Code, Codex and opencode sessions can all be targets. tmux sessions rarely report usage, and `compact` refuses them. Lead a sandboxed Codex session from another session: its shell can't reach the `waypoint` API or the state directory.
 
 Record every decision with `phase`: it is what a compacted lead resumes from. A phase lapses on its own once the watcher re-arms after a compaction; `user-held` lasts until you clear it.
 

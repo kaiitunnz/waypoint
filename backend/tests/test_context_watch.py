@@ -462,6 +462,25 @@ def test_a_pair_waits_for_quiet_and_for_the_compaction_to_end(
     assert [text for _, text in fake.sent][0] == "/compact"
 
 
+def test_the_grounding_waits_out_an_idle_flicker_during_the_compaction(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _parked(cw, fake)
+    real_send = fake.send
+    sent_at: dict[str, float] = {}
+
+    def timed_send(sid: str, text: str) -> str | None:
+        sent_at[text] = fake.t
+        if text == "/compact":
+            fake.sessions[T]["last_event_at"] = _iso(fake.t)
+        return real_send(sid, text)
+
+    monkeypatch.setattr(cw, "send", timed_send)
+    _pair(cw)
+    grounding = "Ground yourself comprehensively and proceed"
+    assert sent_at[grounding] - sent_at["/compact"] >= cw.PAIR_POLL_SEC
+
+
 @pytest.mark.parametrize(
     ("fields", "named"),
     [

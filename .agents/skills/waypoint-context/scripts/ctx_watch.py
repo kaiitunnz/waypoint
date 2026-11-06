@@ -37,6 +37,7 @@ STALL_SEC = 600
 REFILL_SEC = 1800
 MAX_BACKOFF_SEC = 300
 PAIR_QUIET_SEC = 30
+PAIR_SETTLE_SEC = 5
 PAIR_POLL_SEC = 10
 PAIR_GIVE_UP_SEC = 600
 STOP_WAIT_SEC = 2
@@ -627,7 +628,8 @@ def cmd_pair(args: argparse.Namespace) -> None:
                 stamp_compacting()
                 pair_alert(sid, "pair-held", "/compact is held for the human", True)
                 return
-        quiet = PAIR_QUIET_SEC if args.grounding_only else 0
+        # Some backends read idle for a moment between the steps of a compaction.
+        quiet = PAIR_QUIET_SEC if args.grounding_only else PAIR_SETTLE_SEC
         text = grounding_text(cfg, grounding)
         status = deliver(sid, text, quiet, before_grounding)
         log(sid, f"grounding sent (send: {status})")

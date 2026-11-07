@@ -498,9 +498,10 @@ def cmd_start(args: argparse.Namespace) -> None:
 def recent_log(sid: str) -> list[str]:
     """The last lines of the watcher's log; absent or unreadable reads as none."""
     try:
-        return (tdir(sid) / "watcher.log").read_text().splitlines()[-5:]
+        text = (tdir(sid) / "watcher.log").read_text(errors="replace")
     except OSError:
         return []
+    return text.splitlines()[-5:]
 
 
 def status_record(sid: str, sessions: dict[str, Any] | None) -> dict[str, Any]:

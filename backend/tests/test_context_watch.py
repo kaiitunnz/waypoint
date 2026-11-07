@@ -1372,6 +1372,56 @@ def test_status_shows_the_self_compact_command_only_for_this_session(
     assert out["allow_rule"] == "Bash(python3 /skills/ctx_watch.py self-compact:*)"
 
 
+def test_status_prints_one_document_with_the_log_tail(
+    cw: ModuleType, fake: Fake, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _watch(cw)
+    cw.log(T, "first")
+    cw.log(T, "second")
+    cw.log(T, "third")
+    cw.log(T, "fourth")
+    cw.log(T, "fifth")
+    cw.log(T, "sixth")
+    cw.cmd_status(cw.argparse.Namespace(target=T, all_leads=False))
+    out = json.loads(capsys.readouterr().out)
+    assert [line.split(" ", 2)[2] for line in out["recent_log"]] == [
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+    ]
+
+
+def test_status_prints_an_array_and_parses_with_many_watchers(
+    cw: ModuleType, fake: Fake, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _watch(cw, "a", lead=L)
+    _watch(cw, "b", lead=L)
+    cw.log("a", "only")
+    cw.cmd_status(cw.argparse.Namespace(target=None, all_leads=False))
+    out = json.loads(capsys.readouterr().out)
+    assert [record["target"] for record in out] == ["a", "b"]
+    assert [len(record["recent_log"]) for record in out] == [1, 0]
+
+
+def test_status_reads_a_log_with_stray_bytes(
+    cw: ModuleType, fake: Fake, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _watch(cw)
+    (cw.tdir(T) / "watcher.log").write_bytes(b"\xff\xfe bad bytes\nlast\n")
+    cw.cmd_status(cw.argparse.Namespace(target=T, all_leads=False))
+    out = json.loads(capsys.readouterr().out)
+    assert out["recent_log"][-1] == "last"
+
+
+def test_status_prints_an_empty_array_with_no_watchers(
+    cw: ModuleType, fake: Fake, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cw.cmd_status(cw.argparse.Namespace(target=None, all_leads=False))
+    assert json.loads(capsys.readouterr().out) == []
+
+
 def test_set_updates_the_handoff(cw: ModuleType) -> None:
     _watch(cw)
     cw.cmd_set(

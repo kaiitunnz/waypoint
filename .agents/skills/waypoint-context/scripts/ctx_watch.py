@@ -76,6 +76,9 @@ host reboot ends every watcher; start them again with `start`.
     python3 $W stop --target <sid>
     python3 $W stop --all [--all-leads]
 
+`status` prints one JSON document: an object for `--target`, else an array of
+them. `recent_log` holds the watcher's last log lines.
+
 Remove everything: stop every watcher, then delete this directory.
 
 Per target, `<sid>/` holds `config.json`, `state.json` (watcher-written),
@@ -492,37 +495,45 @@ def cmd_start(args: argparse.Namespace) -> None:
     print(json.dumps(out, indent=2))
 
 
+def recent_log(sid: str) -> list[str]:
+    """The last lines of the watcher's log; absent or unreadable reads as none."""
+    try:
+        return (tdir(sid) / "watcher.log").read_text().splitlines()[-5:]
+    except OSError:
+        return []
+
+
+def status_record(sid: str, sessions: dict[str, Any] | None) -> dict[str, Any]:
+    st = read_json(tdir(sid) / "state.json", {}) or {}
+    out: dict[str, Any] = {
+        "target": sid,
+        "running": live_pid(sid) is not None,
+        "pair_running": pair_pid(sid) is not None,
+        "config": read_json(tdir(sid) / "config.json"),
+        "state": st,
+        "phase": effective_phase(sid, st.get("cycle_id", 0)),
+    }
+    if sessions is not None:
+        target = sessions.get(sid) or {}
+        pct = context_fraction(target)
+        out["status"] = target.get("status")
+        out["usage"] = (
+            None if pct is None else {**target["context_usage"], "pct": round(pct, 4)}
+        )
+    if sid == os.environ.get("WAYPOINT_SESSION_ID"):
+        out.update(self_compact_hint())
+    out["recent_log"] = recent_log(sid)
+    return out
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     sids = [args.target] if args.target else owned_targets(args.all_leads)
     try:
         sessions = list_sessions()
     except OSError:
         sessions = None
-    for sid in sids:
-        st = read_json(tdir(sid) / "state.json", {}) or {}
-        out: dict[str, Any] = {
-            "target": sid,
-            "running": live_pid(sid) is not None,
-            "pair_running": pair_pid(sid) is not None,
-            "config": read_json(tdir(sid) / "config.json"),
-            "state": st,
-            "phase": effective_phase(sid, st.get("cycle_id", 0)),
-        }
-        if sessions is not None:
-            target = sessions.get(sid) or {}
-            pct = context_fraction(target)
-            out["status"] = target.get("status")
-            out["usage"] = (
-                None
-                if pct is None
-                else {**target["context_usage"], "pct": round(pct, 4)}
-            )
-        if sid == os.environ.get("WAYPOINT_SESSION_ID"):
-            out.update(self_compact_hint())
-        print(json.dumps(out, indent=2))
-        logf = tdir(sid) / "watcher.log"
-        if logf.exists():
-            print("".join(logf.read_text().splitlines(keepends=True)[-5:]))
+    out = [status_record(sid, sessions) for sid in sids]
+    print(json.dumps(out[0] if args.target else out, indent=2))
 
 
 def cmd_set(args: argparse.Namespace) -> None:

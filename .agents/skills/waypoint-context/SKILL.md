@@ -28,7 +28,7 @@ $W compact --target <sid> --grounding proceed|park [--grounding-only]
 $W stop --target <sid>          # or --all, which covers the watchers you lead
 ```
 
-`--lead` defaults to your own session. `status` and `stop --all` cover the watchers you lead unless you pass `--all-leads`.
+`--lead` defaults to your own session. `status` and `stop --all` cover the watchers you lead unless you pass `--all-leads`. `status` prints one JSON document: an object for `--target`, else an array; `recent_log` holds the watcher's last log lines.
 
 Watching your own session on Claude Code: `start` prints an `allow_rule`. Show it to the user right away, because auto mode denies `self-compact` until they add it.
 

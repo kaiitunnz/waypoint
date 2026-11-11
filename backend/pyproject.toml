@@ -31,7 +31,7 @@ dev = [
   "pre-commit>=4.7.0",
   "pytest>=8.4.0",
   "pytest-asyncio>=0.24.0",
-  "ruff>=0.17.1",
+  "ruff>=0.17.3",
   "types-croniter>=6.2.4.20261006",
   "types-PyYAML>=6.0.0",
 ]

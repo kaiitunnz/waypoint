@@ -13,6 +13,7 @@ import pytest
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    FABLE52_MIN_CLI_VERSION,
     SONNET5_MIN_CLI_VERSION,
     SONNET55_MIN_CLI_VERSION,
     claude_models_for_version,
@@ -30,7 +31,7 @@ def _by_id(models: tuple, model_id: str):
     return next(opt for opt in models if opt.id == model_id)
 
 
-@pytest.mark.parametrize("version", [None, SONNET55_MIN_CLI_VERSION, (2, 2, 0)])
+@pytest.mark.parametrize("version", [None, FABLE52_MIN_CLI_VERSION, (2, 2, 0)])
 def test_current_offering_for_none_or_recent_version(version) -> None:
     models = claude_models_for_version(version)
     assert models == DEFAULT_CLAUDE_MODELS
@@ -47,9 +48,30 @@ def test_current_offering_for_none_or_recent_version(version) -> None:
     assert _by_id(models, "opus[1m]").label == "Opus 5.5 (1M context)"
 
     fable = _by_id(models, "fable")
-    assert fable.label == "Fable 5.1"
+    assert fable.label == "Fable 5.2"
     assert "xhigh" in fable.supported_efforts and "max" in fable.supported_efforts
-    assert _by_id(models, "fable[1m]").label == "Fable 5.1 (1M context)"
+    assert fable.default_effort == "medium"
+    assert _by_id(models, "fable[1m]").label == "Fable 5.2 (1M context)"
+    assert _by_id(models, "fable[1m]").default_effort == "medium"
+
+
+@pytest.mark.parametrize("version", [SONNET55_MIN_CLI_VERSION, (2, 1, 320)])
+def test_legacy_offering_below_fable52_min_version(version) -> None:
+    models = claude_models_for_version(version)
+    for model_id, label in [
+        ("fable", "Fable 5.1"),
+        ("fable[1m]", "Fable 5.1 (1M context)"),
+    ]:
+        option = _by_id(models, model_id)
+        assert option.label == label
+        assert option.default_effort == "high"
+        assert option.supported_efforts == list(CLAUDE_EFFORT_LEVELS)
+    ids = {option.id for option in models}
+    assert "claude-fable-5-1" not in ids
+    assert "claude-fable-5-1[1m]" not in ids
+    assert "claude-fable-5" in ids
+    assert _by_id(models, "opus").default_effort == "medium"
+    assert _by_id(models, "sonnet").default_effort == "medium"
 
 
 def test_legacy_offering_below_opus5_min_version() -> None:
@@ -198,7 +220,16 @@ def test_rollbacks_apply_cumulatively_at_each_boundary(
 
 @pytest.mark.parametrize(
     "version",
-    [(2, 0, 0), (2, 1, 190), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 283)],
+    [
+        (2, 0, 0),
+        (2, 1, 190),
+        (2, 1, 218),
+        (2, 1, 220),
+        (2, 1, 260),
+        (2, 1, 283),
+        (2, 1, 320),
+        FABLE52_MIN_CLI_VERSION,
+    ],
 )
 def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
     # A rollback may drop a redundant pin, so an older offering is a subset -- never a
@@ -214,7 +245,16 @@ def test_every_offering_is_an_ordered_subset_with_one_default(version) -> None:
 
 @pytest.mark.parametrize(
     "version",
-    [(2, 0, 0), (2, 1, 196), (2, 1, 218), (2, 1, 220), (2, 1, 260), (2, 1, 283)],
+    [
+        (2, 0, 0),
+        (2, 1, 196),
+        (2, 1, 218),
+        (2, 1, 220),
+        (2, 1, 260),
+        (2, 1, 283),
+        (2, 1, 320),
+        FABLE52_MIN_CLI_VERSION,
+    ],
 )
 def test_no_offering_lists_a_label_twice(version) -> None:
     # Below 2.1.219 the `opus` alias is itself labelled "Opus 4.8"; likewise `sonnet`
@@ -269,6 +309,7 @@ _LEGACY_IDS = (
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
+    "claude-fable-5-1",
     "claude-fable-5",
 )
 
@@ -305,6 +346,7 @@ def test_legacy_models_forward_effort_unvalidated(model_id: str) -> None:
         "claude-sonnet-5",
         "claude-sonnet-4-6",
         "claude-sonnet-4-5",
+        "claude-fable-5-1",
         "claude-fable-5",
     ],
 )

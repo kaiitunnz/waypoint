@@ -22,6 +22,7 @@ def _make_repo(
         "waypoint-manager",
         "waypoint-worktree",
         "waypoint-research",
+        "waypoint-context",
     ),
 ) -> Path:
     (home / "backend").mkdir(parents=True)
@@ -155,6 +156,7 @@ def test_helper_default_installs_all_skills(tmp_path: Path) -> None:
         "waypoint-manager",
         "waypoint-worktree",
         "waypoint-research",
+        "waypoint-context",
     ):
         assert (dest / skill).is_symlink()
 

@@ -395,7 +395,7 @@ warns without blocking, and the merged catalogue is what the frontend pickers an
 The catalogue is ordered by family, newest first, with each model's `[1m]` entry
 directly after its base. Alongside the current aliases it pins the previous and
 legacy models the CLI still runs: `claude-opus-5` down to `claude-opus-4-5`,
-`claude-sonnet-5` down to `claude-sonnet-4-5`, and `claude-fable-5`, each with a
+`claude-sonnet-5` down to `claude-sonnet-4-5`, and `claude-fable-5-1` / `claude-fable-5`, each with a
 `[1m]` entry except `claude-opus-4-5`, which the CLI excludes from long context.
 Pins use full model names; the CLI's short picker keys (`opus48`, …) are internal
 and rejected by `--model`. Models the CLI remaps to the latest (`claude-opus-4-1`)
@@ -403,6 +403,10 @@ or has retired (`claude-3-5-haiku`) are absent, so a picker entry never runs as 
 different model than it names. Reachability is a runtime property: the
 remap/retirement table is fetched from the server, so a pinned model can start
 remapping without a CLI upgrade.
+
+Claude Code `2.1.321` and later resolve `fable` to Fable 5.2 with medium default
+effort; builds `2.1.257` through `2.1.320` use Fable 5.1 with high default
+effort. The catalogue keeps Fable 5.1 available through its full model id.
 
 Each release that moves an alias to a new model is an epoch boundary. A CLI older
 than the boundary sees the alias under the model it resolves to there (below

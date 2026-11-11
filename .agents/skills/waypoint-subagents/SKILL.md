@@ -76,6 +76,7 @@ visible to a downstream lead reading the board.
   `references/permissions.md`.
 - Read their output, continue them, or service their approvals and questions:
   `references/collect-and-steer.md`.
+- Keep a long-running child from filling its context window: the `waypoint-context` skill.
 - Tear down the children you spawned: `references/cleanup.md`.
 
 ## Guardrails

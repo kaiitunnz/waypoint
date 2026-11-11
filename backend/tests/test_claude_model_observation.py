@@ -13,7 +13,9 @@ from waypoint.backends.claude_code.models import (
         # Current-epoch alias targets have no pinned entry -> map to the alias.
         ("claude-opus-5-5", "opus"),
         ("claude-sonnet-5-5", "sonnet"),
-        ("claude-fable-5-1", "fable"),
+        ("claude-fable-5-2", "fable"),
+        ("claude-fable-5-2[1m]", "fable"),
+        ("claude-fable-5-1", "claude-fable-5-1"),
         # Pinned legacy ids keep their distinct identity (checked before alias).
         ("claude-opus-5", "claude-opus-5"),
         ("claude-sonnet-5", "claude-sonnet-5"),
@@ -142,3 +144,20 @@ def test_one_m_not_reattached_for_family_without_variant() -> None:
     assert obs is not None
     assert obs.resolved_base == "haiku"
     assert obs.adopt_selection == "haiku"
+
+
+@pytest.mark.parametrize("selection", ["fable", "fable[1m]"])
+def test_fable52_alias_resolution_keeps_selection(selection: str) -> None:
+    obs = observe_claude_model("claude-fable-5-2", selection, prev_base=None)
+    assert obs is not None
+    assert obs.resolved_base == "fable"
+    assert obs.adopt_selection is None
+    assert obs.reason is None
+
+
+def test_previous_fable_keeps_pinned_identity() -> None:
+    obs = observe_claude_model("claude-fable-5-1", "fable[1m]", prev_base=None)
+    assert obs is not None
+    assert obs.resolved_base == "claude-fable-5-1"
+    assert obs.adopt_selection == "claude-fable-5-1[1m]"
+    assert obs.reason == "initial_mismatch"

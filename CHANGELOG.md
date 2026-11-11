@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.0](https://github.com/kaiitunnz/waypoint/compare/v0.26.2...v0.27.0) (2026-11-11)
+
+
+### Features
+
+* add Claude Fable 5.2 to the model catalogue ([#560](https://github.com/kaiitunnz/waypoint/issues/560)) ([414929a](https://github.com/kaiitunnz/waypoint/commit/414929a135eb335a48ac6e6349179657a09a61f3))
+* add the waypoint-context skill ([#555](https://github.com/kaiitunnz/waypoint/issues/555)) ([fd245d4](https://github.com/kaiitunnz/waypoint/commit/fd245d4fc527b022b50ef6a4ba0642d3f5f81edd))
+
+
+### Bug Fixes
+
+* print one JSON document from ctx_watch status ([#559](https://github.com/kaiitunnz/waypoint/issues/559)) ([a6c05fc](https://github.com/kaiitunnz/waypoint/commit/a6c05fc61b590ef612a07a7988ea01e2f547891c))
+* send the compaction pair at once on Claude Code ([#556](https://github.com/kaiitunnz/waypoint/issues/556)) ([771d44d](https://github.com/kaiitunnz/waypoint/commit/771d44d81781aaacd78eaa34b8b4722268165d87))
+
 ## [0.26.2](https://github.com/kaiitunnz/waypoint/compare/v0.26.1...v0.26.2) (2026-11-04)
 
 

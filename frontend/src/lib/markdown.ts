@@ -38,6 +38,16 @@ function rehypePreserveMathFences() {
   };
 }
 
+// Digits in the widest marker an ordered list prints, which is its last number
+// (`start + itemCount - 1`). The marker sits outside the list's content box, so
+// the stylesheet needs this count to reserve room for it; CSS can't derive it.
+export function orderedListMarkerDigits(
+  start: number | undefined,
+  itemCount: number,
+): number {
+  return String((start ?? 1) + Math.max(itemCount, 1) - 1).length;
+}
+
 // rehype-katex renders KaTeX's own error markup in place of throwing, so
 // malformed streamed TeX can't crash a message. trust and maxExpand bound
 // untrusted input; errorColor is a token so the error resolves per theme.

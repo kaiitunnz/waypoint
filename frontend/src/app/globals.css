@@ -4613,9 +4613,15 @@ html[data-theme="light"] .tool-call-run-children {
   margin: 0;
 }
 
-.markdown-message ul,
-.markdown-message ol {
+.markdown-message ul {
   padding-left: 1.2rem;
+}
+
+/* Ordered-list markers hang outside the content box, in this padding, and
+ * fit-content bubbles don't count them. 1.2rem holds a one-digit marker;
+ * MarkdownMessage sets --ol-marker-digits so each extra digit adds one `ch`. */
+.markdown-message ol {
+  padding-left: calc(1.2rem + (var(--ol-marker-digits, 1) - 1) * 1ch);
 }
 
 .markdown-message a {

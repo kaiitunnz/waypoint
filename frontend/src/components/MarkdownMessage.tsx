@@ -6,6 +6,7 @@ import {
   useMemo,
   useState,
   type ComponentPropsWithoutRef,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 
@@ -14,7 +15,11 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { CopyCodeButton } from "@/components/CopyCodeButton";
 import { useWorkspaceFileLink } from "@/components/WorkspaceFileLinkContext";
 import { highlightFenceToLines, type HighlightToken } from "@/lib/highlight";
-import { COMMON_REHYPE_PLUGINS, COMMON_REMARK_PLUGINS } from "@/lib/markdown";
+import {
+  COMMON_REHYPE_PLUGINS,
+  COMMON_REMARK_PLUGINS,
+  orderedListMarkerDigits,
+} from "@/lib/markdown";
 import { isWorkspacePathHref, remarkLinkifyPaths } from "@/lib/workspacePaths";
 
 interface MarkdownMessageProps {
@@ -169,6 +174,20 @@ const COMPONENTS: Components = {
   },
   pre({ children }) {
     return <CodeBlock>{children}</CodeBlock>;
+  },
+  ol({ node, start, style, children, ...props }) {
+    const items =
+      node?.children.filter((c) => c.type === "element" && c.tagName === "li")
+        .length ?? 1;
+    const markerStyle = {
+      ...style,
+      "--ol-marker-digits": orderedListMarkerDigits(start, items),
+    } as CSSProperties;
+    return (
+      <ol start={start} style={markerStyle} {...props}>
+        {children}
+      </ol>
+    );
   },
 };
 

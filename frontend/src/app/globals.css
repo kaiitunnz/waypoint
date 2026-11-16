@@ -19813,9 +19813,6 @@ body.wp-dock-resizing .inbox-resizer::after {
   border-radius: var(--radius-sm);
 }
 
-/* Drag-active feedback while dropping an image onto the reply — a flat token
-   tint over the opaque block, no glass/shadow. */
-
 .inbox-reply-input {
   width: 100%;
   resize: vertical;

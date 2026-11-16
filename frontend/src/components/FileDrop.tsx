@@ -21,7 +21,7 @@ import { filesFromDataTransfer } from "@/components/AttachmentTray";
 // reads as a file arriving from the OS.
 let internalDrag = false;
 
-export function isFileDrag(data: DataTransfer | null): boolean {
+function isFileDrag(data: DataTransfer | null): boolean {
   return !!data && Array.from(data.types).includes("Files");
 }
 
@@ -224,15 +224,17 @@ export function FileDropZone({
     window.addEventListener("dragenter", onDragEnter, true);
     window.addEventListener("dragleave", onDragLeave, true);
     window.addEventListener("dragover", onDragOver, true);
-    window.addEventListener("drop", hide, true);
-    window.addEventListener("dragend", hide, true);
+    // Bubble phase: hiding during capture lets React flush the unmount at a
+    // trusted drop's microtask checkpoint, before the overlay's onDrop runs.
+    window.addEventListener("drop", hide);
+    window.addEventListener("dragend", hide);
     window.addEventListener("blur", hide);
     return () => {
       window.removeEventListener("dragenter", onDragEnter, true);
       window.removeEventListener("dragleave", onDragLeave, true);
       window.removeEventListener("dragover", onDragOver, true);
-      window.removeEventListener("drop", hide, true);
-      window.removeEventListener("dragend", hide, true);
+      window.removeEventListener("drop", hide);
+      window.removeEventListener("dragend", hide);
       window.removeEventListener("blur", hide);
       window.clearTimeout(watchdog.current);
     };

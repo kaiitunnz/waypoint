@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.0](https://github.com/kaiitunnz/waypoint/compare/v0.26.2...v0.27.0) (2026-11-16)
+
+
+### Features
+
+* add Claude Fable 5.2 to the model catalogue ([#560](https://github.com/kaiitunnz/waypoint/issues/560)) ([414929a](https://github.com/kaiitunnz/waypoint/commit/414929a135eb335a48ac6e6349179657a09a61f3))
+* add the waypoint-context skill ([#555](https://github.com/kaiitunnz/waypoint/issues/555)) ([fd245d4](https://github.com/kaiitunnz/waypoint/commit/fd245d4fc527b022b50ef6a4ba0642d3f5f81edd))
+* attach files dropped anywhere on a session page ([#568](https://github.com/kaiitunnz/waypoint/issues/568)) ([7c5a141](https://github.com/kaiitunnz/waypoint/commit/7c5a1417c4905ea0cb93bfc0447b70ed1e0e61f1))
+
+
+### Bug Fixes
+
+* keep wide ordered-list markers inside chat bubbles ([#566](https://github.com/kaiitunnz/waypoint/issues/566)) ([f3d424c](https://github.com/kaiitunnz/waypoint/commit/f3d424c6c654782149eb760a24ca0a0dd70979e8))
+* print one JSON document from ctx_watch status ([#559](https://github.com/kaiitunnz/waypoint/issues/559)) ([a6c05fc](https://github.com/kaiitunnz/waypoint/commit/a6c05fc61b590ef612a07a7988ea01e2f547891c))
+* send the compaction pair at once on Claude Code ([#556](https://github.com/kaiitunnz/waypoint/issues/556)) ([771d44d](https://github.com/kaiitunnz/waypoint/commit/771d44d81781aaacd78eaa34b8b4722268165d87))
+
+
+### Performance Improvements
+
+* stream live sessions only and page exited history on demand ([#567](https://github.com/kaiitunnz/waypoint/issues/567)) ([090ef59](https://github.com/kaiitunnz/waypoint/commit/090ef59b23dc911a2434a64e17fb02769d5a5bbc))
+
 ## [0.26.2](https://github.com/kaiitunnz/waypoint/compare/v0.26.1...v0.26.2) (2026-11-04)
 
 

@@ -8,6 +8,7 @@ import { trapTabFocus } from "@/lib/keyboard";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import {
   byRecency,
+  isHistorySession,
   SESSION_SEARCH_FIELDS,
   useMergedSessionPage,
   useSessionHistory,
@@ -130,11 +131,27 @@ export function SessionSwitcher({
     };
   }, [liveSessions, query, currentSession?.id, showExited, historyCount]);
 
-  const recentPage = useMergedSessionPage(recentLive, history, showExited, page, PAGE_SIZE);
-  const recent = useMemo(
-    () => recentPage.items.filter((s) => s.id !== currentSession?.id),
-    [recentPage.items, currentSession?.id],
+  // The session being viewed is shown on its own above the list, so it leaves
+  // history before paging; otherwise its page comes up a row short.
+  const currentId = currentSession?.id ?? null;
+  const currentCounted =
+    currentSession !== null &&
+    isHistorySession(currentSession) &&
+    matchesQuery(currentSession, parseQuery(query), SESSION_SEARCH_FIELDS);
+  const historyItems = useMemo(
+    () => (currentId ? history.items.filter((s) => s.id !== currentId) : history.items),
+    [history.items, currentId],
   );
+  const historyTotal =
+    history.total !== null && currentCounted ? Math.max(0, history.total - 1) : history.total;
+  const recentPage = useMergedSessionPage(
+    recentLive,
+    { ...history, items: historyItems, total: historyTotal },
+    showExited,
+    page,
+    PAGE_SIZE,
+  );
+  const recent = recentPage.items;
   const totalPages = recentPage.totalPages;
 
   const flatItems = useMemo(() => [...pinned, ...recent], [pinned, recent]);

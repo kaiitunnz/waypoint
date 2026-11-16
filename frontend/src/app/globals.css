@@ -13622,6 +13622,17 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 /* Older-session status row at the end of the list (loading / retry). */
+.session-list-tail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .session-switcher-tail {
   display: flex;
   align-items: center;

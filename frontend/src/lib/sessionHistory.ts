@@ -21,6 +21,8 @@ export const SESSION_SEARCH_FIELDS = [
 ];
 
 const MAX_PAGE_SIZE = 100;
+// Searched-query views kept once nothing shows them; unfiltered views stay.
+const MAX_IDLE_QUERY_ENTRIES = 8;
 const QUERY_DEBOUNCE_MS = 200;
 const REVISION_DEBOUNCE_MS = 300;
 const NO_SOURCES: readonly string[] = [];
@@ -44,6 +46,7 @@ interface HistoryEntry {
 const entries = new Map<string, HistoryEntry>();
 const listeners = new Set<() => void>();
 const inflight = new Map<string, AbortController>();
+const users = new Map<string, number>();
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -178,6 +181,33 @@ export function clearSessionHistory(host: string): void {
     entries.delete(key);
   }
   emit();
+}
+
+function retain(key: string): void {
+  users.set(key, (users.get(key) ?? 0) + 1);
+  const entry = entries.get(key);
+  if (entry) {
+    // Re-insert so Map order tracks recency of use for pruning.
+    entries.delete(key);
+    entries.set(key, entry);
+  }
+}
+
+function release(key: string): void {
+  const count = (users.get(key) ?? 1) - 1;
+  if (count > 0) {
+    users.set(key, count);
+    return;
+  }
+  users.delete(key);
+  const idle = [...entries.entries()].filter(
+    ([candidate, entry]) => !users.has(candidate) && entry.query !== "",
+  );
+  for (const [candidate] of idle.slice(0, Math.max(0, idle.length - MAX_IDLE_QUERY_ENTRIES))) {
+    inflight.get(candidate)?.abort();
+    inflight.delete(candidate);
+    entries.delete(candidate);
+  }
 }
 
 function begin(key: string): AbortController {
@@ -372,6 +402,12 @@ export function useSessionHistory({
   }, [onAuthError]);
   const lastRun = useRef<{ key: string; revision: string } | null>(null);
   const stale = entry?.stale ?? false;
+
+  useEffect(() => {
+    if (!key) return;
+    retain(key);
+    return () => release(key);
+  }, [key]);
 
   useEffect(() => {
     // An empty revision means no list frame has arrived yet; the first one

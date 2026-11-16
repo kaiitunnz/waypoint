@@ -93,13 +93,17 @@ def test_live_query_and_history_count_avoid_table_scans(tmp_path: Path) -> None:
     storage.connection.set_trace_callback(statements.append)
     storage.list_live_sessions()
     storage.count_history_sessions()
+    storage.count_history_sessions(("assistant", "telemetry"))
+    storage.list_history_sessions(limit=5, exclude_sources=("assistant",))
     storage.connection.set_trace_callback(None)
-    assert len(statements) == 2
+    assert len(statements) == 4
     for statement in statements:
         plan = storage.connection.execute(f"EXPLAIN QUERY PLAN {statement}").fetchall()
         details = [row["detail"] for row in plan]
+        # Walking an index is fine; reading the table row by row is not.
         assert not any(
-            detail.startswith("SCAN sessions") for detail in details
+            detail.startswith("SCAN sessions") and "INDEX" not in detail
+            for detail in details
         ), details
 
 
@@ -304,6 +308,13 @@ async def test_sessions_list_scopes_and_id_filter(tmp_path: Path) -> None:
             await client.get("/api/sessions?id=old&id=nope", headers=_auth(token))
         ).json()
         assert [s["id"] for s in by_id["sessions"]] == ["old"]
+        for combined in (
+            "scope=live&spawned_by=x",
+            "id=old&tag=a:b",
+            "scope=live&id=old",
+        ):
+            resp = await client.get(f"/api/sessions?{combined}", headers=_auth(token))
+            assert resp.status_code == 400, combined
 
 
 async def test_history_revision_changes_on_mutation_not_streaming(

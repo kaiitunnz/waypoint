@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -100,10 +101,16 @@ _LIVE_SESSION_STATUSES = tuple(
 )
 
 
+# History rows (exited, unpinned) as the partial index's own predicate. It must
+# be spelled literally, not bound, for SQLite to match the index's WHERE clause.
+_HISTORY_PREDICATE = "status = 'exited' AND pinned_at IS NULL"
+_HISTORY_TABLE = "sessions INDEXED BY idx_sessions_history"
+
+
 def _history_where(exclude_sources: Sequence[str]) -> tuple[str, list[Any]]:
     """WHERE clause selecting history sessions: exited and not pinned."""
-    where = "status = ? AND pinned_at IS NULL"
-    params: list[Any] = [SessionStatus.EXITED.value]
+    where = _HISTORY_PREDICATE
+    params: list[Any] = []
     if exclude_sources:
         where += f" AND source NOT IN ({', '.join('?' for _ in exclude_sources)})"
         params.extend(exclude_sources)
@@ -643,6 +650,9 @@ class Storage:
                 ON sessions(status, last_event_at, id);
             CREATE INDEX IF NOT EXISTS idx_sessions_pinned
                 ON sessions(pinned_at) WHERE pinned_at IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_sessions_history
+                ON sessions(last_event_at, id, source)
+                WHERE status = 'exited' AND pinned_at IS NULL;
             CREATE INDEX IF NOT EXISTS idx_wake_subs_session
                 ON wake_subscriptions(session_id);
             CREATE INDEX IF NOT EXISTS idx_manager_tickets_manager
@@ -824,22 +834,10 @@ class Storage:
 
     @_synchronized
     def count_history_sessions(self, exclude_sources: Sequence[str] = ()) -> int:
-        if not exclude_sources:
-            # Index-only form for the broadcast path: counting ``pinned_at IS
-            # NULL`` directly would fetch every exited row to test the column.
-            row = self.connection.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM sessions WHERE status = ?)
-                    - (SELECT COUNT(*) FROM sessions INDEXED BY idx_sessions_pinned
-                       WHERE pinned_at IS NOT NULL AND status = ?)
-                """,
-                (SessionStatus.EXITED.value, SessionStatus.EXITED.value),
-            ).fetchone()
-            return int(row[0])
+        # Index-only over the partial history index, which also carries source.
         where, params = _history_where(exclude_sources)
         row = self.connection.execute(
-            f"SELECT COUNT(*) FROM sessions WHERE {where}", params
+            f"SELECT COUNT(*) FROM {_HISTORY_TABLE} WHERE {where}", params
         ).fetchone()
         return int(row[0])
 
@@ -861,7 +859,7 @@ class Storage:
             where += " AND (last_event_at < ? OR (last_event_at = ? AND id < ?))"
             params.extend([cursor[0], cursor[0], cursor[1]])
         rows = self.connection.execute(
-            f"SELECT * FROM sessions WHERE {where} "
+            f"SELECT * FROM {_HISTORY_TABLE} WHERE {where} "
             "ORDER BY last_event_at DESC, id DESC LIMIT ?",
             [*params, limit + 1],
         ).fetchall()
@@ -872,26 +870,31 @@ class Storage:
         )
         return [self._session_from_row(row) for row in rows], has_more, next_cursor
 
-    @_synchronized
     def history_search_rows(
         self, columns: Sequence[str], exclude_sources: Sequence[str] = ()
     ) -> list[dict[str, Any]]:
         """Raw ``columns`` of every history row, newest activity first.
 
         Only plain columns are read so a search pass never decodes the JSON
-        blobs or validates full records for rows that don't match.
+        blobs or validates full records for rows that don't match. The scan
+        grows with history, so it reads on its own read-only connection (WAL
+        allows concurrent readers) instead of holding the shared lock.
         """
-        known = self._session_columns()
+        with self._lock:
+            known = self._session_columns()
         selected = [column for column in columns if column in known]
         for required in ("id", "last_event_at"):
             if required not in selected:
                 selected.append(required)
         where, params = _history_where(exclude_sources)
-        rows = self.connection.execute(
-            f"SELECT {', '.join(selected)} FROM sessions WHERE {where} "
-            "ORDER BY last_event_at DESC, id DESC",
-            params,
-        ).fetchall()
+        uri = f"{self.database_path.resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as reader:
+            reader.row_factory = sqlite3.Row
+            rows = reader.execute(
+                f"SELECT {', '.join(selected)} FROM {_HISTORY_TABLE} WHERE {where} "
+                "ORDER BY last_event_at DESC, id DESC",
+                params,
+            ).fetchall()
         return [dict(row) for row in rows]
 
     @_synchronized

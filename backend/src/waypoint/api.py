@@ -458,6 +458,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         scope: Annotated[Literal["all", "live"], Query()] = "all",
         session_id: Annotated[list[str] | None, Query(alias="id")] = None,
     ) -> Any:
+        if (scope == "live" or session_id) and (
+            spawned_by is not None
+            or tag
+            or recursive
+            or (scope == "live" and session_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scope=live and id cannot be combined with other filters",
+            )
         if scope == "live":
             # Same payload as the /ws/sessions list frame, so a client can
             # hydrate over REST and the socket without the two disagreeing.

@@ -2,7 +2,6 @@ import asyncio
 import base64
 import binascii
 import fnmatch
-import functools
 import json
 import logging
 import mimetypes
@@ -889,12 +888,10 @@ class SessionRuntime:
             if limit == 0:
                 return SessionHistoryPage(sessions=[], has_more=False, total=total)
             sessions, has_more, next_key = await asyncio.to_thread(
-                functools.partial(
-                    self.storage.list_history_sessions,
-                    limit=limit,
-                    cursor=after,
-                    exclude_sources=exclude_sources,
-                )
+                self.storage.list_history_sessions,
+                limit=limit,
+                cursor=after,
+                exclude_sources=exclude_sources,
             )
             return SessionHistoryPage(
                 sessions=sessions,

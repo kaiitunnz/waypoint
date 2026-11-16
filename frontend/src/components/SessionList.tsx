@@ -12,6 +12,12 @@ import {
 } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { formatClock } from "@/lib/scheduleTime";
+import {
+  byRecency,
+  SESSION_SEARCH_FIELDS,
+  useMergedSessionPage,
+  useSessionHistory,
+} from "@/lib/sessionHistory";
 import { SessionRecord } from "@/lib/types";
 import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
@@ -19,8 +25,16 @@ import { SearchInput } from "./SearchInput";
 import { Pager } from "@/components/Pager";
 
 interface SessionListProps {
+  host: string;
+  token: string;
+  /** Live and pinned sessions; exited history is paged from the server. */
   sessions: SessionRecord[];
+  /** `history_revision` from the latest session list frame. */
+  historyRevision: string;
+  /** Sources hidden from this list (live rows are filtered by the caller). */
+  hiddenSources: readonly string[];
   catalog?: BackendCatalog;
+  onAuthFailure?: () => void;
   onDelete?: (sessionId: string) => void | Promise<void>;
   onDeleteExited?: () => void | Promise<void>;
   onTerminate?: (sessionId: string) => void | Promise<void>;
@@ -32,8 +46,13 @@ interface SessionListProps {
 const PAGE_SIZE = 10;
 
 export function SessionList({
+  host,
+  token,
   sessions,
+  historyRevision,
+  hiddenSources,
   catalog,
+  onAuthFailure,
   onDelete,
   onDeleteExited,
   onTerminate,
@@ -138,47 +157,69 @@ export function SessionList({
     void onDeleteExited();
   }
 
-  const {
-    pinnedSessions,
-    recentSessions,
-    flatSearchResults,
-    exitedCount,
-    activeCount,
-  } = useMemo(() => {
+  const trimmedQuery = query.trim();
+  const searching = trimmedQuery !== "";
+  const historyCounts = useSessionHistory({
+    host,
+    token,
+    query: "",
+    withItems: false,
+    revision: historyRevision,
+    excludeSources: hiddenSources,
+    onAuthError: onAuthFailure,
+  });
+  const history = useSessionHistory({
+    host,
+    token,
+    query,
+    withItems: true,
+    enabled: showExited,
+    revision: historyRevision,
+    excludeSources: hiddenSources,
+    pageSize: PAGE_SIZE,
+    onAuthError: onAuthFailure,
+  });
+  const historyTotal = historyCounts.total ?? 0;
+
+  const { pinnedSessions, recentLive, exitedLive, activeCount } = useMemo(() => {
     const exited = sessions.filter((session) => session.status === "exited").length;
-    const active = sessions.length - exited;
-    const visible = showExited
+    let visible = showExited
       ? sessions
       : sessions.filter((session) => session.status !== "exited");
-
-    if (query.trim() === "") {
-      const pinned = visible
-        .filter((session) => session.pinned_at)
-        .sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
-      const recent = visible.filter((session) => !session.pinned_at);
-      return { pinnedSessions: pinned, recentSessions: recent, flatSearchResults: null, exitedCount: exited, activeCount: active };
+    if (searching) {
+      const terms = parseQuery(trimmedQuery);
+      visible = visible.filter((session) =>
+        matchesQuery(session, terms, SESSION_SEARCH_FIELDS),
+      );
     }
+    const pinned = visible
+      .filter((session) => session.pinned_at)
+      .sort(
+        searching
+          ? byRecency
+          : (a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""),
+      );
+    return {
+      pinnedSessions: pinned,
+      recentLive: visible.filter((session) => !session.pinned_at),
+      exitedLive: exited,
+      activeCount: sessions.length - exited,
+    };
+  }, [sessions, searching, trimmedQuery, showExited]);
 
-    const terms = parseQuery(query.trim());
-    const defaultFields = ["title", "cwd", "repo_name", "branch", "backend", "search_status"];
-
-    const matched = visible.filter((session) => {
-      return matchesQuery(session, terms, defaultFields);
-    });
-
-    matched.sort((a, b) => {
-      const aPinned = Boolean(a.pinned_at);
-      const bPinned = Boolean(b.pinned_at);
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-      return b.last_event_at.localeCompare(a.last_event_at);
-    });
-
-    return { pinnedSessions: [], recentSessions: [], flatSearchResults: matched, exitedCount: exited, activeCount: active };
-  }, [sessions, query, showExited]);
-
-  const listToPaginate = flatSearchResults !== null ? flatSearchResults : recentSessions;
-  const totalPages = Math.max(1, Math.ceil(listToPaginate.length / PAGE_SIZE));
+  // Search results are one flat list (pinned matches first); otherwise pinned
+  // sessions get their own section and only recent ones are paged.
+  const recentPage = useMergedSessionPage(
+    recentLive,
+    history,
+    showExited,
+    page,
+    PAGE_SIZE,
+    searching ? pinnedSessions : undefined,
+  );
+  const totalPages = recentPage.totalPages;
+  const exitedCount = exitedLive + historyTotal;
+  const totalCount = sessions.length + historyTotal;
 
   useEffect(() => {
     setPage(1);
@@ -188,7 +229,7 @@ export function SessionList({
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
-  if (!sessions.length) {
+  if (!sessions.length && historyCounts.total === 0) {
     return (
       <section className="panel">
         <h3>No sessions yet</h3>
@@ -198,9 +239,25 @@ export function SessionList({
   }
 
   const pageStart = (page - 1) * PAGE_SIZE;
-  const visibleItems = listToPaginate.slice(pageStart, pageStart + PAGE_SIZE);
-  const showingFrom = listToPaginate.length === 0 ? 0 : pageStart + 1;
-  const showingTo = Math.min(listToPaginate.length, pageStart + PAGE_SIZE);
+  const visibleItems = recentPage.items;
+  const listTotal = recentPage.total;
+  const showingFrom = visibleItems.length === 0 ? 0 : pageStart + 1;
+  const showingTo = pageStart + visibleItems.length;
+  const historyBusy = showExited && (history.pending || recentPage.filling);
+  const historyNote = searching ? "Searching older sessions…" : "Loading older sessions…";
+  const historyStatus =
+    showExited && history.error ? (
+      <div className="session-list-tail" role="status">
+        <span>Older sessions failed to load.</span>
+        <button className="secondary" type="button" onClick={history.retry}>
+          Retry
+        </button>
+      </div>
+    ) : historyBusy ? (
+      <p className="session-list-tail muted" role="status">
+        {historyNote}
+      </p>
+    ) : null;
 
   function renderCard(session: SessionRecord): ReactNode {
     const pinned = Boolean(session.pinned_at);
@@ -349,7 +406,7 @@ export function SessionList({
         <div className="session-list-summary">
           <h3>Sessions</h3>
           <p className="muted">
-            {sessions.length} total · {activeCount} active · {exitedCount} exited
+            {totalCount} total · {activeCount} active · {exitedCount} exited
             {pinnedSessions.length ? ` · ${pinnedSessions.length} pinned` : null}
           </p>
         </div>
@@ -379,13 +436,13 @@ export function SessionList({
         ) : null}
       </div>
 
-      {flatSearchResults !== null ? (
+      {searching ? (
         <section className="session-section">
-          {flatSearchResults.length > 0 ? (
+          {visibleItems.length > 0 ? (
             <Pager
               page={page}
               totalPages={totalPages}
-              total={flatSearchResults.length}
+              total={listTotal}
               pageStart={showingFrom}
               pageEnd={showingTo}
               onPage={setPage}
@@ -393,18 +450,19 @@ export function SessionList({
               compact
             />
           ) : null}
-          {flatSearchResults.length > 0 ? (
+          {visibleItems.length > 0 ? (
             <div className="stack">{visibleItems.map(renderCard)}</div>
-          ) : (
+          ) : historyBusy || history.error ? null : (
             <p className="muted" style={{ textAlign: "center", padding: "20px 0" }}>
               No sessions match your search.
             </p>
           )}
-          {flatSearchResults.length > 0 ? (
+          {historyStatus}
+          {visibleItems.length > 0 ? (
             <Pager
               page={page}
               totalPages={totalPages}
-              total={flatSearchResults.length}
+              total={listTotal}
               pageStart={showingFrom}
               pageEnd={showingTo}
               onPage={setPage}
@@ -427,14 +485,12 @@ export function SessionList({
           <section className="session-section">
             <header className="session-section-header">
               <h4>Recent</h4>
-              {recentSessions.length > 0 ? (
-                <span className="meta">{recentSessions.length}</span>
-              ) : null}
-              {recentSessions.length > 0 ? (
+              {listTotal > 0 ? <span className="meta">{listTotal}</span> : null}
+              {visibleItems.length > 0 ? (
                 <Pager
                   page={page}
                   totalPages={totalPages}
-                  total={recentSessions.length}
+                  total={listTotal}
                   pageStart={showingFrom}
                   pageEnd={showingTo}
                   onPage={setPage}
@@ -445,14 +501,17 @@ export function SessionList({
             </header>
             {visibleItems.length > 0 ? (
               <div className="stack">{visibleItems.map(renderCard)}</div>
-            ) : (
+            ) : historyBusy || history.error ? null : pinnedSessions.length > 0 ? (
               <p className="muted">All sessions are pinned.</p>
+            ) : (
+              <p className="muted">No recent sessions.</p>
             )}
-            {recentSessions.length > 0 ? (
+            {historyStatus}
+            {visibleItems.length > 0 ? (
               <Pager
                 page={page}
                 totalPages={totalPages}
-                total={recentSessions.length}
+                total={listTotal}
                 pageStart={showingFrom}
                 pageEnd={showingTo}
                 onPage={setPage}

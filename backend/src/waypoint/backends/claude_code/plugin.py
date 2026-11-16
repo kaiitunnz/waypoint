@@ -1181,16 +1181,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         if current == previous:
             return
         runtime.storage.update_session(session.id, permission_mode=current)
-        await runtime.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in runtime.list_sessions()
-                    ]
-                },
-            )
-        )
+        await runtime.broadcast_session_list()
 
     async def fork_session(
         self,

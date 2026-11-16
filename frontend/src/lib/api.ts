@@ -86,14 +86,86 @@ export async function login(host: string, password: string): Promise<string> {
   return payload.token as string;
 }
 
-export async function fetchSessions(host: string, token: string): Promise<SessionRecord[]> {
-  const response = await fetch(`${host}/api/sessions`, {
+export interface LiveSessionList {
+  sessions: SessionRecord[];
+  historyCount: number;
+  historyRevision: string;
+}
+
+export function parseLiveSessionList(payload: Record<string, unknown>): LiveSessionList {
+  return {
+    sessions: payload.sessions as SessionRecord[],
+    historyCount: typeof payload.history_count === "number" ? payload.history_count : 0,
+    historyRevision:
+      typeof payload.history_revision === "string" ? payload.history_revision : "",
+  };
+}
+
+export async function fetchLiveSessions(host: string, token: string): Promise<LiveSessionList> {
+  const response = await fetch(`${host}/api/sessions?scope=live`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch sessions");
+  return parseLiveSessionList(await response.json());
+}
+
+export async function fetchSessionsByIds(
+  host: string,
+  token: string,
+  sessionIds: string[],
+): Promise<SessionRecord[]> {
+  const params = new URLSearchParams();
+  for (const sessionId of sessionIds) params.append("id", sessionId);
+  const response = await fetch(`${host}/api/sessions?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   await ensureOk(response, "failed to fetch sessions");
   const payload = await response.json();
   return payload.sessions as SessionRecord[];
+}
+
+export interface SessionHistoryPage {
+  sessions: SessionRecord[];
+  has_more: boolean;
+  cursor: string | null;
+  total: number;
+}
+
+export async function fetchSessionHistory(
+  host: string,
+  token: string,
+  options: {
+    query?: string;
+    cursor?: string | null;
+    limit?: number;
+    excludeSources?: readonly string[];
+    signal?: AbortSignal;
+  } = {},
+): Promise<SessionHistoryPage> {
+  const params = new URLSearchParams();
+  if (options.query) params.set("q", options.query);
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  for (const source of options.excludeSources ?? []) params.append("exclude_source", source);
+  const response = await fetch(`${host}/api/sessions/history?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal: options.signal,
+  });
+  await ensureOk(response, "failed to load session history");
+  return (await response.json()) as SessionHistoryPage;
+}
+
+export async function deleteExitedSessions(host: string, token: string): Promise<number> {
+  const response = await fetch(`${host}/api/sessions/delete-exited`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete exited sessions");
+  const payload = await response.json();
+  return typeof payload.queued === "number" ? payload.queued : 0;
 }
 
 export async function fetchBackendThreads<T = unknown>(

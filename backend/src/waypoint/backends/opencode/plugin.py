@@ -35,7 +35,6 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     SessionCreateRequest,
-    SessionEnvelope,
     SessionInputRequest,
     SessionRecord,
     SessionSource,
@@ -357,17 +356,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                     SessionStatus.RUNNING,
                 )
 
-                await runtime.broadcast.publish(
-                    SessionEnvelope(
-                        type="session_list_update",
-                        payload={
-                            "sessions": [
-                                item.model_dump(mode="json")
-                                for item in runtime.list_sessions()
-                            ]
-                        },
-                    )
-                )
+                await runtime.broadcast_session_list()
 
     def _health_for(self, key: OpenCodeAdapterKey) -> AdapterHealth:
         if key not in self._health:

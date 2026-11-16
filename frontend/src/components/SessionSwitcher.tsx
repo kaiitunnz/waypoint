@@ -4,21 +4,38 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { connectSessionsSocket, fetchSessions } from "@/lib/api";
 import { trapTabFocus } from "@/lib/keyboard";
 import { matchesQuery, parseQuery } from "@/lib/search";
-import { SessionEnvelope, SessionRecord } from "@/lib/types";
+import {
+  byRecency,
+  isHistorySession,
+  SESSION_SEARCH_FIELDS,
+  useMergedSessionPage,
+  useSessionHistory,
+} from "@/lib/sessionHistory";
+import { SessionRecord } from "@/lib/types";
 import { SearchInput } from "@/components/SearchInput";
-import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
+import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
 import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
 
 interface SessionSwitcherProps {
   host: string;
   token: string;
+  catalog: BackendCatalog;
+  /** Cached live + pinned sessions; null until the first list frame arrives. */
+  liveSessions: SessionRecord[] | null;
+  historyCount: number;
+  historyRevision: string;
+  /** The cached list is being refreshed from the server. */
+  syncing: boolean;
   currentSession: SessionRecord | null;
   onAuthFailure?: () => void;
   onClose: () => void;
 }
+
+// The highlighted row: a session id once known, or a row position while
+// keyboard paging lands on a page whose rows haven't rendered yet.
+type Selection = { id: string } | { index: number };
 
 const PAGE_SIZE = 8;
 // Window after a keypress during which mouse-hover updates to the
@@ -51,15 +68,24 @@ function formatCwdSegments(cwd: string): string[] {
   return segments.length ? segments : [trimmed];
 }
 
-export function SessionSwitcher({ host, token, currentSession, onAuthFailure, onClose }: SessionSwitcherProps) {
+export function SessionSwitcher({
+  host,
+  token,
+  catalog,
+  liveSessions,
+  historyCount,
+  historyRevision,
+  syncing,
+  currentSession,
+  onAuthFailure,
+  onClose,
+}: SessionSwitcherProps) {
   const router = useRouter();
-  const catalog = useBackendCatalog(host || null, token || null, null);
   const toggleHint = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl+K";
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
   const [showExited, setShowExited] = useShowExitedSessions(SWITCHER_SHOW_EXITED_KEY);
   const [page, setPage] = useState(1);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [selection, setSelection] = useState<Selection>({ index: 0 });
   const listRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const lastKeyTimeRef = useRef(0);
@@ -79,99 +105,80 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     offsetLeft: number;
   } | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    let socket: WebSocket | null = null;
+  const history = useSessionHistory({
+    host,
+    token,
+    query,
+    withItems: true,
+    enabled: showExited,
+    revision: historyRevision,
+    pageSize: PAGE_SIZE,
+    onAuthError: onAuthFailure,
+  });
 
-    async function load() {
-      try {
-        const data = await fetchSessions(host, token);
-        if (active) {
-          setSessions(data);
-        }
-      } catch {
-        if (active && typeof onAuthFailure === "function") {
-          onAuthFailure();
-        }
-      }
-    }
-    load();
-
-    socket = connectSessionsSocket(
-      host,
-      token,
-      (message: SessionEnvelope) => {
-        if (message.type === "session_list_update") {
-          setSessions(message.payload.sessions as SessionRecord[]);
-          return;
-        }
-        if (message.type === "session_state") {
-          const updated = message.payload.session as SessionRecord;
-          setSessions((current) => {
-            const index = current.findIndex((s) => s.id === updated.id);
-            if (index !== -1) {
-              const next = [...current];
-              next[index] = updated;
-              return next;
-            }
-            return [updated, ...current];
-          });
-        }
-      },
-      () => {
-        if (active && typeof onAuthFailure === "function") {
-          onAuthFailure();
-        }
-      }
-    );
-
-    return () => {
-      active = false;
-      socket?.close();
-    };
-  }, [host, token, onAuthFailure]);
-
-  const filteredSessions = useMemo(() => {
-    let list = sessions.filter((s) => s.id !== currentSession?.id);
-    const hasExited = list.some((s) => s.status === "exited");
+  const { pinned, recentLive, hasExited } = useMemo(() => {
+    let list = (liveSessions ?? []).filter((s) => s.id !== currentSession?.id);
+    const pinnedExited = list.some((s) => s.status === "exited");
     if (!showExited) {
       list = list.filter((s) => s.status !== "exited");
     }
     const parsed = parseQuery(query);
-    list = list.filter((s) =>
-      matchesQuery(s, parsed, ["title", "cwd", "repo_name", "branch", "backend", "search_status"]),
-    );
-
-    const pinned = list.filter((s) => s.pinned_at != null);
-    const recent = list.filter((s) => s.pinned_at == null);
-
-    recent.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
-    pinned.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
-
-    const totalPages = Math.ceil(recent.length / PAGE_SIZE) || 1;
-    const cappedRecent = recent.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
+    list = list.filter((s) => matchesQuery(s, parsed, SESSION_SEARCH_FIELDS));
     return {
-      pinned,
-      recent: cappedRecent,
-      totalPages,
-      totalRecent: recent.length,
-      hasExited
+      pinned: list.filter((s) => s.pinned_at != null).sort(byRecency),
+      recentLive: list.filter((s) => s.pinned_at == null),
+      hasExited: pinnedExited || historyCount > 0,
     };
-  }, [sessions, query, currentSession?.id, page, showExited]);
+  }, [liveSessions, query, currentSession?.id, showExited, historyCount]);
 
-  const flatItems = useMemo(() => {
-    return [...filteredSessions.pinned, ...filteredSessions.recent];
-  }, [filteredSessions]);
+  // The session being viewed is shown on its own above the list, so it leaves
+  // history before paging; otherwise its page comes up a row short.
+  const currentId = currentSession?.id ?? null;
+  const currentCounted =
+    currentSession !== null &&
+    isHistorySession(currentSession) &&
+    matchesQuery(currentSession, parseQuery(query), SESSION_SEARCH_FIELDS);
+  const historyItems = useMemo(
+    () => (currentId ? history.items.filter((s) => s.id !== currentId) : history.items),
+    [history.items, currentId],
+  );
+  const historyTotal =
+    history.total !== null && currentCounted ? Math.max(0, history.total - 1) : history.total;
+  const recentPage = useMergedSessionPage(
+    recentLive,
+    { ...history, items: historyItems, total: historyTotal },
+    showExited,
+    page,
+    PAGE_SIZE,
+  );
+  const recent = recentPage.items;
+  const totalPages = recentPage.totalPages;
 
-  // Adjust active index if list shrinks
+  const flatItems = useMemo(() => [...pinned, ...recent], [pinned, recent]);
+
+  const selectedIndex =
+    "id" in selection
+      ? flatItems.findIndex((s) => s.id === selection.id)
+      : selection.index;
+  const [lastIndex, setLastIndex] = useState(0);
+  const activeIndex =
+    selectedIndex >= 0 && selectedIndex < flatItems.length
+      ? selectedIndex
+      : Math.min(lastIndex, Math.max(0, flatItems.length - 1));
+  const activeId = flatItems[activeIndex]?.id ?? null;
+
+  // Pin the selection to the session under it, so a background refresh that
+  // reorders rows never moves the highlight (or Enter) to another session.
+  // A position resolves to an id only once its row exists, so keyboard paging
+  // onto a page still loading lands on that page's row, not the previous one.
   useEffect(() => {
-    if (activeIndex >= flatItems.length && flatItems.length > 0) {
-      setActiveIndex(flatItems.length - 1);
-    } else if (flatItems.length === 0) {
-      setActiveIndex(0);
-    }
-  }, [flatItems.length, activeIndex]);
+    const inRange = selectedIndex >= 0 && selectedIndex < flatItems.length;
+    if (inRange) setLastIndex(selectedIndex);
+    const settled = "id" in selection ? selectedIndex !== -1 : !inRange;
+    if (!settled && activeId) setSelection({ id: activeId });
+  }, [activeId, selectedIndex, flatItems.length, selection]);
+
+  const select = useCallback((index: number) => setSelection({ index }), []);
 
   const handleKeyDown = useCallback((e: globalThis.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -190,8 +197,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       lastKeyTimeRef.current = Date.now();
     }
 
-    const pinnedCount = filteredSessions.pinned.length;
-    const totalPages = filteredSessions.totalPages;
+    const pinnedCount = pinned.length;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -200,10 +206,10 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       // page and land on the first recent item of the new page.
       if (activeIndex === flatItems.length - 1 && page < totalPages) {
         setPage(page + 1);
-        setActiveIndex(pinnedCount);
+        select(pinnedCount);
         return;
       }
-      setActiveIndex((i) => (i + 1) % flatItems.length);
+      select((activeIndex + 1) % flatItems.length);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (flatItems.length === 0) return;
@@ -212,16 +218,16 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       // (which is always full since only the last page can be partial).
       if (activeIndex === pinnedCount && page > 1) {
         setPage(page - 1);
-        setActiveIndex(pinnedCount + PAGE_SIZE - 1);
+        select(pinnedCount + PAGE_SIZE - 1);
         return;
       }
-      setActiveIndex((i) => (i - 1 + flatItems.length) % flatItems.length);
+      select((activeIndex - 1 + flatItems.length) % flatItems.length);
     } else if (e.key === "Home") {
       e.preventDefault();
-      setActiveIndex(0);
+      select(0);
     } else if (e.key === "End") {
       e.preventDefault();
-      setActiveIndex(flatItems.length > 0 ? flatItems.length - 1 : 0);
+      select(flatItems.length > 0 ? flatItems.length - 1 : 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const target = flatItems[activeIndex];
@@ -230,7 +236,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         router.push(`/session/${target.id}`);
       }
     }
-  }, [flatItems, activeIndex, onClose, router, filteredSessions.pinned.length, filteredSessions.totalPages, page]);
+  }, [flatItems, activeIndex, onClose, router, pinned.length, totalPages, page, select]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown, { capture: true });
@@ -297,6 +303,29 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     };
   }, []);
 
+  const historyBusy = showExited && (history.pending || recentPage.filling);
+  const refreshing = syncing || (history.loading && history.loaded && !recentPage.filling);
+  const historyNote = query.trim() ? "Searching older sessions…" : "Loading older sessions…";
+  const emptyMessage =
+    liveSessions === null
+      ? "Loading sessions…"
+      : historyBusy && !history.error
+        ? historyNote
+        : "No matching sessions";
+  const tailStatus =
+    showExited && history.error ? (
+      <div className="session-switcher-tail" role="status">
+        <span>Older sessions failed to load.</span>
+        <button type="button" onClick={history.retry}>
+          Retry
+        </button>
+      </div>
+    ) : historyBusy && flatItems.length > 0 ? (
+      <div className="session-switcher-tail" role="status">
+        {historyNote}
+      </div>
+    ) : null;
+
   const renderRow = (s: SessionRecord, idx: number) => {
     const isSelected = activeIndex === idx;
     const cwdSegments = formatCwdSegments(s.cwd);
@@ -315,7 +344,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         }}
         onMouseEnter={() => {
           if (Date.now() - lastKeyTimeRef.current < MOUSE_AFTER_KEY_SUPPRESS_MS) return;
-          if (activeIndex !== idx) setActiveIndex(idx);
+          if (activeIndex !== idx) setSelection({ id: s.id });
         }}
       >
         <div className={`session-switcher-rail ${s.status}`} />
@@ -363,13 +392,22 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
             onChange={(val) => {
               setQuery(val);
               setPage(1);
-              setActiveIndex(0);
+              select(0);
             }}
             placeholder="Search sessions..."
             autoFocus={!isMobile}
             showStatusExample={false}
           />
-          {filteredSessions.hasExited ? (
+          <span
+            className="session-switcher-sync"
+            data-active={refreshing ? "true" : undefined}
+            role="status"
+            aria-live="polite"
+            title={refreshing ? "Refreshing sessions" : undefined}
+          >
+            <span className="sr-only">{refreshing ? "Refreshing sessions" : ""}</span>
+          </span>
+          {hasExited ? (
             <button
               type="button"
               className="exited-toggle"
@@ -392,40 +430,40 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
             </div>
           ) : null}
 
-          {filteredSessions.pinned.length > 0 ? (
+          {pinned.length > 0 ? (
             <div className="session-switcher-section">
               <div className="session-switcher-header">
-                Pinned <span>{filteredSessions.pinned.length}</span>
+                Pinned <span>{pinned.length}</span>
               </div>
-              {filteredSessions.pinned.map((s, i) => renderRow(s, i))}
+              {pinned.map((s, i) => renderRow(s, i))}
             </div>
           ) : null}
 
-          {filteredSessions.recent.length > 0 ? (
+          {recent.length > 0 ? (
             <div className="session-switcher-section">
               <div className="session-switcher-header">
                 Recent
                 <span>
                   {(page - 1) * PAGE_SIZE + 1}–
-                  {Math.min(page * PAGE_SIZE, filteredSessions.totalRecent)} of{" "}
-                  {filteredSessions.totalRecent}
+                  {(page - 1) * PAGE_SIZE + recent.length} of {recentPage.total}
                 </span>
               </div>
-              {filteredSessions.recent.map((s, i) => renderRow(s, filteredSessions.pinned.length + i))}
-              {filteredSessions.totalPages > 1 ? (
+              {recent.map((s, i) => renderRow(s, pinned.length + i))}
+              {tailStatus}
+              {totalPages > 1 ? (
                 <div className="session-switcher-pagination">
-                  <button 
-                    type="button" 
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page === 1}
                   >
                     Previous
                   </button>
-                  <span>Page {page} of {filteredSessions.totalPages}</span>
-                  <button 
-                    type="button" 
-                    onClick={() => setPage(p => Math.min(filteredSessions.totalPages, p + 1))}
-                    disabled={page === filteredSessions.totalPages}
+                  <span>Page {page} of {totalPages}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
                   >
                     Next
                   </button>
@@ -435,9 +473,11 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           ) : null}
 
           {flatItems.length === 0 ? (
-            <div className="session-switcher-empty">
-              No matching sessions
+            <div className="session-switcher-empty" role="status">
+              {emptyMessage}
             </div>
+          ) : recent.length === 0 ? (
+            tailStatus
           ) : null}
         </div>
 

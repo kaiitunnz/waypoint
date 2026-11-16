@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { CompactLaunch, type LaunchSheetMode } from "@/components/CompactLaunch";
@@ -30,6 +30,7 @@ import {
   createSession,
   createSessionPreset,
   deleteMessageSchedule as deleteMessageScheduleRequest,
+  deleteExitedSessions,
   deleteSession as deleteSessionRequest,
   deleteSessionPreset,
   deleteThread,
@@ -40,12 +41,15 @@ import {
   fetchMe,
   fetchMessageSchedules,
   fetchSchedules,
+  fetchLiveSessions,
+  fetchSessionHistory,
   fetchSessionPreset,
-  fetchSessions,
+  fetchSessionsByIds,
   fetchUsageDashboard,
   importBackendThread,
   isAuthError,
   login,
+  parseLiveSessionList,
   postAction,
   refreshUsageDashboard,
   setDefaultSessionPreset,
@@ -68,6 +72,13 @@ import {
   writeToken,
 } from "@/lib/store";
 import { launchableAgents, useBackendCatalog } from "@/lib/backends";
+import {
+  applySessionState,
+  clearSessionHistory,
+  forgetHistorySession,
+  invalidateSessionHistory,
+  upsertLiveSession,
+} from "@/lib/sessionHistory";
 import {
   AccountProfile,
   AssistantSummary,
@@ -108,6 +119,10 @@ type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 const BOARD_REFRESH_DEBOUNCE_MS = 300;
+// Exited sessions read when seeding the recent-directory suggestions.
+const RECENT_CWD_HISTORY_LIMIT = 50;
+// Sources the home list never shows (each has its own surface or is ephemeral).
+const HOME_HIDDEN_SOURCES = ["assistant", "telemetry"] as const;
 
 function seedRecentCwdsFromHistory(
   host: string,
@@ -145,7 +160,13 @@ export default function HomePage() {
   const { theme } = useTheme();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
+  // Live and pinned sessions; exited history is paged by SessionList.
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [historyRevision, setHistoryRevision] = useState("");
+  // Sessions referenced by message schedules but absent from the live list,
+  // fetched by id so schedule rows keep their titles.
+  const [referencedSessions, setReferencedSessions] = useState<Record<string, SessionRecord>>({});
+  const requestedSessionIdsRef = useRef(new Set<string>());
   const [settingsSession, setSettingsSession] = useState<SessionRecord | null>(
     null,
   );
@@ -273,8 +294,10 @@ export default function HomePage() {
 
   const resetAuthState = useCallback((message: string) => {
     clearToken();
+    clearSessionHistory(readHost());
     setToken("");
     setSessions([]);
+    setHistoryRevision("");
     setDefaultBackend("codex");
     setDefaultCwd("~/");
     setLaunchTargets([]);
@@ -357,17 +380,18 @@ export default function HomePage() {
     }
     let active = true;
     Promise.all([
-      fetchSessions(host, token),
+      fetchLiveSessions(host, token),
       fetchMe(host, token),
       fetchSchedules(host, token).catch(() => [] as ScheduledSession[]),
       fetchMessageSchedules(host, token).catch(() => [] as MessageSchedule[]),
       fetchBoardChannels(host, token).catch(() => []),
     ])
-      .then(([items, me, scheduleItems, messageItems, boardChannels]) => {
+      .then(([live, me, scheduleItems, messageItems, boardChannels]) => {
         if (!active) {
           return;
         }
-        setSessions(items);
+        setSessions(live.sessions);
+        setHistoryRevision(live.historyRevision);
         setBoardChannels(boardChannels);
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
@@ -389,8 +413,18 @@ export default function HomePage() {
           ? storedTargetId
           : "";
         setActiveLaunchTargetId(nextTargetId);
-        seedRecentCwdsFromHistory(host, items, scheduleItems);
         setRecentCwds(readRecentCwds(host, nextTargetId));
+        fetchSessionHistory(host, token, { limit: RECENT_CWD_HISTORY_LIMIT })
+          .catch(() => ({ sessions: [] as SessionRecord[] }))
+          .then((history) => {
+            if (!active) return;
+            seedRecentCwdsFromHistory(
+              host,
+              [...live.sessions, ...history.sessions],
+              scheduleItems,
+            );
+            setRecentCwds(readRecentCwds(host, nextTargetId));
+          });
       })
       .catch((fetchError) => {
         if (active) {
@@ -432,7 +466,12 @@ export default function HomePage() {
         token,
         (message: SessionEnvelope) => {
           if (message.type === "session_list_update") {
-            setSessions(message.payload.sessions as SessionRecord[]);
+            const live = parseLiveSessionList(message.payload);
+            setSessions(live.sessions);
+            setHistoryRevision(live.historyRevision);
+          }
+          if (message.type === "session_state") {
+            applySessionState(host, message.payload.session as SessionRecord);
           }
           if (message.type === "schedule_list_update") {
             setSchedules(message.payload.schedules as ScheduledSession[]);
@@ -1034,6 +1073,7 @@ export default function HomePage() {
     try {
       await deleteSessionRequest(host, token, sessionId);
       setSessions((current) => current.filter((session) => session.id !== sessionId));
+      forgetHistorySession(host, sessionId);
     } catch (deleteError) {
       if (isAuthError(deleteError)) {
         resetAuthState("Session expired. Log in again.");
@@ -1066,9 +1106,8 @@ export default function HomePage() {
   async function handleSetPinned(sessionId: string, pinned: boolean) {
     try {
       const updated = await setSessionPinned(host, token, sessionId, pinned);
-      setSessions((current) =>
-        current.map((session) => (session.id === sessionId ? updated : session)),
-      );
+      setSessions((current) => upsertLiveSession(current, updated));
+      applySessionState(host, updated);
     } catch (pinError) {
       if (isAuthError(pinError)) {
         resetAuthState("Session expired. Log in again.");
@@ -1092,6 +1131,7 @@ export default function HomePage() {
       setSessions((current) =>
         current.map((session) => (session.id === sessionId ? updated : session)),
       );
+      applySessionState(host, updated);
     } catch (titleError) {
       if (previous) {
         setSessions((current) =>
@@ -1113,14 +1153,12 @@ export default function HomePage() {
   }
 
   async function handleDeleteExited() {
-    const exitedIds = sessions
-      .filter((session) => session.status === "exited")
-      .map((session) => session.id);
     try {
-      for (const sessionId of exitedIds) {
-        await deleteSessionRequest(host, token, sessionId);
-      }
+      await deleteExitedSessions(host, token);
+      // The server deletes in the background; each deletion's list broadcast
+      // moves the counts, and this drops the rows already on screen.
       setSessions((current) => current.filter((session) => session.status !== "exited"));
+      invalidateSessionHistory(host);
     } catch (deleteError) {
       if (isAuthError(deleteError)) {
         resetAuthState("Session expired. Log in again.");
@@ -1153,6 +1191,37 @@ export default function HomePage() {
     setError("Switched backend. Log in to continue.");
   }
 
+  useEffect(() => {
+    requestedSessionIdsRef.current = new Set();
+    setReferencedSessions({});
+  }, [host]);
+
+  useEffect(() => {
+    if (!host || !token) return;
+    const known = new Set(sessions.map((session) => session.id));
+    const missing = [...new Set(messageSchedules.map((message) => message.session_id))].filter(
+      (sessionId) => !known.has(sessionId) && !requestedSessionIdsRef.current.has(sessionId),
+    );
+    if (!missing.length) return;
+    // Remembered even on failure or when not found (deleted sessions), so a
+    // frequently changing live list never re-requests the same ids.
+    for (const sessionId of missing) requestedSessionIdsRef.current.add(sessionId);
+    fetchSessionsByIds(host, token, missing)
+      .then((found) =>
+        setReferencedSessions((current) => ({
+          ...current,
+          ...Object.fromEntries(found.map((session) => [session.id, session])),
+        })),
+      )
+      .catch(() => {});
+  }, [host, token, sessions, messageSchedules]);
+
+  const titleSessions = [
+    ...sessions,
+    ...Object.values(referencedSessions).filter(
+      (session) => !sessions.some((live) => live.id === session.id),
+    ),
+  ];
   const filteredSessions = sessions.filter(
     (session) =>
       session.source !== "assistant" && session.source !== "telemetry",
@@ -1233,8 +1302,13 @@ export default function HomePage() {
             />
             <div className="home-main">
               <SessionList
+                host={host}
+                token={token}
                 sessions={filteredSessions}
+                historyRevision={historyRevision}
+                hiddenSources={HOME_HIDDEN_SOURCES}
                 catalog={catalog}
+                onAuthFailure={handleAuthFailure}
                 onDelete={handleDelete}
                 onDeleteExited={handleDeleteExited}
                 onTerminate={handleTerminate}
@@ -1253,7 +1327,7 @@ export default function HomePage() {
               boardChannels={boardChannels}
               schedules={schedules}
               messageSchedules={messageSchedules}
-              sessions={filteredSessions}
+              sessions={titleSessions}
               onOpenScheduled={() => setScheduleSheetOpen(true)}
             />
           </div>
@@ -1265,11 +1339,12 @@ export default function HomePage() {
           token={token}
           session={settingsSession}
           onClose={() => setSettingsSession(null)}
-          onApplied={(updated) =>
+          onApplied={(updated) => {
             setSessions((prev) =>
               prev.map((s) => (s.id === updated.id ? updated : s)),
-            )
-          }
+            );
+            applySessionState(host, updated);
+          }}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}
@@ -1334,7 +1409,7 @@ export default function HomePage() {
               token={token}
               schedules={schedules}
               messageSchedules={messageSchedules}
-              sessions={sessions}
+              sessions={titleSessions}
               catalog={catalog}
               onCancelSchedule={handleCancelSchedule}
               onClearScheduleHistory={handleClearScheduleHistory}

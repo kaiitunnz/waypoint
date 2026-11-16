@@ -29,6 +29,7 @@ from typing import Any, TextIO, cast
 
 from fastapi import HTTPException, status
 
+from waypoint import session_search
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
 from waypoint.attachments import (
     AttachmentStore,
@@ -125,6 +126,7 @@ from waypoint.schemas import (
     SessionCommandInvocation,
     SessionCreateRequest,
     SessionEnvelope,
+    SessionHistoryPage,
     SessionInputRequest,
     SessionPlanApprovalRequest,
     SessionRateLimitUsage,
@@ -438,6 +440,22 @@ def _append_attachments(
     )
 
 
+def _encode_history_cursor(key: tuple[str, str]) -> str:
+    return f"{key[0]}|{key[1]}"
+
+
+def _decode_history_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if not cursor:
+        return None
+    last_event_at, separator, session_id = cursor.partition("|")
+    if not separator or not last_event_at or not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid history cursor",
+        )
+    return last_event_at, session_id
+
+
 class SessionRuntime:
     def __init__(
         self,
@@ -504,6 +522,14 @@ class SessionRuntime:
         self._dirty_session_states: set[str] = set()
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
+        # History change signal carried on every session_list_update: bumped by
+        # each mutation broadcast (rename, pin, delete, …) so clients holding a
+        # paged copy of exited history know to revalidate it. The per-process
+        # epoch keeps a restart from replaying a revision a client has cached.
+        self._history_epoch = secrets.token_hex(4)
+        self._history_mutations = 0
+        self._delete_exited_task: asyncio.Task[int] | None = None
+        self._delete_exited_stopping = False
         self._broadcast_flusher: asyncio.Task[None] | None = None
         # Board/inbox wake dispatch and delivery tasks, cancelled on stop.
         self._wake_tasks: set[asyncio.Task[None]] = set()
@@ -741,6 +767,13 @@ class SessionRuntime:
 
     async def stop(self) -> None:
         await self.scheduler.stop()
+        if self._delete_exited_task is not None:
+            # Let the in-flight deletion finish rather than cancel it halfway
+            # through its cleanup; the sweep stops before the next one.
+            self._delete_exited_stopping = True
+            with suppress(Exception):
+                await self._delete_exited_task
+            self._delete_exited_task = None
         self.session_presence.clear()
         if self.notifications is not None:
             await self.notifications.stop()
@@ -832,6 +865,76 @@ class SessionRuntime:
 
     def list_sessions(self) -> list[SessionRecord]:
         return self.storage.list_sessions()
+
+    async def list_history(
+        self,
+        query: str = "",
+        cursor: str | None = None,
+        limit: int = 20,
+        exclude_sources: Sequence[str] = (),
+    ) -> SessionHistoryPage:
+        """Page exited, unpinned sessions, newest activity first.
+
+        ``limit=0`` returns only ``total``. Storage reads run in a worker
+        thread; search matching runs outside the storage lock under a time
+        budget (``SearchBudgetExceeded`` past it).
+        """
+        after = _decode_history_cursor(cursor)
+        parsed = session_search.parse_query(query)
+        if not parsed:
+            total = await asyncio.to_thread(
+                self.storage.count_history_sessions, exclude_sources
+            )
+            if limit == 0:
+                return SessionHistoryPage(sessions=[], has_more=False, total=total)
+            sessions, has_more, next_key = await asyncio.to_thread(
+                self.storage.list_history_sessions,
+                limit=limit,
+                cursor=after,
+                exclude_sources=exclude_sources,
+            )
+            return SessionHistoryPage(
+                sessions=sessions,
+                has_more=has_more,
+                cursor=_encode_history_cursor(next_key) if next_key else None,
+                total=total,
+            )
+        return await asyncio.to_thread(
+            self._search_history, parsed, after, limit, exclude_sources
+        )
+
+    def _search_history(
+        self,
+        parsed: session_search.ParsedQuery,
+        after: tuple[str, str] | None,
+        limit: int,
+        exclude_sources: Sequence[str],
+    ) -> SessionHistoryPage:
+        rows = self.storage.history_search_rows(
+            session_search.required_columns(parsed), exclude_sources
+        )
+        deadline = monotonic() + session_search.SEARCH_BUDGET_SECONDS
+        matched = [row for row in rows if session_search.matches(row, parsed, deadline)]
+        total = len(matched)
+        if limit == 0:
+            return SessionHistoryPage(sessions=[], has_more=False, total=total)
+        if after is not None:
+            matched = [
+                row for row in matched if (row["last_event_at"], row["id"]) < after
+            ]
+        page = matched[:limit]
+        has_more = len(matched) > limit
+        sessions = self.storage.get_sessions_by_ids([row["id"] for row in page])
+        return SessionHistoryPage(
+            sessions=sessions,
+            has_more=has_more,
+            cursor=(
+                _encode_history_cursor((page[-1]["last_event_at"], page[-1]["id"]))
+                if has_more and page
+                else None
+            ),
+            total=total,
+        )
 
     def get_session(self, session_id: str) -> SessionRecord:
         session = self.storage.get_session(session_id)
@@ -2515,7 +2618,7 @@ class SessionRuntime:
             structured_log=structured_log,
         )
         new_session = await self._apply_usage_selection(new_session, usage_selection)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return new_session
 
     async def fork_session(self, session_id: str) -> SessionRecord:
@@ -2559,7 +2662,7 @@ class SessionRuntime:
         )
         new_session = await self._apply_usage_selection(new_session, usage_selection)
         self._warm_command_completions(new_session)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return new_session
 
     async def clone_session_launch(self, session_id: str) -> SessionRecord:
@@ -3727,14 +3830,14 @@ class SessionRuntime:
                             fs=fs,
                         )
                     except TranscriptUnavailableError as exc:
-                        await self._broadcast_session_list()
+                        await self.broadcast_session_list()
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"cannot switch account profile: {exc}",
                         ) from exc
                     if transcript_availability == ThreadAvailability.UNPERSISTED:
                         if self._has_durable_conversation(session.id):
-                            await self._broadcast_session_list()
+                            await self.broadcast_session_list()
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=(
@@ -3749,7 +3852,7 @@ class SessionRuntime:
                             # would also run on the current plugin, not the target.
                             # Reject the combined change rather than relaunch the
                             # target transport with the source driver.
-                            await self._broadcast_session_list()
+                            await self.broadcast_session_list()
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=(
@@ -3759,7 +3862,7 @@ class SessionRuntime:
                                 ),
                             )
                         if not isinstance(plugin, FreshThreadRestarting):
-                            await self._broadcast_session_list()
+                            await self.broadcast_session_list()
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=(
@@ -3840,7 +3943,7 @@ class SessionRuntime:
             # Restore failed: keep the new settings on the record (per the RFC —
             # a rollback here could flip back to an already-rate-limited account)
             # and surface the terminal state so the user can reattach.
-            await self._broadcast_session_list()
+            await self.broadcast_session_list()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -3871,8 +3974,50 @@ class SessionRuntime:
                 "Pending approval was cancelled by the interface change; "
                 "re-run the request on the new interface if needed",
             )
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return self.get_session(session.id)
+
+    def delete_exited_sessions(self) -> int:
+        """Start a background sweep deleting every exited session.
+
+        Returns how many sessions the sweep queued, or 0 when a sweep is
+        already running. Each deletion is the same work as a single
+        ``delete``; running them off the request keeps a large history from
+        holding one HTTP call open, and clients follow progress through the
+        list broadcasts each deletion publishes.
+        """
+        if self._delete_exited_task is not None and not self._delete_exited_task.done():
+            return 0
+        session_ids = self.storage.list_exited_session_ids(
+            exclude_sources=(SessionSource.ASSISTANT.value,)
+        )
+        if not session_ids:
+            return 0
+        self._delete_exited_task = asyncio.create_task(
+            self._delete_exited_sweep(session_ids)
+        )
+        return len(session_ids)
+
+    async def _delete_exited_sweep(self, session_ids: list[str]) -> int:
+        deleted = 0
+        for session_id in session_ids:
+            if self._delete_exited_stopping:
+                break
+            # Re-check right before deleting: delete() terminates a session that
+            # is no longer exited, and one revived mid-sweep must survive.
+            session = self.storage.get_session(session_id)
+            if session is None or session.status != SessionStatus.EXITED:
+                continue
+            try:
+                await self.delete(session_id)
+            except Exception:
+                log.warning(
+                    "failed to delete exited session %s", session_id, exc_info=True
+                )
+                continue
+            deleted += 1
+            await asyncio.sleep(0)
+        return deleted
 
     async def delete(
         self,
@@ -3931,7 +4076,7 @@ class SessionRuntime:
         # scheduled_messages FK is declarative only (foreign_keys pragma is off).
         await self.scheduler.purge_session_messages(session_id)
         plugin.on_session_deleted(self, session)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         if pruned:
             await self._publish_board_update(None, author_session_id=actor_session_id)
 
@@ -4523,7 +4668,7 @@ class SessionRuntime:
             )
         await plugin.apply_permission_mode(self, session, validated)
         updated = self.storage.update_session(session_id, permission_mode=validated)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     async def _rebase_context_usage(
@@ -4584,7 +4729,7 @@ class SessionRuntime:
         if cleaned is not None:
             await self._rebase_context_usage(session_id, model=cleaned)
         updated = self.get_session(session_id)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     async def set_effort(self, session_id: str, effort: str | None) -> SessionRecord:
@@ -4617,7 +4762,7 @@ class SessionRuntime:
                 status=SessionStatus.IDLE,
             )
         updated = self.storage.update_session(session_id, effort=cleaned)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     async def list_backend_models(
@@ -4645,7 +4790,7 @@ class SessionRuntime:
         if session.title == title:
             return session
         updated = self.storage.update_session(session_id, title=title)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     async def set_tags(
@@ -4658,7 +4803,7 @@ class SessionRuntime:
         if new_tags == session.tags:
             return session
         updated = self.storage.update_session(session_id, tags=new_tags)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
@@ -4667,7 +4812,7 @@ class SessionRuntime:
         if (session.pinned_at is None) == (pinned_at is None):
             return session
         updated = self.storage.update_session(session_id, pinned_at=pinned_at)
-        await self._broadcast_session_list()
+        await self.broadcast_session_list()
         return updated
 
     def set_focus(self, session_id: str, enabled: bool) -> SessionRecord:
@@ -5240,7 +5385,7 @@ class SessionRuntime:
         # Streaming hot path: mark the session dirty and let the debounced
         # flusher emit the session_state / session_list broadcasts. A fast
         # token stream would otherwise re-serialize every session on every
-        # event. Lifecycle changes call ``_broadcast_session_list``
+        # event. Lifecycle changes call ``broadcast_session_list``
         # directly when they need an immediate update.
         self._dirty_session_states.add(session_id)
         self._session_list_dirty = True
@@ -5249,15 +5394,36 @@ class SessionRuntime:
     def wake_session_flusher(self) -> None:
         self._broadcast_wake.set()
 
-    async def _broadcast_session_list(self) -> None:
-        with debug_timer(log, "_broadcast_session_list"):
-            sessions = [item.model_dump(mode="json") for item in self.list_sessions()]
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={"sessions": sessions},
-            )
+    def session_list_envelope(self) -> SessionEnvelope:
+        """The ``session_list_update`` frame: live sessions plus history counters.
+
+        Exited, unpinned sessions are left out so the frame stays proportional
+        to live work; clients page history from ``/api/sessions/history`` and
+        revalidate it when ``history_revision`` changes.
+        """
+        with debug_timer(log, "session_list_envelope"):
+            sessions = [
+                item.model_dump(mode="json")
+                for item in self.storage.list_live_sessions()
+            ]
+            history_count = self.storage.count_history_sessions()
+        return SessionEnvelope(
+            type="session_list_update",
+            payload={
+                "sessions": sessions,
+                "scope": "live",
+                "history_count": history_count,
+                "history_revision": self.history_revision(history_count),
+            },
         )
+
+    def history_revision(self, history_count: int) -> str:
+        return f"{self._history_epoch}.{self._history_mutations}.{history_count}"
+
+    async def broadcast_session_list(self) -> None:
+        """Publish the session list after a mutation that may touch history rows."""
+        self._history_mutations += 1
+        await self.broadcast.publish(self.session_list_envelope())
 
     async def _broadcast_session_state(self, session_id: str) -> None:
         session = self.storage.get_session(session_id)
@@ -5684,7 +5850,9 @@ class SessionRuntime:
                 await self._broadcast_session_state(session_id)
             await self.questions.flush(dirty_ids)
             if list_dirty:
-                await self._broadcast_session_list()
+                # Streaming churn only moves live rows; a session crossing
+                # into or out of history changes history_count instead.
+                await self.broadcast.publish(self.session_list_envelope())
             self.held.drain(dirty_ids)
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:

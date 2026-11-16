@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 import fastapi
@@ -123,6 +123,7 @@ from waypoint.schemas import (
     WakeRegisterRequest,
     WakeSubscriptionListResponse,
 )
+from waypoint.session_search import SearchBudgetExceeded
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import (
     InboxBlockNotFoundError,
@@ -454,7 +455,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         spawned_by: Annotated[str | None, Query()] = None,
         tag: Annotated[list[str] | None, Query()] = None,
         recursive: Annotated[bool, Query()] = False,
+        scope: Annotated[Literal["all", "live"], Query()] = "all",
+        session_id: Annotated[list[str] | None, Query(alias="id")] = None,
     ) -> Any:
+        if (scope == "live" or session_id) and (
+            spawned_by is not None
+            or tag
+            or recursive
+            or (scope == "live" and session_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scope=live and id cannot be combined with other filters",
+            )
+        if scope == "live":
+            # Same payload as the /ws/sessions list frame, so a client can
+            # hydrate over REST and the socket without the two disagreeing.
+            return context.runtime.session_list_envelope().payload
+        if session_id:
+            records = context.runtime.storage.get_sessions_by_ids(session_id)
+            return {"sessions": [record.model_dump(mode="json") for record in records]}
         all_sessions = context.runtime.list_sessions()
         if spawned_by is not None:
             if recursive:
@@ -470,6 +490,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]
         sessions = [session.model_dump(mode="json") for session in all_sessions]
         return {"sessions": sessions}
+
+    # Literal path registered before ``/api/sessions/{session_id}``.
+    @app.get("/api/sessions/history")
+    async def list_session_history(
+        _: Annotated[str, Depends(token_dependency())],
+        q: Annotated[str, Query()] = "",
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=0, le=100)] = 20,
+        exclude_source: Annotated[list[str] | None, Query()] = None,
+    ) -> Any:
+        try:
+            page = await context.runtime.list_history(
+                q, cursor, limit, exclude_source or ()
+            )
+        except SearchBudgetExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="search pattern is too expensive; simplify the regex",
+            ) from exc
+        return page.model_dump(mode="json")
+
+    @app.post("/api/sessions/delete-exited", status_code=status.HTTP_202_ACCEPTED)
+    async def delete_exited_sessions(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        return {"queued": context.runtime.delete_exited_sessions()}
 
     @app.get("/api/backends/{backend}/threads")
     async def list_backend_threads(
@@ -2331,15 +2377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return
         queue = context.runtime.broadcast.subscribe_global()
         try:
-            initial = SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json")
-                        for item in context.runtime.list_sessions()
-                    ]
-                },
-            )
+            initial = context.runtime.session_list_envelope()
             await websocket.send_json(initial.model_dump(mode="json"))
             while True:
                 message = await queue.get()

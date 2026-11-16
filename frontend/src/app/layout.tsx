@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 
+import { FileDropGuard } from "@/components/FileDrop";
 import { SwitcherProvider } from "@/components/SwitcherProvider";
 import { ThemeProvider } from "@/lib/theme";
 // Bundles KaTeX's stylesheet and fonts locally; precedes globals.css so token
@@ -62,6 +63,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: antiFlashScript }} />
       </head>
       <body>
+        <FileDropGuard />
         <ThemeProvider>
           <SwitcherProvider>{children}</SwitcherProvider>
         </ThemeProvider>

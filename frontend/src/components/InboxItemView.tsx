@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useRef, useState, type ClipboardEvent } from "react";
 
 import {
   AttachmentTray,
@@ -9,6 +9,7 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { useElementFileDrop } from "@/components/FileDrop";
 import { InboxAttachment, InboxAttachments } from "@/components/InboxAttachment";
 import { InboxQuestionCard } from "@/components/InboxQuestionCard";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
@@ -125,7 +126,6 @@ function InboxBlockRow({
   // per block — no thread).
   const [notes, setNotes] = useState(block.reply?.notes ?? "");
   const [submitting, setSubmitting] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(
     () =>
       new Set(block.type === "question" ? block.answer?.selected ?? [] : []),
@@ -152,6 +152,7 @@ function InboxBlockRow({
   // first answer); everything else starts read-only behind an Edit/Reply
   // affordance.
   const [editing, setEditing] = useState(pending);
+  const { dragActive, dropProps } = useElementFileDrop(editing, attachments.addFiles);
   const decisionTag = block.type === "approval" ? "APPROVAL" : "QUESTION";
   let answerEcho = "";
   if (block.type === "approval" && block.answer) {
@@ -284,19 +285,6 @@ function InboxBlockRow({
     attachments.addFiles(files);
   }
 
-  function onDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setDragActive(false);
-    const files = filesFromDataTransfer(event.dataTransfer);
-    if (files.length) attachments.addFiles(files);
-  }
-
-  function onDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    event.preventDefault();
-    setDragActive(true);
-  }
-
   const canSave =
     !!buildAnswer() ||
     notes.trim().length > 0 ||
@@ -304,7 +292,10 @@ function InboxBlockRow({
   const editTrigger = pending ? "Answer" : hasCommittedReply || answered ? "Edit" : "Reply";
 
   return (
-    <section className={`inbox-block${pending ? " pending" : ""}`}>
+    <section
+      className={`inbox-block${pending ? " pending" : ""}${dragActive ? " is-drag-active" : ""}`}
+      {...dropProps}
+    >
       {isDecisionBlock ? (
         <div className="inbox-block-head">
           <span className="inbox-block-tag">{decisionTag}</span>
@@ -358,12 +349,7 @@ function InboxBlockRow({
       </div>
 
       {editing ? (
-        <div
-          className={`inbox-reply${dragActive ? " dragging" : ""}`}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={() => setDragActive(false)}
-        >
+        <div className="inbox-reply">
           {block.reply?.attachments && block.reply.attachments.length > 0 ? (
             <div className="inbox-reply-carried">
               <span className="inbox-reply-shown-label">Attached</span>

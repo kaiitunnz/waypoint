@@ -3,7 +3,6 @@
 import {
   ChangeEvent,
   ClipboardEvent,
-  DragEvent,
   KeyboardEvent,
   useCallback,
   useEffect,
@@ -20,6 +19,7 @@ import {
   useAttachments,
 } from "@/components/AttachmentTray";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
+import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { type TerminalSubmitResult } from "@/lib/composer";
@@ -76,13 +76,16 @@ export function TerminalCompose({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [dragActive, setDragActive] = useState(false);
   // Mirrors the chat composer: 📁/📎 collapse to a ›-chevron on focus (CSS),
   // and the chevron forces them back open via `lead-forced`.
   const [leadForced, setLeadForced] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
+  useFileDropTarget(attachmentsEnabled ? null : "unsupported", "the terminal composer", (files) => {
+    onExpandedChange(true);
+    attachments.addFiles(files);
+  });
 
   // Baseline the mount value so a session switch never reopens Files.
   const filesRequestBaseline = useRef(filesOpenRequest);
@@ -196,26 +199,6 @@ export function TerminalCompose({
     attachments.addFiles(files);
   };
 
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!attachmentsEnabled) return;
-    event.preventDefault();
-    setDragActive(false);
-    const files = filesFromDataTransfer(event.dataTransfer);
-    if (files.length) attachments.addFiles(files);
-  };
-
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!attachmentsEnabled) return;
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    event.preventDefault();
-    setDragActive(true);
-  };
-
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    setDragActive(false);
-  };
-
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       // The suggestion/mention menus own Tab/Enter/Arrows/Esc when open, so
@@ -274,10 +257,7 @@ export function TerminalCompose({
             </div>
           ) : null}
           <div
-            className={`term-compose-field${dragActive ? " is-drag-active" : ""}${leadForced ? " lead-forced" : ""}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
+            className={`term-compose-field${leadForced ? " lead-forced" : ""}`}
           >
             <button
               type="button"
@@ -355,12 +335,6 @@ export function TerminalCompose({
                 aria-label="Message to send to terminal"
                 tabIndex={expanded ? 0 : -1}
               />
-              {dragActive ? (
-                <div className="composer-drop-hint" aria-hidden="true">
-                  <span className="composer-drop-glyph">⤓</span>
-                  <span>Drop to attach</span>
-                </div>
-              ) : null}
               <button
                 type="button"
                 className="term-compose-send"

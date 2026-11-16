@@ -19,7 +19,7 @@ import {
   useAttachments,
 } from "@/components/AttachmentTray";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
-import { NO_ATTACHMENTS, useFileDropTarget } from "@/components/FileDrop";
+import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { type TerminalSubmitResult } from "@/lib/composer";
@@ -82,7 +82,7 @@ export function TerminalCompose({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
-  useFileDropTarget(attachmentsEnabled ? null : NO_ATTACHMENTS, "the terminal composer", (files) => {
+  useFileDropTarget(attachmentsEnabled ? null : "unsupported", "the terminal composer", (files) => {
     onExpandedChange(true);
     attachments.addFiles(files);
   });

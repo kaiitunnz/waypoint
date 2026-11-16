@@ -8884,8 +8884,6 @@ html[data-theme="light"] .ask-answer-chip {
   display: none;
 }
 
-/* Page-wide drop overlay: covers the visible session region while files are
-   dragged in from the OS; glass because it floats over the transcript. */
 .file-drop-overlay {
   position: fixed;
   z-index: 55;
@@ -19695,7 +19693,6 @@ body.wp-dock-resizing .inbox-resizer::after {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
 }
 
-/* Drag target: the whole card accepts a file drop while its reply is open. */
 .inbox-block.is-drag-active {
   outline: 1.5px dashed color-mix(in srgb, var(--accent) 62%, transparent);
   outline-offset: 3px;
@@ -19810,7 +19807,6 @@ body.wp-dock-resizing .inbox-resizer::after {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-radius: var(--radius-sm);
 }
 
 .inbox-reply-input {

@@ -97,7 +97,7 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
-import { FileDropZone, NO_ATTACHMENTS, useFileDropTarget } from "@/components/FileDrop";
+import { FileDropZone, useFileDropTarget } from "@/components/FileDrop";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { FocusPill } from "@/components/FocusPill";
@@ -2897,7 +2897,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
   useFileDropTarget(
-    !attachmentsEnabled ? NO_ATTACHMENTS : disabled ? "This session has exited" : null,
+    !attachmentsEnabled ? "unsupported" : disabled ? "exited" : null,
     "your reply",
     attachments.addFiles,
   );

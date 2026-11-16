@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import {
   ChangeEvent,
   ClipboardEvent,
-  DragEvent,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
   memo,
@@ -98,6 +97,7 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { FileDropZone, NO_ATTACHMENTS, useFileDropTarget } from "@/components/FileDrop";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { FocusPill } from "@/components/FocusPill";
@@ -2281,6 +2281,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     <AskQuestionContext.Provider value={askController}>
     <WorkspaceFileLinkProvider value={workspaceLink}>
     <SessionFilesLinkProvider value={filesLink}>
+    <FileDropZone containerRef={sectionRef} title={session?.title}>
     <section className="stack" ref={sectionRef}>
       {!terminalOnly && activeView === "chat" && showScrollToTop ? (
         <div className="scroll-top-floater" aria-hidden={false}>
@@ -2753,6 +2754,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         />
       ) : null}
     </section>
+    </FileDropZone>
     </SessionFilesLinkProvider>
     </WorkspaceFileLinkProvider>
     </AskQuestionContext.Provider>
@@ -2892,9 +2894,13 @@ const ReplyComposer = memo(function ReplyComposer({
   onFilesOpenChange,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
-  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
+  useFileDropTarget(
+    !attachmentsEnabled ? NO_ATTACHMENTS : disabled ? "This session has exited" : null,
+    "your reply",
+    attachments.addFiles,
+  );
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
   // The transcript records nothing until the interrupt request returns.
@@ -3301,26 +3307,6 @@ const ReplyComposer = memo(function ReplyComposer({
     // pastes fall through to the textarea.
     event.preventDefault();
     attachments.addFiles(files);
-  };
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!attachmentsEnabled) return;
-    event.preventDefault();
-    setDragActive(false);
-    const files = filesFromDataTransfer(event.dataTransfer);
-    if (files.length) attachments.addFiles(files);
-  };
-
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!attachmentsEnabled) return;
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    event.preventDefault();
-    setDragActive(true);
-  };
-
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    setDragActive(false);
   };
 
   function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -4015,12 +4001,7 @@ const ReplyComposer = memo(function ReplyComposer({
           ■
         </span>
       </button>
-      <div
-        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
+      <div className="reply-textarea-wrap">
         {attachmentsEnabled ? (
           <AttachmentTray
             items={attachments.items}
@@ -4045,12 +4026,6 @@ const ReplyComposer = memo(function ReplyComposer({
           placeholder={placeholder}
           aria-label="Reply"
         />
-        {dragActive ? (
-          <div className="composer-drop-hint" aria-hidden="true">
-            <span className="composer-drop-glyph">⤓</span>
-            <span>Drop to attach</span>
-          </div>
-        ) : null}
         <div
           className="composer-send-wrap"
           onPointerEnter={handleSendPointerEnter}

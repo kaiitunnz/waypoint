@@ -8884,41 +8884,75 @@ html[data-theme="light"] .ask-answer-chip {
   display: none;
 }
 
-/* Drag target: a brass dashed frame that reads as "this surface accepts a drop". */
-.reply-textarea-wrap.is-drag-active,
-.term-compose-field.is-drag-active .term-compose-input {
-  outline: 1.5px dashed color-mix(in srgb, var(--accent) 68%, transparent);
-  outline-offset: 3px;
-  border-radius: 20px;
+/* Page-wide drop overlay: covers the visible session region while files are
+   dragged in from the OS; glass because it floats over the transcript. */
+.file-drop-overlay {
+  position: fixed;
+  z-index: 55;
+  display: flex;
+  padding: 10px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-line);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+  border-radius: var(--radius-glass);
+  animation: file-drop-in 160ms ease-out both;
 }
 
-.composer-drop-hint {
-  position: absolute;
-  inset: 0;
+.file-drop-frame {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
+  padding: 24px 20px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 62%, transparent);
+  border-radius: calc(var(--radius-glass) - 6px);
+  text-align: center;
   pointer-events: none;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-input));
-  backdrop-filter: blur(3px);
+}
+
+.file-drop-glyph {
+  margin-bottom: 4px;
   color: var(--accent-strong);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  animation: drop-hint-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-
-.composer-drop-glyph {
-  font-size: 1.55rem;
+  font-size: 2.4rem;
   line-height: 1;
-  animation: drop-glyph-bob 1.2s ease-in-out infinite;
+  animation: file-drop-glyph-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
-@keyframes drop-hint-in {
+.file-drop-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.file-drop-target {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.file-drop-session {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.file-drop-overlay.is-muted .file-drop-frame {
+  border-color: var(--line-strong);
+}
+
+.file-drop-overlay.is-muted .file-drop-title {
+  color: var(--muted);
+}
+
+@keyframes file-drop-in {
   from {
     opacity: 0;
   }
@@ -8927,18 +8961,20 @@ html[data-theme="light"] .ask-answer-chip {
   }
 }
 
-@keyframes drop-glyph-bob {
-  0%,
-  100% {
-    transform: translateY(-2px);
+@keyframes file-drop-glyph-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
   }
-  50% {
-    transform: translateY(2px);
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-drop-glyph,
+  .file-drop-overlay,
+  .file-drop-glyph,
   .attachment-chip {
     animation: none;
   }
@@ -19659,6 +19695,13 @@ body.wp-dock-resizing .inbox-resizer::after {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
 }
 
+/* Drag target: the whole card accepts a file drop while its reply is open. */
+.inbox-block.is-drag-active {
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
+}
+
 .inbox-block-head {
   display: flex;
   align-items: center;
@@ -19772,11 +19815,6 @@ body.wp-dock-resizing .inbox-resizer::after {
 
 /* Drag-active feedback while dropping an image onto the reply — a flat token
    tint over the opaque block, no glass/shadow. */
-.inbox-reply.dragging {
-  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 3px;
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-}
 
 .inbox-reply-input {
   width: 100%;

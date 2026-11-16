@@ -1,4 +1,5 @@
 import functools
+import itertools
 import json
 import logging
 import secrets
@@ -93,6 +94,21 @@ def _repo_dir_from_templates_dir(payload: dict[str, Any]) -> str | None:
 # ``update_session`` fetch the post-update row in the same statement, avoiding
 # the extra existence-check and re-read round-trips on a hot path.
 _SUPPORTS_RETURNING = sqlite3.sqlite_version_info >= (3, 35, 0)
+
+_LIVE_SESSION_STATUSES = tuple(
+    status.value for status in SessionStatus if status is not SessionStatus.EXITED
+)
+
+
+def _history_where(exclude_sources: Sequence[str]) -> tuple[str, list[Any]]:
+    """WHERE clause selecting history sessions: exited and not pinned."""
+    where = "status = ? AND pinned_at IS NULL"
+    params: list[Any] = [SessionStatus.EXITED.value]
+    if exclude_sources:
+        where += f" AND source NOT IN ({', '.join('?' for _ in exclude_sources)})"
+        params.extend(exclude_sources)
+    return where, params
+
 
 # Event kinds that the chat view always renders as their own bubble. These
 # drive the page-size budget so a page of N reliably surfaces ~N visible
@@ -220,6 +236,7 @@ class Storage:
         self.database_path = database_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._session_column_cache: frozenset[str] | None = None
         self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         # WAL drops the full fsync that the default rollback journal does
@@ -521,6 +538,7 @@ class Storage:
             "scheduled_sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'"
         )
         self._ensure_column("scheduled_sessions", "transport", "TEXT")
+        self._ensure_column("sessions", "pinned_at", "TEXT")
         self._ensure_column("sessions", "args", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
@@ -621,6 +639,10 @@ class Storage:
                 ON sessions(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_last_event
                 ON sessions(last_event_at);
+            CREATE INDEX IF NOT EXISTS idx_sessions_status_last_event
+                ON sessions(status, last_event_at, id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_pinned
+                ON sessions(pinned_at) WHERE pinned_at IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_wake_subs_session
                 ON wake_subscriptions(session_id);
             CREATE INDEX IF NOT EXISTS idx_manager_tickets_manager
@@ -779,6 +801,131 @@ class Storage:
             "SELECT * FROM sessions ORDER BY last_event_at DESC, created_at DESC"
         ).fetchall()
         return [self._session_from_row(row) for row in rows]
+
+    @_synchronized
+    def list_live_sessions(self) -> list[SessionRecord]:
+        # Runs on every debounced list broadcast, so it must stay independent of
+        # history size: ``status != 'exited' OR pinned`` makes SQLite scan every
+        # row, and without the hints the planner walks idx_sessions_last_event
+        # end to end to skip a sort.
+        placeholders = ", ".join("?" for _ in _LIVE_SESSION_STATUSES)
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM sessions INDEXED BY idx_sessions_status_last_event
+            WHERE status IN ({placeholders})
+            UNION ALL
+            SELECT * FROM sessions INDEXED BY idx_sessions_pinned
+            WHERE pinned_at IS NOT NULL AND status = ?
+            ORDER BY last_event_at DESC, created_at DESC
+            """,
+            (*_LIVE_SESSION_STATUSES, SessionStatus.EXITED.value),
+        ).fetchall()
+        return [self._session_from_row(row) for row in rows]
+
+    @_synchronized
+    def count_history_sessions(self, exclude_sources: Sequence[str] = ()) -> int:
+        if not exclude_sources:
+            # Index-only form for the broadcast path: counting ``pinned_at IS
+            # NULL`` directly would fetch every exited row to test the column.
+            row = self.connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM sessions WHERE status = ?)
+                    - (SELECT COUNT(*) FROM sessions INDEXED BY idx_sessions_pinned
+                       WHERE pinned_at IS NOT NULL AND status = ?)
+                """,
+                (SessionStatus.EXITED.value, SessionStatus.EXITED.value),
+            ).fetchone()
+            return int(row[0])
+        where, params = _history_where(exclude_sources)
+        row = self.connection.execute(
+            f"SELECT COUNT(*) FROM sessions WHERE {where}", params
+        ).fetchone()
+        return int(row[0])
+
+    @_synchronized
+    def list_history_sessions(
+        self,
+        *,
+        limit: int,
+        cursor: tuple[str, str] | None = None,
+        exclude_sources: Sequence[str] = (),
+    ) -> tuple[list[SessionRecord], bool, tuple[str, str] | None]:
+        """Keyset page of exited, unpinned sessions, newest activity first.
+
+        Returns ``(sessions, has_more, next_cursor)``; the cursor is the
+        ``(last_event_at, id)`` of the last returned row when more remain.
+        """
+        where, params = _history_where(exclude_sources)
+        if cursor is not None:
+            where += " AND (last_event_at < ? OR (last_event_at = ? AND id < ?))"
+            params.extend([cursor[0], cursor[0], cursor[1]])
+        rows = self.connection.execute(
+            f"SELECT * FROM sessions WHERE {where} "
+            "ORDER BY last_event_at DESC, id DESC LIMIT ?",
+            [*params, limit + 1],
+        ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = (
+            (rows[-1]["last_event_at"], rows[-1]["id"]) if has_more and rows else None
+        )
+        return [self._session_from_row(row) for row in rows], has_more, next_cursor
+
+    @_synchronized
+    def history_search_rows(
+        self, columns: Sequence[str], exclude_sources: Sequence[str] = ()
+    ) -> list[dict[str, Any]]:
+        """Raw ``columns`` of every history row, newest activity first.
+
+        Only plain columns are read so a search pass never decodes the JSON
+        blobs or validates full records for rows that don't match.
+        """
+        known = self._session_columns()
+        selected = [column for column in columns if column in known]
+        for required in ("id", "last_event_at"):
+            if required not in selected:
+                selected.append(required)
+        where, params = _history_where(exclude_sources)
+        rows = self.connection.execute(
+            f"SELECT {', '.join(selected)} FROM sessions WHERE {where} "
+            "ORDER BY last_event_at DESC, id DESC",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @_synchronized
+    def list_exited_session_ids(self, exclude_sources: Sequence[str] = ()) -> list[str]:
+        sql = "SELECT id FROM sessions WHERE status = ?"
+        params: list[Any] = [SessionStatus.EXITED.value]
+        if exclude_sources:
+            sql += f" AND source NOT IN ({', '.join('?' for _ in exclude_sources)})"
+            params.extend(exclude_sources)
+        rows = self.connection.execute(
+            sql + " ORDER BY last_event_at DESC, id DESC", params
+        ).fetchall()
+        return [row["id"] for row in rows]
+
+    @_synchronized
+    def get_sessions_by_ids(self, session_ids: Sequence[str]) -> list[SessionRecord]:
+        """Fetch sessions by id in the requested order; unknown ids are skipped."""
+        if not session_ids:
+            return []
+        found: dict[str, SessionRecord] = {}
+        for chunk in itertools.batched(dict.fromkeys(session_ids), 500):
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = self.connection.execute(
+                f"SELECT * FROM sessions WHERE id IN ({placeholders})", chunk
+            ).fetchall()
+            for row in rows:
+                found[row["id"]] = self._session_from_row(row)
+        return [found[sid] for sid in dict.fromkeys(session_ids) if sid in found]
+
+    def _session_columns(self) -> frozenset[str]:
+        if self._session_column_cache is None:
+            rows = self.connection.execute("PRAGMA table_info(sessions)").fetchall()
+            self._session_column_cache = frozenset(row["name"] for row in rows)
+        return self._session_column_cache
 
     @_synchronized
     def get_session(self, session_id: str) -> SessionRecord | None:

@@ -1646,6 +1646,8 @@ def test_init_creates_performance_indexes(tmp_path) -> None:
     }
     assert {
         "idx_sessions_spawner",
+        "idx_sessions_status_last_event",
+        "idx_sessions_pinned",
         "idx_board_author",
         "idx_scheduled_status",
         "idx_events_tool_use_id",

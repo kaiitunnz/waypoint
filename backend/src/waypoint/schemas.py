@@ -1968,6 +1968,15 @@ class InboxListResponse(BaseModel):
     cursor: str | None = None
 
 
+class SessionHistoryPage(BaseModel):
+    """A keyset page of exited, unpinned sessions plus the matching total."""
+
+    sessions: list[SessionRecord] = Field(default_factory=list)
+    has_more: bool = False
+    cursor: str | None = None
+    total: int = 0
+
+
 class InboxUnresolvedCountResponse(BaseModel):
     unresolved_count: int
 

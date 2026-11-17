@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/kaiitunnz/waypoint/compare/v0.27.0...v0.28.0) (2026-11-17)
+
+
+### Features
+
+* rank composer completions with fuzzy matching ([#569](https://github.com/kaiitunnz/waypoint/issues/569)) ([8ebede1](https://github.com/kaiitunnz/waypoint/commit/8ebede1fae437898ffe54c5736aea4fe36776bf9))
+
 ## [0.27.0](https://github.com/kaiitunnz/waypoint/compare/v0.26.2...v0.27.0) (2026-11-16)
 
 

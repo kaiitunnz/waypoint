@@ -9604,6 +9604,36 @@ html[data-theme="light"] .slash-suggestion.active {
   white-space: nowrap;
 }
 
+/* Matched query characters: warm brass against the cool mono labels; a
+   description hit only lifts to body text so name hits stay primary. */
+.match-hit {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.slash-desc .match-hit {
+  color: var(--text);
+}
+
+/* Repo-wide paths run long on a phone; wrap them so the filename stays
+   visible instead of clipping at the popover edge. */
+.path-row .slash-name {
+  overflow-wrap: anywhere;
+}
+
+/* Non-interactive caption between the typed directory's rows and the
+   repo-wide matches below them. */
+.slash-section {
+  margin: 4px 6px 0;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 0.74rem;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
+}
+
 /* The @-mention popover reuses the slash list, but each row is a file —
    thumbnail/glyph on the left, name over size on the right. */
 .slash-suggestion.file-mention {

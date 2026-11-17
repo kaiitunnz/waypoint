@@ -5,9 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchSessionCompletionsResponse,
+  fetchWorkspaceFind,
   fetchWorkspaceTree,
   type WorkspaceTreeEntry,
 } from "@/lib/api";
+import { highlightPositions, rankItems } from "@/lib/fuzzy";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type {
   CommandCompletion,
@@ -17,6 +19,15 @@ import type {
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 const COMPLETION_REFRESH_POLL_MS = 750;
 const WORKSPACE_PATH_PAGE_LIMIT = 200;
+// Repo-wide search runs `git ls-files` (over SSH for remote sessions) per
+// query, so it waits a little longer than a directory listing.
+const WORKSPACE_FIND_DEBOUNCE_MS = 250;
+const WORKSPACE_FIND_LIMIT = 20;
+// A one-letter leaf fuzzy-hits nearly every file in the repo.
+const WORKSPACE_FIND_MIN_LEAF = 2;
+// A query with any other character (e.g. the `/` of `/etc/hosts`) is prose or
+// a path, not a fuzzy command search, so it only gets exact/prefix hits.
+const COMMAND_QUERY = /^[A-Za-z0-9_.:-]*$/;
 
 // `/new` works on every structured backend so we surface it locally
 // while the debounced fetch is in flight or if the request fails. Tmux
@@ -34,18 +45,31 @@ export const SLASH_NEW_FALLBACK: CommandCompletion = {
   metadata: {},
 };
 
+// Which group a `./` row belongs to: the children of the typed directory, or a
+// repo-wide fuzzy hit.
+export type WorkspacePathSection = "dir" | "workspace";
+
 // A `./` workspace path candidate; selecting it edits the draft, never dispatches.
 export interface WorkspacePathSuggestion {
   type: "workspace_path";
   replacement: string;
   description: "Directory" | "File" | "Symlink";
+  section: WorkspacePathSection;
+  // Matched character indices into ``replacement``.
+  positions: number[];
+}
+
+export interface CommandSuggestion {
+  type: "command";
+  command: CommandCompletion;
+  // Matched character indices into ``commandLabel(command)``.
+  positions: number[];
+  descriptionPositions: number[];
 }
 
 // A menu row: a backend command or a workspace path. The discriminated union
 // keeps a path from reaching command dispatch.
-export type SuggestionRow =
-  | { type: "command"; command: CommandCompletion }
-  | WorkspacePathSuggestion;
+export type SuggestionRow = CommandSuggestion | WorkspacePathSuggestion;
 
 export function commandLabel(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
@@ -63,6 +87,10 @@ export function rowDescription(row: SuggestionRow): string | null {
   return row.type === "command"
     ? row.command.description ?? null
     : row.description;
+}
+
+export function rowDescriptionPositions(row: SuggestionRow): number[] {
+  return row.type === "command" ? row.descriptionPositions : [];
 }
 
 export function rowHint(row: SuggestionRow): string | null {
@@ -87,9 +115,10 @@ export function parseWorkspacePathToken(
   return { dir, leaf };
 }
 
-function workspacePathRow(
+function dirPathRow(
   dir: string,
   entry: WorkspaceTreeEntry,
+  leafLength: number,
 ): WorkspacePathSuggestion {
   const prefix = dir ? `./${dir}/` : "./";
   const suffix = entry.kind === "dir" ? "/" : "";
@@ -103,7 +132,64 @@ function workspacePathRow(
     type: "workspace_path",
     replacement: `${prefix}${entry.name}${suffix}`,
     description,
+    section: "dir",
+    positions: Array.from({ length: leafLength }, (_, i) => prefix.length + i),
   };
+}
+
+function workspaceFindRow(
+  path: string,
+  fragment: string,
+): WorkspacePathSuggestion {
+  return {
+    type: "workspace_path",
+    replacement: `./${path}`,
+    description: "File",
+    section: "workspace",
+    positions: highlightPositions(path, fragment).map((index) => index + 2),
+  };
+}
+
+interface DirPage {
+  dir: string;
+  entries: WorkspaceTreeEntry[];
+  truncated: boolean;
+}
+
+interface FilteredDirPage extends DirPage {
+  // Lowercased ``name_prefix`` the page was fetched with.
+  namePrefix: string;
+}
+
+interface FindPage {
+  query: string;
+  paths: string[];
+}
+
+// The entries to filter for ``dir``/``leaf``: a complete base page, else a
+// filtered page that still covers the leaf, else the partial base page while
+// the filtered fetch is in flight.
+function dirEntriesFor(
+  dir: string,
+  leaf: string,
+  base: DirPage | null,
+  filtered: FilteredDirPage | null,
+): WorkspaceTreeEntry[] | null {
+  const baseMatches = base !== null && base.dir === dir;
+  if (baseMatches && !base.truncated) return base.entries;
+  if (filtered && filteredCovers(filtered, dir, leaf)) return filtered.entries;
+  return baseMatches ? base.entries : null;
+}
+
+// A filtered page answers a longer leaf only when it wasn't itself truncated.
+function filteredCovers(
+  page: FilteredDirPage,
+  dir: string,
+  leaf: string,
+): boolean {
+  const needle = leaf.toLowerCase();
+  if (page.dir !== dir || !needle.startsWith(page.namePrefix)) return false;
+  return needle === page.namePrefix || !page.truncated;
 }
 
 interface UseCommandCompletionsOptions {
@@ -148,15 +234,25 @@ export function useCommandCompletions({
   textareaRef,
 }: UseCommandCompletionsOptions): CommandCompletionsState {
   const pathCompletionEnabled = pathEnabled ?? enabled;
-  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  // The highlighted row, tracked by key so rows landing asynchronously (find
+  // results, a filtered page, a refresh poll) don't move it to another item.
+  // Tagged with the head it was picked under; a null key follows row 0.
+  const [active, setActive] = useState<{ head: string; key: string } | null>(
+    null,
+  );
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
-  const [backendCompletions, setBackendCompletions] = useState<CommandCompletion[]>([]);
+  // The full list for one trigger, tagged so a `/` list never ranks under `$`.
+  const [backendCompletions, setBackendCompletions] = useState<{
+    trigger: string;
+    entries: CommandCompletion[];
+  } | null>(null);
   // The last workspace directory page, tagged with its directory so a stale
   // response for another token is ignored.
-  const [pathPage, setPathPage] = useState<{
-    dir: string;
-    entries: WorkspaceTreeEntry[];
-  } | null>(null);
+  const [pathPage, setPathPage] = useState<DirPage | null>(null);
+  const [filteredPage, setFilteredPage] = useState<FilteredDirPage | null>(
+    null,
+  );
+  const [findPage, setFindPage] = useState<FindPage | null>(null);
   const [selectedCompletion, setSelectedCompletion] =
     useState<CommandCompletion | null>(null);
 
@@ -205,43 +301,97 @@ export function useCommandCompletions({
       : null;
   const isPathHead = completionHead.startsWith("./");
   const onCompletableToken = completionTrigger !== null || isPathHead;
-  // The directory a `./` token would list, or null when no query should run.
-  // Keyed on the directory (not the whole token) so typing the leaf filters the
-  // loaded page client-side instead of re-fetching the same listing.
-  const pathQueryDir =
-    pathCompletionEnabled && !suggestionsDismissed
-      ? parseWorkspacePathToken(completionHead)?.dir ?? null
+  const pathToken = useMemo(
+    () =>
+      pathCompletionEnabled && !suggestionsDismissed && isPathHead
+        ? parseWorkspacePathToken(completionHead)
+        : null,
+    [completionHead, isPathHead, pathCompletionEnabled, suggestionsDismissed],
+  );
+  const pathFragment = completionHead.slice(2);
+  // The directory a `./` token would list. Keyed on the directory (not the
+  // whole token) so typing the leaf filters the loaded page client-side.
+  const pathQueryDir = pathToken?.dir ?? null;
+  // A truncated listing can't answer the leaf by itself; refetch the directory
+  // filtered by name so entries past the first page stay reachable.
+  const filteredQuery =
+    pathToken &&
+    pathToken.leaf &&
+    pathPage?.dir === pathToken.dir &&
+    pathPage.truncated &&
+    !(filteredPage && filteredCovers(filteredPage, pathToken.dir, pathToken.leaf))
+      ? { dir: pathToken.dir, namePrefix: pathToken.leaf.toLowerCase() }
+      : null;
+  const filteredQueryKey = filteredQuery
+    ? `${filteredQuery.dir}\0${filteredQuery.namePrefix}`
+    : null;
+  const findQuery =
+    pathToken && pathToken.leaf.length >= WORKSPACE_FIND_MIN_LEAF
+      ? pathFragment
       : null;
 
   const suggestions = useMemo<ReadonlyArray<SuggestionRow>>(() => {
     if (suggestionsDismissed) return [];
     // A token can't be both `./` and `/`/`$`, so at most one source is eligible.
     if (isPathHead) {
-      if (!pathCompletionEnabled) return [];
-      const parsed = parseWorkspacePathToken(completionHead);
-      if (!parsed || !pathPage || pathPage.dir !== parsed.dir) return [];
-      const leaf = parsed.leaf.toLowerCase();
-      return pathPage.entries
-        .filter((entry) => entry.name.toLowerCase().startsWith(leaf))
-        .map((entry) => workspacePathRow(parsed.dir, entry));
+      if (!pathToken) return [];
+      const { dir, leaf } = pathToken;
+      const lowered = leaf.toLowerCase();
+      const dirRows = (
+        dirEntriesFor(dir, leaf, pathPage, filteredPage) ?? []
+      )
+        .filter((entry) => entry.name.toLowerCase().startsWith(lowered))
+        .map((entry) => dirPathRow(dir, entry, leaf.length));
+      if (findQuery === null || findPage === null) return dirRows;
+      const seen = new Set(dirRows.map((row) => row.replacement));
+      // Until the new query's results land, keep the previous ones that
+      // still match rather than flickering the section shut.
+      const paths =
+        findPage.query === findQuery
+          ? findPage.paths
+          : findPage.paths.filter(
+              (path) => highlightPositions(path, findQuery).length > 0,
+            );
+      const workspaceRows = paths
+        .map((path) => workspaceFindRow(path, findQuery))
+        .filter((row) => !seen.has(row.replacement));
+      return [...dirRows, ...workspaceRows];
     }
     if (!enabled || completionTrigger === null) return [];
-    const pool =
+    const loaded =
+      backendCompletions?.trigger === completionTrigger
+        ? backendCompletions.entries
+        : [];
+    const pool = (
       completionTrigger === "/"
-        ? mergeLocalFallback(backendCompletions, localFallback)
-        : backendCompletions;
-    return pool
-      .filter((entry) => commandLabel(entry).startsWith(completionHead))
-      .map((command) => ({ type: "command", command }) as const);
+        ? mergeLocalFallback(loaded, localFallback)
+        : loaded
+    ).filter((entry) => entry.trigger === completionTrigger);
+    const query = completionHead.slice(completionTrigger.length);
+    return rankItems(
+      pool,
+      query,
+      (entry) => entry.name,
+      (entry) => entry.description,
+      { prefixOnly: !COMMAND_QUERY.test(query) },
+    ).map(({ item, positions, descriptionPositions }) => ({
+      type: "command",
+      command: item,
+      positions: positions.map((index) => index + completionTrigger.length),
+      descriptionPositions,
+    }));
   }, [
     backendCompletions,
     completionHead,
     completionTrigger,
     enabled,
+    filteredPage,
+    findPage,
+    findQuery,
     isPathHead,
     localFallback,
-    pathCompletionEnabled,
     pathPage,
+    pathToken,
     suggestionsDismissed,
   ]);
 
@@ -249,16 +399,25 @@ export function useCommandCompletions({
   // token, so its presence is the open condition — no whole-draft test that
   // would suppress mid-prompt triggers.
   const suggestionsOpen = suggestions.length > 0;
-  const activeIndex = Math.min(
-    suggestionIndex,
-    Math.max(0, suggestions.length - 1),
+  const activeKey = active?.head === completionHead ? active.key : null;
+  const activeIndex = Math.max(
+    0,
+    activeKey === null
+      ? 0
+      : suggestions.findIndex((row) => rowKey(row) === activeKey),
   );
+
+  function setActiveIndex(index: number) {
+    const row = suggestions[index];
+    if (row) setActive({ head: completionHead, key: rowKey(row) });
+  }
 
   useEffect(() => {
     if (!enabled || completionTrigger === null) {
-      setBackendCompletions([]);
+      setBackendCompletions(null);
       return;
     }
+    const trigger = completionTrigger;
     const controller = new AbortController();
     let debounceTimer: number | null = null;
     let pollTimer: number | null = null;
@@ -268,14 +427,13 @@ export function useCommandCompletions({
         host,
         token,
         sessionId,
-        completionTrigger,
-        completionHead,
+        trigger,
         false,
         controller.signal,
       )
         .then((payload) => {
           if (controller.signal.aborted) return;
-          setBackendCompletions(payload.completions);
+          setBackendCompletions({ trigger, entries: payload.completions });
           if (payload.refreshing) {
             pollTimer = window.setTimeout(
               loadCompletions,
@@ -287,7 +445,7 @@ export function useCommandCompletions({
           if (error instanceof DOMException && error.name === "AbortError") {
             return;
           }
-          setBackendCompletions([]);
+          setBackendCompletions(null);
         });
     };
     debounceTimer = window.setTimeout(
@@ -299,7 +457,7 @@ export function useCommandCompletions({
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       if (pollTimer !== null) window.clearTimeout(pollTimer);
     };
-  }, [host, token, sessionId, enabled, completionTrigger, completionHead]);
+  }, [host, token, sessionId, enabled, completionTrigger]);
 
   useEffect(() => {
     if (pathQueryDir === null) return;
@@ -312,13 +470,13 @@ export function useCommandCompletions({
       })
         .then((page) => {
           if (controller.signal.aborted) return;
-          setPathPage({ dir, entries: page.entries });
+          setPathPage({ dir, entries: page.entries, truncated: page.truncated });
         })
         .catch((error) => {
           if (error instanceof DOMException && error.name === "AbortError") {
             return;
           }
-          // Remote, disabled, 404, or denied: stay silent. Drop only this
+          // Disabled, 404, denied, or unreachable: stay silent. Drop only this
           // directory's own stale page, never another token's.
           setPathPage((current) => (current?.dir === dir ? null : current));
         });
@@ -330,16 +488,72 @@ export function useCommandCompletions({
   }, [host, token, sessionId, pathQueryDir]);
 
   useEffect(() => {
-    setSuggestionIndex(0);
-  }, [completionHead]);
+    if (filteredQueryKey === null) return;
+    const [dir, namePrefix] = filteredQueryKey.split("\0");
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(() => {
+      fetchWorkspaceTree(host, token, sessionId, dir, {
+        limit: WORKSPACE_PATH_PAGE_LIMIT,
+        namePrefix,
+        signal: controller.signal,
+      })
+        .then((page) => {
+          if (controller.signal.aborted) return;
+          setFilteredPage({
+            dir,
+            namePrefix,
+            entries: page.entries,
+            truncated: page.truncated,
+          });
+        })
+        .catch(() => undefined);
+    }, COMPLETION_FETCH_DEBOUNCE_MS);
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounceTimer);
+    };
+  }, [host, token, sessionId, filteredQueryKey]);
+
+  useEffect(() => {
+    if (findQuery === null) return;
+    const query = findQuery;
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(() => {
+      fetchWorkspaceFind(
+        host,
+        token,
+        sessionId,
+        query,
+        WORKSPACE_FIND_LIMIT,
+        controller.signal,
+      )
+        .then((result) => {
+          if (controller.signal.aborted) return;
+          setFindPage({
+            query,
+            paths: result.matches.map((match) => match.path),
+          });
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          setFindPage({ query, paths: [] });
+        });
+    }, WORKSPACE_FIND_DEBOUNCE_MS);
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounceTimer);
+    };
+  }, [host, token, sessionId, findQuery]);
 
   useEffect(() => {
     if (!suggestionsOpen) return;
-    const active = itemRefs.current[activeIndex];
+    const activeItem = itemRefs.current[activeIndex];
     const list = listRef.current;
-    if (!active || !list) return;
-    const activeTop = active.offsetTop;
-    const activeBottom = activeTop + active.offsetHeight;
+    if (!activeItem || !list) return;
+    const activeTop = activeItem.offsetTop;
+    const activeBottom = activeTop + activeItem.offsetHeight;
     const visibleTop = list.scrollTop;
     const visibleBottom = visibleTop + list.clientHeight;
     if (activeTop < visibleTop) {
@@ -435,12 +649,12 @@ export function useCommandCompletions({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setSuggestionIndex((index) => Math.min(suggestions.length - 1, index + 1));
+      setActiveIndex(Math.min(suggestions.length - 1, activeIndex + 1));
       return true;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setSuggestionIndex((index) => Math.max(0, index - 1));
+      setActiveIndex(Math.max(0, activeIndex - 1));
       return true;
     }
     if (event.key === "Escape") {
@@ -454,14 +668,14 @@ export function useCommandCompletions({
   function reset() {
     setSelectedCompletion(null);
     setSuggestionsDismissed(false);
-    setSuggestionIndex(0);
+    setActive(null);
   }
 
   return {
     suggestions,
     suggestionsOpen,
     activeIndex,
-    setActiveIndex: setSuggestionIndex,
+    setActiveIndex,
     selectedCompletion,
     listRef,
     itemRefs,

@@ -289,15 +289,11 @@ export async function fetchSessionCompletionsResponse(
   token: string,
   sessionId: string,
   trigger: string,
-  prefix: string,
   forceRefresh = false,
   signal?: AbortSignal,
 ): Promise<SessionCompletionsResponse> {
   const params = new URLSearchParams();
   params.set("trigger", trigger);
-  if (prefix) {
-    params.set("prefix", prefix);
-  }
   if (forceRefresh) {
     params.set("force_refresh", "true");
   }
@@ -1822,12 +1818,18 @@ export async function fetchWorkspaceTree(
   token: string,
   sessionId: string,
   relPath = "",
-  opts: { offset?: number; limit?: number; signal?: AbortSignal } = {},
+  opts: {
+    offset?: number;
+    limit?: number;
+    namePrefix?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<WorkspaceTreePage> {
   const params = new URLSearchParams();
   if (relPath) params.set("path", relPath);
   if (opts.offset) params.set("offset", String(opts.offset));
   if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.namePrefix) params.set("name_prefix", opts.namePrefix);
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/workspace/tree${suffix}`,
@@ -2000,6 +2002,7 @@ export async function fetchWorkspaceFind(
   sessionId: string,
   q: string,
   limit?: number,
+  signal?: AbortSignal,
 ): Promise<WorkspaceFindResult> {
   const params = new URLSearchParams({ q });
   if (limit) params.set("limit", String(limit));
@@ -2008,6 +2011,7 @@ export async function fetchWorkspaceFind(
     {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
+      signal,
     },
   );
   await ensureOk(response, "failed to search workspace");

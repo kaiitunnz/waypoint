@@ -3,14 +3,15 @@
 import { forwardRef, MutableRefObject } from "react";
 
 import { FileIcon, formatBytes, typeTag } from "@/components/AttachmentTray";
+import { HighlightedText } from "@/components/HighlightedText";
 import { attachmentUrl } from "@/lib/api";
-import type { SessionAttachment } from "@/lib/types";
+import type { FileMentionRow } from "@/lib/use-file-mentions";
 
 interface FileMentionsProps {
   host: string;
   token: string;
   sessionId: string;
-  mentions: ReadonlyArray<SessionAttachment>;
+  mentions: ReadonlyArray<FileMentionRow>;
   activeIndex: number;
   itemRefs: MutableRefObject<Array<HTMLButtonElement | null>>;
   onApply: (index: number) => void;
@@ -26,7 +27,7 @@ export const FileMentions = forwardRef<HTMLUListElement, FileMentionsProps>(
   ) {
     return (
       <ul className="slash-suggestions file-mentions" role="listbox" ref={ref}>
-        {mentions.map((file, index) => {
+        {mentions.map(({ file, positions }, index) => {
           const url = attachmentUrl(host, token, sessionId, file.id);
           return (
             <li key={file.id}>
@@ -59,7 +60,9 @@ export const FileMentions = forwardRef<HTMLUListElement, FileMentionsProps>(
                   </span>
                 )}
                 <span className="file-mention-body">
-                  <span className="slash-name">{file.filename}</span>
+                  <span className="slash-name">
+                    <HighlightedText text={file.filename} positions={positions} />
+                  </span>
                   <span className="slash-desc">
                     {typeTag(file.filename, file.kind === "image")} ·{" "}
                     {formatBytes(file.size)}

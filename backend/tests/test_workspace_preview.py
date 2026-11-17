@@ -98,6 +98,68 @@ def test_rank_files_matches_subsequence_and_ranks_basename() -> None:
     assert truncated is False
 
 
+_SEGMENT_PATHS = [
+    "frontend/src/lib/composer-completions.ts",
+    "frontend/src/lib/fuzzy.ts",
+    "frontend/src/components/CommandSuggestions.tsx",
+    "backend/src/waypoint/runtime.py",
+    "docs/frontend-composer.md",
+]
+
+
+def test_rank_files_segment_query_skips_folders_in_order() -> None:
+    matches, _ = rank_files("fe/comp", _SEGMENT_PATHS, limit=10)
+    assert matches == ["frontend/src/lib/composer-completions.ts"]
+
+    # Each query segment stays inside one path segment, so letters spread across
+    # folders no longer match, and folder order matters.
+    assert rank_files("src/fe/comp", _SEGMENT_PATHS, limit=10)[0] == []
+    assert rank_files("lib/fuz", _SEGMENT_PATHS, limit=10)[0] == [
+        "frontend/src/lib/fuzzy.ts"
+    ]
+
+
+def test_rank_files_segment_matches_fuzzily_within_a_segment() -> None:
+    # Word starts of "composer-completions" and of "CommandSuggestions".
+    assert rank_files("lib/cc", _SEGMENT_PATHS, limit=10)[0] == [
+        "frontend/src/lib/composer-completions.ts"
+    ]
+    assert rank_files("comp/cs", _SEGMENT_PATHS, limit=10)[0] == [
+        "frontend/src/components/CommandSuggestions.tsx"
+    ]
+    # A one-letter segment matches only by prefix or word start.
+    assert rank_files("f/s/l/f", _SEGMENT_PATHS, limit=10)[0] == [
+        "frontend/src/lib/fuzzy.ts"
+    ]
+
+
+def test_rank_files_segment_prefers_abbreviation_over_inner_substring() -> None:
+    paths = [
+        "docs/references/compaction.md",
+        "frontend/src/lib/composer.ts",
+    ]
+    # "fe" abbreviates "frontend" from its first letter; inside "references"
+    # it is only a substring.
+    matches, _ = rank_files("fe/comp", paths, limit=10)
+    assert matches == ["frontend/src/lib/composer.ts", "docs/references/compaction.md"]
+
+
+def test_rank_files_trailing_slash_lists_files_under_matched_folders() -> None:
+    matches, _ = rank_files("fe/lib/", _SEGMENT_PATHS, limit=10)
+    assert sorted(matches) == [
+        "frontend/src/lib/composer-completions.ts",
+        "frontend/src/lib/fuzzy.ts",
+    ]
+
+
+def test_rank_files_segment_ranks_tighter_matches_first() -> None:
+    paths = ["a/deep/nested/src/util.py", "src/util.py", "src/utilities/x.py"]
+    matches, _ = rank_files("src/util", paths, limit=10)
+    # Exact-ish basename on the shortest path wins; a folder named "utilities"
+    # can't satisfy the file-name segment.
+    assert matches == ["src/util.py", "a/deep/nested/src/util.py"]
+
+
 def test_rank_files_empty_query_matches_nothing() -> None:
     assert rank_files("", ["a.py", "b.py"]) == ([], False)
 

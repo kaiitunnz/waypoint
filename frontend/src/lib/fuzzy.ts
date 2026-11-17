@@ -25,14 +25,15 @@ export interface RankedItem<T> {
 }
 
 export interface RankOptions {
-  // Restrict to exact/prefix hits (today's behaviour), e.g. for a query with
-  // characters outside the command alphabet.
+  // Restrict to exact/prefix hits, e.g. for a query with characters outside
+  // the command alphabet.
   prefixOnly?: boolean;
 }
 
-// Shorter queries are too permissive for these tiers: a 1-char subsequence or
-// a 1–2-char description word matches almost everything.
-const MIN_SUBSEQUENCE_QUERY = 2;
+// Shorter queries are too permissive for these tiers: a single letter appears
+// inside nearly every name, and a 1–2-char description word matches almost
+// everything.
+const MIN_INNER_QUERY = 2;
 const MIN_DESCRIPTION_QUERY = 3;
 
 const SEPARATOR = /[-_:./\s]/;
@@ -55,6 +56,20 @@ function fold(query: string, text: string): [string, string] {
   return query === query.toLowerCase()
     ? [query, text.toLowerCase()]
     : [query, text];
+}
+
+function isSubsequenceFrom(
+  needle: string,
+  from: number,
+  hay: string,
+  after: number,
+): boolean {
+  let at = after;
+  for (let qi = from; qi < needle.length; qi++) {
+    at = hay.indexOf(needle[qi], at + 1);
+    if (at === -1) return false;
+  }
+  return true;
 }
 
 function isSegmentEnd(text: string, index: number): boolean {
@@ -98,12 +113,12 @@ function alignFrom(
     const next = hay.indexOf(ch, prev + 1);
     if (next === -1) return null;
     // Prefer a later word-start occurrence over a mid-word one, unless the
-    // nearest hit is consecutive.
+    // nearest hit is consecutive or the jump would strand the rest of the query.
     let pick = next;
     if (next !== prev + 1 && !isWordStart(text, next)) {
       for (let j = hay.indexOf(ch, next + 1); j !== -1; j = hay.indexOf(ch, j + 1)) {
         if (isWordStart(text, j)) {
-          pick = j;
+          if (isSubsequenceFrom(needle, qi + 1, hay, j)) pick = j;
           break;
         }
       }
@@ -158,6 +173,7 @@ export function matchText(
       positions: span(wordStart.index, needle.length),
     };
   }
+  if (needle.length < MIN_INNER_QUERY) return null;
   const substring = hay.indexOf(needle);
   if (substring !== -1) {
     return {
@@ -166,7 +182,6 @@ export function matchText(
       positions: span(substring, needle.length),
     };
   }
-  if (needle.length < MIN_SUBSEQUENCE_QUERY) return null;
   return subsequence(needle, hay, text, false);
 }
 
@@ -239,9 +254,11 @@ export function rankItems<T>(
 
 // Highlight positions for a server-ranked path: the last contiguous hit
 // (usually the basename), else the best in-order alignment from any start.
+// Case-insensitive, matching the server's ranking.
 export function highlightPositions(text: string, query: string): number[] {
   if (!query) return [];
-  const [needle, hay] = fold(query, text);
+  const needle = query.toLowerCase();
+  const hay = text.toLowerCase();
   const last = hay.lastIndexOf(needle);
   if (last !== -1) return span(last, needle.length);
   return subsequence(needle, hay, text, true)?.positions ?? [];

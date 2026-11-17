@@ -296,7 +296,7 @@ def _subsequence_score(query: str, path: str) -> int | None:
 
 
 _SEGMENT_SEPARATORS = "-_:. "
-# A single letter appears inside most names, so the inner tiers need two.
+# One letter appears inside most names.
 _MIN_INNER_SEGMENT_QUERY = 2
 
 
@@ -307,11 +307,13 @@ def _is_word_start(text: str, index: int) -> bool:
     return prev in _SEGMENT_SEPARATORS or (prev.islower() and ch.isupper())
 
 
+def _is_subsequence(needle: str, hay: str) -> bool:
+    rest = iter(hay)
+    return all(ch in rest for ch in needle)
+
+
 def _segment_score(query: str, segment: str) -> int | None:
-    # One query segment against one path segment, case-insensitively, by tier:
-    # exact > prefix > word start > in-order letters from the first character
-    # (``fe`` → ``frontend``) > substring > in-order letters from a word start.
-    # Mirrors the composer's ``matchText`` in ``lib/fuzzy.ts``.
+    # Mirrors matchText in frontend/src/lib/fuzzy.ts; keep the tiers in sync.
     needle = query.lower()
     hay = segment.lower()
     if hay == needle:
@@ -333,45 +335,30 @@ def _segment_score(query: str, segment: str) -> int | None:
     return None
 
 
-def _is_subsequence(needle: str, hay: str) -> bool:
-    rest = iter(hay)
-    return all(ch in rest for ch in needle)
-
-
 def _segment_path_score(query: str, path: str) -> int | None:
-    # Query segments (split on ``/``) match path segments in order, each within
-    # a single segment; folders in between may be skipped. The last query
-    # segment matches the file name unless the query ends with ``/``, which
-    # asks for any file under the matched folders.
+    # Query segments match path segments in order, each within one segment;
+    # folders between may be skipped. A trailing "/" matches any file under the
+    # folders. Folders bind to the earliest match, as matchPath highlights them.
     parts = [part for part in query.split("/") if part]
     if not parts:
         return None
     *dirs, name = path.split("/")
-    folder_parts = parts if query.endswith("/") else parts[:-1]
+    wants_name = not query.endswith("/")
+    folder_parts = parts[:-1] if wants_name else parts
     score = 0
-    if not query.endswith("/"):
-        name_score = _segment_score(parts[-1], name)
-        if name_score is None:
+    if wants_name:
+        if (name_score := _segment_score(parts[-1], name)) is None:
             return None
-        score += 2 * name_score
-    # best[j]: best total for the query folders matched so far, using only the
-    # first j path folders; None when unmatchable.
-    best: list[int | None] = [0] * (len(dirs) + 1)
+        score = 2 * name_score
+    folders = iter(dirs)
     for part in folder_parts:
-        nxt: list[int | None] = [None] * (len(dirs) + 1)
-        for j, folder in enumerate(dirs, start=1):
-            carried = nxt[j - 1]
-            matched = _segment_score(part, folder)
-            here = best[j - 1]
-            take = here + matched if here is not None and matched else None
-            nxt[j] = max(
-                (value for value in (carried, take) if value is not None),
-                default=None,
-            )
-        best = nxt
-    if best[-1] is None:
-        return None
-    return score + best[-1] - (len(dirs) - len(folder_parts))
+        hit = next(
+            (s for f in folders if (s := _segment_score(part, f)) is not None), None
+        )
+        if hit is None:
+            return None
+        score += hit
+    return score - (len(dirs) - len(folder_parts))
 
 
 def rank_files(
@@ -382,9 +369,7 @@ def rank_files(
 ) -> tuple[list[str], bool]:
     # Score, filter, and order candidate paths for the finder. Returns the top
     # ``limit`` matches and whether more matched than were returned. An empty
-    # query matches nothing (callers should not search on a blank input). A
-    # query containing ``/`` matches by path segment; otherwise it is a fuzzy
-    # match over the whole path.
+    # query matches nothing (callers should not search on a blank input).
     if not query:
         return [], False
     score_path = _segment_path_score if "/" in query else _subsequence_score

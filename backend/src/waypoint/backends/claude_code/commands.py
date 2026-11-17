@@ -136,9 +136,7 @@ def _records_from_candidates(
     return records
 
 
-def _records_to_completions(
-    records: list[dict[str, Any]],
-) -> list[CommandCompletion]:
+def _records_to_completions(records: list[dict[str, Any]]) -> list[CommandCompletion]:
     completions: list[CommandCompletion] = []
     seen: set[str] = set()
     for record in records:

@@ -111,8 +111,7 @@ def test_rank_files_segment_query_skips_folders_in_order() -> None:
     matches, _ = rank_files("fe/comp", _SEGMENT_PATHS, limit=10)
     assert matches == ["frontend/src/lib/composer-completions.ts"]
 
-    # Each query segment stays inside one path segment, so letters spread across
-    # folders no longer match, and folder order matters.
+    # Each query segment stays inside one path segment, and folder order matters.
     assert rank_files("src/fe/comp", _SEGMENT_PATHS, limit=10)[0] == []
     assert rank_files("lib/fuz", _SEGMENT_PATHS, limit=10)[0] == [
         "frontend/src/lib/fuzzy.ts"

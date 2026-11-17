@@ -160,6 +160,7 @@ def list_dir(
     denylist: list[str] | None = None,
     follow_symlinks: bool = False,
     offset: int = 0,
+    name_prefix: str = "",
 ) -> tuple[list[WorkspaceEntry], bool, int | None, Path]:
     if is_denied(rel, denylist):
         raise WorkspacePathError("path is denied")
@@ -170,8 +171,11 @@ def list_dir(
         raise NotADirectoryError(directory)
 
     base_resolved = base.expanduser().resolve()
+    needle = name_prefix.lower()
     allowed: list[WorkspaceEntry] = []
     for child in directory.iterdir():
+        if needle and not child.name.lower().startswith(needle):
+            continue
         child_rel = child.relative_to(base_resolved)
         if is_denied(child_rel, denylist):
             continue
@@ -358,10 +362,11 @@ def op_list_dir(
     offset: int,
     denylist: list[str] | None,
     follow_symlinks: bool,
+    name_prefix: str = "",
 ) -> DirListing:
     base_path = Path(base)
     entries, truncated, overflow, directory = list_dir(
-        base_path, rel, cap, denylist, follow_symlinks, offset
+        base_path, rel, cap, denylist, follow_symlinks, offset, name_prefix
     )
     return {
         "entries": entries,

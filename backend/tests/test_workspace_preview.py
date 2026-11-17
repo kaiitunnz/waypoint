@@ -50,6 +50,19 @@ def test_list_dir_reports_overflow(tmp_path: Path) -> None:
     assert overflow == 2
 
 
+def test_list_dir_filters_by_name_prefix_before_paging(tmp_path: Path) -> None:
+    for index in range(5):
+        (tmp_path / f"alpha-{index}.txt").write_text(str(index), encoding="utf-8")
+    (tmp_path / "Zeta.txt").write_text("z", encoding="utf-8")
+    (tmp_path / "zed").mkdir()
+
+    entries, truncated, overflow, _ = list_dir(tmp_path, "", 2, name_prefix="z")
+
+    assert [entry["name"] for entry in entries] == ["zed", "Zeta.txt"]
+    assert truncated is False
+    assert overflow is None
+
+
 def test_list_dir_pages_with_offset(tmp_path: Path) -> None:
     for index in range(5):
         (tmp_path / f"file-{index}.txt").write_text(str(index), encoding="utf-8")

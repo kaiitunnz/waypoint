@@ -932,10 +932,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path: Annotated[str, Query()] = "",
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
+        name_prefix: Annotated[str, Query(max_length=256)] = "",
     ) -> Any:
         session, fs, base = _workspace(session_id)
         async with _workspace_errors():
-            listing = await fs.list_dir(base, path, limit, offset)
+            listing = await fs.list_dir(base, path, limit, offset, name_prefix)
         return {
             "root": {"cwd": session.cwd, "worktree_path": session.worktree_path},
             "path": listing["path"],

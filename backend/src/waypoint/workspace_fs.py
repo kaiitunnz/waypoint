@@ -57,7 +57,9 @@ class WorkspaceFilesystem(ABC):
         self, base: str, commands: list[list[str]]
     ) -> list[tuple[int, bytes]]: ...
 
-    async def list_dir(self, base: str, rel: str, cap: int, offset: int) -> DirListing:
+    async def list_dir(
+        self, base: str, rel: str, cap: int, offset: int, name_prefix: str = ""
+    ) -> DirListing:
         return cast(
             DirListing,
             await self._call(
@@ -66,6 +68,7 @@ class WorkspaceFilesystem(ABC):
                 rel=rel,
                 cap=cap,
                 offset=offset,
+                name_prefix=name_prefix,
                 denylist=self._denylist,
                 follow_symlinks=self._follow,
             ),

@@ -115,6 +115,30 @@ async def test_tree_lists_dotfiles_but_hides_git(
     assert ".git" not in names  # VCS internals stay hidden
 
 
+async def test_tree_name_prefix_reaches_entries_past_the_page(
+    tmp_path: Path, target: SshLaunchTargetConfig | None
+) -> None:
+    app, token = _build(tmp_path, target)
+    workspace = tmp_path / "ws"
+    for index in range(5):
+        (workspace / f"entry-{index}.txt").write_text("x", encoding="utf-8")
+    headers = {"Authorization": f"Bearer {token}"}
+    async with _client(app) as client:
+        page = await client.get(
+            "/api/sessions/s1/workspace/tree", params={"limit": 2}, headers=headers
+        )
+        filtered = await client.get(
+            "/api/sessions/s1/workspace/tree",
+            params={"limit": 2, "name_prefix": "NOTES"},
+            headers=headers,
+        )
+    assert page.json()["truncated"] is True
+    assert "notes.md" not in [entry["name"] for entry in page.json()["entries"]]
+    assert filtered.status_code == 200
+    assert [entry["name"] for entry in filtered.json()["entries"]] == ["notes.md"]
+    assert filtered.json()["truncated"] is False
+
+
 async def test_file_reads_text(
     tmp_path: Path, target: SshLaunchTargetConfig | None
 ) -> None:

@@ -22,7 +22,6 @@ async def test_list_claude_command_completions_reads_project_commands(
     completions = await list_claude_command_completions(
         cwd=str(repo),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/hum",
     )
 
     assert [item.name for item in completions] == ["humanizer"]
@@ -47,7 +46,6 @@ async def test_list_claude_command_completions_reads_user_commands(
     completions = await list_claude_command_completions(
         cwd=str(tmp_path / "repo"),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/team",
     )
 
     assert [item.name for item in completions] == ["team/review"]
@@ -71,12 +69,10 @@ async def test_list_claude_command_completions_scopes_to_config_dir(
     default = await list_claude_command_completions(
         cwd=str(tmp_path / "repo"),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/team",
     )
     scoped = await list_claude_command_completions(
         cwd=str(tmp_path / "repo"),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/team",
         config_dir=str(profile),
     )
     assert [item.name for item in default] == []
@@ -106,7 +102,6 @@ async def test_list_claude_command_completions_reads_plugin_skills(
     completions = await list_claude_command_completions(
         cwd=str(tmp_path / "repo"),
         claude_bin=str(claude),
-        prefix="/frontend",
     )
 
     assert [item.name for item in completions] == ["frontend-design"]
@@ -130,7 +125,6 @@ async def test_list_claude_command_completions_reads_user_skills(
     completions = await list_claude_command_completions(
         cwd=str(tmp_path / "repo"),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/create",
     )
 
     assert [item.name for item in completions] == ["create-pr"]
@@ -160,7 +154,6 @@ async def test_list_claude_command_completions_workspace_skill_overrides_home(
     completions = await list_claude_command_completions(
         cwd=str(repo),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/shared",
     )
 
     assert len(completions) == 1
@@ -183,7 +176,6 @@ async def test_list_claude_command_completions_propagates_command_argument_hint(
     completions = await list_claude_command_completions(
         cwd=str(repo),
         claude_bin=str(tmp_path / "missing-claude"),
-        prefix="/rev",
     )
 
     assert completions[0].argument_hint == "<branch>"
@@ -218,7 +210,6 @@ async def test_remote_discovery_scopes_to_profile_config_dir(
     completions = await list_claude_command_completions(
         cwd="~/repo",
         claude_bin="missing-claude",
-        prefix="/",
         launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
         config_dir="~/.claude-work",
     )
@@ -235,7 +226,6 @@ async def test_remote_discovery_expands_tilde_cwd(tmp_path, monkeypatch) -> None
     completions = await list_claude_command_completions(
         cwd="~/repo",
         claude_bin="missing-claude",
-        prefix="/",
         launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
     )
 
@@ -261,13 +251,12 @@ async def test_remote_discovery_matches_local(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(home))
 
     local = await list_claude_command_completions(
-        cwd=str(home / "repo"), claude_bin="missing-claude", prefix="/"
+        cwd=str(home / "repo"), claude_bin="missing-claude"
     )
     _loopback_remote(monkeypatch, home)
     remote = await list_claude_command_completions(
         cwd="~/repo",
         claude_bin="missing-claude",
-        prefix="/",
         launch_target=SshLaunchTargetConfig(id="t", name="t", ssh_destination="d"),
     )
 

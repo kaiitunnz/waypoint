@@ -899,7 +899,6 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         if trigger != "/":
@@ -907,20 +906,18 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         runtime_commands = _session_slash_commands(
             self.adapter, session.id
         ) or _session_transport_slash_commands(session)
-        waypoint_completions = _claude_waypoint_completions(prefix)
+        waypoint_completions = _claude_waypoint_completions()
         # /status: drop our version when Claude has it natively; /btw is always ours
         if _commands_include_name(runtime_commands, "status"):
             waypoint_completions = [
                 c for c in waypoint_completions if c.name != "status"
             ]
         completions = waypoint_completions
-        completions.extend(_claude_runtime_slash_completions(runtime_commands, prefix))
+        completions.extend(_claude_runtime_slash_completions(runtime_commands))
         # Curated built-ins as a baseline for sessions with no live slash-command
         # stream (tmux transport), deduped against anything the runtime reported.
         present = {f"{item.trigger}{item.name}" for item in completions}
-        for builtin in static_slash_completions(
-            self.id, self.capabilities, prefix=prefix
-        ):
+        for builtin in static_slash_completions(self.id, self.capabilities):
             key = f"{builtin.trigger}{builtin.name}"
             if key not in present:
                 completions.append(builtin)
@@ -941,7 +938,6 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             dynamic = await list_claude_command_completions(
                 cwd=session.cwd,
                 claude_bin=claude_bin,
-                prefix=prefix,
                 launch_target=launch_target,
                 config_dir=config_dir_for(self.capabilities, session.launch_env),
             )
@@ -1884,7 +1880,7 @@ def _claude_effort_swap_message(effort: str | None) -> str:
     return "Restarted Claude session with default effort"
 
 
-def _claude_waypoint_completions(prefix: str) -> list[CommandCompletion]:
+def _claude_waypoint_completions() -> list[CommandCompletion]:
     specs = [
         (
             "/status",
@@ -1912,12 +1908,11 @@ def _claude_waypoint_completions(prefix: str) -> list[CommandCompletion]:
             metadata={"builtin_command": command},
         )
         for command, name, description, cid in specs
-        if _slash_prefix_matches(command, prefix)
     ]
 
 
 def _claude_runtime_slash_completions(
-    commands: tuple[str, ...], prefix: str
+    commands: tuple[str, ...],
 ) -> list[CommandCompletion]:
     completions: list[CommandCompletion] = []
     seen: set[str] = set()
@@ -1926,7 +1921,7 @@ def _claude_runtime_slash_completions(
         if not name:
             continue
         command = f"/{name}"
-        if command in seen or not _slash_prefix_matches(command, prefix):
+        if command in seen:
             continue
         is_plugin_command = ":" in raw
         completions.append(
@@ -1959,13 +1954,6 @@ def _merge_completion_metadata(
         if existing.source == "plugin_skill" and incoming.source == "plugin_skill":
             existing.kind = incoming.kind
         return
-
-
-def _slash_prefix_matches(command: str, prefix: str) -> bool:
-    if not prefix:
-        return True
-    normalized = prefix if prefix.startswith("/") else f"/{prefix}"
-    return normalized == "/" or command.startswith(normalized)
 
 
 def _slash_command_name(raw: str) -> str:

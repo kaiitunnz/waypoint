@@ -91,21 +91,10 @@ def _make_runtime(tmp_path: Path) -> tuple[SessionRuntime, Storage, Settings]:
 
 
 def test_claude_waypoint_completions_includes_btw() -> None:
-    completions = _claude_waypoint_completions("")
+    completions = _claude_waypoint_completions()
     names = [c.name for c in completions]
     assert "btw" in names
     assert "status" in names
-
-
-def test_claude_waypoint_completions_btw_prefix_match() -> None:
-    completions = _claude_waypoint_completions("/bt")
-    assert any(c.name == "btw" for c in completions)
-    assert not any(c.name == "status" for c in completions)
-
-
-def test_claude_waypoint_completions_no_match() -> None:
-    completions = _claude_waypoint_completions("/xyz")
-    assert completions == []
 
 
 async def test_claude_code_completions_include_btw(tmp_path: Path) -> None:
@@ -113,7 +102,7 @@ async def test_claude_code_completions_include_btw(tmp_path: Path) -> None:
     runtime, storage, _ = _make_runtime(tmp_path)
     storage.create_session(session)
     plugin = ClaudeCodePlugin()
-    completions = await plugin.list_command_completions(runtime, session, prefix="")
+    completions = await plugin.list_command_completions(runtime, session)
     assert any(c.name == "btw" for c in completions)
 
 
@@ -124,18 +113,7 @@ async def test_claude_tty_completions_include_btw(tmp_path: Path) -> None:
     runtime, storage, _ = _make_runtime(tmp_path)
     storage.create_session(session)
     plugin = ClaudeTtyPlugin()
-    completions = await plugin.list_command_completions(runtime, session, prefix="")
-    assert any(c.name == "btw" for c in completions)
-
-
-async def test_claude_tty_completions_btw_prefix_match(tmp_path: Path) -> None:
-    session, _, _ = _make_session(
-        tmp_path, backend="claude_tty", transport="claude_tty"
-    )
-    runtime, storage, _ = _make_runtime(tmp_path)
-    storage.create_session(session)
-    plugin = ClaudeTtyPlugin()
-    completions = await plugin.list_command_completions(runtime, session, prefix="/bt")
+    completions = await plugin.list_command_completions(runtime, session)
     assert any(c.name == "btw" for c in completions)
 
 

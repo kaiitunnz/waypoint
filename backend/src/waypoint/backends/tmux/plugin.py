@@ -298,7 +298,6 @@ class TmuxPlugin:
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         # Tmux is a transport, not a backend in the user-visible sense:
@@ -313,12 +312,11 @@ class TmuxPlugin:
                 runtime,
                 session,
                 trigger=trigger,
-                prefix=prefix,
                 force_refresh=force_refresh,
             )
         if trigger != "/":
             return []
-        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+        return static_slash_completions(self.id, self.capabilities)
 
     async def maybe_handle_input(
         self,

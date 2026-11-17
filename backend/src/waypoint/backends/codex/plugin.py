@@ -2085,14 +2085,12 @@ class CodexPlugin(DefaultLaunchContract):
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         if trigger == "/":
-            return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+            return static_slash_completions(self.id, self.capabilities)
         if trigger != "$":
             return []
-        normalized_prefix = prefix if prefix.startswith("$") else f"${prefix}"
         try:
             skills = await self._require_adapter().list_skills(
                 session.id,
@@ -2107,8 +2105,6 @@ class CodexPlugin(DefaultLaunchContract):
             if not isinstance(name, str) or not name:
                 continue
             command = f"${name}"
-            if normalized_prefix != "$" and not command.startswith(normalized_prefix):
-                continue
             if command in seen:
                 continue
             path = skill.get("path")

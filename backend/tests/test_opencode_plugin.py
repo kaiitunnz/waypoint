@@ -235,7 +235,7 @@ async def test_list_command_completions_reads_opencode_commands(tmp_path) -> Non
     )
 
     completions = await plugin.list_command_completions(
-        runtime, _session(), trigger="/", prefix="/"
+        runtime, _session(), trigger="/"
     )
 
     names = [item.name for item in completions]

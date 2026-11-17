@@ -2854,13 +2854,11 @@ class SessionRuntime:
         session_id: str,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         completions, _refreshing = await self.get_command_completions(
             session_id,
             trigger=trigger,
-            prefix=prefix,
             force_refresh=force_refresh,
         )
         return completions
@@ -2870,7 +2868,6 @@ class SessionRuntime:
         session_id: str,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> tuple[list[CommandCompletion], bool]:
         session = self.get_session(session_id)
@@ -2883,14 +2880,7 @@ class SessionRuntime:
                 trigger=trigger,
                 force_refresh=True,
             )
-            return (
-                self._filter_command_completions(
-                    self._merge_builtins(builtins, completions),
-                    trigger=trigger,
-                    prefix=prefix,
-                ),
-                False,
-            )
+            return self._merge_builtins(builtins, completions), False
 
         cached = self._completion_cache.get(key)
         updated_at = self._completion_cache_updated_at.get(key, 0.0)
@@ -2901,26 +2891,10 @@ class SessionRuntime:
             self._ensure_command_completion_refresh(session, trigger=trigger)
 
         if cached is None:
-            cached = self._fallback_command_completions(
-                plugin,
-                trigger=trigger,
-                prefix=prefix,
-            )
-            return (
-                self._filter_command_completions(
-                    self._merge_builtins(builtins, cached),
-                    trigger=trigger,
-                    prefix=prefix,
-                ),
-                key in self._completion_refresh_tasks,
-            )
+            cached = self._fallback_command_completions(plugin, trigger=trigger)
 
         return (
-            self._filter_command_completions(
-                self._merge_builtins(builtins, cached),
-                trigger=trigger,
-                prefix=prefix,
-            ),
+            self._merge_builtins(builtins, cached),
             key in self._completion_refresh_tasks,
         )
 
@@ -3034,7 +3008,6 @@ class SessionRuntime:
             self,
             session,
             trigger=trigger,
-            prefix="",
             force_refresh=force_refresh,
         )
         key = (session.id, trigger)
@@ -3047,29 +3020,10 @@ class SessionRuntime:
         plugin: Any,
         *,
         trigger: str,
-        prefix: str,
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        return static_slash_completions(plugin.id, plugin.capabilities, prefix=prefix)
-
-    def _filter_command_completions(
-        self,
-        completions: list[CommandCompletion],
-        *,
-        trigger: str,
-        prefix: str,
-    ) -> list[CommandCompletion]:
-        if not prefix:
-            return list(completions)
-        normalized_prefix = (
-            prefix if prefix.startswith(trigger) else f"{trigger}{prefix}"
-        )
-        return [
-            item
-            for item in completions
-            if f"{item.trigger}{item.name}".startswith(normalized_prefix)
-        ]
+        return static_slash_completions(plugin.id, plugin.capabilities)
 
     def _trust_server_completion_invocation(
         self, session: SessionRecord, request: SessionInputRequest

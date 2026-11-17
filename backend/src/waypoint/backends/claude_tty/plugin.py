@@ -474,32 +474,25 @@ class ClaudeTtyPlugin:
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        completions = static_slash_completions(
-            self.id, self.capabilities, prefix=prefix
-        )
+        completions = static_slash_completions(self.id, self.capabilities)
         # /btw is a Waypoint-owned command; always add it
-        norm_prefix = (
-            prefix if prefix.startswith("/") else f"/{prefix}" if prefix else "/"
-        )
-        if "/btw".startswith(norm_prefix) or norm_prefix == "/":
-            completions.append(
-                CommandCompletion(
-                    id="claude_tty:waypoint:btw",
-                    trigger="/",
-                    replacement="/btw ",
-                    name="btw",
-                    description="Ask a side-question without interrupting the session",
-                    kind="command",
-                    source="waypoint",
-                    dispatch=CompletionDispatch.PLAIN_TEXT,
-                    metadata={"builtin_command": "/btw"},
-                )
+        completions.append(
+            CommandCompletion(
+                id="claude_tty:waypoint:btw",
+                trigger="/",
+                replacement="/btw ",
+                name="btw",
+                description="Ask a side-question without interrupting the session",
+                kind="command",
+                source="waypoint",
+                dispatch=CompletionDispatch.PLAIN_TEXT,
+                metadata={"builtin_command": "/btw"},
             )
+        )
         # Custom commands and skills come from the same on-disk discovery
         # claude_code uses; both wrap the ``claude`` binary in the same cwd.
         launch_target = (
@@ -518,7 +511,6 @@ class ClaudeTtyPlugin:
             dynamic = await list_claude_command_completions(
                 cwd=session.cwd,
                 claude_bin=claude_bin,
-                prefix=prefix,
                 launch_target=launch_target,
                 config_dir=self._config_dir(session),
             )

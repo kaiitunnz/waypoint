@@ -724,13 +724,11 @@ async def test_list_command_completions_uses_backend_static_slash_commands(
     )
     storage.create_session(session)
 
-    completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/co"
-    )
+    completions = await runtime.list_command_completions(session.id, trigger="/")
 
-    assert [item.name for item in completions] == ["compact"]
-    assert completions[0].replacement == "/compact "
-    assert completions[0].dispatch == CompletionDispatch.PLAIN_TEXT
+    compact = next(item for item in completions if item.name == "compact")
+    assert compact.replacement == "/compact "
+    assert compact.dispatch == CompletionDispatch.PLAIN_TEXT
 
 
 @pytest.mark.asyncio
@@ -759,13 +757,13 @@ async def test_list_command_completions_uses_claude_runtime_commands(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/us", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
-    assert [item.name for item in completions] == ["usage"]
-    assert completions[0].replacement == "/usage "
-    assert completions[0].dispatch == CompletionDispatch.PLAIN_TEXT
-    assert completions[0].source == "claude_builtin"
+    usage = next(item for item in completions if item.name == "usage")
+    assert usage.replacement == "/usage "
+    assert usage.dispatch == CompletionDispatch.PLAIN_TEXT
+    assert usage.source == "claude_builtin"
 
 
 @pytest.mark.asyncio
@@ -794,7 +792,7 @@ async def test_list_command_completions_claude_surfaces_reported_and_curated(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
     names = {item.name for item in completions}
@@ -849,10 +847,10 @@ async def test_list_command_completions_claude_uses_stored_init_commands(
     session = runtime.get_session(session.id)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/us", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
-    assert [item.name for item in completions] == ["usage"]
+    assert "usage" in {item.name for item in completions}
 
 
 @pytest.mark.asyncio
@@ -893,12 +891,13 @@ async def test_list_command_completions_claude_merges_dynamic_descriptions(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/front", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
-    assert [item.name for item in completions] == ["frontend-design"]
-    assert completions[0].description == "Design polished frontend interfaces"
-    assert completions[0].metadata["path"] == "/skills/frontend-design/SKILL.md"
+    matching = [item for item in completions if item.name == "frontend-design"]
+    assert len(matching) == 1
+    assert matching[0].description == "Design polished frontend interfaces"
+    assert matching[0].metadata["path"] == "/skills/frontend-design/SKILL.md"
 
 
 @pytest.mark.asyncio
@@ -948,9 +947,7 @@ async def test_list_command_completions_codex_omits_unsupported_legacy_commands(
     session = make_session(settings)
     storage.create_session(session)
 
-    completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/"
-    )
+    completions = await runtime.list_command_completions(session.id, trigger="/")
 
     names = [item.name for item in completions]
     assert "status" in names
@@ -983,7 +980,7 @@ async def test_list_command_completions_uses_codex_skills(tmp_path) -> None:
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="$", prefix="$hum", force_refresh=True
+        session.id, trigger="$", force_refresh=True
     )
 
     assert [item.name for item in completions] == ["humanizer"]
@@ -1087,7 +1084,7 @@ async def test_get_command_completions_injects_waypoint_builtins(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
     names = [item.name for item in completions]
@@ -1113,7 +1110,7 @@ async def test_get_command_completions_skips_fork_for_tmux(tmp_path) -> None:
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="", force_refresh=True
+        session.id, trigger="/", force_refresh=True
     )
 
     names = [item.name for item in completions]
@@ -1138,7 +1135,7 @@ async def test_get_command_completions_omits_builtins_for_non_slash_trigger(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="$", prefix="", force_refresh=True
+        session.id, trigger="$", force_refresh=True
     )
 
     assert all(item.source != "waypoint" for item in completions)
@@ -1253,7 +1250,7 @@ async def test_get_command_completions_returns_cache_while_refreshing(
     storage.create_session(session)
 
     completions, refreshing = await runtime.get_command_completions(
-        session.id, trigger="$", prefix="$hum"
+        session.id, trigger="$"
     )
 
     assert completions == []
@@ -1261,7 +1258,7 @@ async def test_get_command_completions_returns_cache_while_refreshing(
     await asyncio.gather(*runtime._completion_refresh_tasks.values())
 
     completions, refreshing = await runtime.get_command_completions(
-        session.id, trigger="$", prefix="$hum"
+        session.id, trigger="$"
     )
 
     assert [item.name for item in completions] == ["humanizer"]

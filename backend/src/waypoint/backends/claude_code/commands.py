@@ -37,7 +37,6 @@ async def list_claude_command_completions(
     *,
     cwd: str,
     claude_bin: str,
-    prefix: str,
     launch_target: SshLaunchTargetConfig | None = None,
     config_dir: str | None = None,
 ) -> list[CommandCompletion]:
@@ -46,7 +45,7 @@ async def list_claude_command_completions(
         if launch_target is not None
         else await asyncio.to_thread(list_candidates, cwd, claude_bin, config_dir)
     )
-    return _records_to_completions(_records_from_candidates(candidates), prefix)
+    return _records_to_completions(_records_from_candidates(candidates))
 
 
 async def _list_remote_candidates(
@@ -139,9 +138,7 @@ def _records_from_candidates(
 
 def _records_to_completions(
     records: list[dict[str, Any]],
-    prefix: str,
 ) -> list[CommandCompletion]:
-    normalized_prefix = prefix if prefix.startswith("/") else f"/{prefix}"
     completions: list[CommandCompletion] = []
     seen: set[str] = set()
     for record in records:
@@ -149,8 +146,6 @@ def _records_to_completions(
         if not name:
             continue
         command = f"/{name}"
-        if normalized_prefix != "/" and not command.startswith(normalized_prefix):
-            continue
         if command in seen:
             continue
         source = _string_or_none(record.get("source")) or "custom_command"

@@ -5,7 +5,6 @@ import { Fragment } from "react";
 interface HighlightedTextProps {
   text: string;
   positions: ReadonlyArray<number>;
-  // Offer a line break after each `/` so long paths wrap at segment edges.
   breakAfterSlash?: boolean;
 }
 
@@ -23,8 +22,6 @@ function withSlashBreaks(value: string, enabled: boolean) {
   ));
 }
 
-// Renders ``text`` with the characters at ``positions`` wrapped in
-// ``<mark className="match-hit">``, merging adjacent hits into one run.
 export function HighlightedText({
   text,
   positions,

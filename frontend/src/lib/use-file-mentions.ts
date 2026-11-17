@@ -3,7 +3,7 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { wordRangeAt } from "@/lib/composer-completions";
+import { useActiveRow, wordRangeAt } from "@/lib/composer-completions";
 import { fetchSessionAttachments } from "@/lib/api";
 import { rankItems } from "@/lib/fuzzy";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
@@ -38,6 +38,8 @@ export interface FileMentionsState {
 
 const MAX_MENTIONS = 8;
 
+const mentionKey = (row: FileMentionRow) => row.file.id;
+
 // Inline `@name` file referencing: type `@` in the composer to search the
 // session's stored files and pick one. Selecting strips the `@query` token and
 // adds the file to the attachment tray (no re-upload) via `onReference`. Models
@@ -53,11 +55,6 @@ export function useFileMentions({
   onReference,
   textareaRef,
 }: UseFileMentionsOptions): FileMentionsState {
-  // Highlighted file id, tagged with the query it was picked under so ranking
-  // changes as the query grows can't leave Enter on a different file.
-  const [active, setActive] = useState<{ word: string; id: string } | null>(
-    null,
-  );
   const [files, setFiles] = useState<SessionAttachment[] | null>(null);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
@@ -114,18 +111,11 @@ export function useFileMentions({
   }, [isActive, files, query]);
 
   const open = mentions.length > 0;
-  const activeId = active?.word === word ? active.id : null;
-  const activeIndex = Math.max(
-    0,
-    activeId === null
-      ? 0
-      : mentions.findIndex((row) => row.file.id === activeId),
+  const { activeIndex, setActiveIndex, resetActive } = useActiveRow(
+    mentions,
+    mentionKey,
+    word,
   );
-
-  function setActiveIndex(target: number) {
-    const row = mentions[target];
-    if (row) setActive({ word, id: row.file.id });
-  }
 
   function apply(target: number) {
     const chosen = mentions[target]?.file;
@@ -141,7 +131,7 @@ export function useFileMentions({
         : before + tail;
     setDraft(next);
     setCaret(before.length);
-    setActive(null);
+    resetActive();
     onReference(chosen);
     if (textareaRef) {
       requestAnimationFrame(() => {

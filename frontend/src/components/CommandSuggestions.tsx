@@ -9,12 +9,9 @@ import {
   rowHint,
   rowKey,
   rowLabel,
+  rowSection,
   type SuggestionRow,
 } from "@/lib/composer-completions";
-
-function rowSection(row: SuggestionRow | undefined): string | null {
-  return row?.type === "workspace_path" ? row.section : null;
-}
 
 interface CommandSuggestionsProps {
   suggestions: ReadonlyArray<SuggestionRow>;
@@ -34,10 +31,9 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
         {suggestions.map((entry, index) => {
           const hint = rowHint(entry);
           const description = rowDescription(entry);
-          // Caption the repo-wide group only where it follows directory rows.
+          const isWorkspace = rowSection(entry) === "workspace";
           const startsWorkspace =
-            rowSection(entry) === "workspace" &&
-            rowSection(suggestions[index - 1]) === "dir";
+            isWorkspace && rowSection(suggestions[index - 1]) === "dir";
           return (
             <Fragment key={rowKey(entry)}>
               {startsWorkspace ? (
@@ -53,7 +49,7 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
                   type="button"
                   role="option"
                   aria-selected={index === activeIndex}
-                  className={`slash-suggestion${rowSection(entry) === "workspace" ? " path-row" : ""}${index === activeIndex ? " active" : ""}`}
+                  className={`slash-suggestion${isWorkspace ? " path-row" : ""}${index === activeIndex ? " active" : ""}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     onApply(index);
@@ -64,7 +60,7 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
                     <HighlightedText
                       text={rowLabel(entry)}
                       positions={entry.positions}
-                      breakAfterSlash={rowSection(entry) === "workspace"}
+                      breakAfterSlash={isWorkspace}
                     />
                     {hint ? <span className="slash-hint">{hint}</span> : null}
                   </span>

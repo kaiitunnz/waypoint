@@ -1,19 +1,19 @@
-// Ranked matching for composer completions. Tiers order how a query hit a
-// name; lower is better. Smart-case: a query with an uppercase letter matches
-// case-sensitively, so `$HOME` never fuzzy-hits a lowercase skill name.
-export const MatchTier = {
+// Ranked matching for composer completions; a lower tier ranks first.
+// Smart-case: a query with an uppercase letter matches case-sensitively, so
+// `$HOME` never hits a lowercase skill name.
+const MatchTier = {
   Exact: 0,
   Prefix: 1,
   WordStart: 2,
-  // Letters in order starting at the name's first character: `fe` → frontend.
+  // Letters in order from the first character: `fe` → `frontend`.
   Abbreviation: 3,
   Substring: 4,
   Subsequence: 5,
   Description: 6,
 } as const;
-export type MatchTier = (typeof MatchTier)[keyof typeof MatchTier];
+type MatchTier = (typeof MatchTier)[keyof typeof MatchTier];
 
-export interface TextMatch {
+interface TextMatch {
   tier: MatchTier;
   score: number;
   positions: number[];
@@ -21,20 +21,17 @@ export interface TextMatch {
 
 export interface RankedItem<T> {
   item: T;
-  tier: MatchTier | null;
   positions: number[];
   descriptionPositions: number[];
 }
 
 export interface RankOptions {
-  // Restrict to exact/prefix hits, e.g. for a query with characters outside
-  // the command alphabet.
+  // Exact and prefix hits only.
   prefixOnly?: boolean;
 }
 
-// Shorter queries are too permissive for these tiers: a single letter appears
-// inside nearly every name, and a 1–2-char description word matches almost
-// everything.
+// One letter appears inside most names, and a short description word matches
+// almost anything.
 const MIN_INNER_QUERY = 2;
 const MIN_DESCRIPTION_QUERY = 3;
 
@@ -50,7 +47,7 @@ function isWordStart(text: string, index: number): boolean {
   return prev >= "a" && prev <= "z" && ch >= "A" && ch <= "Z";
 }
 
-function span(start: number, length: number): number[] {
+export function span(start: number, length: number): number[] {
   return Array.from({ length }, (_, offset) => start + offset);
 }
 
@@ -78,8 +75,7 @@ function isSegmentEnd(text: string, index: number): boolean {
   return index === text.length || SEPARATOR.test(text[index]);
 }
 
-// The first word-start occurrence of ``needle`` past index 0, preferring one
-// that spans a whole segment (`pr` in `create-pr` over `pr` in `project`).
+// Prefers a hit spanning a whole segment: `pr` in `create-pr` over `project`.
 function wordStartIndex(
   needle: string,
   hay: string,
@@ -98,9 +94,7 @@ function wordStartIndex(
   return first === null ? null : { index: first, whole: false };
 }
 
-// Best-scoring in-order alignment of ``needle`` in ``hay`` starting at
-// ``start``: +1 per char, +10 per word-start hit, +5 per consecutive hit, and a
-// small penalty for a late start so `review-pr` beats `ns:review-pr`.
+// A late start costs a little, so `review-pr` beats `ns:review-pr`.
 function alignFrom(
   needle: string,
   hay: string,
@@ -114,8 +108,8 @@ function alignFrom(
     const ch = needle[qi];
     const next = hay.indexOf(ch, prev + 1);
     if (next === -1) return null;
-    // Prefer a later word-start occurrence over a mid-word one, unless the
-    // nearest hit is consecutive or the jump would strand the rest of the query.
+    // Jump to a later word-start hit unless the nearest one is consecutive or
+    // the jump would strand the rest of the query.
     let pick = next;
     if (next !== prev + 1 && !isWordStart(text, next)) {
       for (let j = hay.indexOf(ch, next + 1); j !== -1; j = hay.indexOf(ch, j + 1)) {
@@ -153,12 +147,12 @@ function subsequence(
   return best;
 }
 
-export function matchText(
+// Mirrors _segment_score in backend workspace_preview.py; keep the tiers in sync.
+function matchText(
   query: string,
   text: string,
   options: RankOptions = {},
 ): TextMatch | null {
-  if (!query) return { tier: MatchTier.Exact, score: 0, positions: [] };
   const [needle, hay] = fold(query, text);
   if (hay === needle) {
     return { tier: MatchTier.Exact, score: 0, positions: span(0, needle.length) };
@@ -200,9 +194,8 @@ function matchDescription(query: string, description: string): number[] | null {
   return index === undefined ? null : span(index, needle.length);
 }
 
-// Rank ``items`` against ``query``. An empty query keeps every item in its
-// original order; otherwise non-matches drop out and ties keep original order,
-// so a backend's grouping (e.g. Waypoint built-ins first) survives.
+// An empty query keeps every item. Ties keep input order, so the caller's
+// grouping survives.
 export function rankItems<T>(
   items: ReadonlyArray<T>,
   query: string,
@@ -211,25 +204,14 @@ export function rankItems<T>(
   options: RankOptions = {},
 ): RankedItem<T>[] {
   if (!query) {
-    return items.map((item) => ({
-      item,
-      tier: null,
-      positions: [],
-      descriptionPositions: [],
-    }));
+    return items.map((item) => ({ item, positions: [], descriptionPositions: [] }));
   }
-  const scored: Array<RankedItem<T> & { score: number; index: number }> = [];
+  const scored: Array<RankedItem<T> & { tier: MatchTier; score: number; index: number }> =
+    [];
   items.forEach((item, index) => {
     const hit = matchText(query, name(item), options);
     if (hit) {
-      scored.push({
-        item,
-        tier: hit.tier,
-        score: hit.score,
-        index,
-        positions: hit.positions,
-        descriptionPositions: [],
-      });
+      scored.push({ item, ...hit, index, descriptionPositions: [] });
       return;
     }
     if (options.prefixOnly) return;
@@ -246,26 +228,18 @@ export function rankItems<T>(
       });
     }
   });
-  scored.sort(
-    (a, b) =>
-      (a.tier ?? 0) - (b.tier ?? 0) || b.score - a.score || a.index - b.index,
-  );
-  return scored.map(({ item, tier, positions, descriptionPositions }) => ({
+  scored.sort((a, b) => a.tier - b.tier || b.score - a.score || a.index - b.index);
+  return scored.map(({ item, positions, descriptionPositions }) => ({
     item,
-    tier,
     positions,
     descriptionPositions,
   }));
 }
 
-// Matched positions in a workspace path, mirroring the server's ranking
-// (`rank_files`), or null when the path doesn't match. Case-insensitive. A
-// query with `/` matches segment by segment in order: folders in between may
-// be skipped, and the last segment matches the file name unless the query ends
-// with `/`. Otherwise the query may match anywhere in the path, preferring the
-// last contiguous hit (usually the file name).
+// Highlight positions for a rank_files hit, or null when the path doesn't
+// match. Mirrors _segment_path_score for queries with `/`, binding each folder
+// segment to its earliest match.
 export function matchPath(path: string, query: string): number[] | null {
-  if (!query) return [];
   const needle = query.toLowerCase();
   if (!needle.includes("/")) {
     const hay = path.toLowerCase();
@@ -283,12 +257,9 @@ export function matchPath(path: string, query: string): number[] | null {
   }
   const name = segments[segments.length - 1];
   const folders = segments.slice(0, -1);
-  const wantsName = !needle.endsWith("/");
-  const folderParts = wantsName ? parts.slice(0, -1) : parts;
   const positions: number[] = [];
-  // Earliest in-order folder for each part: feasible whenever any order is.
   let next = 0;
-  for (const part of folderParts) {
+  for (const part of parts.slice(0, -1)) {
     let hit: TextMatch | null = null;
     for (; next < folders.length && !hit; next++) {
       hit = matchText(part, folders[next].text);
@@ -296,10 +267,8 @@ export function matchPath(path: string, query: string): number[] | null {
     }
     if (!hit) return null;
   }
-  if (wantsName) {
-    const hit = matchText(parts[parts.length - 1], name.text);
-    if (!hit) return null;
-    positions.push(...hit.positions.map((i) => i + name.start));
-  }
+  const hit = matchText(parts[parts.length - 1], name.text);
+  if (!hit) return null;
+  positions.push(...hit.positions.map((i) => i + name.start));
   return positions;
 }

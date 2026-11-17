@@ -9,7 +9,7 @@ import {
   fetchWorkspaceTree,
   type WorkspaceTreeEntry,
 } from "@/lib/api";
-import { matchPath, rankItems } from "@/lib/fuzzy";
+import { matchPath, rankItems, span } from "@/lib/fuzzy";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type {
   CommandCompletion,
@@ -19,15 +19,14 @@ import type {
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 const COMPLETION_REFRESH_POLL_MS = 750;
 const WORKSPACE_PATH_PAGE_LIMIT = 200;
-// Repo-wide search runs `git ls-files` (over SSH for remote sessions) per
-// query, so it waits a little longer than a directory listing.
+// Each find runs `git ls-files` (over SSH when remote), so it debounces longer.
 const WORKSPACE_FIND_DEBOUNCE_MS = 250;
 const WORKSPACE_FIND_LIMIT = 20;
 // A one-letter query fuzzy-hits nearly every file in the repo.
 const WORKSPACE_FIND_MIN_CHARS = 2;
-// A query with any other character (e.g. the `/` of `/etc/hosts`) is prose or
-// a path, not a fuzzy command search, so it only gets exact/prefix hits.
+// Other characters (`/etc/hosts`) mean a path or prose: exact/prefix hits only.
 const COMMAND_QUERY = /^[A-Za-z0-9_.:-]*$/;
+const PATH_TRIGGER = "./";
 
 // `/new` works on every structured backend so we surface it locally
 // while the debounced fetch is in flight or if the request fails. Tmux
@@ -45,21 +44,17 @@ export const SLASH_NEW_FALLBACK: CommandCompletion = {
   metadata: {},
 };
 
-// Which group a `./` row belongs to: the children of the typed directory, or a
-// repo-wide fuzzy hit.
-export type WorkspacePathSection = "dir" | "workspace";
-
 // A `./` workspace path candidate; selecting it edits the draft, never dispatches.
 export interface WorkspacePathSuggestion {
   type: "workspace_path";
   replacement: string;
   description: "Directory" | "File" | "Symlink";
-  section: WorkspacePathSection;
+  section: "dir" | "workspace";
   // Matched character indices into ``replacement``.
   positions: number[];
 }
 
-export interface CommandSuggestion {
+interface CommandSuggestion {
   type: "command";
   command: CommandCompletion;
   // Matched character indices into ``commandLabel(command)``.
@@ -97,14 +92,18 @@ export function rowHint(row: SuggestionRow): string | null {
   return row.type === "command" ? row.command.argument_hint ?? null : null;
 }
 
+export function rowSection(row: SuggestionRow | undefined): "dir" | "workspace" | null {
+  return row?.type === "workspace_path" ? row.section : null;
+}
+
 // Split a `./` caret token into the directory to list and the leaf being typed.
 // Null when the token isn't `./`-rooted or a directory segment is `.`/`..`, so
 // an out-of-scope prefix never becomes a valid query.
 export function parseWorkspacePathToken(
   head: string,
 ): { dir: string; leaf: string } | null {
-  if (!head.startsWith("./")) return null;
-  const fragment = head.slice(2);
+  if (!head.startsWith(PATH_TRIGGER)) return null;
+  const fragment = head.slice(PATH_TRIGGER.length);
   const lastSlash = fragment.lastIndexOf("/");
   const dir = lastSlash === -1 ? "" : fragment.slice(0, lastSlash);
   const leaf = lastSlash === -1 ? fragment : fragment.slice(lastSlash + 1);
@@ -120,7 +119,7 @@ function dirPathRow(
   entry: WorkspaceTreeEntry,
   leafLength: number,
 ): WorkspacePathSuggestion {
-  const prefix = dir ? `./${dir}/` : "./";
+  const prefix = dir ? `${PATH_TRIGGER}${dir}/` : PATH_TRIGGER;
   const suffix = entry.kind === "dir" ? "/" : "";
   const description =
     entry.kind === "dir"
@@ -133,7 +132,7 @@ function dirPathRow(
     replacement: `${prefix}${entry.name}${suffix}`,
     description,
     section: "dir",
-    positions: Array.from({ length: leafLength }, (_, i) => prefix.length + i),
+    positions: span(prefix.length, leafLength),
   };
 }
 
@@ -143,22 +142,21 @@ function workspaceFindRow(
 ): WorkspacePathSuggestion {
   return {
     type: "workspace_path",
-    replacement: `./${path}`,
+    replacement: `${PATH_TRIGGER}${path}`,
     description: "File",
     section: "workspace",
-    positions: (matchPath(path, fragment) ?? []).map((index) => index + 2),
+    positions: (matchPath(path, fragment) ?? []).map(
+      (index) => index + PATH_TRIGGER.length,
+    ),
   };
 }
 
 interface DirPage {
   dir: string;
+  // Lowercased `name_prefix` the page was fetched with; "" for a full listing.
+  namePrefix: string;
   entries: WorkspaceTreeEntry[];
   truncated: boolean;
-}
-
-interface FilteredDirPage extends DirPage {
-  // Lowercased ``name_prefix`` the page was fetched with.
-  namePrefix: string;
 }
 
 interface FindPage {
@@ -166,30 +164,32 @@ interface FindPage {
   paths: string[];
 }
 
-// The entries to filter for ``dir``/``leaf``: a complete base page, else a
-// filtered page that still covers the leaf, else the partial base page while
-// the filtered fetch is in flight.
+// A truncated page answers only the exact prefix it was fetched with.
+function pageCovers(
+  page: DirPage | null,
+  dir: string,
+  leaf: string,
+): page is DirPage {
+  const needle = leaf.toLowerCase();
+  return (
+    page !== null &&
+    page.dir === dir &&
+    needle.startsWith(page.namePrefix) &&
+    (needle === page.namePrefix || !page.truncated)
+  );
+}
+
+// Falls back to the partial base page while a filtered fetch is in flight.
 function dirEntriesFor(
   dir: string,
   leaf: string,
   base: DirPage | null,
-  filtered: FilteredDirPage | null,
-): WorkspaceTreeEntry[] | null {
-  const baseMatches = base !== null && base.dir === dir;
-  if (baseMatches && !base.truncated) return base.entries;
-  if (filtered && filteredCovers(filtered, dir, leaf)) return filtered.entries;
-  return baseMatches ? base.entries : null;
-}
-
-// A filtered page answers a longer leaf only when it wasn't itself truncated.
-function filteredCovers(
-  page: FilteredDirPage,
-  dir: string,
-  leaf: string,
-): boolean {
-  const needle = leaf.toLowerCase();
-  if (page.dir !== dir || !needle.startsWith(page.namePrefix)) return false;
-  return needle === page.namePrefix || !page.truncated;
+  filtered: DirPage | null,
+): WorkspaceTreeEntry[] {
+  for (const page of [base, filtered]) {
+    if (pageCovers(page, dir, leaf)) return page.entries;
+  }
+  return base?.dir === dir ? base.entries : [];
 }
 
 interface UseCommandCompletionsOptions {
@@ -234,12 +234,6 @@ export function useCommandCompletions({
   textareaRef,
 }: UseCommandCompletionsOptions): CommandCompletionsState {
   const pathCompletionEnabled = pathEnabled ?? enabled;
-  // The highlighted row, tracked by key so rows landing asynchronously (find
-  // results, a filtered page, a refresh poll) don't move it to another item.
-  // Tagged with the head it was picked under; a null key follows row 0.
-  const [active, setActive] = useState<{ head: string; key: string } | null>(
-    null,
-  );
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   // The full list for one trigger, tagged so a `/` list never ranks under `$`.
   const [backendCompletions, setBackendCompletions] = useState<{
@@ -249,9 +243,7 @@ export function useCommandCompletions({
   // The last workspace directory page, tagged with its directory so a stale
   // response for another token is ignored.
   const [pathPage, setPathPage] = useState<DirPage | null>(null);
-  const [filteredPage, setFilteredPage] = useState<FilteredDirPage | null>(
-    null,
-  );
+  const [filteredPage, setFilteredPage] = useState<DirPage | null>(null);
   const [findPage, setFindPage] = useState<FindPage | null>(null);
   const [selectedCompletion, setSelectedCompletion] =
     useState<CommandCompletion | null>(null);
@@ -299,7 +291,7 @@ export function useCommandCompletions({
     : completionHead.startsWith("$")
       ? "$"
       : null;
-  const isPathHead = completionHead.startsWith("./");
+  const isPathHead = completionHead.startsWith(PATH_TRIGGER);
   const onCompletableToken = completionTrigger !== null || isPathHead;
   const pathToken = useMemo(
     () =>
@@ -308,25 +300,18 @@ export function useCommandCompletions({
         : null,
     [completionHead, isPathHead, pathCompletionEnabled, suggestionsDismissed],
   );
-  const pathFragment = completionHead.slice(2);
-  // The directory a `./` token would list. Keyed on the directory (not the
-  // whole token) so typing the leaf filters the loaded page client-side.
+  const pathFragment = completionHead.slice(PATH_TRIGGER.length);
+  // Keyed on the directory so typing the leaf filters the loaded page.
   const pathQueryDir = pathToken?.dir ?? null;
-  // A truncated listing can't answer the leaf by itself; refetch the directory
-  // filtered by name so entries past the first page stay reachable.
-  const filteredQuery =
-    pathToken &&
-    pathToken.leaf &&
+  // A truncated listing can't answer the leaf; refetch filtered by name.
+  const filteredNamePrefix =
+    pathToken?.leaf &&
     pathPage?.dir === pathToken.dir &&
-    pathPage.truncated &&
-    !(filteredPage && filteredCovers(filteredPage, pathToken.dir, pathToken.leaf))
-      ? { dir: pathToken.dir, namePrefix: pathToken.leaf.toLowerCase() }
+    !pageCovers(pathPage, pathToken.dir, pathToken.leaf) &&
+    !pageCovers(filteredPage, pathToken.dir, pathToken.leaf)
+      ? pathToken.leaf.toLowerCase()
       : null;
-  const filteredQueryKey = filteredQuery
-    ? `${filteredQuery.dir}\0${filteredQuery.namePrefix}`
-    : null;
-  // Repo-wide search needs a file-name segment to match; a bare `./dir/` is
-  // path-walking and lists only that directory.
+  // A bare `./dir/` only lists that directory.
   const findQuery =
     pathToken &&
     pathToken.leaf &&
@@ -341,15 +326,12 @@ export function useCommandCompletions({
       if (!pathToken) return [];
       const { dir, leaf } = pathToken;
       const lowered = leaf.toLowerCase();
-      const dirRows = (
-        dirEntriesFor(dir, leaf, pathPage, filteredPage) ?? []
-      )
+      const dirRows = dirEntriesFor(dir, leaf, pathPage, filteredPage)
         .filter((entry) => entry.name.toLowerCase().startsWith(lowered))
         .map((entry) => dirPathRow(dir, entry, leaf.length));
       if (findQuery === null || findPage === null) return dirRows;
       const seen = new Set(dirRows.map((row) => row.replacement));
-      // Until the new query's results land, keep the previous ones that
-      // still match rather than flickering the section shut.
+      // Until the new results land, keep previous ones that still match.
       const paths =
         findPage.query === findQuery
           ? findPage.paths
@@ -366,11 +348,10 @@ export function useCommandCompletions({
       backendCompletions?.trigger === completionTrigger
         ? backendCompletions.entries
         : [];
-    const pool = (
+    const pool =
       completionTrigger === "/"
         ? mergeLocalFallback(loaded, localFallback)
-        : loaded
-    ).filter((entry) => entry.trigger === completionTrigger);
+        : loaded;
     const query = completionHead.slice(completionTrigger.length);
     return rankItems(
       pool,
@@ -403,18 +384,11 @@ export function useCommandCompletions({
   // token, so its presence is the open condition — no whole-draft test that
   // would suppress mid-prompt triggers.
   const suggestionsOpen = suggestions.length > 0;
-  const activeKey = active?.head === completionHead ? active.key : null;
-  const activeIndex = Math.max(
-    0,
-    activeKey === null
-      ? 0
-      : suggestions.findIndex((row) => rowKey(row) === activeKey),
+  const { activeIndex, setActiveIndex, resetActive } = useActiveRow(
+    suggestions,
+    rowKey,
+    completionHead,
   );
-
-  function setActiveIndex(index: number) {
-    const row = suggestions[index];
-    if (row) setActive({ head: completionHead, key: rowKey(row) });
-  }
 
   useEffect(() => {
     if (!enabled || completionTrigger === null) {
@@ -474,7 +448,12 @@ export function useCommandCompletions({
       })
         .then((page) => {
           if (controller.signal.aborted) return;
-          setPathPage({ dir, entries: page.entries, truncated: page.truncated });
+          setPathPage({
+            dir,
+            namePrefix: "",
+            entries: page.entries,
+            truncated: page.truncated,
+          });
         })
         .catch((error) => {
           if (error instanceof DOMException && error.name === "AbortError") {
@@ -492,8 +471,9 @@ export function useCommandCompletions({
   }, [host, token, sessionId, pathQueryDir]);
 
   useEffect(() => {
-    if (filteredQueryKey === null) return;
-    const [dir, namePrefix] = filteredQueryKey.split("\0");
+    if (pathQueryDir === null || filteredNamePrefix === null) return;
+    const dir = pathQueryDir;
+    const namePrefix = filteredNamePrefix;
     const controller = new AbortController();
     const debounceTimer = window.setTimeout(() => {
       fetchWorkspaceTree(host, token, sessionId, dir, {
@@ -516,7 +496,7 @@ export function useCommandCompletions({
       controller.abort();
       window.clearTimeout(debounceTimer);
     };
-  }, [host, token, sessionId, filteredQueryKey]);
+  }, [host, token, sessionId, pathQueryDir, filteredNamePrefix]);
 
   useEffect(() => {
     if (findQuery === null) return;
@@ -672,7 +652,7 @@ export function useCommandCompletions({
   function reset() {
     setSelectedCompletion(null);
     setSuggestionsDismissed(false);
-    setActive(null);
+    resetActive();
   }
 
   return {
@@ -688,6 +668,27 @@ export function useCommandCompletions({
     handleSuggestionKey,
     reset,
   };
+}
+
+// The highlighted row of an inline menu, tracked by key so rows landing
+// asynchronously can't move it to another item. Scoped to the query it was
+// picked under; until one is picked, it follows row 0.
+export function useActiveRow<T>(
+  rows: ReadonlyArray<T>,
+  keyOf: (row: T) => string,
+  scope: string,
+) {
+  const [active, setActive] = useState<{ scope: string; key: string } | null>(
+    null,
+  );
+  const key = active?.scope === scope ? active.key : null;
+  const activeIndex =
+    key === null ? 0 : Math.max(0, rows.findIndex((row) => keyOf(row) === key));
+  function setActiveIndex(index: number) {
+    const row = rows[index];
+    if (row) setActive({ scope, key: keyOf(row) });
+  }
+  return { activeIndex, setActiveIndex, resetActive: () => setActive(null) };
 }
 
 // The [start, end) bounds of the non-whitespace word that ``pos`` sits in (or

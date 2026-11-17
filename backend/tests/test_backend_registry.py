@@ -94,7 +94,6 @@ class _StubPlugin:
         session: Any,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[Any]:
         return []

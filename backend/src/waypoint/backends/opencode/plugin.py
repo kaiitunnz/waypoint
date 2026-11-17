@@ -900,14 +900,11 @@ class OpenCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        completions = static_slash_completions(
-            self.id, self.capabilities, prefix=prefix
-        )
+        completions = static_slash_completions(self.id, self.capabilities)
         try:
             adapter = self._require_adapter(
                 runtime,
@@ -924,7 +921,6 @@ class OpenCodePlugin(DefaultLaunchContract):
         except Exception:
             return completions
 
-        normalized_prefix = prefix if prefix.startswith("/") else f"/{prefix}"
         seen = {f"/{item.name}" for item in completions}
         for item in commands:
             if not isinstance(item, dict):
@@ -933,8 +929,6 @@ class OpenCodePlugin(DefaultLaunchContract):
             if not isinstance(name, str) or not name:
                 continue
             command = f"/{name}"
-            if normalized_prefix != "/" and not command.startswith(normalized_prefix):
-                continue
             if command in seen:
                 continue
             description = item.get("description")

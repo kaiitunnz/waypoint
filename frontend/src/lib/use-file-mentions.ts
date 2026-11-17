@@ -3,8 +3,9 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { wordRangeAt } from "@/lib/composer-completions";
+import { useActiveRow, wordRangeAt } from "@/lib/composer-completions";
 import { fetchSessionAttachments } from "@/lib/api";
+import { rankItems } from "@/lib/fuzzy";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type { SessionAttachment } from "@/lib/types";
 
@@ -19,8 +20,14 @@ interface UseFileMentionsOptions {
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
+// A ranked `@` candidate; ``positions`` index into ``file.filename``.
+export interface FileMentionRow {
+  file: SessionAttachment;
+  positions: number[];
+}
+
 export interface FileMentionsState {
-  mentions: ReadonlyArray<SessionAttachment>;
+  mentions: ReadonlyArray<FileMentionRow>;
   open: boolean;
   activeIndex: number;
   setActiveIndex: (index: number) => void;
@@ -30,6 +37,8 @@ export interface FileMentionsState {
 }
 
 const MAX_MENTIONS = 8;
+
+const mentionKey = (row: FileMentionRow) => row.file.id;
 
 // Inline `@name` file referencing: type `@` in the composer to search the
 // session's stored files and pick one. Selecting strips the `@query` token and
@@ -46,7 +55,6 @@ export function useFileMentions({
   onReference,
   textareaRef,
 }: UseFileMentionsOptions): FileMentionsState {
-  const [index, setIndex] = useState(0);
   const [files, setFiles] = useState<SessionAttachment[] | null>(null);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
@@ -74,12 +82,12 @@ export function useFileMentions({
   const [wordStart] = wordRangeAt(draft, caretPos);
   const word = draft.slice(wordStart, caretPos);
   const query = word.startsWith("@") ? word.slice(1) : null;
-  const active = enabled && query !== null && dismissedQuery !== word;
+  const isActive = enabled && query !== null && dismissedQuery !== word;
 
   // Load the session's files when a mention opens; clear when it closes so the
   // next `@` refetches a fresh list.
   useEffect(() => {
-    if (!active) {
+    if (!isActive) {
       setFiles(null);
       return;
     }
@@ -93,21 +101,24 @@ export function useFileMentions({
         if (!controller.signal.aborted) setFiles([]);
       });
     return () => controller.abort();
-  }, [active, files, host, token, sessionId]);
+  }, [isActive, files, host, token, sessionId]);
 
-  const mentions = useMemo<ReadonlyArray<SessionAttachment>>(() => {
-    if (!active || files === null) return [];
-    const needle = (query ?? "").toLowerCase();
-    return files
-      .filter((file) => file.filename.toLowerCase().includes(needle))
-      .slice(0, MAX_MENTIONS);
-  }, [active, files, query]);
+  const mentions = useMemo<ReadonlyArray<FileMentionRow>>(() => {
+    if (!isActive || files === null) return [];
+    return rankItems(files, query ?? "", (file) => file.filename)
+      .slice(0, MAX_MENTIONS)
+      .map(({ item, positions }) => ({ file: item, positions }));
+  }, [isActive, files, query]);
 
   const open = mentions.length > 0;
-  const activeIndex = Math.min(index, Math.max(0, mentions.length - 1));
+  const { activeIndex, setActiveIndex, resetActive } = useActiveRow(
+    mentions,
+    mentionKey,
+    word,
+  );
 
   function apply(target: number) {
-    const chosen = mentions[target];
+    const chosen = mentions[target]?.file;
     if (!chosen) return;
     const pos = textareaRef ? Math.min(caret, draft.length) : draft.length;
     const [start, end] = wordRangeAt(draft, pos);
@@ -120,7 +131,7 @@ export function useFileMentions({
         : before + tail;
     setDraft(next);
     setCaret(before.length);
-    setIndex(0);
+    resetActive();
     onReference(chosen);
     if (textareaRef) {
       requestAnimationFrame(() => {
@@ -141,12 +152,12 @@ export function useFileMentions({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setIndex((i) => Math.min(mentions.length - 1, i + 1));
+      setActiveIndex(Math.min(mentions.length - 1, activeIndex + 1));
       return true;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setIndex((i) => Math.max(0, i - 1));
+      setActiveIndex(Math.max(0, activeIndex - 1));
       return true;
     }
     if (event.key === "Escape") {
@@ -161,7 +172,7 @@ export function useFileMentions({
     mentions,
     open,
     activeIndex,
-    setActiveIndex: setIndex,
+    setActiveIndex,
     itemRefs,
     apply,
     handleKey,

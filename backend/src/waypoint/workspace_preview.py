@@ -160,6 +160,7 @@ def list_dir(
     denylist: list[str] | None = None,
     follow_symlinks: bool = False,
     offset: int = 0,
+    name_prefix: str = "",
 ) -> tuple[list[WorkspaceEntry], bool, int | None, Path]:
     if is_denied(rel, denylist):
         raise WorkspacePathError("path is denied")
@@ -170,8 +171,11 @@ def list_dir(
         raise NotADirectoryError(directory)
 
     base_resolved = base.expanduser().resolve()
+    needle = name_prefix.lower()
     allowed: list[WorkspaceEntry] = []
     for child in directory.iterdir():
+        if needle and not child.name.lower().startswith(needle):
+            continue
         child_rel = child.relative_to(base_resolved)
         if is_denied(child_rel, denylist):
             continue
@@ -291,6 +295,72 @@ def _subsequence_score(query: str, path: str) -> int | None:
     return score
 
 
+_SEGMENT_SEPARATORS = "-_:. "
+# One letter appears inside most names.
+_MIN_INNER_SEGMENT_QUERY = 2
+
+
+def _is_word_start(text: str, index: int) -> bool:
+    if index == 0:
+        return True
+    prev, ch = text[index - 1], text[index]
+    return prev in _SEGMENT_SEPARATORS or (prev.islower() and ch.isupper())
+
+
+def _is_subsequence(needle: str, hay: str) -> bool:
+    rest = iter(hay)
+    return all(ch in rest for ch in needle)
+
+
+def _segment_score(query: str, segment: str) -> int | None:
+    # Mirrors matchText in frontend/src/lib/fuzzy.ts; keep the tiers in sync.
+    needle = query.lower()
+    hay = segment.lower()
+    if hay == needle:
+        return 100
+    if hay.startswith(needle):
+        return 80
+    starts = [i for i in range(1, len(hay)) if _is_word_start(segment, i)]
+    if any(hay.startswith(needle, i) for i in starts):
+        return 60
+    if len(needle) < _MIN_INNER_SEGMENT_QUERY:
+        return None
+    if hay[0] == needle[0] and _is_subsequence(needle[1:], hay[1:]):
+        return 50
+    if needle in hay:
+        return 40
+    for start in starts:
+        if hay[start] == needle[0] and _is_subsequence(needle[1:], hay[start + 1 :]):
+            return 20
+    return None
+
+
+def _segment_path_score(query: str, path: str) -> int | None:
+    # Query segments match path segments in order, each within one segment;
+    # folders between may be skipped. A trailing "/" matches any file under the
+    # folders. Folders bind to the earliest match, as matchPath highlights them.
+    parts = [part for part in query.split("/") if part]
+    if not parts:
+        return None
+    *dirs, name = path.split("/")
+    wants_name = not query.endswith("/")
+    folder_parts = parts[:-1] if wants_name else parts
+    score = 0
+    if wants_name:
+        if (name_score := _segment_score(parts[-1], name)) is None:
+            return None
+        score = 2 * name_score
+    folders = iter(dirs)
+    for part in folder_parts:
+        hit = next(
+            (s for f in folders if (s := _segment_score(part, f)) is not None), None
+        )
+        if hit is None:
+            return None
+        score += hit
+    return score - (len(dirs) - len(folder_parts))
+
+
 def rank_files(
     query: str,
     paths: list[str],
@@ -302,11 +372,12 @@ def rank_files(
     # query matches nothing (callers should not search on a blank input).
     if not query:
         return [], False
+    score_path = _segment_path_score if "/" in query else _subsequence_score
     scored: list[tuple[int, int, str]] = []
     for path in paths:
         if is_denied(path, denylist):
             continue
-        result = _subsequence_score(query, path)
+        result = score_path(query, path)
         if result is None:
             continue
         scored.append((result, len(path), path))
@@ -358,10 +429,11 @@ def op_list_dir(
     offset: int,
     denylist: list[str] | None,
     follow_symlinks: bool,
+    name_prefix: str = "",
 ) -> DirListing:
     base_path = Path(base)
     entries, truncated, overflow, directory = list_dir(
-        base_path, rel, cap, denylist, follow_symlinks, offset
+        base_path, rel, cap, denylist, follow_symlinks, offset, name_prefix
     )
     return {
         "entries": entries,

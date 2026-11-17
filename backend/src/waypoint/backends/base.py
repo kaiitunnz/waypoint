@@ -462,7 +462,6 @@ class BackendPlugin(Protocol):
         session: SessionRecord,
         *,
         trigger: str = "/",
-        prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
         """Return command or skill completions available in a session."""

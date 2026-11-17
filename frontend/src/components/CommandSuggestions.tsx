@@ -1,12 +1,15 @@
 "use client";
 
-import { forwardRef, MutableRefObject } from "react";
+import { forwardRef, Fragment, MutableRefObject } from "react";
 
+import { HighlightedText } from "@/components/HighlightedText";
 import {
   rowDescription,
+  rowDescriptionPositions,
   rowHint,
   rowKey,
   rowLabel,
+  rowSection,
   type SuggestionRow,
 } from "@/lib/composer-completions";
 
@@ -28,31 +31,50 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
         {suggestions.map((entry, index) => {
           const hint = rowHint(entry);
           const description = rowDescription(entry);
+          const isWorkspace = rowSection(entry) === "workspace";
+          const startsWorkspace =
+            isWorkspace && rowSection(suggestions[index - 1]) === "dir";
           return (
-            <li key={rowKey(entry)}>
-              <button
-                ref={(node) => {
-                  itemRefs.current[index] = node;
-                }}
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                className={`slash-suggestion ${index === activeIndex ? "active" : ""}`}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  onApply(index);
-                }}
-                onMouseEnter={() => onHover(index)}
-              >
-                <span className="slash-name">
-                  {rowLabel(entry)}
-                  {hint ? <span className="slash-hint">{hint}</span> : null}
-                </span>
-                {description ? (
-                  <span className="slash-desc">{description}</span>
-                ) : null}
-              </button>
-            </li>
+            <Fragment key={rowKey(entry)}>
+              {startsWorkspace ? (
+                <li role="presentation" className="slash-section">
+                  Across workspace
+                </li>
+              ) : null}
+              <li>
+                <button
+                  ref={(node) => {
+                    itemRefs.current[index] = node;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={`slash-suggestion${isWorkspace ? " path-row" : ""}${index === activeIndex ? " active" : ""}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    onApply(index);
+                  }}
+                  onMouseEnter={() => onHover(index)}
+                >
+                  <span className="slash-name">
+                    <HighlightedText
+                      text={rowLabel(entry)}
+                      positions={entry.positions}
+                      breakAfterSlash={isWorkspace}
+                    />
+                    {hint ? <span className="slash-hint">{hint}</span> : null}
+                  </span>
+                  {description ? (
+                    <span className="slash-desc">
+                      <HighlightedText
+                        text={description}
+                        positions={rowDescriptionPositions(entry)}
+                      />
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            </Fragment>
           );
         })}
       </ul>

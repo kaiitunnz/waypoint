@@ -796,9 +796,7 @@ async def test_list_command_completions_surfaces_compact(
     runtime._find_launch_target.return_value = None
     session = _make_session()
 
-    completions = await plugin.list_command_completions(
-        runtime, session, prefix="/comp"
-    )
+    completions = await plugin.list_command_completions(runtime, session)
 
     compact = next(c for c in completions if c.name == "compact")
     assert compact.replacement == "/compact "

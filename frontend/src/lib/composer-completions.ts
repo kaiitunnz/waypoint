@@ -9,7 +9,7 @@ import {
   fetchWorkspaceTree,
   type WorkspaceTreeEntry,
 } from "@/lib/api";
-import { highlightPositions, rankItems } from "@/lib/fuzzy";
+import { matchPath, rankItems } from "@/lib/fuzzy";
 import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type {
   CommandCompletion,
@@ -23,8 +23,8 @@ const WORKSPACE_PATH_PAGE_LIMIT = 200;
 // query, so it waits a little longer than a directory listing.
 const WORKSPACE_FIND_DEBOUNCE_MS = 250;
 const WORKSPACE_FIND_LIMIT = 20;
-// A one-letter leaf fuzzy-hits nearly every file in the repo.
-const WORKSPACE_FIND_MIN_LEAF = 2;
+// A one-letter query fuzzy-hits nearly every file in the repo.
+const WORKSPACE_FIND_MIN_CHARS = 2;
 // A query with any other character (e.g. the `/` of `/etc/hosts`) is prose or
 // a path, not a fuzzy command search, so it only gets exact/prefix hits.
 const COMMAND_QUERY = /^[A-Za-z0-9_.:-]*$/;
@@ -84,9 +84,9 @@ export function rowLabel(row: SuggestionRow): string {
 }
 
 export function rowDescription(row: SuggestionRow): string | null {
-  return row.type === "command"
-    ? row.command.description ?? null
-    : row.description;
+  if (row.type === "command") return row.command.description ?? null;
+  // Repo-wide rows are always files; the label would only crowd the path.
+  return row.section === "workspace" ? null : row.description;
 }
 
 export function rowDescriptionPositions(row: SuggestionRow): number[] {
@@ -146,7 +146,7 @@ function workspaceFindRow(
     replacement: `./${path}`,
     description: "File",
     section: "workspace",
-    positions: highlightPositions(path, fragment).map((index) => index + 2),
+    positions: (matchPath(path, fragment) ?? []).map((index) => index + 2),
   };
 }
 
@@ -325,8 +325,12 @@ export function useCommandCompletions({
   const filteredQueryKey = filteredQuery
     ? `${filteredQuery.dir}\0${filteredQuery.namePrefix}`
     : null;
+  // Repo-wide search needs a file-name segment to match; a bare `./dir/` is
+  // path-walking and lists only that directory.
   const findQuery =
-    pathToken && pathToken.leaf.length >= WORKSPACE_FIND_MIN_LEAF
+    pathToken &&
+    pathToken.leaf &&
+    pathFragment.replaceAll("/", "").length >= WORKSPACE_FIND_MIN_CHARS
       ? pathFragment
       : null;
 
@@ -350,7 +354,7 @@ export function useCommandCompletions({
         findPage.query === findQuery
           ? findPage.paths
           : findPage.paths.filter(
-              (path) => highlightPositions(path, findQuery).length > 0,
+              (path) => matchPath(path, findQuery) !== null,
             );
       const workspaceRows = paths
         .map((path) => workspaceFindRow(path, findQuery))

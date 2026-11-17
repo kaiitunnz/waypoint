@@ -53,7 +53,7 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
                   type="button"
                   role="option"
                   aria-selected={index === activeIndex}
-                  className={`slash-suggestion${entry.type === "workspace_path" ? " path-row" : ""}${index === activeIndex ? " active" : ""}`}
+                  className={`slash-suggestion${rowSection(entry) === "workspace" ? " path-row" : ""}${index === activeIndex ? " active" : ""}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     onApply(index);
@@ -64,7 +64,7 @@ export const CommandSuggestions = forwardRef<HTMLUListElement, CommandSuggestion
                     <HighlightedText
                       text={rowLabel(entry)}
                       positions={entry.positions}
-                      breakAfterSlash={entry.type === "workspace_path"}
+                      breakAfterSlash={rowSection(entry) === "workspace"}
                     />
                     {hint ? <span className="slash-hint">{hint}</span> : null}
                   </span>

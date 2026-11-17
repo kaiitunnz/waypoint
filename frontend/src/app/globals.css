@@ -9618,6 +9618,10 @@ html[data-theme="light"] .slash-suggestion.active {
 
 /* Repo-wide paths run long on a phone; wrap them so the filename stays
    visible instead of clipping at the popover edge. */
+.path-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .path-row .slash-name {
   overflow-wrap: anywhere;
 }

@@ -5,9 +5,11 @@ export const MatchTier = {
   Exact: 0,
   Prefix: 1,
   WordStart: 2,
-  Substring: 3,
-  Subsequence: 4,
-  Description: 5,
+  // Letters in order starting at the name's first character: `fe` → frontend.
+  Abbreviation: 3,
+  Substring: 4,
+  Subsequence: 5,
+  Description: 6,
 } as const;
 export type MatchTier = (typeof MatchTier)[keyof typeof MatchTier];
 
@@ -174,6 +176,10 @@ export function matchText(
     };
   }
   if (needle.length < MIN_INNER_QUERY) return null;
+  if (hay[0] === needle[0]) {
+    const abbreviation = alignFrom(needle, hay, text, 0);
+    if (abbreviation) return { ...abbreviation, tier: MatchTier.Abbreviation };
+  }
   const substring = hay.indexOf(needle);
   if (substring !== -1) {
     return {
@@ -252,14 +258,48 @@ export function rankItems<T>(
   }));
 }
 
-// Highlight positions for a server-ranked path: the last contiguous hit
-// (usually the basename), else the best in-order alignment from any start.
-// Case-insensitive, matching the server's ranking.
-export function highlightPositions(text: string, query: string): number[] {
+// Matched positions in a workspace path, mirroring the server's ranking
+// (`rank_files`), or null when the path doesn't match. Case-insensitive. A
+// query with `/` matches segment by segment in order: folders in between may
+// be skipped, and the last segment matches the file name unless the query ends
+// with `/`. Otherwise the query may match anywhere in the path, preferring the
+// last contiguous hit (usually the file name).
+export function matchPath(path: string, query: string): number[] | null {
   if (!query) return [];
   const needle = query.toLowerCase();
-  const hay = text.toLowerCase();
-  const last = hay.lastIndexOf(needle);
-  if (last !== -1) return span(last, needle.length);
-  return subsequence(needle, hay, text, true)?.positions ?? [];
+  if (!needle.includes("/")) {
+    const hay = path.toLowerCase();
+    const last = hay.lastIndexOf(needle);
+    if (last !== -1) return span(last, needle.length);
+    return subsequence(needle, hay, path, true)?.positions ?? null;
+  }
+  const parts = needle.split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+  const segments: Array<{ text: string; start: number }> = [];
+  let offset = 0;
+  for (const text of path.split("/")) {
+    segments.push({ text, start: offset });
+    offset += text.length + 1;
+  }
+  const name = segments[segments.length - 1];
+  const folders = segments.slice(0, -1);
+  const wantsName = !needle.endsWith("/");
+  const folderParts = wantsName ? parts.slice(0, -1) : parts;
+  const positions: number[] = [];
+  // Earliest in-order folder for each part: feasible whenever any order is.
+  let next = 0;
+  for (const part of folderParts) {
+    let hit: TextMatch | null = null;
+    for (; next < folders.length && !hit; next++) {
+      hit = matchText(part, folders[next].text);
+      if (hit) positions.push(...hit.positions.map((i) => i + folders[next].start));
+    }
+    if (!hit) return null;
+  }
+  if (wantsName) {
+    const hit = matchText(parts[parts.length - 1], name.text);
+    if (!hit) return null;
+    positions.push(...hit.positions.map((i) => i + name.start));
+  }
+  return positions;
 }

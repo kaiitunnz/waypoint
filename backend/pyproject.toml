@@ -14,7 +14,7 @@ dependencies = [
   "croniter>=6.0.0",
   "fastapi>=0.162.0",
   "openai-codex==0.163.0",
-  "pydantic>=2.13.5",
+  "pydantic>=2.14.3",
   "pyte>=0.8.2",
   "python-multipart>=0.0.9",
   "PyYAML>=6.0.0",

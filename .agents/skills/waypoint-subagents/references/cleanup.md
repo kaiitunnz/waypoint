@@ -9,7 +9,8 @@ session list.
 There are two operations:
 
 - `waypoint sessions terminate <id>` — stops a running child; the record
-  remains (status `exited`), so the user can still review it.
+  remains (status `exited`), so the user can still review it, and
+  `waypoint sessions reattach <id>` revives it with its transcript.
 - `waypoint sessions delete <id>` — terminates if needed, then **removes the
   record** entirely. Add `--force` only for a wedged adapter that won't
   terminate gracefully.
@@ -29,7 +30,7 @@ waypoint sessions delete <child-id>
 - **You may still iterate on it.** If the work is likely to need another turn —
   a follow-up, a fix, a re-run against changed inputs — **park it, don't reap it**:
   leave it idle so you can `waypoint sessions send <id> "<next instruction>"` and
-  continue in place. Reaping is a one-way door — to pick the work back up you would
+  continue in place. Deleting is a one-way door — to pick the work back up you would
   have to **reimport the thread**, which spins a *new* session, replays the history
   into it, and loses the live session state. Bound how many you keep parked (an
   idle child still holds resources — see below), and reap it once you are genuinely

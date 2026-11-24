@@ -63,7 +63,7 @@ waypoint sessions answer-question <session-id> --answer "<your answer>"
 ```
 
 `send` injects a message and leaves the question blocking; only `answer-question`
-releases it. See `references/permissions.md` for the structured `--answers-json`
+releases it (or `cancel-question`, which declines it unanswered). See `references/permissions.md` for the structured `--answers-json`
 shape and `--tool-use-id`.
 
 ## Interrupt a stuck child

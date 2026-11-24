@@ -110,9 +110,12 @@ Then send the handoff prompt from `search-agents.md`.
 
 Use one of these, in order of fidelity:
 
-1. **fork** - if `waypoint help` and the backend expose a true session/thread
-   fork or import for the parent agent, launch with that mechanism and record
-   `context=fork`.
+1. **fork** - when the parent's backend has `supports_fork` in
+   `waypoint backends`, run `waypoint sessions fork <parent-sid> "<handoff>"
+   --title "<title>"`, then have it make the assigned branch inside the parent's
+   worktree before iterating, and record `context=fork`. The fork shares the
+   parent's cwd, so run it only once the parent is idle and done with that
+   worktree.
 2. **resume** - continue the parent search session serially. Instruct it to make
    a new branch from the parent branch inside its existing worktree, then run
    the optimizer handoff. Record `context=resume`.
@@ -120,7 +123,6 @@ Use one of these, in order of fidelity:
    branch and include only parent findings plus a short Shepherd summary.
    Record `context=findings-only`.
 
-Do not invent a fork flag. Check the installed CLI and backend.
 
 ## Multi-parent Setup
 

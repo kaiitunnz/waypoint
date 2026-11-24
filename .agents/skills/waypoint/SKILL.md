@@ -23,19 +23,21 @@ trusting any flag list reproduced in this skill.
 
 - Read session state or transcript: see `references/sessions-read.md`; list importable threads with `waypoint backends threads <backend>`, import one with `waypoint sessions import <backend> --thread-id <id>` (replays the thread's prior conversation into the new session by default; pass `--no-import-history` to start empty), or pipe just the assistant text with `waypoint sessions output <session-id> --text`.
 - Launch a new coding agent: see `references/sessions-launch.md`.
+- Fork or clone a session, revive an exited one (`reattach`, `resume`), or
+  search exited sessions (`history`): see `references/sessions-lifecycle.md`.
 - Keep a long-running session from filling its context window (watch usage, park at a checkpoint, compact): the `waypoint-context` skill.
 - Discover the backend ids and the models/efforts each offers: `waypoint
   backends` and `waypoint models [backend]` (see `references/sessions-launch.md`).
-- Send messages, interrupt running work, or terminate sessions: see
-  `references/sessions-steer.md`.
+- Send messages, release or cancel held messages, interrupt running work, or
+  terminate sessions: see `references/sessions-steer.md`.
 - Change a session's settings (title, permission mode, model/effort, account
   profile, launch args/config/env, usage source) with `waypoint sessions
   settings` — non-interactive, and refuses a restart-required plan without
   `--restart` (exit 4): see `references/sessions-settings.md`.
 - Schedule a session launch or a message for later (deferred, server-side): see
   `references/scheduling.md`.
-- Respond to approval requests or answer a session's question: see
-  `references/sessions-approvals.md`.
+- Respond to approval requests, decide a plan, or answer or cancel a session's
+  question: see `references/sessions-approvals.md`.
 - Reach the **human** — post a message the user triages in the inbox UI (ask a
   question, request an approval, or surface an FYI) and optionally block until
   they answer: see `references/inbox.md`.

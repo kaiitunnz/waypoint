@@ -56,7 +56,22 @@ waypoint sessions start --preset worker-codex-high \
 auto-approves: see `references/permissions.md` before relying on it for an
 unattended child.
 
-Then send the task as the first input:
+### Fork or clone a session
+
+To start a child from an existing conversation, fork it; to reuse a session's
+launch settings with a blank conversation, clone it. Both take the task as an
+optional message and are owned by you, like `sessions start`:
+
+```bash
+waypoint sessions fork <session-id> "<task>" --title "subagent:<short-purpose>"
+waypoint sessions clone <session-id> "<task>" --title "subagent:<short-purpose>"
+```
+
+Forking your own session hands the child your conversation up to your current
+message, without the work of the turn in progress. Fork keeps the source's
+backend and model; see `waypoint` skill `references/sessions-lifecycle.md`.
+
+Otherwise, send the task as the first input:
 
 ```bash
 waypoint sessions send <session-id> "<task instructions>"

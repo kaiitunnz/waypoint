@@ -8,19 +8,16 @@ waypoint sessions clone <session-id> ["<first message>"] [--title <t>] [--tag k=
 ```
 
 - `fork` starts a new session that continues a copy of the source's
-  conversation (the web `/fork`). It needs a backend with `supports_fork` in
+  conversation (the web `/fork`); it needs `supports_fork` in
   `waypoint backends`. Forking a running session copies the conversation up to
   its in-flight message, without the unfinished reply.
-- `clone` starts a fresh session with the source's launch settings (backend,
-  cwd, transport, model, effort, permission mode, account profile, args, launch
-  env) and no conversation (the web `/new`).
-- Both are owned by the calling session (`--spawner-session-id`, defaulting to
-  `$WAYPOINT_SESSION_ID`), so `sessions list --mine` and `reap --mine` cover
-  them. Ownership is all the spawner contributes: the new session keeps the
-  source's permission mode.
-- The optional message is sent to the new session as the caller. A message the
-  server cannot deliver prints the new session with `"send": "failed"` and exits
-  1; take the id from that output instead of forking again.
+- `clone` starts a fresh session with the source's launch settings and no
+  conversation (the web `/new`).
+- Both are owned by the calling session, so `sessions list --mine` and
+  `reap --mine` cover them. The spawner sets ownership only; the permission mode
+  comes from the source.
+- If the optional first message can't be delivered, the output still carries the
+  new session; take its id rather than forking again.
 
 ## Revive
 
@@ -29,26 +26,20 @@ waypoint sessions reattach <session-id>
 waypoint sessions resume <session-id>
 ```
 
-`reattach` brings an `exited` or `error` session back with its conversation,
-without sending it a message; `sessions send` to an exited session reattaches it
-too. `resume` reattaches an exited session and, on a live terminal pane (tmux /
-claude_tty), presses Enter and marks it `running`. A pane that wasn't waiting on
-Enter then stays `running` with no turn, so `sessions wait` on it blocks until
-timeout. Use `resume` for a tmux pane waiting on Enter, and `reattach` for
-anything exited.
+`reattach` revives an `exited` or `error` session with its conversation, without
+sending a message (`sessions send` to an exited session also reattaches it); on
+a live session it restarts the agent and ends any running turn. `resume` presses
+Enter on a live tmux / claude_tty pane; on a pane that wasn't waiting on Enter
+the session stays `running` with no turn, so `sessions wait` blocks until
+timeout.
 
 ## Find exited sessions
 
 `sessions history` searches and pages exited, unpinned sessions, newest
-activity first:
+activity first; `QUERY` uses the dashboard search syntax
+(`waypoint sessions history --help`):
 
 ```bash
-waypoint sessions history                          # first 20
 waypoint sessions history 'repo:waypoint status:error' --limit 50
-waypoint sessions history --cursor <cursor>        # next page
+waypoint sessions history --cursor <cursor>
 ```
-
-The query matches like the dashboard search: space-separated terms are ANDed,
-`OR` separates groups, and a term is a word, `"quoted phrase"`, or `/regex/`,
-optionally prefixed by a field (`title:`, `repo:`, `branch:`, `dir:`, `agent:`,
-`status:`). The output is `{sessions, has_more, cursor, total}`.

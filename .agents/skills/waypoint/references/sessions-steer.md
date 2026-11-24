@@ -14,13 +14,14 @@ delivered once the human answers).
 
 ```bash
 waypoint sessions held list <session-id>
-waypoint sessions held cancel <session-id> --id <held-message-id>
-waypoint sessions held release <session-id> --id <held-message-id>
+waypoint sessions held cancel <held-message-id>
+waypoint sessions held release <held-message-id>
 ```
 
 Cancel your own held message when it has gone stale. Release delivers at once,
-overriding Focus, so release only when the human asks. `--all` in place of
-`--id` acts on every held message, including other senders' and scheduled ones.
+overriding Focus, so release only when the human asks. `cancel-all` and
+`release-all <session-id>` act on every held message, including other senders'
+and scheduled ones.
 
 Attach files to a message with `--attach` (upload-and-send in one step):
 

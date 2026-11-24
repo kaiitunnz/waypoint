@@ -67,9 +67,7 @@ waypoint sessions fork <session-id> "<task>" --title "subagent:<short-purpose>"
 waypoint sessions clone <session-id> "<task>" --title "subagent:<short-purpose>"
 ```
 
-Forking your own session hands the child your conversation up to your current
-message, without the work of the turn in progress. Fork keeps the source's
-backend and model; see `waypoint` skill `references/sessions-lifecycle.md`.
+See `waypoint` skill `references/sessions-lifecycle.md`.
 
 Otherwise, send the task as the first input:
 

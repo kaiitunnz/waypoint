@@ -118,11 +118,9 @@ The compact `approval_request` event gives you the summary text, `tool`,
 - **Tool-use approval** — compact output carries `tool` and `approval_id`;
   coalesced metadata also carries `method: can_use_tool`, `tool_input`, and any
   permission suggestions. Decide per the tool and its inputs.
-- **Plan** (backends with `supports_plan_approval`, e.g. codex, in plan mode) —
-  an `item_type: plan` event, not an `approval_request`. Decide it with
-  `waypoint sessions approve-plan <child-id> --plan-item-id <item_id>
-  [--decision accept|acceptForSession|decline|cancel]`; `approve` does not
-  release it.
+- **Plan** (backends with `supports_plan_approval`) — an `item_type: plan`
+  event, not an `approval_request`; decide it with `waypoint sessions
+  approve-plan` (see `waypoint` skill `references/sessions-approvals.md`).
 
 Valid `<decision>` values are backend-specific — take them from
 `approval_decisions` in `waypoint backends` (e.g. `approve`/`decline`, plus

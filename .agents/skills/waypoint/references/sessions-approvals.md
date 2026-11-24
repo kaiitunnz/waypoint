@@ -29,9 +29,8 @@ waypoint sessions approve-plan <session-id> --plan-item-id <item_id>
 waypoint sessions approve-plan <session-id> --plan-item-id <item_id> --decision decline --text "<why>"
 ```
 
-`accept` (default) and `acceptForSession` leave plan mode and run the plan;
-`decline` and `cancel` keep the session in plan mode. Decided plans show
-`plan_item_id` and `plan_decision` on the following system event.
+Decided plans show `plan_item_id` and `plan_decision` on the following system
+event.
 
 ## Questions
 
@@ -47,12 +46,12 @@ waypoint sessions answer-question <session-id> --answers-json '[{"question": "..
 ```
 
 `sessions send` injects a normal message and will **not** satisfy the blocking
-question; only `answer-question` does. Pass `--tool-use-id` when several
-questions are pending.
+question; only `answer-question` does. Without `--tool-use-id` it answers the
+newest pending question.
 
-To dismiss a question without answering it, cancel it. The agent sees it
-declined and may end its turn (Claude does), so send a follow-up if it should
-carry on:
+To dismiss a question without answering it, cancel it (the newest, without
+`--tool-use-id`). The agent sees it declined and may end its turn (Claude does),
+so send a follow-up if it should carry on:
 
 ```bash
 waypoint sessions cancel-question <session-id> [--tool-use-id <id>]

@@ -101,7 +101,7 @@ import {
 import {
   PLUGIN_SELECTION,
   type UsageLimitSourceValue,
-} from "@waypoint/web-core/session/usageLimitSource";
+} from "@waypoint/web-core/usageLimitSource";
 
 interface ThreadSummary {
   id: string;

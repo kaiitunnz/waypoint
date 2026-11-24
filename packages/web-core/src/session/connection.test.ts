@@ -4,7 +4,6 @@ import type { SessionRecord } from "../types";
 import {
   connectionLabel,
   connectionTitle,
-  connectionVariant,
   isAgentBusy,
   type ConnectionState,
 } from "./connection";
@@ -19,25 +18,6 @@ describe("isAgentBusy", () => {
     expect(isAgentBusy(session("running"), "reconnecting")).toBe(false);
     expect(isAgentBusy(session("idle"), "open")).toBe(false);
     expect(isAgentBusy(session("waiting_input"), "open")).toBe(false);
-  });
-});
-
-describe("connectionVariant", () => {
-  it("returns the socket state while it is not open", () => {
-    expect(connectionVariant("connecting", "running")).toBe("connecting");
-    expect(connectionVariant("reconnecting", "exited")).toBe("reconnecting");
-  });
-
-  it.each([
-    ["running", "open running"],
-    ["waiting_input", "open running"],
-    ["error", "open warn"],
-    ["interrupted", "open warn"],
-    ["exited", "open dim"],
-    ["idle", "open"],
-    ["starting", "open"],
-  ] as const)("maps an open socket with status %s to %j", (status, variant) => {
-    expect(connectionVariant("open", status)).toBe(variant);
   });
 });
 

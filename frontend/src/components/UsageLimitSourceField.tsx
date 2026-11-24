@@ -1,7 +1,7 @@
 "use client";
 
 import type { UsageProviderOption } from "@waypoint/web-core/types";
-import type { UsageLimitSourceValue } from "@waypoint/web-core/session/usageLimitSource";
+import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
 
 interface UsageLimitSourceFieldProps {
   variant: "launch" | "settings";

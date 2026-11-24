@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "./test-helpers";
-import { isTodoToolEvent, readTodoEntries, summarizeTodos, type TodoEntry } from "./todos";
+import {
+  isTodoListEvent,
+  isTodoToolEvent,
+  readTodoEntries,
+  summarizeTodos,
+  type TodoEntry,
+} from "./todos";
 
 const todoWrite = (todos: unknown) =>
   ev(1, "tool_call", "", { tool_name: "TodoWrite", payload: { input: { todos } } });
@@ -85,6 +91,14 @@ describe("isTodoToolEvent", () => {
     expect(isTodoToolEvent(null)).toBe(false);
     expect(isTodoToolEvent(undefined)).toBe(false);
     expect(isTodoToolEvent(ev(1, "tool_call", "", { tool_name: "Bash" }))).toBe(false);
+  });
+});
+
+describe("isTodoListEvent", () => {
+  it("matches todo_list items and TodoWrite calls", () => {
+    expect(isTodoListEvent(ev(1, "tool_result", "", { item_type: "todo_list" }))).toBe(true);
+    expect(isTodoListEvent(ev(1, "tool_call", "", { tool_name: "TodoWrite" }))).toBe(true);
+    expect(isTodoListEvent(ev(1, "tool_call", "", { tool_name: "Bash" }))).toBe(false);
   });
 });
 

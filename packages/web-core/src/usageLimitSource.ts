@@ -1,4 +1,4 @@
-import type { SessionRecord, UsageLimitSource } from "../types";
+import type { SessionRecord, UsageLimitSource } from "./types";
 
 export interface UsageLimitSourceValue {
   source: UsageLimitSource;

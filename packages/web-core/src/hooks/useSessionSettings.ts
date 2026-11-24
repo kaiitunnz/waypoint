@@ -30,7 +30,7 @@ import {
   sameSelection,
   selectionFromRecord,
   type UsageLimitSourceValue,
-} from "../session/usageLimitSource";
+} from "../usageLimitSource";
 
 // Editing model for an existing (redacted) env key. Its stored value is never
 // fetched or prefilled: the user may keep it, replace it (typing a new value),

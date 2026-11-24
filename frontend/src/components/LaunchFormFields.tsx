@@ -26,7 +26,7 @@ import { permissionModesFor } from "@waypoint/web-core/backends";
 import {
   PLUGIN_SELECTION,
   type UsageLimitSourceValue,
-} from "@waypoint/web-core/session/usageLimitSource";
+} from "@waypoint/web-core/usageLimitSource";
 import {
   AccountProfile,
   Backend,

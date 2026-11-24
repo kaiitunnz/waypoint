@@ -89,7 +89,6 @@ import { approvalPager, findPendingApprovals, stepApprovalPage } from "@waypoint
 import {
   connectionLabel,
   connectionTitle,
-  connectionVariant,
   isAgentBusy,
   type ConnectionState,
 } from "@waypoint/web-core/session/connection";
@@ -100,7 +99,6 @@ import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,
   foldOlderEvents,
-  isTodoListEvent,
   latestActionablePlanEvent,
   mergeEvents,
   minRawSequence,
@@ -152,7 +150,7 @@ import {
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
-import { readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
+import { isTodoListEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import {
   effortLabel,
   formatResolvedModelLabel,
@@ -4395,6 +4393,17 @@ const ReplyComposer = memo(function ReplyComposer({
     </section>
   );
 });
+
+function connectionVariant(
+  connection: ConnectionState,
+  status: SessionRecord["status"],
+): string {
+  if (connection !== "open") return connection;
+  if (status === "running" || status === "waiting_input") return "open running";
+  if (status === "error" || status === "interrupted") return "open warn";
+  if (status === "exited") return "open dim";
+  return "open";
+}
 
 function SessionHeader({
   session,

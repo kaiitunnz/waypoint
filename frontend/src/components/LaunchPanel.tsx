@@ -35,7 +35,7 @@ import {
   SessionTransport,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
-import type { UsageLimitSourceValue } from "@waypoint/web-core/session/usageLimitSource";
+import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
 
 interface ThreadSummary {
   id: string;

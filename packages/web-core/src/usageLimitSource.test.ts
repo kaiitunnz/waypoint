@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionRecord } from "../types";
+import type { SessionRecord } from "./types";
 import { PLUGIN_SELECTION, sameSelection, selectionFromRecord } from "./usageLimitSource";
 
 const record = (fields: Record<string, unknown>) => fields as unknown as SessionRecord;

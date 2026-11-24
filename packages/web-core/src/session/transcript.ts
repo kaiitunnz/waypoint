@@ -7,6 +7,7 @@ import {
   planForEvent,
   readToolName,
 } from "../events";
+import { isTodoListEvent } from "../todos";
 import type { EventRecord } from "../types";
 import { stripAnsi } from "./terminalText";
 
@@ -58,7 +59,7 @@ export function foldOlderEvents(
   for (let i = 0; i < current.length; i += 1) {
     const event = current[i];
     if (event.kind !== "agent_output" && event.kind !== "tool_result") continue;
-    const itemId = readItemId(event);
+    const itemId = itemIdForEvent(event);
     if (!itemId) continue;
     currentItemIndex.set(`${event.kind}:${itemId}`, i);
   }
@@ -72,7 +73,7 @@ export function foldOlderEvents(
   for (const event of older) {
     if (typeof event.id === "number" && seenIds.has(event.id)) continue;
     if (seenSequences.has(event.sequence)) continue;
-    const itemId = readItemId(event);
+    const itemId = itemIdForEvent(event);
     if ((event.kind === "agent_output" || event.kind === "tool_result") && itemId) {
       const targetIdx = currentItemIndex.get(`${event.kind}:${itemId}`);
       if (targetIdx !== undefined) {
@@ -114,10 +115,10 @@ export function mergeEvents(current: EventRecord[], incoming: EventRecord): Even
   if (dup) {
     return current;
   }
-  const incomingItemId = readItemId(incoming);
+  const incomingItemId = itemIdForEvent(incoming);
   if ((incoming.kind === "agent_output" || incoming.kind === "tool_result") && incomingItemId) {
     const index = current.findIndex(
-      (event) => event.kind === incoming.kind && readItemId(event) === incomingItemId,
+      (event) => event.kind === incoming.kind && itemIdForEvent(event) === incomingItemId,
     );
     if (index !== -1) {
       const next = current.slice();
@@ -133,10 +134,6 @@ export function mergeEvents(current: EventRecord[], incoming: EventRecord): Even
     }
   }
   return [...current, incoming];
-}
-
-function readItemId(event: EventRecord): string | null {
-  return itemIdForEvent(event);
 }
 
 function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
@@ -171,7 +168,7 @@ export function collapseSupersededPlanEvents(events: EventRecord[]): EventRecord
     if (!isPlanEvent(event)) {
       continue;
     }
-    const itemId = readItemId(event);
+    const itemId = itemIdForEvent(event);
     if (itemId) {
       latestPlanByItemId.set(itemId, event);
     }
@@ -183,7 +180,7 @@ export function collapseSupersededPlanEvents(events: EventRecord[]): EventRecord
     if (!isPlanEvent(event)) {
       return true;
     }
-    const itemId = readItemId(event);
+    const itemId = itemIdForEvent(event);
     return !itemId || latestPlanByItemId.get(itemId) === event;
   });
 }
@@ -223,7 +220,7 @@ export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
       result.push({ kind: "single", event });
       continue;
     }
-    const itemId = readItemId(event);
+    const itemId = itemIdForEvent(event);
     if (!itemId) {
       result.push({ kind: "single", event });
       continue;
@@ -256,13 +253,10 @@ export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
 
-  // Classify each item so the grouping loop is easy to reason about.
   // "content"  → user messages, agent text, approvals, ask-questions:
   //              always breaks (and terminates) the current tool run.
-  // "tool"     → ordinary tool call/result pairs/singles, including todos:
-  //              join the run. The live task list lives in the dock now, so
-  //              the transcript todo marker is just a historical tool record
-  //              and folds into the run instead of standing alone.
+  // "tool"     → ordinary tool call/result pairs and singles, todos included:
+  //              join the run.
   // "absorbed" → system_note / status_update lifecycle noise: silently join
   //              the active run (rendered as quiet separators when expanded),
   //              or fall through as standalone if no run is active yet.
@@ -373,10 +367,6 @@ function isToolResultDelta(event: EventRecord): boolean {
   }
   const method = event.metadata?.method;
   return method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta";
-}
-
-export function isTodoListEvent(event: EventRecord): boolean {
-  return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
 }
 
 // Tool calls that render as their own card instead of folding into a collapsed

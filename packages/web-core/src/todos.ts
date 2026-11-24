@@ -1,5 +1,5 @@
 import { EventRecord } from "./types";
-import { normalizeToolName } from "./events";
+import { readToolName } from "./events";
 
 export type TodoStatus = "completed" | "in-progress" | "pending";
 
@@ -19,17 +19,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function toolNameOf(event: EventRecord): string | null {
-  const meta = asRecord(event.metadata);
-  const name = meta?.tool_name;
-  return typeof name === "string" && name ? normalizeToolName(name) : null;
-}
-
 export function isTodoToolEvent(event: EventRecord | null | undefined): boolean {
   if (!event) {
     return false;
   }
-  return readTodoEntries(event)?.length ? true : toolNameOf(event) === "TodoWrite";
+  return readTodoEntries(event)?.length ? true : readToolName(event) === "TodoWrite";
+}
+
+// A todo snapshot by its marker alone, whether or not its entries parse.
+export function isTodoListEvent(event: EventRecord): boolean {
+  return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
 }
 
 export function readTodoEntries(event: EventRecord | null | undefined): TodoEntry[] | null {

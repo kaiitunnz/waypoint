@@ -1,4 +1,4 @@
-import { variantLabel } from "@waypoint/web-core";
+import { variantLabel } from "@waypoint/web-core/variant";
 
 export default function Home() {
   return (

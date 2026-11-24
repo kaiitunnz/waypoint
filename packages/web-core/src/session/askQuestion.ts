@@ -1,4 +1,4 @@
-import { normalizeToolName } from "../events";
+import { readToolName } from "../events";
 import type {
   EventRecord,
   PendingQuestionAvailability,
@@ -30,12 +30,10 @@ export type AskQuestionResolution =
   | { state: "closed_unanswered"; resultEvent: EventRecord };
 
 export function parseAskUserQuestion(event: EventRecord): AskUserQuestion[] | null {
-  const meta = event.metadata as Record<string, unknown> | undefined;
-  const toolName =
-    typeof meta?.tool_name === "string" ? normalizeToolName(meta.tool_name) : null;
-  if (toolName !== "AskUserQuestion") {
+  if (readToolName(event) !== "AskUserQuestion") {
     return null;
   }
+  const meta = event.metadata as Record<string, unknown> | undefined;
   const payload = meta?.payload as { input?: unknown } | undefined;
   const input = payload?.input as { questions?: unknown } | undefined;
   const raw = input?.questions;
@@ -107,10 +105,9 @@ export function indexAskQuestionEvidence(events: EventRecord[]): AskQuestionEvid
     if (!existing || event.sequence < existing.sequence) index.set(id, event);
   };
   for (const event of events) {
-    const metadata = event.metadata ?? {};
-    const toolUseId =
-      typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : "";
+    const toolUseId = askToolUseId(event);
     if (!toolUseId) continue;
+    const metadata = event.metadata ?? {};
     if (event.kind === "user_input" && metadata.kind === "ask_user_question_answer") {
       keep(evidence.answers, toolUseId, event);
     } else if (event.kind === "system_note") {

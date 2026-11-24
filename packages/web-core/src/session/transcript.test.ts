@@ -5,7 +5,6 @@ import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,
   foldOlderEvents,
-  isTodoListEvent,
   latestActionablePlanEvent,
   mergeEvents,
   minRawSequence,
@@ -419,13 +418,5 @@ describe("sanitizeEvent", () => {
     expect(clean.text).toBe("red");
     expect(clean.metadata).toBe(event.metadata);
     expect(clean).not.toBe(event);
-  });
-});
-
-describe("isTodoListEvent", () => {
-  it("matches todo_list items and TodoWrite calls", () => {
-    expect(isTodoListEvent(ev(1, "tool_result", "", { item_type: "todo_list" }))).toBe(true);
-    expect(isTodoListEvent(ev(1, "tool_call", "", { tool_name: "TodoWrite" }))).toBe(true);
-    expect(isTodoListEvent(ev(1, "tool_call", "", { tool_name: "Bash" }))).toBe(false);
   });
 });

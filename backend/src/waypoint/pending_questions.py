@@ -247,15 +247,15 @@ class PendingQuestionTracker:
 
     def _settles(self, session: SessionRecord, tool_use_id: str) -> bool:
         """Whether the session stops waiting on the human once ``tool_use_id``
-        is cancelled."""
+        is cancelled. Questions the human moved past do not hold the wait."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return False
         if self._runtime.transport_for(session).has_pending_approval(session):
             return False
         others = [
             other
-            for other in self._runtime.storage.open_question_tool_use_ids(session.id)
-            if other != tool_use_id
+            for event in self._asked_since_human_input(session.id)
+            if (other := str(event.metadata["tool_use_id"])) != tool_use_id
         ]
         return all(
             state is QuestionLiveness.CLOSED

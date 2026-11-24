@@ -434,6 +434,21 @@ async def test_cancel_after_a_settled_wait_marks_idle(tmp_path, monkeypatch) -> 
     assert updated.status is SessionStatus.IDLE
 
 
+async def test_cancel_ignores_a_question_the_human_moved_past(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q_old")
+    await runtime.handle_input("s1", SessionInputRequest(text="do this instead"))
+    await end_turn(runtime)
+    await ask(runtime, "q_new")
+
+    updated = await cancel(runtime, "q_new")
+
+    assert updated.status is SessionStatus.IDLE
+
+
 async def test_relaunch_note_keeps_the_wait(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     fake_transport(runtime, monkeypatch)

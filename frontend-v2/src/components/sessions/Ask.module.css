@@ -1,0 +1,85 @@
+.headline {
+  margin-top: 4px;
+  font-size: var(--f-body);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.body {
+  margin-top: 10px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.actions > :first-child {
+  margin-right: 6px;
+}
+
+.meta {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 8px;
+}
+
+.command {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  line-height: 19px;
+  color: var(--text-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.path {
+  margin-top: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.clamp {
+  margin-top: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.plan {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: var(--f-body);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin-top: 8px;
+}
+
+.danger {
+  margin-left: auto;
+}

@@ -21,3 +21,8 @@
   font-weight: 600;
   color: var(--muted);
 }
+
+.dense {
+  padding-top: 18px;
+  padding-bottom: 8px;
+}

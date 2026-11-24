@@ -54,6 +54,10 @@
   overflow: hidden;
 }
 
+.modalLg {
+  max-width: 560px;
+}
+
 .handle {
   flex: none;
   padding: 7px 0 0;
@@ -83,8 +87,17 @@
   padding: 16px 12px 8px 24px;
 }
 
-.title {
+.heading {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.subtitle {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.title {
   min-width: 0;
   font-family: var(--serif);
   font-size: var(--f-title);

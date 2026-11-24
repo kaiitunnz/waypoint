@@ -1,16 +1,20 @@
 import type { ReactNode } from "react";
 
+import { cx } from "@/lib/cx";
+
 import styles from "./SectionHeading.module.css";
 
 interface SectionHeadingProps {
   title: string;
   count?: number;
   action?: ReactNode;
+  // Tighter spacing, for a screen with little height to spare.
+  dense?: boolean;
 }
 
-export function SectionHeading({ title, count, action }: SectionHeadingProps) {
+export function SectionHeading({ title, count, action, dense }: SectionHeadingProps) {
   return (
-    <div className={styles.heading}>
+    <div className={cx(styles.heading, dense && styles.dense)}>
       <h2 className={styles.title}>{title}</h2>
       {count !== undefined ? <span className={styles.count}>{count}</span> : null}
       {action ? <span className={styles.action}>{action}</span> : null}

@@ -49,3 +49,7 @@
 .exited {
   border: 1.5px dashed var(--faint);
 }
+
+.flat {
+  box-shadow: none;
+}

@@ -14,10 +14,14 @@ interface DialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  // A line under the title, such as what the title names.
+  subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
+  // A modal only: wide for a search palette.
+  size?: "md" | "lg";
 }
 
 // Opaque with a scrim: dialogs carry text, so they are never glass.
@@ -25,9 +29,11 @@ function Surface({
   open,
   onClose,
   title,
+  subtitle,
   children,
   footer,
   flush,
+  size = "md",
   variant,
 }: DialogProps & { variant: "sheet" | "modal" }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -64,7 +70,7 @@ function Surface({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={isSheet ? styles.sheet : styles.modal}
+        className={isSheet ? styles.sheet : cx(styles.modal, size === "lg" && styles.modalLg)}
         style={drag ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
       >
         {isSheet ? (
@@ -79,7 +85,10 @@ function Surface({
           </div>
         ) : null}
         <div className={styles.head}>
-          <h2 className={styles.title}>{title}</h2>
+          <div className={styles.heading}>
+            <h2 className={styles.title}>{title}</h2>
+            {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+          </div>
           <IconButton label="Close" size="sm" onClick={onClose}>
             <Icon name="close" size={18} />
           </IconButton>

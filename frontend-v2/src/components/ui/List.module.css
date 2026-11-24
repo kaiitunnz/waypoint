@@ -4,8 +4,26 @@
   list-style: none;
 }
 
+.item {
+  position: relative;
+}
+
 .item + .item {
   border-top: 1px solid var(--line);
+}
+
+/* The menu button sits at the row's end, in the space the row leaves for it. */
+.withActions .row {
+  padding-right: 52px;
+}
+
+.actions {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
 }
 
 .row {

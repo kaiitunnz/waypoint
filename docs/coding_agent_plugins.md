@@ -507,6 +507,19 @@ Codex work this way; Codex's `request_user_input_async` mapping lives in
 Codex turn that ends with one of its own questions still open settles at
 `WAITING_INPUT`.
 
+The runtime keeps a session waiting on the human while a question is open. An
+`IDLE` an event stamps (through the adapter-event sink or a runtime system
+note) becomes `WAITING_INPUT` while an `ACTIONABLE` question asked since the
+human's last message is still open. That holds even when an agent message, a
+wake, or a task notification started the turn that ended. A `user_input` event
+for a message the human did not type carries `input_origin` (`agent`,
+`schedule`, or `wake`); only events without it count as the human's message, so
+a plugin recording its own `user_input` during dispatch gets the key without
+passing it. A normalizer only needs to report the turn's end as `IDLE`. An
+agent that dismisses its own question to surface it (`claude_tty`) marks the
+dismissal `WAITING_INPUT`, since a sibling tool's result can land after the
+card and mark the session running.
+
 ### Task notifications (optional)
 
 A background task's lifecycle — a subagent finishing, a monitor firing, a

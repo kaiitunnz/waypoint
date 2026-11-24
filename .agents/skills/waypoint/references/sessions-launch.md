@@ -77,3 +77,21 @@ preset exists, it is applied automatically — pass `--no-preset` to opt out. Ru
 `waypoint presets list` before choosing settings from scratch, and still consult
 `waypoint backends` / `waypoint models` when overriding or creating a preset so
 the ids you pin are real.
+
+## Attaching an existing tmux pane
+
+To bring a pane you (or the human) already started under Waypoint, attach it
+instead of launching a new agent:
+
+```bash
+waypoint sessions attach-tmux --tmux <target>                  # pane id (%3), session, or session:window.pane
+waypoint sessions attach-tmux --tmux <target> --backend-hint <agent-id> --title <title>
+```
+
+The server mirrors the pane's output and monitors it as a `tmux`-transport
+session. `--backend-hint` names the agent running in the pane; without it the
+agent is inferred from the target name, falling back to the server's default
+backend. Inside a Waypoint session the attached session is owned by the caller
+(`--spawner-session-id` defaults to `$WAYPOINT_SESSION_ID`). The pane belongs
+to whoever created it: terminating or deleting the session stops the mirror
+but leaves the pane running.

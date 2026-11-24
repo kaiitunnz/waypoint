@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 
-import { attachmentUrl } from "@/lib/api";
-import type { InboxAttachmentRef } from "@/lib/types";
+import { attachmentUrl } from "@waypoint/web-core/api";
+import type { InboxAttachmentRef } from "@waypoint/web-core/types";
 
 // Renders an inbox attachment ref. The backend denormalizes filename/kind onto
 // the ref at post/submit time, so the name renders inline with no per-session

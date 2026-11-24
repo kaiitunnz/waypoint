@@ -34,7 +34,7 @@ import {
   isAuthError,
   postBoardEntry,
   updateBoardEntry,
-} from "@/lib/api";
+} from "@waypoint/web-core/api";
 import {
   CHANNEL_GROUP_COLLAPSED_DEFAULT,
   CHANNEL_GROUP_LABELS,
@@ -54,8 +54,8 @@ import {
   stateTone,
   ticketIdFromChannel,
   TICKET_PAGE_LIMIT,
-} from "@/lib/board";
-import { clearToken, readHost, readToken } from "@/lib/store";
+} from "@waypoint/web-core/board";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
 import {
   BoardChannel,
@@ -70,8 +70,8 @@ import {
   ManagerTicketState,
   ManagerTicketSummary,
   SessionEnvelope,
-} from "@/lib/types";
-import { formatRelativeTime } from "@/lib/usage";
+} from "@waypoint/web-core/types";
+import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 15000;

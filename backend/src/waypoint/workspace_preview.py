@@ -313,7 +313,7 @@ def _is_subsequence(needle: str, hay: str) -> bool:
 
 
 def _segment_score(query: str, segment: str) -> int | None:
-    # Mirrors matchText in frontend/src/lib/fuzzy.ts; keep the tiers in sync.
+    # Mirrors matchText in packages/web-core/src/fuzzy.ts; keep the tiers in sync.
     needle = query.lower()
     hay = segment.lower()
     if hay == needle:

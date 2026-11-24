@@ -1,7 +1,7 @@
 "use client";
 
-import { insightSeverityTone } from "@/lib/telemetry";
-import { Insight } from "@/lib/types";
+import { insightSeverityTone } from "@waypoint/web-core/telemetry";
+import { Insight } from "@waypoint/web-core/types";
 
 interface InsightCardsProps {
   insights: Insight[];

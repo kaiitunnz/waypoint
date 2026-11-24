@@ -1,4 +1,4 @@
-import { TODO_MARKER, TodoEntry } from "@/lib/todos";
+import { TODO_MARKER, TodoEntry } from "@waypoint/web-core/todos";
 
 export function TodoListBody({ todos }: { todos: TodoEntry[] | null }) {
   if (!todos || todos.length === 0) {

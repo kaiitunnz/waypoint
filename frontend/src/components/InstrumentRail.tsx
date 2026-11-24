@@ -10,9 +10,9 @@ import {
   rateLimitWindowPercent,
   usageTone,
   type UsageTone,
-} from "@/lib/usage";
-import { isRecurring } from "@/lib/recurrence";
-import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
+} from "@waypoint/web-core/usage";
+import { isRecurring } from "@waypoint/web-core/recurrence";
+import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -21,7 +21,7 @@ import type {
   SessionRecord,
   UsageDashboardBucket,
   UsageWindow,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 // Right-rail instrument tiles: compact, glanceable status headlines that link
 // to (or open) the dedicated surfaces. They consume already-fetched data

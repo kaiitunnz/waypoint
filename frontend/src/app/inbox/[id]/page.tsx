@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { InboxItemPane } from "@/components/InboxItemPane";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { clearToken, readHost, readToken } from "@/lib/store";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
 
 export default function InboxItemPage() {

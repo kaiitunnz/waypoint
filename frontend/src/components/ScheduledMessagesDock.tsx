@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
-import { cronToLabel, isIdle, isRecurring } from "@/lib/recurrence";
-import { MessageSchedule } from "@/lib/types";
+import { cronToLabel, isRecurring } from "@waypoint/web-core/recurrence";
+import { describeScheduledDelivery } from "@waypoint/web-core/session/scheduledMessages";
+import { MessageSchedule } from "@waypoint/web-core/types";
 
 // A single chevron glyph (pointing up); orientation handled with a CSS rotation,
 // matching the task-progress and side-question docks so the three read as one
@@ -103,7 +104,7 @@ export function ScheduledMessagesDock({
               {messages.map((m) => (
                 <div key={m.id} className="sched-dock-item">
                   <span className="sched-dock-item-when">
-                    {relativeFromNow(m)}
+                    {describeScheduledDelivery(m)}
                     {isRecurring(m) ? (
                       <span
                         className="sched-dock-recur"
@@ -155,7 +156,7 @@ export function ScheduledMessagesDock({
               </span>
             ) : null}
             <span className="sched-dock-label">{label}</span>
-            <span className="sched-dock-when">{relativeFromNow(next)}</span>
+            <span className="sched-dock-when">{describeScheduledDelivery(next)}</span>
             <span className="sched-dock-count">{messages.length}</span>
             <span className="sched-dock-chevron" aria-hidden>
               <ChevronIcon />
@@ -165,36 +166,8 @@ export function ScheduledMessagesDock({
       </div>
       <span className="sr-only" aria-live="polite">
         {messages.length} scheduled message{messages.length === 1 ? "" : "s"},
-        next {relativeFromNow(next)}
+        next {describeScheduledDelivery(next)}
       </span>
     </div>
   );
-}
-
-function relativeFromNow(schedule: MessageSchedule): string {
-  // An idle schedule delivers on session state, not a clock; its scheduled_at
-  // is only the enqueue time, so it must never render as a countdown.
-  if (isIdle(schedule)) {
-    return "When idle";
-  }
-  if (!schedule.scheduled_at) {
-    return "";
-  }
-  const diff = new Date(schedule.scheduled_at).getTime() - Date.now();
-  if (diff <= 0) {
-    return "any moment";
-  }
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 1) {
-    return "in <1m";
-  }
-  if (minutes < 60) {
-    return `in ${minutes}m`;
-  }
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days}d`;
 }

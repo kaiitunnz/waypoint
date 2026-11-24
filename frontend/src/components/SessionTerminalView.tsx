@@ -18,10 +18,10 @@ import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
-import { terminalResizable, useBackendCatalog } from "@/lib/backends";
+import { terminalResizable, useBackendCatalog } from "@waypoint/web-core/backends";
 import type { TerminalSubmitResult } from "@/lib/composer";
-import { SessionRecord } from "@/lib/types";
-import { usePopoverAnchor } from "@/lib/use-popover-anchor";
+import { SessionRecord } from "@waypoint/web-core/types";
+import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 

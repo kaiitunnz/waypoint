@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { fetchDirectorySuggestions } from "@/lib/api";
+import { fetchDirectorySuggestions } from "@waypoint/web-core/api";
 
 const SUGGEST_DELAY_MS = 200;
 

@@ -13,22 +13,22 @@ import {
 import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
-import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
-import { UNIFIED_TOKEN_LABELS, unifyTokens } from "@/lib/tokens";
+import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
+import { UNIFIED_TOKEN_LABELS, unifyTokens } from "@waypoint/web-core/tokens";
 import type {
   SessionContextUsage,
   SessionRecord,
   SessionTokenUsage,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 import {
   clampPercent,
   formatRelativeTime,
   formatTokens,
   rateLimitUsageTone,
-} from "@/lib/usage";
-import { useMediaQuery } from "@/lib/use-media-query";
-import { usePopoverAnchor } from "@/lib/use-popover-anchor";
-import { usePopoverDismiss } from "@/lib/use-popover-dismiss";
+} from "@waypoint/web-core/usage";
+import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
+import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
+import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 

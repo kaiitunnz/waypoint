@@ -9,17 +9,17 @@ import {
   humaniseBackend,
   transportLabel,
   type BackendCatalog,
-} from "@/lib/backends";
-import { matchesQuery, parseQuery } from "@/lib/search";
-import { formatClock } from "@/lib/scheduleTime";
+} from "@waypoint/web-core/backends";
+import { matchesQuery, parseQuery } from "@waypoint/web-core/search";
+import { formatClock } from "@waypoint/web-core/scheduleTime";
 import {
   byRecency,
   SESSION_SEARCH_FIELDS,
   useMergedSessionPage,
   useSessionHistory,
-} from "@/lib/sessionHistory";
-import { SessionRecord } from "@/lib/types";
-import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
+} from "@waypoint/web-core/sessionHistory";
+import { SessionRecord } from "@waypoint/web-core/types";
+import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 
 import { SearchInput } from "./SearchInput";
 import { Pager } from "@/components/Pager";

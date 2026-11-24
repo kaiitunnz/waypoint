@@ -5,6 +5,12 @@ const config = [
   ...nextCoreWebVitals,
   ...nextTypeScript,
   { rules: { "@next/next/no-html-link-for-pages": "off" } },
+  {
+    rules: {
+      "react-hooks/immutability": "off",
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
 ];
 
 export default config;

@@ -4,14 +4,14 @@ import { useId, useState } from "react";
 
 import ReactMarkdown from "react-markdown";
 
-import { COMMON_REHYPE_PLUGINS, COMMON_REMARK_PLUGINS } from "@/lib/markdown";
-import { confidenceLabel } from "@/lib/telemetry";
+import { COMMON_REHYPE_PLUGINS, COMMON_REMARK_PLUGINS } from "@waypoint/web-core/markdown";
+import { confidenceLabel } from "@waypoint/web-core/telemetry";
 import {
   NLGenerationStatus,
   NLInsightEvidence,
   NLInsightResponse,
-} from "@/lib/types";
-import { formatRelativeTime } from "@/lib/usage";
+} from "@waypoint/web-core/types";
+import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 interface NLInsightCardProps {
   nlEnabled: boolean;

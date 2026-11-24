@@ -3,11 +3,9 @@
 import { useState } from "react";
 
 import { EnvVarRows, type EnvEntry } from "@/components/EnvVarRows";
-import {
-  UsageLimitSourceField,
-  type UsageLimitSourceValue,
-} from "@/components/UsageLimitSourceField";
-import type { UsageProviderOption } from "@/lib/types";
+import { UsageLimitSourceField } from "@/components/UsageLimitSourceField";
+import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
+import type { UsageProviderOption } from "@waypoint/web-core/types";
 
 export function GearGlyph() {
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { AskQuestionOptions } from "@/components/AskQuestion";
-import type { InboxQuestionBlock } from "@/lib/types";
+import type { InboxQuestionBlock } from "@waypoint/web-core/types";
 
 // Presentational, controlled variant of the transcript's AskUserQuestion card
 // for an inbox question block (a single question). It reuses AskQuestionOptions

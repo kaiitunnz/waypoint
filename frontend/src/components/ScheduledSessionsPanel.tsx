@@ -2,26 +2,26 @@
 
 import { useEffect, useState } from "react";
 
-import type { BackendCatalog } from "@/lib/backends";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
 import {
   humaniseBackend,
   permissionModeLabel,
-} from "@/lib/backends";
-import { fetchBackendModels } from "@/lib/api";
+} from "@waypoint/web-core/backends";
+import { fetchBackendModels } from "@waypoint/web-core/api";
 import { Pager } from "@/components/Pager";
-import { usePagination } from "@/lib/usePagination";
-import { formatClock, formatRelative } from "@/lib/scheduleTime";
+import { usePagination } from "@waypoint/web-core/hooks/usePagination";
+import { formatClock, formatRelative } from "@waypoint/web-core/scheduleTime";
 import {
   cronToLabel,
   formatInZone,
   isRecurring,
   timezoneAbbrev,
-} from "@/lib/recurrence";
+} from "@waypoint/web-core/recurrence";
 import {
   Backend,
   BackendModelOption,
   ScheduledSession,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 const PAGE_SIZE = 5;
 

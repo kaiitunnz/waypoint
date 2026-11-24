@@ -7,8 +7,8 @@ import {
   SESSION_SOURCE_OPTIONS,
   TelemetryFiltersState,
   TelemetryRangeState,
-} from "@/lib/telemetry";
-import { TelemetryParentScope } from "@/lib/types";
+} from "@waypoint/web-core/telemetry";
+import { TelemetryParentScope } from "@waypoint/web-core/types";
 
 interface TelemetryFiltersProps {
   range: TelemetryRangeState;

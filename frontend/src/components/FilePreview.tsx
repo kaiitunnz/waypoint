@@ -4,8 +4,8 @@ import { type CSSProperties, Fragment, useEffect, useMemo, useState } from "reac
 
 import { formatBytes } from "@/components/AttachmentTray";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
-import type { WorkspaceFile } from "@/lib/api";
-import { highlightToLines, type HighlightToken } from "@/lib/highlight";
+import type { WorkspaceFile } from "@waypoint/web-core/api";
+import { highlightToLines, type HighlightToken } from "@waypoint/web-core/highlight";
 
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",

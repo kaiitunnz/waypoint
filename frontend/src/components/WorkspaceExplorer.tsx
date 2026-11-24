@@ -21,13 +21,13 @@ import {
   type WorkspaceGitFileStatus,
   type WorkspaceGitStatus,
   type WorkspaceTreePage,
-} from "@/lib/api";
+} from "@waypoint/web-core/api";
 import { FileIcon, formatBytes } from "@/components/AttachmentTray";
 import { FilePreview } from "@/components/FilePreview";
 import { WorkspaceDiff } from "@/components/WorkspaceDiff";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
-import type { EventDiffPreview } from "@/lib/events";
-import { copyText } from "@/lib/clipboard";
+import type { EventDiffPreview } from "@waypoint/web-core/events";
+import { copyText } from "@waypoint/web-core/clipboard";
 
 function gitChangeLabel(status: WorkspaceGitFileStatus): {
   letter: string;

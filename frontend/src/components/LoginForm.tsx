@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { PasswordInput } from "@/components/PasswordInput";
-import { probeBackend } from "@/lib/api";
+import { probeBackend } from "@waypoint/web-core/api";
 import {
   backendPortFromUrl,
   BackendOption,
@@ -12,7 +12,7 @@ import {
   fetchLocalTailnetSnapshot,
   sameBackendUrl,
   TailnetSnapshot,
-} from "@/lib/tailnet";
+} from "@waypoint/web-core/tailnet";
 
 interface LoginFormProps {
   defaultHost: string;

@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { isModifiedEnterShortcut } from "@/lib/keyboard";
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
@@ -15,8 +15,8 @@ import {
   parseEvent,
   type EventDiffPreview,
   type PlanDecision,
-} from "@/lib/events";
-import type { EventRecord } from "@/lib/types";
+} from "@waypoint/web-core/events";
+import type { EventRecord } from "@waypoint/web-core/types";
 
 export interface SharedApprovalAction {
   id: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountProfile } from "@/lib/types";
+import type { AccountProfile } from "@waypoint/web-core/types";
 
 interface AccountProfilePickerProps {
   profiles: AccountProfile[];

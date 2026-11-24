@@ -4,8 +4,8 @@ import { forwardRef, MutableRefObject } from "react";
 
 import { FileIcon, formatBytes, typeTag } from "@/components/AttachmentTray";
 import { HighlightedText } from "@/components/HighlightedText";
-import { attachmentUrl } from "@/lib/api";
-import type { FileMentionRow } from "@/lib/use-file-mentions";
+import { attachmentUrl } from "@waypoint/web-core/api";
+import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions";
 
 interface FileMentionsProps {
   host: string;

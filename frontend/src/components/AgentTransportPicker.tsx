@@ -8,14 +8,14 @@ import {
   useState,
 } from "react";
 
-import type { BackendCatalog } from "@/lib/backends";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
 import {
   agentTransports,
   defaultTransportFor,
   humaniseBackend,
   transportPresentation,
-} from "@/lib/backends";
-import { Backend, SessionTransport } from "@/lib/types";
+} from "@waypoint/web-core/backends";
+import { Backend, SessionTransport } from "@waypoint/web-core/types";
 
 interface AgentPickerProps {
   agents: Backend[];

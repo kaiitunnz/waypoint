@@ -1,6 +1,6 @@
 "use client";
 
-import { UsageTone } from "@/lib/usage";
+import { UsageTone } from "@waypoint/web-core/usage";
 
 interface UsageDialProps {
   percent: number | null;

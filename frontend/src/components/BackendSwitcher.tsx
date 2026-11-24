@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { isAuthError, probeBackend } from "@/lib/api";
-import { LaunchTargetSummary } from "@/lib/types";
+import { isAuthError, probeBackend } from "@waypoint/web-core/api";
+import { LaunchTargetSummary } from "@waypoint/web-core/types";
 import {
   backendPortFromUrl,
   BackendOption,
@@ -12,7 +12,7 @@ import {
   fetchBackendTailnetSnapshot,
   sameBackendUrl,
   TailnetSnapshot,
-} from "@/lib/tailnet";
+} from "@waypoint/web-core/tailnet";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 

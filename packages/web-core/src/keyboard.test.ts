@@ -1,0 +1,76 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { describe, expect, it } from "vitest";
+
+import {
+  isComposingKeyEvent,
+  isInlineMenuAcceptKey,
+  isModifiedEnterShortcut,
+  isUnmodifiedEnterKey,
+  trapTabFocus,
+} from "./keyboard";
+
+type Keys = {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  nativeEvent?: { isComposing?: boolean };
+};
+const key = (init: Keys) => ({ ctrlKey: false, metaKey: false, shiftKey: false, ...init });
+const react = (init: Keys) => key(init) as unknown as ReactKeyboardEvent<HTMLTextAreaElement>;
+
+describe("isComposingKeyEvent", () => {
+  it("detects composition on the event or its native event", () => {
+    expect(isComposingKeyEvent(key({ key: "a", isComposing: true }))).toBe(true);
+    expect(isComposingKeyEvent(key({ key: "a", nativeEvent: { isComposing: true } }))).toBe(true);
+    expect(isComposingKeyEvent(key({ key: "a" }))).toBe(false);
+    expect(isComposingKeyEvent(key({ key: "a", isComposing: false, nativeEvent: {} }))).toBe(false);
+  });
+});
+
+describe("isModifiedEnterShortcut", () => {
+  it("accepts Cmd/Ctrl+Enter without Shift", () => {
+    expect(isModifiedEnterShortcut(react({ key: "Enter", metaKey: true }))).toBe(true);
+    expect(isModifiedEnterShortcut(react({ key: "Enter", ctrlKey: true }))).toBe(true);
+  });
+
+  it("rejects plain Enter, Shift+Enter, other keys and composition", () => {
+    expect(isModifiedEnterShortcut(react({ key: "Enter" }))).toBe(false);
+    expect(isModifiedEnterShortcut(react({ key: "Enter", metaKey: true, shiftKey: true }))).toBe(false);
+    expect(isModifiedEnterShortcut(react({ key: "a", metaKey: true }))).toBe(false);
+    expect(isModifiedEnterShortcut(react({ key: "Enter", metaKey: true, isComposing: true }))).toBe(false);
+  });
+});
+
+describe("isUnmodifiedEnterKey", () => {
+  it("accepts a bare Enter only", () => {
+    expect(isUnmodifiedEnterKey(key({ key: "Enter" }))).toBe(true);
+    for (const modifier of ["ctrlKey", "metaKey", "shiftKey"] as const) {
+      expect(isUnmodifiedEnterKey(key({ key: "Enter", [modifier]: true }))).toBe(false);
+    }
+    expect(isUnmodifiedEnterKey(key({ key: "Enter", isComposing: true }))).toBe(false);
+    expect(isUnmodifiedEnterKey(key({ key: "Tab" }))).toBe(false);
+  });
+});
+
+describe("isInlineMenuAcceptKey", () => {
+  it("accepts Tab and a bare Enter", () => {
+    expect(isInlineMenuAcceptKey(key({ key: "Tab" }))).toBe(true);
+    expect(isInlineMenuAcceptKey(key({ key: "Enter" }))).toBe(true);
+  });
+
+  it("accepts Tab even with modifiers or during composition, but not a modified Enter", () => {
+    expect(isInlineMenuAcceptKey(key({ key: "Tab", shiftKey: true }))).toBe(true);
+    expect(isInlineMenuAcceptKey(key({ key: "Tab", isComposing: true }))).toBe(true);
+    expect(isInlineMenuAcceptKey(key({ key: "Enter", shiftKey: true }))).toBe(false);
+    expect(isInlineMenuAcceptKey(key({ key: "ArrowDown" }))).toBe(false);
+  });
+});
+
+describe("trapTabFocus", () => {
+  it("does nothing for non-Tab keys or a missing root", () => {
+    expect(trapTabFocus(key({ key: "a" }) as unknown as KeyboardEvent, {} as HTMLElement)).toBe(false);
+    expect(trapTabFocus(key({ key: "Tab" }) as unknown as KeyboardEvent, null)).toBe(false);
+  });
+});

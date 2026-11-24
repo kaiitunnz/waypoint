@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { AssistantMark } from "@/components/AssistantMark";
-import type { AssistantSummary, SessionStatus } from "@/lib/types";
+import type { AssistantSummary, SessionStatus } from "@waypoint/web-core/types";
 
 // Bottom-right cluster of two low-profile glass circles (Inbox above,
 // Assistant below), icon-only at rest and expanding to labels on hover/focus.

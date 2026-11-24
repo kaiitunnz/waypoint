@@ -5,17 +5,61 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    "./api": "./src/api.ts",
+    "./backends": "./src/backends.ts",
+    "./board": "./src/board.ts",
+    "./clipboard": "./src/clipboard.ts",
+    "./composer-completions": "./src/composer-completions.ts",
+    "./events": "./src/events.ts",
+    "./fuzzy": "./src/fuzzy.ts",
+    "./highlight": "./src/highlight.ts",
+    "./keyboard": "./src/keyboard.ts",
+    "./markdown": "./src/markdown.ts",
+    "./modelDisplay": "./src/modelDisplay.ts",
+    "./recurrence": "./src/recurrence.ts",
+    "./scheduleTime": "./src/scheduleTime.ts",
+    "./search": "./src/search.ts",
+    "./sessionHistory": "./src/sessionHistory.ts",
+    "./store": "./src/store.ts",
+    "./tailnet": "./src/tailnet.ts",
+    "./telemetry": "./src/telemetry.ts",
+    "./todos": "./src/todos.ts",
+    "./tokens": "./src/tokens.ts",
+    "./types": "./src/types.ts",
+    "./usage": "./src/usage.ts",
+    "./usageLimitSource": "./src/usageLimitSource.ts",
+    "./variant": "./src/variant.ts",
+    "./workspacePaths": "./src/workspacePaths.ts",
+    "./hooks/*.test": null,
+    "./hooks/*": "./src/hooks/*.ts",
+    "./session/*.test": null,
+    "./session/*": "./src/session/*.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "peerDependencies": {
+    "react": "^19.3.1"
+  },
+  "dependencies": {
+    "lowlight": "^3.3.0",
+    "rehype-katex": "^7.0.1",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.2.0"
+  },
   "devDependencies": {
+    "@types/hast": "^3.0.5",
     "@types/node": "^26.6.6",
+    "@types/react": "^19.2.18",
+    "@types/unist": "^3.0.3",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.6",
+    "react": "^19.3.1",
     "typescript": "^6.0.3",
     "vitest": "^3.2.7"
   }

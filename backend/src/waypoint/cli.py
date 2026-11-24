@@ -2254,10 +2254,10 @@ def _validate_permission_mode(
         )
 
 
-# `sessions settings` mirrors the frontend editor (frontend/src/lib/
-# useSessionSettings.ts): the restart count, turn-interruption, and execution
-# order are computed the same way. The runtime stays authoritative; the CLI
-# plan is conservative validation only.
+# `sessions settings` mirrors the frontend editor
+# (packages/web-core/src/hooks/useSessionSettings.ts): the restart count,
+# turn-interruption, and execution order are computed the same way. The runtime
+# stays authoritative; the CLI plan is conservative validation only.
 
 # Exit code for a restart-required plan run without --restart, distinct from a
 # usage error (2) and a runtime failure (1).

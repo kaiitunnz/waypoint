@@ -11,15 +11,15 @@ import {
   useState,
 } from "react";
 
-import { connectSessionsSocket, parseLiveSessionList } from "@/lib/api";
-import { useBackendCatalog } from "@/lib/backends";
+import { connectSessionsSocket, parseLiveSessionList } from "@waypoint/web-core/api";
+import { useBackendCatalog } from "@waypoint/web-core/backends";
 import {
   applySessionState,
   clearSessionHistory,
   upsertLiveSession,
-} from "@/lib/sessionHistory";
-import { clearToken, readHost, readToken } from "@/lib/store";
-import { SessionEnvelope, SessionRecord } from "@/lib/types";
+} from "@waypoint/web-core/sessionHistory";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
+import { SessionEnvelope, SessionRecord } from "@waypoint/web-core/types";
 
 import { SessionSwitcher } from "./SessionSwitcher";
 

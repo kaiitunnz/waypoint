@@ -34,10 +34,10 @@ import {
   isAuthError,
   isTelemetryDisabledError,
   refreshTelemetryInstance,
-} from "@/lib/api";
-import { agentTransports, useBackendCatalog } from "@/lib/backends";
-import { clearToken, readHost, readToken } from "@/lib/store";
-import { formatRangeLabel, readTelemetryQuery, writeTelemetryQuery } from "@/lib/telemetry";
+} from "@waypoint/web-core/api";
+import { agentTransports, useBackendCatalog } from "@waypoint/web-core/backends";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
+import { formatRangeLabel, readTelemetryQuery, writeTelemetryQuery } from "@waypoint/web-core/telemetry";
 import { useTheme } from "@/lib/theme";
 import {
   Insight,
@@ -55,7 +55,7 @@ import {
   TelemetrySettingsResponse,
   TelemetryTokens,
   TokenGroupBy,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 const DRILLDOWN_PAGE_SIZE = 20;
 const REFRESH_DEBOUNCE_MS = 400;

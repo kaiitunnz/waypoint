@@ -1,6 +1,6 @@
 "use client";
 
-import { effortLabel } from "@/lib/modelDisplay";
+import { effortLabel } from "@waypoint/web-core/modelDisplay";
 
 interface EffortPickerProps {
   options: string[];

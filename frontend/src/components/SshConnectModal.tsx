@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { PasswordInput } from "@/components/PasswordInput";
-import { trapTabFocus } from "@/lib/keyboard";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
 
 interface SshConnectModalProps {
   targetName: string;

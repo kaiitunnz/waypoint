@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
-import type { EventDiffPreview, EventDiffPreviewFile } from "@/lib/events";
+import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/events";
 import {
   buildPlainDiffLines,
   DIFF_MARKER,
   highlightDiffToLines,
   type DiffLine,
-} from "@/lib/highlight";
+} from "@waypoint/web-core/highlight";
 
 const PHASE_LABEL: Record<EventDiffPreview["phase"], string> = {
   proposed: "Proposed changes",

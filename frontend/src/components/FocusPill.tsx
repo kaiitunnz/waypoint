@@ -3,9 +3,9 @@
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { useMediaQuery } from "@/lib/use-media-query";
-import { usePopoverAnchor } from "@/lib/use-popover-anchor";
-import { usePopoverDismiss } from "@/lib/use-popover-dismiss";
+import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
+import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
+import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
 
 const NARROW_INSET = 12;
 

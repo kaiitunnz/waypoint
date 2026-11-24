@@ -17,7 +17,7 @@ import { Sheet } from "@/components/Sheet";
 import { SessionSettingsModal } from "@/components/SessionSettingsModal";
 import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { useInboxCount } from "@/lib/useInboxCount";
+import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
 import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
@@ -58,7 +58,7 @@ import {
   updateSessionPreset,
   SSH_MASTER_REQUIRED_DETAIL,
   CWD_NOT_FOUND_DETAIL,
-} from "@/lib/api";
+} from "@waypoint/web-core/api";
 import {
   clearToken,
   mergeRecentCwds,
@@ -70,15 +70,15 @@ import {
   writeHost,
   writeLaunchTarget,
   writeToken,
-} from "@/lib/store";
-import { launchableAgents, useBackendCatalog } from "@/lib/backends";
+} from "@waypoint/web-core/store";
+import { launchableAgents, useBackendCatalog } from "@waypoint/web-core/backends";
 import {
   applySessionState,
   clearSessionHistory,
   forgetHistorySession,
   invalidateSessionHistory,
   upsertLiveSession,
-} from "@/lib/sessionHistory";
+} from "@waypoint/web-core/sessionHistory";
 import {
   AccountProfile,
   AssistantSummary,
@@ -97,11 +97,11 @@ import {
   SessionTransport,
   UsageDashboardBucket,
   UsageProviderOption,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 import {
   PLUGIN_SELECTION,
   type UsageLimitSourceValue,
-} from "@/components/UsageLimitSourceField";
+} from "@waypoint/web-core/usageLimitSource";
 
 interface ThreadSummary {
   id: string;

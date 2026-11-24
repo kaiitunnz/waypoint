@@ -43,20 +43,16 @@
   border-color: var(--error);
 }
 
+.input[aria-invalid="true"]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 30%, transparent);
+}
+
 .input::-webkit-search-cancel-button {
   appearance: none;
 }
 
 .mono {
   font-family: var(--mono);
-}
-
-.withLead {
-  padding-left: 38px;
-}
-
-.withTrail {
-  padding-right: 44px;
 }
 
 .lead {
@@ -92,7 +88,17 @@
   .mono {
     font-size: var(--f-code);
   }
+}
 
+.withLead {
+  padding-left: 38px;
+}
+
+.withTrail {
+  padding-right: 44px;
+}
+
+@media (min-width: 900px) {
   .withLead {
     padding-left: 36px;
   }

@@ -488,13 +488,15 @@ async def test_auto_mode_dialog_still_surfaced() -> None:
 
 async def test_trust_prompt_is_accepted() -> None:
     # A fresh-cwd session opens at the workspace-trust prompt; the tailer must
-    # accept it (bare Enter) so the session — including autonomous ones — does
+    # accept it (bare Enter, once the selection holds) so the session — including autonomous ones — does
     # not hang, without emitting any approval.
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     runtime = _make_runtime(session, _load("trust_dialog.txt"))
     tailer = _make_tailer(plugin, runtime)
 
+    await tailer._poll_dialog()
+    runtime.tmux.send_input.assert_not_called()
     await tailer._poll_dialog()
 
     runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
@@ -516,12 +518,31 @@ async def test_trust_prompt_selects_trust_option_before_accepting() -> None:
     runtime.tmux.send_input.assert_not_called()
 
 
+async def test_trust_prompt_arrow_waits_for_redraw() -> None:
+    # The options wrap, so a second Down on a pane that hasn't redrawn yet would
+    # land back on "No, exit". Re-send only once a dropped burst times out.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("trust_dialog_2_1_331.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    for _ in range(6):
+        await tailer._poll_dialog()
+    assert runtime.tmux.send_bytes.await_count == 1
+
+    await tailer._poll_dialog()
+    assert runtime.tmux.send_bytes.await_count == 2
+    runtime.tmux.send_input.assert_not_called()
+
+
 async def test_trust_prompt_accepts_once_trust_option_is_selected() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     runtime = _make_runtime(session, _load("trust_dialog_2_1_331_trust_selected.txt"))
     tailer = _make_tailer(plugin, runtime)
 
+    await tailer._poll_dialog()
+    runtime.tmux.send_input.assert_not_called()
     await tailer._poll_dialog()
 
     runtime.tmux.send_bytes.assert_not_called()

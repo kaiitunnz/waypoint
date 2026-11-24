@@ -62,6 +62,8 @@ _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
 _ARROW_DOWN = b"\x1b[B"
 _ARROW_UP = b"\x1b[A"
+# Polls an unchanged trust prompt waits before re-sending a dropped arrow burst.
+_TRUST_ARROW_RETRY_POLLS = 5
 # Popups cancelled with one Escape after the debounce. The message is fixed —
 # never interpolate pane contents, which can hold personal environment data.
 _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
@@ -129,6 +131,10 @@ class TranscriptTailer:
         # Dialog debounce state
         self._prev_dialog_sig: str | None = None
         self._dialog_stable_count: int = 0
+        # Trust-prompt navigation: the snapshot the last arrow burst acted on and
+        # the polls since, and consecutive polls showing the trust option selected.
+        self._trust_arrowed: tuple[str, int] | None = None
+        self._trust_selected_polls: int = 0
         # Signature of the dialog already surfaced as an APPROVAL_REQUEST; held
         # until the dialog leaves the screen so a response that clears pending
         # before the pane redraws cannot trigger a duplicate emit.
@@ -390,12 +396,13 @@ class TranscriptTailer:
         if screen_type is pane_dialog.PaneScreen.TRUST:
             # A fresh cwd opens with the workspace-trust prompt, which blocks the
             # session (including autonomously-spawned ones in fresh worktrees)
-            # until answered. Newer CLIs preselect "No, exit", so move the
-            # highlight onto the trust option and press Enter only on a later tick
-            # that shows it selected; Enter on the wrong row ends the session.
-            # Re-sent each tick it persists — idempotent, and self-heals if a
-            # keystroke is dropped; a stray Enter at the ready prompt after it
-            # clears is a harmless empty submit.
+            # until answered. Newer CLIs preselect "No, exit", and Enter on it
+            # ends the session, so move the highlight onto the trust option first.
+            # The option list wraps, so arrows are not re-sent until the pane
+            # redraws (or a dropped burst times out), and Enter waits for the
+            # selection to hold across polls so it never queues behind an arrow.
+            # The Enter is re-sent while the prompt persists; a stray one at the
+            # ready prompt after it clears is a harmless empty submit.
             offset = pane_dialog.trust_option_offset(snapshot)
             if offset is None:
                 log.warning(
@@ -404,8 +411,19 @@ class TranscriptTailer:
                 )
                 return
             if offset:
+                self._trust_selected_polls = 0
+                if self._trust_arrowed is not None:
+                    acted_on, polls = self._trust_arrowed
+                    if acted_on == snapshot and polls < _TRUST_ARROW_RETRY_POLLS:
+                        self._trust_arrowed = (acted_on, polls + 1)
+                        return
                 arrow = _ARROW_DOWN if offset > 0 else _ARROW_UP
                 await self._runtime.tmux.send_bytes(pane, arrow * abs(offset))
+                self._trust_arrowed = (snapshot, 0)
+                return
+            self._trust_arrowed = None
+            self._trust_selected_polls += 1
+            if self._trust_selected_polls < _DIALOG_STABLE_TICKS:
                 return
             log.info(
                 "accepting workspace-trust prompt",

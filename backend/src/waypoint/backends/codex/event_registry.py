@@ -320,7 +320,7 @@ def _image_generation_completed(item: dict[str, Any]) -> Rendered:
 
 
 def _without_image_bytes(item: dict[str, Any]) -> dict[str, Any]:
-    return {**item, "result": ""}
+    return {**item, "result": ""} if "result" in item else item
 
 
 def _hook_prompt(item: dict[str, Any]) -> Rendered | None:
@@ -693,6 +693,8 @@ NOTIFICATIONS: dict[str, NotificationSpec] = {
     "thread/goal/cleared": Ignored(_TURN_LESS_STATE),
     "thread/queue/changed": Ignored(_TURN_LESS_STATE),
     "thread/prediction/updated": Ignored(_NOT_A_SESSION_SURFACE),
+    "thread/search/partial": Ignored(_NOT_A_SESSION_SURFACE),
+    "thread/section/changed": Ignored(_TURN_LESS_STATE),
     "thread/readState/changed": Ignored("Waypoint tracks its own unread state"),
     "thread/project/updated": Ignored(_TURN_LESS_STATE),
     "thread/attachment/updated": Ignored(_TURN_LESS_STATE),

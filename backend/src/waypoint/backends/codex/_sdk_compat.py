@@ -73,7 +73,8 @@ def _known_thread_item_types(union: typing.Any) -> frozenset[str]:
     Raises if any member contributes no string literal -- the set is load-bearing
     (it is the only thing that stops a malformed *known* item from binding to the
     ``UnknownThreadItem`` fallback), so a broken derivation must fail loudly at
-    install time rather than silently degrade the guarantee.
+    install time rather than silently degrade the guarantee. Members may share a
+    literal (the SDK splits one item type into variants by payload shape).
     """
     members = typing.get_args(union)
     known: set[str] = set()
@@ -87,11 +88,6 @@ def _known_thread_item_types(union: typing.Any) -> frozenset[str]:
                 "cannot distinguish known from unknown thread items."
             )
         known |= contributed
-    if len(known) < len(members):
-        raise RuntimeError(
-            f"ThreadItem type-literal derivation is incomplete "
-            f"({len(known)} literals for {len(members)} members)."
-        )
     return frozenset(known)
 
 

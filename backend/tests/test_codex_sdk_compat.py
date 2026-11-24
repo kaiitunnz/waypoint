@@ -13,7 +13,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 from openai_codex._message_router import MessageRouter, _TurnState
@@ -30,10 +30,11 @@ from openai_codex.generated.v2_all import (
     Turn,
 )
 from openai_codex.models import Notification, UnknownNotification
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import waypoint.backends.codex  # noqa: F401  (installs the shim on import)
 from waypoint.backends.codex._sdk_compat import (
+    _known_thread_item_types,
     install_activity_kind_tolerance,
     install_thread_item_tolerance,
     start_compaction_turn,
@@ -46,6 +47,34 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 def _load(name: str) -> dict:
     return json.loads((_FIXTURES / f"{name}.json").read_text())
+
+
+class _FileIdItem(BaseModel):
+    type: Literal["imageGeneration"]
+    file_id: str
+
+
+class _ResultItem(BaseModel):
+    type: Literal["imageGeneration"]
+    result: str
+
+
+class _PlanItem(BaseModel):
+    type: Literal["plan"]
+
+
+class _UntypedItem(BaseModel):
+    type: str
+
+
+def test_known_thread_item_types_accepts_variants_sharing_a_literal() -> None:
+    union = _FileIdItem | _ResultItem | _PlanItem
+    assert _known_thread_item_types(union) == {"imageGeneration", "plan"}
+
+
+def test_known_thread_item_types_rejects_a_member_without_a_literal() -> None:
+    with pytest.raises(RuntimeError, match="exposes no 'type' literal"):
+        _known_thread_item_types(_PlanItem | _UntypedItem)
 
 
 def test_model_list_with_unknown_efforts_validates_and_preserves_values() -> None:

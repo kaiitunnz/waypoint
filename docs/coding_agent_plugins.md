@@ -564,9 +564,9 @@ def affects_plan_approval(self, event) -> bool: ...
 
 `pending_plan_approval` returns the plan awaiting a decision (`PendingPlanApproval`
 in `base.py`: `plan_id`, `text`, `decisions`, `supports_note`, `availability`,
-`created_at`, and `sequence`), or `None`.
-It checks cheap gates (the permission mode) before reading events. The feed lists
-the plan with `resolve_via: "approve_plan"`, so the client answers through
+`created_at`, and `sequence`), or `None`. Implementations check cheap gates (the
+permission mode) before reading events. The feed lists the plan with
+`resolve_via: "approve_plan"`, so the client answers through
 `POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
 `affects_plan_approval` is a pure test of which events (a plan item, a recorded
 decision) can change the result; the feed calls it for every event of a tracked

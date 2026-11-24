@@ -759,10 +759,10 @@ class EventEnvelope(BaseModel):
 ```
 
 Per-plugin `normalize.py` modules turn raw protocol events into the envelope
-shape. The frontend's `parseEvent` (`packages/web-core/src/events.ts`) reads the envelope back out
-— components no longer poke `metadata.tool_name` etc. directly. When an agent
-bumps its protocol, the change lands inside that agent's `normalize.py`; the
-frontend reader stays put.
+shape. The frontend's `parseEvent` (`packages/web-core/src/events.ts`) reads
+the envelope back out — components no longer poke `metadata.tool_name` etc.
+directly. When an agent bumps its protocol, the change lands inside that
+agent's `normalize.py`; the frontend reader stays put.
 
 ### Capture seams
 

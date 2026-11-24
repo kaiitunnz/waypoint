@@ -11,9 +11,9 @@ import {
 import { MessageSchedule } from "../types";
 
 // Live view of the *pending* scheduled messages for a single session. The
-// schedule broadcast reaches only /ws/sessions (session_id=None), so this hook
-// fetches on mount, polls, applies an optimistic cancel, and refreshes after a
-// create.
+// schedule broadcast goes only to /ws/sessions (session_id=None), which this
+// hook doesn't subscribe to, so it fetches on mount, polls, and cancels
+// optimistically; callers call `refresh` after creating one.
 export function useSessionScheduledMessages(
   host: string,
   token: string,

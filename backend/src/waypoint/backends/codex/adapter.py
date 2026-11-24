@@ -15,6 +15,7 @@ from uuid import uuid4
 from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
 from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.codex._sdk_compat import start_compaction_turn
 from waypoint.backends.codex.event_registry import (
     REASONING_DELTA_METHODS,
@@ -829,9 +830,7 @@ class CodexAppServerAdapter:
         if state is None:
             return False
         if state.rate_limit_refresh_task is not None:
-            state.rate_limit_refresh_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await state.rate_limit_refresh_task
+            await cancel_and_wait(state.rate_limit_refresh_task)
         if state.pending_approval is not None:
             state.pending_approval.response = {"decision": "decline"}
             state.pending_approval.event.set()
@@ -848,9 +847,8 @@ class CodexAppServerAdapter:
         state.report_reader.shutdown(wait=False, cancel_futures=True)
         # The pump thread exits on its own: closing the client fails its read.
         if state.stream_task is not None:
-            state.stream_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await state.stream_task
+            with suppress(Exception):
+                await cancel_and_wait(state.stream_task)
         return True
 
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:

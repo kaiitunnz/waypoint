@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.schemas import (
     HeldMessageOrigin,
     HeldMessageRecord,
@@ -64,12 +65,7 @@ class HeldQueue:
         for handle in self._retries.values():
             handle.cancel()
         self._retries.clear()
-        tasks = list(self._tasks)
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            with suppress(asyncio.CancelledError):
-                await task
+        await cancel_and_wait(*self._tasks)
 
     async def deliver(
         self,

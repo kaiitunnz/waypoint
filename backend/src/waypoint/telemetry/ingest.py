@@ -22,6 +22,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.schemas import (
     EventKind,
@@ -613,9 +614,7 @@ class TelemetryIngester:
 
     async def stop(self) -> None:
         if self._task is not None:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
+            await cancel_and_wait(self._task)
             self._task = None
         # Best-effort final flush so nothing enqueued right before shutdown
         # is silently dropped.

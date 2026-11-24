@@ -14,6 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.schemas import (
     ProviderBucketHealth,
     ProviderRefreshResult,
@@ -72,15 +73,11 @@ class UsageProviderService:
         self._stopping = True
         for event in self._wake.values():
             event.set()
-        for loop_task in self._loops:
-            loop_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await loop_task
+        await cancel_and_wait(*self._loops)
         self._loops.clear()
         for inflight_task in list(self._inflight.values()):
-            inflight_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await inflight_task
+            with contextlib.suppress(Exception):
+                await cancel_and_wait(inflight_task)
         self._inflight.clear()
         for provider in self._providers:
             with contextlib.suppress(Exception):

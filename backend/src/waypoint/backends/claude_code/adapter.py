@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.claude_code.models import (
@@ -1337,9 +1338,7 @@ class ClaudeCliAdapter:
             )
         state.closing = True
         if state.rate_limit_refresh_task is not None:
-            state.rate_limit_refresh_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await state.rate_limit_refresh_task
+            await cancel_and_wait(state.rate_limit_refresh_task)
         # Deny any pending approvals so the binary unblocks the parked tool
         # call before we tear the process down (best-effort; the stdin may
         # already be gone).
@@ -1368,9 +1367,8 @@ class ClaudeCliAdapter:
                 with suppress(Exception):
                     await state.process.wait()
         for task in (state.stdout_task, state.stderr_task, state.wait_task):
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+            with suppress(Exception):
+                await cancel_and_wait(task)
         return True
 
     async def shutdown(self) -> None:
@@ -1622,9 +1620,7 @@ class ClaudeCliAdapter:
         except asyncio.CancelledError:
             raise
         # Drain stderr/stdout readers so the tail captures the final lines.
-        for task in (state.stderr_task, state.stdout_task):
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+        await asyncio.wait((state.stderr_task, state.stdout_task))
         if state.closing:
             return
         text = self._format_dead_process_error(state, returncode)

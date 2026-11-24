@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Self
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.base import (
     PaneTypingSpec,
     TerminalAppearance,
@@ -601,9 +602,8 @@ class ClaudeTtyPlugin:
 
     async def _cancel_tailer(self, session_id: str) -> None:
         if (run := self._tailers.pop(session_id, None)) is not None:
-            run.task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await run.task
+            with suppress(Exception):
+                await cancel_and_wait(run.task)
 
     def _byte_source(
         self,

@@ -12,11 +12,14 @@ export interface AuthState {
   token: string;
   // A line the login screen shows once: why the person is signed out.
   notice: string;
+  // What the host picked in the switcher was called there, until the next sign-in.
+  hostName: string;
 }
 
-const SERVER_STATE: AuthState = { ready: false, host: "", token: "", notice: "" };
+const SERVER_STATE: AuthState = { ready: false, host: "", token: "", notice: "", hostName: "" };
 
 let notice = "";
+let hostName = "";
 let cached: AuthState = SERVER_STATE;
 const listeners = new Set<() => void>();
 
@@ -26,8 +29,14 @@ const listeners = new Set<() => void>();
 function getSnapshot(): AuthState {
   const host = readHost();
   const token = readToken();
-  if (!cached.ready || cached.host !== host || cached.token !== token || cached.notice !== notice) {
-    cached = { ready: true, host, token, notice };
+  if (
+    !cached.ready ||
+    cached.host !== host ||
+    cached.token !== token ||
+    cached.notice !== notice ||
+    cached.hostName !== hostName
+  ) {
+    cached = { ready: true, host, token, notice, hostName };
   }
   return cached;
 }
@@ -49,6 +58,7 @@ export function signIn(host: string, token: string) {
   writeHost(host);
   writeToken(token);
   notice = "";
+  hostName = "";
   emit();
 }
 
@@ -56,14 +66,16 @@ export function signIn(host: string, token: string) {
 export function handleAuthFailure() {
   clearToken();
   notice = "Session expired. Log in again.";
+  hostName = "";
   emit();
 }
 
 // Another backend needs its own sign-in.
-export function switchHost(host: string) {
+export function switchHost(host: string, name = "") {
   writeHost(host);
   clearToken();
   notice = "Switched backend. Log in to continue.";
+  hostName = name;
   emit();
 }
 

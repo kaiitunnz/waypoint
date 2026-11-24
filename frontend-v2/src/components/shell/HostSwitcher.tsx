@@ -189,7 +189,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
     } else if (sameBackendUrl(picked.url, host)) {
       launchTargets.selectTarget("");
     } else if (splitBackendUrl(picked.url)) {
-      switchHost(picked.url);
+      switchHost(picked.url, picked.name);
     }
     onDone();
   };

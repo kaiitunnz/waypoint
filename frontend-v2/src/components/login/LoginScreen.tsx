@@ -47,10 +47,12 @@ function choiceUrl(choice: Choice, port: number): string {
 interface LoginScreenProps {
   // The saved (or inferred) backend URL: the starting choice on desktop.
   defaultHost: string;
+  // What the host was called where it was picked; else its name is worked out from the address.
+  hostName: string;
   notice: string;
 }
 
-export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
+export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [recents] = useState(readRecentHosts);
   const { snapshot, loading, refresh } = useTailnetSnapshot({ kind: "local" });
@@ -59,7 +61,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
     const address = splitBackendUrl(defaultHost);
     return address
       ? {
-          name: describeHost(defaultHost, { recents }),
+          name: hostName || describeHost(defaultHost, { recents }),
           protocol: address.protocol,
           hostname: address.hostname,
           portText: String(address.port),

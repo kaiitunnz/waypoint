@@ -18,7 +18,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <div className={styles.splash} />;
   }
   if (!auth.token) {
-    return <LoginScreen defaultHost={auth.host} notice={auth.notice} />;
+    return <LoginScreen defaultHost={auth.host} hostName={auth.hostName} notice={auth.notice} />;
   }
   return (
     <ShellDataProvider host={auth.host} token={auth.token}>

@@ -279,7 +279,7 @@ def _lookup(
 
 def _register_old_tailer(
     plugin: ClaudeTtyPlugin,
-) -> tuple["asyncio.Task[None]", MagicMock]:
+) -> tuple[asyncio.Task[None], MagicMock]:
     tailer = MagicMock(spec=TranscriptTailer)
     task = asyncio.create_task(asyncio.sleep(3600))
     plugin._tailers["s1"] = plugin_mod._TailerRun(tailer, task)

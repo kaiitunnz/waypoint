@@ -575,7 +575,7 @@ class ClaudeTtyPlugin:
         start_at_end: bool = False,
         config_dir: str | None = None,
         launch_target: SshLaunchTargetConfig | None = None,
-        after: "asyncio.Task[None] | None" = None,
+        after: asyncio.Task[None] | None = None,
     ) -> None:
         if session_id in self._tailers:
             return
@@ -1762,11 +1762,11 @@ def _carried_pre_plan_mode(
 
 class _TailerRun(NamedTuple):
     tailer: TranscriptTailer
-    task: "asyncio.Task[None]"
+    task: asyncio.Task[None]
 
 
 async def _run_tailer_after(
-    previous: "asyncio.Task[None]", tailer: TranscriptTailer
+    previous: asyncio.Task[None], tailer: TranscriptTailer
 ) -> None:
     # ``wait`` neither raises the previous task's outcome nor swallows this
     # task's own cancellation.

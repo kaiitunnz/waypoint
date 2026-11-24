@@ -373,8 +373,8 @@ describe("buildSshRows", () => {
 
   it("reads password targets as online only once connected", () => {
     const rows = buildSshRows(targets);
-    expect(rows[0]).toMatchObject({ key: "ssh:a", online: "offline", sshAuth: "password", sshConnected: false });
-    expect(rows[1]).toMatchObject({ key: "ssh:b", online: "online", sshConnected: true });
+    expect(rows[0]).toMatchObject({ key: "ssh:a", online: "offline" });
+    expect(rows[1]).toMatchObject({ key: "ssh:b", online: "online" });
     expect(buildSshRows([{ ...targets[0], connected: true }])[0].online).toBe("online");
   });
 

@@ -191,8 +191,6 @@ export interface HostRow {
   lastUsedAt: number | null;
   // Set on SSH target rows.
   targetId?: string;
-  sshAuth?: "key" | "password";
-  sshConnected?: boolean;
   searchText: string;
 }
 
@@ -387,8 +385,6 @@ export function buildSshRows(
         online: connected ? "online" : "offline",
         lastUsedAt: null,
         targetId: target.id,
-        sshAuth: auth,
-        sshConnected: connected,
         searchText: `${target.name} ${target.supported_backends.join(" ")} ssh`.toLowerCase(),
       };
       return row;

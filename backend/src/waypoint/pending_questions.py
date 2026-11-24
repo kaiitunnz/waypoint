@@ -111,42 +111,34 @@ class PendingQuestionTracker:
         )
 
     def restored_status(self, session: SessionRecord) -> SessionStatus:
-        """Only a question asked since the human's last message keeps
-        ``WAITING_INPUT`` across a restore; a wait on an approval ends with the
-        process that held it."""
+        """An open question keeps ``WAITING_INPUT`` across a restore; a wait on
+        an approval ends with the process that held it."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return SessionStatus.IDLE
-        if self._question_ids_since_human_input(session.id):
+        ids = self._runtime.storage.open_question_tool_use_ids(session.id)
+        if any(
+            state is not QuestionLiveness.CLOSED
+            for state in self.liveness(session, ids).values()
+        ):
             return SessionStatus.WAITING_INPUT
         return SessionStatus.IDLE
 
     def awaits_answer(
         self, session: SessionRecord, resolving_id: str | None = None
     ) -> bool:
-        """Whether an actionable question asked since the human's last message
-        is still open, leaving aside ``resolving_id`` (the question the incoming
-        event resolves, if any)."""
-        ids = self._question_ids_since_human_input(session.id, resolving_id)
+        """Whether an actionable question is open, leaving aside
+        ``resolving_id`` (the question the incoming event resolves, if any)."""
+        ids = [
+            tool_use_id
+            for tool_use_id in self._runtime.storage.open_question_tool_use_ids(
+                session.id
+            )
+            if tool_use_id != resolving_id
+        ]
         return any(
             state is QuestionLiveness.ACTIONABLE
             for state in self.liveness(session, ids).values()
         )
-
-    def _question_ids_since_human_input(
-        self, session_id: str, excluding: str | None = None
-    ) -> list[str]:
-        """Open questions the human has not moved past with a message of their
-        own; agent, scheduled, and wake deliveries do not count."""
-        events = self._runtime.storage.open_question_events(session_id)
-        if not events:
-            return []
-        last_input = self._runtime.storage.latest_human_input_sequence(session_id)
-        return [
-            tool_use_id
-            for event in events
-            if (last_input is None or event.sequence > last_input)
-            and (tool_use_id := str(event.metadata["tool_use_id"])) != excluding
-        ]
 
     # ── Answers ─────────────────────────────────────────────────────────
 
@@ -243,12 +235,16 @@ class PendingQuestionTracker:
 
     def _settles(self, session: SessionRecord, tool_use_id: str) -> bool:
         """Whether the session stops waiting on the human once ``tool_use_id``
-        is cancelled. Questions the human moved past do not hold the wait."""
+        is cancelled."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return False
         if self._runtime.transport_for(session).has_pending_approval(session):
             return False
-        others = self._question_ids_since_human_input(session.id, tool_use_id)
+        others = [
+            other
+            for other in self._runtime.storage.open_question_tool_use_ids(session.id)
+            if other != tool_use_id
+        ]
         return all(
             state is QuestionLiveness.CLOSED
             for state in self.liveness(session, others).values()

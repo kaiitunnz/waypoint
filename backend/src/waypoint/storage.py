@@ -23,7 +23,6 @@ from waypoint.questions import (
 )
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
-    INPUT_ORIGIN_KEY,
     BoardChannel,
     BoardEntry,
     EventKind,
@@ -2356,20 +2355,6 @@ class Storage:
             [session_id, before_sequence],
         ).fetchone()
         return row is not None
-
-    @_synchronized
-    def latest_human_input_sequence(self, session_id: str) -> int | None:
-        """The sequence of the session's newest user_input the human typed (one
-        without an ``INPUT_ORIGIN_KEY``), or ``None``."""
-        row = self.connection.execute(
-            f"""
-            SELECT MAX(sequence) FROM events
-            WHERE session_id = ? AND kind = ?
-              AND json_extract(metadata, '$.{INPUT_ORIGIN_KEY}') IS NULL
-            """,
-            [session_id, EventKind.USER_INPUT],
-        ).fetchone()
-        return row[0] if row is not None and row[0] is not None else None
 
     @_synchronized
     def latest_todo_event(self, session_id: str) -> EventRecord | None:

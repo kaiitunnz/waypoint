@@ -64,15 +64,11 @@ def focused_runtime(tmp_path: Path) -> SessionRuntime:
     return runtime
 
 
-def record_dispatches(
-    runtime: SessionRuntime, monkeypatch, origins: list | None = None
-) -> list[str]:
+def record_dispatches(runtime: SessionRuntime, monkeypatch) -> list[str]:
     sent: list[str] = []
 
     async def fake_dispatch(prepared: PreparedInput) -> SessionRecord:
         sent.append(prepared.request.text)
-        if origins is not None:
-            origins.append(prepared.origin)
         return prepared.session
 
     monkeypatch.setattr(runtime, "dispatch_input", fake_dispatch)
@@ -185,27 +181,6 @@ async def test_release_delivers_and_unpins(tmp_path, monkeypatch) -> None:
     assert sent == ["hi"]
     assert runtime.storage.list_held_messages("s1") == []
     assert runtime.attachments.held_referenced_ids("s1") == set()
-
-
-async def test_deliveries_carry_their_origin(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path)
-    runtime.storage.create_session(make_session(runtime.settings, "s1"))
-    origins: list = []
-    record_dispatches(runtime, monkeypatch, origins)
-
-    await runtime.held.deliver("s1", agent_send("hi"), HeldMessageOrigin.AGENT)
-    await runtime._deliver_wake("s1")
-    runtime.set_focus("s1", True)
-    held = await runtime.held.deliver(
-        "s1", SessionInputRequest(text="later"), HeldMessageOrigin.SCHEDULE
-    )
-    await runtime.held.release(held.id)
-
-    assert origins == [
-        HeldMessageOrigin.AGENT,
-        HeldMessageOrigin.WAKE,
-        HeldMessageOrigin.SCHEDULE,
-    ]
 
 
 async def test_release_unknown_is_404(tmp_path) -> None:

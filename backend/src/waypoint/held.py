@@ -9,7 +9,6 @@ import logging
 import uuid
 from collections import defaultdict
 from contextlib import suppress
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -87,9 +86,7 @@ class HeldQueue:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
             if self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
-                    delivered = await self._runtime.handle_input(
-                        session_id, request, origin
-                    )
+                    delivered = await self._runtime.handle_input(session_id, request)
                     if wake and self._runtime.storage.delete_held_wake(session_id):
                         await self._publish(session_id)
                     return delivered
@@ -282,9 +279,7 @@ class HeldQueue:
                 return
             self._dispatching.add(record.id)
             try:
-                await self._runtime.dispatch_input(
-                    replace(prepared, origin=record.origin)
-                )
+                await self._runtime.dispatch_input(prepared)
             except InputBlockedError:
                 # A dialog opened first; keep the item for the next edge.
                 self._put_back(record)

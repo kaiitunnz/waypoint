@@ -21,8 +21,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import suppress
-from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import monotonic
@@ -93,7 +92,6 @@ from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
-    INPUT_ORIGIN_KEY,
     PLUGIN_USAGE_SELECTION,
     USAGE_SELECTION_FIELDS,
     AccountProbeResult,
@@ -229,12 +227,6 @@ CWD_NOT_FOUND_DETAIL = "cwd-not-found"
 # authoritative payload — the woken session re-reads the board/inbox itself.
 WAKE_INPUT_TEXT = "Board/inbox changed — run your cycle."
 
-# Origin of the input being dispatched, so every user_input a dispatch records
-# (including a plugin's own, e.g. a slash command) carries INPUT_ORIGIN_KEY.
-_DISPATCH_ORIGIN: ContextVar[HeldMessageOrigin | None] = ContextVar(
-    "dispatch_origin", default=None
-)
-
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -296,7 +288,6 @@ class PreparedInput:
     session: SessionRecord
     request: SessionInputRequest
     attachments: list[ResolvedAttachment]
-    origin: HeldMessageOrigin | None = None
 
 
 @dataclass
@@ -2801,15 +2792,9 @@ class SessionRuntime:
         return self.get_session(session.id)
 
     async def handle_input(
-        self,
-        session_id: str,
-        request: SessionInputRequest,
-        origin: HeldMessageOrigin | None = None,
+        self, session_id: str, request: SessionInputRequest
     ) -> SessionRecord:
-        """``origin`` marks a message the human did not type (see
-        ``INPUT_ORIGIN_KEY``)."""
-        prepared = await self.prepare_input(session_id, request)
-        return await self.dispatch_input(replace(prepared, origin=origin))
+        return await self.dispatch_input(await self.prepare_input(session_id, request))
 
     async def prepare_input(
         self, session_id: str, request: SessionInputRequest
@@ -2823,13 +2808,6 @@ class SessionRuntime:
         return PreparedInput(session=session, request=request, attachments=attachments)
 
     async def dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
-        token = _DISPATCH_ORIGIN.set(prepared.origin)
-        try:
-            return await self._dispatch_input(prepared)
-        finally:
-            _DISPATCH_ORIGIN.reset(token)
-
-    async def _dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
         session = prepared.session
         request = prepared.request
         attachments = prepared.attachments
@@ -5113,8 +5091,6 @@ class SessionRuntime:
         attachments: list[AttachmentSpec] | None = None,
     ) -> None:
         metadata: dict[str, Any] = {"submit": submit, "status": status}
-        if (origin := _DISPATCH_ORIGIN.get()) is not None:
-            metadata[INPUT_ORIGIN_KEY] = origin
         if attachments:
             metadata["attachments"] = [
                 spec.model_dump(mode="json") for spec in attachments
@@ -6099,8 +6075,8 @@ class SessionRuntime:
     ) -> tuple[SessionStatus | None, bool]:
         """The status to store, and whether the session is ``awaiting_answer``.
 
-        An ``IDLE`` stays ``WAITING_INPUT`` while a question the human has yet to
-        answer is open, leaving aside ``resolving_id`` (see
+        An ``IDLE`` stays ``WAITING_INPUT`` while an actionable question is
+        open, leaving aside ``resolving_id`` (see
         ``PendingQuestionTracker.awaits_answer``). It is ``awaiting_answer``
         unless a request parks the turn: an agent whose questions block it, or a
         pending approval.

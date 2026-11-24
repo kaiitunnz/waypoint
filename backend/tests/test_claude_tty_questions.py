@@ -11,9 +11,7 @@ from waypoint.questions import QuestionLiveness
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
-    INPUT_ORIGIN_KEY,
     EventKind,
-    HeldMessageOrigin,
     SessionInputRequest,
     SessionRecord,
     SessionSource,
@@ -357,31 +355,40 @@ def last_event(runtime: SessionRuntime):
     return runtime.storage.list_events("s1")[-1]
 
 
-async def test_agent_message_does_not_end_the_wait(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path)
-    input_transport(runtime, monkeypatch)
-    await ask(runtime, "q1")
-
-    await runtime.handle_input(
-        "s1", SessionInputRequest(text="[wp-msg] status?"), HeldMessageOrigin.AGENT
-    )
-    assert runtime.get_session("s1").status is SessionStatus.RUNNING
-    assert last_event(runtime).metadata[INPUT_ORIGIN_KEY] == HeldMessageOrigin.AGENT
-    await end_turn(runtime)
-
-    assert runtime.get_session("s1").status is SessionStatus.WAITING_INPUT
-
-
-async def test_human_message_moves_past_the_question(tmp_path, monkeypatch) -> None:
+async def test_a_human_message_does_not_end_the_wait(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     input_transport(runtime, monkeypatch)
     await ask(runtime, "q1")
 
     await runtime.handle_input("s1", SessionInputRequest(text="do this instead"))
-    assert INPUT_ORIGIN_KEY not in last_event(runtime).metadata
+    assert runtime.get_session("s1").status is SessionStatus.RUNNING
     await end_turn(runtime)
 
-    assert runtime.get_session("s1").status is SessionStatus.IDLE
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
+
+
+async def test_a_clarification_exchange_keeps_the_wait(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+
+    for text in ("What does option A change?", "And option B?"):
+        await runtime.handle_input("s1", SessionInputRequest(text=text))
+        await runtime._emit_adapter_event(
+            "s1",
+            EventKind.AGENT_OUTPUT,
+            "It changes the default.",
+            {"method": "assistant.text"},
+            SessionStatus.RUNNING,
+        )
+        await end_turn(runtime)
+
+        session = runtime.get_session("s1")
+        assert session.status is SessionStatus.WAITING_INPUT
+        assert session.awaiting_answer
+    assert runtime.storage.open_question_tool_use_ids("s1") == ["q1"]
 
 
 async def test_answered_question_lets_the_turn_end_idle(tmp_path, monkeypatch) -> None:
@@ -422,7 +429,7 @@ async def test_cancel_after_a_settled_wait_marks_idle(tmp_path, monkeypatch) -> 
     assert updated.status is SessionStatus.IDLE
 
 
-async def test_cancel_ignores_a_question_the_human_moved_past(
+async def test_cancel_keeps_waiting_on_an_older_open_question(
     tmp_path, monkeypatch
 ) -> None:
     runtime = make_runtime(tmp_path)
@@ -434,7 +441,8 @@ async def test_cancel_ignores_a_question_the_human_moved_past(
 
     updated = await cancel(runtime, "q_new")
 
-    assert updated.status is SessionStatus.IDLE
+    assert updated.status is SessionStatus.WAITING_INPUT
+    assert (await cancel(runtime, "q_old")).status is SessionStatus.IDLE
 
 
 async def test_relaunch_note_keeps_the_wait(tmp_path, monkeypatch) -> None:
@@ -445,28 +453,6 @@ async def test_relaunch_note_keeps_the_wait(tmp_path, monkeypatch) -> None:
     await runtime._record_system_event(
         "s1", "Restarted Claude TUI session", status=SessionStatus.IDLE
     )
-
-    assert runtime.get_session("s1").status is SessionStatus.WAITING_INPUT
-
-
-async def test_input_a_plugin_records_carries_the_origin(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path)
-    transport = input_transport(runtime, monkeypatch)
-    transport.is_structured = True
-    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
-
-    async def handle_command(runtime_, session, request):
-        await runtime_._record_user_event(session.id, request.text, submit=True)
-        return session
-
-    monkeypatch.setattr(plugin, "maybe_handle_input", handle_command)
-    await ask(runtime, "q1")
-
-    await runtime.handle_input(
-        "s1", SessionInputRequest(text="/compact"), HeldMessageOrigin.AGENT
-    )
-    assert last_event(runtime).metadata[INPUT_ORIGIN_KEY] == HeldMessageOrigin.AGENT
-    await end_turn(runtime)
 
     assert runtime.get_session("s1").status is SessionStatus.WAITING_INPUT
 
@@ -536,9 +522,7 @@ async def test_awaiting_survives_a_status_reassert_and_clears_on_change(
     runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
     assert runtime.get_session("s1").awaiting_answer
 
-    await runtime.handle_input(
-        "s1", SessionInputRequest(text="[wp-msg] hi"), HeldMessageOrigin.AGENT
-    )
+    await runtime.handle_input("s1", SessionInputRequest(text="[wp-msg] hi"))
     session = runtime.get_session("s1")
     assert session.status is SessionStatus.RUNNING
     assert not session.awaiting_answer
@@ -569,9 +553,7 @@ async def test_a_failed_send_restores_awaiting(tmp_path, monkeypatch) -> None:
     transport.send_input.side_effect = RuntimeError("pane gone")
 
     with pytest.raises(RuntimeError):
-        await runtime.handle_input(
-            "s1", SessionInputRequest(text="[wp-msg] hi"), HeldMessageOrigin.AGENT
-        )
+        await runtime.handle_input("s1", SessionInputRequest(text="[wp-msg] hi"))
 
     session = runtime.get_session("s1")
     assert session.status is SessionStatus.WAITING_INPUT

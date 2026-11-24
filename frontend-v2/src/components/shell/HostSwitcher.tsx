@@ -12,12 +12,13 @@ import {
   hostKey,
   isCompleteHost,
   buildBackendUrl,
+  pageDevice,
   parsePort,
   splitBackendUrl,
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts } from "@waypoint/web-core/recentHosts";
-import { deploymentBackendPort, sameBackendUrl } from "@waypoint/web-core/tailnet";
+import { sameBackendUrl } from "@waypoint/web-core/tailnet";
 
 import { HostPicker, type TypedAddress } from "@/components/hosts/HostPicker";
 import { Button } from "@/components/ui/Button";
@@ -123,9 +124,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
   const groups = useMemo(
     () =>
       buildHostGroups({
-        pageHost: window.location.hostname || "localhost",
-        protocol: window.location.protocol === "https:" ? "https" : "http",
-        devicePort: deploymentBackendPort(),
+        ...pageDevice(),
         snapshot,
         selfIsPageHost: false,
         recents,
@@ -197,11 +196,15 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
         liveAddress
       />
       <div className={styles.footer}>
-        {picked.kind === "host" && probe !== "idle" ? (
-          <p className={styles.status} data-state={probe} role="status">
-            {probe === "checking" ? "Checking" : probe === "reachable" ? "Reachable" : "Unreachable"}
-          </p>
-        ) : null}
+        <p className={styles.status} data-state={probe} role="status">
+          {picked.kind !== "host" || probe === "idle"
+            ? ""
+            : probe === "checking"
+              ? "Checking"
+              : probe === "reachable"
+                ? "Reachable"
+                : "Unreachable"}
+        </p>
         {target?.auth === "password" ? (
           <div className={styles.status} data-state={target.connected ? "reachable" : "idle"}>
             <span>{target.connected ? "SSH connected" : "SSH password required"}</span>

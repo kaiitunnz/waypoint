@@ -1,8 +1,12 @@
 import sys
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from agent_cli_guard import AgentCliGuard
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.workspace_fs import (
     LocalWorkspaceFilesystem,
@@ -24,6 +28,33 @@ _HOST_WAYPOINT_ENV = (
     "WAYPOINT_CORS_ORIGINS",
     "WAYPOINT_CORS_ORIGIN_REGEX",
 )
+
+
+@pytest.fixture(autouse=True)
+def forbid_agent_cli_processes(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    guard = AgentCliGuard([Path(tempfile.gettempdir()), tmp_path_factory.getbasetemp()])
+    guard.install(monkeypatch)
+    yield
+    if guard.spawned:
+        pytest.fail(
+            f"{request.node.nodeid} tried to start a real agent CLI: "
+            f"{sorted(set(guard.spawned))}; stub the call at its plugin seam"
+        )
+
+
+@pytest.fixture(autouse=True)
+def offline_account_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The runtime schedules a live verified-account probe on every
+    # profile-scoped launch, import, reattach, and restore. Tests that cover
+    # the probe patch this seam themselves.
+    async def unverified(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr("waypoint.runtime.probe_account", unverified)
 
 
 @pytest.fixture

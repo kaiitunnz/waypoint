@@ -139,6 +139,12 @@ class TranscriptTailer:
         # a matching dialog on the pane adopts its card; the rest expire on the
         # first decided screen.
         self._adoptable: list[tuple[str | None, str]] = []
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        """Finish after one last forced drain, leaving dialog state for the next
+        tailer to adopt."""
+        self._stop_requested = True
 
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body) so start-at-end
@@ -695,6 +701,8 @@ class TranscriptTailer:
         try:
             self._load_adoptable()
             await self._loop()
+            if self._stop_requested:
+                return
         except Exception:
             log.exception(
                 "transcript tailer crashed",
@@ -706,6 +714,9 @@ class TranscriptTailer:
 
     async def _loop(self) -> None:
         while True:
+            if self._stop_requested:
+                await self._drain(force=True)
+                return
             session = self._runtime.storage.get_session(self._session_id)
             if session is None:
                 return

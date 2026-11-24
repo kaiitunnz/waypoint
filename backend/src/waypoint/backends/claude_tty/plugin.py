@@ -30,7 +30,7 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, model_validator
@@ -80,9 +80,9 @@ from waypoint.backends.claude_code.threads import (
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
+    ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
-    TranscriptByteSource,
     resolve_remote_config_root,
     transcript_path,
 )
@@ -119,6 +119,12 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 # in the control-swap helper, so a caller can clear a flag (effort=None) while
 # the unspecified flags keep the session's current value.
 _UNSET: Any = object()
+
+# The age window covers the send's pane-ready and submit-confirm waits, which
+# run before the lookup starts.
+_CLEAR_SUCCESSOR_MAX_AGE_SECONDS = 120.0
+_CLEAR_LOOKUP_DEADLINE_SECONDS = 5.0
+_CLEAR_LOOKUP_INTERVAL_SECONDS = 0.5
 
 # CLI flags Waypoint owns; users may not smuggle them in through custom args.
 _RESERVED_CLI_FLAGS = frozenset(
@@ -216,7 +222,7 @@ class ClaudeTtyPlugin:
         # adapter. The tmux instance is the shared pane-wrapper transport.
         self._claude = ClaudeCodePlugin()
         self._tmux = TmuxPlugin()
-        self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
+        self._tailers: dict[str, _TailerRun] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
         # Resolver from this transport's own config, used only by the
         # backend=claude_tty rebase hook (the sole path with no runtime handle to
@@ -569,20 +575,13 @@ class ClaudeTtyPlugin:
         start_at_end: bool = False,
         config_dir: str | None = None,
         launch_target: SshLaunchTargetConfig | None = None,
+        after: asyncio.Task[None] | None = None,
     ) -> None:
-        if session_id in self._tailer_tasks:
+        if session_id in self._tailers:
             return
-        # A local session tails the shared projects tree directly; a session on
-        # an SSH launch target reads its transcript over the remote filesystem
-        # seam. The selection lives here in the transport plugin so the runtime
-        # stays unaware of Claude-specific transcript storage.
-        source: TranscriptByteSource
-        if launch_target is None:
-            source = LocalTranscriptByteSource(cwd, thread_id, config_dir)
-        else:
-            source = RemoteClaudeTranscriptByteSource(
-                runtime, session_id, self, launch_target, config_dir
-            )
+        source = self._byte_source(
+            runtime, session_id, thread_id, cwd, config_dir, launch_target
+        )
         session = runtime.storage.get_session(session_id)
         backend_id = session.backend if session is not None else self.id
         tailer = TranscriptTailer(
@@ -596,7 +595,97 @@ class ClaudeTtyPlugin:
                 runtime, backend_id
             ),
         )
-        self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
+        run = tailer.run() if after is None else _run_tailer_after(after, tailer)
+        self._tailers[session_id] = _TailerRun(tailer, asyncio.create_task(run))
+
+    async def _cancel_tailer(self, session_id: str) -> None:
+        if (run := self._tailers.pop(session_id, None)) is not None:
+            run.task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await run.task
+
+    def _byte_source(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        thread_id: str,
+        cwd: str,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> ClaudeTranscriptSource:
+        # A local session tails the shared projects tree directly; a session on
+        # an SSH launch target reads its transcript over the remote filesystem
+        # seam. The selection lives here in the transport plugin so the runtime
+        # stays unaware of Claude-specific transcript storage.
+        if launch_target is None:
+            return LocalTranscriptByteSource(cwd, thread_id, config_dir)
+        return RemoteClaudeTranscriptByteSource(
+            runtime, session_id, thread_id, launch_target, config_dir
+        )
+
+    async def follow_clear(self, runtime: "SessionRuntime", session_id: str) -> bool:
+        """Move the session's thread id and tailer onto the transcript a
+        ``/clear`` just started. Returns whether it was found."""
+        session = runtime.storage.get_session(session_id)
+        if session is None:
+            return False
+        parent = session.transport_state.get("thread_id")
+        if not isinstance(parent, str) or not parent:
+            return False
+        pane = session.transport_state.get("tmux_pane")
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        config_dir = self._config_dir(session)
+        source = self._byte_source(
+            runtime, session_id, parent, session.cwd, config_dir, launch_target
+        )
+        try:
+            async with asyncio.timeout(_CLEAR_LOOKUP_DEADLINE_SECONDS):
+                while (
+                    successor := await asyncio.to_thread(
+                        source.find_clear_successor,
+                        parent,
+                        _CLEAR_SUCCESSOR_MAX_AGE_SECONDS,
+                    )
+                ) is None:
+                    await asyncio.sleep(_CLEAR_LOOKUP_INTERVAL_SECONDS)
+        except TimeoutError:
+            return False
+        # Check and swap without yielding to the loop, so no relaunch or
+        # terminate interleaves: one in flight has popped the tailer, and one
+        # that finished has replaced the pane, even when it resumed this thread.
+        session = runtime.storage.get_session(session_id)
+        old = self._tailers.get(session_id)
+        if (
+            session is None
+            or old is None
+            or old.task.done()
+            or session.transport_state.get("thread_id") != parent
+            or session.transport_state.get("tmux_pane") != pane
+        ):
+            return False
+        old.tailer.stop()
+        del self._tailers[session_id]
+        self._start_tailer(
+            runtime,
+            session_id,
+            successor,
+            session.cwd,
+            config_dir=config_dir,
+            launch_target=launch_target,
+            # Starts after the old tailer's final drain, so events stay in
+            # transcript order.
+            after=old.task,
+        )
+        await runtime.update_session_fields(
+            session_id,
+            transport_state={**session.transport_state, "thread_id": successor},
+            context_usage=None,
+        )
+        log.info(
+            "following /clear onto a new thread",
+            extra={"session_id": session_id, "thread_id": successor},
+        )
+        return True
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str
@@ -622,11 +711,7 @@ class ClaudeTtyPlugin:
         await self.drop_pending_approval(
             runtime, session.id, "Pending approval cleared by terminate"
         )
-        tailer_task = self._tailer_tasks.pop(session.id, None)
-        if tailer_task is not None:
-            tailer_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await tailer_task
+        await self._cancel_tailer(session.id)
 
     async def create_session(
         self,
@@ -1154,11 +1239,7 @@ class ClaudeTtyPlugin:
         await self.drop_pending_approval(
             runtime, session.id, "Pending approval cleared by restart"
         )
-        tailer_task = self._tailer_tasks.pop(session.id, None)
-        if tailer_task is not None:
-            tailer_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await tailer_task
+        await self._cancel_tailer(session.id)
 
         stored_args = state.get("launch_args")
         base_args = _scrub_session_args(
@@ -1677,6 +1758,20 @@ def _carried_pre_plan_mode(
     if isinstance(pre_plan_mode, str) and pre_plan_mode:
         return {"pre_plan_mode": pre_plan_mode}
     return {}
+
+
+class _TailerRun(NamedTuple):
+    tailer: TranscriptTailer
+    task: asyncio.Task[None]
+
+
+async def _run_tailer_after(
+    previous: asyncio.Task[None], tailer: TranscriptTailer
+) -> None:
+    # ``wait`` neither raises the previous task's outcome nor swallows this
+    # task's own cancellation.
+    await asyncio.wait({previous})
+    await tailer.run()
 
 
 def _scrub_session_args(args: list[str]) -> list[str]:

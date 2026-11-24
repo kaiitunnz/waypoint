@@ -214,7 +214,10 @@ class TranscriptNormalizer:
         # a user prompt rather than emitting this subtype, so resolving to idle
         # here is safe; a stray case would self-correct on the next assistant
         # record (which re-asserts RUNNING).
-        text = _strip_local_command_output(record.get("content")) or "Command complete"
+        command = (record.get("commandRun") or {}).get("command")
+        text = _strip_local_command_output(record.get("content")) or (
+            "Context cleared" if command == "clear" else "Command complete"
+        )
         return [self._result_note(text, "local_command")]
 
     def _result_note(self, text: str, stop_reason: str) -> NormalizedEvent:

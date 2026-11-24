@@ -10,11 +10,12 @@ implements every operation, so there is one remote command surface to reason
 about instead of a bespoke ``ssh`` invocation per op.
 
 Fail-before-destroy: read-only queries (``exists``/``is_dir``/``is_symlink``/
-``listdir``/``glob_artifacts``) degrade to a "not found" answer when the
-round-trip itself fails (timeout, dropped connection, bad output) rather than
-raising — the worst outcome is a wrong turn that itself degrades to a clean,
-non-destructive :class:`~waypoint.backends.transcripts.TranscriptUnavailableError`
-further down the policy (a stale symlink target compares unequal, a copy finds
+``listdir``/``glob``/``glob_artifacts``/``find_clear_successors``) degrade to
+a "not found" answer when the round-trip itself fails (timeout, dropped
+connection, bad output) rather than raising — the worst outcome is a wrong turn
+that itself degrades to a clean, non-destructive
+:class:`~waypoint.backends.transcripts.TranscriptUnavailableError` further down
+the policy (a stale symlink target compares unequal, a copy finds
 no source, a final re-check reports the thread still unavailable). Mutating
 ops (``mkdir``/``chmod``/``rmdir``/``symlink``/``copy_file``/``readlink``)
 instead raise immediately on any failure — remote or transport — since there
@@ -105,14 +106,28 @@ class RemoteTranscriptFilesystem:
         entries = self._run("listdir", path).get("entries", [])
         return entries if isinstance(entries, list) else []
 
+    def glob(self, root: str, pattern: str) -> list[str]:
+        paths = self._run("glob", root, pattern).get("paths", [])
+        return paths if isinstance(paths, list) else []
+
     def glob_artifacts(
         self, session: SessionRecord, plugin: Any, config_dir: str
     ) -> list[str]:
         pattern = plugin.native_thread_artifact_glob(session)
         if pattern is None:
             return []
-        paths = self._run("glob", config_dir, pattern).get("paths", [])
-        return paths if isinstance(paths, list) else []
+        return self.glob(config_dir, pattern)
+
+    def find_clear_successors(
+        self, root: str, pattern: str, parent_id: str, max_age_seconds: float
+    ) -> list[str]:
+        result = self._run(
+            "find_clear_successors", root, pattern, parent_id, str(max_age_seconds)
+        )
+        ids = result.get("ids", [])
+        if not isinstance(ids, list):
+            return []
+        return [item for item in ids if isinstance(item, str)]
 
     def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
         """Read up to ``limit`` bytes of ``path`` starting at ``offset``.

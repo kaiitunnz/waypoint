@@ -23,6 +23,16 @@ export function readHost(): string {
   return saved;
 }
 
+// The saved backend URL as chosen, else the page's own backend. Unlike `readHost`,
+// a saved loopback host is kept when the page is served from another machine: it
+// can be an SSH tunnel to the browser's own machine.
+export function readSavedHost(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(HOST_KEY) || inferBackendHost();
+}
+
 export function writeHost(host: string): void {
   window.localStorage.setItem(HOST_KEY, host);
 }

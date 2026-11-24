@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { clearToken, readHost, readToken, writeHost, writeToken } from "@waypoint/web-core/store";
+import { clearToken, readSavedHost, readToken, writeHost, writeToken } from "@waypoint/web-core/store";
 
 export interface AuthState {
   // False until the browser has been read; the server render and hydration show nothing.
@@ -27,7 +27,7 @@ const listeners = new Set<() => void>();
 // here and notifies. The snapshot is rebuilt only when a value changed, which
 // keeps it referentially stable for useSyncExternalStore.
 function getSnapshot(): AuthState {
-  const host = readHost();
+  const host = readSavedHost();
   const token = readToken();
   if (
     !cached.ready ||

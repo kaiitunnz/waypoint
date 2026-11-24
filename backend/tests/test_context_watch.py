@@ -936,6 +936,7 @@ def test_a_claude_target_awaiting_its_answer_gets_both_at_once(
 ) -> None:
     spawned = _claude(cw, fake, monkeypatch, status="waiting_input")
     fake.sessions[T]["awaiting_answer"] = True
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", L)
     cw.begin_pair(T, "park")
     assert fake.sent == [(T, "/compact"), (T, G.replace("proceed", "park"))]
     assert spawned == []
@@ -947,15 +948,28 @@ def test_a_target_awaiting_its_answer_elsewhere_gets_a_helper(
     _watch(cw)
     spawned = _capture_spawn(cw, monkeypatch)
     fake.sessions[T].update(status="waiting_input", awaiting_answer=True)
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", L)
     cw.begin_pair(T, "park")
     assert spawned == [["pair", "--target", T, "--grounding", "park"]]
     assert cw.current_phase(T) == "parking"
+
+
+def test_a_target_awaiting_its_answer_needs_a_session_to_send_from(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _watch(cw)
+    spawned = _capture_spawn(cw, monkeypatch)
+    fake.sessions[T].update(status="waiting_input", awaiting_answer=True)
+    with pytest.raises(SystemExit, match="needs a person"):
+        cw.begin_pair(T, "park")
+    assert fake.sent == [] and spawned == []
 
 
 def test_the_helper_sends_the_grounding_once_the_turn_ends_on_a_question(
     cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _claude(cw, fake, monkeypatch, status="running")
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", L)
     cw.write_phase(T, "compacting", "proceed", pending=True)
     waiting = fake.sessions[T]
     fake.on_sleep = [
@@ -1578,6 +1592,7 @@ def test_await_turn_end_reads_the_status_rather_than_the_exit_code(
     )
     cli.chmod(0o755)
     monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(cli))
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", L)
     slept: list[float] = []
     monkeypatch.setattr(cw.time, "sleep", slept.append)
     cw.await_turn_end(T, 30.5)

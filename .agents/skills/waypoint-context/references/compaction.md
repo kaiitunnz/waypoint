@@ -10,7 +10,7 @@ $W compact --target <sid> --grounding proceed|park
 
 Use the grounding you recorded with `phase`. If the target's events show a compaction note since it parked, the user already compacted it: pass `--grounding-only`. The note reads `Context compacted` on Claude Code and Codex, and `Session compacted` on opencode.
 
-`compact` refuses a target at `interrupted` or `error`, and at `waiting_input` unless it is waiting only on its own question (`awaiting_answer: true` in `sessions list`). Such a target counts as idle: its question card stays answerable through the pair, and the pair's messages come from your session, so they don't count as the human moving past the question. Give it the grounding you recorded, usually `park`, so it goes back to waiting for the answer. Otherwise the pair goes out by backend:
+`compact` refuses a target at `interrupted` or `error`, and at `waiting_input` unless it is waiting only on its own question (`awaiting_answer: true` in `sessions list`) and you run `$W` from a session. Such a target counts as idle, and its question stays answerable. Otherwise the pair goes out by backend:
 
 - **Claude Code** queues `/compact` until its turn ends, so `compact` sends it at once, and a refusal fails the command. An idle target gets the grounding right after it. A running turn would consume plain text, so a detached helper sends that target's grounding once the turn has ended, including a turn that ends waiting on its own question.
 - **Codex and opencode** can't queue it, so `compact` returns at once and a detached helper sends both: `/compact` once the target is idle and quiet (2 s on Codex, 5 s on opencode), then the grounding once the compaction has ended. Focus counts as not ready.

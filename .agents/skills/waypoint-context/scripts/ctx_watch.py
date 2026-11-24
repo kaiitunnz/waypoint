@@ -255,10 +255,16 @@ def epoch(iso: str | None) -> float:
 
 def at_rest(target: dict[str, Any]) -> bool:
     """Whether the target's turn ended with nothing parking it: idle, or waiting
-    only on its own question. An approval or a blocking question is not rest."""
+    only on its own question. An approval or a blocking question is not rest.
+
+    Waiting on its question counts only for sends from a session: a send with
+    no session id is the human's own message and moves the target past it.
+    """
     status = target.get("status")
     return status == "idle" or (
-        status == "waiting_input" and bool(target.get(AWAITING_ANSWER))
+        status == "waiting_input"
+        and bool(target.get(AWAITING_ANSWER))
+        and bool(os.environ.get("WAYPOINT_SESSION_ID"))
     )
 
 

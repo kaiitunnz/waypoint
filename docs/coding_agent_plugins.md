@@ -269,8 +269,9 @@ A transport that can list the tool approvals its provider is waiting on
 overrides `pending_approval_ids(session)` to return their ids (the default
 returns `None`). The pending-asks feed lists an approval request only while its
 id is in that tuple, so requests left open in the transcript by a terminate or a
-restart are not offered for an answer. With `None` the feed falls back to
-`has_pending_approval`, which cannot separate a stale request from a live one.
+restart are not offered for an answer. A transport that returns `None` reports
+only `has_pending_approval`, and the feed then lists every open request of a
+session that has one pending.
 The returned ids are the ids the approval request events carry (see
 [Approval requests](#approval-requests-and-plans)).
 

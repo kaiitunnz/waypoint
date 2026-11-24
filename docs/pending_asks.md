@@ -94,6 +94,6 @@ when an event that can change its asks arrives, when its status or permission mo
 changes, or when a plugin reports a change no event records. The first read scans
 live sessions once.
 
-A transport that cannot list its pending approvals by id reports only whether any
-is pending; the feed then cannot tell a stale open request from a live one in the
-same session.
+A transport reports its pending approvals by id. One that can only say whether
+any is pending reports no ids, and the feed then lists every open request of a
+session that has one pending.

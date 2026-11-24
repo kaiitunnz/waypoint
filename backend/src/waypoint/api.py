@@ -2397,11 +2397,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             initial = context.runtime.session_list_envelope()
             await websocket.send_json(initial.model_dump(mode="json"))
-            await websocket.send_json(
-                context.runtime.asks.envelope(
+            try:
+                pending_asks = context.runtime.asks.envelope(
                     await context.runtime.asks.snapshot()
-                ).model_dump(mode="json")
-            )
+                )
+            except Exception:
+                # The feed is an add-on frame; its failure must not close the
+                # sessions stream every client depends on.
+                log.exception("pending-asks hydration failed")
+            else:
+                await websocket.send_json(pending_asks.model_dump(mode="json"))
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)

@@ -1321,6 +1321,7 @@ class ClaudeCliAdapter:
         )
 
     def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        """Every parked request: tool approvals and AskUserQuestion alike."""
         state = self._sessions.get(session_id)
         if state is None:
             return ()

@@ -51,7 +51,6 @@ log = logging.getLogger("waypoint.pending_asks")
 # text and question prompts are what the human decides on and stay whole.
 TEXT_LIMIT = 2000
 _ELLIPSIS = "…"
-_MAX_DEPTH = 8
 _RECOMMENDED_SUFFIX = "(recommended)"
 
 
@@ -59,22 +58,20 @@ def _cut(text: str) -> str:
     return text if len(text) <= TEXT_LIMIT else text[:TEXT_LIMIT] + _ELLIPSIS
 
 
-def _cut_value(value: Any, depth: int = 0) -> tuple[Any, bool]:
+def _cut_value(value: Any) -> tuple[Any, bool]:
     """A copy of ``value`` with every long string cut, and whether any was."""
     if isinstance(value, str):
         cut = _cut(value)
         return cut, cut != value
-    if depth >= _MAX_DEPTH:
-        return _cut(str(value)), True
     if isinstance(value, dict):
         out: dict[Any, Any] = {}
         truncated = False
         for key, item in value.items():
-            out[key], was_cut = _cut_value(item, depth + 1)
+            out[key], was_cut = _cut_value(item)
             truncated = truncated or was_cut
         return out, truncated
     if isinstance(value, list):
-        items = [_cut_value(item, depth + 1) for item in value]
+        items = [_cut_value(item) for item in value]
         return [item for item, _ in items], any(was_cut for _, was_cut in items)
     return value, False
 
@@ -146,8 +143,12 @@ class _Entry:
     # Open approval events, reused until an ask-relevant event arrives.
     open_approvals: list[EventRecord] | None = None
     plan_plugin: PlanApprovalLifecycle | None = None
-    # Whether the session has open question or approval events or items, so
-    # state churn re-derives it.
+    # The plugin's pending plan as of the last derivation (``plan_fresh``), reused
+    # until an ask-relevant event arrives or the session's status or mode changes.
+    plan: PendingPlanApproval | None = None
+    plan_fresh: bool = False
+    # Whether the session has items or open question events, so state churn
+    # re-derives it.
     watch: bool = False
 
 
@@ -190,16 +191,26 @@ class PendingAskFeed:
     # ── Scan ────────────────────────────────────────────────────────────
 
     async def _ensure_scanned(self) -> None:
-        if self._scanned:
-            return
+        if not self._scanned:
+            # Shielded: a caller cancelled mid-scan (a reconnecting websocket)
+            # must not leave a partial feed.
+            await asyncio.shield(self._start_scan())
+
+    def _start_scan(self) -> asyncio.Task[None]:
+        """The first-scan task, started if none is running. The feed owns it so
+        a failed scan is retried by the next read or flush."""
         if self._scan_task is None:
-            # Owned by the feed and shielded below: a caller cancelled mid-scan
-            # (a reconnecting websocket) must not leave a partial feed.
             self._active = True
             self._scan_task = asyncio.create_task(
                 self._scan(), name="pending-asks-scan"
             )
-        await asyncio.shield(self._scan_task)
+            self._scan_task.add_done_callback(self._scan_done)
+        return self._scan_task
+
+    def _scan_done(self, task: asyncio.Task[None]) -> None:
+        if not task.cancelled() and (error := task.exception()) is not None:
+            self._scan_task = None
+            log.error("pending-asks scan failed", exc_info=error)
 
     async def _scan(self) -> None:
         for session in self._runtime.storage.list_live_sessions():
@@ -265,6 +276,7 @@ class PendingAskFeed:
                 return
             if not self._scanned:
                 # The scan drains these when it finishes.
+                self._start_scan()
                 for session_id in changed_ids:
                     self._dirty.setdefault(session_id, False)
                 return
@@ -357,12 +369,35 @@ class PendingAskFeed:
                     session, transport, previous, entry, events_changed
                 )
                 if entry.plan_plugin is not None:
-                    plan = entry.plan_plugin.pending_plan_approval(runtime, session)
+                    plan = self._plan(session, previous, entry, events_changed)
                     if plan is not None:
                         asks.append(self._plan_ask(session, plan))
         entry.asks = asks
         entry.watch = bool(asks) or bool(question_ids)
         return entry
+
+    def _plan(
+        self,
+        session: SessionRecord,
+        previous: _Entry | None,
+        entry: _Entry,
+        events_changed: bool,
+    ) -> PendingPlanApproval | None:
+        """The plugin's pending plan. Asking walks the session's events, so the
+        last answer stands until an event or a status or mode change."""
+        assert entry.plan_plugin is not None
+        if (
+            previous is not None
+            and previous.plan_fresh
+            and not events_changed
+            and (previous.status, previous.permission_mode)
+            == (session.status, session.permission_mode)
+        ):
+            entry.plan = previous.plan
+        else:
+            entry.plan = entry.plan_plugin.pending_plan_approval(self._runtime, session)
+        entry.plan_fresh = True
+        return entry.plan
 
     def _question_ask(
         self, session: SessionRecord, question: PendingQuestion

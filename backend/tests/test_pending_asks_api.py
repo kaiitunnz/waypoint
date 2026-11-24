@@ -182,6 +182,24 @@ def test_stream_sends_the_feed_after_the_session_list_then_live_changes(
     ]
 
 
+def test_a_failing_feed_does_not_close_the_sessions_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, context, token = _build(tmp_path, monkeypatch)
+    runtime = context.runtime
+
+    async def broken() -> None:
+        raise RuntimeError("feed failure")
+
+    monkeypatch.setattr(runtime.asks, "snapshot", broken)
+    with TestClient(app) as client:
+        assert client.portal is not None
+        with client.websocket_connect(f"/ws/sessions?token={token}") as ws:
+            assert ws.receive_json()["type"] == "session_list_update"
+            client.portal.call(runtime.broadcast_session_list)
+            assert _next_of_type(ws, "session_list_update")["payload"]["sessions"]
+
+
 def _next_of_type(ws: Any, frame_type: str) -> dict[str, Any]:
     for _ in range(50):
         frame = ws.receive_json()

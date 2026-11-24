@@ -1,6 +1,8 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -28,8 +30,13 @@ class FakePlugin:
     """A question-capable plugin that can also report a plan."""
 
     question_parks_turn = True
+    capabilities = SimpleNamespace(
+        supports_set_permission_mode_inline=True,
+        supports_set_permission_mode_with_restart=False,
+    )
 
     def __init__(self) -> None:
+        self.on_delete: Callable[[SessionRecord], Awaitable[None]] | None = None
         self.liveness: dict[str, QuestionLiveness] = {}
         self.plan: PendingPlanApproval | None = None
         self.plan_modes: set[str | None] | None = None
@@ -58,6 +65,21 @@ class FakePlugin:
 
     def affects_plan_approval(self, event: EventRecord) -> bool:
         return event.metadata.get("item_type") == "plan"
+
+    def validate_permission_mode(self, mode: str) -> str:
+        return mode
+
+    async def apply_permission_mode(
+        self, runtime: Any, session: SessionRecord, mode: str
+    ) -> None: ...
+
+    def on_session_deleted(self, runtime: Any, session: SessionRecord) -> None: ...
+
+    async def cleanup_side_questions_on_delete(
+        self, runtime: Any, session: SessionRecord
+    ) -> None:
+        if self.on_delete is not None:
+            await self.on_delete(session)
 
 
 class PlainPlugin(FakePlugin):
@@ -941,17 +963,160 @@ async def test_a_cancelled_first_read_does_not_leave_a_partial_feed(env: Env) ->
     assert sorted(i.session_id for i in snapshot.items) == ["a", "b", "c", "s1"]
 
 
-async def test_state_changes_during_the_scan_are_applied_afterwards(env: Env) -> None:
+async def test_state_changes_during_the_scan_are_applied_afterwards(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     add_session(env.runtime, "a")
     await ask(env.runtime, "q-a", session_id="a")
+    feed = env.runtime.asks
+    derive = feed._derive_into_entries
+    changed: list[str] = []
 
-    reader = asyncio.create_task(env.runtime.asks.snapshot())
-    await asyncio.sleep(0)
-    env.runtime.storage.update_session("a", status=SessionStatus.EXITED)
-    await env.runtime.asks.flush({"a"})
-    snapshot = await reader
+    def derive_then_change(session: SessionRecord, *, events_changed: bool) -> None:
+        derive(session, events_changed=events_changed)
+        if session.id == "a" and not changed:
+            # The session ends after the scan has already listed its question;
+            # the broadcast tick for it arrives before the scan finishes.
+            changed.append(session.id)
+            env.runtime.storage.update_session("a", status=SessionStatus.EXITED)
+            asyncio.get_running_loop().create_task(feed.flush({"a"}))
 
+    monkeypatch.setattr(feed, "_derive_into_entries", derive_then_change)
+
+    snapshot = await feed.snapshot()
+
+    assert changed == ["a"]
     assert all(i.session_id != "a" for i in snapshot.items)
+
+
+async def test_a_failed_first_scan_is_retried_by_the_next_read(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await ask(env.runtime, "q1")
+    real = env.runtime.storage.list_live_sessions
+    calls: list[int] = []
+
+    def flaky() -> list[SessionRecord]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("database is locked")
+        return real()
+
+    monkeypatch.setattr(env.runtime.storage, "list_live_sessions", flaky)
+
+    with pytest.raises(RuntimeError):
+        await env.runtime.asks.snapshot()
+    snapshot = await env.runtime.asks.snapshot()
+
+    assert [i.id for i in snapshot.items] == ["question:s1:q1"]
+    assert len(calls) == 2
+
+
+async def test_a_flush_restarts_a_failed_scan(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await ask(env.runtime, "q1")
+    real = env.runtime.storage.list_live_sessions
+    calls: list[int] = []
+
+    def flaky() -> list[SessionRecord]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("database is locked")
+        return real()
+
+    monkeypatch.setattr(env.runtime.storage, "list_live_sessions", flaky)
+    with pytest.raises(RuntimeError):
+        await env.runtime.asks.snapshot()
+
+    await env.runtime.asks.flush(set())
+    task = env.runtime.asks._scan_task
+    assert task is not None
+    await task
+    await env.runtime.asks.flush(set())
+
+    [payload] = env.published()
+    assert [i["id"] for i in payload["items"]] == ["question:s1:q1"]
+
+
+async def test_deeply_nested_tool_input_is_kept_and_flagged_only_when_cut(
+    env: Env,
+) -> None:
+    env.transport.ids = ("a1", "a2")
+
+    def nest(leaf: Any) -> dict[str, Any]:
+        value: Any = leaf
+        for _ in range(12):
+            value = {"k": [value]}
+        return value
+
+    await approval(env.runtime, "a1", tool_input=nest({"n": 5, "s": "short"}))
+    await approval(env.runtime, "a2", tool_input=nest("y" * (TEXT_LIMIT + 1)))
+
+    first, second = (await env.runtime.asks.snapshot()).items
+
+    assert first.approval is not None and second.approval is not None
+    assert first.approval.tool_input == nest({"n": 5, "s": "short"})
+    assert first.approval.tool_input_truncated is False
+    assert second.approval.tool_input_truncated is True
+
+
+async def test_a_held_plan_is_not_requeried_under_state_churn(env: Env) -> None:
+    env.plugin.plan = plugin_plan()
+    spy = MagicMock(wraps=env.plugin.pending_plan_approval)
+    env.plugin.pending_plan_approval = spy  # type: ignore[method-assign]
+    await start(env)
+    assert spy.call_count == 1
+
+    env.runtime.asks.mark_watched_dirty()
+    await items(env)
+    env.runtime.asks.mark_dirty("s1")
+    await items(env)
+    await env.runtime.asks.flush({"s1"})
+    assert spy.call_count == 1
+
+    await env.runtime._emit_adapter_event(
+        "s1", EventKind.SYSTEM_NOTE, "plan", {"item_type": "plan"}, SessionStatus.IDLE
+    )
+    await items(env)
+    assert spy.call_count == 2
+
+    env.runtime.storage.update_session("s1", permission_mode="plan")
+    await env.runtime.asks.flush({"s1"})
+    assert spy.call_count == 3
+
+
+async def test_set_permission_mode_updates_the_feed(env: Env) -> None:
+    env.plugin.plan = plugin_plan()
+    env.plugin.plan_modes = {"plan"}
+    await start(env)
+    assert env.runtime.asks._current == []
+
+    await env.runtime.set_permission_mode("s1", "plan")
+    assert [i.id for i in await items(env)] == ["plan_approval:s1:plan-a"]
+
+    await env.runtime.set_permission_mode("s1", "default")
+    assert await items(env) == []
+
+
+async def test_deleting_a_session_leaves_nothing_in_the_feed(env: Env) -> None:
+    await ask(env.runtime, "q1")
+    await start(env)
+    env.runtime.storage.update_session("s1", status=SessionStatus.EXITED)
+
+    async def tick_during_delete(session: SessionRecord) -> None:
+        # A broadcast tick between the delete's awaits sees the row still there.
+        await env.runtime.asks.flush({session.id})
+
+    env.plugin.on_delete = tick_during_delete
+
+    await env.runtime.delete("s1")
+    # No later tick names the deleted session.
+    await env.runtime.asks.flush(set())
+
+    assert "s1" not in env.runtime.asks._entries
+    assert env.runtime.asks._current == []
+    assert env.published()[-1]["items"] == []
 
 
 def test_the_feed_is_backend_neutral() -> None:

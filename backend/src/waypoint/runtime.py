@@ -4015,7 +4015,6 @@ class SessionRuntime:
         await self._cancel_context_usage_source(session_id)
         self._close_structured_log(session_id)
         self.questions.forget(session_id)
-        self.asks.forget(session_id)
         plugin = self.registry.plugin_for(session)
         # Optional async cleanup hook; not part of the BackendPlugin protocol.
         # Run it BEFORE deleting the row so it can read fresh side-question state
@@ -4025,6 +4024,9 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
+        # After the row is gone: a flush during the awaits above would re-derive
+        # the session from it.
+        self.asks.forget(session_id)
         # If this session ran `manager init` for any project(s), it owns those
         # managers; tear their state down with it so no orphaned backlog lingers.
         self.managers.deinit_owned_by(session_id)

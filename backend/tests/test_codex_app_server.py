@@ -691,6 +691,13 @@ async def test_live_approval_ids_match_the_emitted_request() -> None:
     assert await adapter.terminate_session("sess") is True
 
 
+def test_pending_approval_ids_are_empty_before_the_adapter_exists() -> None:
+    transport = CodexTransport(None, SimpleNamespace(adapter=None))  # type: ignore[arg-type]
+    session: Any = SimpleNamespace(id="sess")
+
+    assert transport.pending_approval_ids(session) == ()
+
+
 @pytest.mark.asyncio
 async def test_interrupt_cancels_a_pending_approval_first() -> None:
     emitted: list = []

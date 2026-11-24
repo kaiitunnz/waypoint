@@ -102,6 +102,10 @@ def now() -> float:
     return time.time()
 
 
+def sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
 def tdir(sid: str) -> Path:
     # `stop` deletes what this returns, so `--target ..` must never reach it.
     if not SESSION_ID.fullmatch(sid):
@@ -429,7 +433,7 @@ def remove_target(sid: str, pids: list[int | None]) -> None:
         and now() < deadline
         and (live_pid(sid) in running or pair_pid(sid) in running)
     ):
-        time.sleep(0.1)
+        sleep(0.1)
     shutil.rmtree(tdir(sid), ignore_errors=True)
 
 
@@ -461,9 +465,9 @@ def cmd_run(args: argparse.Namespace) -> None:
         except Exception as e:  # the detached loop outlives any single bad poll
             backoff = min(max(backoff * 2, 30), MAX_BACKOFF_SEC)
             log(sid, f"poll failed ({e!r}); retrying in {backoff}s")
-            time.sleep(backoff)
+            sleep(backoff)
             continue
-        time.sleep(read_json(tdir(sid) / "config.json", {}).get("interval", 60))
+        sleep(read_json(tdir(sid) / "config.json", {}).get("interval", 60))
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -682,7 +686,7 @@ def await_turn_end(sid: str, timeout: float) -> None:
         ended = False
     # A server that is down exits like a timeout and prints no status.
     if not ended:
-        time.sleep(PAIR_POLL_SEC)
+        sleep(PAIR_POLL_SEC)
 
 
 def deliver(
@@ -705,7 +709,7 @@ def deliver(
         try:
             target = list_sessions().get(sid)
         except OSError:
-            time.sleep(PAIR_POLL_SEC)
+            sleep(PAIR_POLL_SEC)
             continue
         if target is None or target.get("status") in GONE:
             raise TargetGone
@@ -715,7 +719,7 @@ def deliver(
         focus = target.get("focus")
         if focus and not send_in_focus:
             seen = "in Focus"
-            time.sleep(PAIR_POLL_SEC)
+            sleep(PAIR_POLL_SEC)
             continue
         if not focus:
             if not at_rest(target):
@@ -725,7 +729,7 @@ def deliver(
                 now() - epoch(target.get("last_event_at"))
             )
             if quiet_left > 0:
-                time.sleep(quiet_left)
+                sleep(quiet_left)
                 continue
         before_send()
         status = send(sid, text)
@@ -733,7 +737,7 @@ def deliver(
             return status
         log(sid, f"{text!r} refused; retrying")
         deadline = min(deadline, now() + PAIR_GIVE_UP_SEC)
-        time.sleep(PAIR_POLL_SEC)
+        sleep(PAIR_POLL_SEC)
     raise PairFailed(f"gave up with the target {seen}")
 
 

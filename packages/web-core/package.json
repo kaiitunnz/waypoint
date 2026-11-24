@@ -28,6 +28,7 @@
     "./tokens": "./src/tokens.ts",
     "./types": "./src/types.ts",
     "./usage": "./src/usage.ts",
+    "./variant": "./src/variant.ts",
     "./workspacePaths": "./src/workspacePaths.ts",
     "./hooks/*.test": null,
     "./hooks/*": "./src/hooks/*.ts",

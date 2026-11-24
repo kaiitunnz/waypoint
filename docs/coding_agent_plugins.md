@@ -532,9 +532,7 @@ reads only the backend-neutral parts:
   id the approve endpoint takes, and equals the id a transport reports from
   `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
   `body`; one with an empty body is listed as a plain approval.
-- `metadata["tool_name"]` / `metadata["tool_input"]`, when the backend has them.
-  A backend whose requests carry no tool (Codex) relies on `title` and the event
-  text.
+- `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
 - The resolution notes `open_approval_requests`
   ([`approvals.py`](../backend/src/waypoint/backends/approvals.py)) understands:
   a system note whose method is `approval.invalidated`, or whose text contains
@@ -554,23 +552,16 @@ re-derives that session.
 ### Plan approval lifecycle (optional)
 
 An agent that decides plans through `approve_plan` implements the
-`PlanApprovalLifecycle` protocol from
-[`base.py`](../backend/src/waypoint/backends/base.py):
-
-```python
-def pending_plan_approval(self, runtime, session) -> PendingPlanApproval | None: ...
-def affects_plan_approval(self, event) -> bool: ...
-```
-
-`pending_plan_approval` returns the plan awaiting a decision (`PendingPlanApproval`
-in `base.py`: `plan_id`, `text`, `decisions`, `supports_note`, `availability`,
-`created_at`, and `sequence`), or `None`. Implementations check cheap gates (the
+`PlanApprovalLifecycle` protocol in
+[`base.py`](../backend/src/waypoint/backends/base.py).
+`pending_plan_approval(runtime, session)` returns the plan awaiting a decision as
+a `PendingPlanApproval`, or `None`; implementations check cheap gates (the
 permission mode) before reading events. The feed lists the plan with
 `resolve_via: "approve_plan"`, so the client answers through
 `POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
-`affects_plan_approval` is a pure test of which events (a plan item, a recorded
-decision) can change the result; the feed calls it for every event of a tracked
-session. Codex implements the protocol in `backends/codex/plugin.py`.
+`affects_plan_approval(event)` is a pure test of which events (a plan item, a
+recorded decision) can change the result; the feed calls it for every event of a
+tracked session. Codex implements the protocol in `backends/codex/plugin.py`.
 
 ### Task notifications (optional)
 

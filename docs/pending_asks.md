@@ -38,7 +38,7 @@ Items are ordered by `created_at`, oldest first, then by `session_id` and
 | `session_id`, `session_title`, `session_backend`, `spawner_session_id` | The asking session; `spawner_session_id` marks a subagent session |
 | `created_at`, `sequence` | Timestamp and sequence of the request's event |
 | `availability` | `actionable`, `starting` (asked, not yet able to take a reply), or `unavailable` (not reachable now, may recover) |
-| `title`, `body` | Headline and body text for a list row; `body` is null when it would repeat `title` |
+| `title`, `body` | Headline and body text for a list row; `body` is null when it would repeat `title`, and on every `plan_approval` item (the text is in `plan.text`) |
 
 A `question` item carries a `question` payload, an `approval` item an `approval`
 payload, and a `plan_approval` item a `plan` payload; the other two payload

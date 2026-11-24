@@ -40,7 +40,9 @@ export function PromptField({
 }: PromptFieldProps) {
   const [expanded, setExpanded] = useState(false);
   const [otherOpen, setOtherOpen] = useState(pick.other !== "");
-  const limited = limit !== undefined && !expanded && prompt.options.length > limit;
+  // A multi-select prompt shows every option, so a choice is never out of sight.
+  const limited =
+    limit !== undefined && !prompt.multi_select && !expanded && prompt.options.length > limit;
   // Keep the recommended answer in view when the list is cut.
   const ordered = limited
     ? [...prompt.options].sort((a, b) => Number(b.recommended) - Number(a.recommended))
@@ -50,8 +52,7 @@ export function PromptField({
   return (
     <div className={styles.field}>
       {showQuestion ? <p className={styles.question}>{prompt.question}</p> : null}
-      {prompt.multi_select ? <p className={styles.hint}>Choose any</p> : null}
-      <div className={styles.chips}>
+      <div className={styles.chips} role="group" aria-label={prompt.multi_select ? "Choose any" : "Options"}>
         {shown.map((option) => (
           <Chip
             key={option.label}

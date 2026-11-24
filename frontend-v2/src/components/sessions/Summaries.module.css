@@ -21,6 +21,10 @@
   flex-shrink: 0;
 }
 
+.strip > .stripWindow {
+  color: var(--text);
+}
+
 .strip > .who {
   flex-shrink: 1;
 }

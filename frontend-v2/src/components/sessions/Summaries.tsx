@@ -28,9 +28,8 @@ export function LimitsStrip({ usage, now }: { usage: UsageSummaryState; now: num
   if (!top) return null;
   return (
     <Link href="/telemetry" className={styles.strip}>
-      <span className={styles.who}>
-        {top.accountLabel} {top.label}
-      </span>
+      <span className={styles.who}>{top.accountLabel}</span>
+      <span className={styles.stripWindow}>{top.label}</span>
       <Meter value={top.percent} tone={METER_TONE[top.tone]} label={`${top.accountLabel} ${top.label} used`} className={styles.stripMeter} />
       <span className={pressure(top.tone)}>{top.percent}%</span>
       {top.resetsIn ? <span className={styles.faint}>resets in {top.resetsIn}</span> : null}

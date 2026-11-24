@@ -6,6 +6,7 @@ import {
   approvalActions,
   approvalPreview,
   planActions,
+  planPreview,
   type AskDecision,
   type DecisionAction,
 } from "@waypoint/web-core/pendingAskActions";
@@ -66,7 +67,7 @@ export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
       <h3 className={styles.headline}>{ask.title}</h3>
       {preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null}
       {preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null}
-      {plan ? <p className={styles.clamp}>{plan.text}</p> : ask.body && preview?.kind !== "command" ? (
+      {plan ? <p className={styles.clamp}>{planPreview(plan.text)}</p> : ask.body && preview?.kind !== "command" ? (
         <p className={styles.clamp}>{ask.body}</p>
       ) : null}
       {noteOpen ? (

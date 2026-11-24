@@ -10,11 +10,6 @@
   color: var(--text-strong);
 }
 
-.hint {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;

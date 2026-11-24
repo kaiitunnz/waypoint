@@ -497,6 +497,25 @@ def test_install_is_refused_under_a_running_sibling(
     assert installs == [] and fake_runtime.calls == []
 
 
+def test_conflict_previews_the_start_guard_without_starting(
+    monkeypatch: pytest.MonkeyPatch,
+    state_dir: Path,
+    tmp_path: Path,
+    fake_runtime: _Spawned,
+) -> None:
+    config = _build_config(tmp_path, state_dir)
+    preview = _frontend(
+        config, name="frontend-preview", variant="v2", port=_free_port(), optional=True
+    )
+    assert preview.conflict() is None
+
+    _mark_running("frontend", "v1")
+    monkeypatch.setattr(services.frontend_install, "needs_install", lambda _home: True)
+
+    assert "while frontend is running" in (preview.conflict() or "")
+    assert fake_runtime.calls == []
+
+
 def test_start_beside_a_sibling_serving_a_different_app_is_fine(
     state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
 ) -> None:

@@ -52,8 +52,12 @@ class _StubService:
         self.optional = optional
         self.configured = configured
         self.pid_path = pid_path or Path("/nonexistent") / f"{name}.pid"
+        self.conflict_message: str | None = None
         self.calls: list[str] = []
         self.started_marker_value = False
+
+    def conflict(self) -> str | None:
+        return self.conflict_message
 
     @property
     def started_marker(self):  # type: ignore[no-untyped-def]
@@ -532,3 +536,41 @@ def test_format_status_shows_the_variant() -> None:
     assert _format_status(running) == (
         "frontend: running pid=42 port=3010 health=healthy variant=v2"
     )
+
+
+@pytest.mark.parametrize("action", ["start", "restart"])
+def test_a_conflicting_lone_preview_is_refused_before_anything_stops(
+    state_dir: Path, tmp_path: Path, action: str
+) -> None:
+    stack = WaypointStack(
+        _build_config(tmp_path, state_dir, frontend_preview_port=3011)
+    )
+    _install_stubs(stack)
+    preview = _install_preview_stub(stack)
+    preview.conflict_message = "frontend dependencies changed; run restart frontend"
+
+    result = (
+        stack.start(lambda *_: None, "frontend-preview")
+        if action == "start"
+        else stack.restart("frontend-preview", lambda *_: None)
+    )
+
+    assert result.ok is False
+    assert "restart frontend" in result.message
+    assert preview.calls == []
+    assert stack.check_target("frontend-preview", action) == preview.conflict_message
+    assert stack.check_target("frontend-preview", "stop") is None
+
+
+def test_the_frontend_group_ignores_the_sibling_conflict(
+    state_dir: Path, tmp_path: Path
+) -> None:
+    stack = WaypointStack(
+        _build_config(tmp_path, state_dir, frontend_preview_port=3011)
+    )
+    _, frontend, _ = _install_stubs(stack)
+    preview = _install_preview_stub(stack)
+    preview.conflict_message = "would disturb the primary"
+
+    assert stack.restart("frontend", lambda *_: None).ok is True
+    assert frontend.calls == ["stop", "start"] and preview.calls == ["stop", "start"]

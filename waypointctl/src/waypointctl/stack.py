@@ -104,6 +104,9 @@ class WaypointStack:
                 "frontend-preview is not configured; "
                 "set WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
             )
+        # A lone preview start must be refused before `restart` stops the preview.
+        if action != "stop" and target == "frontend-preview":
+            return self.frontend_preview.conflict()
         return None
 
     def select(self, target: str) -> tuple[ManagedService, ...] | None:

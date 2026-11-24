@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from waypointctl import cli
 from waypointctl.cli import app
-from waypointctl.paths import pid_file_for
+from waypointctl.paths import pid_file_for, waypoint_pid_path
 
 runner = CliRunner()
 
@@ -78,6 +78,12 @@ def _record_pid(name: str, pid: int) -> None:
     path.write_text(f"{pid}\n")
 
 
+def _record_daemon_pid(pid: int) -> None:
+    path = waypoint_pid_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{pid}\n")
+
+
 @pytest.mark.parametrize("target", ["frontend", "frontend-preview", "all"])
 def test_restart_refuses_from_inside_the_preview_process_tree(
     cli_home: Path, monkeypatch: pytest.MonkeyPatch, target: str
@@ -119,6 +125,20 @@ def test_invalid_configuration_is_rejected_before_a_daemon_is_spawned(
     assert result.exit_code == 2
     assert "invalid stack configuration" in result.output
     assert spawned == []
+
+
+def test_daemon_restart_with_a_bad_configuration_leaves_the_daemon_alone(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_STACK_FRONTEND", "v3")
+    _record_daemon_pid(os.getpid())
+    signalled: list[int] = []
+    monkeypatch.setattr(cli.os, "kill", lambda pid, _sig: signalled.append(pid))
+
+    result = runner.invoke(app, ["--home", str(cli_home), "daemon", "restart"])
+
+    assert result.exit_code == 2
+    assert signalled == []
 
 
 def test_invalid_stack_configuration_is_reported_in_one_line(

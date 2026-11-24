@@ -201,6 +201,10 @@ class FrontendService(ManagedService):
         # current config would start.
         return _read_variant(self.variant_path)
 
+    def conflict(self) -> str | None:
+        """Why starting now would disturb the running sibling frontend, if it would."""
+        return self._sibling_conflict(frontend_install.needs_install(self.config.home))
+
     def _sibling_conflict(self, install_needed: bool) -> str | None:
         """Why starting beside an already-running sibling frontend would hurt it.
 

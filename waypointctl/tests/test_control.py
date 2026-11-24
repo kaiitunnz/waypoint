@@ -21,6 +21,7 @@ class _StubService:
         self.state = state
         self.optional = False
         self.configured = True
+        self.conflict = lambda: None
         self.pid_path = Path("/nonexistent") / f"{name}.pid"
         self.calls: list[str] = []
         self.started_marker_value = False

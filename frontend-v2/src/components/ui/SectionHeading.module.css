@@ -1,0 +1,23 @@
+.heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 32px 16px 12px;
+}
+
+.title {
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.count {
+  color: var(--faint);
+}
+
+.action {
+  margin-left: auto;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--muted);
+}

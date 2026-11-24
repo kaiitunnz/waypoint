@@ -1,0 +1,46 @@
+.group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.fill {
+  display: flex;
+}
+
+.fill .segment {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.on {
+  background: var(--fill-raised);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.count {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+@media (min-width: 900px) {
+  .segment {
+    height: 32px;
+  }
+}

@@ -1,0 +1,51 @@
+.popover {
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--f-body);
+  color: var(--text);
+  text-align: left;
+}
+
+.item:hover,
+.selected {
+  background: var(--fill-quiet);
+}
+
+.selected {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.danger {
+  color: var(--error);
+}
+
+@media (min-width: 900px) {
+  .item {
+    min-height: 36px;
+    font-size: 14px;
+  }
+}

@@ -1,0 +1,34 @@
+.bar {
+  position: absolute;
+  z-index: var(--z-bar);
+  left: 0;
+  right: 0;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+}
+
+.fixed {
+  position: fixed;
+}
+
+.top {
+  top: 0;
+  padding-top: var(--safe-top);
+  border-bottom: 1px solid var(--line);
+}
+
+.bottom {
+  bottom: 0;
+  padding-bottom: var(--safe-bottom);
+  border-top: 1px solid var(--line);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: var(--bar-height);
+  padding: 0 4px 0 2px;
+}

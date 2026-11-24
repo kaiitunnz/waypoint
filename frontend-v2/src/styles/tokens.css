@@ -1,0 +1,131 @@
+/* Design tokens. Every colour, radius, size and layer the app uses resolves from
+   here, so a component stylesheet never names a theme. Dark is the default;
+   html[data-theme="light"] swaps the values. Values come from the approved
+   direction D (Bridge). */
+
+:root {
+  color-scheme: dark;
+
+  /* Surface tiers. Ground recedes (chrome, rails, side panes), the plane is the
+     brightest large region (content), the attention tier is reserved for what
+     needs the human. */
+  --ground: #0b0e13;
+  --plane: #11151c;
+  --plane-raised: #161b23;
+  --attention: color-mix(in srgb, #c9a86a 7%, #161b23);
+  --attention-line: color-mix(in srgb, #c9a86a 36%, transparent);
+  --bubble: #1a2029;
+  --sunken: #0d1117;
+  --field: var(--sunken);
+
+  /* Floating chrome is glass; sheets and modals carry text and stay opaque. */
+  --glass: color-mix(in srgb, #0b0e13 92%, transparent);
+  --glass-blur: blur(18px) saturate(1.3);
+  --scrim: rgba(3, 5, 8, 0.64);
+  --shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.45);
+  --shadow-sheet: 0 -18px 44px rgba(0, 0, 0, 0.4);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.5);
+
+  /* Text and lines. */
+  --text: #e6eaf0;
+  --text-strong: #f6f8fb;
+  --muted: #a3acba;
+  --faint: #808a9a;
+  --line: #222933;
+  --line-strong: #343d4b;
+  --fill-quiet: color-mix(in srgb, #e6eaf0 7%, transparent);
+  --fill-raised: color-mix(in srgb, #e6eaf0 13%, transparent);
+
+  /* The brass budget: the primary action, needs-you markers and the dog-ear.
+     Nothing else is brass. */
+  --brass: #c9a86a;
+  --brass-text: #d8b878;
+  --action: #c9a86a;
+  --on-action: #17120a;
+
+  /* Status and pressure. Warn orange is limit pressure, never brass. */
+  --warn: #d9894a;
+  --working: #7fa9d1;
+  --done: #73c59b;
+  --error: #e8787a;
+
+  /* Type. Serif names things, sans carries UI and prose, mono is machine strings. */
+  --serif: var(--font-serif), "Source Serif 4", Georgia, serif;
+  --sans: var(--font-sans), "Source Sans 3", system-ui, sans-serif;
+  --mono: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
+  --f-page: 28px;
+  --f-title: 20px;
+  --f-head: 17px;
+  --f-body: 15px;
+  --f-meta: 13px;
+  --f-code: 12.5px;
+
+  --r-sm: 6px;
+  --r: 10px;
+  --r-card: 12px;
+  --r-modal: 16px;
+  --r-sheet: 18px;
+
+  /* Safe areas: viewport-fit=cover lets the page run under the status bar,
+     Dynamic Island and home indicator; chrome pads by these insets. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Layout. */
+  --rail-width: 64px;
+  --tabbar-height: 52px;
+  --bar-height: 48px;
+
+  /* Layers. */
+  --z-bar: 20;
+  --z-scrim: 40;
+  --z-dialog: 41;
+  --z-popover: 50;
+  --z-toast: 60;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --ground: #eeede9;
+  --plane: #fbfaf8;
+  --plane-raised: #f3f2ee;
+  --attention: color-mix(in srgb, #b8820e 6%, #ffffff);
+  --attention-line: color-mix(in srgb, #b8820e 42%, transparent);
+  --bubble: #efede8;
+  --sunken: #f3f2ee;
+  --field: #ffffff;
+
+  --glass: color-mix(in srgb, #eeede9 92%, transparent);
+  --scrim: rgba(27, 29, 33, 0.36);
+  --shadow-pop: 0 10px 28px rgba(27, 29, 33, 0.16);
+  --shadow-sheet: 0 -18px 44px rgba(27, 29, 33, 0.18);
+  --shadow-modal: 0 24px 64px rgba(27, 29, 33, 0.22);
+
+  --text: #1b1d21;
+  --text-strong: #0e1013;
+  --muted: #565a62;
+  --faint: #6b6f77;
+  --line: #e0ddd5;
+  --line-strong: #cbc6ba;
+  --fill-quiet: color-mix(in srgb, #1b1d21 6%, transparent);
+  --fill-raised: color-mix(in srgb, #1b1d21 11%, transparent);
+
+  --brass: #b8820e;
+  --brass-text: #8a5f12;
+  --action: #8a5f12;
+  --on-action: #ffffff;
+
+  --warn: #b5621f;
+  --working: #2f6f9e;
+  --done: #257a50;
+  --error: #b83038;
+}
+
+@media (max-width: 899.98px) {
+  :root {
+    --f-page: 26px;
+  }
+}

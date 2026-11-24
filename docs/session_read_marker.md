@@ -46,8 +46,9 @@ sessions into Done.
 
 The v2 sessions home shows **Done** for a session that is idle, is not waiting
 on a question or approval, and is unread. Any other recorded event
-moves `last_event_at`, including system notes, so an idle session can show Done
-after activity that is not a finished turn.
+moves `last_event_at`, including system notes, so Done means "something happened
+that you have not seen", not strictly "a turn finished". That keeps the rule one
+comparison with no per-agent knowledge of what counts as a turn.
 
 Leases are held in memory, so a restart drops them; the next renewal (every 15
 seconds) restores presence and marks the session read.

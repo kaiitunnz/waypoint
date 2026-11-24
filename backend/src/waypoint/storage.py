@@ -616,6 +616,11 @@ class Storage:
         self._ensure_column("sessions", "focus", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("sessions", "awaiting_answer", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("sessions", "task_dock_dismissed_sequence", "INTEGER")
+        self._ensure_column("sessions", "read_at", "TEXT")
+        # Sessions that predate the read marker start read.
+        self.connection.execute(
+            "UPDATE sessions SET read_at = last_event_at WHERE read_at IS NULL"
+        )
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -752,8 +757,9 @@ class Storage:
                 resolved_model, effort, args, config_overrides, launch_env, context_usage,
                 rate_limit_usage, tags, preset_id, preset_name,
                 account_profile_id, account_profile_label,
-                usage_limit_source, usage_provider_id, usage_provider_account_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                usage_limit_source, usage_provider_id, usage_provider_account_key,
+                read_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -802,6 +808,7 @@ class Storage:
                 session.usage_limit_source,
                 session.usage_provider_id,
                 session.usage_provider_account_key,
+                (session.read_at or session.last_event_at).isoformat(),
             ),
         )
         self.connection.commit()
@@ -976,6 +983,26 @@ class Storage:
             updated = self.get_session(session_id)
             assert updated is not None
             return updated
+
+    @_synchronized
+    def mark_session_read(self, session_id: str, at: datetime) -> bool:
+        """Advance the read marker to ``at`` and report whether the session went
+        from unread to read. The marker never moves back, and ``updated_at`` is
+        left alone: reading is not a change to the session."""
+        row = self.connection.execute(
+            "SELECT last_event_at, read_at FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        last_event_at = datetime.fromisoformat(row["last_event_at"])
+        current = datetime.fromisoformat(row["read_at"]) if row["read_at"] else None
+        if current is not None and current >= at:
+            return False
+        self.connection.execute(
+            "UPDATE sessions SET read_at = ? WHERE id = ?", (at.isoformat(), session_id)
+        )
+        self.connection.commit()
+        return current is not None and current < last_event_at <= at
 
     def restore_status(self, previous: SessionRecord) -> SessionRecord:
         """Write back ``previous``'s status and ``awaiting_answer``."""
@@ -3773,6 +3800,10 @@ class Storage:
         raw_pinned_at = payload.get("pinned_at")
         payload["pinned_at"] = (
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
+        )
+        raw_read_at = payload.get("read_at")
+        payload["read_at"] = (
+            datetime.fromisoformat(raw_read_at) if raw_read_at else None
         )
         raw_verified_probed_at = payload.get("verified_account_probed_at")
         payload["verified_account_probed_at"] = (

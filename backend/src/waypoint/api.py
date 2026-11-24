@@ -747,8 +747,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Response:
         # 404 on an unknown session before touching the registry.
-        context.runtime.get_session(session_id)
-        context.runtime.session_presence.touch(session_id, request.viewer_id)
+        context.runtime.register_presence(session_id, request.viewer_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.delete(
@@ -760,8 +759,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         viewer_id: Annotated[str, fastapi.Path(max_length=128)],
         _: Annotated[str, Depends(token_dependency())],
     ) -> Response:
-        context.runtime.get_session(session_id)
-        context.runtime.session_presence.release(session_id, viewer_id)
+        context.runtime.release_presence(session_id, viewer_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/sessions/{session_id}/attachments")

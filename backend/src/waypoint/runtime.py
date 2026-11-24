@@ -917,6 +917,37 @@ class SessionRuntime:
             )
         return session
 
+    def mark_session_read(self, session_id: str, at: datetime) -> None:
+        """Advance the session's read marker; broadcast only when it flips the
+        session from unread to read."""
+        if self.storage.mark_session_read(session_id, at):
+            self._publish_session_state(session_id)
+
+    def _follow_presence(self, session_id: str, at: datetime) -> None:
+        """While a viewer holds presence, new activity counts as seen."""
+        if not self.session_presence.is_active(session_id):
+            return
+        try:
+            self.storage.mark_session_read(session_id, at)
+        except Exception:
+            # The marker is an add-on: its failure must not skip the idle wake or
+            # auto-approval that follow an event.
+            log.exception("read marker update failed", extra={"session_id": session_id})
+
+    def register_presence(self, session_id: str, viewer_id: str) -> None:
+        """A viewer opened or renewed its lease: everything so far counts as seen."""
+        session = self.get_session(session_id)
+        self.session_presence.touch(session_id, viewer_id)
+        self.mark_session_read(session_id, session.last_event_at)
+
+    def release_presence(self, session_id: str, viewer_id: str) -> None:
+        """A viewer left: the session was read up to now."""
+        session = self.get_session(session_id)
+        self.session_presence.release(session_id, viewer_id)
+        self.mark_session_read(
+            session_id, max(datetime.now(UTC), session.last_event_at)
+        )
+
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.
 
@@ -5315,6 +5346,7 @@ class SessionRuntime:
         self._derive_telemetry_from_event(event)
         self.questions.note_event(event)
         self.asks.note_event(event)
+        self._follow_presence(event.session_id, event.ts)
         self._publish_session_state(event.session_id)
         # Backend-neutral idle wake: the just-persisted event's canonical status
         # already updated the session record (see Storage._insert_event), so a
@@ -6351,6 +6383,7 @@ class SessionRuntime:
                 last_event_at=normalized.events[-1].ts,
                 status=normalized.status,
             )
+            self._follow_presence(session_id, normalized.events[-1].ts)
             self._publish_session_state(session_id)
 
     async def _refresh_state(self, session_id: str) -> None:

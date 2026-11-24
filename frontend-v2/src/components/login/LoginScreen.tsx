@@ -66,7 +66,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
         }
       : null;
   });
-  const [step, setStep] = useState<"hosts" | "password">("hosts");
+  const [step, setStep] = useState<"hosts" | "password">(notice && choice ? "password" : "hosts");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

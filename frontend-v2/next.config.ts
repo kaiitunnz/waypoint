@@ -39,6 +39,7 @@ function addOriginVariants(origins: Set<string>, host: string, port: string): vo
 const nextConfig: NextConfig = {
   allowedDevOrigins: collectAllowedDevOrigins(),
   reactStrictMode: true,
+  agentRules: false,
   transpilePackages: ["@waypoint/web-core"],
 };
 

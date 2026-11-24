@@ -10,11 +10,7 @@ DEFAULT_BRANCH = "main"
 # Tracked files the frontend build regenerates; a prior `start`/`restart` leaves
 # them modified, which would otherwise trip the dirty-tree guard. They are
 # rewritten by the post-checkout build, so discarding the drift is safe.
-_GENERATED_FILES = (
-    "frontend/next-env.d.ts",
-    "frontend/tsconfig.json",
-    "frontend-v2/tsconfig.json",
-)
+_GENERATED_FILES = ("frontend/next-env.d.ts", "frontend/tsconfig.json")
 
 
 def _resolve_home(home: Path | None) -> Path:

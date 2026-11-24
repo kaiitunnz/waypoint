@@ -111,11 +111,7 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     # In a managed checkout, clear build-generated drift (start/restart rewrites
     # these tracked files) so it doesn't trip the dirty-tree guard below.
     if [[ "${managed}" = "true" ]]; then
-        # One checkout per path: git aborts the whole command on a path the
-        # current revision doesn't track (e.g. frontend-v2 before it existed).
-        for generated in frontend/next-env.d.ts frontend/tsconfig.json frontend-v2/tsconfig.json; do
-            git -C "${INSTALL_DIR}" checkout -- "${generated}" 2>/dev/null || true
-        done
+        git -C "${INSTALL_DIR}" checkout -- frontend/next-env.d.ts frontend/tsconfig.json 2>/dev/null || true
     fi
     if [[ -n "$(git -C "${INSTALL_DIR}" status --porcelain)" ]]; then
         die "refusing to update ${INSTALL_DIR}: it has uncommitted changes. Commit or stash them first."

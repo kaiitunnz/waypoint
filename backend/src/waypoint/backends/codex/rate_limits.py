@@ -644,9 +644,9 @@ def _string_value(
     return None
 
 
-# Without ``daemon_auto_start=false`` the TUI installs and detaches a managed
-# app-server daemon in CODEX_HOME that outlives the probe. ``-c`` (unlike
-# ``--disable``) is accepted by a codex that predates the feature.
+# ``daemon_auto_start`` makes the TUI install and detach a managed app-server
+# daemon in CODEX_HOME that outlives the probe. A codex that predates the
+# feature rejects ``--disable daemon_auto_start`` but accepts this ``-c``.
 _CODEX_STATUS_ARGS = (
     "-c",
     "features.daemon_auto_start=false",

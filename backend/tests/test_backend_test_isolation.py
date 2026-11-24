@@ -46,12 +46,9 @@ def test_resolves_relative_path_against_spawn_cwd(tmp_path: Path) -> None:
     )
 
 
-def test_ignores_other_programs_missing_binaries_and_shell(tmp_path: Path) -> None:
-    _fake_cli(tmp_path / "bin")
-
+def test_ignores_other_programs_and_missing_binaries(tmp_path: Path) -> None:
     assert real_agent_cli(["git", "status"], {}, []) is None
     assert real_agent_cli([str(tmp_path / "missing" / "codex")], {}, []) is None
-    assert real_agent_cli(f"{tmp_path}/bin/codex", {"shell": True}, []) is None
 
 
 def test_guard_blocks_and_records_the_spawn(

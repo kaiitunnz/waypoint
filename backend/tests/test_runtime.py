@@ -2033,7 +2033,6 @@ async def test_create_session_direct_mode_uses_requested_backend(
     session = await runtime.create_session(request)
     # Re-enter the preflight with the correct symlink already in place.
     second_session = await runtime.create_session(request)
-    await runtime._drain_account_probe_tasks()
 
     assert create_calls == [
         (session.id, LaunchMode.DIRECT),
@@ -5581,7 +5580,6 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
         thread_id="thread-xyz",
         account_profile_id="work",
     )
-    await runtime._drain_account_probe_tasks()
 
     assert summary.session_id == "codex-imported"
     assert runtime.assistant_session_id == "codex-imported"

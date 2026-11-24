@@ -1,7 +1,7 @@
 """Refuse to start a real coding-agent CLI from a backend test.
 
 A real ``codex`` run against a fresh ``CODEX_HOME`` installs and detaches a
-managed app-server daemon that outlives pytest (#579), and a real ``claude``
+managed app-server daemon that outlives pytest, and a real ``claude``
 or ``opencode`` run reaches the host's own accounts. The guard wraps
 ``subprocess.Popen``, which ``subprocess.run`` and
 ``asyncio.create_subprocess_exec`` both build on. Fake agent binaries that
@@ -25,16 +25,12 @@ def real_agent_cli(
     args: Any, kwargs: dict[str, Any], allowed_roots: Sequence[Path]
 ) -> str | None:
     """The resolved agent CLI a ``Popen(args, **kwargs)`` would start, if real."""
-    if kwargs.get("shell"):
+    if isinstance(args, (str, bytes, os.PathLike)):
+        program = args
+    elif args:
+        program = args[0]
+    else:
         return None
-    program = kwargs.get("executable")
-    if program is None:
-        if isinstance(args, (str, bytes, os.PathLike)):
-            program = args
-        elif args:
-            program = args[0]
-        else:
-            return None
     name = os.fsdecode(program)
     if os.path.basename(name) not in AGENT_CLIS:
         return None

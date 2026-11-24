@@ -48,9 +48,9 @@ CODEX_USAGE_PATH = "/api/codex/usage"
 HTTP_TIMEOUT = 15
 CODEX_BIN_ENV = "WAYPOINT_REMOTE_PROBE_CODEX_BIN"
 STATUS_TIMEOUT = 8.0
-# Without ``daemon_auto_start=false`` the TUI installs and detaches a managed
-# app-server daemon in CODEX_HOME that outlives the probe. ``-c`` (unlike
-# ``--disable``) is accepted by a codex that predates the feature.
+# ``daemon_auto_start`` makes the TUI install and detach a managed app-server
+# daemon in CODEX_HOME that outlives the probe. A codex that predates the
+# feature rejects ``--disable daemon_auto_start`` but accepts this ``-c``.
 STATUS_ARGS = [
     "-c",
     "features.daemon_auto_start=false",

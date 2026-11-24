@@ -18,6 +18,9 @@ class _StubService:
     def __init__(self, name: str, state: str = "running") -> None:
         self.name = name
         self.state = state
+        self.optional = False
+        self.configured = True
+        self.pid_path = Path("/nonexistent") / f"{name}.pid"
         self.calls: list[str] = []
         self.started_marker_value = False
 
@@ -56,7 +59,7 @@ class _StubService:
         return ServiceStatus(name=self.name, state="stopped")
 
 
-def _build_stack(tmp_path: Path) -> WaypointStack:
+def _build_stack(tmp_path: Path, preview: bool = False) -> WaypointStack:
     home = tmp_path / "repo"
     home.mkdir(exist_ok=True)
     config = StackConfig(
@@ -75,11 +78,14 @@ def _build_stack(tmp_path: Path) -> WaypointStack:
         control_host="127.0.0.1",
         control_port=0,
         child_env={},
+        frontend_preview_port=3001 if preview else None,
     )
     stack = WaypointStack(config)
     stack.backend = _StubService("backend")  # type: ignore[assignment]
     stack.frontend = _StubService("frontend")  # type: ignore[assignment]
     stack.caffeinate = _StubService("caffeinate", state="stopped")  # type: ignore[assignment]
+    if preview:
+        stack.frontend_preview = _StubService("frontend-preview")  # type: ignore[assignment]
     return stack
 
 
@@ -95,6 +101,19 @@ def _serve(stack: WaypointStack, password: str | None) -> tuple[ControlServer, i
     thread = threading.Thread(target=server.serve_forever, args=(0.1,), daemon=True)
     thread.start()
     return server, port
+
+
+@pytest.fixture
+def control_with_preview(
+    tmp_path: Path,
+) -> Iterator[tuple[ControlServer, int, str]]:
+    stack = _build_stack(tmp_path, preview=True)
+    server, port = _serve(stack, "s3cret")
+    try:
+        yield server, port, "s3cret"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.fixture
@@ -367,3 +386,99 @@ def test_redeploy_update_channel_fails_safe_outside_git(
     assert ops["all"]["action"] == "redeploy" and ops["all"]["target"] == channel
     assert ops["all"]["state"] == "failed"
     assert server.stack.frontend.calls == []  # type: ignore[attr-defined]
+
+
+# ── frontend preview ─────────────────────────────────────────────────────
+def test_status_lists_the_preview_only_when_active(
+    control: tuple[ControlServer, int, str],
+    control_with_preview: tuple[ControlServer, int, str],
+) -> None:
+    for (_, port, password), expected in (
+        (control, {"backend", "frontend"}),
+        (control_with_preview, {"backend", "frontend", "frontend-preview"}),
+    ):
+        token = _login(port, password)
+        status, body = _request(port, "/api/status", token=token)
+        assert status == 200
+        names = {svc["name"] for svc in body["services"]}
+        assert names == expected
+        assert all("variant" in svc for svc in body["services"])
+
+
+def test_preview_action_runs_only_the_preview(
+    control_with_preview: tuple[ControlServer, int, str],
+) -> None:
+    server, port, password = control_with_preview
+    token = _login(port, password)
+
+    status, _ = _request(
+        port,
+        "/api/action",
+        "POST",
+        token=token,
+        body={"action": "restart", "target": "frontend-preview"},
+    )
+
+    assert status == 202
+    server.join_op(timeout=5)
+    assert server.stack.frontend_preview.calls == ["stop", "start"]  # type: ignore[attr-defined]
+    assert server.stack.frontend.calls == []  # type: ignore[attr-defined]
+    _, body = _request(port, "/api/status", token=token)
+    assert {op["key"] for op in body["ops"]} == {"frontend-preview"}
+
+
+def test_preview_shares_the_frontend_lane(
+    control_with_preview: tuple[ControlServer, int, str],
+) -> None:
+    server, port, password = control_with_preview
+    token = _login(port, password)
+    assert server._lanes_for("frontend-preview") == ("frontend",)
+    assert server._lane_locks["frontend"].acquire(blocking=False)
+    try:
+        status, _ = _request(
+            port,
+            "/api/action",
+            "POST",
+            token=token,
+            body={"action": "restart", "target": "frontend-preview"},
+        )
+        assert status == 409
+    finally:
+        server._lane_locks["frontend"].release()
+
+
+def test_action_on_an_unconfigured_preview_is_rejected(
+    control: tuple[ControlServer, int, str],
+) -> None:
+    server, port, password = control
+    token = _login(port, password)
+
+    status, body = _request(
+        port,
+        "/api/action",
+        "POST",
+        token=token,
+        body={"action": "start", "target": "frontend-preview"},
+    )
+
+    assert status == 400
+    assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in body["error"]
+    assert server.ops_snapshot() == []
+
+
+def test_preview_log_target_is_served(
+    control_with_preview: tuple[ControlServer, int, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "logstate"
+    (state / "logs").mkdir(parents=True)
+    (state / "logs" / "frontend-preview.log").write_text("one\ntwo\n")
+    monkeypatch.setenv("WAYPOINTCTL_STATE_DIR", str(state))
+    _, port, password = control_with_preview
+    token = _login(port, password)
+
+    status, body = _request(port, "/api/logs?target=frontend-preview&n=10", token=token)
+
+    assert status == 200
+    assert body["lines"] == ["one", "two"]

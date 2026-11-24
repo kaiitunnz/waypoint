@@ -231,3 +231,33 @@ def test_daemon_status_e2e(state_dir: Path) -> None:
         assert "frontend:" in text
     finally:
         _terminate(proc)
+
+
+def test_daemon_rejects_deferred_restart_it_cannot_run(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
+    }
+    env["WAYPOINTCTL_STATE_DIR"] = str(state_dir)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
+        client = DaemonClient(home)
+
+        # Deferred commands ack before running, so a bad target has to be
+        # refused up front or the caller would see success.
+        preview = client.request("restart", ["frontend-preview"], log=lambda *_: None)
+        unknown = client.request("restart", ["teleporter"], log=lambda *_: None)
+
+        assert preview.ok is False
+        assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in (preview.error or "")
+        assert unknown.ok is False
+        assert "unknown service" in (unknown.error or "")
+    finally:
+        _terminate(proc)

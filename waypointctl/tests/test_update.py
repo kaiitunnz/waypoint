@@ -194,7 +194,11 @@ def test_managed_update_discards_generated_files(tmp_path: Path) -> None:
         update.run(tmp_path, ref="v1.0.0")
 
     argvs = _argvs(mock_run)
-    for rel in ("frontend/next-env.d.ts", "frontend/tsconfig.json"):
+    for rel in (
+        "frontend/next-env.d.ts",
+        "frontend/tsconfig.json",
+        "frontend-v2/tsconfig.json",
+    ):
         assert ["git", "-C", str(tmp_path), "checkout", "--", rel] in argvs
     # the discard doesn't abort the update
     assert any(a and a[0] == "uv" and "--force" in a for a in argvs)

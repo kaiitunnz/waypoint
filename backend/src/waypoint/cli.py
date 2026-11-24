@@ -11,7 +11,6 @@ import sys
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple, Protocol, cast
@@ -44,6 +43,7 @@ from waypoint.launch_env import validate_launch_env
 from waypoint.presets import resolve_session_create_request
 from waypoint.schemas import (
     LaunchMode,
+    PlanDecision,
     SessionAttachRequest,
     SessionLaunchRequest,
     SessionSource,
@@ -3521,7 +3521,9 @@ def sessions_resume(
     """Press Enter in a live terminal pane, or revive an exited session.
 
     Live resume applies to tmux / claude_tty panes; other transports reject it.
-    Prefer ``reattach`` to revive an exited session.
+    It marks the session running, and a pane that wasn't waiting on Enter stays
+    running with no turn, so don't ``sessions wait`` on it. Prefer ``reattach``
+    to revive an exited session.
     """
     _emit(_settings_from_ctx(ctx), lambda c: {"session": c.resume(session_id)})
 
@@ -3565,13 +3567,6 @@ def sessions_history(
             query, cursor=cursor, limit=limit, exclude_sources=exclude_source
         ),
     )
-
-
-class PlanDecision(StrEnum):
-    ACCEPT = "accept"
-    ACCEPT_FOR_SESSION = "acceptForSession"
-    DECLINE = "decline"
-    CANCEL = "cancel"
 
 
 @sessions_app.command("approve-plan")

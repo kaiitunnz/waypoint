@@ -465,6 +465,7 @@ implements the `QuestionLifecycle` protocol from
 [`base.py`](../backend/src/waypoint/backends/base.py):
 
 ```python
+question_parks_turn: bool
 def question_liveness(self, runtime, session, tool_use_ids) -> dict[str, QuestionLiveness]: ...
 async def decline_question(self, runtime, session, tool_use_id) -> QuestionDecline: ...
 ```
@@ -507,11 +508,10 @@ Codex work this way; Codex's `request_user_input_async` mapping lives in
 
 An `IDLE` written through the adapter-event sink, `_record_system_event`, or
 `update_session_fields` is stored as `WAITING_INPUT` while any `ACTIONABLE`
-question is open, so a session with a pending question reads as waiting on the
-human until the question is answered or cancelled. A normalizer reports a
-turn's end as `IDLE` and leaves the settling to the runtime. A plugin whose
-agent replaces its conversation (`claude_tty` after `/clear`) closes the old
-conversation's questions with `runtime.questions.close_open`.
+question is open. A normalizer reports a turn's end as `IDLE` and leaves the
+settling to the runtime. A plugin whose agent replaces its conversation
+(`claude_tty` after `/clear`) closes the old conversation's questions with
+`runtime.questions.close_open`.
 
 A `QuestionLifecycle` plugin declares `question_parks_turn`: true when the
 agent's turn blocks on an open question (claude_code, OpenCode), false when the
@@ -520,8 +520,8 @@ no pending approval, a settled wait also sets the session's `awaiting_answer`:
 the turn ended and the session is safe to message. A status change or an
 approval request clears it. A plugin that settles its own turn end onto a
 question on restore or import sets the flag itself, with `awaiting_answer=` on
-`update_session`. One that rolls a status back after a
-failed send uses `storage.restore_status`.
+`update_session`. One that rolls a status back after a failed send uses
+`storage.restore_status`.
 
 ### Task notifications (optional)
 

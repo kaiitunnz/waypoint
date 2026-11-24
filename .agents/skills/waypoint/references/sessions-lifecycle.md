@@ -29,9 +29,15 @@ waypoint sessions resume <session-id>
 `reattach` revives an `exited` or `error` session with its conversation, without
 sending a message (`sessions send` to an exited session also reattaches it); on
 a live session it restarts the agent and ends any running turn. `resume` presses
-Enter on a live tmux / claude_tty pane; on a pane that wasn't waiting on Enter
-the session stays `running` with no turn, so `sessions wait` blocks until
-timeout.
+Enter on a live tmux / claude_tty pane. When the Enter submits a message typed
+into a Claude composer, the session goes `running` and `sessions wait` tracks
+the turn; otherwise the status stays as it was. A generic tmux pane of another
+agent keeps its pane-output status. While a dialog is open, `resume` fails
+(HTTP 409, exit 1). Answer an approval with `sessions approve` or a plan with
+`approve-plan`. A claude_tty session accepts its folder-trust prompt by itself
+within a few seconds, so retry then; on a generic tmux pane the human answers
+it in the terminal. Codex and OpenCode panes can't be read for dialogs, so
+resume presses Enter on them regardless.
 
 ## Find exited sessions
 

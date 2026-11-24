@@ -596,6 +596,23 @@ untrusted `<pasted_content>`;
 records the TUI behavior its spec relies on. `claude_tty` delegates to its
 composed Claude agent.
 
+### Pane composer reading (optional)
+
+An agent that can tell from a `capture-pane` snapshot whether its composer holds
+a typed, unsent message implements the `PaneComposerReading` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def pane_composer_holds_input(self, pane_text: str) -> bool: ...
+```
+
+Resume on a tmux or `claude_tty` pane presses Enter; when this method reports a
+typed message on the pre-Enter snapshot, the runtime marks the session
+`running`. Without it, resume leaves the status to the transport. Resume refuses
+with `InputBlockedError` (409) while `pane_shows_blocking_dialog` reports a
+dialog. Claude implements it; `claude_tty` delegates to its composed Claude
+agent.
+
 ## Token & context usage
 
 Waypoint tracks two independent token measurements, both agent-owned at the

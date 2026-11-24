@@ -11,12 +11,14 @@ import pytest
 from waypoint.backends.claude_tty.pane_dialog import (
     PaneScreen,
     classify,
+    composer_holds_input,
     composer_is_empty,
     composer_ready,
     parse_approval,
     parse_model_selector,
     parse_plan_dialog,
     shows_blocking_dialog,
+    trust_option_offset,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
@@ -40,6 +42,8 @@ def _load(name: str) -> str:
         ("approval_with_queued.txt", PaneScreen.APPROVAL),
         ("overflow_bash.txt", PaneScreen.APPROVAL),
         ("trust_dialog.txt", PaneScreen.TRUST),
+        ("trust_dialog_2_1_331.txt", PaneScreen.TRUST),
+        ("trust_dialog_2_1_331_trust_selected.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
         ("auto_mode_teaching.txt", PaneScreen.AUTO_MODE_TEACHING),
@@ -64,6 +68,8 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("approval_with_queued.txt", True),
         ("overflow_bash.txt", True),
         ("trust_dialog.txt", True),
+        ("trust_dialog_2_1_331.txt", True),
+        ("trust_dialog_2_1_331_trust_selected.txt", True),
         ("model_selector.txt", True),
         ("effort_popup.txt", True),
         ("auto_mode_teaching.txt", True),
@@ -632,6 +638,19 @@ def test_quoted_footer_directly_above_composer_does_not_mask_it() -> None:
     assert shows_blocking_dialog(screen) is False
 
 
+@pytest.mark.parametrize(
+    "fixture, offset",
+    [
+        ("trust_dialog.txt", 0),
+        ("trust_dialog_2_1_331.txt", 1),
+        ("trust_dialog_2_1_331_trust_selected.txt", 0),
+        ("ready.txt", None),
+    ],
+)
+def test_trust_option_offset(fixture: str, offset: int | None) -> None:
+    assert trust_option_offset(_load(fixture)) == offset
+
+
 def test_composer_is_empty_for_bare_prompt() -> None:
     # After a real submit the composer clears to a bare ``❯`` above the footer.
     screen = "\n".join(
@@ -681,6 +700,68 @@ def test_composer_is_empty_for_idle_placeholder() -> None:
     # (e.g. ``❯ Try "fix typecheck errors"``); it is empty for submit-confirm
     # purposes, so the confirm loop must not keep firing Enter at it.
     assert composer_is_empty(_load("ready.txt")) is True
+
+
+_RULE = "─" * 40
+_PENDING_MESSAGE = "\n".join(
+    [
+        "❯ earlier submitted message",
+        _RULE,
+        "❯ Write the numbers 1 to 30.",
+        _RULE,
+        "  ⏸ manual mode on · ? for shortcuts",
+    ]
+)
+_PROMPT_ECHO = "❯ Run this exact shell command and report the output."
+_STATUS_PANEL = "\n".join(
+    [
+        _PROMPT_ECHO,
+        "● Done.",
+        "▔" * 40,
+        "  Settings  Status   Config   Usage   Stats",
+        "  Version:           2.1.331",
+        "  ←/→ to switch · Esc to close",
+    ]
+)
+_SHELL_MODE = "\n".join(
+    [_PROMPT_ECHO, "● Done.", _RULE, "! ", _RULE, "  ! for shell mode"]
+)
+
+
+def test_composer_holds_input_for_unsent_message() -> None:
+    assert composer_holds_input(_PENDING_MESSAGE) is True
+
+
+def test_composer_holds_wrapped_input() -> None:
+    screen = "\n".join([_RULE, "❯ ", "  second line of a typed message", _RULE])
+    assert composer_holds_input(screen) is True
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [
+        _load("ready.txt"),
+        "\n".join([_RULE, "❯ ", _RULE]),
+        "loading Claude...\nno prompt yet",
+        _load("approval_with_queued.txt"),
+        _load("trust_dialog.txt"),
+        _load("question_dialog.txt"),
+        _STATUS_PANEL,
+        _SHELL_MODE,
+    ],
+    ids=[
+        "placeholder",
+        "bare-prompt",
+        "booting",
+        "approval",
+        "trust",
+        "question",
+        "status-panel",
+        "shell-mode",
+    ],
+)
+def test_composer_holds_no_input_enter_would_submit(screen: str) -> None:
+    assert composer_holds_input(screen) is False
 
 
 def test_composer_ready_when_prompt_drawn() -> None:

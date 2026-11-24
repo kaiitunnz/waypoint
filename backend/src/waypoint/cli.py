@@ -3411,8 +3411,8 @@ def sessions_resume(
     """Press Enter in a live terminal pane, or revive an exited session.
 
     Live resume applies to tmux / claude_tty panes; other transports reject it.
-    A pane that wasn't waiting on Enter stays running with no turn, so don't
-    ``sessions wait`` on it.
+    The session goes running only when the Enter submits a typed message.
+    Refused while a dialog is open.
     """
     _emit(_settings_from_ctx(ctx), lambda c: {"session": c.resume(session_id)})
 

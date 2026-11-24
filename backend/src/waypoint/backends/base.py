@@ -256,6 +256,17 @@ class PaneSubmitConfirming(Protocol):
         ...
 
 
+@runtime_checkable
+class PaneComposerReading(Protocol):
+    """A plugin that can tell whether its TUI's composer holds unsent input."""
+
+    def pane_composer_holds_input(self, pane_text: str) -> bool:
+        """Return whether the composer holds a typed message that ``Enter``
+        submits, given a ``capture-pane`` snapshot. False when a modal dialog
+        is open, since ``Enter`` then selects an option instead."""
+        ...
+
+
 @dataclass(frozen=True)
 class PaneTypingSpec:
     """How to type a message into an agent's TUI.

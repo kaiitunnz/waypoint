@@ -3084,11 +3084,19 @@ class SessionRuntime:
         # reattach guard, so "Resume" on an exited session brings it back.
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             return await self._reattach_session(session)
-        await self.transport_for(session).resume(session)
+        transport = self.transport_for(session)
+        # Enter on an open dialog selects its highlighted option, e.g. approving
+        # a tool call or exiting at the trust prompt.
+        if await transport.input_blocked(session):
+            raise InputBlockedError()
+        submitted = await transport.resume(session)
+        # Only an Enter that submits input starts a turn.
         await self._record_system_event(
-            session.id, "Sent resume", status=SessionStatus.RUNNING
+            session.id,
+            "Sent resume",
+            status=SessionStatus.RUNNING if submitted else None,
         )
-        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        return self.get_session(session.id)
 
     async def terminate(self, session_id: str) -> SessionRecord:
         # Serialized with the launch-settings switch and reattach so a terminate

@@ -60,6 +60,10 @@ _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
+_ARROW_DOWN = b"\x1b[B"
+_ARROW_UP = b"\x1b[A"
+# Polls an unchanged trust prompt waits before re-sending a dropped arrow burst.
+_TRUST_ARROW_RETRY_POLLS = 5
 # Popups cancelled with one Escape after the debounce. The message is fixed —
 # never interpolate pane contents, which can hold personal environment data.
 _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
@@ -127,6 +131,10 @@ class TranscriptTailer:
         # Dialog debounce state
         self._prev_dialog_sig: str | None = None
         self._dialog_stable_count: int = 0
+        # Trust-prompt navigation: the snapshot the last arrow burst acted on and
+        # the polls since, and consecutive polls showing the trust option selected.
+        self._trust_arrowed: tuple[str, int] | None = None
+        self._trust_selected_polls: int = 0
         # Signature of the dialog already surfaced as an APPROVAL_REQUEST; held
         # until the dialog leaves the screen so a response that clears pending
         # before the pane redraws cannot trigger a duplicate emit.
@@ -386,18 +394,42 @@ class TranscriptTailer:
         screen_type = pane_dialog.classify(snapshot)
 
         if screen_type is pane_dialog.PaneScreen.TRUST:
-            # A fresh cwd opens with the workspace-trust prompt, which blocks the
-            # session (including autonomously-spawned ones in fresh worktrees)
-            # until answered. Option 1 ("trust") is preselected, so a bare Enter
-            # accepts. Re-sent each tick it persists — idempotent, and self-heals
-            # if a keystroke is dropped; a stray Enter at the ready prompt after
-            # it clears is a harmless empty submit.
+            # A fresh cwd opens at the workspace-trust prompt, which blocks the
+            # session until answered. Enter on "No, exit" ends the session, so
+            # arrow onto the trust option first. The options wrap, so arrows wait
+            # for a redraw (or a dropped-burst timeout) and Enter waits for the
+            # selection to hold; a stray Enter after the prompt clears is a
+            # harmless empty submit.
+            offset = pane_dialog.trust_option_offset(snapshot)
+            if offset is None:
+                log.warning(
+                    "workspace-trust prompt has no trust option to select",
+                    extra={"session_id": self._session_id},
+                )
+                return
+            if offset:
+                self._trust_selected_polls = 0
+                if self._trust_arrowed is not None:
+                    acted_on, polls = self._trust_arrowed
+                    if acted_on == snapshot and polls < _TRUST_ARROW_RETRY_POLLS:
+                        self._trust_arrowed = (acted_on, polls + 1)
+                        return
+                arrow = _ARROW_DOWN if offset > 0 else _ARROW_UP
+                await self._runtime.tmux.send_bytes(pane, arrow * abs(offset))
+                self._trust_arrowed = (snapshot, 0)
+                return
+            self._trust_arrowed = None
+            self._trust_selected_polls += 1
+            if self._trust_selected_polls < _DIALOG_STABLE_TICKS:
+                return
             log.info(
                 "accepting workspace-trust prompt",
                 extra={"session_id": self._session_id},
             )
             await self._runtime.tmux.send_input(pane, "", submit=True)
             return
+        self._trust_arrowed = None
+        self._trust_selected_polls = 0
 
         if screen_type in _ESC_DISMISS_LOG:
             # Esc both popups once, after the debounce. For AskUserQuestion the

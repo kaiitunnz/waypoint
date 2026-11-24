@@ -69,6 +69,11 @@ _EFFORT_MARKER = "Effort"
 _AUTO_MODE_TEACHING_TITLE = "Teach auto mode about your environment?"
 _AUTO_MODE_TEACHING_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
 _TRUST_MARKER = "Is this a project you created or one you trust?"
+# Claude Code 2.1.331 lists "No, exit" first, preselected and unnumbered. Its
+# ``❯`` row reads as a composer prompt, so the active region starts below the
+# question; the trust option and footer under it still identify the prompt.
+_TRUST_OPTION = "Yes, I trust this folder"
+_TRUST_FOOTER = "Enter to confirm"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
@@ -229,8 +234,8 @@ def _is_column0_rule(line: str) -> bool:
     return len(stripped) >= _MIN_RULE_WIDTH and set(stripped) == {_RULE_CHAR}
 
 
-def _live_composer_bottom(lines: list[str]) -> int | None:
-    """Index of the live composer's bottom border, when the composer is drawn.
+def _live_composer_frame(lines: list[str]) -> tuple[int, int] | None:
+    """Indices of the live composer's top and bottom borders, when it is drawn.
 
     The composer is framed by two full-width rules starting at column 0, with
     the ``❯`` prompt at column 0 directly under the top one. Its text wraps onto
@@ -248,7 +253,7 @@ def _live_composer_bottom(lines: list[str]) -> int | None:
         width = len(lines[top].rstrip())
         for bottom in range(top + 2, len(lines)):
             if _is_column0_rule(lines[bottom]) and len(lines[bottom].rstrip()) == width:
-                return bottom
+                return top, bottom
         return None
     return None
 
@@ -263,9 +268,8 @@ def _active_region(lines: list[str]) -> list[str]:
     resting on a dialog footer is queued messages or a free-text answer field,
     so the scan skips it and continues above the footer.
     """
-    composer_bottom = _live_composer_bottom(lines)
-    if composer_bottom is not None:
-        return lines[composer_bottom:]
+    if (frame := _live_composer_frame(lines)) is not None:
+        return lines[frame[1] :]
     i = len(lines) - 1
     while i >= 0:
         if not _is_composer_line(lines[i]):
@@ -324,7 +328,10 @@ def classify(screen: str) -> PaneScreen:
         return PaneScreen.PLAN
     if all(_contains(region, compact, marker) for marker in _QUESTION_MARKERS):
         return PaneScreen.QUESTION
-    if _contains(region, compact, _TRUST_MARKER):
+    if _contains(region, compact, _TRUST_MARKER) or (
+        _contains(region, compact, _TRUST_OPTION)
+        and _contains(region, compact, _TRUST_FOOTER)
+    ):
         return PaneScreen.TRUST
     if _contains(region, compact, _MODEL_FOOTER) and _contains(
         region, compact, _MODEL_MARKER
@@ -339,6 +346,38 @@ def classify(screen: str) -> PaneScreen:
     ):
         return PaneScreen.AUTO_MODE_TEACHING
     return PaneScreen.OTHER
+
+
+def trust_option_offset(screen: str) -> int | None:
+    """Rows from the trust prompt's highlighted option to its trust option.
+
+    Positive means the trust option is below the highlight. None when either
+    row is missing. Callers classify the screen as the trust prompt first.
+    """
+    rows = [line for line in _strip_ansi(screen).splitlines() if line.strip()]
+    selected = max(
+        (i for i, row in enumerate(rows) if _COMPOSER_PROMPT_RE.match(row)),
+        default=None,
+    )
+    trust = max((i for i, row in enumerate(rows) if _TRUST_OPTION in row), default=None)
+    if selected is None or trust is None:
+        return None
+    return trust - selected
+
+
+def composer_holds_input(screen: str) -> bool:
+    """Whether the live composer holds an unsent message that ``Enter`` submits.
+
+    Read from the framed composer only: a panel or shell-mode prompt replaces
+    it, and earlier prompts echo above with the same ``❯`` glyph.
+    """
+    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    frame = _live_composer_frame(lines)
+    if frame is None or shows_blocking_dialog(screen):
+        return False
+    top, bottom = frame
+    text = "\n".join(lines[top + 1 : bottom]).removeprefix(_COMPOSER_PROMPT).strip()
+    return bool(text) and not text.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
 
 
 def shows_blocking_dialog(screen: str) -> bool:

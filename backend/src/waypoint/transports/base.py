@@ -59,7 +59,9 @@ class TransportAdapter(ABC):
         """Whether a dialog on the session would capture sent input."""
         return False
 
-    async def resume(self, session: SessionRecord) -> None:
+    async def resume(self, session: SessionRecord) -> bool:
+        """Press Enter in the session's pane. Return whether it submitted
+        input, which starts a turn; False when that can't be told."""
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"resume is not supported for {session.transport} sessions",

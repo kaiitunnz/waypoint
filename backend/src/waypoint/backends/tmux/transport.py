@@ -19,6 +19,7 @@ from waypoint.attachments import (
 )
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.base import (
+    PaneComposerReading,
     PaneSubmitConfirming,
     PaneTypedInput,
     PaneTypingSpec,
@@ -95,6 +96,10 @@ class TmuxTransport(TransportAdapter):
             deliver = partial(self.adapter.type_input, target, segments, typing_spec)
         async with self._input_lock(session):
             await self._send(target, payload, deliver, confirmer)
+
+    def _composer_reader(self, session: SessionRecord) -> PaneComposerReading | None:
+        plugin = self._runtime.registry.get(session.backend)
+        return plugin if isinstance(plugin, PaneComposerReading) else None
 
     def _typing_spec(self, session: SessionRecord) -> PaneTypingSpec | None:
         plugin = self._runtime.registry.get(session.backend)
@@ -272,8 +277,25 @@ class TmuxTransport(TransportAdapter):
         artifacts = agent.native_thread_artifacts(session, config_dir)
         return artifacts[0] if artifacts else None
 
-    async def resume(self, session: SessionRecord) -> None:
-        await self.adapter.resume(self._target(session))
+    async def resume(self, session: SessionRecord) -> bool:
+        target = self._target(session)
+        confirmer = self._confirmer(session)
+        reader = self._composer_reader(session)
+        submits = False
+        async with self._input_lock(session):
+            if confirmer is not None or reader is not None:
+                snapshot = await self.adapter.capture_snapshot(target)
+                # Recheck the screen the Enter lands on: a dialog may have opened
+                # since the runtime's guard.
+                if confirmer is not None and confirmer.pane_shows_blocking_dialog(
+                    snapshot
+                ):
+                    raise InputBlockedError()
+                submits = reader is not None and reader.pane_composer_holds_input(
+                    snapshot
+                )
+            await self.adapter.resume(target)
+        return submits
 
     async def terminate(self, session: SessionRecord) -> None:
         target = self._target(session)

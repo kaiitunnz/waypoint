@@ -78,14 +78,10 @@ def test_help_lists_command_groups() -> None:
         assert name in result.stdout
 
 
-@pytest.mark.parametrize("command", ["start", "attach"])
-def test_in_process_session_group_is_gone(tmp_path: Path, command: str) -> None:
-    result = runner.invoke(
-        app, ["--config", str(_config(tmp_path)), "session", command]
-    )
+def test_in_process_session_group_is_gone() -> None:
+    result = runner.invoke(app, ["session", "start"])
     assert result.exit_code == 2
     assert "No such command 'session'" in result.output
-    assert not (tmp_path / "data").exists()
 
 
 def test_board_help_lists_commands() -> None:

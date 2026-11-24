@@ -80,7 +80,7 @@ INBOX_GONE_EXIT_CODE = 3
 
 
 def _backend_choices() -> list[str]:
-    """Backend ids accepted by ``session`` / ``sessions`` launch commands.
+    """Backend ids the CLI accepts wherever it takes a backend.
 
     Excludes only the managed-launch fallback wrapper (``tmux``, flagged
     ``is_fallback_for_managed_launch``): it is routed to via the registry, not
@@ -2005,8 +2005,7 @@ def sessions_attach_tmux(
 ) -> None:
     """Attach an existing tmux pane as a session on the running server.
 
-    The server mirrors the pane's output and monitors it; the pane keeps
-    running when the session is terminated or deleted.
+    Terminating or deleting the session leaves the pane running.
     """
     _emit(
         _settings_from_ctx(ctx),

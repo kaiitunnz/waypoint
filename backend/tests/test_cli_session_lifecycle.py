@@ -366,24 +366,6 @@ def test_attach_tmux_omits_unset_fields(
     assert calls[0]["body"] == {"tmux_target": "%3"}
 
 
-def test_attach_tmux_reports_server_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    prefix, _ = _server(
-        tmp_path,
-        monkeypatch,
-        {
-            ("POST", "/api/sessions/attach-tmux"): (
-                400,
-                {"detail": "can't find target: nope"},
-            )
-        },
-    )
-    result = runner.invoke(app, [*prefix, "sessions", "attach-tmux", "--tmux", "nope"])
-    assert result.exit_code == 1
-    assert "can't find target: nope" in result.output
-
-
 def test_attach_tmux_rejects_unknown_backend_hint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

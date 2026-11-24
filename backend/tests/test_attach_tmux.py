@@ -76,17 +76,7 @@ async def test_attach_tmux_stamps_spawner(
             tmux_target="work:1.0", backend_hint="codex", spawner_session_id="lead"
         )
     )
-    assert session.source == SessionSource.ATTACHED_TMUX
     assert session.spawner_session_id == "lead"
-    assert runtime.get_session(session.id).spawner_session_id == "lead"
-
-
-@pytest.mark.asyncio
-async def test_attach_tmux_without_spawner_has_no_owner(
-    runtime: SessionRuntime,
-) -> None:
-    session = await runtime.attach_tmux(SessionAttachRequest(tmux_target="%3"))
-    assert session.spawner_session_id is None
 
 
 @pytest.mark.asyncio

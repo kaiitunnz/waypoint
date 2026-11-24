@@ -24,8 +24,8 @@ export interface LaunchTargetsState {
   activeTargetId: string;
   selectTarget: (targetId: string) => void;
   connect: (targetId: string, password: string) => Promise<SshConnectOutcome>;
-  disconnect: (targetId: string) => Promise<void>;
-  error: string;
+  // Resolves to the failure message, or null once disconnected.
+  disconnect: (targetId: string) => Promise<string | null>;
 }
 
 // SSH launch targets of the signed-in backend, the active one per host, and the
@@ -37,7 +37,6 @@ export function useLaunchTargets(
 ): LaunchTargetsState {
   const [targets, setTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeTargetId, setActiveTargetId] = useState("");
-  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!host || !token) {
@@ -87,7 +86,6 @@ export function useLaunchTargets(
     (targetId: string) => {
       writeLaunchTarget(host, targetId);
       setActiveTargetId(targetId);
-      setError("");
     },
     [host],
   );
@@ -112,26 +110,24 @@ export function useLaunchTargets(
   );
 
   const disconnect = useCallback(
-    async (targetId: string) => {
+    async (targetId: string): Promise<string | null> => {
       try {
         await disconnectLaunchTarget(host, token, targetId);
         setTargets((current) => markTargetConnected(current, targetId, false));
-        setError("");
+        return null;
       } catch (disconnectError) {
         if (isAuthError(disconnectError)) {
           onAuthFailure?.();
-          return;
+          return null;
         }
-        setError(
-          disconnectError instanceof Error ? disconnectError.message : "failed to disconnect",
-        );
+        return disconnectError instanceof Error ? disconnectError.message : "failed to disconnect";
       }
     },
     [host, token, onAuthFailure],
   );
 
   return useMemo(
-    () => ({ targets, activeTargetId, selectTarget, connect, disconnect, error }),
-    [targets, activeTargetId, selectTarget, connect, disconnect, error],
+    () => ({ targets, activeTargetId, selectTarget, connect, disconnect }),
+    [targets, activeTargetId, selectTarget, connect, disconnect],
   );
 }

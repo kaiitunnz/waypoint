@@ -59,7 +59,14 @@ export function HostSwitcher() {
 
   const label = "Switch host";
   const panel = (
-    <SwitcherPanel recents={recents} onDone={() => setOpen(false)} onConnectRequest={setConnecting} />
+    <SwitcherPanel
+      recents={recents}
+      onDone={() => {
+        setOpen(false);
+        trigger.current?.focus();
+      }}
+      onConnectRequest={setConnecting}
+    />
   );
   const requestOpen = (next: boolean) => {
     if (!next && connecting) return;
@@ -120,6 +127,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
   const { snapshot } = useTailnetSnapshot({ kind: "backend", host, token });
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [sshError, setSshError] = useState("");
 
   const activeId = launchTargets.activeTargetId;
   const groups = useMemo(
@@ -152,12 +160,14 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
       : null,
   );
 
-  const select = (row: HostRow) =>
+  const select = (row: HostRow) => {
+    setSshError("");
     setSelection(
       row.kind === "ssh" && row.targetId
         ? { kind: "ssh", targetId: row.targetId, name: row.name }
         : { kind: "host", url: row.url, name: row.name },
     );
+  };
 
   const typed = (address: TypedAddress | null) => {
     const port = address ? parsePort(address.portText) : null;
@@ -210,7 +220,11 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
           <div className={styles.status} data-state={target.connected ? "reachable" : "idle"}>
             <span>{target.connected ? "SSH connected" : "SSH password required"}</span>
             {target.connected ? (
-              <Button variant="text" size="sm" onClick={() => void launchTargets.disconnect(target.id)}>
+              <Button
+                variant="text"
+                size="sm"
+                onClick={() => void launchTargets.disconnect(target.id).then((failure) => setSshError(failure ?? ""))}
+              >
                 Disconnect
               </Button>
             ) : (
@@ -220,9 +234,9 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
             )}
           </div>
         ) : null}
-        {launchTargets.error ? (
+        {sshError ? (
           <p className={styles.error} role="alert">
-            {launchTargets.error}
+            {sshError}
           </p>
         ) : null}
         {!desktop ? (

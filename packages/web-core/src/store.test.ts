@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readHost, readSavedHost } from "./store";
 
@@ -8,6 +8,10 @@ function stubBrowser(pageHostname: string, saved?: string) {
     localStorage: { getItem: (key: string) => (key === "waypoint.host" ? (saved ?? null) : null) },
   });
 }
+
+beforeEach(() => {
+  vi.stubEnv("NEXT_PUBLIC_BACKEND_PORT", undefined);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();

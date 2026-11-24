@@ -114,6 +114,16 @@ export function approvalPreview(approval: PendingAskApproval): ApprovalPreview {
   return { kind: "none" };
 }
 
+// The first lines of a plan with the markdown marks off, for a card.
+export function planPreview(text: string, maxLines = 3): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^[#>\s]+/, "").replace(/[*`]/g, "").trim())
+    .filter(Boolean)
+    .slice(0, maxLines)
+    .join("\n");
+}
+
 // ─── Responding ───
 
 export const NOT_READY_MESSAGE = "The agent isn't ready for a reply yet. Try again in a moment.";

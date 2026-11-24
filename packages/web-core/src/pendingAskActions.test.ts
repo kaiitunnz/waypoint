@@ -9,6 +9,7 @@ import {
   isAnswerable,
   isAgentNotReady,
   planActions,
+  planPreview,
   respondToAsk,
   retryWhileNotReady,
   stripRecommendedSuffix,
@@ -131,6 +132,16 @@ describe("decisions", () => {
       kind: "none",
     });
     expect(approvalPreview(approval({ tool_input: null }))).toEqual({ kind: "none" });
+  });
+});
+
+describe("planPreview", () => {
+  it("drops markdown marks, blank lines and everything past the first lines", () => {
+    expect(planPreview("# Plan: create hello.txt\n\n## Context\nCreate a `file`.\n- step one\n- step two")).toBe(
+      "Plan: create hello.txt\nContext\nCreate a file.",
+    );
+    expect(planPreview("one\ntwo", 5)).toBe("one\ntwo");
+    expect(planPreview("")).toBe("");
   });
 });
 

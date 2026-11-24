@@ -692,9 +692,8 @@ export interface PendingPlanAsk extends PendingAskBase {
 // One request waiting on the human; narrow on `kind` to reach its payload.
 export type PendingAsk = PendingQuestionAsk | PendingApprovalAsk | PendingPlanAsk;
 
-// Every pending ask across live sessions, oldest first (GET /api/pending-asks
-// and the `pending_asks` frame on /ws/sessions). Apply a snapshot when `epoch`
-// differs from the held one or `revision` is higher.
+// GET /api/pending-asks and the `pending_asks` frame on /ws/sessions: every
+// pending ask across live sessions, oldest first (docs/pending_asks.md).
 export interface PendingAsksSnapshot {
   epoch: string;
   revision: number;

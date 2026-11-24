@@ -100,7 +100,7 @@ export function formatCwdSegments(cwd: string): string[] {
   const trimmed = cwd.replace(/\/+$/, "");
   const segments = trimmed.split("/").filter(Boolean);
   if (trimmed.startsWith("/")) {
-    return segments.length ? [`/${segments[0]}`, ...segments.slice(1)] : ["/"];
+    return [`/${segments[0]}`, ...segments.slice(1)];
   }
   return segments.length ? segments : [trimmed];
 }

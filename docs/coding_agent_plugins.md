@@ -517,7 +517,9 @@ agent message, a wake, or a task notification started the turn that ended. A
 message, so a plugin recording its own `user_input` during dispatch gets the
 key without passing it. A normalizer only needs to report the turn's end as
 `IDLE`. `claude_tty` reports it at the dismissal of the question it surfaces,
-which lands after any sibling tool's result.
+which lands after any sibling tool's result. A plugin whose agent swaps to a new
+conversation (`claude_tty` following `/clear`) closes the old one's questions
+with `runtime.questions.close_open`.
 
 The plugin declares `question_parks_turn`: true when the agent's turn blocks on
 an open question (claude_code, OpenCode), false when it ends with a stand-in

@@ -54,7 +54,6 @@ from waypoint.backends.events import (
 )
 from waypoint.backends.task_notifications import CAPTURE_DISABLED
 from waypoint.schemas import (
-    AWAITING_ANSWER_KEY,
     EventKind,
     SessionContextUsage,
     SessionRateLimitUsage,
@@ -204,8 +203,6 @@ class CodexSessionState:
     active_turn_id: str | None = None
     stream_task: asyncio.Task[None] | None = None
     pending_approval: PendingApproval | None = None
-    # Async question ids the active turn asked.
-    turn_question_ids: set[str] = field(default_factory=set)
     # Set while an interrupt is in flight; read on the SDK reader thread.
     interrupting: bool = False
     streamed_tool_result_ids: set[str] = field(default_factory=set)
@@ -255,12 +252,10 @@ class CodexAppServerAdapter:
         on_session_update: SessionUpdateCallback | None = None,
         on_token_usage: TokenUsageCallback | None = None,
         client_factory: ClientFactory | None = None,
-        open_question_ids: Callable[[str], set[str]] | None = None,
         task_output_capture_enabled: bool = True,
     ) -> None:
         self._emit_event = emit_event
         self._task_output_capture_enabled = task_output_capture_enabled
-        self._open_question_ids = open_question_ids
         self._on_session_update = on_session_update
         self._on_token_usage = on_token_usage
         self._client_factory = client_factory or default_client_factory
@@ -1034,8 +1029,6 @@ class CodexAppServerAdapter:
             )
         kind = rendered.kind
         status: SessionStatus | None = rendered.status
-        if method == "turn/completed":
-            status = self._settled_turn_status(state, rendered.status)
         diff_preview = diff_preview_for_notification(method, payload)
         metadata: dict[str, Any] = {
             "method": method,
@@ -1063,8 +1056,7 @@ class CodexAppServerAdapter:
             plan_envelope = plan_metadata_for_item(item)
             if plan_envelope is not None:
                 metadata["plan"] = plan_envelope
-            if apply_async_question(metadata, item):
-                state.turn_question_ids.add(metadata["tool_use_id"])
+            apply_async_question(metadata, item)
         metadata.update(rendered.metadata)
         item_id = metadata.get("item_id")
         if kind == EventKind.TOOL_RESULT and method in _TOOL_RESULT_DELTA_METHODS:
@@ -1090,8 +1082,6 @@ class CodexAppServerAdapter:
                 return
         if status is not None and settle:
             metadata["status"] = status
-            if method == "turn/completed" and status is SessionStatus.WAITING_INPUT:
-                metadata[AWAITING_ANSWER_KEY] = True
         await self._emit_event(
             state.session_id, kind, rendered.text, metadata, status if settle else None
         )
@@ -1108,22 +1098,6 @@ class CodexAppServerAdapter:
             ", ".join(sorted(payload)),
             extra={"session_id": state.session_id},
         )
-
-    def _settled_turn_status(
-        self, state: CodexSessionState, status: SessionStatus
-    ) -> SessionStatus:
-        """A turn that ends with one of its own async questions open waits on
-        the human."""
-        if (
-            status is not SessionStatus.IDLE
-            or not state.turn_question_ids
-            or self._open_question_ids is None
-        ):
-            return status
-        open_ids = self._open_question_ids(state.session_id)
-        if state.turn_question_ids & open_ids:
-            return SessionStatus.WAITING_INPUT
-        return status
 
     async def _call_client(
         self, state: CodexSessionState, func: Callable[..., Any], *args: Any
@@ -1255,7 +1229,6 @@ def _end_turn(state: CodexSessionState) -> None:
     state.stream_task = None
     state.compacting = False
     state.interrupt_pending = False
-    state.turn_question_ids.clear()
     state.streamed_tool_result_ids.clear()
     state.streamed_reasoning_ids.clear()
     state.file_diff_previews.clear()

@@ -256,9 +256,6 @@ class CodexPlugin(DefaultLaunchContract):
             runtime._emit_adapter_event,
             runtime.session_update_callback(),
             on_token_usage=runtime.token_usage_callback(),
-            open_question_ids=lambda session_id: set(
-                runtime.storage.open_question_tool_use_ids(session_id)
-            ),
             task_output_capture_enabled=runtime.settings.task_output_capture_enabled,
         )
 

@@ -34,7 +34,7 @@ from waypoint.backends.codex.subagents import (
     read_report,
 )
 from waypoint.backends.codex.transport import CodexTransport, input_http_error
-from waypoint.schemas import AWAITING_ANSWER_KEY, EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionStatus
 
 
 @pytest.mark.parametrize(
@@ -1683,7 +1683,7 @@ def _turn_completed() -> FakeNotification:
 
 
 async def _run_turn(
-    open_ids: set[str], *notifications: FakeNotification
+    *notifications: FakeNotification,
 ) -> list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]]:
     emitted: list = []
 
@@ -1694,7 +1694,6 @@ async def _run_turn(
     adapter = CodexAppServerAdapter(
         emit,
         client_factory=lambda *_: cast(CodexClient, fake),
-        open_question_ids=lambda session_id: open_ids,
     )
     await adapter.start_session("sess", "/tmp/work")
     await adapter.send_input("sess", "go")
@@ -1711,7 +1710,6 @@ async def _run_turn(
 async def test_async_question_emits_one_question_card_and_keeps_running() -> None:
     item = _async_question_item()
     emitted = await _run_turn(
-        set(),
         _item_notification("item/started", item),
         _item_notification("item/completed", item),
         _turn_completed(),
@@ -1734,28 +1732,14 @@ async def test_async_question_emits_one_question_card_and_keeps_running() -> Non
     assert not [entry for entry in emitted if entry[1] == EventKind.AGENT_OUTPUT]
 
 
-@pytest.mark.parametrize(
-    ("open_ids", "expected"),
-    [({"call_q1"}, SessionStatus.WAITING_INPUT), (set(), SessionStatus.IDLE)],
-)
 @pytest.mark.asyncio
-async def test_turn_end_waits_only_on_its_own_open_question(
-    open_ids: set[str], expected: SessionStatus
-) -> None:
+async def test_turn_end_with_a_question_open_reports_idle() -> None:
+    # The runtime settles the turn's end onto the open question.
     item = _async_question_item()
     emitted = await _run_turn(
-        open_ids, _item_notification("item/completed", item), _turn_completed()
+        _item_notification("item/completed", item), _turn_completed()
     )
     assert emitted[-1][2] == "Turn completed"
-    assert emitted[-1][4] == expected
-    assert emitted[-1][3].get(AWAITING_ANSWER_KEY, False) is (
-        expected is SessionStatus.WAITING_INPUT
-    )
-
-
-@pytest.mark.asyncio
-async def test_turn_end_ignores_open_questions_from_earlier_turns() -> None:
-    emitted = await _run_turn({"call_old"}, _turn_completed())
     assert emitted[-1][4] == SessionStatus.IDLE
 
 
@@ -1768,7 +1752,6 @@ async def test_async_message_without_questions_is_agent_output() -> None:
         "delivery": "async",
     }
     emitted = await _run_turn(
-        set(),
         _item_notification("item/started", item),
         _item_notification("item/completed", item),
         _turn_completed(),
@@ -1823,7 +1806,7 @@ def _agent_delta(text: str) -> FakeNotification:
 async def _run_turn_errors(
     *notifications: FakeNotification,
 ) -> list[tuple[str, SessionStatus]]:
-    emitted = await _run_turn(set(), *notifications)
+    emitted = await _run_turn(*notifications)
     return [
         (text, status)
         for _, _, text, metadata, status in emitted
@@ -1923,7 +1906,6 @@ def _turn_payload(**fields: Any) -> dict[str, Any]:
 async def test_streamed_reasoning_is_not_repeated_on_completion() -> None:
     item = _reasoning(summary=["Plan.", "Act."])
     emitted = await _run_turn(
-        set(),
         _item_notification("item/started", _reasoning()),
         FakeNotification(
             "item/reasoning/summaryTextDelta",
@@ -1949,7 +1931,6 @@ async def test_streamed_reasoning_is_not_repeated_on_completion() -> None:
 @pytest.mark.asyncio
 async def test_unstreamed_reasoning_summary_is_emitted_once_on_completion() -> None:
     emitted = await _run_turn(
-        set(),
         _item_notification("item/completed", _reasoning(summary=["Only this."])),
         _turn_completed(),
     )
@@ -1960,7 +1941,6 @@ async def test_unstreamed_reasoning_summary_is_emitted_once_on_completion() -> N
 @pytest.mark.asyncio
 async def test_empty_reasoning_and_user_echo_stay_out_of_the_transcript() -> None:
     emitted = await _run_turn(
-        set(),
         FakeNotification(
             "turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}}
         ),
@@ -1994,7 +1974,7 @@ async def test_generated_image_is_captured_and_not_persisted_inline() -> None:
         "failure": None,
     }
     emitted = await _run_turn(
-        set(), _item_notification("item/completed", item), _turn_completed()
+        _item_notification("item/completed", item), _turn_completed()
     )
     _, kind, text, metadata, _ = emitted[0]
     assert (kind, text) == (EventKind.TOOL_RESULT, "completed")

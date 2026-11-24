@@ -81,8 +81,7 @@ are not supported.
 
 The repo root is an npm workspace holding the v1 app (`frontend/`), the v2 app
 (`frontend-v2/`) and the shared `packages/web-core/`. Dependencies install once,
-at the root, with `npm ci`; a standalone per-app `node_modules` (such as
-`frontend/node_modules`) is removed first so it can't shadow the shared one.
+at the root, with `npm ci`.
 
 `WAYPOINT_STACK_FRONTEND` chooses the app behind `WAYPOINT_STACK_FRONTEND_PORT`
 (service `frontend`). With `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` set, the other
@@ -91,9 +90,8 @@ check. `status` shows which app each service is running (`variant=v1|v2`).
 
 - `start`, `stop`, `restart`, and `logs` on `frontend` cover both services;
   `frontend-preview` targets only the preview, and `all` includes it.
-- Each app keeps its own build cache under its `.next/`. A build is reused until
-  the app, `packages/web-core`, the root `package.json`, the root
-  `package-lock.json`, or `WAYPOINT_STACK_BACKEND_PORT` changes.
+- Each app keeps its own build cache under its `.next/`, reused until its inputs
+  or `WAYPOINT_STACK_BACKEND_PORT` change.
 - The preview is optional: if it fails to start, the error is reported and the
   exit code is 1, but the backend and primary frontend keep running. The Docker
   tailnet sidecar does not proxy the preview port.

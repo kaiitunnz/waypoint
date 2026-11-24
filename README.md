@@ -27,7 +27,7 @@ Use GitHub Issues directly for active bugs and feature requests.
 - `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`) plus the transport packages (`claude_tty/` for the tty-tail Emulated transport, `tmux/` for the raw Terminal transport); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
 - `frontend/` — Next.js PWA client (v1)
-- `frontend-v2/` — the in-progress v2 client, served instead of or beside v1 (see [Local stack supervisor](#local-stack-supervisor))
+- `frontend-v2/` — the v2 client, served instead of or beside v1 (see [Local stack supervisor](#local-stack-supervisor))
 - `packages/web-core/` — `@waypoint/web-core`, the TypeScript source package the frontends share
 
 A single long-lived **personal assistant** thread — which answers host questions, grounds itself in your running sessions, and manages them via the `waypoint sessions` CLI — can be enabled in `waypoint.yaml`. Its coding backend, model, and permission mode are switchable on the fly, and the thread can be terminated, reattached, or context-cleared from the assistant page; see [`docs/personal_assistant.md`](docs/personal_assistant.md).
@@ -178,7 +178,7 @@ waypointctl daemon start            # opt in to the long-lived waypointd supervi
 What it does:
 
 - starts `uv run waypoint serve` in `backend/` (in its own process group)
-- installs dependencies at the workspace root if needed, then builds (if needed) and runs `npm run start` for the selected frontend app, `frontend/` or `frontend-v2/` per `WAYPOINT_STACK_FRONTEND`, plus the other app when `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` is set
+- installs dependencies at the workspace root if needed, then builds (if needed) and runs `npm run start` for the selected frontend app (`frontend/` or `frontend-v2/`) and the preview app when configured
 - waits for backend `http://127.0.0.1:8787/health` and each frontend's root URL
   before reporting success
 - stores PID files, logs, and default backend/uv-cache directories under
@@ -198,7 +198,7 @@ WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml waypointctl restart
 WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data waypointctl start
 ```
 
-`WAYPOINT_STACK_FRONTEND=v2` serves the v2 app (`frontend-v2/`) on the frontend port; the default is `v1`. Set `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` to also run the other app on that port as a `frontend-preview` service, so both can be compared side by side. See [`waypointctl/README.md`](waypointctl/README.md).
+`WAYPOINT_STACK_FRONTEND=v2` serves the v2 app (`frontend-v2/`) on the frontend port; the default is `v1`. Set `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` to also run the other app on that port as a `frontend-preview` service. See [`waypointctl/README.md`](waypointctl/README.md).
 
 By default each command runs in-process and exits when the work is done.
 `waypointctl daemon start` brings up a long-lived `waypointd` that subsequent

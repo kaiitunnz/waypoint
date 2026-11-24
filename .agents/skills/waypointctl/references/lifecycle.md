@@ -9,12 +9,10 @@ waypointctl restart [backend|frontend|frontend-preview|all]
 waypointctl status
 ```
 
-`frontend` covers the optional preview service too when one is configured;
-`frontend-preview` addresses only the preview. A preview that fails to start is
-reported (exit 1) without stopping the rest of the stack. Restarting
-`frontend-preview` alone is refused when dependencies changed while the primary
-frontend runs, or when the primary already serves the preview's app; use
-`restart frontend` then.
+`frontend` covers the optional preview too; `frontend-preview` addresses only the
+preview. A failing preview is reported (exit 1) without stopping the rest. A lone
+preview start or restart is refused when it would disturb the running primary;
+the error names the command to run.
 
 Starting is generally safe. Frontend restart is safe for frontend-only changes.
 Backend or full-stack restart requires confirmation because it interrupts live

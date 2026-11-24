@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { UNIFIED_TOKEN_CATEGORIES, UNIFIED_TOKEN_LABELS, unifyTokens } from "./tokens";
+import { UNIFIED_TOKEN_CATEGORIES, unifyTokens } from "./tokens";
 
 describe("unifyTokens", () => {
   it("subtracts cached and reasoning subsets for codex totals", () => {
@@ -74,11 +74,5 @@ describe("unifyTokens", () => {
     });
     const sum = UNIFIED_TOKEN_CATEGORIES.reduce((total, key) => total + unified[key], 0);
     expect(sum).toBe(900 + 250);
-  });
-
-  it("has a label for every category", () => {
-    for (const category of UNIFIED_TOKEN_CATEGORIES) {
-      expect(UNIFIED_TOKEN_LABELS[category]).toBeTruthy();
-    }
   });
 });

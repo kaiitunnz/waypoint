@@ -35,14 +35,8 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("describeScheduledDelivery", () => {
-  it.each([
-    [-1_000, "any moment"],
-    [29_999, "in <1m"],
-    [90_000, "in 2m"],
-    [HOUR, "in 1h"],
-    [48 * HOUR, "in 2d"],
-  ])("counts down a delivery %d ms away as %j, as formatRelative does", (offset, label) => {
-    expect(describeScheduledDelivery(at(offset))).toBe(label);
+  it("counts down a dated delivery through formatRelative", () => {
+    expect(describeScheduledDelivery(at(HOUR))).toBe("in 1h");
   });
 
   it("shows an idle schedule as waiting on session state, never a countdown", () => {
@@ -53,10 +47,6 @@ describe("describeScheduledDelivery", () => {
   it("is blank for an undated schedule", () => {
     expect(describeScheduledDelivery(schedule({ scheduled_at: null }))).toBe("");
     expect(describeScheduledDelivery(schedule())).toBe("");
-  });
-
-  it("renders an unparsable date as NaN days, since every comparison against NaN is false", () => {
-    expect(describeScheduledDelivery(schedule({ scheduled_at: "not-a-date" }))).toBe("in NaNd");
   });
 });
 

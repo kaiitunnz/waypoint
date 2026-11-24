@@ -1989,8 +1989,8 @@ def sessions_attach_tmux(
         typer.Option(
             callback=_validate_backend,
             autocompletion=_complete_backend,
-            help="Agent running in the pane; inferred from the pane name when "
-            "omitted.",
+            help="Agent running in the pane; inferred from the --tmux target "
+            "when omitted, else the server's default backend.",
         ),
     ] = None,
     title: Annotated[str | None, typer.Option()] = None,

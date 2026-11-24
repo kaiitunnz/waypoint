@@ -431,6 +431,8 @@ class TranscriptTailer:
             )
             await self._runtime.tmux.send_input(pane, "", submit=True)
             return
+        self._trust_arrowed = None
+        self._trust_selected_polls = 0
 
         if screen_type in _ESC_DISMISS_LOG:
             # Esc both popups once, after the debounce. For AskUserQuestion the

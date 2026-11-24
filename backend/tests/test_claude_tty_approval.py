@@ -549,6 +549,22 @@ async def test_trust_prompt_accepts_once_trust_option_is_selected() -> None:
     runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
 
 
+async def test_trust_selection_debounce_restarts_after_prompt_leaves() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    selected = _load("trust_dialog_2_1_331_trust_selected.txt")
+    runtime = _make_runtime(session, selected)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    runtime.tmux.capture_snapshot.return_value = _load("ready.txt")
+    await tailer._poll_dialog()
+    runtime.tmux.capture_snapshot.return_value = selected
+    await tailer._poll_dialog()
+
+    runtime.tmux.send_input.assert_not_called()
+
+
 async def test_non_approval_screen_does_not_emit() -> None:
     for fixture in ("ready.txt", "trust_dialog.txt", "model_selector.txt"):
         plugin = ClaudeTtyPlugin()

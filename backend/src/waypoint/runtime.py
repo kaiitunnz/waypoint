@@ -125,6 +125,7 @@ from waypoint.schemas import (
     SessionAttachRequest,
     SessionCommandInvocation,
     SessionCreateRequest,
+    SessionDeriveRequest,
     SessionEnvelope,
     SessionHistoryPage,
     SessionInputRequest,
@@ -2621,7 +2622,9 @@ class SessionRuntime:
         await self.broadcast_session_list()
         return new_session
 
-    async def fork_session(self, session_id: str) -> SessionRecord:
+    async def fork_session(
+        self, session_id: str, overrides: SessionDeriveRequest | None = None
+    ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         if not plugin.capabilities.supports_fork:
@@ -2629,6 +2632,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Backend {session.backend} does not support forking",
             )
+        overrides = overrides or SessionDeriveRequest()
+        self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(session, "fork")
 
         new_session_id = self._generate_session_id(session.backend)
@@ -2647,7 +2652,9 @@ class SessionRuntime:
         # Add branch/fork suffix to the original title if it doesn't already have one
         base_title = session.title or session.id
         match = re.match(r"^(.+) \(fork #(\d+)\)$", base_title)
-        if match:
+        if overrides.title is not None:
+            new_title = overrides.title
+        elif match:
             new_title = f"{match.group(1)} (fork #{int(match.group(2)) + 1})"
         else:
             new_title = f"{base_title} (fork #1)"
@@ -2660,12 +2667,29 @@ class SessionRuntime:
             raw_log,
             structured_log,
         )
+        # Stamped generically after the plugin builds the record, like launch tags.
+        owner_fields: dict[str, Any] = {}
+        if overrides.spawner_session_id:
+            owner_fields["spawner_session_id"] = overrides.spawner_session_id
+        if overrides.tags:
+            owner_fields["tags"] = overrides.tags
+        if owner_fields:
+            new_session = self.storage.update_session(new_session.id, **owner_fields)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
 
-    async def clone_session_launch(self, session_id: str) -> SessionRecord:
+    def _require_spawner(self, spawner_session_id: str | None) -> None:
+        if spawner_session_id and self.storage.get_session(spawner_session_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown spawner session: {spawner_session_id}",
+            )
+
+    async def clone_session_launch(
+        self, session_id: str, overrides: SessionDeriveRequest | None = None
+    ) -> SessionRecord:
         """Start a fresh managed session from a source session's launch settings.
 
         Backs ``/new``: reads the private source record and reuses the managed
@@ -2680,12 +2704,20 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
+        overrides = overrides or SessionDeriveRequest()
+        self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(
             source, "start a new session from"
         )
         # Copy the non-secret launch fields; pin the transport so the child keeps
         # the source's channel. launch_env travels only in the private snapshot.
+        # The spawner is stamped after create: on the request it would let a
+        # source with no explicit permission mode inherit the spawner's instead.
+        derived = overrides.model_dump(
+            include={"title", "tags"}, exclude_unset=True, exclude_defaults=True
+        )
         request = SessionCreateRequest(
+            **derived,
             backend=source.backend,
             cwd=source.cwd,
             launch_target_id=source.launch_target_id,
@@ -2705,7 +2737,13 @@ class SessionRuntime:
             launch_env=dict(source.launch_env),
             account_profile_label=source.account_profile_label,
         )
-        return await self.create_session(request, clone_snapshot=snapshot)
+        created = await self.create_session(request, clone_snapshot=snapshot)
+        if overrides.spawner_session_id:
+            created = self.storage.update_session(
+                created.id, spawner_session_id=overrides.spawner_session_id
+            )
+            await self.broadcast_session_list()
+        return created
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:

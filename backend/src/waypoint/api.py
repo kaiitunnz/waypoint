@@ -99,6 +99,7 @@ from waypoint.schemas import (
     SessionAttachRequest,
     SessionCancelQuestionRequest,
     SessionCompletionsResponse,
+    SessionDeriveRequest,
     SessionEffortRequest,
     SessionEnvelope,
     SessionInputRequest,
@@ -1237,18 +1238,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def session_fork(
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
+        request: SessionDeriveRequest | None = None,
     ) -> Any:
-        session = await context.runtime.fork_session(session_id)
+        session = await context.runtime.fork_session(session_id, request)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/clone")
     async def session_clone(
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
+        request: SessionDeriveRequest | None = None,
     ) -> Any:
-        # Body-less clone-launch for ``/new``: the source's private launch_env is
-        # copied inside the runtime and never crosses the API boundary.
-        session = await context.runtime.clone_session_launch(session_id)
+        # Clone-launch for ``/new``: the source's private launch_env is copied
+        # inside the runtime and never crosses the API boundary.
+        session = await context.runtime.clone_session_launch(session_id, request)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/reattach")
@@ -1965,6 +1968,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = context.runtime.set_task_dock_dismissed(session_id, None)
         return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/sessions/{session_id}/held-messages")
+    async def list_held_messages(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        context.runtime.get_session(session_id)
+        return context.runtime.held.envelope(session_id).payload
 
     @app.post("/api/sessions/{session_id}/held-messages/release")
     async def release_all_held_messages(

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -591,7 +592,7 @@ def test_send_input_from_session_reports_held(
     with _client(_settings(tmp_path), state) as client:
         result = client.send_input("s1", "hi", sender_session_id="peer")
     assert state["input_body"]["sender_session_id"] == "peer"
-    assert result == {"id": "s1", "send": "held"}
+    assert result == {"id": "s1", "send": "held", "held_message_id": "h1"}
 
 
 def test_upload_attachment_pin_sends_form_field(
@@ -1248,3 +1249,125 @@ def test_clear_message_schedule_history_passes_session_id(
     with _client(_settings(tmp_path), state) as client:
         client.clear_message_schedule_history(session_id="s1")
     assert state["msg_clear_params"]["session_id"] == "s1"
+
+
+def _recording_client(
+    tmp_path: Path, responses: dict[tuple[str, str], Any]
+) -> tuple[WaypointClient, list[dict[str, Any]]]:
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "params": list(request.url.params.multi_items()),
+                "body": json.loads(request.content) if request.content else None,
+            }
+        )
+        key = (request.method, request.url.path)
+        if key not in responses:
+            return httpx.Response(404, json={"detail": f"unexpected {key}"})
+        payload = responses[key]
+        if payload is None:
+            return httpx.Response(204)
+        return httpx.Response(200, json=payload)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    return WaypointClient(_settings(tmp_path), token="t", client=http), calls
+
+
+@pytest.mark.parametrize("action", ["fork", "clone"])
+def test_derive_session_sends_only_set_overrides(tmp_path: Path, action: str) -> None:
+    path = f"/api/sessions/s1/{action}"
+    client, calls = _recording_client(
+        tmp_path, {("POST", path): {"session": {"id": "s2"}}}
+    )
+    method = client.fork_session if action == "fork" else client.clone_session
+    with client:
+        assert method("s1") == {"id": "s2"}
+        method("s1", spawner_session_id="lead", title="t", tags={"role": "x"})
+    assert calls[0]["body"] == {}
+    assert calls[1]["body"] == {
+        "spawner_session_id": "lead",
+        "title": "t",
+        "tags": {"role": "x"},
+    }
+
+
+def test_lifecycle_methods_hit_routes(tmp_path: Path) -> None:
+    session = {"session": {"id": "s1"}}
+    client, calls = _recording_client(
+        tmp_path,
+        {
+            ("POST", "/api/sessions/s1/reattach"): session,
+            ("POST", "/api/sessions/s1/resume"): session,
+            ("POST", "/api/sessions/s1/approve-plan"): session,
+            ("POST", "/api/sessions/s1/cancel-question"): session,
+        },
+    )
+    with client:
+        client.reattach("s1")
+        client.resume("s1")
+        client.approve_plan("s1", "plan-1", "decline", text="no")
+        client.cancel_question("s1", "tu1")
+    assert [c["path"] for c in calls] == [
+        "/api/sessions/s1/reattach",
+        "/api/sessions/s1/resume",
+        "/api/sessions/s1/approve-plan",
+        "/api/sessions/s1/cancel-question",
+    ]
+    assert calls[2]["body"] == {
+        "plan_item_id": "plan-1",
+        "decision": "decline",
+        "text": "no",
+    }
+    assert calls[3]["body"] == {"tool_use_id": "tu1"}
+
+
+def test_list_history_passes_params(tmp_path: Path) -> None:
+    page = {"sessions": [], "has_more": False, "cursor": None, "total": 0}
+    client, calls = _recording_client(
+        tmp_path, {("GET", "/api/sessions/history"): page}
+    )
+    with client:
+        assert client.list_history() == page
+        client.list_history(
+            "repo:waypoint", cursor="c1", limit=5, exclude_sources=["assistant"]
+        )
+    assert calls[0]["params"] == [("q", ""), ("limit", "20")]
+    assert calls[1]["params"] == [
+        ("q", "repo:waypoint"),
+        ("limit", "5"),
+        ("cursor", "c1"),
+        ("exclude_source", "assistant"),
+    ]
+
+
+def test_held_message_methods_route_by_scope(tmp_path: Path) -> None:
+    session = {"session": {"id": "s1"}}
+    client, calls = _recording_client(
+        tmp_path,
+        {
+            ("GET", "/api/sessions/s1/held-messages"): {
+                "session_id": "s1",
+                "held_messages": [{"id": "h1"}],
+            },
+            ("POST", "/api/sessions/s1/held-messages/release"): session,
+            ("POST", "/api/held-messages/h1/release"): session,
+            ("DELETE", "/api/sessions/s1/held-messages"): None,
+            ("DELETE", "/api/held-messages/h1"): None,
+        },
+    )
+    with client:
+        assert client.list_held_messages("s1") == [{"id": "h1"}]
+        client.release_held_messages("s1")
+        client.release_held_messages("s1", "h1")
+        client.cancel_held_messages("s1")
+        client.cancel_held_messages("s1", "h1")
+    assert [(c["method"], c["path"]) for c in calls[1:]] == [
+        ("POST", "/api/sessions/s1/held-messages/release"),
+        ("POST", "/api/held-messages/h1/release"),
+        ("DELETE", "/api/sessions/s1/held-messages"),
+        ("DELETE", "/api/held-messages/h1"),
+    ]

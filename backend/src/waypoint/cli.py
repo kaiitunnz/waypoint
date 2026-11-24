@@ -11,6 +11,7 @@ import sys
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple, Protocol, cast
@@ -145,6 +146,11 @@ attachments_app = typer.Typer(
     help="Manage a session's file attachments on a running Waypoint server.",
     no_args_is_help=True,
 )
+held_app = typer.Typer(
+    help="List, release, or cancel messages a session is holding (Focus or an "
+    "open dialog).",
+    no_args_is_help=True,
+)
 board_app = typer.Typer(
     help="Blackboard messaging shared across sessions.",
     no_args_is_help=True,
@@ -212,6 +218,7 @@ app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 sessions_app.add_typer(attachments_app, name="attachments")
+sessions_app.add_typer(held_app, name="held")
 app.add_typer(board_app, name="board")
 app.add_typer(inbox_app, name="inbox")
 app.add_typer(schedule_app, name="schedule")
@@ -1711,6 +1718,8 @@ _COMPACT_METADATA_KEYS: dict[str, str] = {
     "status": "status",
     "approval_id": "approval_id",
     "question_id": "question_id",
+    "plan_item_id": "plan_item_id",
+    "plan_decision": "plan_decision",
 }
 
 
@@ -3392,6 +3401,321 @@ def sessions_answer_question(
             )
         },
     )
+
+
+_DeriveTitleOption = Annotated[
+    str | None, typer.Option(help="Title for the new session.")
+]
+_DeriveTagOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--tag",
+        help="Tag the new session as key=value (or a bare key). Repeatable.",
+    ),
+]
+_DeriveSpawnerOption = Annotated[
+    str | None,
+    typer.Option(
+        envvar="WAYPOINT_SESSION_ID",
+        help="Owning session, for `sessions list --mine` and `reap`; defaults to "
+        "this session's id when run inside one. Ownership only: the new session "
+        "keeps the source's permission mode. Also sends MESSAGE as this session.",
+    ),
+]
+_DeriveMessageArgument = Annotated[
+    str | None,
+    typer.Argument(help="Optional first message to send to the new session."),
+]
+
+
+def _derive_session(
+    ctx: typer.Context,
+    derive: Callable[[WaypointClient], dict[str, Any]],
+    message: str | None,
+    spawner_session_id: str | None,
+) -> None:
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        created = derive(c)
+        if message is None:
+            return {"session": created}
+        try:
+            sent = c.send_input(
+                created["id"], message, sender_session_id=spawner_session_id
+            )
+        except WaypointError as exc:
+            return {"session": {**created, "send": "failed"}, "error": str(exc)}
+        return {"session": sent}
+
+    result = _run_client(_settings_from_ctx(ctx), _run)
+    typer.echo(json.dumps(result, indent=2))
+    if result["session"].get("send") in {"failed", "unknown"}:
+        raise typer.Exit(code=1)
+
+
+@sessions_app.command("fork")
+def sessions_fork(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    message: _DeriveMessageArgument = None,
+    title: _DeriveTitleOption = None,
+    tag: _DeriveTagOption = None,
+    spawner_session_id: _DeriveSpawnerOption = None,
+) -> None:
+    """Fork a session: a new session that continues a copy of its conversation.
+
+    The web composer's ``/fork``. Requires a fork-capable backend (see
+    ``waypoint backends``). With MESSAGE, sends it to the fork; a follow-up the
+    server cannot deliver prints the new session with ``"send": "failed"`` and
+    exits 1.
+    """
+    tags = _parse_tags(tag)
+    _derive_session(
+        ctx,
+        lambda c: c.fork_session(
+            session_id, spawner_session_id=spawner_session_id, title=title, tags=tags
+        ),
+        message,
+        spawner_session_id,
+    )
+
+
+@sessions_app.command("clone")
+def sessions_clone(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    message: _DeriveMessageArgument = None,
+    title: _DeriveTitleOption = None,
+    tag: _DeriveTagOption = None,
+    spawner_session_id: _DeriveSpawnerOption = None,
+) -> None:
+    """Start a fresh session with another session's launch settings.
+
+    The web composer's ``/new``: same backend, cwd, transport, model, effort,
+    permission mode, account profile, args, and launch env; no conversation.
+    With MESSAGE, sends it to the new session (exit 1 if it cannot be
+    delivered, with the new session still printed).
+    """
+    tags = _parse_tags(tag)
+    _derive_session(
+        ctx,
+        lambda c: c.clone_session(
+            session_id, spawner_session_id=spawner_session_id, title=title, tags=tags
+        ),
+        message,
+        spawner_session_id,
+    )
+
+
+@sessions_app.command("reattach")
+def sessions_reattach(
+    ctx: typer.Context, session_id: Annotated[str, typer.Argument()]
+) -> None:
+    """Revive an exited or errored session without sending it a message."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"session": c.reattach(session_id)})
+
+
+@sessions_app.command("resume")
+def sessions_resume(
+    ctx: typer.Context, session_id: Annotated[str, typer.Argument()]
+) -> None:
+    """Press Enter in a live terminal pane, or revive an exited session.
+
+    Live resume applies to tmux / claude_tty panes; other transports reject it.
+    Prefer ``reattach`` to revive an exited session.
+    """
+    _emit(_settings_from_ctx(ctx), lambda c: {"session": c.resume(session_id)})
+
+
+@sessions_app.command("history")
+def sessions_history(
+    ctx: typer.Context,
+    query: Annotated[
+        str,
+        typer.Argument(
+            help="Search query, as in the dashboard: space-separated terms are "
+            'ANDed, OR separates groups; a term is a word, "quoted phrase", or '
+            "/regex/, optionally prefixed by a field (title:, repo:, branch:, "
+            "dir:, agent:, status:, ...). Empty lists everything.",
+        ),
+    ] = "",
+    cursor: Annotated[
+        str | None,
+        typer.Option(help="Continue from a previous page's `cursor`."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(min=0, max=100, help="Page size (0 returns only `total`)."),
+    ] = 20,
+    exclude_source: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--exclude-source",
+            help="Skip sessions of this source (e.g. assistant). Repeatable.",
+        ),
+    ] = None,
+) -> None:
+    """Page exited, unpinned sessions, newest activity first.
+
+    Prints ``{sessions, has_more, cursor, total}``; pass ``cursor`` back with
+    ``--cursor`` for the next page. Revive one with ``sessions reattach``.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.list_history(
+            query, cursor=cursor, limit=limit, exclude_sources=exclude_source
+        ),
+    )
+
+
+class PlanDecision(StrEnum):
+    ACCEPT = "accept"
+    ACCEPT_FOR_SESSION = "acceptForSession"
+    DECLINE = "decline"
+    CANCEL = "cancel"
+
+
+@sessions_app.command("approve-plan")
+def sessions_approve_plan(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    plan_item_id: Annotated[
+        str,
+        typer.Option(
+            "--plan-item-id",
+            help="The plan event's `item_id` (an `item_type: plan` event in "
+            "`sessions events --compact`).",
+        ),
+    ],
+    decision: Annotated[
+        PlanDecision,
+        typer.Option(
+            help="accept / acceptForSession leave plan mode and run the plan; "
+            "decline / cancel stay in plan mode."
+        ),
+    ] = PlanDecision.ACCEPT,
+    text: Annotated[
+        str | None, typer.Option(help="Note sent to the agent with the decision.")
+    ] = None,
+) -> None:
+    """Decide a plan-mode session's proposed plan (not the same as approve)."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.approve_plan(
+                session_id, plan_item_id, decision.value, text=text
+            )
+        },
+    )
+
+
+def _sole_pending_question(client: WaypointClient, session_id: str) -> str:
+    snapshot = client.get_events(session_id, messages=1).get("pending_questions")
+    ids = [q["tool_use_id"] for q in (snapshot or {}).get("questions", [])]
+    if not ids:
+        raise WaypointError(f"session {session_id} has no pending question")
+    if len(ids) > 1:
+        raise WaypointError(
+            f"session {session_id} has {len(ids)} pending questions; pass "
+            f"--tool-use-id with one of: {', '.join(ids)}"
+        )
+    return str(ids[0])
+
+
+@sessions_app.command("cancel-question")
+def sessions_cancel_question(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    tool_use_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Target a specific question by tool-use id. Omit to cancel the "
+            "sole pending question.",
+        ),
+    ] = None,
+) -> None:
+    """Dismiss a session's pending question without answering it."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.cancel_question(
+                session_id, tool_use_id or _sole_pending_question(c, session_id)
+            )
+        },
+    )
+
+
+_HeldIdOption = Annotated[
+    str | None,
+    typer.Option("--id", help="The held message's id (from `held list`)."),
+]
+_HeldAllOption = Annotated[
+    bool, typer.Option("--all", help="Act on every message the session holds.")
+]
+
+
+def _require_held_choice(held_id: str | None, all_: bool) -> None:
+    if (held_id is None) == (not all_):
+        raise typer.BadParameter("pass exactly one of --id or --all")
+
+
+def _held_target(
+    client: WaypointClient, session_id: str, held_id: str | None
+) -> str | None:
+    """The held id after checking the session holds it; None means all."""
+    if held_id is None:
+        return None
+    held = client.list_held_messages(session_id)
+    if not any(record["id"] == held_id for record in held):
+        raise WaypointError(
+            f"held message {held_id} is not queued for session {session_id}"
+        )
+    return held_id
+
+
+@held_app.command("list")
+def held_list(ctx: typer.Context, session_id: Annotated[str, typer.Argument()]) -> None:
+    """List the messages a session is holding, oldest first."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"held_messages": c.list_held_messages(session_id)},
+    )
+
+
+@held_app.command("release")
+def held_release(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    held_id: _HeldIdOption = None,
+    all_: _HeldAllOption = False,
+) -> None:
+    """Deliver held messages now, even while the session is in Focus."""
+    _require_held_choice(held_id, all_)
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.release_held_messages(
+                session_id, _held_target(c, session_id, held_id)
+            )
+        },
+    )
+
+
+@held_app.command("cancel")
+def held_cancel(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    held_id: _HeldIdOption = None,
+    all_: _HeldAllOption = False,
+) -> None:
+    """Discard held messages without delivering them."""
+    _require_held_choice(held_id, all_)
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        target = _held_target(c, session_id, held_id)
+        c.cancel_held_messages(session_id, target)
+        return {"session_id": session_id, "cancelled": target or "all"}
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("import")

@@ -20,6 +20,7 @@ from waypoint.runtime import CloneLaunchSnapshot, SessionRuntime
 from waypoint.schemas import (
     LaunchMode,
     SessionCreateRequest,
+    SessionDeriveRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -355,3 +356,63 @@ async def test_clone_endpoint_requires_auth(tmp_path: Path) -> None:
     async with _client(app) as client:
         resp = await client.post("/api/sessions/src/clone")
     assert resp.status_code in (401, 403)
+
+
+# ── owner overrides ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_clone_applies_owner_overrides_without_spawner_mode(
+    tmp_path: Path,
+) -> None:
+    runtime, storage, _ = _runtime(tmp_path)
+    runtime.registry.get("codex").adapter = _CloneCodexAdapter()  # type: ignore[attr-defined]
+    storage.create_session(_codex_source(tmp_path, permission_mode=None))
+    storage.create_session(
+        _codex_source(tmp_path, id="lead", permission_mode="full_access")
+    )
+
+    child = await runtime.clone_session_launch(
+        "src",
+        SessionDeriveRequest(
+            spawner_session_id="lead", title="Child", tags={"role": "worker"}
+        ),
+    )
+
+    assert child.spawner_session_id == "lead"
+    assert child.title == "Child"
+    assert child.tags == {"role": "worker"}
+    # Ownership only: the spawner's wider mode never reaches the clone.
+    assert child.permission_mode != "full_access"
+
+
+@pytest.mark.asyncio
+async def test_clone_rejects_unknown_spawner(tmp_path: Path) -> None:
+    runtime, storage, _ = _runtime(tmp_path)
+    storage.create_session(_codex_source(tmp_path))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await runtime.clone_session_launch(
+            "src", SessionDeriveRequest(spawner_session_id="ghost")
+        )
+
+    assert excinfo.value.status_code == 400
+    assert [s.id for s in storage.list_sessions()] == ["src"]
+
+
+@pytest.mark.asyncio
+async def test_clone_endpoint_accepts_override_body(tmp_path: Path) -> None:
+    app, context, token = _app(tmp_path, _codex_source(tmp_path))
+    context.runtime.registry.get("codex").adapter = _CloneCodexAdapter()
+
+    async with _client(app) as client:
+        resp = await client.post(
+            "/api/sessions/src/clone",
+            json={"spawner_session_id": "src", "tags": {"k": "v"}},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    session = resp.json()["session"]
+    assert session["spawner_session_id"] == "src"
+    assert session["tags"] == {"k": "v"}

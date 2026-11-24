@@ -442,6 +442,22 @@ async def test_api_cancel_endpoints(tmp_path) -> None:
     assert runtime.storage.list_held_messages("s1") == []
 
 
+async def test_api_lists_held_messages(tmp_path) -> None:
+    app, runtime, auth = _build(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "s1", focus=True))
+    for text in ("a", "b"):
+        await runtime.held.deliver("s1", agent_send(text), HeldMessageOrigin.AGENT)
+    async with _client(app) as client:
+        listed = await client.get("/api/sessions/s1/held-messages", headers=auth)
+        missing = await client.get("/api/sessions/nope/held-messages", headers=auth)
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["session_id"] == "s1"
+    assert [m["text"] for m in body["held_messages"]] == ["a", "b"]
+    assert body == runtime.held.envelope("s1").payload
+    assert missing.status_code == 404
+
+
 class BlockingTransport:
     is_structured = False
 

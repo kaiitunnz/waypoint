@@ -121,14 +121,14 @@ button.block { width: 100%; }
 .svc .name { font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
              font-size: 13px; }
 .svc .sub { color: var(--ink-dim); font-size: 11.5px; margin-top: 2px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            overflow-wrap: anywhere; }
 .svc .acts { display: flex; gap: 6px; flex: none; }
 .svc .acts button { padding: 8px 11px; font-size: 12px; }
 
 /* logs */
 .logs { background: #05070a; border: 1px solid var(--line); border-radius: 12px;
         overflow: hidden; }
-.logs .bar { display: flex; gap: 8px; align-items: center;
+.logs .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
              padding: 8px; border-bottom: 1px solid var(--line); }
 .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line);
        border-radius: 8px; padding: 2px; }

@@ -250,7 +250,7 @@
     if (present && !btn) {
       btn = document.createElement("button");
       btn.setAttribute("data-log", "frontend-preview");
-      btn.textContent = "frontend-preview";
+      btn.textContent = "preview";
       btn.addEventListener("click", function () { selectLog(btn); });
       seg.appendChild(btn);
     } else if (!present && btn) {

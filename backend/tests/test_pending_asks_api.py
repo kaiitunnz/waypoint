@@ -59,7 +59,9 @@ class LiveApprovals(TransportAdapter):
         return self.ids
 
 
-def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, str]:
+def _build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, Any, str, LiveApprovals]:
     app = create_app(Settings(data_dir=tmp_path / "data"))
     context = app.state.context
     runtime = context.runtime
@@ -68,7 +70,6 @@ def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, s
     )
     transport = LiveApprovals()
     monkeypatch.setattr(runtime, "transport_for", lambda session: transport)
-    runtime.live_approvals = transport
     now = datetime.now(UTC)
     runtime.storage.create_session(
         SessionRecord(
@@ -106,7 +107,7 @@ def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, s
             sequence=1,
         )
     )
-    return app, context, context.tokens.issue().token
+    return app, context, context.tokens.issue().token, transport
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -116,7 +117,7 @@ def _auth(token: str) -> dict[str, str]:
 async def test_pending_asks_requires_auth(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app, _, _ = _build(tmp_path, monkeypatch)
+    app, _, _, _ = _build(tmp_path, monkeypatch)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -128,7 +129,7 @@ async def test_pending_asks_requires_auth(
 async def test_pending_asks_lists_the_open_asks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app, _, token = _build(tmp_path, monkeypatch)
+    app, _, token, _ = _build(tmp_path, monkeypatch)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -149,7 +150,7 @@ async def test_pending_asks_lists_the_open_asks(
 def test_stream_sends_the_feed_after_the_session_list_then_live_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app, context, token = _build(tmp_path, monkeypatch)
+    app, context, token, transport = _build(tmp_path, monkeypatch)
     runtime = context.runtime
     with TestClient(app) as client:
         assert client.portal is not None
@@ -159,7 +160,7 @@ def test_stream_sends_the_feed_after_the_session_list_then_live_changes(
             assert first["type"] == "pending_asks"
             assert [i["id"] for i in first["payload"]["items"]] == ["question:s1:q1"]
 
-            runtime.live_approvals.ids = ("a1",)
+            transport.ids = ("a1",)
             client.portal.call(
                 runtime._emit_adapter_event,
                 "s1",
@@ -186,7 +187,7 @@ def test_stream_sends_the_feed_after_the_session_list_then_live_changes(
 def test_a_later_connection_is_hydrated_right_after_the_session_list(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app, context, token = _build(tmp_path, monkeypatch)
+    app, context, token, _ = _build(tmp_path, monkeypatch)
     runtime = context.runtime
     with TestClient(app) as client:
         assert client.portal is not None
@@ -209,7 +210,7 @@ def test_a_later_connection_is_hydrated_right_after_the_session_list(
 def test_a_failing_feed_does_not_close_the_sessions_stream(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app, context, token = _build(tmp_path, monkeypatch)
+    app, context, token, _ = _build(tmp_path, monkeypatch)
     runtime = context.runtime
 
     async def broken() -> None:

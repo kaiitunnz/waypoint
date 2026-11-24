@@ -2476,11 +2476,11 @@ class Storage:
         *,
         after_sequence: int = 0,
         newest_first: bool = False,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> list[EventRecord]:
         """Events whose top-level metadata ``key`` equals ``value``, or is set
-        when ``value`` is ``None``, after ``after_sequence``. ``limit`` caps the
-        result; a negative limit means no cap."""
+        when ``value`` is ``None``, after ``after_sequence``, capped at
+        ``limit`` when given."""
         direction = "DESC" if newest_first else "ASC"
         path = f"$.{key}"
         if value is None:
@@ -2494,7 +2494,7 @@ class Storage:
             ORDER BY sequence {direction}, id {direction}
             LIMIT ?
             """,
-            [session_id, after_sequence, *params, limit],
+            [session_id, after_sequence, *params, -1 if limit is None else limit],
         ).fetchall()
         return [self._event_from_row(row) for row in rows]
 

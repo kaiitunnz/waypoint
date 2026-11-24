@@ -876,7 +876,7 @@ class CodexPlugin(DefaultLaunchContract):
         return PendingPlanApproval(
             plan_id=current.plan_id,
             text=current.text,
-            decisions=list(PLAN_DECISIONS),
+            decisions=PLAN_DECISIONS,
             supports_note=True,
             availability=(
                 "starting" if session.status is SessionStatus.STARTING else "actionable"
@@ -2152,7 +2152,6 @@ def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, An
     return {"decision": "decline"}
 
 
-# How many of a session's newest plan items the current-plan lookup reads.
 _PLAN_ITEM_WINDOW = 200
 
 

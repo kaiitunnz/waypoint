@@ -57,7 +57,7 @@ from waypoint.backends.events import (
     InteractionEnvelope,
     question_interaction,
 )
-from waypoint.questions import ASK_USER_QUESTION_TOOL, QuestionLiveness
+from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -1308,20 +1308,11 @@ class ClaudeCliAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending)
 
-    def pending_approval_ids(
-        self, session_id: str, *, tools_only: bool = False
-    ) -> tuple[str, ...]:
-        """Ids of the requests parked on ``can_use_tool``: tool approvals and
-        AskUserQuestion alike, or the tool approvals only."""
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
         state = self._sessions.get(session_id)
         if state is None:
             return ()
-        return tuple(
-            tool_use_id
-            for tool_use_id, entry in state.pending.items()
-            if not tools_only
-            or entry.payload.get("tool_name") != ASK_USER_QUESTION_TOOL
-        )
+        return tuple(state.pending.keys())
 
     def session_permission_mode(self, session_id: str) -> str | None:
         """Read the binary's currently-active permission mode for a session.

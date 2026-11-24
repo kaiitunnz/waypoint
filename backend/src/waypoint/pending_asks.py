@@ -117,6 +117,13 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _distinct_body(title: str, text: str | None) -> str | None:
+    """``text`` cut for the wire, or ``None`` when it is empty or repeats the
+    already cut ``title``."""
+    body = _cut(text) if text else None
+    return body if body != title else None
+
+
 _State = tuple[SessionStatus, str | None]
 
 
@@ -126,9 +133,9 @@ def _state(session: SessionRecord) -> _State:
 
 @dataclass
 class _Entry:
-    asks: list[PendingAsk] = field(default_factory=list)
     # The state the last derivation saw; a change re-derives even an idle entry.
-    state: _State | None = None
+    state: _State
+    asks: list[PendingAsk] = field(default_factory=list)
     # Apart from the question tracker's ids so that reading the feed never makes
     # the tracker treat the session as tracked.
     question_ids: frozenset[str] = frozenset()
@@ -157,8 +164,8 @@ class PendingAskFeed:
         self._entries: dict[str, _Entry] = {}
         self._walks: dict[str, _EventWalks] = {}
         self._dirty: set[str] = set()
-        # ``_active`` once something has asked for the feed (events are then
-        # recorded); ``_scanned`` once the first full scan has finished.
+        # ``_active`` once the feed has been read, before which events are
+        # ignored; ``_scanned`` once the first full scan has finished.
         self._active = False
         self._scanned = False
         self._scan_task: asyncio.Task[None] | None = None
@@ -226,33 +233,35 @@ class PendingAskFeed:
             # An unknown session is derived from durable state the first time a
             # flush sees it change.
             return
+        if (
+            event.kind is EventKind.APPROVAL_REQUEST
+            or is_approval_resolution(event)
+            or is_question_lifecycle_event(event, entry.question_ids)
+            or self._plan_affected(entry, event)
+        ):
+            self._walks.pop(event.session_id, None)
+            self._dirty.add(event.session_id)
+
+    @staticmethod
+    def _plan_affected(entry: _Entry, event: EventRecord) -> bool:
+        if entry.plan_plugin is None:
+            return False
         try:
-            relevant = (
-                event.kind is EventKind.APPROVAL_REQUEST
-                or is_approval_resolution(event)
-                or is_question_lifecycle_event(event, entry.question_ids)
-                or (
-                    entry.plan_plugin is not None
-                    and entry.plan_plugin.affects_plan_approval(event)
-                )
-            )
+            return entry.plan_plugin.affects_plan_approval(event)
         except Exception:
             # Runs on the event-ingest path: re-derive rather than fail the event.
             log.exception(
-                "pending-asks event check failed",
+                "pending-asks plan check failed",
                 extra={"session_id": event.session_id},
             )
-            relevant = True
-        if relevant:
-            self._walks.pop(event.session_id, None)
-            self._dirty.add(event.session_id)
+            return True
 
     def mark_dirty(self, session_id: str) -> None:
         """Re-derive the session at the next flush. For a change in what the
         session can answer that no event reports, and for a deleted session."""
         if self._active:
             self._dirty.add(session_id)
-        self._runtime.wake_session_flusher()
+            self._runtime.wake_session_flusher()
 
     def mark_watched_dirty(self) -> None:
         """Re-derive every session that has open asks; for session-level
@@ -379,14 +388,15 @@ class PendingAskFeed:
         if not prompts:
             return None
         interaction = _interaction(question.event)
-        title = _text(interaction.get("title")) or prompts[0].question or "Question"
-        body = _text(interaction.get("body"))
+        title = _cut(
+            _text(interaction.get("title")) or prompts[0].question or "Question"
+        )
         return PendingQuestionAsk(
             id=f"question:{session.id}:{question.tool_use_id}",
             **self._common(session, question.event.ts, question.event.sequence),
             availability=question.availability,
-            title=_cut(title),
-            body=_cut(body) if body else None,
+            title=title,
+            body=_distinct_body(title, _text(interaction.get("body"))),
             question=PendingAskQuestion(
                 tool_use_id=question.tool_use_id, questions=prompts
             ),
@@ -440,19 +450,18 @@ class PendingAskFeed:
             _text(interaction.get("title"))
             or (f"Approve {tool_name}" if tool_name else "Approval requested")
         )
-        body = _cut(_text(interaction.get("body")) or event.text)
         return PendingApprovalAsk(
             id=f"approval:{session.id}:{request_id}",
             **self._common(session, event.ts, event.sequence),
             availability="actionable",
             title=title,
-            body=body if body and body != title else None,
+            body=_distinct_body(title, _text(interaction.get("body")) or event.text),
             approval=PendingAskApproval(
                 approval_id=request_id,
                 tool_name=tool_name,
                 tool_input=tool_input,
                 tool_input_truncated=tool_input is not None and tool_input != raw_input,
-                decisions=list(capabilities.approval_decisions),
+                decisions=capabilities.approval_decisions,
                 supports_note=capabilities.supports_approval_note,
             ),
         )
@@ -474,7 +483,7 @@ class PendingAskFeed:
             plan=PendingAskPlan(
                 plan_id=request_id,
                 text=text,
-                decisions=list(capabilities.approval_decisions),
+                decisions=capabilities.approval_decisions,
                 supports_note=capabilities.supports_approval_note,
                 resolve_via="approve",
             ),

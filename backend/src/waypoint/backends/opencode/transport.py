@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING
 
 from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.opencode.adapter import OpenCodeAdapter
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
-    from waypoint.backends.opencode.adapter import OpenCodeAdapter
     from waypoint.backends.opencode.plugin import OpenCodePlugin
     from waypoint.runtime import SessionRuntime
 
@@ -84,7 +84,7 @@ class OpenCodeTransport(TransportAdapter):
         adapter = self._existing_adapter(session)
         return adapter.pending_approval_ids(session.id) if adapter else ()
 
-    def _existing_adapter(self, session: SessionRecord) -> "OpenCodeAdapter | None":
+    def _existing_adapter(self, session: SessionRecord) -> OpenCodeAdapter | None:
         return self._plugin._adapters.get(
             self._plugin._adapter_key(
                 self._runtime,

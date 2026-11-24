@@ -190,20 +190,16 @@ class PendingPlanApproval(BaseModel):
     plan_id: str
     text: str
     decisions: list[str]
-    supports_note: bool = False
-    availability: PendingAskAvailability = "actionable"
+    supports_note: bool
+    availability: PendingAskAvailability
     created_at: datetime
     sequence: int
 
 
 @runtime_checkable
 class PlanApprovalLifecycle(Protocol):
-    """An agent that decides plans through ``approve_plan``.
-
-    The pending-asks feed asks it which plan, if any, awaits the human. The feed
-    reads plan approvals raised as approval requests (``interaction.kind ==
-    "plan_approval"``) from their events.
-    """
+    """An agent that decides plans through ``approve_plan``. The pending-asks feed
+    asks it which plan, if any, awaits the human."""
 
     def pending_plan_approval(
         self, runtime: "SessionRuntime", session: SessionRecord

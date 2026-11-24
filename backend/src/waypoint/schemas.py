@@ -1323,11 +1323,7 @@ PendingAsk = Annotated[
 
 
 class PendingAsksSnapshot(BaseModel):
-    """Every pending ask across live sessions, oldest first.
-
-    Clients apply a snapshot when ``epoch`` differs from the one they hold or
-    ``revision`` is higher; ``revision`` bumps whenever the item list changes.
-    """
+    """Every pending ask across live sessions, oldest first."""
 
     epoch: str
     revision: int

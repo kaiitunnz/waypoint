@@ -10,6 +10,7 @@ import pytest
 
 from waypoint import pending_asks
 from waypoint.backends.base import PendingPlanApproval
+from waypoint.backends.events import question_interaction
 from waypoint.pending_asks import TEXT_LIMIT
 from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.runtime import SessionRuntime
@@ -196,12 +197,17 @@ async def ask(
     questions: Any = QUESTIONS,
     *,
     session_id: str = "s1",
+    interaction: bool = False,
 ) -> None:
     metadata: dict[str, Any] = {
         "tool_name": "AskUserQuestion",
         "tool_use_id": tool_use_id,
         "payload": {"input": {"questions": questions}},
     }
+    if interaction:
+        envelope = question_interaction(tool_use_id, questions)
+        assert envelope is not None
+        metadata["interaction"] = envelope.to_metadata()
     await runtime._emit_adapter_event(
         session_id,
         EventKind.TOOL_CALL,
@@ -314,6 +320,20 @@ async def test_unparseable_questions_are_skipped(env: Env) -> None:
     await ask(env.runtime, "bad-entries", questions=["x", {"options": []}])
 
     assert [i.id for i in await items(env)] == ["question:s1:valid"]
+
+
+async def test_a_question_body_is_kept_only_when_it_adds_to_the_title(
+    env: Env,
+) -> None:
+    one = [{"question": "Ship?", "options": [{"label": "yes"}]}]
+    two = [*one, {"question": "Where?", "options": [{"label": "prod"}]}]
+    await ask(env.runtime, "one", one, interaction=True)
+    await ask(env.runtime, "two", two, interaction=True)
+
+    single, double = (await env.runtime.asks.snapshot()).items
+
+    assert (single.title, single.body) == ("Ship?", None)
+    assert (double.title, double.body) == ("Ship?", "Ship?\nWhere?")
 
 
 async def test_subagent_sessions_are_included_with_their_spawner(env: Env) -> None:

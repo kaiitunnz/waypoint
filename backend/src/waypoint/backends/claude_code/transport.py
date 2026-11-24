@@ -78,4 +78,10 @@ class ClaudeTransport(TransportAdapter):
     def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
         if self.adapter is None:
             return ()
-        return self.adapter.pending_approval_ids(session.id, tools_only=True)
+        # A parked AskUserQuestion shares the adapter's pending requests.
+        asking = set(self.adapter.pending_ask_question_ids(session.id))
+        return tuple(
+            tool_use_id
+            for tool_use_id in self.adapter.pending_approval_ids(session.id)
+            if tool_use_id not in asking
+        )

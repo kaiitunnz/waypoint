@@ -66,7 +66,7 @@ const FALLBACK_LABELS: Record<string, string> = {
 };
 
 // Hand-mirrored from the backend's capability defaults so catalog-less callers
-// (early bootstrap, lib helpers) still get the right answer for the built-ins.
+// (early bootstrap) still get the right answer for the built-ins.
 // New backends MUST be reachable via the live catalog — these fallbacks only
 // cover today's known agents/transports. Transport-keyed sets resolve
 // transport-level flags; backend-keyed sets resolve agent-level ones.

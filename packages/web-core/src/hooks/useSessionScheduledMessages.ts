@@ -11,10 +11,9 @@ import {
 import { MessageSchedule } from "../types";
 
 // Live view of the *pending* scheduled messages for a single session. The
-// global schedule_list_update broadcast only reaches the /ws/sessions socket
-// (published with session_id=None), which the session page doesn't hold — so we
-// fetch on mount, poll on a slow cadence, apply an optimistic cancel, and
-// refresh after a create to keep the list responsive.
+// schedule broadcast reaches only /ws/sessions (session_id=None), so this hook
+// fetches on mount, polls, applies an optimistic cancel, and refreshes after a
+// create.
 export function useSessionScheduledMessages(
   host: string,
   token: string,
@@ -43,8 +42,7 @@ export function useSessionScheduledMessages(
   }, [refresh]);
 
   // Adaptive polling: a message fires server-side and leaves the pending list,
-  // but the session page never receives the schedule broadcast, so we poll to
-  // notice.
+  // so poll to notice.
   useEffect(() => {
     const interval = schedulePollIntervalMs(messages);
     const id = window.setInterval(() => void refresh(), interval);

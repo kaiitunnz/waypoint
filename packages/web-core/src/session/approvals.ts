@@ -1,9 +1,9 @@
 import type { EventRecord } from "../types";
 
 export function findPendingApprovals(events: EventRecord[]): EventRecord[] {
-  // Track approvals as a queue: every approval_request enqueues, every
-  // "Approval response sent" / "Approval timed out" system note dequeues
-  // its matching entry (by approval_id, falling back to oldest-first).
+  // Track approvals as a queue: every approval_request enqueues, and every
+  // resolution note (response sent, timed out, invalidated) dequeues its
+  // matching entry (by approval_id, falling back to oldest-first).
   const queue: EventRecord[] = [];
   for (const event of events) {
     if (event.kind === "approval_request") {

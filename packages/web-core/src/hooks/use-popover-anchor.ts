@@ -10,7 +10,7 @@ import {
 
 // Where the popover is pinned relative to its trigger. ``dropdown`` drops the
 // panel just below the trigger and is portaled to ``document.body`` with
-// ``position: fixed``, so a trigger inside an ``overflow: hidden`` box can't
+// ``position: fixed``, so an ``overflow: hidden`` ancestor of the trigger can't
 // clip it. ``composer`` renders the panel in-tree above the trigger; CSS owns
 // its ``position: absolute`` bottom/right anchor, so the hook emits no
 // position, only bounds.

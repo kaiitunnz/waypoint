@@ -43,8 +43,8 @@ export function foldOlderEvents(
   // space. Older events sharing an item_id are replayed through mergeEvents
   // into one accumulator per target, which is then merged ahead of the matching
   // current entry, so the result equals a forward merge in true sequence order.
-  // Prepending text instead would break tool_result snapshots, where a final
-  // non-delta supersedes earlier deltas.
+  // Prepending text instead would skip mergeEventText's per-kind rules, e.g. an
+  // accumulated tool_result delta wins over a later snapshot.
   const seenIds = new Set<number>();
   const seenSequences = new Set<number>();
   for (const event of current) {

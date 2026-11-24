@@ -20,6 +20,7 @@ from waypoint.backends.claude_code.rate_limits import (
     probe_claude_usage_shared,
 )
 from waypoint.backends.codex import rate_limits as codex_rate_limits
+from waypoint.backends.codex import remote_probe_script as codex_remote_probe_script
 from waypoint.backends.codex.rate_limits import (
     _load_oauth_credentials,
     _oauth_snapshot_is_actionable,
@@ -208,7 +209,18 @@ def test_codex_oauth_probe_logs_http_status_on_failure(
     assert "codex OAuth usage request failed (HTTP 401)" in caplog.text
 
 
-def test_codex_status_fallback_uses_supported_approval_policy(
+_CODEX_STATUS_ARGV = [
+    "codex",
+    "-c",
+    "features.daemon_auto_start=false",
+    "-s",
+    "read-only",
+    "-a",
+    "never",
+]
+
+
+def test_codex_status_fallback_disables_daemon_auto_start(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured = []
@@ -220,7 +232,22 @@ def test_codex_status_fallback_uses_supported_approval_policy(
     monkeypatch.setattr(codex_rate_limits.subprocess, "Popen", _fake_popen)
     with pytest.raises(OSError):
         _run_codex_status("codex", str(tmp_path), {}, 0.1)
-    assert captured == [["codex", "-s", "read-only", "-a", "never"]]
+    assert captured == [_CODEX_STATUS_ARGV]
+
+
+def test_remote_codex_status_fallback_disables_daemon_auto_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = []
+
+    def _fake_popen(argv, *args, **kwargs):
+        captured.append(argv)
+        raise OSError("not spawning in tests")
+
+    monkeypatch.delenv(codex_remote_probe_script.CODEX_BIN_ENV, raising=False)
+    monkeypatch.setattr(codex_remote_probe_script.subprocess, "Popen", _fake_popen)
+    assert codex_remote_probe_script.run_codex_status_pty(0.1) is None
+    assert captured == [_CODEX_STATUS_ARGV]
 
 
 def test_resolve_usage_url_prefers_chatgpt_backend_api(tmp_path) -> None:

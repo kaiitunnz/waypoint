@@ -49,7 +49,7 @@ class Fake:
         monkeypatch.setattr(cw, "now", lambda: self.t)
         monkeypatch.setattr(cw, "list_sessions", self.list_sessions)
         monkeypatch.setattr(cw, "send", self.send)
-        monkeypatch.setattr(cw.time, "sleep", self.sleep)
+        monkeypatch.setattr(cw, "sleep", self.sleep)
         monkeypatch.setattr(cw, "await_turn_end", self.await_turn_end)
 
     def session(self, sid: str, **fields: Any) -> dict[str, Any]:
@@ -1573,13 +1573,16 @@ def test_await_turn_end_reads_the_status_rather_than_the_exit_code(
 ) -> None:
     args_file = tmp_path / "args"
     cli = tmp_path / "waypoint"
+    # Outliving its closed pipes makes subprocess.run back off in Popen.wait,
+    # whose time.sleep calls must not reach the watcher's sleep seam.
     cli.write_text(
-        f"#!/bin/sh\necho \"$@\" > {args_file}\nprintf '%s' '{stdout}'\nexit {code}\n"
+        f"#!/bin/sh\necho \"$@\" > {args_file}\nprintf '%s' '{stdout}'\n"
+        f"exec >&- 2>&-\nsleep 0.2\nexit {code}\n"
     )
     cli.chmod(0o755)
     monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(cli))
     slept: list[float] = []
-    monkeypatch.setattr(cw.time, "sleep", slept.append)
+    monkeypatch.setattr(cw, "sleep", slept.append)
     cw.await_turn_end(T, 30.5)
     assert slept == ([cw.PAIR_POLL_SEC] if sleeps else [])
     assert args_file.read_text().strip() == (
@@ -1592,7 +1595,7 @@ def test_await_turn_end_survives_a_missing_cli_or_a_hung_one(
     cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     slept: list[float] = []
-    monkeypatch.setattr(cw.time, "sleep", slept.append)
+    monkeypatch.setattr(cw, "sleep", slept.append)
     monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(tmp_path / "missing"))
     cw.await_turn_end(T, 5)
 

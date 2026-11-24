@@ -4,9 +4,9 @@ Designed to be piped to ``python3 -`` over SSH on a remote launch
 target. First tries the OAuth path (``~/.codex/auth.json`` →
 ``chatgpt.com/backend-api/wham/usage``), using the token as stored: the
 remote Codex CLI owns its rotation. If that yields nothing,
-spawns ``codex -s read-only -a never`` with a local PTY on the
-remote, drives ``/status``, and emits the captured TUI output for the
-backend to parse with ``parse_codex_status``.
+spawns ``codex -s read-only -a never``, with ``daemon_auto_start`` off,
+under a local PTY on the remote, drives ``/status``, and emits the
+captured TUI output for the backend to parse with ``parse_codex_status``.
 
 Stdlib-only; targets Python 3.8+. ``tomllib`` (3.11+) is used when
 available to read ``config.toml`` for a custom ``chatgpt_base_url``;
@@ -48,6 +48,17 @@ CODEX_USAGE_PATH = "/api/codex/usage"
 HTTP_TIMEOUT = 15
 CODEX_BIN_ENV = "WAYPOINT_REMOTE_PROBE_CODEX_BIN"
 STATUS_TIMEOUT = 8.0
+# ``daemon_auto_start`` makes the TUI install and detach a managed app-server
+# daemon in CODEX_HOME that outlives the probe. A codex that predates the
+# feature rejects ``--disable daemon_auto_start`` but accepts this ``-c``.
+STATUS_ARGS = [
+    "-c",
+    "features.daemon_auto_start=false",
+    "-s",
+    "read-only",
+    "-a",
+    "never",
+]
 
 
 def emit(payload):
@@ -176,7 +187,7 @@ def run_codex_status_pty(timeout_seconds=STATUS_TIMEOUT):
     try:
         try:
             proc = subprocess.Popen(
-                [binary, "-s", "read-only", "-a", "never"],
+                [binary, *STATUS_ARGS],
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,

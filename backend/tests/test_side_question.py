@@ -283,8 +283,10 @@ async def test_start_side_question_creates_pending_record(
 ) -> None:
     session = _make_session(runtime.storage, thread_id="thread-abc")
 
-    await start_side_question(runtime, plugin, session, "What branch am I on?")
+    with patch.object(sq_module, "_schedule_bg_task") as schedule:
+        await start_side_question(runtime, plugin, session, "What branch am I on?")
 
+    schedule.assert_called_once()
     fresh = runtime.storage.get_session(session.id)
     assert fresh is not None
     qs = _read_side_questions(fresh)
@@ -300,11 +302,8 @@ async def test_start_side_question_broadcasts_upsert(
 ) -> None:
     session = _make_session(runtime.storage, thread_id="thread-abc")
 
-    await start_side_question(runtime, plugin, session, "Quick q?")
-
-    # Cancel the spawned bg task so it doesn't linger.
-    for task in list(sq_module._background_tasks):
-        task.cancel()
+    with patch.object(sq_module, "_schedule_bg_task"):
+        await start_side_question(runtime, plugin, session, "Quick q?")
 
     messages = [m for m, _ in runtime.broadcast.published]
     assert any(m.type == "side_question" for m in messages)

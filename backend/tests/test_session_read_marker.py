@@ -319,7 +319,7 @@ async def test_launched_session_counts_as_read_until_the_agent_acts(
     assert noted is not None
     assert _unread(noted)
 
-    launched = runtime._launched_read("s1")
+    launched = runtime._launched_read(noted)
     assert not _unread(launched)
 
     await _activity(runtime, "s1")

@@ -949,12 +949,14 @@ class SessionRuntime:
             session_id, max(datetime.now(UTC), session.last_event_at)
         )
 
-    def _launched_read(self, session_id: str) -> SessionRecord:
+    def _launched_read(self, session: SessionRecord) -> SessionRecord:
         """Count what launching recorded as seen: the notes a start writes are not
         activity, so a new session stays read until the agent produces some."""
-        session = self.get_session(session_id)
-        self.mark_session_read(session_id, session.last_event_at)
-        return self.get_session(session_id)
+        stored = self.storage.get_session(session.id)
+        if stored is None:
+            return session
+        self.mark_session_read(session.id, stored.last_event_at)
+        return self.storage.get_session(session.id) or stored
 
     @asynccontextmanager
     async def _keep_read(self, session_id: str) -> AsyncIterator[None]:
@@ -1885,7 +1887,7 @@ class SessionRuntime:
         session = await self._apply_usage_selection(session, usage_selection)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
-        return self._launched_read(session.id)
+        return self._launched_read(session)
 
     async def _apply_usage_selection(
         self, session: SessionRecord, selection: UsageSelection
@@ -2522,7 +2524,7 @@ class SessionRuntime:
                 launch_target=launch_target,
                 cwd=session.cwd,
             )
-        return self._launched_read(session.id)
+        return self._launched_read(session)
 
     async def attach_assistant(
         self,
@@ -2646,7 +2648,7 @@ class SessionRuntime:
             structured_log=structured_log,
         )
         new_session = await self._apply_usage_selection(new_session, usage_selection)
-        new_session = self._launched_read(new_session.id)
+        new_session = self._launched_read(new_session)
         await self.broadcast_session_list()
         return new_session
 
@@ -2695,7 +2697,7 @@ class SessionRuntime:
         )
         new_session = self._stamp_owner(new_session, overrides)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
-        new_session = self._launched_read(new_session.id)
+        new_session = self._launched_read(new_session)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
@@ -2818,7 +2820,7 @@ class SessionRuntime:
             session.id, f"Attached to tmux target {request.tmux_target}"
         )
         self._ensure_monitor(session.id)
-        return self._launched_read(session.id)
+        return self._launched_read(session)
 
     async def handle_input(
         self, session_id: str, request: SessionInputRequest

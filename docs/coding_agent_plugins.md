@@ -688,12 +688,12 @@ restart-with-resume only for effort changes. Thread discovery/import reads the
 same `~/.claude/projects` transcript store as `claude_code`, so the same
 Claude threads appear under both backend ids.
 
-`/clear` makes the TUI start a new conversation in a new transcript, whose
-`derived-from` header record names the old thread with `via: "clear"`. When
-`/clear` is sent through Waypoint, the transport looks for that transcript for
-a few seconds after the send, then moves the session's `thread_id` and tailer
-onto it, so later relaunches resume the cleared conversation. A `/clear` typed
-directly into the attached pane is not followed.
+`/clear` starts a new conversation in a new transcript, whose `derived-from`
+header record names the old thread with `via: "clear"`. After a `/clear` sent
+through Waypoint, the transport looks for that transcript for a few seconds and
+moves the session's `thread_id` and tailer onto it. A `/clear` typed into the
+attached pane, or still queued behind a turn when the lookup ends, is not
+followed.
 
 `AskUserQuestion` needs special handling because the TUI withholds the
 tool_use record from the transcript until the popup is resolved, so the

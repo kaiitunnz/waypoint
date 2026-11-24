@@ -56,10 +56,9 @@ svg {
   flex: none;
 }
 
-:focus-visible {
+:where(:focus-visible) {
   outline: 2px solid var(--text-strong);
   outline-offset: 2px;
-  border-radius: var(--r-sm);
 }
 
 .mono {

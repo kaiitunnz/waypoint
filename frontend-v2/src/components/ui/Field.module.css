@@ -39,6 +39,10 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-strong) 10%, transparent);
 }
 
+.input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
 .input::-webkit-search-cancel-button {
   appearance: none;
 }

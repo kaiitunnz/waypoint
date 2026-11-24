@@ -38,8 +38,8 @@ GROUNDINGS = ["proceed", "park"]
 DEFAULTS = {"first": 0.60, "second": 0.70, "interval": 60, "handoff": None}
 QUEUES_COMPACT = {"claude_cli", "claude_tty"}
 TURN_ENDED = ("idle", "interrupted", "exited", "error")
-# The `sessions wait` token for a target at waiting_input whose turn ended on its
-# own open question.
+# The session field, and `sessions wait` token, for a waiting_input target whose
+# turn ended on its own open question.
 AWAITING_ANSWER = "awaiting_answer"
 STOPPED = ("error", "interrupted")
 GONE_EXIT_SEC = 600
@@ -667,30 +667,21 @@ def settle_sec(target: dict[str, Any]) -> float:
 
 def await_turn_end(sid: str, timeout: float) -> None:
     """Block until the target's turn ends; each CLI call costs too much to poll with."""
-    session: Any = None
-    for until in ((*TURN_ENDED, AWAITING_ANSWER), TURN_ENDED):
-        try:
-            out = subprocess.run(
-                [waypoint_cli(), "sessions", "wait", sid]
-                + ["--until", ",".join(until), "--timeout", str(int(timeout) + 1)],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 60,
-            )
-        except (OSError, subprocess.SubprocessError):
-            break
-        if out.returncode == 2:
-            # A CLI that predates the awaiting_answer token rejects it.
-            continue
-        try:
-            session = json.loads(out.stdout)["session"]
-        except (ValueError, KeyError, TypeError):
-            session = None
-        break
+    until = ",".join((*TURN_ENDED, AWAITING_ANSWER))
+    try:
+        out = subprocess.run(
+            [waypoint_cli(), "sessions", "wait", sid]
+            + ["--until", until, "--timeout", str(int(timeout) + 1)],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 60,
+        )
+        session = json.loads(out.stdout)["session"]
+        ended = session["status"] in TURN_ENDED or at_rest(session)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        ended = False
     # A server that is down exits like a timeout and prints no status.
-    if not isinstance(session, dict) or not (
-        session.get("status") in TURN_ENDED or at_rest(session)
-    ):
+    if not ended:
         time.sleep(PAIR_POLL_SEC)
 
 

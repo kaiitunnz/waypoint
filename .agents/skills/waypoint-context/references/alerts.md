@@ -4,7 +4,7 @@ Alerts read `[ctx-watch target=<sid> ... cycle=<id> level=<level> [refill-fast]]
 
 Then act on the target's **current** state; the first matching bullet wins. A target at `waiting_input` with `awaiting_answer` counts as idle.
 
-- **Target at `interrupted` or `error`, or at `waiting_input` that does not count as idle** → it needs a person. Tell the user and do not compact it.
+- **Target at `interrupted` or `error`, or at `waiting_input` without `awaiting_answer`** → it needs a person. Tell the user and do not compact it.
 - **`pair-failed`, `pair-held` or `pair-stalled`** → follow "When a pair does not finish" in [`compaction.md`](compaction.md).
 - **Idle target, phase `parking`** → it parked: run `compact` with the recorded grounding.
 - **`refill-fast`** → read `waypoint sessions events <sid> --compact --messages 30` for a compaction note.

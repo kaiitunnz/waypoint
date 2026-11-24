@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Never
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.base import (
     AgentLaunchContract,
     TerminalAppearance,
@@ -172,29 +173,20 @@ class TmuxPlugin:
                 await runtime.tmux.kill_session(tmux_session)
         monitor = runtime.monitor_tasks.pop(session.id, None)
         if monitor is not None:
-            monitor.cancel()
             try:
-                await monitor
-            except asyncio.CancelledError:
-                pass
+                await cancel_and_wait(monitor)
             except Exception:
                 log.debug("monitor task raised during terminate", exc_info=True)
         capture = runtime._thread_id_watchers.pop(session.id, None)
         if capture is not None:
-            capture.cancel()
             try:
-                await capture
-            except asyncio.CancelledError:
-                pass
+                await cancel_and_wait(capture)
             except Exception:
                 log.debug("thread-id watcher raised during terminate", exc_info=True)
         rl_watcher = runtime._rate_limit_watchers.pop(session.id, None)
         if rl_watcher is not None:
-            rl_watcher.cancel()
             try:
-                await rl_watcher
-            except asyncio.CancelledError:
-                pass
+                await cancel_and_wait(rl_watcher)
             except Exception:
                 log.debug("rate-limit watcher raised during terminate", exc_info=True)
 

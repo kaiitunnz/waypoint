@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import aiohttp
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.opencode.client import (
     LocalOpenCodeClient,
@@ -1477,21 +1478,16 @@ class OpenCodeAdapter:
 
     async def shutdown(self) -> None:
         for task in list(self._question_seed_tasks.values()):
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+            with suppress(Exception):
+                await cancel_and_wait(task)
         self._question_seed_tasks.clear()
         if self._context_window_lookup_tasks:
             for task in list(self._context_window_lookup_tasks):
-                task.cancel()
-            for task in list(self._context_window_lookup_tasks):
-                with suppress(asyncio.CancelledError, Exception):
-                    await task
+                with suppress(Exception):
+                    await cancel_and_wait(task)
             self._context_window_lookup_tasks.clear()
         if self._sse_task is not None:
-            self._sse_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._sse_task
+            await cancel_and_wait(self._sse_task)
             self._sse_task = None
         if self._client is not None:
             await self._client.close()

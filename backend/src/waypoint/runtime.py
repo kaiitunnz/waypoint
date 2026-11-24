@@ -31,6 +31,7 @@ from fastapi import HTTPException, status
 
 from waypoint import session_search
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import (
     AttachmentStore,
     ResolvedAttachment,
@@ -782,79 +783,49 @@ class SessionRuntime:
         if self.usage_providers is not None:
             await self.usage_providers.stop()
         if self._telemetry_backfill_task is not None:
-            self._telemetry_backfill_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._telemetry_backfill_task
+            await cancel_and_wait(self._telemetry_backfill_task)
             self._telemetry_backfill_task = None
         if self._telemetry_maintenance_task is not None:
-            self._telemetry_maintenance_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._telemetry_maintenance_task
+            await cancel_and_wait(self._telemetry_maintenance_task)
             self._telemetry_maintenance_task = None
-        for instance_task in (
-            self._instance_bootstrap_task,
-            self._instance_refresh_task,
-            self._nl_generation_task,
-        ):
-            if instance_task is not None:
-                instance_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await instance_task
+        await cancel_and_wait(
+            *(
+                instance_task
+                for instance_task in (
+                    self._instance_bootstrap_task,
+                    self._instance_refresh_task,
+                    self._nl_generation_task,
+                )
+                if instance_task is not None
+            )
+        )
         self._instance_bootstrap_task = None
         self._instance_refresh_task = None
         self._nl_generation_task = None
         if self.telemetry_ingester is not None:
             await self.telemetry_ingester.stop()
-        for task in self.monitor_tasks.values():
-            task.cancel()
-        for task in self.monitor_tasks.values():
-            with suppress(asyncio.CancelledError):
-                await task
+        await cancel_and_wait(*self.monitor_tasks.values())
         self.monitor_tasks.clear()
-        for task in self._context_usage_sources.values():
-            task.cancel()
-        for task in self._context_usage_sources.values():
-            with suppress(asyncio.CancelledError):
-                await task
+        await cancel_and_wait(*self._context_usage_sources.values())
         self._context_usage_sources.clear()
         restore_tasks = list(self._restore_tasks)
-        for task in restore_tasks:
-            task.cancel()
-        for task in restore_tasks:
-            with suppress(asyncio.CancelledError):
-                await task
+        await cancel_and_wait(*restore_tasks)
         self._restore_tasks.clear()
         completion_tasks = list(self._completion_refresh_tasks.values())
         self._completion_refresh_tasks.clear()
-        for completion_task in completion_tasks:
-            completion_task.cancel()
-        for completion_task in completion_tasks:
-            with suppress(asyncio.CancelledError):
-                await completion_task
+        await cancel_and_wait(*completion_tasks)
         account_probe_tasks = list(self._account_probe_tasks)
         self._account_probe_tasks.clear()
-        for probe_task in account_probe_tasks:
-            probe_task.cancel()
-        for probe_task in account_probe_tasks:
-            with suppress(asyncio.CancelledError):
-                await probe_task
+        await cancel_and_wait(*account_probe_tasks)
         wake_tasks = list(self._wake_tasks)
         self._wake_tasks.clear()
-        for wake_task in wake_tasks:
-            wake_task.cancel()
-        for wake_task in wake_tasks:
-            with suppress(asyncio.CancelledError):
-                await wake_task
+        await cancel_and_wait(*wake_tasks)
         await self.held.stop()
         if self._broadcast_flusher is not None:
-            self._broadcast_flusher.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._broadcast_flusher
+            await cancel_and_wait(self._broadcast_flusher)
             self._broadcast_flusher = None
         if self._telemetry_broadcast_task is not None:
-            self._telemetry_broadcast_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._telemetry_broadcast_task
+            await cancel_and_wait(self._telemetry_broadcast_task)
             self._telemetry_broadcast_task = None
         for entry in self._structured_log_handles.values():
             with suppress(Exception):
@@ -5747,9 +5718,7 @@ class SessionRuntime:
         task = self._nl_generation_task
         if task is None or task.done():
             return
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await cancel_and_wait(task)
         # Only null what we actually cancelled: DELETE and POST are not
         # serialized, so a POST can claim a fresh run during the ``await`` above.
         # Identity-guarding the clears keeps that new run tracked (rather than
@@ -5972,9 +5941,7 @@ class SessionRuntime:
     async def _cancel_context_usage_source(self, session_id: str) -> None:
         task = self._context_usage_sources.pop(session_id, None)
         if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            await cancel_and_wait(task)
 
     def _ensure_monitor(self, session_id: str) -> None:
         if session_id in self.monitor_tasks:

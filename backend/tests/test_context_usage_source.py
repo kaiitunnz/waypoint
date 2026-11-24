@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from waypoint.backends.context_usage_source import ContextUsageSource
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
@@ -151,6 +153,48 @@ async def test_source_cancelled_on_cancel(tmp_path: Path) -> None:
     await runtime._cancel_context_usage_source(session.id)
 
     assert session.id not in runtime._context_usage_sources
+
+
+async def test_cancel_propagates_the_callers_own_cancellation(
+    tmp_path: Path,
+) -> None:
+    """A monitor cancelled while it waits for its source to stop must stop too.
+
+    Shaped like the session monitor: it cancels the source while marking the
+    session exited, then keeps polling. Swallowing its cancellation leaves it
+    polling forever, which hung ``runtime.stop()`` (#595).
+    """
+    release = asyncio.Event()
+    source_cancelled = asyncio.Event()
+
+    class _SlowToCancelSource(ContextUsageSource):
+        async def run(self) -> None:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                source_cancelled.set()
+                await release.wait()
+                raise
+
+    runtime = _make_runtime(tmp_path, _SlowToCancelSource(), is_structured=False)
+    session = _make_session(tmp_path)
+    runtime.storage.create_session(session)
+    runtime._start_context_usage_source(session)
+    await asyncio.sleep(0)
+
+    async def monitor() -> None:
+        while True:
+            await runtime._cancel_context_usage_source(session.id)
+            await asyncio.sleep(0.01)
+
+    monitor_task = asyncio.create_task(monitor())
+    await source_cancelled.wait()
+    monitor_task.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(monitor_task, 2.0)
+    assert monitor_task.cancelled()
 
 
 async def test_none_source_starts_nothing(tmp_path: Path) -> None:

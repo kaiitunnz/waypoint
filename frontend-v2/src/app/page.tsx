@@ -1,10 +1,11 @@
-import { variantLabel } from "@waypoint/web-core/variant";
+import type { Metadata } from "next";
 
-export default function Home() {
-  return (
-    <main>
-      <h1>{variantLabel("v2")}</h1>
-      <p>The v2 interface is under construction.</p>
-    </main>
-  );
+import { HostSwitcher } from "@/components/hosts/HostSwitcher";
+import { RouteSkeleton } from "@/components/shell/RouteSkeleton";
+
+// The root segment does not take the layout's title template.
+export const metadata: Metadata = { title: { absolute: "Sessions · Waypoint" } };
+
+export default function Page() {
+  return <RouteSkeleton title="Sessions" titleExtra={<HostSwitcher />} />;
 }

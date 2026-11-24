@@ -15,6 +15,12 @@ export interface TailnetSnapshot {
 
 export const DEFAULT_BACKEND_PORT = 8787;
 
+// The backend port this deployment was built for (NEXT_PUBLIC_BACKEND_PORT).
+export function deploymentBackendPort(): number {
+  const port = Number.parseInt(process.env.NEXT_PUBLIC_BACKEND_PORT ?? "", 10);
+  return port > 0 && port <= 65535 ? port : DEFAULT_BACKEND_PORT;
+}
+
 // Two backend URLs address the same backend when their host and port match,
 // ignoring protocol (http vs https) and a missing explicit default port.
 // Selection matching compares on this canonical key rather than the raw string.
@@ -28,7 +34,8 @@ export function sameBackendUrl(
   return canonicalBackendKey(a) === canonicalBackendKey(b);
 }
 
-function canonicalBackendKey(url: string): string {
+// The lowercase `host:port` of a backend URL, the protocol's default port made explicit.
+export function canonicalBackendKey(url: string): string {
   try {
     const parsed = new URL(url);
     const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
@@ -36,6 +43,14 @@ function canonicalBackendKey(url: string): string {
   } catch {
     return url.trim().toLowerCase().replace(/\/+$/, "");
   }
+}
+
+// The login header's line about Tailscale; empty until a snapshot has loaded.
+export function tailnetSummary(snapshot: TailnetSnapshot | null): string {
+  if (!snapshot) return "";
+  if (!snapshot.available) return "Tailscale not detected";
+  const peers = snapshot.peers.filter((peer) => !peer.is_self).length;
+  return `Tailscale, ${peers} ${peers === 1 ? "peer" : "peers"}`;
 }
 
 export function backendPortFromUrl(url: string | null | undefined): number | null {

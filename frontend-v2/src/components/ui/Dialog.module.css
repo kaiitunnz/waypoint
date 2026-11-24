@@ -1,0 +1,134 @@
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+}
+
+.rootSheet {
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.rootModal {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+.sheet,
+.modal {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--plane);
+  color: var(--text);
+  outline: none;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100dvh - var(--safe-top) - 8px);
+  border-radius: var(--r-sheet) var(--r-sheet) 0 0;
+  box-shadow: var(--shadow-sheet);
+  padding-bottom: max(var(--safe-bottom), 12px);
+  animation: rise 180ms ease-out;
+}
+
+.modal {
+  width: 100%;
+  max-width: 400px;
+  max-height: calc(100dvh - 32px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-modal);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+
+.handle {
+  flex: none;
+  padding: 7px 0 0;
+  touch-action: none;
+  cursor: grab;
+}
+
+.grabber {
+  display: block;
+  width: 38px;
+  height: 5px;
+  margin: 0 auto;
+  border-radius: 3px;
+  background: var(--faint);
+  opacity: 0.55;
+}
+
+.head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 18px;
+}
+
+.modal .head {
+  padding: 16px 12px 8px 24px;
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: var(--f-title);
+  line-height: 26px;
+  color: var(--text-strong);
+}
+
+.modal .title {
+  line-height: 28px;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 18px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal .body {
+  padding: 0 24px 16px;
+}
+
+.body.flush {
+  padding: 0;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 4px;
+  border-top: 1px solid var(--line);
+}
+
+.modal .footer {
+  justify-content: flex-end;
+  padding: 12px 20px;
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}

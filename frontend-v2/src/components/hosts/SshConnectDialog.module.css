@@ -1,0 +1,14 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.error {
+  font-size: var(--f-body);
+  color: var(--error);
+}
+
+.grow {
+  flex: 1 1 auto;
+}

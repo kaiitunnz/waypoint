@@ -1,0 +1,19 @@
+.bar {
+  position: absolute;
+  z-index: var(--z-bar);
+  top: 0;
+  left: 0;
+  right: 0;
+  padding-top: var(--safe-top);
+  border-bottom: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: var(--bar-height);
+  padding: 0 4px 0 2px;
+}

@@ -1,0 +1,102 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.wrap {
+  position: relative;
+  display: block;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--r);
+  background: var(--field);
+  color: var(--text-strong);
+  /* 16px or more: iOS zooms the page when a smaller field takes focus. */
+  font-size: var(--f-body);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--faint);
+}
+
+.input:focus-visible {
+  border-color: color-mix(in srgb, var(--text-strong) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-strong) 10%, transparent);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.input[aria-invalid="true"]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 30%, transparent);
+}
+
+.input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.lead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 12px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.trail {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  color: var(--muted);
+}
+
+/* Two classes, so the padding for the icon beats .input's at any width. */
+.input.withLead {
+  padding-left: 38px;
+}
+
+.input.withTrail {
+  padding-right: 44px;
+}
+
+@media (min-width: 900px) {
+  .input {
+    min-height: 38px;
+    padding: 0 10px;
+    border-radius: 8px;
+  }
+
+  .input.withLead {
+    padding-left: 36px;
+  }
+
+  .mono {
+    font-size: var(--f-code);
+  }
+}

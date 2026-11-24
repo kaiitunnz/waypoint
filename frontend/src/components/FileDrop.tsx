@@ -17,49 +17,12 @@ import {
 import { createPortal } from "react-dom";
 
 import { filesFromDataTransfer } from "@/components/AttachmentTray";
-
-// A drag that started in this document, e.g. a transcript image, which Chrome
-// types as "Files".
-let internalDrag = false;
-
-function isExternalFileDrag(data: DataTransfer | null): data is DataTransfer {
-  return !internalDrag && !!data && data.types.includes("Files");
-}
+import { installFileDropGuard, isExternalFileDrag } from "@waypoint/web-core/fileDrop";
 
 // Cancels file drops nobody accepted, which the browser would open in the
-// tab. Window listeners run after React's root listeners, so a drop a zone
-// accepted (`defaultPrevented`) keeps its drop effect.
+// tab.
 export function FileDropGuard() {
-  useEffect(() => {
-    const clearInternal = () => {
-      internalDrag = false;
-    };
-    const onDragStart = () => {
-      internalDrag = true;
-    };
-    const onDragOver = (event: globalThis.DragEvent) => {
-      if (event.defaultPrevented || !isExternalFileDrag(event.dataTransfer)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "none";
-    };
-    const onDrop = (event: globalThis.DragEvent) => {
-      if (isExternalFileDrag(event.dataTransfer)) event.preventDefault();
-      internalDrag = false;
-    };
-    window.addEventListener("dragstart", onDragStart);
-    window.addEventListener("dragend", clearInternal);
-    // A drag source removed mid-drag never delivers `dragend` to the window.
-    window.addEventListener("pointerdown", clearInternal);
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      window.removeEventListener("dragstart", onDragStart);
-      window.removeEventListener("dragend", clearInternal);
-      window.removeEventListener("pointerdown", clearInternal);
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("drop", onDrop);
-    };
-  }, []);
+  useEffect(() => installFileDropGuard(), []);
   return null;
 }
 

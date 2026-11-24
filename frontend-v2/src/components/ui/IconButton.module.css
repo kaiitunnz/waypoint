@@ -1,0 +1,21 @@
+.button {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r);
+  color: var(--muted);
+}
+
+.button:hover {
+  color: var(--text-strong);
+}
+
+@media (min-width: 900px) {
+  .sm {
+    width: 36px;
+    height: 36px;
+  }
+}

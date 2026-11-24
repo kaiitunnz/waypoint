@@ -22,6 +22,7 @@ import {
   ManagerSummary,
   ManagerTicketListQuery,
   ManagerTicketPage,
+  PendingAsksSnapshot,
   PendingQuestionsSnapshot,
   MeResponse,
   MessageSchedule,
@@ -2166,6 +2167,20 @@ export async function fetchInboxItem(
   await ensureOk(response, "failed to fetch inbox item");
   const payload = await response.json();
   return payload.item as InboxItem;
+}
+
+export async function fetchPendingAsks(
+  host: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<PendingAsksSnapshot> {
+  const response = await fetch(`${host}/api/pending-asks`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal,
+  });
+  await ensureOk(response, "failed to fetch pending asks");
+  return (await response.json()) as PendingAsksSnapshot;
 }
 
 export async function fetchInboxUnresolvedCount(

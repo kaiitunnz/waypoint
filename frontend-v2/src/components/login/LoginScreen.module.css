@@ -1,0 +1,153 @@
+/* Mobile: two full screens, hosts then password. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 0 var(--safe-right) max(var(--safe-bottom), 8px) var(--safe-left);
+  background: var(--plane);
+}
+
+.top {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  padding: calc(var(--safe-top) + 4px) 6px 0 16px;
+}
+
+.heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--f-page);
+  line-height: 34px;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.notice {
+  flex: none;
+  padding: 8px 16px 0;
+  font-size: var(--f-body);
+  color: var(--muted);
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  margin-left: -6px;
+  padding-right: 10px;
+  color: var(--muted);
+}
+
+.passScreen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 16px 0;
+}
+
+.signinTitle {
+  font-family: var(--serif);
+  font-size: var(--f-page);
+  line-height: 34px;
+  color: var(--text-strong);
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.page,
+.card {
+  display: none;
+}
+
+/* Desktop: one card, hosts left and sign-in right. */
+@media (min-width: 900px) {
+  .page {
+    display: grid;
+    place-items: center;
+    min-height: 100dvh;
+    padding: 16px max(16px, var(--safe-right)) 16px max(16px, var(--safe-left));
+    background: var(--ground);
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    width: min(980px, 100%);
+    height: min(700px, calc(100dvh - 32px));
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--r-modal);
+    background: var(--plane);
+  }
+
+  .cardHead {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 12px 14px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cardTitle {
+    font-family: var(--serif);
+    font-size: var(--f-page);
+    line-height: 30px;
+    color: var(--text-strong);
+  }
+
+  .cardHead .summary {
+    margin: 0 0 0 6px;
+  }
+
+  .cols {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: minmax(0, 520px) minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .listPane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: var(--ground);
+  }
+
+  .passPane {
+    padding: 28px 32px;
+    overflow-y: auto;
+  }
+
+  .signin {
+    margin-bottom: 16px;
+    font-family: var(--serif);
+    font-size: var(--f-title);
+    line-height: 26px;
+    color: var(--text-strong);
+  }
+}

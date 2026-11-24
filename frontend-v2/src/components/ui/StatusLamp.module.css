@@ -1,0 +1,51 @@
+.lamp {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  overflow: visible;
+}
+
+.sm {
+  width: 8px;
+  height: 8px;
+}
+
+/* Needs you: brass, filled, ringed. The ring takes the colour of the surface it sits on. */
+.needs {
+  background: var(--brass);
+  box-shadow:
+    0 0 0 2.5px var(--lamp-ring, var(--plane)),
+    0 0 0 4px color-mix(in srgb, var(--brass) 70%, transparent);
+}
+
+.working {
+  border: 1.5px solid var(--working);
+  overflow: hidden;
+}
+
+.working::after {
+  content: "";
+  position: absolute;
+  inset: 0 50% 0 0;
+  background: var(--working);
+}
+
+.done {
+  background: var(--done);
+}
+
+.error {
+  background: var(--error);
+  border-radius: 2px;
+}
+
+.idle {
+  border: 1.5px solid var(--faint);
+}
+
+.exited {
+  border: 1.5px dashed var(--faint);
+}

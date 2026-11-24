@@ -18,6 +18,7 @@ import { SessionSettingsModal } from "@/components/SessionSettingsModal";
 import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
+import { markTargetConnected as setTargetConnected } from "@waypoint/web-core/launchTargets";
 import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
@@ -658,13 +659,7 @@ export default function HomePage() {
   }
 
   function markTargetConnected(targetId: string, connected: boolean) {
-    setLaunchTargets((current) => {
-      const target = current.find((t) => t.id === targetId);
-      if (!target || target.connected === connected) {
-        return current; // no change → keep the same array (avoids refetch churn)
-      }
-      return current.map((t) => (t.id === targetId ? { ...t, connected } : t));
-    });
+    setLaunchTargets((current) => setTargetConnected(current, targetId, connected));
   }
 
   async function handleConnectTarget(password: string) {

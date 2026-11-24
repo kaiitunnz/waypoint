@@ -1,5 +1,7 @@
 "use client";
 
+import { deploymentBackendPort } from "./tailnet";
+
 const HOST_KEY = "waypoint.host";
 const TOKEN_KEY = "waypoint.token";
 const TARGETS_KEY = "waypoint.launch-targets";
@@ -19,6 +21,16 @@ export function readHost(): string {
     return inferred;
   }
   return saved;
+}
+
+// The saved backend URL as chosen, else the page's own backend. Unlike `readHost`,
+// a saved loopback host is kept when the page is served from another machine: it
+// can be an SSH tunnel to the browser's own machine.
+export function readSavedHost(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(HOST_KEY) || inferBackendHost();
 }
 
 export function writeHost(host: string): void {
@@ -174,7 +186,7 @@ function normalizeCwd(cwd: string): string {
 function inferBackendHost(): string {
   const protocol = window.location.protocol === "https:" ? "https:" : "http:";
   const hostname = window.location.hostname || "127.0.0.1";
-  const port = process.env.NEXT_PUBLIC_BACKEND_PORT || "8787";
+  const port = deploymentBackendPort();
   return `${protocol}//${hostname}:${port}`;
 }
 

@@ -1,0 +1,23 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 32px 16px;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.detail {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+@media (min-width: 900px) {
+  .empty {
+    padding: 32px 36px;
+  }
+}

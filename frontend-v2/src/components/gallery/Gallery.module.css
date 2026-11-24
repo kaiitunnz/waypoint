@@ -1,0 +1,102 @@
+.page {
+  padding-bottom: 48px;
+}
+
+.row,
+.col,
+.fields,
+.tiers {
+  padding: 0 16px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 520px;
+}
+
+.tiers > div {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  border-radius: var(--r-card);
+  font-size: var(--f-meta);
+  color: var(--text);
+}
+
+.ground {
+  background: var(--ground);
+  border: 1px solid var(--line);
+}
+
+.plane {
+  background: var(--plane);
+  border: 1px solid var(--line);
+}
+
+.raised {
+  background: var(--plane-raised);
+}
+
+.attention {
+  background: var(--attention);
+  border: 1px solid var(--attention-line);
+}
+
+.glassDemo {
+  position: relative;
+  height: 160px;
+  margin: 0 16px;
+  overflow: hidden;
+  border-radius: var(--r-card);
+  background: var(--plane-raised);
+}
+
+.glassDemo > header {
+  padding-top: 0;
+}
+
+.scrolling {
+  padding: 56px 14px 0;
+  font-size: var(--f-body);
+  color: var(--muted);
+}
+
+.barTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  color: var(--text-strong);
+}

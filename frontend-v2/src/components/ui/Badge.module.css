@@ -1,0 +1,18 @@
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--action);
+  color: var(--on-action);
+  font-size: var(--f-meta);
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ringed {
+  box-shadow: 0 0 0 2px var(--ground);
+}

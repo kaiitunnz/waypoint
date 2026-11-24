@@ -6,6 +6,7 @@
   "sideEffects": false,
   "exports": {
     "./api": "./src/api.ts",
+    "./backendAddress": "./src/backendAddress.ts",
     "./backends": "./src/backends.ts",
     "./board": "./src/board.ts",
     "./clipboard": "./src/clipboard.ts",

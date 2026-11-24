@@ -3,14 +3,16 @@
 import { useState, type FormEvent } from "react";
 
 import {
-  formatLastUsed,
-  pageDevice,
   parsePort,
   portAfterHostEdit,
   resolveTypedAddress,
+  type TypedAddress,
+} from "@waypoint/web-core/backendAddress";
+import {
+  formatLastUsed,
+  pageDevice,
   type HostGroups,
   type HostRow,
-  type TypedAddress,
 } from "@waypoint/web-core/hostPicker";
 import { DEFAULT_BACKEND_PORT } from "@waypoint/web-core/tailnet";
 
@@ -30,13 +32,13 @@ interface ExtraGroup {
 
 interface HostPickerProps {
   groups: HostGroups;
-  // Groups after Offline, e.g. the host switcher's SSH targets.
+  // Groups listed between Online and Offline, e.g. the host switcher's SSH targets.
   extraGroups?: ExtraGroup[];
   query: string;
   onQueryChange: (query: string) => void;
   selectedKey: string | null;
   onSelect: (row: HostRow) => void;
-  // Called with a typed address. `live` reports every edit, otherwise only on submit.
+  // Called with a typed address: on every edit with `liveAddress`, otherwise on submit.
   onAddress: (address: TypedAddress | null) => void;
   liveAddress?: boolean;
   // The port field's value, when the caller keeps it in step with another port field.

@@ -199,7 +199,6 @@ export function Gallery() {
             </Button>
           </>
         }
-        size="sm"
       >
         <Field label="SSH password" htmlFor="g-ssh">
           <PasswordInput id="g-ssh" />

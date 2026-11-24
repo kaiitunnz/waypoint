@@ -4,27 +4,25 @@ import { useEffect, useState } from "react";
 
 import { connectSessionsSocket, fetchPendingAsks, isAuthError } from "../api";
 import { applyPendingAsksSnapshot, parsePendingAsksSnapshot } from "../pendingAsks";
+import type { ConnectionState } from "../session/connection";
 import type { PendingAsksSnapshot, SessionEnvelope } from "../types";
-
-export type SessionsConnection = "connecting" | "open" | "reconnecting";
 
 export interface PendingAsksState {
   snapshot: PendingAsksSnapshot | null;
-  connection: SessionsConnection;
+  connection: ConnectionState;
 }
 
 // Pending asks across every live session: seeds from GET /api/pending-asks, then
-// follows `pending_asks` frames on /ws/sessions (docs/pending_asks.md), keeping
-// a snapshot only when its epoch differs or its revision is higher. Re-fetches
-// on every (re)connect to close the gap while the socket was down.
-// `onAuthFailure` must be stable (it restarts the socket).
+// follows `pending_asks` frames on /ws/sessions (docs/pending_asks.md) and
+// re-fetches on every (re)connect to close the gap. `onAuthFailure` must be
+// stable: a new one restarts the socket.
 export function usePendingAsks(
   host: string,
   token: string,
   onAuthFailure?: () => void,
 ): PendingAsksState {
   const [snapshot, setSnapshot] = useState<PendingAsksSnapshot | null>(null);
-  const [connection, setConnection] = useState<SessionsConnection>("connecting");
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
 
   useEffect(() => {
     if (!host || !token) {

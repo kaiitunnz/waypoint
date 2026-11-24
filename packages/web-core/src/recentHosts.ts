@@ -1,7 +1,7 @@
 import { sameBackendUrl } from "./tailnet";
 
-export const RECENT_HOSTS_KEY = "waypoint.recent-hosts";
-export const RECENT_HOSTS_LIMIT = 5;
+const RECENT_HOSTS_KEY = "waypoint.recent-hosts";
+const RECENT_HOSTS_LIMIT = 5;
 
 // A backend the user signed in to. `url` is the full backend URL, so each entry
 // carries its own port and two backends on one machine stay two entries.
@@ -13,7 +13,7 @@ export interface RecentHost {
 
 // Tolerant parse of the stored value: malformed entries are dropped, the rest is
 // de-duplicated by host and port, newest first, and capped.
-export function parseRecentHosts(raw: unknown, limit = RECENT_HOSTS_LIMIT): RecentHost[] {
+export function parseRecentHosts(raw: unknown): RecentHost[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -29,16 +29,12 @@ export function parseRecentHosts(raw: unknown, limit = RECENT_HOSTS_LIMIT): Rece
     });
   }
   entries.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
-  return dedupe(entries).slice(0, limit);
+  return dedupe(entries).slice(0, RECENT_HOSTS_LIMIT);
 }
 
 // Puts `entry` first, replacing any earlier entry for the same host and port.
-export function pushRecentHost(
-  list: RecentHost[],
-  entry: RecentHost,
-  limit = RECENT_HOSTS_LIMIT,
-): RecentHost[] {
-  return dedupe([entry, ...list]).slice(0, limit);
+export function pushRecentHost(list: RecentHost[], entry: RecentHost): RecentHost[] {
+  return dedupe([entry, ...list]).slice(0, RECENT_HOSTS_LIMIT);
 }
 
 export function readRecentHosts(): RecentHost[] {
@@ -53,19 +49,13 @@ export function readRecentHosts(): RecentHost[] {
   }
 }
 
-export function writeRecentHost(
-  entry: Omit<RecentHost, "lastUsedAt"> & { lastUsedAt?: number },
-): RecentHost[] {
-  const next = pushRecentHost(readRecentHosts(), {
-    ...entry,
-    lastUsedAt: entry.lastUsedAt ?? Date.now(),
-  });
+export function writeRecentHost(entry: Omit<RecentHost, "lastUsedAt">): void {
+  const next = pushRecentHost(readRecentHosts(), { ...entry, lastUsedAt: Date.now() });
   try {
     window.localStorage.setItem(RECENT_HOSTS_KEY, JSON.stringify(next));
   } catch {
-    // Best effort; the list simply won't persist.
+    // Storage may be unavailable; the list then lasts only for the page.
   }
-  return next;
 }
 
 function dedupe(entries: RecentHost[]): RecentHost[] {

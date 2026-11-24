@@ -9,6 +9,7 @@ import { Field, PasswordInput, TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
+import { PROBE_LABEL } from "@/lib/probe";
 
 import styles from "./SignInForm.module.css";
 
@@ -19,7 +20,6 @@ interface SignInFormProps {
   portText: string;
   portValid: boolean;
   onPortChange: (text: string) => void;
-  // Leaves the host card to pick another host.
   onChangeHost: () => void;
   probe: ProbeStatus;
   password: string;
@@ -36,8 +36,6 @@ const PROBE_LAMP: Record<ProbeStatus, LampState> = {
   unreachable: "error",
 };
 
-// The password step: the chosen host with an editable port and the single
-// reachability probe of that host and port, then the password.
 export function SignInForm({
   name,
   protocol,
@@ -89,7 +87,7 @@ export function SignInForm({
         </span>
         <span className={styles.probe} data-state={probe} role="status">
           {probe === "reachable" ? <Icon name="check" size={13} strokeWidth={2.2} /> : null}
-          {probe === "checking" ? "Checking" : probe === "reachable" ? "Reachable" : probe === "unreachable" ? "Unreachable" : ""}
+          {PROBE_LABEL[probe]}
         </span>
       </div>
       <Field label="Password" htmlFor={passwordId} className={styles.password}>

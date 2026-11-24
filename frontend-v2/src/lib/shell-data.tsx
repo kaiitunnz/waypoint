@@ -4,7 +4,8 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
 import { useLaunchTargets, type LaunchTargetsState } from "@waypoint/web-core/hooks/useLaunchTargets";
-import { usePendingAsks, type SessionsConnection } from "@waypoint/web-core/hooks/usePendingAsks";
+import { usePendingAsks } from "@waypoint/web-core/hooks/usePendingAsks";
+import type { ConnectionState } from "@waypoint/web-core/session/connection";
 import { pendingAsksCount } from "@waypoint/web-core/pendingAsks";
 
 import { handleAuthFailure } from "@/lib/auth";
@@ -14,7 +15,7 @@ export interface ShellData {
   token: string;
   // Pending asks plus open inbox items: everything waiting on the human.
   needsYou: number;
-  connection: SessionsConnection;
+  connection: ConnectionState;
   launchTargets: LaunchTargetsState;
 }
 
@@ -28,8 +29,7 @@ export function useShellData(): ShellData {
   return value;
 }
 
-// Live data the chrome shows on every screen, mounted once per signed-in host so
-// route changes keep its sockets and counts.
+// Mounted once per signed-in host, so route changes keep its sockets and counts.
 export function ShellDataProvider({
   host,
   token,

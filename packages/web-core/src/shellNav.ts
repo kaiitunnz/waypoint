@@ -39,8 +39,10 @@ export function showsTabBar(pathname: string): boolean {
   return ["/", "/inbox", "/board", "/telemetry"].includes(normalize(pathname));
 }
 
-// Counts the badge can show: capped, and absent at zero.
-export function formatBadgeCount(count: number, max = 99): string | null {
+const MAX_BADGE_COUNT = 99;
+
+// The badge text: absent at zero, capped at 99+.
+export function formatBadgeCount(count: number): string | null {
   if (count <= 0) return null;
-  return count > max ? `${max}+` : String(count);
+  return count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : String(count);
 }

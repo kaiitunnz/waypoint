@@ -26,13 +26,12 @@ function sourceKey(source: TailnetSource | null): string {
 }
 
 // Tailscale peers for the host picker, loaded when `source` is set and again on
-// `refresh`. The previous snapshot stays visible while a refresh runs. This
-// lists peers; it never probes any of them.
+// `refresh`. The previous snapshot stays visible while a refresh runs.
 export function useTailnetSnapshot(source: TailnetSource | null): TailnetSnapshotState {
   const [reload, setReload] = useState(0);
   const [result, setResult] = useState<{
-    source: string;
-    key: string;
+    sourceKey: string;
+    request: string;
     snapshot: TailnetSnapshot;
   } | null>(null);
   const key = sourceKey(source);
@@ -53,12 +52,12 @@ export function useTailnetSnapshot(source: TailnetSource | null): TailnetSnapsho
     load
       .catch(() => FAILED)
       .then((snapshot) => {
-        if (!controller.signal.aborted) setResult({ source: key, key: request, snapshot });
+        if (!controller.signal.aborted) setResult({ sourceKey: key, request, snapshot });
       });
     return () => controller.abort();
   }, [key, request]);
 
   const refresh = useCallback(() => setReload((count) => count + 1), []);
-  const snapshot = key && result?.source === key ? result.snapshot : null;
-  return { snapshot, loading: !!key && result?.key !== request, refresh };
+  const snapshot = key && result?.sourceKey === key ? result.snapshot : null;
+  return { snapshot, loading: !!key && result?.request !== request, refresh };
 }

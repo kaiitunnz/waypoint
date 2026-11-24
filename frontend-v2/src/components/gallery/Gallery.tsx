@@ -128,10 +128,10 @@ export function Gallery() {
 
       <SectionHeading title="Meters" dense />
       <div className={styles.fields}>
-        <Meter label="Task progress" value={57} />
-        <Meter label="Calm" value={30} tone="calm" />
-        <Meter label="Approaching the limit" value={77} tone="warn" />
-        <Meter label="At the limit" value={96} tone="danger" />
+        <Meter label="Task progress" value={57} className={styles.meter} />
+        <Meter label="Calm" value={30} tone="calm" className={styles.meter} />
+        <Meter label="Approaching the limit" value={77} tone="warn" className={styles.meter} />
+        <Meter label="At the limit" value={96} tone="danger" className={styles.meter} />
       </div>
 
       <SectionHeading title="List rows" count={4} action="See all" />

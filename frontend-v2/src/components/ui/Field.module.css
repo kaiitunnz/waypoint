@@ -20,7 +20,7 @@
   width: 100%;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--field-line);
   border-radius: var(--r);
   background: var(--field);
   color: var(--text-strong);

@@ -33,6 +33,9 @@
   --faint: #808a9a;
   --line: #222933;
   --line-strong: #343d4b;
+  /* The border of a text field: a control boundary, 3:1 against the field and
+     every surface it sits on (WCAG 1.4.11). Hairlines and dividers keep --line. */
+  --field-line: #6f7a8b;
   --fill-quiet: color-mix(in srgb, #e6eaf0 7%, transparent);
   --fill-raised: color-mix(in srgb, #e6eaf0 13%, transparent);
 
@@ -110,6 +113,7 @@ html[data-theme="light"] {
   --faint: #60646c;
   --line: #e0ddd5;
   --line-strong: #cbc6ba;
+  --field-line: #7f7c75;
   --fill-quiet: color-mix(in srgb, #1b1d21 6%, transparent);
   --fill-raised: color-mix(in srgb, #1b1d21 11%, transparent);
 

@@ -71,12 +71,21 @@ def test_help_lists_command_groups() -> None:
         "backends",
         "models",
         "reset",
-        "session",
         "sessions",
         "board",
         "schedule",
     ):
         assert name in result.stdout
+
+
+@pytest.mark.parametrize("command", ["start", "attach"])
+def test_in_process_session_group_is_gone(tmp_path: Path, command: str) -> None:
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "session", command]
+    )
+    assert result.exit_code == 2
+    assert "No such command 'session'" in result.output
+    assert not (tmp_path / "data").exists()
 
 
 def test_board_help_lists_commands() -> None:
@@ -255,13 +264,13 @@ def test_backend_choices_excludes_only_the_fallback_wrapper() -> None:
     assert "tmux" not in choices
 
 
-def test_session_start_rejects_fallback_wrapper_as_backend(tmp_path: Path) -> None:
+def test_sessions_start_rejects_fallback_wrapper_as_backend(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
             "--config",
             str(_config(tmp_path)),
-            "session",
+            "sessions",
             "start",
             "--backend",
             "tmux",

@@ -318,3 +318,80 @@ def test_held_commands_hit_their_routes(
     assert _routes(calls) == [route]
     if output:
         assert json.loads(result.output) == output
+
+
+def test_attach_tmux_posts_target_and_stamps_spawner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", "lead")
+    prefix, calls = _server(
+        tmp_path,
+        monkeypatch,
+        {("POST", "/api/sessions/attach-tmux"): (200, {"session": {"id": "att"}})},
+    )
+    result = runner.invoke(
+        app,
+        [
+            *prefix,
+            "sessions",
+            "attach-tmux",
+            "--tmux",
+            "work:1.0",
+            "--backend-hint",
+            "codex",
+            "--title",
+            "Pane",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"session": {"id": "att"}}
+    assert calls[0]["body"] == {
+        "tmux_target": "work:1.0",
+        "backend_hint": "codex",
+        "title": "Pane",
+        "spawner_session_id": "lead",
+    }
+
+
+def test_attach_tmux_omits_unset_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix, calls = _server(
+        tmp_path,
+        monkeypatch,
+        {("POST", "/api/sessions/attach-tmux"): (200, {"session": {"id": "att"}})},
+    )
+    result = runner.invoke(app, [*prefix, "sessions", "attach-tmux", "--tmux", "%3"])
+    assert result.exit_code == 0, result.output
+    assert calls[0]["body"] == {"tmux_target": "%3"}
+
+
+def test_attach_tmux_reports_server_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix, _ = _server(
+        tmp_path,
+        monkeypatch,
+        {
+            ("POST", "/api/sessions/attach-tmux"): (
+                400,
+                {"detail": "can't find target: nope"},
+            )
+        },
+    )
+    result = runner.invoke(app, [*prefix, "sessions", "attach-tmux", "--tmux", "nope"])
+    assert result.exit_code == 1
+    assert "can't find target: nope" in result.output
+
+
+def test_attach_tmux_rejects_unknown_backend_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix, calls = _server(tmp_path, monkeypatch, {})
+    result = runner.invoke(
+        app,
+        [*prefix, "sessions", "attach-tmux", "--tmux", "%3", "--backend-hint", "bogus"],
+    )
+    assert result.exit_code != 0
+    assert "unknown backend" in result.output
+    assert calls == []

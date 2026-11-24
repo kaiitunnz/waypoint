@@ -20,10 +20,9 @@ import httpx
 import typer
 import uvicorn
 import yaml
-from fastapi import HTTPException
 from websockets.exceptions import WebSocketException
 
-from waypoint.api import AppContext, create_app
+from waypoint.api import create_app
 from waypoint.backends.account_profiles import (
     account_profile_static_checks,
     backend_hosts_account_profiles,
@@ -40,12 +39,9 @@ from waypoint.client import (
     write_cli_token,
 )
 from waypoint.launch_env import validate_launch_env
-from waypoint.presets import resolve_session_create_request
 from waypoint.schemas import (
     LaunchMode,
     PlanDecision,
-    SessionAttachRequest,
-    SessionLaunchRequest,
     SessionSource,
     SessionStatus,
 )
@@ -116,18 +112,6 @@ def _complete_backend(incomplete: str) -> list[str]:
     return [choice for choice in _backend_choices() if choice.startswith(incomplete)]
 
 
-# Reusable option/argument aliases keep the command signatures readable and
-# the `--backend` validation/completion consistent across `session` and
-# `sessions`.
-BackendOption = Annotated[
-    str,
-    typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
-]
-BackendHintOption = Annotated[
-    str | None,
-    typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
-]
-
 app = typer.Typer(
     help="Waypoint backend control CLI.",
     no_args_is_help=True,
@@ -136,10 +120,6 @@ app = typer.Typer(
 backends_app = typer.Typer(
     help="Inspect backend capabilities and importable threads on a running server.",
     invoke_without_command=True,
-)
-session_app = typer.Typer(
-    help="Launch sessions via an in-process runtime (one-shot, no running server).",
-    no_args_is_help=True,
 )
 sessions_app = typer.Typer(
     help="Manage sessions on a running Waypoint server over HTTP.",
@@ -218,7 +198,6 @@ ManagerIdOption = Annotated[
     ),
 ]
 app.add_typer(backends_app, name="backends")
-app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 sessions_app.add_typer(attachments_app, name="attachments")
 sessions_app.add_typer(held_app, name="held")
@@ -492,175 +471,6 @@ def help_(
         typer.echo(json.dumps(commands, indent=2))
     else:
         typer.echo(_render_help_text(commands))
-
-
-@session_app.command("start")
-def session_start(
-    ctx: typer.Context,
-    backend: Annotated[
-        str | None,
-        typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
-    ] = None,
-    cwd: Annotated[
-        str | None, typer.Option(help="Working directory for the session.")
-    ] = None,
-    preset: Annotated[
-        str | None,
-        typer.Option(
-            "--preset", help="Apply a session preset (by id or name) before launch."
-        ),
-    ] = None,
-    no_preset: Annotated[
-        bool,
-        typer.Option(
-            "--no-preset",
-            help="Do not apply the default preset when --preset is unset.",
-        ),
-    ] = False,
-    launch_target_id: Annotated[str | None, typer.Option()] = None,
-    launch_mode: Annotated[
-        LaunchMode | None,
-        typer.Option(
-            help="Transport to drive the agent: 'auto' (default), 'direct' "
-            "(native structured adapter), or 'tmux_wrapper' (generic tmux pane).",
-        ),
-    ] = None,
-    transport: Annotated[
-        str | None,
-        typer.Option(
-            help="Pin the transport (interface) the agent is driven over: "
-            "'claude_cli' (Chat), 'claude_tty' (Emulated), or 'tmux' (Terminal). "
-            "Must be one of the agent's supported transports; takes precedence "
-            "over --launch-mode. Omit to use the agent's default transport "
-            "(claude_code defaults to Emulated).",
-        ),
-    ] = None,
-    title: Annotated[str | None, typer.Option()] = None,
-    launch_env: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--launch-env",
-            help=(
-                "Environment variable for the agent process as KEY=VALUE. "
-                "Repeatable; values may contain '='."
-            ),
-        ),
-    ] = None,
-    args: Annotated[list[str] | None, typer.Argument()] = None,
-) -> None:
-    """Start a session in-process and print it as JSON."""
-    asyncio.run(
-        _session_start(
-            _settings_from_ctx(ctx),
-            backend=backend,
-            cwd=cwd,
-            preset=preset,
-            no_preset=no_preset,
-            launch_target_id=launch_target_id,
-            launch_mode=launch_mode,
-            transport=transport,
-            title=title,
-            launch_env=(
-                _parse_launch_env(launch_env) if launch_env is not None else None
-            ),
-            args=args or [],
-        )
-    )
-
-
-@session_app.command("attach")
-def session_attach(
-    ctx: typer.Context,
-    tmux: Annotated[str, typer.Option(help="Target tmux pane/session.")],
-    backend_hint: BackendHintOption = None,
-    title: Annotated[str | None, typer.Option()] = None,
-) -> None:
-    """Attach an existing tmux pane as a session."""
-    asyncio.run(
-        _session_attach(
-            _settings_from_ctx(ctx),
-            tmux=tmux,
-            backend_hint=backend_hint,
-            title=title,
-        )
-    )
-
-
-async def _session_start(
-    settings: Settings,
-    *,
-    backend: str | None,
-    cwd: str | None,
-    preset: str | None,
-    no_preset: bool,
-    launch_target_id: str | None,
-    launch_mode: LaunchMode | None,
-    transport: str | None,
-    title: str | None,
-    launch_env: dict[str, str] | None,
-    args: list[str],
-) -> None:
-    context = AppContext(settings)
-    context.settings.ensure_dirs()
-    try:
-        request_fields: dict[str, Any] = {
-            "launch_target_id": launch_target_id,
-            "title": title,
-            "args": list(args),
-        }
-        # Only send backend/cwd when supplied; a preset may fill them in.
-        if backend is not None:
-            request_fields["backend"] = backend
-        if cwd is not None:
-            request_fields["cwd"] = cwd
-        if launch_env is not None:
-            request_fields["launch_env"] = launch_env
-        # Omit launch_mode when unset so the request model's AUTO default applies.
-        if launch_mode is not None:
-            request_fields["launch_mode"] = launch_mode.value
-        # Omit transport when unset so the request model's None default keeps
-        # today's launch_mode-derived behavior.
-        if transport is not None:
-            request_fields["transport"] = transport
-        if preset is not None:
-            request_fields["preset_id"] = preset
-        elif not no_preset:
-            request_fields["use_default_preset"] = True
-        try:
-            resolved, matched = resolve_session_create_request(
-                context.storage, SessionLaunchRequest(**request_fields)
-            )
-        except HTTPException as exc:
-            raise typer.BadParameter(str(exc.detail)) from exc
-        session = await context.runtime.create_session(
-            resolved,
-            preset_id=matched.id if matched else None,
-            preset_name=matched.name if matched else None,
-        )
-        typer.echo(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
-    finally:
-        await context.runtime.stop()
-
-
-async def _session_attach(
-    settings: Settings,
-    *,
-    tmux: str,
-    backend_hint: str | None,
-    title: str | None,
-) -> None:
-    context = AppContext(settings)
-    context.settings.ensure_dirs()
-    try:
-        payload: dict[str, Any] = {"tmux_target": tmux, "title": title}
-        if backend_hint:
-            payload["backend_hint"] = backend_hint
-        session = await context.runtime.attach_tmux(
-            SessionAttachRequest.model_validate(payload)
-        )
-        typer.echo(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
-    finally:
-        await context.runtime.stop()
 
 
 def _run_client(settings: Settings, run: Callable[[WaypointClient], Any]) -> Any:
@@ -2162,6 +1972,53 @@ def sessions_start(
         }
 
     _emit(_settings_from_ctx(ctx), _run)
+
+
+@sessions_app.command("attach-tmux")
+def sessions_attach_tmux(
+    ctx: typer.Context,
+    tmux: Annotated[
+        str,
+        typer.Option(
+            help="tmux target to attach: a pane id (%3), session, or "
+            "session:window.pane."
+        ),
+    ],
+    backend_hint: Annotated[
+        str | None,
+        typer.Option(
+            callback=_validate_backend,
+            autocompletion=_complete_backend,
+            help="Agent running in the pane; inferred from the pane name when "
+            "omitted.",
+        ),
+    ] = None,
+    title: Annotated[str | None, typer.Option()] = None,
+    spawner_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Owning session; defaults to this session's id when run inside "
+            "one.",
+        ),
+    ] = None,
+) -> None:
+    """Attach an existing tmux pane as a session on the running server.
+
+    The server mirrors the pane's output and monitors it; the pane keeps
+    running when the session is terminated or deleted.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.attach_tmux(
+                tmux,
+                backend_hint=backend_hint,
+                title=title,
+                spawner_session_id=spawner_session_id,
+            )
+        },
+    )
 
 
 @sessions_app.command("send")

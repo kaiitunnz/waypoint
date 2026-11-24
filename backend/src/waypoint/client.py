@@ -448,6 +448,27 @@ class WaypointClient:
         ]
         return data
 
+    def attach_tmux(
+        self,
+        tmux_target: str,
+        *,
+        backend_hint: str | None = None,
+        title: str | None = None,
+        spawner_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"tmux_target": tmux_target}
+        for key, value in (
+            ("backend_hint", backend_hint),
+            ("title", title),
+            ("spawner_session_id", spawner_session_id),
+        ):
+            if value is not None:
+                body[key] = value
+        data: dict[str, Any] = self._request(
+            "POST", "/api/sessions/attach-tmux", json=body
+        ).json()["session"]
+        return data
+
     def import_thread(self, backend: str, body: dict[str, Any]) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST", f"/api/backends/{backend}/sessions/import", json=body

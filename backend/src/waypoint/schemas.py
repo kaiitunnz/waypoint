@@ -1338,6 +1338,7 @@ class SessionAttachRequest(BaseModel):
     tmux_target: str
     backend_hint: BackendId | None = None
     title: str | None = None
+    spawner_session_id: str | None = Field(default=None, min_length=1)
 
 
 class SessionInputRequest(BaseModel):

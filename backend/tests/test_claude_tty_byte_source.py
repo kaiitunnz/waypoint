@@ -96,11 +96,10 @@ class _FakeFs:
         self.read_calls: list[tuple[str, int, int]] = []
         self.expand: dict[str, str] = {}
 
-    def glob_artifacts(
-        self, session: object, plugin: object, config_dir: str
-    ) -> list[str]:
+    def glob(self, root: str, pattern: str) -> list[str]:
         self.glob_calls += 1
-        self.last_config_dir = config_dir
+        self.last_config_dir = root
+        self.last_pattern = pattern
         return list(self.glob_result)
 
     def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
@@ -117,7 +116,7 @@ def _remote_source(
     runtime = MagicMock()
     runtime.storage.get_session.return_value = session
     src = RemoteClaudeTranscriptByteSource(
-        runtime, session.id, MagicMock(), _launch_target(), config_dir
+        runtime, session.id, TID, _launch_target(), config_dir
     )
     src._fs = fs  # type: ignore[assignment]
     return src
@@ -150,6 +149,17 @@ def test_remote_resolves_then_reads(monkeypatch) -> None:
     src.read_from(6)
     assert fs.glob_calls == 1
     assert fs.read_calls[-1] == (fs.glob_result[0], 6, 256 * 1024)
+
+
+def test_remote_resolves_its_own_thread_not_the_sessions(monkeypatch) -> None:
+    # After a /clear rebind the session names the successor, but the old
+    # tailer's source must keep reading the thread it was built for.
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    session = _session()
+    session.transport_state["thread_id"] = "22222222-2222-2222-2222-222222222222"
+    fs = _FakeFs()
+    _remote_source(fs, session).read_from(0)
+    assert fs.last_pattern == f"projects/*/{TID}.jsonl"
 
 
 def test_remote_multi_match_refuses(monkeypatch) -> None:
@@ -255,7 +265,7 @@ def test_remote_exception_does_not_raise(monkeypatch) -> None:
     def _boom(*a: object, **k: object) -> list[str]:
         raise RuntimeError("ssh exploded")
 
-    fs.glob_artifacts = _boom  # type: ignore[method-assign]
+    fs.glob = _boom  # type: ignore[method-assign]
     src = _remote_source(fs, _session())
     read = src.read_from(0)  # must not raise
     assert read.observed is False

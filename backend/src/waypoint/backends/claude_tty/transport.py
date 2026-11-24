@@ -6,8 +6,7 @@ Thin subclass of ``TmuxTransport`` that overrides:
   the frontend must not fall back to the heuristic raw-terminal view.
 - ``interrupt`` sends ``Esc`` instead of ``Ctrl-C``; ``Esc`` is the Claude TUI's
   cancel key and cancels the running generation without terminating the process.
-- ``send_input`` follows a ``/clear`` onto the new conversation it starts, so
-  the tailer keeps reading the transcript the TUI now writes.
+- ``send_input`` moves the session onto the conversation a ``/clear`` starts.
 - ``has_pending_approval`` / ``respond_to_approval`` — drive tool-permission
   dialogs by sending the appropriate digit + Enter keystroke to the TUI pane.
   Pending state is owned by the plugin singleton (``ClaudeTtyPlugin``).
@@ -68,9 +67,9 @@ class ClaudeTtyTransport(TmuxTransport):
             return
         if await self._plugin.follow_clear(self._runtime, session.id):
             return
-        # The clear's own completion record sits in the unfollowed transcript,
-        # so resolve the turn here — unless a turn was already in flight, which
-        # the TUI may still be running with the /clear queued behind it.
+        # The clear's completion record is in the unfollowed transcript, so
+        # resolve the turn here, unless a turn was in flight with the /clear
+        # queued behind it.
         await self._runtime._record_system_event(
             session.id,
             _CLEAR_UNFOLLOWED_NOTE,

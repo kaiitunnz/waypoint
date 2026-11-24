@@ -104,6 +104,7 @@ def _stub_lifecycle(plugin: ClaudeTtyPlugin) -> dict[str, object]:
         start_at_end: bool = False,
         config_dir: str | None = None,
         launch_target: object = None,
+        after: object = None,
     ) -> None:
         captured["tailer_thread_id"] = thread_id
         captured["start_at_end"] = start_at_end

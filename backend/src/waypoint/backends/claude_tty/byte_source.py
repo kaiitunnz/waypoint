@@ -24,15 +24,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from waypoint.backends.claude_code.threads import (
+    UUID_RE,
     claude_projects_root,
     encode_project_dir,
 )
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
-from waypoint.backends.transcript_fs_remote_script import find_derived_transcripts
+from waypoint.backends.transcript_fs_remote_script import find_clear_successors
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 if TYPE_CHECKING:
-    from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.claude_tty")
@@ -40,13 +40,10 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 _STEADY_INTERVAL = 1.0  # seconds between remote reads at steady state
 _MAX_BACKOFF = 10.0  # cap on the exponential error backoff
 _READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
-# ``derived-from`` provenance Claude writes on the transcript ``/clear`` starts.
-_CLEAR_VIA = "clear"
 
 
 def _single(ids: list[str]) -> str | None:
-    # A UUID names one conversation; several matches are ambiguous, so refuse to
-    # pick rather than follow an arbitrary file.
+    # Several successors of one thread are ambiguous; follow none.
     return ids[0] if len(ids) == 1 else None
 
 
@@ -165,12 +162,8 @@ class LocalTranscriptByteSource:
         self, parent_thread_id: str, max_age_seconds: float
     ) -> str | None:
         return _single(
-            find_derived_transcripts(
-                str(self._path.parent),
-                "*.jsonl",
-                parent_thread_id,
-                _CLEAR_VIA,
-                max_age_seconds,
+            find_clear_successors(
+                str(self._path.parent), "*.jsonl", parent_thread_id, max_age_seconds
             )
         )
 
@@ -190,13 +183,13 @@ class RemoteClaudeTranscriptByteSource:
         self,
         runtime: "SessionRuntime",
         session_id: str,
-        plugin: "ClaudeTtyPlugin",
+        thread_id: str,
         launch_target: SshLaunchTargetConfig,
         config_dir: str | None,
     ) -> None:
         self._runtime = runtime
         self._session_id = session_id
-        self._plugin = plugin
+        self._thread_id = thread_id
         self._fs = RemoteTranscriptFilesystem(launch_target)
         self._launch_target_id = launch_target.id
         self._config_dir = config_dir
@@ -224,9 +217,8 @@ class RemoteClaudeTranscriptByteSource:
     def find_clear_successor(
         self, parent_thread_id: str, max_age_seconds: float
     ) -> str | None:
-        # Searches the whole projects tree rather than the parent's directory: a
-        # ``/clear`` before the first turn links to a parent never written, so
-        # there is no parent file to locate the directory from.
+        # A ``/clear`` before the first turn names a parent never written, so
+        # there is no parent file to find the project dir from: scan them all.
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
             return None
@@ -236,12 +228,8 @@ class RemoteClaudeTranscriptByteSource:
             self._warn_once("clear-lookup", "remote /clear successor lookup failed")
             return None
         return _single(
-            self._fs.find_derived(
-                root,
-                "projects/*/*.jsonl",
-                parent_thread_id,
-                _CLEAR_VIA,
-                max_age_seconds,
+            self._fs.find_clear_successors(
+                root, "projects/*/*.jsonl", parent_thread_id, max_age_seconds
             )
         )
 
@@ -270,10 +258,10 @@ class RemoteClaudeTranscriptByteSource:
 
     def _resolve(self) -> str | None:
         session = self._runtime.storage.get_session(self._session_id)
-        if session is None:
+        if session is None or not UUID_RE.match(self._thread_id):
             return None
         config_root = self._resolved_config_root(session.cwd)
-        matches = self._fs.glob_artifacts(session, self._plugin, config_root)
+        matches = self._fs.glob(config_root, f"projects/*/{self._thread_id}.jsonl")
         if not matches:
             return None
         if len(matches) > 1:

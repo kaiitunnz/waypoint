@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from waypoint.backends import transcript_fs_remote_script as script
+from waypoint.backends.claude_code.threads import encode_project_dir
 from waypoint.backends.claude_tty import plugin as plugin_mod
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
@@ -36,6 +37,7 @@ from waypoint.schemas import (
 PARENT = "11111111-1111-1111-1111-111111111111"
 CHILD = "22222222-2222-2222-2222-222222222222"
 OTHER = "33333333-3333-3333-3333-333333333333"
+CWD = "/repo/app"
 
 
 def _session(
@@ -48,7 +50,7 @@ def _session(
         source=SessionSource.MANAGED,
         transport="claude_tty",
         title="t",
-        cwd="/repo/app",
+        cwd=CWD,
         status=status,
         created_at=now,
         updated_at=now,
@@ -65,6 +67,12 @@ def _session(
     )
 
 
+def _launch_target() -> SshLaunchTargetConfig:
+    return SshLaunchTargetConfig(
+        id="r", name="R", ssh_destination="h", ssh_bin="/bin/sh"
+    )
+
+
 def _header(session_id: str, parent: str, via: str = "clear") -> list[dict[str, Any]]:
     return [
         {"type": "mode", "mode": "normal", "sessionId": session_id},
@@ -78,23 +86,20 @@ def _header(session_id: str, parent: str, via: str = "clear") -> list[dict[str, 
     ]
 
 
-def _write(path: Path, records: list[dict[str, Any]], age: float = 0.0) -> Path:
+def _write(path: Path, records: list[dict[str, Any]], age: float = 0.0) -> None:
     path.write_text("".join(json.dumps(r) + "\n" for r in records))
     if age:
         stamp = time.time() - age
         os.utime(path, (stamp, stamp))
-    return path
 
 
 # ── header scan (shared by the local source and the remote op) ───────────────
 
 
-def test_find_derived_matches_clear_successor(tmp_path: Path) -> None:
+def test_scan_matches_clear_successor(tmp_path: Path) -> None:
     _write(tmp_path / f"{PARENT}.jsonl", [{"type": "user", "message": {}}])
     _write(tmp_path / f"{CHILD}.jsonl", _header(CHILD, PARENT))
-    assert script.find_derived_transcripts(
-        str(tmp_path), "*.jsonl", PARENT, "clear", 60
-    ) == [CHILD]
+    assert script.find_clear_successors(str(tmp_path), "*.jsonl", PARENT, 60) == [CHILD]
 
 
 @pytest.mark.parametrize(
@@ -103,53 +108,38 @@ def test_find_derived_matches_clear_successor(tmp_path: Path) -> None:
         (_header(CHILD, PARENT, via="fork"), 0.0),
         (_header(CHILD, OTHER), 0.0),
         (_header(CHILD, PARENT), 600.0),
-        ([{"type": "user", "message": {}}, *_header(CHILD, PARENT)], 0.0),
     ],
-    ids=["other-via", "other-parent", "stale", "after-conversation-record"],
+    ids=["other-via", "other-parent", "stale"],
 )
-def test_find_derived_ignores_non_matches(
+def test_scan_ignores_non_matches(
     tmp_path: Path, records: list[dict[str, Any]], age: float
 ) -> None:
     _write(tmp_path / f"{CHILD}.jsonl", records, age=age)
-    assert (
-        script.find_derived_transcripts(str(tmp_path), "*.jsonl", PARENT, "clear", 60)
-        == []
-    )
+    assert script.find_clear_successors(str(tmp_path), "*.jsonl", PARENT, 60) == []
 
 
-def test_find_derived_tolerates_garbage_and_missing_root(tmp_path: Path) -> None:
+def test_scan_tolerates_garbage_and_missing_root(tmp_path: Path) -> None:
     (tmp_path / f"{CHILD}.jsonl").write_bytes(b"\x00not json\n[1, 2]\n")
-    assert (
-        script.find_derived_transcripts(str(tmp_path), "*.jsonl", PARENT, "clear", 60)
-        == []
-    )
-    assert (
-        script.find_derived_transcripts(
-            str(tmp_path / "missing"), "*.jsonl", PARENT, "clear", 60
-        )
-        == []
-    )
+    assert script.find_clear_successors(str(tmp_path), "*.jsonl", PARENT, 60) == []
+    missing = str(tmp_path / "missing")
+    assert script.find_clear_successors(missing, "*.jsonl", PARENT, 60) == []
 
 
-def test_find_derived_op_emits_ids_and_validates_age(
+def test_op_emits_ids_and_validates_age(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     project = tmp_path / "projects" / "-repo-app"
     project.mkdir(parents=True)
     _write(project / f"{CHILD}.jsonl", _header(CHILD, PARENT))
-    script.op_find_derived(str(tmp_path), "projects/*/*.jsonl", PARENT, "clear", "60")
-    script.op_find_derived(str(tmp_path), "projects/*/*.jsonl", PARENT, "clear", "x")
+    script.op_find_clear_successors(str(tmp_path), "projects/*/*.jsonl", PARENT, "60")
+    script.op_find_clear_successors(str(tmp_path), "projects/*/*.jsonl", PARENT, "x")
     first, second = capsys.readouterr().out.splitlines()
     assert json.loads(first.removeprefix(script.SENTINEL)) == {"ids": [CHILD]}
     assert "error" in json.loads(second.removeprefix(script.SENTINEL))
 
 
-def test_remote_fs_find_derived_passes_args_and_degrades(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fs = RemoteTranscriptFilesystem(
-        SshLaunchTargetConfig(id="r", name="R", ssh_destination="h", ssh_bin="/bin/sh")
-    )
+def test_remote_fs_passes_args_and_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
     calls: list[tuple[str, ...]] = []
     replies: list[dict[str, Any]] = [{"ids": [CHILD, 7]}, {"error": "boom"}]
 
@@ -158,65 +148,51 @@ def test_remote_fs_find_derived_passes_args_and_degrades(
         return replies.pop(0)
 
     monkeypatch.setattr(fs, "_run", fake_run)
-    assert fs.find_derived("~/.claude", "projects/*/*.jsonl", PARENT, "clear", 60) == [
-        CHILD
-    ]
-    assert fs.find_derived("~/.claude", "projects/*/*.jsonl", PARENT, "clear", 60) == []
-    assert calls[0] == (
-        "find_derived",
-        "~/.claude",
-        "projects/*/*.jsonl",
-        PARENT,
-        "clear",
-        "60",
-    )
+    pattern = "projects/*/*.jsonl"
+    assert fs.find_clear_successors("~/.claude", pattern, PARENT, 60) == [CHILD]
+    assert fs.find_clear_successors("~/.claude", pattern, PARENT, 60) == []
+    assert calls[0] == ("find_clear_successors", "~/.claude", pattern, PARENT, "60")
 
 
 # ── byte sources ─────────────────────────────────────────────────────────────
 
 
-def _local_source(path: Path) -> LocalTranscriptByteSource:
-    src = LocalTranscriptByteSource.__new__(LocalTranscriptByteSource)
-    src._path = path
-    return src
+def _project_dir(config_dir: Path) -> Path:
+    project = config_dir / "projects" / encode_project_dir(CWD)
+    project.mkdir(parents=True, exist_ok=True)
+    return project
 
 
 def test_local_successor_found_without_parent_file(tmp_path: Path) -> None:
-    # A /clear before the first turn links to a parent that was never written.
-    _write(tmp_path / f"{CHILD}.jsonl", _header(CHILD, PARENT))
-    src = _local_source(tmp_path / f"{PARENT}.jsonl")
+    # A /clear before the first turn names a parent that was never written.
+    _write(_project_dir(tmp_path) / f"{CHILD}.jsonl", _header(CHILD, PARENT))
+    src = LocalTranscriptByteSource(CWD, PARENT, str(tmp_path))
     assert src.find_clear_successor(PARENT, 60) == CHILD
 
 
-def test_local_successor_ambiguous_or_missing(tmp_path: Path) -> None:
-    src = _local_source(tmp_path / "missing-dir" / f"{PARENT}.jsonl")
+def test_local_successor_missing_or_ambiguous(tmp_path: Path) -> None:
+    src = LocalTranscriptByteSource(CWD, PARENT, str(tmp_path))
     assert src.find_clear_successor(PARENT, 60) is None
-    _write(tmp_path / f"{CHILD}.jsonl", _header(CHILD, PARENT))
-    _write(tmp_path / f"{OTHER}.jsonl", _header(OTHER, PARENT))
-    assert (
-        _local_source(tmp_path / f"{PARENT}.jsonl").find_clear_successor(PARENT, 60)
-        is None
-    )
+    project = _project_dir(tmp_path)
+    _write(project / f"{CHILD}.jsonl", _header(CHILD, PARENT))
+    _write(project / f"{OTHER}.jsonl", _header(OTHER, PARENT))
+    assert src.find_clear_successor(PARENT, 60) is None
 
 
 def test_remote_successor_searches_config_root() -> None:
     runtime = MagicMock()
     runtime.storage.get_session.return_value = _session()
     src = RemoteClaudeTranscriptByteSource(
-        runtime,
-        "s1",
-        MagicMock(),
-        SshLaunchTargetConfig(id="r", name="R", ssh_destination="h", ssh_bin="/bin/sh"),
-        "/home/u/.claude-work",
+        runtime, "s1", PARENT, _launch_target(), "/home/u/.claude-work"
     )
     fs = MagicMock()
-    fs.find_derived.return_value = [CHILD]
+    fs.find_clear_successors.return_value = [CHILD]
     src._fs = fs
     assert src.find_clear_successor(PARENT, 60) == CHILD
-    fs.find_derived.assert_called_once_with(
-        "/home/u/.claude-work", "projects/*/*.jsonl", PARENT, "clear", 60
+    fs.find_clear_successors.assert_called_once_with(
+        "/home/u/.claude-work", "projects/*/*.jsonl", PARENT, 60
     )
-    fs.find_derived.return_value = [CHILD, OTHER]
+    fs.find_clear_successors.return_value = [CHILD, OTHER]
     assert src.find_clear_successor(PARENT, 60) is None
 
 
@@ -251,6 +227,10 @@ class _Store:
     def get_session(self, session_id: str) -> SessionRecord | None:
         return self.session
 
+    def set_state(self, **updates: str) -> None:
+        state = {**self.session.transport_state, **updates}
+        self.session = self.session.model_copy(update={"transport_state": state})
+
 
 def _runtime(session: SessionRecord) -> MagicMock:
     runtime = MagicMock()
@@ -266,94 +246,85 @@ def _runtime(session: SessionRecord) -> MagicMock:
     return runtime
 
 
-def _plugin_with_source(
-    monkeypatch: pytest.MonkeyPatch, answers: list[str | None]
-) -> tuple[ClaudeTtyPlugin, MagicMock]:
-    plugin = ClaudeTtyPlugin()
-    source = MagicMock()
-    source.find_clear_successor.side_effect = answers
-    monkeypatch.setattr(plugin, "_byte_source", lambda *args: source)
+class _FakeTailer:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.ran = False
+
+    async def run(self) -> None:
+        self.ran = True
+
+
+@pytest.fixture
+def plugin(monkeypatch: pytest.MonkeyPatch) -> ClaudeTtyPlugin:
     monkeypatch.setattr(plugin_mod, "_CLEAR_LOOKUP_INTERVAL_SECONDS", 0.0)
-    return plugin, source
+    monkeypatch.setattr(plugin_mod, "TranscriptTailer", _FakeTailer)
+    return ClaudeTtyPlugin()
 
 
-class _StoppableTailer:
-    def __init__(self) -> None:
-        self.stopped = False
+def _lookup(
+    plugin: ClaudeTtyPlugin, monkeypatch: pytest.MonkeyPatch, side_effect: Any
+) -> list[tuple[Any, ...]]:
+    source = MagicMock()
+    source.find_clear_successor.side_effect = side_effect
+    built: list[tuple[Any, ...]] = []
 
-    def stop(self) -> None:
-        self.stopped = True
+    def byte_source(*args: Any) -> MagicMock:
+        built.append(args)
+        return source
+
+    monkeypatch.setattr(plugin, "_byte_source", byte_source)
+    return built
 
 
-def _register_tailer(plugin: ClaudeTtyPlugin) -> tuple["asyncio.Task[None]", Any]:
+def _register_old_tailer(
+    plugin: ClaudeTtyPlugin,
+) -> tuple["asyncio.Task[None]", MagicMock]:
+    tailer = MagicMock(spec=TranscriptTailer)
     task = asyncio.create_task(asyncio.sleep(3600))
-    tailer = _StoppableTailer()
-    plugin._tailer_tasks["s1"] = task
-    plugin._tailers["s1"] = tailer  # type: ignore[assignment]
+    plugin._tailers["s1"] = plugin_mod._TailerRun(tailer, task)
     return task, tailer
 
 
-async def test_follow_clear_rebinds_thread_and_restarts_tailer(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_follow_clear_rebinds_after_the_old_tailer_drains(
+    plugin: ClaudeTtyPlugin, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plugin, source = _plugin_with_source(monkeypatch, [None, CHILD])
+    built = _lookup(plugin, monkeypatch, [None, CHILD])
     runtime = _runtime(_session())
-    old_task, old_tailer = _register_tailer(plugin)
-    built: list[tuple[Any, ...]] = []
-    new_tailer = MagicMock()
-    new_tailer.run = AsyncMock()
-
-    def build(*args: Any) -> MagicMock:
-        built.append(args)
-        return new_tailer
-
-    monkeypatch.setattr(plugin, "_build_tailer", build)
+    old_task, old_tailer = _register_old_tailer(plugin)
 
     assert await plugin.follow_clear(runtime, "s1") is True
 
-    assert old_tailer.stopped
-    assert not old_task.cancelled()
+    old_tailer.stop.assert_called_once_with()
     session = runtime.storage.session
     assert session.transport_state == {"thread_id": CHILD, "tmux_pane": "%0"}
     assert session.context_usage is None
-    [args] = built
-    assert args[1:3] == ("s1", CHILD)
-    assert args[4] is False  # start_at_end: the new file is read from byte 0
-    assert plugin._tailers["s1"] is new_tailer
-    new_task = plugin._tailer_tasks["s1"]
-    assert new_task is not old_task
-    assert source.find_clear_successor.call_count == 2
+    assert [args[2] for args in built] == [PARENT, CHILD]
+    new = plugin._tailers["s1"]
+    assert isinstance(new.tailer, _FakeTailer)
+    assert new.tailer.kwargs["start_at_end"] is False
     await asyncio.sleep(0)
-    new_tailer.run.assert_not_called()  # waits for the old tailer's drain
+    assert not new.tailer.ran
     old_task.cancel()
-    await new_task
-    new_tailer.run.assert_awaited_once()
-
-
-async def test_follow_clear_gives_up_after_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    plugin, _ = _plugin_with_source(monkeypatch, [None] * 1000)
-    monkeypatch.setattr(plugin_mod, "_CLEAR_LOOKUP_DEADLINE_SECONDS", 0.0)
-    runtime = _runtime(_session())
-    task, tailer = _register_tailer(plugin)
-
-    assert await plugin.follow_clear(runtime, "s1") is False
-    assert plugin._tailer_tasks["s1"] is task
-    assert not tailer.stopped
-    runtime.update_session_fields.assert_not_called()
-    task.cancel()
+    await new.task
+    assert new.tailer.ran
 
 
 async def test_follow_clear_deadline_bounds_a_hung_lookup(
-    monkeypatch: pytest.MonkeyPatch,
+    plugin: ClaudeTtyPlugin, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plugin, source = _plugin_with_source(monkeypatch, [])
-    source.find_clear_successor.side_effect = lambda *args: time.sleep(0.3)
+    _lookup(plugin, monkeypatch, lambda *args: time.sleep(0.3))
     monkeypatch.setattr(plugin_mod, "_CLEAR_LOOKUP_DEADLINE_SECONDS", 0.05)
+    runtime = _runtime(_session())
+    old_task, _ = _register_old_tailer(plugin)
     started = time.monotonic()
-    assert await plugin.follow_clear(_runtime(_session()), "s1") is False
+
+    assert await plugin.follow_clear(runtime, "s1") is False
+
     assert time.monotonic() - started < 0.25
+    assert plugin._tailers["s1"].task is old_task
+    runtime.update_session_fields.assert_not_called()
+    old_task.cancel()
 
 
 @pytest.mark.parametrize(
@@ -361,70 +332,52 @@ async def test_follow_clear_deadline_bounds_a_hung_lookup(
     [
         {"thread_id": OTHER},
         # A settings-change relaunch resumes the same thread in a new pane.
-        {"thread_id": PARENT, "tmux_pane": "%9"},
+        {"tmux_pane": "%9"},
         # A relaunch or terminate in flight has popped the tailer.
         None,
     ],
     ids=["new-thread", "same-thread-new-pane", "tailer-popped"],
 )
 async def test_follow_clear_yields_to_a_concurrent_relaunch(
-    monkeypatch: pytest.MonkeyPatch, relaunch: dict[str, str] | None
+    plugin: ClaudeTtyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    relaunch: dict[str, str] | None,
 ) -> None:
-    plugin, _ = _plugin_with_source(monkeypatch, [CHILD])
     runtime = _runtime(_session())
-    task, tailer = _register_tailer(plugin)
-    original = plugin._rebind_thread
+    old_task, old_tailer = _register_old_tailer(plugin)
 
-    async def relaunch_first(*args: Any) -> bool:
+    def relaunch_during_lookup(*args: Any) -> str:
         if relaunch is None:
-            del plugin._tailer_tasks["s1"]
+            del plugin._tailers["s1"]
         else:
-            state = {**runtime.storage.session.transport_state, **relaunch}
-            runtime.storage.session = runtime.storage.session.model_copy(
-                update={"transport_state": state}
-            )
-        return await original(*args)
+            runtime.storage.set_state(**relaunch)
+        return CHILD
 
-    monkeypatch.setattr(plugin, "_rebind_thread", relaunch_first)
+    _lookup(plugin, monkeypatch, relaunch_during_lookup)
 
     assert await plugin.follow_clear(runtime, "s1") is False
-    assert not tailer.stopped
+
+    old_tailer.stop.assert_not_called()
     runtime.update_session_fields.assert_not_called()
-    task.cancel()
+    old_task.cancel()
 
 
-async def test_successor_tailer_starts_after_the_old_one_drains() -> None:
-    order: list[str] = []
-    release = asyncio.Event()
-
-    async def old_tailer() -> None:
-        await release.wait()
-        order.append("old drained")
-
-    tailer = MagicMock()
-    tailer.run = AsyncMock(side_effect=lambda: order.append("new started"))
-    old = asyncio.create_task(old_tailer())
-    new = asyncio.create_task(plugin_mod._run_tailer_after(old, tailer))
-    await asyncio.sleep(0)
-    assert order == []
-    release.set()
-    await new
-    assert order == ["old drained", "new started"]
-
-
-async def test_stopped_tailer_drains_once_and_keeps_dialog_state() -> None:
+async def test_stopped_tailer_drains_once_and_keeps_dialog_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = MagicMock()
     runtime.storage.get_session.return_value = _session()
     source = MagicMock()
     source.read_from.return_value = TranscriptRead(observed=False)
     tailer = TranscriptTailer("s1", source, runtime, MagicMock())
-    tailer._close_dialog_state = AsyncMock()  # type: ignore[method-assign]
+    close = AsyncMock()
+    monkeypatch.setattr(tailer, "_close_dialog_state", close)
     tailer.stop()
 
     await tailer.run()
 
     source.read_from.assert_called_once_with(0, metadata_only=False, force=True)
-    tailer._close_dialog_state.assert_not_called()
+    close.assert_not_called()
 
 
 # ── transport interception ───────────────────────────────────────────────────

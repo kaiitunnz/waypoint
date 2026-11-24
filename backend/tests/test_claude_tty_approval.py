@@ -819,6 +819,7 @@ async def _run_exited_reconnect(resumes: bool) -> bool:
         start_at_end: bool = False,
         config_dir: str | None = None,
         launch_target: object = None,
+        after: object = None,
     ) -> None:
         captured["start_at_end"] = start_at_end
 

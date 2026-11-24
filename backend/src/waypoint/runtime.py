@@ -3114,10 +3114,10 @@ class SessionRuntime:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             return await self._reattach_session(session)
         await self.transport_for(session).resume(session)
-        await self._record_system_event(
-            session.id, "Sent resume", status=SessionStatus.RUNNING
-        )
-        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        # The keypress may start no turn, so leave the status to the
+        # transport's own driver, which reports a turn that does start.
+        await self._record_system_event(session.id, "Sent resume")
+        return self.get_session(session.id)
 
     async def terminate(self, session_id: str) -> SessionRecord:
         # Serialized with the launch-settings switch and reattach so a terminate

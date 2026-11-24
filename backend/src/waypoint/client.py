@@ -1,8 +1,9 @@
 """Thin HTTP client for a running Waypoint backend.
 
 Used by the ``waypoint`` CLI (and the personal assistant, which shells out
-to it) to manage a running server over its API. Auth resolves, in order: ``WAYPOINT_TOKEN`` env, the server-issued local token
-file, then a password login (caching the result to the token file).
+to it) to manage a running server over its API. Auth resolves, in order:
+``WAYPOINT_TOKEN`` env, the server-issued local token file, then a password
+login (caching the result to the token file).
 """
 
 import json

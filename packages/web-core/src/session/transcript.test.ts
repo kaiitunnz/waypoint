@@ -363,9 +363,14 @@ describe("latestActionablePlanEvent", () => {
     expect(latestActionablePlanEvent([plan(1, "p1"), decision(2, "p1")])).toBeNull();
   });
 
-  it("is not hidden by a decision for an older plan", () => {
+  it("returns a newer plan even though an older one was decided", () => {
     const events = [plan(1, "p1"), decision(2, "p1"), plan(3, "p2")];
     expect(latestActionablePlanEvent(events)).toBe(events[2]);
+  });
+
+  it("is not hidden by a decision that belongs to a different plan", () => {
+    const events = [plan(1, "p1"), decision(2, "p2")];
+    expect(latestActionablePlanEvent(events)).toBe(events[0]);
   });
 
   it("only looks at the newest plan, so a newer decided plan hides an older open one", () => {

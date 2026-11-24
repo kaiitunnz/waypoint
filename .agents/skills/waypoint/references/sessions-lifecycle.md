@@ -29,11 +29,10 @@ waypoint sessions resume <session-id>
 `reattach` revives an `exited` or `error` session with its conversation, without
 sending a message (`sessions send` to an exited session also reattaches it); on
 a live session it restarts the agent and ends any running turn. `resume` presses
-Enter on a live tmux / claude_tty pane and leaves the status as it was. A turn
-the Enter starts shows as `running` once the agent's first output lands (a
-claude_tty session can stay `idle` through the model's thinking), so wait with
-`--until running --timeout N` before the default `sessions wait`; a timeout
-means no turn started.
+Enter on a live tmux / claude_tty pane. When the Enter submits a message typed
+into a Claude composer, the session goes `running` and `sessions wait` tracks
+the turn; otherwise the status stays as it was. A generic tmux pane of another
+agent keeps its pane-output status.
 
 ## Find exited sessions
 

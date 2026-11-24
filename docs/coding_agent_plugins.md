@@ -596,6 +596,23 @@ untrusted `<pasted_content>`;
 records the TUI behavior its spec relies on. `claude_tty` delegates to its
 composed Claude agent.
 
+### Pane composer reading (optional)
+
+An agent that can tell from a `capture-pane` snapshot whether its composer holds
+a typed, unsent message implements the `PaneComposerReading` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def pane_composer_holds_input(self, pane_text: str) -> bool: ...
+```
+
+Resume on a tmux or `claude_tty` pane presses Enter, which starts a turn only
+when it submits such a message. The transport reads the composer first, and the
+runtime marks the session `running` only on a submit; otherwise the transport's
+own status driver reports any turn. Without this protocol, resume never changes
+the status. Claude implements it; `claude_tty` delegates to its composed Claude
+agent.
+
 ## Token & context usage
 
 Waypoint tracks two independent token measurements, both agent-owned at the

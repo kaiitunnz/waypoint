@@ -89,7 +89,7 @@ ignore = [
 
 [tool.codespell]
 ignore-words-list = "pres,ratatui"
-skip = "*/package-lock.json,*.lock,*.png,*.jsonl,*.log,*/fixtures/claude_tty_pane/*"
+skip = "package-lock.json,*/package-lock.json,*.lock,*.png,*.jsonl,*.log,*/fixtures/claude_tty_pane/*"
 
 [tool.mypy]
 python_version = "3.12"

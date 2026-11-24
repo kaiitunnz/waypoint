@@ -644,6 +644,19 @@ def _string_value(
     return None
 
 
+# Without ``daemon_auto_start=false`` the TUI installs and detaches a managed
+# app-server daemon in CODEX_HOME that outlives the probe. ``-c`` (unlike
+# ``--disable``) is accepted by a codex that predates the feature.
+_CODEX_STATUS_ARGS = (
+    "-c",
+    "features.daemon_auto_start=false",
+    "-s",
+    "read-only",
+    "-a",
+    "never",
+)
+
+
 def _run_codex_status(
     binary: str,
     cwd: str,
@@ -656,7 +669,7 @@ def _run_codex_status(
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
-            [binary, "-s", "read-only", "-a", "never"],
+            [binary, *_CODEX_STATUS_ARGS],
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,

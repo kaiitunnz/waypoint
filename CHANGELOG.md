@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.28.0](https://github.com/kaiitunnz/waypoint/compare/v0.27.0...v0.28.0) (2026-11-24)
+
+
+### Features
+
+* add session lifecycle and held-message CLI commands ([#581](https://github.com/kaiitunnz/waypoint/issues/581)) ([0e2f124](https://github.com/kaiitunnz/waypoint/commit/0e2f124c6b12deb675ae7c8fb5489891c0b539dc))
+* mark sessions awaiting an answer to their own question ([#582](https://github.com/kaiitunnz/waypoint/issues/582)) ([5179ff0](https://github.com/kaiitunnz/waypoint/commit/5179ff07a6cff9dc0b892e4929590ec0918a05e9))
+* rank composer completions with fuzzy matching ([#569](https://github.com/kaiitunnz/waypoint/issues/569)) ([8ebede1](https://github.com/kaiitunnz/waypoint/commit/8ebede1fae437898ffe54c5736aea4fe36776bf9))
+
+
+### Bug Fixes
+
+* accept openai-codex 0.171.0 split thread items and bump the SDK ([#597](https://github.com/kaiitunnz/waypoint/issues/597)) ([3e8a3e6](https://github.com/kaiitunnz/waypoint/commit/3e8a3e6a6f3f7968b885751c17fbe416f10caf99))
+* follow a composer /clear onto its new claude_tty conversation ([#580](https://github.com/kaiitunnz/waypoint/issues/580)) ([5b453f8](https://github.com/kaiitunnz/waypoint/commit/5b453f856ed0d4ddf5130efec47f7e343e4a8c0e))
+* keep CLI help dumps working on typer 0.29 ([#598](https://github.com/kaiitunnz/waypoint/issues/598)) ([c47ee79](https://github.com/kaiitunnz/waypoint/commit/c47ee798d2e4aec4c1e3fa506bb648bcfe2d96b0))
+* replace the in-process session CLI group with sessions attach-tmux ([#592](https://github.com/kaiitunnz/waypoint/issues/592)) ([67191b2](https://github.com/kaiitunnz/waypoint/commit/67191b25199bd955cd44fd197d9b9f208ec60208))
+* settle resume status, refuse it on dialogs, accept new trust prompt ([#594](https://github.com/kaiitunnz/waypoint/issues/594)) ([2fd01bb](https://github.com/kaiitunnz/waypoint/commit/2fd01bb630130c64e071d9775a0564f862f3b0ee))
+* stop cancel-and-wait from swallowing the caller's cancellation ([#596](https://github.com/kaiitunnz/waypoint/issues/596)) ([72ee944](https://github.com/kaiitunnz/waypoint/commit/72ee94488d6bb7a98d211bc38348935bba99bce3))
+* stop tests and the Codex status probe from starting Codex daemons ([#593](https://github.com/kaiitunnz/waypoint/issues/593)) ([c26f5e7](https://github.com/kaiitunnz/waypoint/commit/c26f5e7cb49af74984d79788e98606dac8a133c7))
+
 ## [0.27.0](https://github.com/kaiitunnz/waypoint/compare/v0.26.2...v0.27.0) (2026-11-16)
 
 

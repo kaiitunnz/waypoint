@@ -2741,6 +2741,7 @@ class SessionRuntime:
         return stamped
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
+        self._require_spawner(request.spawner_session_id)
         try:
             target = await self.tmux.describe_target(request.tmux_target)
         except TmuxError as exc:
@@ -2765,6 +2766,7 @@ class SessionRuntime:
             source=SessionSource.ATTACHED_TMUX,
             transport=TMUX_TRANSPORT_ID,
             title=title,
+            spawner_session_id=request.spawner_session_id,
             cwd=target.cwd,
             repo_name=git_meta.repo_name,
             branch=git_meta.branch,

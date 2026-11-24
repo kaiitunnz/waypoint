@@ -1285,7 +1285,7 @@ class SessionCreateRequest(BaseModel):
     # Apply a session preset before validation: ``preset_id`` names a specific
     # preset; ``use_default_preset`` applies the deployment default. Explicit
     # request fields always win over preset values. Resolution happens at the
-    # request boundary (API / in-process CLI); the runtime stays preset-agnostic.
+    # API boundary; the runtime stays preset-agnostic.
     preset_id: str | None = None
     use_default_preset: bool = False
     # Launch under a named account/config-dir profile. Resolved at launch: the
@@ -1299,8 +1299,8 @@ class SessionCreateRequest(BaseModel):
 
 
 class SessionLaunchRequest(SessionCreateRequest):
-    # Boundary input for POST /api/sessions and the in-process CLI launch:
-    # ``backend`` may be omitted when a preset (or the default) supplies it.
+    # Boundary input for POST /api/sessions: ``backend`` may be omitted
+    # when a preset (or the default) supplies it.
     # ``cwd`` is never a preset field, so it stays effectively required — an
     # omitted cwd fails re-validation with a clean 400. Both are optional here
     # only so the resolver can merge and re-validate rather than 422 up-front.
@@ -1338,6 +1338,7 @@ class SessionAttachRequest(BaseModel):
     tmux_target: str
     backend_hint: BackendId | None = None
     title: str | None = None
+    spawner_session_id: str | None = Field(default=None, min_length=1)
 
 
 class SessionInputRequest(BaseModel):

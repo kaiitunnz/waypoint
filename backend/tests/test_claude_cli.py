@@ -309,9 +309,7 @@ async def test_can_use_tool_resolves_via_respond() -> None:
 
 
 @pytest.mark.asyncio
-async def test_live_tool_approval_ids_match_the_emitted_request_and_skip_questions() -> (
-    None
-):
+async def test_live_approval_ids_skip_questions_and_match_the_request() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, _ = _attach_state(adapter)

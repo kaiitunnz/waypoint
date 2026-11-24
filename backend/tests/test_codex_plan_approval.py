@@ -1,7 +1,6 @@
-"""Codex's plan approval lifecycle: the pending plan the feed lists and the
-``approve_plan`` check share one derivation."""
+"""Codex's ``PlanApprovalLifecycle`` and the current-plan lookup that
+``approve_plan`` shares with it."""
 
-import random
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -10,13 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from waypoint.backends.base import PlanApprovalLifecycle
-from waypoint.backends.codex.plugin import (
-    _PLAN_DECISIONS,
-    CodexPlugin,
-    _current_plan_text_for_item,
-    _plan_id_for_event,
-    _plan_text_for_event,
-)
+from waypoint.backends.codex.plugin import CodexPlugin, _current_plan_text_for_item
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     EventKind,
@@ -76,19 +69,13 @@ def seed_plan(
     text: str = "1. Do it",
     *,
     thread_id: str | None = None,
-    decisions: Any = None,
     envelope: bool = True,
 ) -> EventRecord:
     metadata: dict[str, Any] = {"item_type": "plan", "payload": {}}
     if plan_id:
         metadata["item_id"] = plan_id
     if envelope:
-        metadata["plan"] = {
-            "id": plan_id,
-            "text": text,
-            "source": "codex",
-            **({"decisions": decisions} if decisions is not None else {}),
-        }
+        metadata["plan"] = {"id": plan_id, "text": text, "source": "codex"}
     else:
         metadata["payload"]["item"] = {"id": plan_id, "type": "plan", "text": text}
     if thread_id:
@@ -273,26 +260,6 @@ def test_a_plan_on_this_thread_or_without_a_thread_is_pending(
     assert plan is not None and plan.plan_id == "plan-2"
 
 
-@pytest.mark.parametrize(
-    ("offered", "expected"),
-    [
-        (["cancel", "accept", "bogus"], ["accept", "cancel"]),
-        (["bogus"], ["accept", "acceptForSession", "decline", "cancel"]),
-        ("not-a-list", ["accept", "acceptForSession", "decline", "cancel"]),
-        (None, ["accept", "acceptForSession", "decline", "cancel"]),
-    ],
-)
-def test_decisions_are_the_offered_ones_in_canonical_order(
-    runtime: SessionRuntime, plugin: CodexPlugin, offered: Any, expected: list[str]
-) -> None:
-    make_session(runtime)
-    seed_plan(runtime, decisions=offered)
-
-    plan = pending(runtime, plugin)
-
-    assert plan is not None and plan.decisions == expected
-
-
 def test_affects_plan_approval_recognizes_plan_items_and_decisions(
     plugin: CodexPlugin,
 ) -> None:
@@ -331,62 +298,3 @@ def test_storage_plan_queries_are_session_scoped_and_ordered(
     decisions = runtime.storage.plan_decision_events("sess", first.sequence)
     assert [e.metadata["plan_item_id"] for e in decisions] == ["plan-1"]
     assert runtime.storage.plan_decision_events("sess", second.sequence + 1) == []
-
-
-def _full_scan_plan_text(runtime: SessionRuntime, plan_item_id: str) -> str:
-    """Reference implementation: walk every event newest first."""
-    decided: set[str] = set()
-    for event in reversed(runtime.storage.list_events("sess")):
-        if event.metadata.get("item_type") != "plan":
-            decision_plan_id = event.metadata.get("plan_item_id")
-            if (
-                isinstance(decision_plan_id, str)
-                and event.metadata.get("plan_decision") in _PLAN_DECISIONS
-            ):
-                decided.add(decision_plan_id)
-            continue
-        current_plan_id = _plan_id_for_event(event)
-        if not current_plan_id or current_plan_id in decided:
-            return ""
-        if current_plan_id != plan_item_id:
-            return ""
-        text = _plan_text_for_event(event)
-        if text:
-            return text
-    return ""
-
-
-@pytest.mark.parametrize("seed", range(40))
-def test_plan_lookup_matches_a_full_scan_of_the_events(
-    runtime: SessionRuntime, seed: int
-) -> None:
-    rng = random.Random(seed)
-    make_session(runtime)
-    for _ in range(rng.randint(1, 8)):
-        plan_id = rng.choice(["a", "b", "c", None])
-        roll = rng.random()
-        if roll < 0.55:
-            seed_plan(
-                runtime,
-                plan_id,
-                rng.choice(["", "text-1", "text-2"]),
-                envelope=rng.random() < 0.5,
-            )
-        elif roll < 0.9:
-            decide(runtime, plan_id or "a", rng.choice(["accept", "decline", "bogus"]))
-        else:
-            runtime.storage.append_event(
-                EventRecord(
-                    session_id="sess",
-                    ts=datetime.now(UTC),
-                    kind=EventKind.AGENT_OUTPUT,
-                    text="chatter",
-                    metadata={},
-                    sequence=runtime.storage.next_sequence("sess"),
-                )
-            )
-
-    for plan_item_id in ("a", "b", "c", "missing"):
-        assert _current_plan_text_for_item(
-            runtime, "sess", plan_item_id
-        ) == _full_scan_plan_text(runtime, plan_item_id)

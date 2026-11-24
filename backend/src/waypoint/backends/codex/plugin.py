@@ -45,6 +45,7 @@ from waypoint.backends.codex.history import (
     subagent_report_sources,
     turns_to_events,
 )
+from waypoint.backends.codex.normalize import PLAN_DECISIONS
 from waypoint.backends.codex.pane import composer_ready, composer_submitted
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_IDS,
@@ -792,7 +793,7 @@ class CodexPlugin(DefaultLaunchContract):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="codex session is not in plan mode",
             )
-        if decision not in _PLAN_DECISIONS:
+        if decision not in PLAN_DECISIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"unsupported plan decision: {decision}",
@@ -866,23 +867,15 @@ class CodexPlugin(DefaultLaunchContract):
         current = _current_plan(runtime, session.id)
         if current is None:
             return None
-        # A fork copies its parent's events; a plan from another thread can
-        # never be approved on this one.
+        # A fork copies its parent's events, including plans of the parent's thread.
         thread_id = session.transport_state.get("thread_id")
         plan_thread = _event_thread_id(current.event)
         if plan_thread and thread_id and plan_thread != thread_id:
             return None
-        envelope = current.event.metadata.get("plan")
-        offered = envelope.get("decisions") if isinstance(envelope, dict) else None
-        decisions = [
-            decision
-            for decision in _PLAN_DECISION_ORDER
-            if isinstance(offered, list) and decision in offered
-        ]
         return PendingPlanApproval(
             plan_id=current.plan_id,
             text=current.text,
-            decisions=decisions or list(_PLAN_DECISION_ORDER),
+            decisions=list(PLAN_DECISIONS),
             supports_note=True,
             availability=(
                 "starting" if session.status is SessionStatus.STARTING else "actionable"
@@ -2165,12 +2158,10 @@ class _CurrentPlan(NamedTuple):
 
 
 def _current_plan(runtime: "SessionRuntime", session_id: str) -> _CurrentPlan | None:
-    """The plan awaiting a decision.
-
-    The newest plan item defines the current plan id: with no resolvable id, a
-    decision recorded after it, or only older items of another id, there is no
-    current plan. Its text is the newest non-empty one among that id's items.
-    """
+    """The plan awaiting a decision: the newest plan item names it, and its text
+    is the newest non-empty one among that id's items. ``None`` when the newest
+    item has no id, a decision followed it, or an older item of another id is
+    reached before any text."""
     current_id: str | None = None
     for event in runtime.storage.plan_item_events(session_id):
         plan_id = _plan_id_for_event(event)
@@ -2182,7 +2173,7 @@ def _current_plan(runtime: "SessionRuntime", session_id: str) -> _CurrentPlan | 
                 session_id, event.sequence
             )
             if isinstance(decision.metadata.get("plan_item_id"), str)
-            and decision.metadata.get("plan_decision") in _PLAN_DECISIONS
+            and decision.metadata.get("plan_decision") in PLAN_DECISIONS
         }
         if plan_id in decided:
             return None
@@ -2235,10 +2226,6 @@ def _plan_text_for_event(event: EventRecord) -> str:
     if isinstance(text, str) and text.strip():
         return text.strip()
     return ""
-
-
-_PLAN_DECISION_ORDER = ("accept", "acceptForSession", "decline", "cancel")
-_PLAN_DECISIONS = frozenset(_PLAN_DECISION_ORDER)
 
 
 def _format_plan_approval_prompt(plan: str, note: str | None = None) -> str:

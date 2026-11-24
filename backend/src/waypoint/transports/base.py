@@ -55,10 +55,10 @@ class TransportAdapter(ABC):
     @abstractmethod
     def has_pending_approval(self, session: SessionRecord) -> bool: ...
 
-    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...] | None:
-        """Ids of the tool approvals the provider is waiting on, or ``None``
-        when the transport can only say whether any is pending."""
-        return None
+    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
+        """Ids of the tool approvals the provider is waiting on. A structured
+        transport overrides this; the pending-asks feed lists only these."""
+        return ()
 
     async def input_blocked(self, session: SessionRecord) -> bool:
         """Whether a dialog on the session would capture sent input."""

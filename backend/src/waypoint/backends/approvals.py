@@ -36,20 +36,14 @@ _RESOLUTION_TEXT = re.compile(r"Approval response sent|Approval timed out", re.I
 
 
 def approval_request_id(event: EventRecord) -> str | None:
-    """The id the approve endpoint takes for an approval request event.
-
-    Every backend sets ``metadata["interaction"]["request_id"]`` to it; the
-    other keys cover events recorded before that envelope existed.
-    """
-    metadata = event.metadata
-    interaction = metadata.get(INTERACTION_METADATA_KEY)
-    candidates = [
+    """The id the approve endpoint takes for an approval request event: the
+    interaction envelope's ``request_id``, else the top-level ``approval_id``
+    events recorded before that envelope carry."""
+    interaction = event.metadata.get(INTERACTION_METADATA_KEY)
+    candidates = (
         interaction.get("request_id") if isinstance(interaction, dict) else None,
-        metadata.get("approval_id"),
-    ]
-    approval = metadata.get("approval")
-    if isinstance(approval, dict):
-        candidates.append(approval.get("approval_id"))
+        event.metadata.get("approval_id"),
+    )
     return next((c for c in candidates if isinstance(c, str) and c), None)
 
 

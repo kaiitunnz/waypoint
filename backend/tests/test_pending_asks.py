@@ -16,7 +16,10 @@ from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     EventKind,
     EventRecord,
+    PendingApprovalAsk,
     PendingAsk,
+    PendingPlanAsk,
+    PendingQuestionAsk,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -26,8 +29,8 @@ from waypoint.storage import Storage
 from waypoint.transports.base import TransportAdapter
 
 
-class FakePlugin:
-    """A question-capable plugin that can also report a plan."""
+class QuestionOnlyPlugin:
+    """A question-capable plugin without the plan protocol."""
 
     question_parks_turn = True
     capabilities = SimpleNamespace(
@@ -38,8 +41,6 @@ class FakePlugin:
     def __init__(self) -> None:
         self.on_delete: Callable[[SessionRecord], Awaitable[None]] | None = None
         self.liveness: dict[str, QuestionLiveness] = {}
-        self.plan: PendingPlanApproval | None = None
-        self.plan_modes: set[str | None] | None = None
 
     def question_liveness(
         self, runtime: Any, session: SessionRecord, tool_use_ids: list[str]
@@ -53,18 +54,6 @@ class FakePlugin:
         self, runtime: Any, session: SessionRecord, tool_use_id: str
     ) -> QuestionDecline:
         return QuestionDecline.TURN_RESUMES
-
-    def pending_plan_approval(
-        self, runtime: Any, session: SessionRecord
-    ) -> PendingPlanApproval | None:
-        if self.plan_modes is not None and session.permission_mode not in (
-            self.plan_modes
-        ):
-            return None
-        return self.plan
-
-    def affects_plan_approval(self, event: EventRecord) -> bool:
-        return event.metadata.get("item_type") == "plan"
 
     def validate_permission_mode(self, mode: str) -> str:
         return mode
@@ -82,19 +71,32 @@ class FakePlugin:
             await self.on_delete(session)
 
 
-class PlainPlugin(FakePlugin):
-    """A plugin without the plan protocol."""
+class FakePlugin(QuestionOnlyPlugin):
+    """A plugin that also reports a plan."""
 
-    pending_plan_approval = None  # type: ignore[assignment]
-    affects_plan_approval = None  # type: ignore[assignment]
+    def __init__(self) -> None:
+        super().__init__()
+        self.plan: PendingPlanApproval | None = None
+        self.plan_modes: set[str | None] | None = None
+
+    def pending_plan_approval(
+        self, runtime: Any, session: SessionRecord
+    ) -> PendingPlanApproval | None:
+        if self.plan_modes is not None and session.permission_mode not in (
+            self.plan_modes
+        ):
+            return None
+        return self.plan
+
+    def affects_plan_approval(self, event: EventRecord) -> bool:
+        return event.metadata.get("item_type") == "plan"
 
 
 class FakeTransport(TransportAdapter):
     is_structured = True
 
     def __init__(self) -> None:
-        self.ids: tuple[str, ...] | None = ()
-        self.pending = False
+        self.ids: tuple[str, ...] = ()
 
     async def send_input(self, session, text, attachments=None) -> None: ...
 
@@ -108,9 +110,9 @@ class FakeTransport(TransportAdapter):
         return True
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
-        return self.pending if self.ids is None else bool(self.ids)
+        return bool(self.ids)
 
-    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...] | None:
+    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
         return self.ids
 
 
@@ -137,9 +139,6 @@ def add_session(
     status: SessionStatus = SessionStatus.WAITING_INPUT,
     source: SessionSource = SessionSource.MANAGED,
     title: str = "work",
-    backend: str = "claude_code",
-    transport: str = "claude_cli",
-    permission_mode: str | None = None,
     spawner: str | None = None,
 ) -> None:
     session_dir = runtime.settings.sessions_dir / session_id
@@ -148,9 +147,9 @@ def add_session(
     runtime.storage.create_session(
         SessionRecord(
             id=session_id,
-            backend=backend,
+            backend="claude_code",
             source=source,
-            transport=transport,
+            transport="claude_cli",
             title=title,
             cwd="/tmp",
             status=status,
@@ -159,7 +158,6 @@ def add_session(
             last_event_at=now,
             raw_log_path=str(session_dir / "raw.log"),
             structured_log_path=str(session_dir / "events.jsonl"),
-            permission_mode=permission_mode,
             spawner_session_id=spawner,
         )
     )
@@ -198,16 +196,12 @@ async def ask(
     questions: Any = QUESTIONS,
     *,
     session_id: str = "s1",
-    path: str = "payload",
 ) -> None:
     metadata: dict[str, Any] = {
         "tool_name": "AskUserQuestion",
         "tool_use_id": tool_use_id,
+        "payload": {"input": {"questions": questions}},
     }
-    if path == "payload":
-        metadata["payload"] = {"input": {"questions": questions}}
-    else:
-        metadata["tool_input"] = {"questions": questions}
     await runtime._emit_adapter_event(
         session_id,
         EventKind.TOOL_CALL,
@@ -268,6 +262,12 @@ async def start(env: Env) -> None:
     env.published()
 
 
+def only[T](got: list[PendingAsk], kind: type[T]) -> T:
+    [item] = got
+    assert isinstance(item, kind)
+    return item
+
+
 async def items(env: Env) -> list[PendingAsk]:
     await env.runtime.asks.flush(set())
     return (await env.runtime.asks.snapshot()).items
@@ -282,7 +282,7 @@ async def test_question_item_carries_the_inline_answer_payload(env: Env) -> None
 
     snapshot = await env.runtime.asks.snapshot()
 
-    [item] = snapshot.items
+    item = only(snapshot.items, PendingQuestionAsk)
     assert item.id == "question:s1:q1"
     assert item.kind == "question"
     assert (item.session_id, item.session_title, item.session_backend) == (
@@ -294,7 +294,6 @@ async def test_question_item_carries_the_inline_answer_payload(env: Env) -> None
     assert item.availability == "actionable"
     assert item.title == "Which database?"
     assert item.sequence == 1
-    assert item.question is not None
     assert item.question.tool_use_id == "q1"
     [prompt] = item.question.questions
     assert (prompt.question, prompt.header, prompt.multi_select) == (
@@ -307,15 +306,15 @@ async def test_question_item_carries_the_inline_answer_payload(env: Env) -> None
         ("SQLite  (recommended) ", None, True),
         ("Redis", None, False),
     ]
-    assert item.approval is None and item.plan is None
+    assert {"approval", "plan"}.isdisjoint(item.model_dump(mode="json"))
 
 
-async def test_question_reads_tool_input_and_skips_unparseable_calls(env: Env) -> None:
-    await ask(env.runtime, "from-tool-input", path="tool_input")
+async def test_unparseable_questions_are_skipped(env: Env) -> None:
+    await ask(env.runtime, "valid")
     await ask(env.runtime, "no-questions", questions=[])
     await ask(env.runtime, "bad-entries", questions=["x", {"options": []}])
 
-    assert [i.id for i in await items(env)] == ["question:s1:from-tool-input"]
+    assert [i.id for i in await items(env)] == ["question:s1:valid"]
 
 
 async def test_subagent_sessions_are_included_with_their_spawner(env: Env) -> None:
@@ -362,11 +361,10 @@ async def test_approval_item_carries_a_bounded_tool_call(env: Env) -> None:
         },
     )
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
-    assert item.kind == "approval" and item.availability == "actionable"
+    assert item.availability == "actionable"
     assert item.title == "Approve Bash"
-    assert item.approval is not None
     approval_payload = item.approval
     assert approval_payload.approval_id == "a1"
     assert approval_payload.tool_name == "Bash"
@@ -376,7 +374,6 @@ async def test_approval_item_carries_a_bounded_tool_call(env: Env) -> None:
     assert tool_input["command"] == "x" * TEXT_LIMIT + "…"
     assert tool_input["nested"]["items"] == ["x" * TEXT_LIMIT + "…", "short"]
     assert tool_input["ok"] == "fine"
-    assert len(approval_payload.summary) == TEXT_LIMIT + 1
     assert item.body is not None and len(item.body) == TEXT_LIMIT + 1
     assert approval_payload.decisions == ["approve", "decline"]
     assert approval_payload.supports_note is True
@@ -386,39 +383,10 @@ async def test_short_tool_input_is_not_flagged(env: Env) -> None:
     env.transport.ids = ("a1",)
     await approval(env.runtime, "a1")
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
-    assert item.approval is not None
     assert item.approval.tool_input == {"command": "ls"}
     assert item.approval.tool_input_truncated is False
-
-
-async def test_approval_without_a_tool_reads_the_nested_shape(env: Env) -> None:
-    env.transport.ids = ("p1",)
-    await env.runtime._emit_adapter_event(
-        "s1",
-        EventKind.APPROVAL_REQUEST,
-        "Bash: bash (ls)",
-        {
-            "approval": {
-                "approval_id": "p1",
-                "tool_name": "Bash",
-                "tool_input": {"command": "ls"},
-            },
-            "interaction": {
-                "kind": "approval",
-                "request_id": "p1",
-                "title": "Bash: bash",
-            },
-        },
-        SessionStatus.WAITING_INPUT,
-    )
-
-    [item] = (await env.runtime.asks.snapshot()).items
-
-    assert item.approval is not None
-    assert (item.approval.approval_id, item.approval.tool_name) == ("p1", "Bash")
-    assert item.approval.tool_input == {"command": "ls"}
 
 
 async def test_toolless_approval_uses_its_text(env: Env) -> None:
@@ -436,12 +404,11 @@ async def test_toolless_approval_uses_its_text(env: Env) -> None:
         extra={"method": "item/commandExecution/requestApproval"},
     )
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
     assert item.title == "Approve command: ls"
-    assert item.approval is not None
+    assert item.body == "Approve command: ls"
     assert item.approval.tool_name is None and item.approval.tool_input is None
-    assert item.approval.summary == "Approve command: ls"
 
 
 async def test_plan_approval_event_becomes_a_plan_item_with_whole_text(
@@ -464,11 +431,10 @@ async def test_plan_approval_event_becomes_a_plan_item_with_whole_text(
         },
     )
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingPlanAsk)
 
     assert item.kind == "plan_approval" and item.id == "plan_approval:s1:plan-1"
-    assert item.body is None and item.approval is None
-    assert item.plan is not None
+    assert item.body is None
     assert item.plan.text == plan and len(plan) > TEXT_LIMIT
     assert (item.plan.plan_id, item.plan.resolve_via) == ("plan-1", "approve")
     assert item.plan.decisions == ["approve", "decline"]
@@ -490,10 +456,9 @@ async def test_plan_approval_without_plan_text_degrades_to_an_approval(
         },
     )
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
-    assert item.kind == "approval" and item.plan is None
-    assert item.approval is not None and item.approval.approval_id == "plan-1"
+    assert item.approval.approval_id == "plan-1"
 
 
 def plugin_plan(
@@ -513,11 +478,10 @@ def plugin_plan(
 async def test_plugin_plan_item_resolves_through_approve_plan(env: Env) -> None:
     env.plugin.plan = plugin_plan(availability="starting")
 
-    [item] = (await env.runtime.asks.snapshot()).items
+    item = only((await env.runtime.asks.snapshot()).items, PendingPlanAsk)
 
     assert item.kind == "plan_approval" and item.id == "plan_approval:s1:plan-a"
     assert item.availability == "starting" and item.sequence == 7
-    assert item.plan is not None
     assert (item.plan.plan_id, item.plan.resolve_via, item.plan.supports_note) == (
         "plan-a",
         "approve_plan",
@@ -526,12 +490,16 @@ async def test_plugin_plan_item_resolves_through_approve_plan(env: Env) -> None:
     assert item.plan.decisions == ["accept", "decline"]
 
 
-async def test_plan_protocol_is_optional(env: Env, monkeypatch) -> None:
-    plain = PlainPlugin()
+async def test_plan_protocol_is_optional(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plain = QuestionOnlyPlugin()
     monkeypatch.setattr(env.runtime.registry, "plugin_for", lambda session: plain)
-    plain.plan = plugin_plan()  # never asked: the plugin lacks the protocol
+    await ask(env.runtime, "q1")
 
-    assert (await env.runtime.asks.snapshot()).items == []
+    assert [i.id for i in (await env.runtime.asks.snapshot()).items] == [
+        "question:s1:q1"
+    ]
 
 
 # ── Staleness ───────────────────────────────────────────────────────────
@@ -587,27 +555,6 @@ async def test_approval_drops_on_resolution_notes(env: Env) -> None:
     assert [i.id for i in await items(env)] == ["approval:s1:open"]
 
 
-async def test_approval_resolves_by_nested_id(env: Env) -> None:
-    env.transport.ids = ("p1",)
-    await env.runtime._emit_adapter_event(
-        "s1",
-        EventKind.APPROVAL_REQUEST,
-        "Bash: ls",
-        {
-            "approval": {"approval_id": "p1"},
-            "interaction": {"kind": "approval", "request_id": "p1"},
-        },
-        SessionStatus.WAITING_INPUT,
-    )
-    await start(env)
-    assert len(await items(env)) == 1
-
-    env.transport.ids = ()
-    await note(env.runtime, "Approval response sent: approve", {"approval_id": "p1"})
-
-    assert await items(env) == []
-
-
 async def test_dead_approval_events_are_not_listed_next_to_a_live_one(
     env: Env,
 ) -> None:
@@ -616,19 +563,6 @@ async def test_dead_approval_events_are_not_listed_next_to_a_live_one(
     env.transport.ids = ("live",)
 
     assert [i.id for i in await items(env)] == ["approval:s1:live"]
-
-
-async def test_transport_without_ids_falls_back_to_the_boolean(env: Env) -> None:
-    await approval(env.runtime, "a1")
-    env.transport.ids = None
-    env.transport.pending = False
-    await start(env)
-    assert await items(env) == []
-
-    env.transport.pending = True
-    env.runtime.asks.mark_dirty("s1")
-
-    assert [i.id for i in await items(env)] == ["approval:s1:a1"]
 
 
 async def test_approvals_need_a_structured_transport(env: Env) -> None:
@@ -675,16 +609,32 @@ async def test_terminate_event_drops_a_plan_only_session(env: Env) -> None:
     assert env.published()[-1]["items"] == []
 
 
-async def test_deleted_session_items_drop_and_are_published(env: Env) -> None:
+async def test_a_session_deleted_during_the_scan_does_not_linger(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_session(env.runtime, "a")
     await ask(env.runtime, "q1")
-    await start(env)
+    await ask(env.runtime, "q-a", session_id="a")
+    feed = env.runtime.asks
+    derive = feed._derive_into_entries
+    first, victim = (s.id for s in env.runtime.storage.list_live_sessions())
+    derived: list[str] = []
 
-    env.runtime.asks.forget("s1")
-    env.runtime.storage.delete_session("s1")
-    await env.runtime.asks.flush(set())
+    def derive_then_delete(session: SessionRecord) -> None:
+        derived.append(session.id)
+        if session.id == first:
+            # The scan still holds the victim's record when it is deleted.
+            env.runtime.storage.delete_session(victim)
+            feed.mark_dirty(victim)
+        derive(session)
 
-    [payload] = env.published()
-    assert payload["items"] == []
+    monkeypatch.setattr(feed, "_derive_into_entries", derive_then_delete)
+
+    snapshot = await feed.snapshot()
+
+    assert derived == [first, victim]
+    assert [i.session_id for i in snapshot.items] == [first]
+    assert victim not in feed._entries
 
 
 async def test_error_session_keeps_questions_but_drops_approvals(env: Env) -> None:
@@ -886,21 +836,6 @@ async def test_reading_the_feed_leaves_the_question_tracker_alone(env: Env) -> N
     assert env.runtime.storage.list_events("s1") == events_before
 
 
-async def test_mode_change_adds_and_drops_a_plan(env: Env) -> None:
-    env.plugin.plan = plugin_plan()
-    env.plugin.plan_modes = {"plan"}
-    await start(env)
-    assert env.runtime.asks._current == []
-
-    env.runtime.storage.update_session("s1", permission_mode="plan")
-    env.runtime.asks.mark_dirty("s1")
-    assert [i.id for i in await items(env)] == ["plan_approval:s1:plan-a"]
-
-    env.runtime.storage.update_session("s1", permission_mode="default")
-    env.runtime.asks.mark_dirty("s1")
-    assert await items(env) == []
-
-
 async def test_a_mode_change_without_a_hook_still_rederives_on_state_churn(
     env: Env,
 ) -> None:
@@ -972,8 +907,8 @@ async def test_state_changes_during_the_scan_are_applied_afterwards(
     derive = feed._derive_into_entries
     changed: list[str] = []
 
-    def derive_then_change(session: SessionRecord, *, events_changed: bool) -> None:
-        derive(session, events_changed=events_changed)
+    def derive_then_change(session: SessionRecord) -> None:
+        derive(session)
         if session.id == "a" and not changed:
             # The session ends after the scan has already listed its question;
             # the broadcast tick for it arrives before the scan finishes.
@@ -989,10 +924,10 @@ async def test_state_changes_during_the_scan_are_applied_afterwards(
     assert all(i.session_id != "a" for i in snapshot.items)
 
 
-async def test_a_failed_first_scan_is_retried_by_the_next_read(
-    env: Env, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await ask(env.runtime, "q1")
+@pytest.fixture
+def first_scan_fails(env: Env, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the first scan of the live sessions raise; the list holds one entry
+    per scan attempt."""
     real = env.runtime.storage.list_live_sessions
     calls: list[int] = []
 
@@ -1003,29 +938,26 @@ async def test_a_failed_first_scan_is_retried_by_the_next_read(
         return real()
 
     monkeypatch.setattr(env.runtime.storage, "list_live_sessions", flaky)
+    return calls
+
+
+async def test_a_failed_first_scan_is_retried_by_the_next_read(
+    env: Env, first_scan_fails: list[int]
+) -> None:
+    await ask(env.runtime, "q1")
 
     with pytest.raises(RuntimeError):
         await env.runtime.asks.snapshot()
     snapshot = await env.runtime.asks.snapshot()
 
     assert [i.id for i in snapshot.items] == ["question:s1:q1"]
-    assert len(calls) == 2
+    assert len(first_scan_fails) == 2
 
 
 async def test_a_flush_restarts_a_failed_scan(
-    env: Env, monkeypatch: pytest.MonkeyPatch
+    env: Env, first_scan_fails: list[int]
 ) -> None:
     await ask(env.runtime, "q1")
-    real = env.runtime.storage.list_live_sessions
-    calls: list[int] = []
-
-    def flaky() -> list[SessionRecord]:
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("database is locked")
-        return real()
-
-    monkeypatch.setattr(env.runtime.storage, "list_live_sessions", flaky)
     with pytest.raises(RuntimeError):
         await env.runtime.asks.snapshot()
 
@@ -1055,7 +987,8 @@ async def test_deeply_nested_tool_input_is_kept_and_flagged_only_when_cut(
 
     first, second = (await env.runtime.asks.snapshot()).items
 
-    assert first.approval is not None and second.approval is not None
+    assert isinstance(first, PendingApprovalAsk)
+    assert isinstance(second, PendingApprovalAsk)
     assert first.approval.tool_input == nest({"n": 5, "s": "short"})
     assert first.approval.tool_input_truncated is False
     assert second.approval.tool_input_truncated is True

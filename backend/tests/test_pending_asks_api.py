@@ -142,7 +142,8 @@ async def test_pending_asks_lists_the_open_asks(
     assert item["question"]["questions"][0]["options"] == [
         {"label": "yes", "description": None, "recommended": False}
     ]
-    assert item["approval"] is None and item["plan"] is None
+    assert item["kind"] == "question"
+    assert "approval" not in item and "plan" not in item
 
 
 def test_stream_sends_the_feed_after_the_session_list_then_live_changes(

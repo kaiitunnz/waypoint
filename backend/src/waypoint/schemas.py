@@ -4,14 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    StringConstraints,
-    model_validator,
-)
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from waypoint.launch_env import LaunchEnv
 
@@ -1251,7 +1244,6 @@ class PendingQuestionsSnapshot(BaseModel):
     revision: int = 0
 
 
-PendingAskKind = Literal["question", "approval", "plan_approval"]
 PendingAskAvailability = PendingQuestionAvailability
 PendingAskPlanResolver = Literal["approve", "approve_plan"]
 
@@ -1281,7 +1273,6 @@ class PendingAskApproval(BaseModel):
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
     tool_input_truncated: bool = False
-    summary: str
     decisions: list[str] = Field(default_factory=list)
     supports_note: bool = False
 
@@ -1291,18 +1282,14 @@ class PendingAskPlan(BaseModel):
     text: str
     decisions: list[str] = Field(default_factory=list)
     supports_note: bool = False
-    # ``approve`` answers through ``/approve`` with ``approval_id=plan_id``;
-    # ``approve_plan`` through ``/approve-plan`` with ``plan_item_id=plan_id``.
     resolve_via: PendingAskPlanResolver
 
 
-class PendingAsk(BaseModel):
-    """One human-actionable request in one session, with the payload an inline
-    answer needs. Exactly one of ``question`` / ``approval`` / ``plan`` is set,
-    matching ``kind``."""
+class PendingAskBase(BaseModel):
+    """One human-actionable request in one session. The subclass for each
+    ``kind`` carries the payload an inline answer needs."""
 
     id: str
-    kind: PendingAskKind
     session_id: str
     session_title: str
     session_backend: str
@@ -1312,21 +1299,27 @@ class PendingAsk(BaseModel):
     availability: PendingAskAvailability
     title: str
     body: str | None = None
-    question: PendingAskQuestion | None = None
-    approval: PendingAskApproval | None = None
-    plan: PendingAskPlan | None = None
 
-    @model_validator(mode="after")
-    def _payload_matches_kind(self) -> Self:
-        payloads = {
-            "question": self.question,
-            "approval": self.approval,
-            "plan_approval": self.plan,
-        }
-        present = [kind for kind, payload in payloads.items() if payload is not None]
-        if present != [self.kind]:
-            raise ValueError(f"{self.kind} ask must carry only its own payload")
-        return self
+
+class PendingQuestionAsk(PendingAskBase):
+    kind: Literal["question"] = "question"
+    question: PendingAskQuestion
+
+
+class PendingApprovalAsk(PendingAskBase):
+    kind: Literal["approval"] = "approval"
+    approval: PendingAskApproval
+
+
+class PendingPlanAsk(PendingAskBase):
+    kind: Literal["plan_approval"] = "plan_approval"
+    plan: PendingAskPlan
+
+
+PendingAsk = Annotated[
+    PendingQuestionAsk | PendingApprovalAsk | PendingPlanAsk,
+    Field(discriminator="kind"),
+]
 
 
 class PendingAsksSnapshot(BaseModel):

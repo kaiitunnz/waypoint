@@ -43,14 +43,12 @@ def event(
             {
                 "interaction": {"request_id": "from-interaction"},
                 "approval_id": "top-level",
-                "approval": {"approval_id": "nested"},
             },
             "from-interaction",
         ),
-        ({"approval_id": "top-level", "approval": {"approval_id": "n"}}, "top-level"),
-        ({"approval": {"approval_id": "nested"}}, "nested"),
+        ({"approval_id": "top-level"}, "top-level"),
         ({"interaction": {"request_id": ""}, "approval_id": "top-level"}, "top-level"),
-        ({"interaction": "bogus", "approval": ["bogus"]}, None),
+        ({"interaction": "bogus"}, None),
         ({}, None),
     ],
 )
@@ -60,23 +58,26 @@ def test_approval_request_id_prefers_the_interaction_envelope(
     assert approval_request_id(event(metadata=metadata)) == expected
 
 
-def test_a_resolution_note_dequeues_a_request_whose_id_is_nested() -> None:
-    # OpenCode's request keeps its id in ``approval`` / ``interaction`` only.
-    opencode = event(
-        metadata={
-            "approval": {"approval_id": "perm-1"},
-            "interaction": {"request_id": "perm-1"},
-        }
-    )
-    other = event(metadata={"approval_id": "other"}, sequence=2)
-    answered = event(
-        EventKind.SYSTEM_NOTE,
-        "Approval response sent: approve",
-        {"approval_id": "perm-1"},
+def test_a_resolution_note_dequeues_the_request_it_names() -> None:
+    # OpenCode's request has no top-level ``approval_id``; older events have no
+    # interaction envelope.
+    opencode = event(metadata={"interaction": {"request_id": "perm-1"}})
+    older = event(metadata={"approval_id": "old"}, sequence=2)
+    other = event(
+        metadata={"interaction": {"request_id": "other"}, "approval_id": "other"},
         sequence=3,
     )
+    notes = [
+        event(
+            EventKind.SYSTEM_NOTE,
+            "Approval response sent: approve",
+            {"approval_id": approval_id},
+            sequence=4 + index,
+        )
+        for index, approval_id in enumerate(("perm-1", "old"))
+    ]
 
-    assert open_approval_requests([opencode, other, answered]) == [other]
+    assert open_approval_requests([opencode, older, other, *notes]) == [other]
 
 
 def test_is_approval_resolution_matches_text_case_insensitively() -> None:

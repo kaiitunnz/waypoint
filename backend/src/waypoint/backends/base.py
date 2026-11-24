@@ -185,8 +185,7 @@ class QuestionLifecycle(Protocol):
 
 @runtime_checkable
 class PlanApprovalLifecycle(Protocol):
-    """An agent whose plans are approved through ``approve_plan`` rather than an
-    approval request.
+    """An agent that decides plans through ``approve_plan``.
 
     The pending-asks feed asks it which plan, if any, awaits the human. An agent
     that raises plan approvals as approval requests (``interaction.kind ==

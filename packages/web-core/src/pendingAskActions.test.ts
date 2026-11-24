@@ -9,6 +9,7 @@ import {
   isAnswerable,
   isAgentNotReady,
   planActions,
+  sessionScopedAllow,
   planPreview,
   respondToAsk,
   retryWhileNotReady,
@@ -121,6 +122,24 @@ describe("decisions", () => {
     ]);
   });
 
+  it("sends the agent's own id for the session-scoped allow, whatever its spelling", () => {
+    for (const id of ["acceptForSession", "allow_for_session", "approve-for-this-session", "AllowForSession"]) {
+      const actions = approvalActions(approval({ decisions: ["approve", id, "decline"] }));
+      expect(actions.map((a) => [a.decision, a.label])).toEqual([
+        ["accept", "Approve"],
+        [id, "For this session"],
+        ["decline", "Decline"],
+      ]);
+    }
+    expect(sessionScopedAllow(["approve", "acceptAlways", "decline"])).toBeUndefined();
+    expect(sessionScopedAllow([])).toBeUndefined();
+  });
+
+  it("keeps Approve primary and Decline last", () => {
+    const actions = approvalActions(approval({ decisions: ["approve", "acceptForSession", "decline"] }));
+    expect(actions.map((a) => a.tone)).toEqual(["primary", "quiet", "danger"]);
+  });
+
   it("previews the command or the edited file", () => {
     expect(approvalPreview(approval())).toEqual({ kind: "command", text: "git push -u origin feat/x" });
     expect(approvalPreview(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } }))).toEqual({
@@ -212,6 +231,8 @@ describe("respondToAsk", () => {
     expect(api.approveSession).toHaveBeenCalledWith("h", "t", "s1", "accept", undefined, "p1");
     await respondToAsk("h", "t", plan("approve_plan"), { kind: "decision", decision: "accept", note: "go" });
     expect(api.approvePlan).toHaveBeenCalledWith("h", "t", "s1", "p1", "accept", "go");
+    await respondToAsk("h", "t", plan("approve_plan"), { kind: "decision", decision: "allow_for_session" });
+    expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "acceptForSession", undefined);
   });
 
   it("retries a 409 on the way", async () => {

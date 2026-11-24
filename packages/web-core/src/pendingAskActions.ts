@@ -69,7 +69,9 @@ export function buildAnswer(prompts: PendingAskPrompt[], picks: PromptPick[]): B
 
 // ─── Approvals and plans ───
 
-export type AskDecision = "accept" | "acceptForSession" | "decline";
+// The id sent to the approve endpoint: `accept` and `decline` are understood by
+// every agent; the session-scoped allow is the agent's own advertised id.
+export type AskDecision = string;
 
 export interface DecisionAction {
   decision: AskDecision;
@@ -77,14 +79,21 @@ export interface DecisionAction {
   tone: "primary" | "quiet" | "danger";
 }
 
-// Approve and Decline always show (every agent maps them to allow and deny); an
-// escalation only when the agent lists it.
+// "acceptForSession", "allow_for_session", "approve-for-this-session": matched by
+// shape so no agent is named.
+const SESSION_ALLOW = /^(accept|allow|approve)(for)?(this)?session$/;
+
+export function sessionScopedAllow(decisions: readonly string[]): string | undefined {
+  return decisions.find((decision) => SESSION_ALLOW.test(decision.toLowerCase().replace(/[^a-z]/g, "")));
+}
+
+// Approve and Decline always show (every agent maps them to allow and deny); the
+// session-scoped allow shows whenever the agent lists one.
 function decisionActions(decisions: readonly string[]): DecisionAction[] {
+  const forSession = sessionScopedAllow(decisions);
   return [
     { decision: "accept", label: "Approve", tone: "primary" },
-    ...(decisions.includes("acceptForSession")
-      ? [{ decision: "acceptForSession" as const, label: "For this session", tone: "quiet" as const }]
-      : []),
+    ...(forSession ? [{ decision: forSession, label: "For this session", tone: "quiet" as const }] : []),
     { decision: "decline", label: "Decline", tone: "danger" },
   ];
 }
@@ -184,7 +193,12 @@ export function respondToAsk(
     if (ask.kind === "approval") {
       await approveSession(host, token, ask.session_id, response.decision, note, ask.approval.approval_id);
     } else if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
-      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, response.decision, note);
+      // approve-plan takes its own fixed vocabulary; the session-scoped allow is its acceptForSession.
+      const decision =
+        response.decision === "accept" || response.decision === "decline"
+          ? response.decision
+          : "acceptForSession";
+      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, decision, note);
     } else if (ask.kind === "plan_approval") {
       await approveSession(host, token, ask.session_id, response.decision, note, ask.plan.plan_id);
     } else {

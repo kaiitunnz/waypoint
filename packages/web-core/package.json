@@ -29,7 +29,9 @@
     "./types": "./src/types.ts",
     "./usage": "./src/usage.ts",
     "./workspacePaths": "./src/workspacePaths.ts",
+    "./hooks/*.test": null,
     "./hooks/*": "./src/hooks/*.ts",
+    "./session/*.test": null,
     "./session/*": "./src/session/*.ts"
   },
   "scripts": {

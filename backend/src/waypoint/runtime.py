@@ -49,7 +49,6 @@ from waypoint.backends.base import (
     ContextUsageRebasing,
     DefaultConfigDirProviding,
     FreshThreadRestarting,
-    QuestionLifecycle,
     config_dir_for,
 )
 from waypoint.backends.capabilities import BackendCapabilities
@@ -5168,7 +5167,7 @@ class SessionRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         event_metadata = dict(metadata or {})
-        status, awaiting = self._settle_on_open_question(
+        status, awaiting = self.questions.settle_idle(
             session_id, status, event_metadata.get("tool_use_id")
         )
         if awaiting:
@@ -5206,7 +5205,7 @@ class SessionRuntime:
             if not updates:
                 return self.get_session(session_id)
         if "status" in updates:
-            status, awaiting = self._settle_on_open_question(
+            status, awaiting = self.questions.settle_idle(
                 session_id, updates["status"], None
             )
             updates = {**updates, "status": status}
@@ -6031,7 +6030,7 @@ class SessionRuntime:
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
         await self._run_capture_sinks(session_id, metadata)
-        status, awaiting = self._settle_on_open_question(
+        status, awaiting = self.questions.settle_idle(
             session_id, status, metadata.get("tool_use_id")
         )
         if awaiting:
@@ -6069,32 +6068,6 @@ class SessionRuntime:
             persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
-
-    def _settle_on_open_question(
-        self, session_id: str, status: SessionStatus | None, resolving_id: Any
-    ) -> tuple[SessionStatus | None, bool]:
-        """The status to store, and whether the session is ``awaiting_answer``.
-
-        An ``IDLE`` stays ``WAITING_INPUT`` while an actionable question is
-        open, leaving aside ``resolving_id`` (see
-        ``PendingQuestionTracker.awaits_answer``). It is ``awaiting_answer``
-        unless a request parks the turn: an agent whose questions block it, or a
-        pending approval.
-        """
-        if status != SessionStatus.IDLE:
-            return status, False
-        session = self.storage.get_session(session_id)
-        if session is None or not self.questions.awaits_answer(
-            session, resolving_id if isinstance(resolving_id, str) else None
-        ):
-            return status, False
-        plugin = self.registry.plugin_for(session)
-        at_rest = (
-            isinstance(plugin, QuestionLifecycle)
-            and not plugin.question_parks_turn
-            and not self.transport_for(session).has_pending_approval(session)
-        )
-        return SessionStatus.WAITING_INPUT, at_rest
 
     async def _run_capture_sinks(
         self, session_id: str, metadata: dict[str, Any]

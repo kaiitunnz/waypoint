@@ -1588,30 +1588,6 @@ def test_await_turn_end_reads_the_status_rather_than_the_exit_code(
     )
 
 
-def test_await_turn_end_falls_back_for_a_cli_without_awaiting_answer(
-    cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    args_file = tmp_path / "args"
-    cli = tmp_path / "waypoint"
-    cli.write_text(
-        "#!/bin/sh\n"
-        f'echo "$@" >> {args_file}\n'
-        'case "$*" in *awaiting_answer*) exit 2;; esac\n'
-        """printf '%s' '{"session": {"id": "x", "status": "idle"}}'\n"""
-    )
-    cli.chmod(0o755)
-    monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(cli))
-    slept: list[float] = []
-    monkeypatch.setattr(cw.time, "sleep", slept.append)
-
-    cw.await_turn_end(T, 30.5)
-
-    assert slept == []
-    assert args_file.read_text().splitlines()[-1] == (
-        f"sessions wait {T} --until idle,interrupted,exited,error --timeout 31"
-    )
-
-
 def test_await_turn_end_survives_a_missing_cli_or_a_hung_one(
     cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

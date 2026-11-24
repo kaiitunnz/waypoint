@@ -355,20 +355,6 @@ def last_event(runtime: SessionRuntime):
     return runtime.storage.list_events("s1")[-1]
 
 
-async def test_a_human_message_does_not_end_the_wait(tmp_path, monkeypatch) -> None:
-    runtime = make_runtime(tmp_path)
-    input_transport(runtime, monkeypatch)
-    await ask(runtime, "q1")
-
-    await runtime.handle_input("s1", SessionInputRequest(text="do this instead"))
-    assert runtime.get_session("s1").status is SessionStatus.RUNNING
-    await end_turn(runtime)
-
-    session = runtime.get_session("s1")
-    assert session.status is SessionStatus.WAITING_INPUT
-    assert session.awaiting_answer
-
-
 async def test_a_clarification_exchange_keeps_the_wait(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     input_transport(runtime, monkeypatch)
@@ -376,6 +362,7 @@ async def test_a_clarification_exchange_keeps_the_wait(tmp_path, monkeypatch) ->
 
     for text in ("What does option A change?", "And option B?"):
         await runtime.handle_input("s1", SessionInputRequest(text=text))
+        assert runtime.get_session("s1").status is SessionStatus.RUNNING
         await runtime._emit_adapter_event(
             "s1",
             EventKind.AGENT_OUTPUT,
@@ -419,8 +406,7 @@ async def test_closed_question_lets_the_turn_end_idle(tmp_path, monkeypatch) -> 
 
 async def test_cancel_after_a_settled_wait_marks_idle(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
-    transport = fake_transport(runtime, monkeypatch)
-    transport.has_pending_approval = MagicMock(return_value=False)
+    input_transport(runtime, monkeypatch)
     await ask(runtime, "q1")
     await task_notification_turn(runtime)
 

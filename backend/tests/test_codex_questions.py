@@ -265,33 +265,40 @@ async def test_cancel_sends_nothing_and_settles_idle(tmp_path, monkeypatch) -> N
     assert runtime.storage.open_question_tool_use_ids("s1") == []
 
 
-async def test_restore_keeps_the_wait_while_a_question_is_open(tmp_path) -> None:
-    runtime = make_runtime(tmp_path, status=SessionStatus.WAITING_INPUT)
+async def restore_note(runtime: SessionRuntime) -> None:
+    await runtime._record_system_event(
+        "s1",
+        "Codex session restored from previous backend process",
+        status=SessionStatus.IDLE,
+    )
+
+
+async def test_restore_keeps_the_wait_while_a_question_is_open(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path, status=SessionStatus.INTERRUPTED)
+    fake_transport(runtime, monkeypatch)
     await ask(runtime, "call_1")
-    # A human message after the question does not answer it.
     await runtime._record_user_event("s1", "do something else", submit=True)
-    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
-    assert runtime.questions.restored_status(runtime.get_session("s1")) is (
-        SessionStatus.WAITING_INPUT
-    )
 
-    runtime.storage.update_session("s1", status=SessionStatus.INTERRUPTED)
-    assert (
-        runtime.questions.restored_status(runtime.get_session("s1"))
-        is SessionStatus.IDLE
-    )
+    await restore_note(runtime)
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
 
 
-async def test_restore_ends_a_wait_with_no_reachable_question(tmp_path) -> None:
+async def test_restore_ends_a_wait_with_no_reachable_question(
+    tmp_path, monkeypatch
+) -> None:
     runtime = make_runtime(tmp_path, status=SessionStatus.WAITING_INPUT)
+    fake_transport(runtime, monkeypatch)
     # A fork's copy of its parent's card: asked on another thread.
     await ask(runtime, "call_1", thread_id="thread-parent")
-    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
 
-    assert (
-        runtime.questions.restored_status(runtime.get_session("s1"))
-        is SessionStatus.IDLE
-    )
+    await restore_note(runtime)
+
+    assert runtime.get_session("s1").status is SessionStatus.IDLE
 
 
 async def test_a_turn_ending_with_an_open_question_waits_on_the_human(

@@ -64,8 +64,8 @@ WAIT_DEFAULT_STATUSES: frozenset[str] = frozenset(
         SessionStatus.ERROR,
     }
 )
-# `sessions wait --until` token for a session at `waiting_input` only on its own
-# open question after its turn ended (`awaiting_answer`).
+# `sessions wait --until` token matching `waiting_input` only when
+# `awaiting_answer` is set.
 WAIT_AWAITING_ANSWER = "awaiting_answer"
 # Lifecycle-terminal statuses that stop `sessions events --follow` — the
 # process is gone, so no further events will arrive.

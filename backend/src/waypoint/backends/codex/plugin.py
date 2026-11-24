@@ -1188,12 +1188,6 @@ class CodexPlugin(DefaultLaunchContract):
                 status=SessionStatus.ERROR,
             )
             return
-        settled = runtime.questions.restored_status(session)
-        runtime.storage.update_session(
-            session.id,
-            status=settled,
-            awaiting_answer=settled is SessionStatus.WAITING_INPUT,
-        )
         await self._register_rate_limit_probe(
             runtime,
             session.id,
@@ -1203,7 +1197,7 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
-            status=settled,
+            status=SessionStatus.IDLE,
         )
 
     async def restart_unpersisted_session(
@@ -1996,22 +1990,11 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime.seed_thread_history(
             session.id, read_history, enabled=request.import_history
         )
-        # The imported thread's last turn may have ended waiting on its question.
-        settled = (
-            SessionStatus.WAITING_INPUT
-            if runtime.storage.open_question_tool_use_ids(session.id)
-            else SessionStatus.IDLE
-        )
-        runtime.storage.update_session(
-            session.id,
-            status=settled,
-            awaiting_answer=settled is SessionStatus.WAITING_INPUT,
-        )
         await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),
-            status=settled,
+            status=SessionStatus.IDLE,
             metadata={"imported_thread_id": thread.id},
         )
         return runtime.get_session(session.id)

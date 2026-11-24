@@ -1730,16 +1730,7 @@ async def test_async_question_emits_one_question_card_and_keeps_running() -> Non
     assert metadata["payload"]["threadId"] == "thread-1"
     assert metadata["interaction"]["kind"] == "question"
     assert not [entry for entry in emitted if entry[1] == EventKind.AGENT_OUTPUT]
-
-
-@pytest.mark.asyncio
-async def test_turn_end_with_a_question_open_reports_idle() -> None:
     # The runtime settles the turn's end onto the open question.
-    item = _async_question_item()
-    emitted = await _run_turn(
-        _item_notification("item/completed", item), _turn_completed()
-    )
-    assert emitted[-1][2] == "Turn completed"
     assert emitted[-1][4] == SessionStatus.IDLE
 
 

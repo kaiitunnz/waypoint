@@ -110,36 +110,39 @@ class PendingQuestionTracker:
             detail="question is no longer open",
         )
 
-    def restored_status(self, session: SessionRecord) -> SessionStatus:
-        """A session at ``WAITING_INPUT`` keeps it across a restore while an open
-        question is not ``CLOSED``; a wait on an approval ends with the process
-        that held it."""
-        if session.status is not SessionStatus.WAITING_INPUT:
-            return SessionStatus.IDLE
-        ids = self._runtime.storage.open_question_tool_use_ids(session.id)
-        if any(
-            state is not QuestionLiveness.CLOSED
-            for state in self.liveness(session, ids).values()
-        ):
-            return SessionStatus.WAITING_INPUT
-        return SessionStatus.IDLE
+    def settle_idle(
+        self, session_id: str, status: SessionStatus | None, resolving_id: Any
+    ) -> tuple[SessionStatus | None, bool]:
+        """The status to store, and whether the session is ``awaiting_answer``.
 
-    def awaits_answer(
-        self, session: SessionRecord, resolving_id: str | None = None
-    ) -> bool:
-        """Whether an actionable question is open, leaving aside
-        ``resolving_id`` (the question the incoming event resolves, if any)."""
+        An ``IDLE`` stays ``WAITING_INPUT`` while an actionable question other
+        than ``resolving_id`` is open. It is ``awaiting_answer`` unless a request
+        parks the turn: an agent whose questions block it, or a pending approval.
+        """
+        if status != SessionStatus.IDLE:
+            return status, False
+        session = self._runtime.storage.get_session(session_id)
+        if session is None:
+            return status, False
         ids = [
             tool_use_id
             for tool_use_id in self._runtime.storage.open_question_tool_use_ids(
-                session.id
+                session_id
             )
             if tool_use_id != resolving_id
         ]
-        return any(
+        if not any(
             state is QuestionLiveness.ACTIONABLE
             for state in self.liveness(session, ids).values()
+        ):
+            return status, False
+        plugin = self._runtime.registry.plugin_for(session)
+        at_rest = (
+            isinstance(plugin, QuestionLifecycle)
+            and not plugin.question_parks_turn
+            and not self._runtime.transport_for(session).has_pending_approval(session)
         )
+        return SessionStatus.WAITING_INPUT, at_rest
 
     # ── Answers ─────────────────────────────────────────────────────────
 

@@ -443,6 +443,10 @@ class UsageDashboardResponse(BaseModel):
     providers: list[ProviderUsageStatus] = Field(default_factory=list)
 
 
+# Event metadata key a status write sets to mark ``SessionRecord.awaiting_answer``.
+AWAITING_ANSWER_KEY = "awaiting_answer"
+
+
 class SessionRecord(BaseModel):
     id: str
     backend: BackendId
@@ -1674,10 +1678,6 @@ class HeldMessageOrigin(StrEnum):
     AGENT = "agent"
     SCHEDULE = "schedule"
     WAKE = "wake"
-
-
-# Event metadata key a status write sets to mark ``SessionRecord.awaiting_answer``.
-AWAITING_ANSWER_KEY = "awaiting_answer"
 
 
 class HeldReason(StrEnum):

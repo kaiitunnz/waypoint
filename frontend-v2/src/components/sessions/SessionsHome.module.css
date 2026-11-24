@@ -45,6 +45,15 @@
     padding: 0 20px 32px;
   }
 
+  /* Hairlines run the width of the tiles above; the row text keeps the heading's edge. */
+  .inset {
+    margin: 0 16px;
+  }
+
+  .inset li > :first-child {
+    padding-left: 0;
+  }
+
   .side {
     min-width: 0;
     border-left: 1px solid var(--line);

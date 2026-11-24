@@ -46,6 +46,7 @@
 @media (min-width: 900px) {
   .group {
     margin-top: 10px;
+    border-top: 0;
   }
 
   .toggle {

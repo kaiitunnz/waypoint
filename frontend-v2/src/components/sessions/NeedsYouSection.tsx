@@ -36,6 +36,7 @@ export function NeedsYouSection({ asks, waiting, desktop, agentLabel, now }: Nee
       <SectionHeading
         title="Needs you"
         count={asks.length}
+        dense={!desktop}
         action={
           inbox > 0 ? (
             <Link href="/inbox">{desktop ? "Open queue" : `See all ${waiting}`}</Link>

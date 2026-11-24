@@ -41,7 +41,7 @@
 @media (min-width: 900px) {
   .header {
     gap: 14px;
-    padding: 20px 0 4px;
+    padding: 20px 16px 4px;
   }
 
   .grow {

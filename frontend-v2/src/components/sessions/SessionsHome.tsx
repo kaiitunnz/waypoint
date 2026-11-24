@@ -139,11 +139,13 @@ export function SessionsHome() {
     <section>
       <SectionHeading title="Results" count={listed.total} dense={!desktop} />
       {listed.items.length > 0 ? (
-        <List>
-          {listed.items.map((session) => (
-            <ResultRow key={session.id} {...rowProps(session)} />
-          ))}
-        </List>
+        <div className={styles.inset}>
+          <List>
+            {listed.items.map((session) => (
+              <ResultRow key={session.id} {...rowProps(session)} />
+            ))}
+          </List>
+        </div>
       ) : history.pending || listed.filling ? (
         <p className={styles.status}>Searching older sessions…</p>
       ) : history.error ? null : (
@@ -173,7 +175,9 @@ export function SessionsHome() {
       {sections.pinned.length > 0 ? (
         <section>
           <SectionHeading title="Pinned" count={sections.pinned.length} dense={!desktop} />
-          <List>{sections.pinned.map((session) => compactRow(session, true))}</List>
+          <div className={styles.inset}>
+            <List>{sections.pinned.map((session) => compactRow(session, true))}</List>
+          </div>
         </section>
       ) : null}
       {sections.live.length > 0 ? (
@@ -207,7 +211,9 @@ export function SessionsHome() {
           hasMore={shownCount < listed.total}
           onMore={() => setLimit((value) => value + PAGE_SIZE)}
         >
-          <List>{listed.items.map((session) => compactRow(session))}</List>
+          <div className={styles.inset}>
+            <List>{listed.items.map((session) => compactRow(session))}</List>
+          </div>
         </ExitedGroup>
       ) : null}
       {empty ? (

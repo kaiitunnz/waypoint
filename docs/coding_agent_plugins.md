@@ -265,16 +265,6 @@ de-duplicated with ` (1)`, ` (2)` … on collision, so the paths appended for
 path-based agents stay legible; the server-issued uuid remains the resolution
 key and the only token the client ever sends back.
 
-A transport that can list the tool approvals its provider is waiting on
-overrides `pending_approval_ids(session)` to return their ids (the default
-returns `None`). The pending-asks feed lists an approval request only while its
-id is in that tuple, so requests left open in the transcript by a terminate or a
-restart are not offered for an answer. A transport that returns `None` reports
-only `has_pending_approval`, and the feed then lists every open request of a
-session that has one pending.
-The returned ids are the ids the approval request events carry (see
-[Approval requests](#approval-requests-and-plans)).
-
 ### Lifecycle
 
 ```python
@@ -542,19 +532,28 @@ reads only the backend-neutral parts:
   id the approve endpoint takes, and equals the id a transport reports from
   `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
   `body`; one with an empty body is listed as a plain approval.
-- `metadata["tool_name"]` / `metadata["tool_input"]` (or the same keys under
-  `metadata["approval"]`), when the backend has them. A backend whose requests
-  carry no tool (Codex) relies on `title` and the event text.
+- `metadata["tool_name"]` / `metadata["tool_input"]`, when the backend has them.
+  A backend whose requests carry no tool (Codex) relies on `title` and the event
+  text.
 - The resolution notes `open_approval_requests`
   ([`approvals.py`](../backend/src/waypoint/backends/approvals.py)) understands:
   a system note whose method is `approval.invalidated`, or whose text contains
   "Approval response sent" or "Approval timed out", carrying the `approval_id`.
 
-`approval_request_id(event)` resolves the request id from `interaction.request_id`,
-then `approval_id`, then `approval.approval_id`; resolution notes match against it.
+A structured transport overrides `pending_approval_ids(session)` to return the
+ids of the tool approvals its provider is waiting on (the default is empty). The
+feed lists an approval request only while its id is in that tuple, so requests
+left open in the transcript by a terminate or a restart are not offered for an
+answer.
 
-An agent that approves plans through `approve_plan` rather than an approval
-request implements the `PlanApprovalLifecycle` protocol from
+When what a session can answer changes without any event recording it (claude_tty
+adopting a dialog already open in the pane), call
+`runtime.asks.mark_dirty(session_id)` so the feed re-derives that session.
+
+### Plan approval lifecycle (optional)
+
+An agent that decides plans through `approve_plan` implements the
+`PlanApprovalLifecycle` protocol from
 [`base.py`](../backend/src/waypoint/backends/base.py):
 
 ```python
@@ -570,12 +569,7 @@ the plan with `resolve_via: "approve_plan"`, so the client answers through
 `POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
 `affects_plan_approval` is a pure test of which events (a plan item, a recorded
 decision) can change the result; the feed calls it for every event of a tracked
-session so the plan's private event keys stay inside the plugin. Codex implements
-the protocol in `backends/codex/plugin.py`.
-
-When what a session can answer changes without any event recording it (claude_tty
-adopting a dialog already open in the pane), call
-`runtime.asks.mark_dirty(session_id)` so the feed re-derives that session.
+session. Codex implements the protocol in `backends/codex/plugin.py`.
 
 ### Task notifications (optional)
 

@@ -14,6 +14,7 @@ import {
   useSessionHistory,
 } from "@waypoint/web-core/sessionHistory";
 import { SessionRecord } from "@waypoint/web-core/types";
+import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";
 import { SearchInput } from "@/components/SearchInput";
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
 import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
@@ -56,16 +57,6 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 30) return `${diffDays}d ago`;
   return date.toLocaleDateString();
-}
-
-function formatCwdSegments(cwd: string): string[] {
-  if (!cwd) return [""];
-  const trimmed = cwd.replace(/\/+$/, "");
-  const segments = trimmed.split("/").filter(Boolean);
-  if (trimmed.startsWith("/")) {
-    return segments.length ? [`/${segments[0]}`, ...segments.slice(1)] : ["/"];
-  }
-  return segments.length ? segments : [trimmed];
 }
 
 export function SessionSwitcher({

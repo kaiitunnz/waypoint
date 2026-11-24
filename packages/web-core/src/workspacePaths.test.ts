@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findWorkspacePaths, isWorkspacePathHref, remarkLinkifyPaths } from "./workspacePaths";
+import { findWorkspacePaths, formatCwdSegments, isWorkspacePathHref, remarkLinkifyPaths } from "./workspacePaths";
 
 describe("isWorkspacePathHref", () => {
   it.each(["/etc/hosts", "/a", "~/notes.md", "./src/a.ts", "../up/file"])("accepts %s", (href) => {
@@ -117,5 +117,30 @@ describe("remarkLinkifyPaths", () => {
     });
     const strong = tree.children![0].children![0];
     expect(strong.children![0]).toMatchObject({ type: "link", url: "./a/b" });
+  });
+});
+
+describe("formatCwdSegments", () => {
+  it("returns a single empty segment for an empty path", () => {
+    expect(formatCwdSegments("")).toEqual([""]);
+  });
+
+  it("keeps the leading slash on the first segment of an absolute path", () => {
+    expect(formatCwdSegments("/home/me/project")).toEqual(["/home", "me", "project"]);
+    expect(formatCwdSegments("/home")).toEqual(["/home"]);
+  });
+
+  it("returns an empty segment for the root, which has no name once slashes are trimmed", () => {
+    expect(formatCwdSegments("/")).toEqual([""]);
+    expect(formatCwdSegments("///")).toEqual([""]);
+  });
+
+  it("ignores trailing and repeated slashes", () => {
+    expect(formatCwdSegments("/a//b/")).toEqual(["/a", "b"]);
+  });
+
+  it("splits relative and home-relative paths without a leading slash", () => {
+    expect(formatCwdSegments("~/work/repo")).toEqual(["~", "work", "repo"]);
+    expect(formatCwdSegments("a/b")).toEqual(["a", "b"]);
   });
 });

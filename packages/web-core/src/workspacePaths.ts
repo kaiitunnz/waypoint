@@ -92,3 +92,15 @@ function splitTextNode(text: string): MdastNode[] {
   }
   return out;
 }
+
+export function formatCwdSegments(cwd: string): string[] {
+  if (!cwd) return [""];
+  // Render the path as breadcrumb-style segments, but keep the leading slash
+  // (or `~`) attached to the first segment so root paths still read correctly.
+  const trimmed = cwd.replace(/\/+$/, "");
+  const segments = trimmed.split("/").filter(Boolean);
+  if (trimmed.startsWith("/")) {
+    return segments.length ? [`/${segments[0]}`, ...segments.slice(1)] : ["/"];
+  }
+  return segments.length ? segments : [trimmed];
+}

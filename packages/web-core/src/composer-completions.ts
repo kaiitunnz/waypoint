@@ -66,6 +66,16 @@ interface CommandSuggestion {
 // keeps a path from reaching command dispatch.
 export type SuggestionRow = CommandSuggestion | WorkspacePathSuggestion;
 
+// Match a Waypoint control command (e.g. ``/new``) and return its trailing
+// argument string, or null when the text isn't that command. The trailing
+// space requirement keeps ``/news`` from being read as ``/new``.
+export function matchControlCommand(text: string, name: string): string | null {
+  const command = `/${name}`;
+  if (text === command) return "";
+  if (text.startsWith(`${command} `)) return text.slice(command.length + 1).trim();
+  return null;
+}
+
 export function commandLabel(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
 }

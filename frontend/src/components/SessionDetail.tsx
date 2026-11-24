@@ -72,7 +72,7 @@ import {
 import { clearToken } from "@waypoint/web-core/store";
 import { type TerminalSubmitResult } from "@/lib/composer";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
+import { matchControlCommand, useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
@@ -94,11 +94,8 @@ import {
   type ConnectionState,
 } from "@waypoint/web-core/session/connection";
 import { isImportantEvent } from "@waypoint/web-core/session/importance";
-import {
-  formatCwdSegments,
-  matchControlCommand,
-  wrapBracketedPaste,
-} from "@waypoint/web-core/session/terminalText";
+import { wrapBracketedPaste } from "@waypoint/web-core/session/terminalText";
+import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";
 import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,

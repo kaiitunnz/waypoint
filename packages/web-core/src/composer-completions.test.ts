@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SLASH_NEW_FALLBACK,
   commandLabel,
+  matchControlCommand,
   parseWorkspacePathToken,
   rowDescription,
   rowDescriptionPositions,
@@ -141,5 +142,28 @@ describe("wordRangeAt", () => {
 
   it("treats newlines and tabs as whitespace", () => {
     expect(wordRangeAt("a\nbc\td", 3)).toEqual([2, 4]);
+  });
+});
+
+describe("matchControlCommand", () => {
+  it("returns an empty argument string for the bare command", () => {
+    expect(matchControlCommand("/new", "new")).toBe("");
+  });
+
+  it("returns the trimmed trailing argument", () => {
+    expect(matchControlCommand("/new  fix the bug  ", "new")).toBe("fix the bug");
+    expect(matchControlCommand("/new ", "new")).toBe("");
+  });
+
+  it("requires the separating space, so a longer command name is not matched", () => {
+    expect(matchControlCommand("/news", "new")).toBeNull();
+    expect(matchControlCommand("/new-thing x", "new")).toBeNull();
+  });
+
+  it("rejects other commands and plain text", () => {
+    expect(matchControlCommand("/fork", "new")).toBeNull();
+    expect(matchControlCommand("new", "new")).toBeNull();
+    expect(matchControlCommand(" /new", "new")).toBeNull();
+    expect(matchControlCommand("", "new")).toBeNull();
   });
 });

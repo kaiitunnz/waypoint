@@ -281,6 +281,17 @@ def test_image_generation_falls_back_to_the_saved_path() -> None:
     ]
 
 
+def test_file_id_image_generation_captures_the_saved_path() -> None:
+    item = _image_item(fileId="file_1")
+    del item["result"]
+    result = render_item_completed(item)
+    assert result is not None
+    assert result.metadata == {
+        "is_error": False,
+        "capture_host_files": ["/home/u/.codex/generated_images/t/ig1.png"],
+    }
+
+
 def test_failed_image_generation_is_an_error_without_capture() -> None:
     result = render_item_completed(
         _image_item(status="failed", result="", failure={"type": "usageLimitExceeded"})

@@ -16,9 +16,11 @@ from waypoint.backends.claude_tty import plugin as plugin_mod
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
+    TranscriptRead,
 )
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
+from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
@@ -275,63 +277,154 @@ def _plugin_with_source(
     return plugin, source
 
 
+class _StoppableTailer:
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def _register_tailer(plugin: ClaudeTtyPlugin) -> tuple["asyncio.Task[None]", Any]:
+    task = asyncio.create_task(asyncio.sleep(3600))
+    tailer = _StoppableTailer()
+    plugin._tailer_tasks["s1"] = task
+    plugin._tailers["s1"] = tailer  # type: ignore[assignment]
+    return task, tailer
+
+
 async def test_follow_clear_rebinds_thread_and_restarts_tailer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin, source = _plugin_with_source(monkeypatch, [None, CHILD])
     runtime = _runtime(_session())
-    old_tailer = asyncio.create_task(asyncio.sleep(3600))
-    plugin._tailer_tasks["s1"] = old_tailer
-    started: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(
-        plugin, "_start_tailer", lambda *args, **kwargs: started.append((args, kwargs))
-    )
+    old_task, old_tailer = _register_tailer(plugin)
+    built: list[tuple[Any, ...]] = []
+    new_tailer = MagicMock()
+    new_tailer.run = AsyncMock()
+
+    def build(*args: Any) -> MagicMock:
+        built.append(args)
+        return new_tailer
+
+    monkeypatch.setattr(plugin, "_build_tailer", build)
 
     assert await plugin.follow_clear(runtime, "s1") is True
 
-    assert old_tailer.cancelled()
-    assert "s1" not in plugin._tailer_tasks
+    assert old_tailer.stopped
+    assert not old_task.cancelled()
     session = runtime.storage.session
     assert session.transport_state == {"thread_id": CHILD, "tmux_pane": "%0"}
     assert session.context_usage is None
-    [(args, kwargs)] = started
+    [args] = built
     assert args[1:3] == ("s1", CHILD)
-    assert kwargs.get("start_at_end", False) is False
+    assert args[4] is False  # start_at_end: the new file is read from byte 0
+    assert plugin._tailers["s1"] is new_tailer
+    new_task = plugin._tailer_tasks["s1"]
+    assert new_task is not old_task
     assert source.find_clear_successor.call_count == 2
+    await asyncio.sleep(0)
+    new_tailer.run.assert_not_called()  # waits for the old tailer's drain
+    old_task.cancel()
+    await new_task
+    new_tailer.run.assert_awaited_once()
 
 
 async def test_follow_clear_gives_up_after_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    plugin, source = _plugin_with_source(monkeypatch, [None] * 1000)
+    plugin, _ = _plugin_with_source(monkeypatch, [None] * 1000)
     monkeypatch.setattr(plugin_mod, "_CLEAR_LOOKUP_DEADLINE_SECONDS", 0.0)
     runtime = _runtime(_session())
-    tailer = MagicMock()
-    plugin._tailer_tasks["s1"] = tailer
+    task, tailer = _register_tailer(plugin)
 
     assert await plugin.follow_clear(runtime, "s1") is False
-    assert plugin._tailer_tasks["s1"] is tailer
+    assert plugin._tailer_tasks["s1"] is task
+    assert not tailer.stopped
     runtime.update_session_fields.assert_not_called()
+    task.cancel()
 
 
-async def test_follow_clear_yields_to_a_concurrent_relaunch(
+async def test_follow_clear_deadline_bounds_a_hung_lookup(
     monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin, source = _plugin_with_source(monkeypatch, [])
+    source.find_clear_successor.side_effect = lambda *args: time.sleep(0.3)
+    monkeypatch.setattr(plugin_mod, "_CLEAR_LOOKUP_DEADLINE_SECONDS", 0.05)
+    started = time.monotonic()
+    assert await plugin.follow_clear(_runtime(_session()), "s1") is False
+    assert time.monotonic() - started < 0.25
+
+
+@pytest.mark.parametrize(
+    "relaunch",
+    [
+        {"thread_id": OTHER},
+        # A settings-change relaunch resumes the same thread in a new pane.
+        {"thread_id": PARENT, "tmux_pane": "%9"},
+        # A relaunch or terminate in flight has popped the tailer.
+        None,
+    ],
+    ids=["new-thread", "same-thread-new-pane", "tailer-popped"],
+)
+async def test_follow_clear_yields_to_a_concurrent_relaunch(
+    monkeypatch: pytest.MonkeyPatch, relaunch: dict[str, str] | None
 ) -> None:
     plugin, _ = _plugin_with_source(monkeypatch, [CHILD])
     runtime = _runtime(_session())
-    tailer = MagicMock()
-    plugin._tailer_tasks["s1"] = tailer
+    task, tailer = _register_tailer(plugin)
     original = plugin._rebind_thread
 
     async def relaunch_first(*args: Any) -> bool:
-        runtime.storage.session = _session(thread_id=OTHER)
+        if relaunch is None:
+            del plugin._tailer_tasks["s1"]
+        else:
+            state = {**runtime.storage.session.transport_state, **relaunch}
+            runtime.storage.session = runtime.storage.session.model_copy(
+                update={"transport_state": state}
+            )
         return await original(*args)
 
     monkeypatch.setattr(plugin, "_rebind_thread", relaunch_first)
 
     assert await plugin.follow_clear(runtime, "s1") is False
-    assert plugin._tailer_tasks["s1"] is tailer
+    assert not tailer.stopped
     runtime.update_session_fields.assert_not_called()
+    task.cancel()
+
+
+async def test_successor_tailer_starts_after_the_old_one_drains() -> None:
+    order: list[str] = []
+    release = asyncio.Event()
+
+    async def old_tailer() -> None:
+        await release.wait()
+        order.append("old drained")
+
+    tailer = MagicMock()
+    tailer.run = AsyncMock(side_effect=lambda: order.append("new started"))
+    old = asyncio.create_task(old_tailer())
+    new = asyncio.create_task(plugin_mod._run_tailer_after(old, tailer))
+    await asyncio.sleep(0)
+    assert order == []
+    release.set()
+    await new
+    assert order == ["old drained", "new started"]
+
+
+async def test_stopped_tailer_drains_once_and_keeps_dialog_state() -> None:
+    runtime = MagicMock()
+    runtime.storage.get_session.return_value = _session()
+    source = MagicMock()
+    source.read_from.return_value = TranscriptRead(observed=False)
+    tailer = TranscriptTailer("s1", source, runtime, MagicMock())
+    tailer._close_dialog_state = AsyncMock()  # type: ignore[method-assign]
+    tailer.stop()
+
+    await tailer.run()
+
+    source.read_from.assert_called_once_with(0, metadata_only=False, force=True)
+    tailer._close_dialog_state.assert_not_called()
 
 
 # ── transport interception ───────────────────────────────────────────────────

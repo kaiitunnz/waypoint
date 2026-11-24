@@ -225,6 +225,9 @@ class ClaudeTtyPlugin:
         self._claude = ClaudeCodePlugin()
         self._tmux = TmuxPlugin()
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
+        # The tailer behind each registered task, so a /clear rebind can stop it
+        # gracefully (final drain) rather than cancel it mid-read.
+        self._tailers: dict[str, TranscriptTailer] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
         # Resolver from this transport's own config, used only by the
         # backend=claude_tty rebase hook (the sole path with no runtime handle to
@@ -580,12 +583,28 @@ class ClaudeTtyPlugin:
     ) -> None:
         if session_id in self._tailer_tasks:
             return
+        tailer = self._build_tailer(
+            runtime, session_id, thread_id, cwd, start_at_end, config_dir, launch_target
+        )
+        self._tailers[session_id] = tailer
+        self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
+
+    def _build_tailer(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        thread_id: str,
+        cwd: str,
+        start_at_end: bool,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> TranscriptTailer:
         source = self._byte_source(
             runtime, session_id, thread_id, cwd, config_dir, launch_target
         )
         session = runtime.storage.get_session(session_id)
         backend_id = session.backend if session is not None else self.id
-        tailer = TranscriptTailer(
+        return TranscriptTailer(
             session_id=session_id,
             source=source,
             runtime=runtime,
@@ -596,7 +615,6 @@ class ClaudeTtyPlugin:
                 runtime, backend_id
             ),
         )
-        self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
 
     def _byte_source(
         self,
@@ -637,21 +655,29 @@ class ClaudeTtyPlugin:
         source = self._byte_source(
             runtime, session_id, parent, session.cwd, config_dir, launch_target
         )
+        # The pane the lookup started against: a relaunch during the lookup
+        # (even one resuming this same thread) replaces it.
+        pane = session.transport_state.get("tmux_pane")
         deadline = time.monotonic() + _CLEAR_LOOKUP_DEADLINE_SECONDS
-        while (
-            successor := await asyncio.to_thread(
-                source.find_clear_successor, parent, _CLEAR_SUCCESSOR_MAX_AGE_SECONDS
-            )
-        ) is None:
+        while True:
+            try:
+                successor = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        source.find_clear_successor,
+                        parent,
+                        _CLEAR_SUCCESSOR_MAX_AGE_SECONDS,
+                    ),
+                    timeout=max(deadline - time.monotonic(), 0.0),
+                )
+            except TimeoutError:
+                return False
+            if successor is not None:
+                break
             if time.monotonic() >= deadline:
                 return False
             await asyncio.sleep(_CLEAR_LOOKUP_INTERVAL_SECONDS)
-        # Shielded so a dropped request cannot strand the session between
-        # cancelling the old tailer and starting the new one.
-        return await asyncio.shield(
-            self._rebind_thread(
-                runtime, session_id, parent, successor, config_dir, launch_target
-            )
+        return await self._rebind_thread(
+            runtime, session_id, parent, pane, successor, config_dir, launch_target
         )
 
     async def _rebind_thread(
@@ -659,34 +685,49 @@ class ClaudeTtyPlugin:
         runtime: "SessionRuntime",
         session_id: str,
         parent: str,
+        pane: Any,
         successor: str,
         config_dir: str | None,
         launch_target: SshLaunchTargetConfig | None,
     ) -> bool:
+        # Check and swap without yielding to the loop, so no relaunch or
+        # terminate interleaves: one in flight has already popped the tailer,
+        # and one that finished has moved the pane.
         session = runtime.storage.get_session(session_id)
-        # A relaunch or terminate during the lookup owns the thread now.
-        if session is None or session.transport_state.get("thread_id") != parent:
+        old_task = self._tailer_tasks.get(session_id)
+        if (
+            session is None
+            or session.transport_state.get("thread_id") != parent
+            or session.transport_state.get("tmux_pane") != pane
+            or old_task is None
+            or old_task.done()
+        ):
             return False
-        tailer_task = self._tailer_tasks.pop(session_id, None)
-        if tailer_task is not None:
-            tailer_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await tailer_task
-        session = runtime.storage.get_session(session_id)
-        if session is None:
-            return False
-        await runtime.update_session_fields(
-            session_id,
-            transport_state={**session.transport_state, "thread_id": successor},
-            context_usage=None,
-        )
-        self._start_tailer(
+        del self._tailer_tasks[session_id]
+        old_tailer = self._tailers.get(session_id)
+        if old_tailer is not None:
+            old_tailer.stop()
+        else:
+            old_task.cancel()
+        # Registered before any await, and run only once the old tailer has
+        # drained the pre-clear file, so events stay in transcript order.
+        tailer = self._build_tailer(
             runtime,
             session_id,
             successor,
             session.cwd,
-            config_dir=config_dir,
-            launch_target=launch_target,
+            False,
+            config_dir,
+            launch_target,
+        )
+        self._tailers[session_id] = tailer
+        self._tailer_tasks[session_id] = asyncio.create_task(
+            _run_tailer_after(old_task, tailer)
+        )
+        await runtime.update_session_fields(
+            session_id,
+            transport_state={**session.transport_state, "thread_id": successor},
+            context_usage=None,
         )
         log.info(
             "following /clear onto a new thread",
@@ -1773,6 +1814,15 @@ def _carried_pre_plan_mode(
     if isinstance(pre_plan_mode, str) and pre_plan_mode:
         return {"pre_plan_mode": pre_plan_mode}
     return {}
+
+
+async def _run_tailer_after(
+    previous: "asyncio.Task[None]", tailer: TranscriptTailer
+) -> None:
+    # ``wait`` neither raises the previous task's outcome nor swallows this
+    # task's own cancellation.
+    await asyncio.wait({previous})
+    await tailer.run()
 
 
 def _scrub_session_args(args: list[str]) -> list[str]:

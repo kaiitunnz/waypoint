@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildBackendUrl,
@@ -9,6 +9,7 @@ import {
   formatLastUsed,
   hostKey,
   isCompleteHost,
+  pageDevice,
   parseAddress,
   parsePort,
   portForHost,
@@ -352,6 +353,24 @@ describe("formatLastUsed", () => {
   it("uses a weekday within the week and a date after", () => {
     expect(formatLastUsed(at(23), now)).toBe("Mon");
     expect(formatLastUsed(at(3), now)).toBe("Nov 3");
+  });
+});
+
+describe("pageDevice", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the page host and scheme with the deployment port", () => {
+    vi.stubEnv("NEXT_PUBLIC_BACKEND_PORT", "8797");
+    vi.stubGlobal("window", { location: { hostname: "studio.tail1234.ts.net", protocol: "https:" } });
+    expect(pageDevice()).toEqual({ pageHost: "studio.tail1234.ts.net", protocol: "https", devicePort: 8797 });
+  });
+
+  it("reads as localhost over http without a page", () => {
+    vi.stubEnv("NEXT_PUBLIC_BACKEND_PORT", undefined);
+    expect(pageDevice()).toEqual({ pageHost: "localhost", protocol: "http", devicePort: 8787 });
   });
 });
 

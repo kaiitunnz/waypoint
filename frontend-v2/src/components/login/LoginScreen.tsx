@@ -12,13 +12,13 @@ import {
   describeHost,
   hostKey,
   isCompleteHost,
+  pageDevice,
   parsePort,
   splitBackendUrl,
   type BackendProtocol,
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts, writeRecentHost } from "@waypoint/web-core/recentHosts";
-import { deploymentBackendPort } from "@waypoint/web-core/tailnet";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { Button } from "@/components/ui/Button";
@@ -74,9 +74,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
   const groups = useMemo(
     () =>
       buildHostGroups({
-        pageHost: window.location.hostname || "localhost",
-        protocol: window.location.protocol === "https:" ? "https" : "http",
-        devicePort: deploymentBackendPort(),
+        ...pageDevice(),
         snapshot,
         recents,
         query,

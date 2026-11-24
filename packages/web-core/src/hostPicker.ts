@@ -1,6 +1,7 @@
 import type { RecentHost } from "./recentHosts";
 import {
   DEFAULT_BACKEND_PORT,
+  deploymentBackendPort,
   sameBackendUrl,
   type TailnetPeer,
   type TailnetSnapshot,
@@ -189,6 +190,17 @@ export interface BuildHostGroupsInput {
   selfIsPageHost?: boolean;
   recents: RecentHost[];
   query?: string;
+}
+
+// The machine serving this page as the picker sees it: its host name, scheme and
+// the deployment's backend port. Browser only; elsewhere it reads as localhost.
+export function pageDevice(): { pageHost: string; protocol: BackendProtocol; devicePort: number } {
+  const location = typeof window === "undefined" ? null : window.location;
+  return {
+    pageHost: location?.hostname || "localhost",
+    protocol: location?.protocol === "https:" ? "https" : "http",
+    devicePort: deploymentBackendPort(),
+  };
 }
 
 export function hostKey(url: string): string {

@@ -6,15 +6,6 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.fill {
-  display: flex;
-}
-
-.fill .segment {
-  flex: 1 1 0;
-  justify-content: center;
-}
-
 .segment {
   display: inline-flex;
   align-items: center;

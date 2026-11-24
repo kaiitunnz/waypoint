@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -9,7 +7,6 @@ import { IconButton } from "@/components/ui/IconButton";
 
 import styles from "./SessionSkeleton.module.css";
 
-// A session screen's frame: a glass bar floats over the content.
 export function SessionSkeleton({ id, view, subject }: { id: string; view: "chat" | "files"; subject?: string }) {
   const title = view === "files" ? "Files" : "Session";
   return (

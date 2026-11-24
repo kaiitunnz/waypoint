@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
 
 import { cx } from "@/lib/cx";
 
@@ -27,7 +27,6 @@ export function Field({ label, htmlFor, children, className }: FieldProps) {
 
 interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   ref?: Ref<HTMLInputElement>;
-  // Machine strings (hosts, ports, paths) use the mono face.
   mono?: boolean;
 }
 
@@ -48,12 +47,10 @@ export function SearchInput({ className, ref, ...rest }: TextInputProps) {
 
 export function PasswordInput({ className, ref, ...rest }: Omit<TextInputProps, "type">) {
   const [shown, setShown] = useState(false);
-  const id = useId();
   return (
     <span className={cx(styles.wrap, className)}>
       <input
         {...rest}
-        id={rest.id ?? id}
         ref={ref}
         type={shown ? "text" : "password"}
         className={cx(styles.input, styles.withTrail)}

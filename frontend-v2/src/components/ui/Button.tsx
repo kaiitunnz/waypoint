@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 import { cx } from "@/lib/cx";
@@ -7,18 +6,14 @@ import styles from "./Button.module.css";
 
 export type ButtonVariant = "primary" | "secondary" | "text" | "danger";
 
-interface CommonProps {
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: "md" | "sm";
   block?: boolean;
   busy?: boolean;
   children: ReactNode;
-  className?: string;
-}
-
-type ButtonProps = CommonProps &
-  ButtonHTMLAttributes<HTMLButtonElement> & { href?: undefined; ref?: Ref<HTMLButtonElement> };
-type LinkProps = CommonProps & { href: string; onClick?: () => void };
+  ref?: Ref<HTMLButtonElement>;
+};
 
 // One filled primary per card or screen; everything else is a quiet or text button.
 export function Button({
@@ -27,29 +22,16 @@ export function Button({
   block,
   busy,
   className,
+  type = "button",
+  disabled,
   children,
   ...rest
-}: ButtonProps | LinkProps) {
-  const classes = cx(
-    styles.button,
-    styles[variant],
-    size === "sm" && styles.sm,
-    block && styles.block,
-    className,
-  );
-  if (rest.href !== undefined) {
-    return (
-      <Link href={rest.href} className={classes} onClick={rest.onClick}>
-        {children}
-      </Link>
-    );
-  }
-  const { type = "button", disabled, ...buttonProps } = rest;
+}: ButtonProps) {
   return (
     <button
-      {...buttonProps}
+      {...rest}
       type={type}
-      className={classes}
+      className={cx(styles.button, styles[variant], size === "sm" && styles.sm, block && styles.block, className)}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
     >

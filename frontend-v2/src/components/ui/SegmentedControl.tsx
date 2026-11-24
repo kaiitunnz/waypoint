@@ -19,18 +19,14 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   label: string;
-  // Equal-width segments that fill the row.
-  fill?: boolean;
   className?: string;
 }
 
-// The active segment is raised, the rest are plain text.
 export function SegmentedControl<T extends string>({
   segments,
   value,
   onChange,
   label,
-  fill,
   className,
 }: SegmentedControlProps<T>) {
   const group = useRef<HTMLDivElement>(null);
@@ -50,7 +46,7 @@ export function SegmentedControl<T extends string>({
       ref={group}
       role="radiogroup"
       aria-label={label}
-      className={cx(styles.group, fill && styles.fill, className)}
+      className={cx(styles.group, className)}
       onKeyDown={onKeyDown}
     >
       {segments.map((segment) => (

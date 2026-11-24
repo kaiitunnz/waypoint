@@ -34,14 +34,6 @@
   color: var(--muted);
 }
 
-.actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
 @media (min-width: 900px) {
   .header {
     padding: 20px 36px 4px;

@@ -20,8 +20,6 @@ export interface ToastOptions {
   message: string;
   tone?: "default" | "error";
   action?: { label: string; onSelect: () => void };
-  // Milliseconds; 0 keeps it until dismissed.
-  duration?: number;
 }
 
 interface ToastEntry extends ToastOptions {
@@ -31,6 +29,8 @@ interface ToastEntry extends ToastOptions {
 interface ToastContextValue {
   toast: (options: ToastOptions) => void;
 }
+
+const TOAST_DURATION_MS = 4000;
 
 const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
 
@@ -50,10 +50,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (options: ToastOptions) => {
       const id = next.current++;
       setEntries((current) => [...current.slice(-2), { ...options, id }]);
-      const duration = options.duration ?? 4000;
-      if (duration > 0) {
-        setTimeout(() => dismiss(id), duration);
-      }
+      setTimeout(() => dismiss(id), TOAST_DURATION_MS);
     },
     [dismiss],
   );

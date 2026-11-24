@@ -1,11 +1,11 @@
 export type Theme = "dark" | "light";
 
 export const STORAGE_KEY = "waypoint-theme";
-// The ground colour of each theme: the browser chrome and overscroll match it.
+// Must match `--ground` in tokens.css.
 export const THEME_COLORS: Record<Theme, string> = { dark: "#0b0e13", light: "#eeede9" };
 
-// Runs before first paint (inline in <head>), so there is no flash of the wrong
-// theme. It also owns the one theme-color meta the provider keeps in sync.
+// Runs inline in <head> before first paint so the wrong theme never flashes. It
+// also creates the theme-color meta that theme.ts updates.
 export const ANTI_FLASH_SCRIPT = `(function(){
   var theme='dark';
   try{

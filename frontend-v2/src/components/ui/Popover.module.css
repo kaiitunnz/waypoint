@@ -47,6 +47,5 @@
 @media (min-width: 900px) {
   .item {
     min-height: 36px;
-    font-size: var(--f-body);
   }
 }

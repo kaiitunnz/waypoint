@@ -4,7 +4,6 @@
   list-style: none;
 }
 
-/* Hairlines separate rows; they never box the list. */
 .item + .item {
   border-top: 1px solid var(--line);
 }
@@ -96,10 +95,6 @@
 
 .selected {
   background: var(--plane-raised);
-}
-
-.selectedOnGround {
-  background: var(--plane);
 }
 
 /* The dog-ear: a squared corner fold in brass. */

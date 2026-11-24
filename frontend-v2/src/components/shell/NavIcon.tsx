@@ -1,23 +1,16 @@
-import { Icon } from "@/components/ui/Icon";
 import type { NavKey } from "@waypoint/web-core/shellNav";
+
+import { Icon } from "@/components/ui/Icon";
 
 import styles from "./NavIcon.module.css";
 
-export function NavIcon({ navKey, size = 22 }: { navKey: NavKey; size?: number }) {
-  switch (navKey) {
-    case "sessions":
-      return <Icon name="sessions" size={size} strokeWidth={1.7} />;
-    case "needs-you":
-      return <Icon name="needs-you" size={size} strokeWidth={1.7} />;
-    case "board":
-      return <Icon name="board" size={size} strokeWidth={1.7} />;
-    case "usage":
-      return <Icon name="usage" size={size} strokeWidth={1.7} />;
-    case "assistant":
-      return (
-        <span className={styles.glyph} aria-hidden="true">
-          ⁂
-        </span>
-      );
+export function NavIcon({ navKey }: { navKey: NavKey }) {
+  if (navKey === "assistant") {
+    return (
+      <span className={styles.glyph} aria-hidden="true">
+        ⁂
+      </span>
+    );
   }
+  return <Icon name={navKey} size={22} strokeWidth={1.7} />;
 }

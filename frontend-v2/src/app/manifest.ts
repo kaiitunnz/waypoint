@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
 
-const GROUND = "#0b0e13";
+import { THEME_COLORS } from "@/lib/theme-script";
+
+const GROUND = THEME_COLORS.dark;
 
 export default function manifest(): MetadataRoute.Manifest {
   return {

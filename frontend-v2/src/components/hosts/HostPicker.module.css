@@ -168,8 +168,4 @@
   .row {
     min-height: 38px;
   }
-
-  .name {
-    font-size: var(--f-body);
-  }
 }

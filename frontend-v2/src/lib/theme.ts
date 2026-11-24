@@ -4,8 +4,6 @@ import { useSyncExternalStore } from "react";
 
 import { STORAGE_KEY, THEME_COLORS, type Theme } from "./theme-script";
 
-export type { Theme };
-
 const listeners = new Set<() => void>();
 
 function readStored(): Theme | null {
@@ -49,7 +47,7 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-export function setTheme(theme: Theme) {
+function setTheme(theme: Theme) {
   try {
     localStorage.setItem(STORAGE_KEY, theme);
   } catch {

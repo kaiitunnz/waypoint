@@ -21,13 +21,6 @@
     0 0 0 4px color-mix(in srgb, var(--brass) 70%, transparent);
 }
 
-.sm.needs {
-  box-shadow:
-    0 0 0 2px var(--lamp-ring, var(--plane)),
-    0 0 0 3.5px color-mix(in srgb, var(--brass) 70%, transparent);
-}
-
-/* Working: half filled. */
 .working {
   border: 1.5px solid var(--working);
   overflow: hidden;

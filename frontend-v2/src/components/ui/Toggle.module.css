@@ -33,8 +33,3 @@
 .on::after {
   transform: translateX(18px);
 }
-
-.toggle:disabled {
-  opacity: 0.45;
-  cursor: default;
-}

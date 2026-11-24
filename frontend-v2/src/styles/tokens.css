@@ -1,24 +1,18 @@
-/* Design tokens. Every colour, radius, size and layer the app uses resolves from
-   here, so a component stylesheet never names a theme. Dark is the default;
-   html[data-theme="light"] swaps the values. Values come from the approved
-   direction D (Bridge). */
+/* Design tokens: every colour, radius, size and layer resolves from here. Dark is
+   the default; html[data-theme="light"] swaps the values. */
 
 :root {
   color-scheme: dark;
 
-  /* Surface tiers. Ground recedes (chrome, rails, side panes), the plane is the
-     brightest large region (content), the attention tier is reserved for what
-     needs the human. */
+  /* Surface tiers: ground recedes, the plane is content, attention is for what needs the human. */
   --ground: #0b0e13;
   --plane: #11151c;
   --plane-raised: #161b23;
   --attention: color-mix(in srgb, #c9a86a 7%, #161b23);
   --attention-line: color-mix(in srgb, #c9a86a 36%, transparent);
-  --bubble: #1a2029;
   --sunken: #0d1117;
   --field: var(--sunken);
 
-  /* Floating chrome is glass; sheets and modals carry text and stay opaque. */
   --glass: color-mix(in srgb, #0b0e13 92%, transparent);
   --glass-blur: blur(18px) saturate(1.3);
   --scrim: rgba(3, 5, 8, 0.64);
@@ -39,9 +33,6 @@
   --fill-quiet: color-mix(in srgb, #e6eaf0 7%, transparent);
   --fill-raised: color-mix(in srgb, #e6eaf0 13%, transparent);
 
-  /* The brass budget: the primary action, needs-you markers (including a
-     recommended answer inside a needs-you card) and the dog-ear. The logo, the
-     brand mark, is the one other brass. */
   --brass: #c9a86a;
   --brass-text: #d8b878;
   --action: #c9a86a;
@@ -53,7 +44,7 @@
   --done: #73c59b;
   --error: #e8787a;
 
-  /* Type. Serif names things, sans carries UI and prose, mono is machine strings. */
+  /* Type. */
   --serif: var(--font-serif), "Source Serif 4", Georgia, serif;
   --sans: var(--font-sans), "Source Sans 3", system-ui, sans-serif;
   --mono: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
@@ -70,8 +61,7 @@
   --r-modal: 16px;
   --r-sheet: 18px;
 
-  /* Safe areas: viewport-fit=cover lets the page run under the status bar,
-     Dynamic Island and home indicator; chrome pads by these insets. */
+  /* Safe areas: chrome pads by these insets. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -97,7 +87,6 @@ html[data-theme="light"] {
   --plane-raised: #f3f2ee;
   --attention: color-mix(in srgb, #b8820e 6%, #ffffff);
   --attention-line: color-mix(in srgb, #b8820e 42%, transparent);
-  --bubble: #efede8;
   --sunken: #f3f2ee;
   --field: #ffffff;
 
@@ -128,8 +117,7 @@ html[data-theme="light"] {
   --error: #b83038;
 }
 
-/* On mobile the body is 16px (iOS also zooms into smaller form fields), the item
-   headline 18px and the page title 26px. */
+/* Mobile body text is 16px so iOS does not zoom into form fields. */
 @media (max-width: 899.98px) {
   :root {
     --f-page: 26px;

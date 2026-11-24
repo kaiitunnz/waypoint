@@ -14,5 +14,5 @@
 }
 
 .ringed {
-  box-shadow: 0 0 0 2px var(--badge-ring, var(--ground));
+  box-shadow: 0 0 0 2px var(--ground);
 }

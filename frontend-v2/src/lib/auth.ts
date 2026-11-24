@@ -62,7 +62,6 @@ export function signIn(host: string, token: string) {
   emit();
 }
 
-// A token the backend no longer accepts: back to the login screen, on the same URL.
 export function handleAuthFailure() {
   clearToken();
   notice = "Session expired. Log in again.";
@@ -70,7 +69,6 @@ export function handleAuthFailure() {
   emit();
 }
 
-// Another backend needs its own sign-in.
 export function switchHost(host: string, name = "") {
   writeHost(host);
   clearToken();

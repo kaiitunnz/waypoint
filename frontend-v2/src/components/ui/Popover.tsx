@@ -13,32 +13,18 @@ import styles from "./Popover.module.css";
 interface PopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  // The control that opens it; the panel anchors below it.
   triggerRef: RefObject<HTMLElement | null>;
   label: string;
-  align?: "left" | "right";
   width?: number;
   children: ReactNode;
-  className?: string;
 }
 
-// An anchored panel of floating chrome (glass), dismissed by an outside press or Escape.
-export function Popover({
-  open,
-  onOpenChange,
-  triggerRef,
-  label,
-  align = "left",
-  width = 360,
-  children,
-  className,
-}: PopoverProps) {
+export function Popover({ open, onOpenChange, triggerRef, label, width = 360, children }: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
-  const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 });
+  const anchor = usePopoverAnchor(triggerRef, open, "left", { gap: 8 });
   usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
   const placed = open && anchor.style !== null;
-  // The panel is portaled to the end of the page; move focus into it so the
-  // keyboard reaches its controls.
+  // The panel is portaled to the end of the page, so focus moves into it for the keyboard.
   useEffect(() => {
     if (placed) panel.current?.focus({ preventScroll: true });
   }, [placed]);
@@ -52,7 +38,7 @@ export function Popover({
       role="dialog"
       aria-label={label}
       tabIndex={-1}
-      className={cx(styles.popover, className)}
+      className={styles.popover}
       style={{
         ...anchor.style,
         width: Math.min(width, anchor.bounds?.maxWidth ?? width),

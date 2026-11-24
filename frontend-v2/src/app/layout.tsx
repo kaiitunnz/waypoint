@@ -7,7 +7,6 @@ import { ANTI_FLASH_SCRIPT } from "@/lib/theme-script";
 import "@/styles/tokens.css";
 import "@/styles/base.css";
 
-// Serif names things, sans carries UI and prose, mono is for machine strings only.
 const serif = Source_Serif_4({
   subsets: ["latin"],
   axes: ["opsz"],
@@ -36,9 +35,8 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Waypoint" },
 };
 
-// viewport-fit=cover lets the page run under the status bar and home indicator;
-// the chrome pads itself by env(safe-area-inset-*). The theme-color meta is
-// managed by the inline script below, so it is not declared here.
+// viewport-fit=cover lets the page run under the status bar and home indicator.
+// The theme-color meta is created by the inline script below, so it is not declared here.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,

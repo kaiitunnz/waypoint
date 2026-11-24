@@ -8,7 +8,6 @@ interface Props {
 
 export const metadata: Metadata = { title: "Needs you" };
 
-// Telegram notifications link here.
 export default async function Page({ params }: Props) {
   const { id } = await params;
   return <RouteSkeleton title="Needs you" subject={id} back={{ href: "/inbox", label: "Needs you" }} />;

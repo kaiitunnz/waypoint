@@ -18,10 +18,9 @@ interface DialogProps {
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
-  className?: string;
 }
 
-// The only place a sheet's text sits: opaque, with a scrim, because dialogs carry text.
+// Opaque with a scrim: dialogs carry text, so they are never glass.
 function Surface({
   open,
   onClose,
@@ -29,10 +28,8 @@ function Surface({
   children,
   footer,
   flush,
-  className,
   variant,
-  size,
-}: DialogProps & { variant: "sheet" | "modal"; size?: "sm" | "md" | "lg" }) {
+}: DialogProps & { variant: "sheet" | "modal" }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState(0);
   const dragStart = useRef<number | null>(null);
@@ -53,12 +50,8 @@ function Surface({
   function onPointerUp() {
     if (dragStart.current === null) return;
     dragStart.current = null;
-    if (drag > 90) {
-      setDrag(0);
-      onClose();
-      return;
-    }
     setDrag(0);
+    if (drag > 90) onClose();
   }
 
   const isSheet = variant === "sheet";
@@ -71,7 +64,7 @@ function Surface({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={cx(isSheet ? styles.sheet : cx(styles.modal, styles[size ?? "md"]), className)}
+        className={isSheet ? styles.sheet : styles.modal}
         style={drag ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
       >
         {isSheet ? (
@@ -103,6 +96,6 @@ export function Sheet(props: DialogProps) {
   return <Surface {...props} variant="sheet" />;
 }
 
-export function Modal(props: DialogProps & { size?: "sm" | "md" | "lg" }) {
+export function Modal(props: DialogProps) {
   return <Surface {...props} variant="modal" />;
 }

@@ -10,14 +10,11 @@ interface PageHeaderProps {
   subtitle?: ReactNode;
   // Sits right after the title (the host chip).
   titleExtra?: ReactNode;
-  actions?: ReactNode;
   // A way out on mobile screens that have no tab bar; desktop has the rail.
   back?: { href: string; label: string };
 }
 
-// The in-flow header of a top-level screen: the page title in serif, padded
-// below the status bar and Dynamic Island.
-export function PageHeader({ title, subtitle, titleExtra, actions, back }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, titleExtra, back }: PageHeaderProps) {
   return (
     <header className={styles.header}>
       {back ? (
@@ -30,7 +27,6 @@ export function PageHeader({ title, subtitle, titleExtra, actions, back }: PageH
         {subtitle ? <div className={styles.subtitle}>{subtitle}</div> : null}
       </div>
       {titleExtra}
-      {actions ? <div className={styles.actions}>{actions}</div> : null}
     </header>
   );
 }

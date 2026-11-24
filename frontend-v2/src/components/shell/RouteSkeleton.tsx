@@ -8,16 +8,14 @@ interface RouteSkeletonProps {
   // A mono machine string the route was opened with (an id, a channel).
   subject?: string | null;
   titleExtra?: ReactNode;
-  actions?: ReactNode;
   back?: { href: string; label: string };
 }
 
-// The placeholder every route renders until its screen is built: the page
-// header and an honest empty body.
-export function RouteSkeleton({ title, subject, titleExtra, actions, back }: RouteSkeletonProps) {
+// Placeholder for a route whose screen is not built yet.
+export function RouteSkeleton({ title, subject, titleExtra, back }: RouteSkeletonProps) {
   return (
     <>
-      <PageHeader title={title} titleExtra={titleExtra} actions={actions} back={back} />
+      <PageHeader title={title} titleExtra={titleExtra} back={back} />
       <EmptyState
         title="Not built yet"
         detail={subject ? <span className="mono">{subject}</span> : undefined}

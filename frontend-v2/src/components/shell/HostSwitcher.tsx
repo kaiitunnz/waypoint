@@ -17,9 +17,9 @@ import {
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts } from "@waypoint/web-core/recentHosts";
-import { DEFAULT_BACKEND_PORT, sameBackendUrl } from "@waypoint/web-core/tailnet";
+import { deploymentBackendPort, sameBackendUrl } from "@waypoint/web-core/tailnet";
 
-import { HostPicker, type TypedAddress } from "@/components/login/HostPicker";
+import { HostPicker, type TypedAddress } from "@/components/hosts/HostPicker";
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
@@ -33,8 +33,6 @@ import { useTheme } from "@/lib/theme";
 
 import { SshConnectDialog } from "./SshConnectDialog";
 import styles from "./HostSwitcher.module.css";
-
-const DEVICE_PORT = Number.parseInt(process.env.NEXT_PUBLIC_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT;
 
 // The host chip: which backend (and SSH target) the app is driving, and the way
 // to change it. Opens a popover on desktop and a sheet on mobile.
@@ -127,7 +125,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
       buildHostGroups({
         pageHost: window.location.hostname || "localhost",
         protocol: window.location.protocol === "https:" ? "https" : "http",
-        devicePort: DEVICE_PORT,
+        devicePort: deploymentBackendPort(),
         snapshot,
         recents,
         query,

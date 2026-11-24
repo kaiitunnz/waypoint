@@ -14,7 +14,6 @@ import { NavIcon } from "./NavIcon";
 import { ThemeToggle } from "./ThemeToggle";
 import styles from "./NavRail.module.css";
 
-// Desktop navigation: a 64px rail of ground-tier chrome.
 export function NavRail() {
   const active = activeNavKey(usePathname());
   const { needsYou } = useShellData();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { useState, type ClipboardEvent, type FormEvent } from "react";
 
 import {
   formatLastUsed,
@@ -43,11 +43,9 @@ interface HostPickerProps {
   // Called with a typed address. `live` reports every edit, otherwise only on submit.
   onAddress: (address: TypedAddress) => void;
   liveAddress?: boolean;
-  // Open the address form with these values (e.g. the saved custom host).
-  initialAddress?: TypedAddress | null;
+  // The port field's value, when the caller keeps it in step with another port field.
+  port?: { text: string; onChange: (text: string) => void };
   searchRef?: React.Ref<HTMLInputElement>;
-  // Rendered between the controls and the list (a notice, a status).
-  children?: ReactNode;
 }
 
 const LAMP: Record<HostRow["online"], LampState> = {
@@ -65,9 +63,8 @@ export function HostPicker({
   onSelect,
   onAddress,
   liveAddress,
-  initialAddress,
+  port,
   searchRef,
-  children,
 }: HostPickerProps) {
   const [offlineOpen, setOfflineOpen] = useState(false);
   const [now] = useState(() => Date.now());
@@ -115,9 +112,8 @@ export function HostPicker({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
         />
-        <AddressEntry onAddress={onAddress} live={liveAddress} initial={initialAddress} />
+        <AddressEntry onAddress={onAddress} live={liveAddress} port={port} />
       </div>
-      {children}
       <div className={styles.scroll}>
         {groups.thisDevice ? (
           <section aria-label="This device">
@@ -172,14 +168,16 @@ export function HostPicker({
 interface AddressEntryProps {
   onAddress: (address: TypedAddress) => void;
   live?: boolean;
-  initial?: TypedAddress | null;
+  port?: { text: string; onChange: (text: string) => void };
 }
 
-function AddressEntry({ onAddress, live, initial }: AddressEntryProps) {
-  const [open, setOpen] = useState(initial !== null && initial !== undefined);
-  const [hostText, setHostText] = useState(initial?.hostname ?? "");
-  const [portText, setPortText] = useState(initial?.portText ?? String(DEFAULT_BACKEND_PORT));
-  const [protocol, setProtocol] = useState<BackendProtocol>(initial?.protocol ?? "http");
+function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
+  const [open, setOpen] = useState(false);
+  const [hostText, setHostText] = useState("");
+  const [ownPortText, setOwnPortText] = useState(String(DEFAULT_BACKEND_PORT));
+  const [protocol, setProtocol] = useState<BackendProtocol>("http");
+  const portText = port ? port.text : ownPortText;
+  const setPortText = port ? port.onChange : setOwnPortText;
 
   const resolve = (nextHost: string, nextPort: string, nextProtocol: BackendProtocol) => {
     const parsed = parseAddress(nextHost);
@@ -256,7 +254,13 @@ function AddressEntry({ onAddress, live, initial }: AddressEntryProps) {
             />
           </Field>
           {live ? null : (
-            <Button variant="text" size="sm" type="submit" className={styles.continue} disabled={!resolve(hostText, portText, protocol) || portInvalid}>
+            <Button
+              variant="text"
+              size="sm"
+              type="submit"
+              className={styles.continue}
+              disabled={!resolve(hostText, portText, protocol) || portInvalid}
+            >
               Continue
             </Button>
           )}

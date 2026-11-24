@@ -14,7 +14,6 @@ interface FieldProps {
   className?: string;
 }
 
-// A label above a quiet well.
 export function Field({ label, htmlFor, children, className }: FieldProps) {
   return (
     <div className={cx(styles.field, className)}>

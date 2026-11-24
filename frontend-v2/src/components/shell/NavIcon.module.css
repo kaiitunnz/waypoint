@@ -2,5 +2,6 @@
   display: inline-grid;
   place-items: center;
   height: 22px;
+  font-size: var(--f-title);
   line-height: 22px;
 }

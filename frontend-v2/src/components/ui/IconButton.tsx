@@ -5,7 +5,6 @@ import { cx } from "@/lib/cx";
 import styles from "./IconButton.module.css";
 
 interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> {
-  // Required: an icon has no text of its own.
   label: string;
   size?: "md" | "sm";
   children: ReactNode;

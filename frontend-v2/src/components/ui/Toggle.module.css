@@ -7,6 +7,13 @@
   background: color-mix(in srgb, var(--text) 16%, transparent);
 }
 
+/* A larger hit area than the 26px switch. */
+.toggle::before {
+  content: "";
+  position: absolute;
+  inset: -9px -4px;
+}
+
 .toggle::after {
   content: "";
   position: absolute;

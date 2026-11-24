@@ -35,7 +35,7 @@ The repo's `.agents/skills/` are auto-installed only into the personal assistant
 ## Coding Style & Naming Conventions
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.
 
-## Frontend Theming
+## Frontend Theming (v1)
 The app supports dark (default) and light themes via the `html[data-theme="light"]` attribute set by `ThemeToggle`. All CSS lives in `frontend/src/app/globals.css`, which is organized into named sections with `/* ─── Section ─── */` dividers; when a light-mode override is genuinely needed it sits immediately after the base rule it overrides.
 
 The design language is **flat instruments, liquid-glass chrome**:
@@ -54,7 +54,7 @@ The design language is **flat instruments, liquid-glass chrome**:
 
 Rules for any v2 surface:
 - **Surface tiers.** Ground (`--ground`) is receding chrome (rail, tab bar, side panes), the plane (`--plane`) is content, and the attention tier (`--attention` with `--attention-line`) is only for items that need the human.
-- **Brass budget.** Brass is the primary action, needs-you markers (lamp, badge, card hairline) and the dog-ear. Limit pressure is `--warn`. Active navigation, links and selection use bright text and quiet fills.
+- **Brass budget.** Brass is the primary action, needs-you markers (lamp, badge, card hairline) and the dog-ear, plus the logo as the brand mark. Limit pressure is `--warn`. Active navigation, links and selection use bright text and quiet fills.
 - **No edge accents.** No per-item left highlight, accent rail or edge stripe; a selected row takes a fill.
 - **Glass only on floating chrome.** Floating bars, popovers and toasts use `--glass` with `--glass-blur`; sheets and modals carry text and stay opaque. In-flow content is flat: no gradients, blur or shadows. Write `backdrop-filter` unprefixed only.
 - **Type.** Six sizes (`--f-page`, `--f-title`, `--f-head`, `--f-body`, `--f-meta`, `--f-code`); never a literal `font-size`. Serif names things, sans carries UI and prose, mono is only for machine strings (paths, hosts, ids). Body is 16px on mobile, which also keeps iOS from zooming into form fields.

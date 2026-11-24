@@ -7,11 +7,9 @@ import styles from "./PageHeader.module.css";
 
 interface PageHeaderProps {
   title: string;
-  // A muted line under the title.
   subtitle?: ReactNode;
   // Sits right after the title (the host chip).
   titleExtra?: ReactNode;
-  // Controls at the far right.
   actions?: ReactNode;
   // A way out on mobile screens that have no tab bar; desktop has the rail.
   back?: { href: string; label: string };

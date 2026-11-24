@@ -5,7 +5,7 @@ import { cx } from "@/lib/cx";
 import styles from "./Chip.module.css";
 
 interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  // The agent's recommended answer: a brass-tinted outline and a quiet label.
+  // The agent's recommended answer inside a needs-you card: a brass-tinted outline and a quiet label.
   recommended?: boolean;
   // A text-only chip for the escape hatch ("Other…").
   quiet?: boolean;

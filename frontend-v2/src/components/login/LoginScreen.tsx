@@ -18,7 +18,7 @@ import {
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts, writeRecentHost } from "@waypoint/web-core/recentHosts";
-import { DEFAULT_BACKEND_PORT } from "@waypoint/web-core/tailnet";
+import { deploymentBackendPort } from "@waypoint/web-core/tailnet";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { Button } from "@/components/ui/Button";
@@ -28,7 +28,7 @@ import { Logo } from "@/components/ui/Logo";
 import { signIn } from "@/lib/auth";
 import { DESKTOP_QUERY } from "@/lib/layout";
 
-import { HostPicker, type TypedAddress } from "./HostPicker";
+import { HostPicker, type TypedAddress } from "@/components/hosts/HostPicker";
 import { SignInForm } from "./SignInForm";
 import styles from "./LoginScreen.module.css";
 
@@ -38,8 +38,6 @@ interface Choice {
   hostname: string;
   portText: string;
 }
-
-const DEVICE_PORT = Number.parseInt(process.env.NEXT_PUBLIC_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT;
 
 function choiceUrl(choice: Choice, port: number): string {
   return buildBackendUrl({ protocol: choice.protocol, hostname: choice.hostname, port });
@@ -78,7 +76,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
       buildHostGroups({
         pageHost: window.location.hostname || "localhost",
         protocol: window.location.protocol === "https:" ? "https" : "http",
-        devicePort: DEVICE_PORT,
+        devicePort: deploymentBackendPort(),
         snapshot,
         recents,
         query,
@@ -140,7 +138,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
     }
   }
 
-  const peers = snapshot?.available ? snapshot.peers.length : null;
+  const peers = snapshot?.available ? snapshot.peers.filter((peer) => !peer.is_self).length : null;
   const summary = snapshot === null ? "" : peers === null ? "Tailscale not detected" : `Tailscale, ${peers} peers`;
 
   const picker = (
@@ -153,6 +151,11 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
       onSelect={select}
       onAddress={typed}
       liveAddress={desktop}
+      port={
+        desktop && choice
+          ? { text: choice.portText, onChange: (portText) => setChoice({ ...choice, portText }) }
+          : undefined
+      }
       searchRef={searchRef}
     />
   );

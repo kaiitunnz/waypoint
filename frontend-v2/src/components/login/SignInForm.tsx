@@ -63,7 +63,7 @@ export function SignInForm({
   return (
     <form className={styles.form} onSubmit={submit}>
       <div className={styles.host}>
-        <StatusLamp state={PROBE_LAMP[probe]} label={probe === "reachable" ? "Reachable" : undefined} />
+        <StatusLamp state={PROBE_LAMP[probe]} />
         <span className={styles.name}>{name}</span>
         <Button variant="text" size="sm" onClick={onChangeHost} className={styles.change}>
           Change

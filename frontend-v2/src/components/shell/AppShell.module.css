@@ -21,6 +21,7 @@
     grid-template-columns: var(--rail-width) minmax(0, 1fr);
     height: 100dvh;
     overflow: hidden;
+    padding: 0 var(--safe-right) 0 var(--safe-left);
     background: var(--ground);
   }
 

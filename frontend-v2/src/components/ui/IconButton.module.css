@@ -13,7 +13,9 @@
   color: var(--text-strong);
 }
 
-.sm {
-  width: 36px;
-  height: 36px;
+@media (min-width: 900px) {
+  .sm {
+    width: 36px;
+    height: 36px;
+  }
 }

@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 40px;
+  height: 44px;
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
@@ -35,4 +35,10 @@
 .selected {
   border-color: color-mix(in srgb, var(--text-strong) 55%, transparent);
   background: color-mix(in srgb, var(--text) 8%, var(--plane));
+}
+
+@media (min-width: 900px) {
+  .chip {
+    height: 36px;
+  }
 }

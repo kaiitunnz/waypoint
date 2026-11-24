@@ -15,7 +15,6 @@ interface DialogProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  // A row of actions pinned under the scrolling body.
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
@@ -100,12 +99,10 @@ function Surface({
   );
 }
 
-// Mobile bottom sheet with a grabber (drag it down to dismiss).
 export function Sheet(props: DialogProps) {
   return <Surface {...props} variant="sheet" />;
 }
 
-// Desktop centred dialog.
 export function Modal(props: DialogProps & { size?: "sm" | "md" | "lg" }) {
   return <Surface {...props} variant="modal" />;
 }

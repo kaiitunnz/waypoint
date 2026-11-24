@@ -3,7 +3,6 @@ import type { NavKey } from "@waypoint/web-core/shellNav";
 
 import styles from "./NavIcon.module.css";
 
-// The assistant is the asterism glyph; the rest are drawn icons.
 export function NavIcon({ navKey, size = 22 }: { navKey: NavKey; size?: number }) {
   switch (navKey) {
     case "sessions":
@@ -16,7 +15,7 @@ export function NavIcon({ navKey, size = 22 }: { navKey: NavKey; size?: number }
       return <Icon name="usage" size={size} strokeWidth={1.7} />;
     case "assistant":
       return (
-        <span className={styles.glyph} style={{ fontSize: size - 2 }} aria-hidden="true">
+        <span className={styles.glyph} aria-hidden="true">
           ⁂
         </span>
       );

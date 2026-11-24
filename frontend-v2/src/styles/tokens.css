@@ -36,8 +36,9 @@
   --fill-quiet: color-mix(in srgb, #e6eaf0 7%, transparent);
   --fill-raised: color-mix(in srgb, #e6eaf0 13%, transparent);
 
-  /* The brass budget: the primary action, needs-you markers and the dog-ear.
-     Nothing else is brass. */
+  /* The brass budget: the primary action, needs-you markers (including a
+     recommended answer inside a needs-you card) and the dog-ear. The logo, the
+     brand mark, is the one other brass. */
   --brass: #c9a86a;
   --brass-text: #d8b878;
   --action: #c9a86a;
@@ -106,7 +107,7 @@ html[data-theme="light"] {
   --text: #1b1d21;
   --text-strong: #0e1013;
   --muted: #565a62;
-  --faint: #6b6f77;
+  --faint: #60646c;
   --line: #e0ddd5;
   --line-strong: #cbc6ba;
   --fill-quiet: color-mix(in srgb, #1b1d21 6%, transparent);

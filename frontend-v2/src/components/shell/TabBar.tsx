@@ -13,7 +13,6 @@ import { useShellData } from "@/lib/shell-data";
 import { NavIcon } from "./NavIcon";
 import styles from "./TabBar.module.css";
 
-// Mobile bottom navigation: flat chrome above the home indicator.
 export function TabBar() {
   const active = activeNavKey(usePathname());
   const { needsYou } = useShellData();
@@ -36,15 +35,11 @@ export function TabBar() {
             href={destination.href}
             className={cx(styles.tab, isActive && styles.on)}
             aria-current={isActive ? "page" : undefined}
+            aria-label={count > 0 ? `${destination.label}, ${count} waiting` : undefined}
           >
             <NavIcon navKey={destination.key} />
             <span>{destination.label}</span>
-            <Badge
-              count={count}
-              ringed
-              label={`${count} need you`}
-              className={styles.badge}
-            />
+            <Badge count={count} ringed className={styles.badge} />
           </Link>
         );
       })}

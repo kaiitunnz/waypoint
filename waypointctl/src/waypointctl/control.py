@@ -118,7 +118,10 @@ class ControlServer(ThreadingHTTPServer):
 
     # ── operations ────────────────────────────────────────────────────
     def _lanes_for(self, key: str) -> tuple[str, ...]:
-        return ("backend", "frontend") if key == "all" else (key,)
+        if key == "all":
+            return ("backend", "frontend")
+        # The preview serializes with the frontend ops that also cover it.
+        return ("frontend",) if key == "frontend-preview" else (key,)
 
     def start_op(
         self,
@@ -310,13 +313,20 @@ class ControlHandler(BaseHTTPRequestHandler):
                 {"error": f"action must be one of {', '.join(commands.ACTIONS)}"},
             )
             return
-        if target not in ("frontend", "backend", "all"):
+        if target not in commands.ACTION_TARGETS:
             self._send_json(
                 HTTPStatus.BAD_REQUEST,
-                {"error": "target must be frontend, backend, or all"},
+                {
+                    "error": (
+                        f"target must be one of {', '.join(commands.ACTION_TARGETS)}"
+                    )
+                },
             )
             return
         stack = self.control.stack
+        if message := stack.check_target(target, action):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": message})
+            return
         started = self.control.start_op(
             target,
             action,

@@ -19,7 +19,7 @@ from waypointctl.client import (
     daemon_available,
     ensure_daemon,
 )
-from waypointctl.config import apply_dotenv, load_stack_config
+from waypointctl.config import StackConfig, apply_dotenv, load_stack_config
 from waypointctl.health import http_ok
 from waypointctl.paths import (
     pid_file_for,
@@ -58,6 +58,14 @@ skills_app = typer.Typer(
     help="Install coding-agent skills into global skill directories",
 )
 app.add_typer(skills_app, name="skills")
+
+
+def _load_config(home: Path) -> StackConfig:
+    try:
+        return load_stack_config(home)
+    except ValueError as exc:
+        typer.echo(f"invalid stack configuration: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
 
 def _ctx_home(ctx: typer.Context) -> Path:
@@ -278,7 +286,7 @@ def status(ctx: typer.Context) -> None:
 @app.command()
 def logs(ctx: typer.Context, service: str = typer.Argument("all")) -> None:
     home = _ctx_home(ctx)
-    stack = WaypointStack(load_stack_config(home))
+    stack = WaypointStack(_load_config(home))
     try:
         argv = stack.logs_argv(service)
     except ValueError as exc:
@@ -296,7 +304,7 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"daemon socket={waypoint_socket_path()}")
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
 
-    config = load_stack_config(home)
+    config = _load_config(home)
     if config.control_port:
         reachable = http_ok(f"http://127.0.0.1:{config.control_port}/health")
         typer.echo(
@@ -404,11 +412,8 @@ def daemon_start(ctx: typer.Context) -> None:
     if daemon_available(home):
         typer.echo("waypointd already running")
         return
-    try:
-        ensure_daemon(home)
-    except DaemonUnavailableError as exc:
-        typer.echo(f"failed to start waypointd: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+    _load_config(home)
+    _ensure_daemon_or_exit(home)
     typer.echo("waypointd started")
 
 
@@ -469,6 +474,7 @@ def daemon_stop(
 def daemon_restart(ctx: typer.Context) -> None:
     """Stop the daemon (waiting for full exit) and start a fresh one."""
     home = _ctx_home(ctx)
+    _load_config(home)
     pid = read_pid_file(waypoint_pid_path())
     if pid is not None and is_pid_running(pid):
         os.kill(pid, signal.SIGTERM)
@@ -479,17 +485,15 @@ def daemon_restart(ctx: typer.Context) -> None:
                 err=True,
             )
             raise typer.Exit(code=1)
-    try:
-        ensure_daemon(home)
-    except DaemonUnavailableError as exc:
-        typer.echo(f"failed to start waypointd: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+    _ensure_daemon_or_exit(home)
     typer.echo("waypointd restarted")
 
 
 def _warn_if_services_running() -> None:
     survivors = [
-        name for name in ("backend", "frontend") if running_pid(pid_file_for(name))
+        name
+        for name in ("backend", "frontend", "frontend-preview")
+        if running_pid(pid_file_for(name))
     ]
     if not survivors:
         return
@@ -558,7 +562,7 @@ def _exit_with_result(result: DaemonResult) -> None:
 
 
 def _run_in_process(home: Path, command: str, args: list[str]) -> None:
-    stack = WaypointStack(load_stack_config(home))
+    stack = WaypointStack(_load_config(home))
 
     def log(stream: str, line: str) -> None:
         typer.echo(line, err=(stream == "stderr"))
@@ -672,6 +676,13 @@ def _daemon_client(home: Path) -> DaemonClient | None:
         return DaemonClient(home)
     if not _env_flag("WAYPOINTCTL_DAEMON"):
         return None
+    # A daemon that can't load its configuration only surfaces as a startup
+    # timeout, so reject a bad configuration before spawning one.
+    _load_config(home)
+    return _ensure_daemon_or_exit(home)
+
+
+def _ensure_daemon_or_exit(home: Path) -> DaemonClient:
     try:
         return ensure_daemon(home)
     except DaemonUnavailableError as exc:
@@ -692,25 +703,19 @@ def _check_agent_restart_safety(
     # path; the check is unconditional in that case.
     if _should_use_daemon(home) and not wait:
         return
-    config = load_stack_config(home)
-    stack = WaypointStack(config)
+    stack = WaypointStack(_load_config(home))
 
     target = (args[0] if args else "all").lower()
     self_pid = os.getpid()
-    services = []
-    if target in {"backend", "all"}:
-        services.append(("backend", stack.backend.pid_path))
-    if target in {"frontend", "all"}:
-        services.append(("frontend", stack.frontend.pid_path))
 
-    for name, pid_path in services:
-        pid = running_pid(pid_path)
+    for service in stack.select(target) or ():
+        pid = running_pid(service.pid_path)
         if pid is None:
             continue
         if is_descendant_of(self_pid, pid):
             typer.echo(
-                f"refusing to restart {name} from inside its own process tree "
-                f"(pid {self_pid} descends from {name} pid {pid}); "
+                f"refusing to restart {service.name} from inside its own process "
+                f"tree (pid {self_pid} descends from {service.name} pid {pid}); "
                 "run `waypointctl daemon start` or set WAYPOINTCTL_DAEMON=1",
                 err=True,
             )

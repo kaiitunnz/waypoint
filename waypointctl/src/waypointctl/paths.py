@@ -58,6 +58,10 @@ def log_file_for(service: str) -> Path:
     return state_log_dir() / f"{service}.log"
 
 
+def variant_file_for(service: str) -> Path:
+    return state_run_dir() / f"{service}.variant"
+
+
 def started_marker_for(service: str) -> Path:
     return state_run_dir() / f"{service}.started-this-run"
 

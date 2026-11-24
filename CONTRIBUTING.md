@@ -8,7 +8,7 @@ Project architecture and module conventions live in [`AGENTS.md`](AGENTS.md).
 See the [README](README.md) for install options. For a working tree:
 
 - Backend: `cd backend && uv sync --group dev && uv run pre-commit install`
-- Frontend: `cd frontend && npm install`
+- Frontend: `npm install` at the repo root (one npm workspace covers `frontend/`, `frontend-v2/` and `packages/web-core/`)
 - Control plane: `uv tool install ./waypointctl`
 
 ## Pull request titles (Conventional Commits)
@@ -52,7 +52,7 @@ The sign-off name and email must match the commit author.
 
 - Backend: `cd backend && uv run pre-commit run --all-files` and `uv run pytest`.
 - waypointctl: `cd waypointctl && uv run pytest` (and `uv run mypy` if you touched it).
-- Frontend: `cd frontend && npm run lint && npm run build`.
+- Frontend: `npm run lint && npm run build` in `frontend/` and `frontend-v2/`, and `npm run lint && npm run typecheck && npm test` in `packages/web-core/`.
 - Fill in the PR template and make sure CI (`CI`, `Check PR Title`,
   `Check DCO Sign-off`) is green.
 

@@ -20,17 +20,17 @@ While the project is pre-1.0, `bump-minor-pre-major: true` is set in `release-pl
 ## Release flow
 
 1. Merge commits to `main` with conventional-commit subjects.
-2. release-please opens (or updates) a Release PR targeting `main`. The PR bumps the version in `CHANGELOG.md` and `frontend/package.json`.
+2. release-please opens (or updates) a Release PR targeting `main`. The PR bumps the version in `CHANGELOG.md` and in the `package.json` of `frontend/`, `frontend-v2/` and `packages/web-core/`.
 3. Merge the Release PR. release-please creates a `vX.Y.Z` git tag and publishes a GitHub Release with the corresponding `CHANGELOG.md` section.
 
 No manual tagging or version-file editing is required.
 
 ## Versioning
 
-All three packages share a single version number derived from the root git tag:
+All packages share a single version number derived from the root git tag:
 
 - **Backend** (`backend/`) and **waypointctl** (`waypointctl/`) both declare `dynamic = ["version"]` with `[tool.setuptools_scm] root = ".."`. At build time, `setuptools-scm` reads the nearest `vX.Y.Z` tag from the repo root.
-- **Frontend** (`frontend/`) has its `package.json` version updated directly by release-please via the `extra-files` entry in `release-please-config.json`.
+- **Frontend** (`frontend/`, `frontend-v2/`) and **web-core** (`packages/web-core/`) have their `package.json` versions updated directly by release-please via the `extra-files` entries in `release-please-config.json`.
 
 The tag format is `vX.Y.Z` with no component prefix (`include-component-in-tag: false` in `release-please-config.json`).
 

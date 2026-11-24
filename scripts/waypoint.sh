@@ -119,9 +119,12 @@ FRONTEND_BUILD_INPUTS_RELATIVE=(
   "frontend/src"
   "frontend/public"
   "frontend/package.json"
-  "frontend/package-lock.json"
   "frontend/next.config.ts"
   "frontend/tsconfig.json"
+  "package.json"
+  "package-lock.json"
+  "packages/web-core/src"
+  "packages/web-core/package.json"
 )
 
 # Skip `next build` when nothing the build cares about has changed.

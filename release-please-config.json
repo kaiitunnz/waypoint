@@ -8,6 +8,16 @@
       "type": "json",
       "path": "frontend/package.json",
       "jsonpath": "$.version"
+    },
+    {
+      "type": "json",
+      "path": "frontend-v2/package.json",
+      "jsonpath": "$.version"
+    },
+    {
+      "type": "json",
+      "path": "packages/web-core/package.json",
+      "jsonpath": "$.version"
     }
   ],
   "packages": {

@@ -6,13 +6,14 @@ Use:
 waypointctl status
 waypointctl logs backend
 waypointctl logs frontend
+waypointctl logs frontend-preview
 waypointctl logs all
 waypointctl doctor
 ```
 
 `status` reports managed, stopped, or unmanaged services, each with a health
 field — read the health, not just `running`, when deciding whether a service is
-actually up.
+actually up. Frontend services also show the app they serve (`variant=v1|v2`).
 
 `logs` **follows** the service log files like `tail -f`: it does not return on
 its own and will block a foreground call indefinitely. Do not run it as a plain

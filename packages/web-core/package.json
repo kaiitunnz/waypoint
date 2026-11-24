@@ -1,0 +1,22 @@
+{
+  "name": "@waypoint/web-core",
+  "version": "0.28.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.6",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

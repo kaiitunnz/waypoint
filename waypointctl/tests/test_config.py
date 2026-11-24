@@ -53,6 +53,8 @@ def test_load_stack_config_defaults(
     assert config.caffeinate is True
     assert config.control_host == "0.0.0.0"
     assert config.control_port == 8799
+    assert config.frontend_variant == "v1"
+    assert config.frontend_preview_port is None
 
 
 def test_load_stack_config_env_overrides(
@@ -130,3 +132,82 @@ def test_apply_dotenv_no_op_without_file(
     monkeypatch.setenv("UNAFFECTED", "kept")
     apply_dotenv(tmp_path)
     assert os.environ["UNAFFECTED"] == "kept"
+
+
+def _config_for(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: dict[str, str]):
+    monkeypatch.setenv("WAYPOINTCTL_STATE_DIR", str(tmp_path / "state"))
+    return load_stack_config(tmp_path, env=env)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("v1", "v1"), ("v2", "v2"), (" V2 ", "v2"), ("", "v1")]
+)
+def test_frontend_variant_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str, expected: str
+) -> None:
+    config = _config_for(monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND": raw})
+    assert config.frontend_variant == expected
+
+
+def test_frontend_variant_rejects_unknown_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="WAYPOINT_STACK_FRONTEND"):
+        _config_for(monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND": "v3"})
+
+
+def test_frontend_preview_port(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = _config_for(
+        monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": "3011"}
+    )
+    assert config.frontend_preview_port == 3011
+
+
+@pytest.mark.parametrize("raw", ["", "  "])
+def test_blank_frontend_preview_port_disables_the_preview(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str
+) -> None:
+    config = _config_for(
+        monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": raw}
+    )
+    assert config.frontend_preview_port is None
+
+
+def test_frontend_preview_port_must_be_an_integer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="WAYPOINT_STACK_FRONTEND_PREVIEW_PORT.*'abc'"):
+        _config_for(
+            monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": "abc"}
+        )
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "70000"])
+def test_frontend_preview_port_out_of_range(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str
+) -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        _config_for(
+            monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": raw}
+        )
+
+
+@pytest.mark.parametrize(
+    ("env", "colliding"),
+    [
+        ({"WAYPOINT_STACK_FRONTEND_PORT": "4000"}, "WAYPOINT_STACK_FRONTEND_PORT"),
+        ({"WAYPOINT_STACK_BACKEND_PORT": "4000"}, "WAYPOINT_STACK_BACKEND_PORT"),
+    ],
+)
+def test_frontend_preview_port_must_not_collide(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env: dict[str, str],
+    colliding: str,
+) -> None:
+    with pytest.raises(ValueError, match=colliding):
+        _config_for(
+            monkeypatch,
+            tmp_path,
+            {**env, "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": "4000"},
+        )

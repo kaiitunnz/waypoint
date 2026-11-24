@@ -26,7 +26,9 @@ Use GitHub Issues directly for active bugs and feature requests.
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
 - `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`) plus the transport packages (`claude_tty/` for the tty-tail Emulated transport, `tmux/` for the raw Terminal transport); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
-- `frontend/` — Next.js PWA client
+- `frontend/` — Next.js PWA client (v1)
+- `frontend-v2/` — the in-progress v2 client, served instead of or beside v1 (see [Local stack supervisor](#local-stack-supervisor))
+- `packages/web-core/` — `@waypoint/web-core`, the TypeScript source package the frontends share
 
 A single long-lived **personal assistant** thread — which answers host questions, grounds itself in your running sessions, and manages them via the `waypoint sessions` CLI — can be enabled in `waypoint.yaml`. Its coding backend, model, and permission mode are switchable on the fly, and the thread can be terminated, reattached, or context-cleared from the assistant page; see [`docs/personal_assistant.md`](docs/personal_assistant.md).
 
@@ -122,14 +124,17 @@ Remote sessions have the same workspace explorer, file finder, git changes, path
 
 #### Frontend
 
+The frontends and `packages/web-core` form one npm workspace with a single install and lockfile at the repo root:
+
 ```bash
-cd frontend
-npm install
+npm install            # from the repo root, installs every workspace
+cd frontend            # or frontend-v2
 npm run dev
 ```
 
 Frontend dev notes:
 
+- `npm run lint && npm run build` run per app; `cd packages/web-core && npm run typecheck && npm test` cover the shared package.
 - `npm run dev` binds to `0.0.0.0` so the phone can reach the dev server over Tailscale.
 - The dev config auto-allows the machine's non-internal IPv4 addresses, including typical Tailscale `100.x.x.x` addresses, and emits both bare hosts and full `http://host:3000` origins.
 - If you still need extra origins, set `NEXT_ALLOWED_DEV_ORIGINS` (comma-separated) in your shell or in a `frontend/.env.local` you create yourself.
@@ -165,7 +170,7 @@ Then from the repo root (or anywhere, with `--home <repo>`):
 waypointctl start                   # bring up backend + frontend, exits when ready
 waypointctl status                  # pid, port, health for each service
 waypointctl logs                    # tail backend + frontend logs
-waypointctl restart [backend|frontend|all]
+waypointctl restart [backend|frontend|frontend-preview|all]
 waypointctl stop
 waypointctl daemon start            # opt in to the long-lived waypointd supervisor
 ```
@@ -173,7 +178,7 @@ waypointctl daemon start            # opt in to the long-lived waypointd supervi
 What it does:
 
 - starts `uv run waypoint serve` in `backend/` (in its own process group)
-- builds the frontend if needed, then runs `npm run start` in `frontend/`
+- installs dependencies at the workspace root if needed, builds the frontend if needed, then runs `npm run start` in `frontend/`
 - waits for backend `http://127.0.0.1:8787/health` and the frontend root URL
   before reporting success
 - stores PID files, logs, and default backend/uv-cache directories under
@@ -192,6 +197,8 @@ WAYPOINT_STACK_BACKEND_PORT=8788 WAYPOINT_STACK_FRONTEND_PORT=3001 waypointctl s
 WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml waypointctl restart
 WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data waypointctl start
 ```
+
+`WAYPOINT_STACK_FRONTEND=v2` serves the v2 app (`frontend-v2/`) on the frontend port; the default is `v1`. Set `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` to also run the other app on that port as a `frontend-preview` service, so both can be compared side by side. See [`waypointctl/README.md`](waypointctl/README.md).
 
 By default each command runs in-process and exits when the work is done.
 `waypointctl daemon start` brings up a long-lived `waypointd` that subsequent

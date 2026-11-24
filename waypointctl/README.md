@@ -18,11 +18,11 @@ This installs one console script: `waypointctl`. The optional daemon
 ## Commands
 
 ```
-waypointctl --home <repo> start [backend|frontend|all]
-waypointctl --home <repo> stop  [backend|frontend|all]
-waypointctl --home <repo> restart [backend|frontend|all]
+waypointctl --home <repo> start [backend|frontend|frontend-preview|all]
+waypointctl --home <repo> stop  [backend|frontend|frontend-preview|all]
+waypointctl --home <repo> restart [backend|frontend|frontend-preview|all]
 waypointctl --home <repo> status
-waypointctl --home <repo> logs  [backend|frontend|all]
+waypointctl --home <repo> logs  [backend|frontend|frontend-preview|all]
 waypointctl daemon start | stop | restart | status
 waypointctl doctor
 ```
@@ -38,8 +38,8 @@ State (PID files, logs, default data dirs) lives under
 
 ```
 ~/.waypoint/
-├── run/           waypointd.{sock,pid}, {backend,frontend,caffeinate}.{pid,started-this-run}
-├── logs/          waypointd.log, backend.log, frontend.log
+├── run/           waypointd.{sock,pid}, {backend,frontend,frontend-preview,caffeinate}.{pid,started-this-run}, {frontend,frontend-preview}.variant
+├── logs/          waypointd.log, backend.log, frontend.log, frontend-preview.log
 ├── tailscale/     Docker-backed tailnet state (per-profile dirs + `active-profile` marker)
 ├── backend-data/  (default; overridable via WAYPOINT_STACK_BACKEND_DATA_DIR)
 └── uv-cache/      (default; overridable via WAYPOINT_STACK_UV_CACHE_DIR)
@@ -67,6 +67,8 @@ are not supported.
 | `WAYPOINT_STACK_CONFIG` | `backend/waypoint.yaml` | Path to backend config (relative paths resolve under `--home`). |
 | `WAYPOINT_STACK_BACKEND_DATA_DIR` | `<state-dir>/backend-data` | Backend data directory. |
 | `WAYPOINT_STACK_FRONTEND_PORT` | `3000` | Frontend port. |
+| `WAYPOINT_STACK_FRONTEND` | `v1` | App served on the frontend port: `v1` (`frontend/`) or `v2` (`frontend-v2/`). |
+| `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` | unset | Also serve the other app on this port as the `frontend-preview` service. Must differ from the backend and frontend ports. |
 | `WAYPOINT_STACK_FRONTEND_DEV` | `0` | When `1`, start the frontend in `npm run dev` mode. |
 | `WAYPOINT_STACK_START_TIMEOUT` | `30` | Seconds to wait for health probes. |
 | `WAYPOINT_STACK_UV_CACHE_DIR` | `<state-dir>/uv-cache` | Backend `UV_CACHE_DIR`. |
@@ -74,6 +76,29 @@ are not supported.
 | `WAYPOINT_STACK_CAFFEINATE` | `1` | macOS only: hold a `caffeinate -i -s` for the lifetime of the stack. |
 | `WAYPOINT_STACK_CONTROL_HOST` | `0.0.0.0` | Bind host for the daemon's remote-control console. |
 | `WAYPOINT_STACK_CONTROL_PORT` | `8799` | Port for the daemon's remote-control console; `0` disables it. |
+
+## Frontend variants
+
+The repo root is an npm workspace holding the v1 app (`frontend/`), the v2 app
+(`frontend-v2/`) and the shared `packages/web-core/`. Dependencies install once,
+at the root, with `npm ci`; a standalone per-app `node_modules` (such as
+`frontend/node_modules`) is removed first so it can't shadow the shared one.
+
+`WAYPOINT_STACK_FRONTEND` chooses the app behind `WAYPOINT_STACK_FRONTEND_PORT`
+(service `frontend`). With `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` set, the other
+app runs beside it as `frontend-preview`, with its own pid, log, and health
+check. `status` shows which app each service is running (`variant=v1|v2`).
+
+- `start`, `stop`, `restart`, and `logs` on `frontend` cover both services;
+  `frontend-preview` targets only the preview, and `all` includes it.
+- Each app keeps its own build cache under its `.next/`. A build is reused until
+  the app, `packages/web-core`, the root `package.json`, the root
+  `package-lock.json`, or `WAYPOINT_STACK_BACKEND_PORT` changes.
+- The preview is optional: if it fails to start, the error is reported and the
+  exit code is 1, but the backend and primary frontend keep running.
+- Both apps share one `node_modules`, so a command that would reinstall
+  dependencies under a running frontend is refused; use `restart frontend`.
+- `WAYPOINT_STACK_FRONTEND_DEV=1` runs both services with `npm run dev`.
 
 ## Multiple tailnets per host
 
@@ -140,6 +165,9 @@ is visible in the daemon's own log (`<state-dir>/logs/waypointd.log`).
 Use `waypointctl status` to inspect afterward. `start` and `status` stay
 synchronous and stream output as before.
 
+`waypointd` reads its configuration (including `.env` and the variables above)
+once, when it starts; run `waypointctl daemon restart` after changing it.
+
 Pass `-w` / `--wait` to `stop` or `restart` to force the daemon to run
 the command synchronously and stream its progress, the same way `start`
 behaves. When `--wait` is set, the agent-restart safety check applies
@@ -168,10 +196,10 @@ layer `waypointctl` does and never touches the app's session data.
 Open `http://<host>:8799/`, authenticate with `WAYPOINT_PASSWORD`, and you
 get:
 
-- **Status** — health, pid, and port for backend and frontend, so you can
-  watch a restart come back up.
-- **Logs** — the tail of `backend.log` / `frontend.log`, to see why a build
-  broke before acting.
+- **Status** — health, pid, port, and app variant for backend, frontend, and
+  the preview when configured, so you can watch a restart come back up.
+- **Logs** — the tail of `backend.log` / `frontend.log` / `frontend-preview.log`,
+  to see why a build broke before acting.
 - **Lifecycle** — `restart` / `stop` / `start` a service or the whole stack,
   the same as `waypointctl <action> <target>`.
 - **Redeploy** — restart the whole stack on one of three channels:
@@ -202,8 +230,8 @@ pass it as `Authorization: Bearer <token>` on the rest.
 | `GET /health` | — | Liveness of the control plane itself. |
 | `POST /api/login` | password | `{password}` → `{token, expires_in}`. |
 | `GET /api/status` | token | → service status + in-flight/last `ops` per target. |
-| `GET /api/logs?target=&n=` | token | `target` = `backend`\|`frontend`, `n` lines → `{lines}`. |
-| `POST /api/action` | token | `{action: start\|stop\|restart, target: backend\|frontend\|all}` → `202`; async. |
+| `GET /api/logs?target=&n=` | token | `target` = `backend`\|`frontend`\|`frontend-preview`, `n` lines → `{lines}`. |
+| `POST /api/action` | token | `{action: start\|stop\|restart, target: backend\|frontend\|frontend-preview\|all}` → `202`; async. |
 | `POST /api/redeploy` | token | `{channel: stable\|nightly\|current}` → `202`; async. |
 
 ```bash
@@ -216,8 +244,9 @@ curl -s "$host/api/action" -H "Authorization: Bearer $token" \
 
 Mutating calls return `202` and run in the background; poll `GET /api/status`
 and read the matching entry in `ops` for the outcome. `backend` and `frontend`
-run on independent lanes (so they can proceed at once); an `all` action or a
-redeploy holds both, and a busy lane rejects a conflicting call with `409`.
+run on independent lanes (so they can proceed at once); `frontend-preview` shares
+the frontend lane, an `all` action or a redeploy holds both lanes, and a busy
+lane rejects a conflicting call with `409`.
 
 ## Logs
 

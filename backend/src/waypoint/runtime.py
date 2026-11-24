@@ -2649,12 +2649,10 @@ class SessionRuntime:
             if src.exists():
                 shutil.copy2(src, dst)
 
-        # Add branch/fork suffix to the original title if it doesn't already have one
         base_title = session.title or session.id
-        match = re.match(r"^(.+) \(fork #(\d+)\)$", base_title)
         if overrides.title is not None:
             new_title = overrides.title
-        elif match:
+        elif match := re.match(r"^(.+) \(fork #(\d+)\)$", base_title):
             new_title = f"{match.group(1)} (fork #{int(match.group(2)) + 1})"
         else:
             new_title = f"{base_title} (fork #1)"
@@ -2667,18 +2665,19 @@ class SessionRuntime:
             raw_log,
             structured_log,
         )
-        # Stamped generically after the plugin builds the record, like launch tags.
-        owner_fields: dict[str, Any] = {}
-        if overrides.spawner_session_id:
-            owner_fields["spawner_session_id"] = overrides.spawner_session_id
-        if overrides.tags:
-            owner_fields["tags"] = overrides.tags
-        if owner_fields:
-            new_session = self.storage.update_session(new_session.id, **owner_fields)
+        new_session = self._stamp_owner(new_session, overrides)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
+
+    def _stamp_owner(
+        self, session: SessionRecord, overrides: SessionDeriveRequest
+    ) -> SessionRecord:
+        fields = overrides.model_dump(
+            include={"spawner_session_id", "tags"}, exclude_defaults=True
+        )
+        return self.storage.update_session(session.id, **fields) if fields else session
 
     def _require_spawner(self, spawner_session_id: str | None) -> None:
         if spawner_session_id and self.storage.get_session(spawner_session_id) is None:
@@ -2711,18 +2710,13 @@ class SessionRuntime:
         )
         # Copy the non-secret launch fields; pin the transport so the child keeps
         # the source's channel. launch_env travels only in the private snapshot.
-        # The spawner is stamped after create: on the request it would let a
-        # source with no explicit permission mode inherit the spawner's instead.
-        derived = overrides.model_dump(
-            include={"title", "tags"}, exclude_unset=True, exclude_defaults=True
-        )
         request = SessionCreateRequest(
-            **derived,
             backend=source.backend,
             cwd=source.cwd,
             launch_target_id=source.launch_target_id,
             launch_mode=source.launch_mode,
             transport=source.transport,
+            title=overrides.title,
             args=list(source.args),
             config_overrides=list(source.config_overrides),
             model=source.model,
@@ -2737,13 +2731,13 @@ class SessionRuntime:
             launch_env=dict(source.launch_env),
             account_profile_label=source.account_profile_label,
         )
+        # The spawner is stamped after create: on the request it would let a
+        # source with no explicit permission mode inherit the spawner's instead.
         created = await self.create_session(request, clone_snapshot=snapshot)
-        if overrides.spawner_session_id:
-            created = self.storage.update_session(
-                created.id, spawner_session_id=overrides.spawner_session_id
-            )
+        stamped = self._stamp_owner(created, overrides)
+        if stamped is not created:
             await self.broadcast_session_list()
-        return created
+        return stamped
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:
@@ -4840,7 +4834,9 @@ class SessionRuntime:
         plugin = self.registry.plugin_for(session)
         return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
-    async def cancel_question(self, session_id: str, tool_use_id: str) -> SessionRecord:
+    async def cancel_question(
+        self, session_id: str, tool_use_id: str | None
+    ) -> SessionRecord:
         return await self.questions.cancel(self.get_session(session_id), tool_use_id)
 
     async def approve(

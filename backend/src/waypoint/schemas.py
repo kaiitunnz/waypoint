@@ -1316,7 +1316,7 @@ class SessionDeriveRequest(BaseModel):
     source's permission mode and usage selection.
     """
 
-    spawner_session_id: str | None = None
+    spawner_session_id: str | None = Field(default=None, min_length=1)
     title: SessionTitle | None = None
     tags: dict[str, str] = Field(default_factory=dict)
 
@@ -1556,7 +1556,7 @@ class SessionAnswerQuestionRequest(BaseModel):
 
 
 class SessionCancelQuestionRequest(BaseModel):
-    tool_use_id: str = Field(min_length=1)
+    tool_use_id: str | None = Field(default=None, min_length=1)
 
 
 class ScheduleStatus(StrEnum):

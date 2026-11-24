@@ -551,17 +551,7 @@ def _cli_config(tmp_path: Path) -> Path:
     return cfg
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in (
-        "WAYPOINT_DATA_DIR",
-        "WAYPOINT_CONFIG_PATH",
-        "WAYPOINT_HOST",
-        "WAYPOINT_PORT",
-        "WAYPOINT_PASSWORD",
-        "WAYPOINT_TOKEN",
-    ):
-        monkeypatch.delenv(var, raising=False)
+pytestmark = pytest.mark.usefixtures("isolate_waypoint_env")
 
 
 def _mock_cli(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:

@@ -562,7 +562,9 @@ class WaypointClient:
         ).json()["session"]
         return data
 
-    def cancel_question(self, session_id: str, tool_use_id: str) -> dict[str, Any]:
+    def cancel_question(
+        self, session_id: str, tool_use_id: str | None = None
+    ) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST",
             f"/api/sessions/{session_id}/cancel-question",
@@ -651,7 +653,7 @@ class WaypointClient:
         if cursor is not None:
             params["cursor"] = cursor
         if exclude_sources:
-            params["exclude_source"] = list(exclude_sources)
+            params["exclude_source"] = exclude_sources
         data: dict[str, Any] = self._request(
             "GET", "/api/sessions/history", params=params
         ).json()
@@ -663,24 +665,23 @@ class WaypointClient:
         ).json()["held_messages"]
         return data
 
-    def release_held_messages(
-        self, session_id: str, held_id: str | None = None
-    ) -> dict[str, Any]:
-        path = (
-            f"/api/held-messages/{held_id}/release"
-            if held_id
-            else f"/api/sessions/{session_id}/held-messages/release"
-        )
-        data: dict[str, Any] = self._request("POST", path).json()["session"]
+    def release_held_message(self, held_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/held-messages/{held_id}/release"
+        ).json()["session"]
         return data
 
-    def cancel_held_messages(self, session_id: str, held_id: str | None = None) -> None:
-        path = (
-            f"/api/held-messages/{held_id}"
-            if held_id
-            else f"/api/sessions/{session_id}/held-messages"
-        )
-        self._request("DELETE", path)
+    def release_held_messages(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/held-messages/release"
+        ).json()["session"]
+        return data
+
+    def cancel_held_message(self, held_id: str) -> None:
+        self._request("DELETE", f"/api/held-messages/{held_id}")
+
+    def cancel_held_messages(self, session_id: str) -> None:
+        self._request("DELETE", f"/api/sessions/{session_id}/held-messages")
 
     def set_permission_mode(self, session_id: str, mode: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(

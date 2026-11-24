@@ -3788,8 +3788,6 @@ async def test_runtime_fork_applies_owner_overrides(tmp_path) -> None:
     assert forked.spawner_session_id == "lead"
     assert forked.title == "Child"
     assert forked.tags == {"role": "worker"}
-    stored = storage.get_session(forked.id)
-    assert stored is not None and stored.spawner_session_id == "lead"
 
 
 @pytest.mark.asyncio

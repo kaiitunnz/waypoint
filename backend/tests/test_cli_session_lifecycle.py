@@ -6,7 +6,7 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from waypoint.cli import _compact_event, app
+from waypoint.cli import app
 from waypoint.client import WaypointClient
 from waypoint.settings import Settings
 
@@ -15,17 +15,7 @@ runner = CliRunner()
 type Route = tuple[str, str]
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in (
-        "WAYPOINT_DATA_DIR",
-        "WAYPOINT_CONFIG_PATH",
-        "WAYPOINT_HOST",
-        "WAYPOINT_PORT",
-        "WAYPOINT_PASSWORD",
-        "WAYPOINT_SESSION_ID",
-    ):
-        monkeypatch.delenv(var, raising=False)
+pytestmark = pytest.mark.usefixtures("isolate_waypoint_env")
 
 
 def _server(
@@ -257,60 +247,12 @@ def test_approve_plan_rejects_unknown_decision(
     assert calls == []
 
 
-def _events_with_questions(*ids: str) -> tuple[int, Any]:
-    return (
-        200,
-        {
-            "events": [],
-            "pending_questions": {
-                "questions": [{"tool_use_id": qid} for qid in ids],
-            },
-        },
-    )
-
-
-def test_cancel_question_resolves_sole_pending_question(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    prefix, calls = _server(
-        tmp_path,
-        monkeypatch,
-        {
-            ("GET", "/api/sessions/s1/events"): _events_with_questions("tu1"),
-            ("POST", "/api/sessions/s1/cancel-question"): (
-                200,
-                {"session": {"id": "s1"}},
-            ),
-        },
-    )
-    result = runner.invoke(app, [*prefix, "sessions", "cancel-question", "s1"])
-    assert result.exit_code == 0, result.output
-    assert calls[-1]["body"] == {"tool_use_id": "tu1"}
-
-
 @pytest.mark.parametrize(
-    ("ids", "message"),
-    [((), "no pending question"), (("a", "b"), "pass --tool-use-id with one of: a, b")],
+    ("args", "body"),
+    [([], {"tool_use_id": None}), (["--tool-use-id", "tu9"], {"tool_use_id": "tu9"})],
 )
-def test_cancel_question_needs_exactly_one_pending(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    ids: tuple[str, ...],
-    message: str,
-) -> None:
-    prefix, calls = _server(
-        tmp_path,
-        monkeypatch,
-        {("GET", "/api/sessions/s1/events"): _events_with_questions(*ids)},
-    )
-    result = runner.invoke(app, [*prefix, "sessions", "cancel-question", "s1"])
-    assert result.exit_code == 1
-    assert message in result.output
-    assert _routes(calls) == [("GET", "/api/sessions/s1/events")]
-
-
-def test_cancel_question_with_explicit_id_skips_lookup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_cancel_question_sends_optional_tool_use_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str], body: Any
 ) -> None:
     prefix, calls = _server(
         tmp_path,
@@ -322,109 +264,57 @@ def test_cancel_question_with_explicit_id_skips_lookup(
             )
         },
     )
-    result = runner.invoke(
-        app, [*prefix, "sessions", "cancel-question", "s1", "--tool-use-id", "tu9"]
-    )
+    result = runner.invoke(app, [*prefix, "sessions", "cancel-question", "s1", *args])
     assert result.exit_code == 0, result.output
-    assert _routes(calls) == [("POST", "/api/sessions/s1/cancel-question")]
-
-
-_HELD_LIST: dict[Route, tuple[int, Any]] = {
-    ("GET", "/api/sessions/s1/held-messages"): (
-        200,
-        {"session_id": "s1", "held_messages": [{"id": "h1"}]},
-    ),
-}
+    assert calls[0]["body"] == body
 
 
 def test_held_list_prints_messages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    prefix, _ = _server(tmp_path, monkeypatch, _HELD_LIST)
+    prefix, _ = _server(
+        tmp_path,
+        monkeypatch,
+        {
+            ("GET", "/api/sessions/s1/held-messages"): (
+                200,
+                {"session_id": "s1", "held_messages": [{"id": "h1"}]},
+            )
+        },
+    )
     result = runner.invoke(app, [*prefix, "sessions", "held", "list", "s1"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"held_messages": [{"id": "h1"}]}
 
 
 @pytest.mark.parametrize(
-    ("args", "route", "payload"),
+    ("args", "route", "output"),
     [
+        (["release", "h1"], ("POST", "/api/held-messages/h1/release"), None),
         (
-            ["release", "s1", "--all"],
+            ["release-all", "s1"],
             ("POST", "/api/sessions/s1/held-messages/release"),
-            {"session": {"id": "s1"}},
+            None,
         ),
+        (["cancel", "h1"], ("DELETE", "/api/held-messages/h1"), {"cancelled": "h1"}),
         (
-            ["release", "s1", "--id", "h1"],
-            ("POST", "/api/held-messages/h1/release"),
-            {"session": {"id": "s1"}},
-        ),
-        (
-            ["cancel", "s1", "--all"],
+            ["cancel-all", "s1"],
             ("DELETE", "/api/sessions/s1/held-messages"),
             {"session_id": "s1", "cancelled": "all"},
         ),
-        (
-            ["cancel", "s1", "--id", "h1"],
-            ("DELETE", "/api/held-messages/h1"),
-            {"session_id": "s1", "cancelled": "h1"},
-        ),
     ],
 )
-def test_held_release_and_cancel_route_by_scope(
+def test_held_commands_hit_their_routes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     args: list[str],
     route: Route,
-    payload: dict[str, Any],
+    output: dict[str, Any] | None,
 ) -> None:
-    body = payload if route[0] == "POST" else None
-    prefix, calls = _server(
-        tmp_path, monkeypatch, {**_HELD_LIST, route: (200 if body else 204, body)}
-    )
+    response = (204, None) if output else (200, {"session": {"id": "s1"}})
+    prefix, calls = _server(tmp_path, monkeypatch, {route: response})
     result = runner.invoke(app, [*prefix, "sessions", "held", *args])
     assert result.exit_code == 0, result.output
-    assert _routes(calls)[-1] == route
-    if route[0] == "DELETE":
-        assert json.loads(result.output) == payload
-
-
-@pytest.mark.parametrize("command", ["release", "cancel"])
-def test_held_requires_id_or_all(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
-) -> None:
-    prefix, calls = _server(tmp_path, monkeypatch, {})
-    for extra in ([], ["--id", "h1", "--all"]):
-        result = runner.invoke(
-            app, [*prefix, "sessions", "held", command, "s1", *extra]
-        )
-        assert result.exit_code == 2
-    assert calls == []
-
-
-def test_held_id_must_belong_to_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    prefix, calls = _server(tmp_path, monkeypatch, _HELD_LIST)
-    result = runner.invoke(
-        app, [*prefix, "sessions", "held", "release", "s1", "--id", "other"]
-    )
-    assert result.exit_code == 1
-    assert "not queued for session s1" in result.output
-    assert _routes(calls) == [("GET", "/api/sessions/s1/held-messages")]
-
-
-def test_compact_events_lift_plan_decision_metadata() -> None:
-    event = {
-        "sequence": 7,
-        "kind": "system_note",
-        "text": "Plan declined; staying in plan mode",
-        "metadata": {"plan_item_id": "p1", "plan_decision": "decline"},
-    }
-    assert _compact_event(event) == {
-        "seq": 7,
-        "kind": "system_note",
-        "text": "Plan declined; staying in plan mode",
-        "plan_item_id": "p1",
-        "plan_decision": "decline",
-    }
+    assert _routes(calls) == [route]
+    if output:
+        assert json.loads(result.output) == output

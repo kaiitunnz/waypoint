@@ -37,20 +37,7 @@ from waypoint.telemetry.ingest import TelemetryIngester
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The test host may itself run Waypoint, whose WAYPOINT_* env vars would
-    # otherwise override the per-test config file (notably data_dir).
-    for var in (
-        "WAYPOINT_DATA_DIR",
-        "WAYPOINT_CONFIG_PATH",
-        "WAYPOINT_HOST",
-        "WAYPOINT_PORT",
-        "WAYPOINT_PASSWORD",
-        "WAYPOINT_CORS_ORIGINS",
-        "WAYPOINT_CORS_ORIGIN_REGEX",
-    ):
-        monkeypatch.delenv(var, raising=False)
+pytestmark = pytest.mark.usefixtures("isolate_waypoint_env")
 
 
 def _error_text(output: str) -> str:

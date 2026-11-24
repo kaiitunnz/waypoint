@@ -86,6 +86,7 @@ describe("ports and URLs", () => {
     expect(formatAddress("http://100.91.2.17:8797")).toBe("100.91.2.17:8797");
     expect(formatAddress("http://100.91.2.17:8787")).toBe("100.91.2.17");
     expect(formatAddress("https://box.example.com")).toBe("box.example.com");
+    expect(formatAddress("http://box")).toBe("box:80");
   });
 
   it("reads an address with no port as the scheme's default port", () => {

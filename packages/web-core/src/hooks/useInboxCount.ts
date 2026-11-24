@@ -8,7 +8,7 @@ import type { SessionEnvelope } from "../types";
 // Shared unresolved-inbox count for the nav count and the floater badge. Seeds
 // from the REST count, then tracks the absolute `unresolved_count` on every
 // `inbox_update` over a dedicated session socket, re-fetching on (re)connect to
-// close the reconnect gap.
+// close the reconnect gap. `onAuthFailure` must be stable (it restarts the socket).
 export function useInboxCount(
   host: string,
   token: string,

@@ -17,6 +17,7 @@ export interface PendingAsksState {
 // follows `pending_asks` frames on /ws/sessions (docs/pending_asks.md), keeping
 // a snapshot only when its epoch differs or its revision is higher. Re-fetches
 // on every (re)connect to close the gap while the socket was down.
+// `onAuthFailure` must be stable (it restarts the socket).
 export function usePendingAsks(
   host: string,
   token: string,

@@ -41,12 +41,18 @@ interface HostPickerProps {
   selectedKey: string | null;
   onSelect: (row: HostRow) => void;
   // Called with a typed address. `live` reports every edit, otherwise only on submit.
-  onAddress: (address: TypedAddress) => void;
+  onAddress: (address: TypedAddress | null) => void;
   liveAddress?: boolean;
   // The port field's value, when the caller keeps it in step with another port field.
   port?: { text: string; onChange: (text: string) => void };
   searchRef?: React.Ref<HTMLInputElement>;
+  // Level of the group headings, so they nest under the page's own headings.
+  headingLevel?: "h2" | "h3";
 }
+
+// A typed address on an https-served page must be https too, or the browser blocks it.
+const pageProtocol: BackendProtocol =
+  typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http";
 
 const LAMP: Record<HostRow["online"], LampState> = {
   online: "done",
@@ -65,8 +71,11 @@ export function HostPicker({
   liveAddress,
   port,
   searchRef,
+  headingLevel: Heading = "h3",
 }: HostPickerProps) {
   const [offlineOpen, setOfflineOpen] = useState(false);
+  // A row pick clears the typed address, so the form never contradicts the selection.
+  const [picks, setPicks] = useState(0);
   const [now] = useState(() => Date.now());
   const searching = query.trim() !== "";
   const showOffline = offlineOpen || searching;
@@ -85,7 +94,10 @@ export function HostPicker({
             type="button"
             className={cx(styles.row, row.key === selectedKey && styles.selected)}
             aria-current={row.key === selectedKey ? "true" : undefined}
-            onClick={() => onSelect(row)}
+            onClick={() => {
+              setPicks((count) => count + 1);
+              onSelect(row);
+            }}
           >
             <StatusLamp state={LAMP[row.online]} size="sm" label={row.online} />
             <span className={styles.name}>
@@ -108,30 +120,30 @@ export function HostPicker({
         <SearchInput
           ref={searchRef}
           aria-label="Search hosts"
-          placeholder={`Search ${groups.total} hosts`}
+          placeholder={groups.total > 1 ? `Search ${groups.total} hosts` : "Search hosts"}
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
         />
-        <AddressEntry onAddress={onAddress} live={liveAddress} port={port} />
+        <AddressEntry key={picks} onAddress={onAddress} live={liveAddress} port={port} />
       </div>
       <div className={styles.scroll}>
         {groups.thisDevice ? (
           <section aria-label="This device">
-            <h3 className={styles.head}>This device</h3>
+            <Heading className={styles.head}>This device</Heading>
             {renderRows([groups.thisDevice])}
           </section>
         ) : null}
         {groups.recent.length > 0 ? (
           <section aria-label="Recent">
-            <h3 className={styles.head}>Recent</h3>
+            <Heading className={styles.head}>Recent</Heading>
             {renderRows(groups.recent)}
           </section>
         ) : null}
         {groups.online.length > 0 ? (
           <section aria-label="Online">
-            <h3 className={styles.head}>
+            <Heading className={styles.head}>
               Online <span>{groups.online.length}</span>
-            </h3>
+            </Heading>
             {renderRows(groups.online)}
           </section>
         ) : null}
@@ -139,9 +151,9 @@ export function HostPicker({
           .filter((group) => group.rows.length > 0)
           .map((group) => (
             <section key={group.id} aria-label={group.title}>
-              <h3 className={styles.head}>
+              <Heading className={styles.head}>
                 {group.title} <span>{group.rows.length}</span>
-              </h3>
+              </Heading>
               {renderRows(group.rows)}
             </section>
           ))}
@@ -166,7 +178,7 @@ export function HostPicker({
 }
 
 interface AddressEntryProps {
-  onAddress: (address: TypedAddress) => void;
+  onAddress: (address: TypedAddress | null) => void;
   live?: boolean;
   port?: { text: string; onChange: (text: string) => void };
 }
@@ -175,7 +187,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
   const [open, setOpen] = useState(false);
   const [hostText, setHostText] = useState("");
   const [ownPortText, setOwnPortText] = useState(String(DEFAULT_BACKEND_PORT));
-  const [protocol, setProtocol] = useState<BackendProtocol>("http");
+  const [protocol, setProtocol] = useState<BackendProtocol>(pageProtocol);
   const portText = port ? port.text : ownPortText;
   const setPortText = port ? port.onChange : setOwnPortText;
 
@@ -193,9 +205,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
     setHostText(nextHost);
     setPortText(nextPort);
     setProtocol(nextProtocol);
-    if (!live) return;
-    const address = resolve(nextHost, nextPort, nextProtocol);
-    if (address) onAddress(address);
+    if (live) onAddress(resolve(nextHost, nextPort, nextProtocol));
   };
 
   // A pasted URL fills the port field and drops the scheme and path.

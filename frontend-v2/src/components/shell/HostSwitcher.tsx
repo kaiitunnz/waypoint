@@ -52,7 +52,7 @@ export function HostSwitcher() {
     ? { state: "error", label: "SSH disconnected" }
     : connection === "open"
       ? { state: "done", label: "Live" }
-      : { state: connection === "connecting" || connection === "reconnecting" ? "working" : "idle", label: "Connecting" };
+      : { state: "working", label: "Connecting" };
   const name = describeHost(host, { targetName: activeTarget?.name, recents });
 
   const label = "Switch host";
@@ -158,10 +158,10 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
         : { kind: "host", url: row.url, name: row.name },
     );
 
-  const typed = (address: TypedAddress) => {
-    const port = parsePort(address.portText);
+  const typed = (address: TypedAddress | null) => {
+    const port = address ? parsePort(address.portText) : null;
     // A half-typed address is not a choice yet.
-    if (port === null || !isCompleteHost(address.hostname)) {
+    if (!address || port === null || !isCompleteHost(address.hostname)) {
       setSelection(null);
       return;
     }

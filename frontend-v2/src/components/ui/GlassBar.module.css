@@ -3,14 +3,16 @@
   z-index: var(--z-bar);
   left: 0;
   right: 0;
-  padding-left: var(--safe-left);
-  padding-right: var(--safe-right);
   background: var(--glass);
   backdrop-filter: var(--glass-blur);
 }
 
+/* Fixed to the viewport, the bar pads by the side insets itself; an absolute
+   bar sits inside a container that already does. */
 .fixed {
   position: fixed;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 .top {

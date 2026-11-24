@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: calc(var(--safe-top) + 4px) calc(10px + var(--safe-right)) 4px calc(16px + var(--safe-left));
+  padding: calc(var(--safe-top) + 4px) 10px 4px 16px;
 }
 
 .back {

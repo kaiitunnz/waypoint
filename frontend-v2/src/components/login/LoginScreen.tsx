@@ -104,7 +104,9 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
     setStep("password");
   };
 
-  const typed = (address: TypedAddress) => {
+  const typed = (address: TypedAddress | null) => {
+    if (!address) return;
+    if (address.hostname !== choice?.hostname) setPassword("");
     setChoice({ name: address.hostname, ...address });
     setError("");
     if (!desktop) setStep("password");
@@ -139,7 +141,12 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
   }
 
   const peers = snapshot?.available ? snapshot.peers.filter((peer) => !peer.is_self).length : null;
-  const summary = snapshot === null ? "" : peers === null ? "Tailscale not detected" : `Tailscale, ${peers} peers`;
+  const summary =
+    snapshot === null
+      ? ""
+      : peers === null
+        ? "Tailscale not detected"
+        : `Tailscale, ${peers} ${peers === 1 ? "peer" : "peers"}`;
 
   const picker = (
     <HostPicker
@@ -157,6 +164,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
           : undefined
       }
       searchRef={searchRef}
+      headingLevel="h2"
     />
   );
   const form = choice ? (
@@ -184,7 +192,7 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
 
   if (desktop) {
     return (
-      <div className={styles.page}>
+      <main className={styles.page}>
         <section className={styles.card} aria-label="Connect to a host">
           <header className={styles.cardHead}>
             <Logo size={30} />
@@ -213,13 +221,13 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
             </div>
           </div>
         </section>
-      </div>
+      </main>
     );
   }
 
   if (step === "password" && choice) {
     return (
-      <div className={styles.screen}>
+      <main className={styles.screen}>
         <header className={styles.top}>
           <button type="button" className={styles.back} onClick={() => setStep("hosts")}>
             <Icon name="chevron-left" size={20} />
@@ -233,12 +241,12 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
           {noticeLine}
           {form}
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className={styles.screen}>
+    <main className={styles.screen}>
       <header className={styles.top}>
         <div className={styles.heading}>
           <div className={styles.titleRow}>
@@ -259,6 +267,6 @@ export function LoginScreen({ defaultHost, notice }: LoginScreenProps) {
       </header>
       {noticeLine}
       {picker}
-    </div>
+    </main>
   );
 }

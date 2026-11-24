@@ -48,7 +48,7 @@ export function SshConnectDialog({ targetName, onConnect, onClose }: SshConnectD
           data-autofocus
           autoComplete="off"
           value={password}
-          disabled={busy}
+          readOnly={busy}
           aria-invalid={error ? true : undefined}
           onChange={(event) => setPassword(event.target.value)}
         />

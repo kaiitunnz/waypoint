@@ -1,6 +1,5 @@
 import type { RecentHost } from "./recentHosts";
 import {
-  backendPortFromUrl,
   DEFAULT_BACKEND_PORT,
   sameBackendUrl,
   type TailnetPeer,
@@ -111,17 +110,17 @@ export function parseAddress(text: string): ParsedAddress | null {
   return port === null ? null : { protocol, hostname, port };
 }
 
-// The address shown next to a host: the hostname, plus `:port` only when the URL
-// names a port other than the Waypoint default.
+// The address shown next to a host: the hostname, plus `:port` unless the port
+// is the Waypoint default (8787) or the one its scheme implies on https (443).
 export function formatAddress(url: string): string {
   const address = splitBackendUrl(url);
   if (!address) {
     return url;
   }
-  const explicit = backendPortFromUrl(url);
-  return explicit !== null && explicit !== DEFAULT_BACKEND_PORT
-    ? `${address.hostname}:${explicit}`
-    : address.hostname;
+  const implied = address.protocol === "https" && address.port === 443;
+  return address.port === DEFAULT_BACKEND_PORT || implied
+    ? address.hostname
+    : `${address.hostname}:${address.port}`;
 }
 
 // The port a host should start with: the port of its most recent sign-in under

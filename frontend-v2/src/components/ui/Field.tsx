@@ -62,7 +62,6 @@ export function PasswordInput({ className, ref, ...rest }: Omit<TextInputProps, 
         type="button"
         className={styles.trail}
         aria-label={shown ? "Hide password" : "Show password"}
-        aria-pressed={shown}
         onClick={() => setShown((value) => !value)}
       >
         <Icon name={shown ? "eye-off" : "eye"} size={18} />

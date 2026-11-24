@@ -1,5 +1,7 @@
 "use client";
 
+import { deploymentBackendPort } from "./tailnet";
+
 const HOST_KEY = "waypoint.host";
 const TOKEN_KEY = "waypoint.token";
 const TARGETS_KEY = "waypoint.launch-targets";
@@ -174,7 +176,7 @@ function normalizeCwd(cwd: string): string {
 function inferBackendHost(): string {
   const protocol = window.location.protocol === "https:" ? "https:" : "http:";
   const hostname = window.location.hostname || "127.0.0.1";
-  const port = process.env.NEXT_PUBLIC_BACKEND_PORT || "8787";
+  const port = deploymentBackendPort();
   return `${protocol}//${hostname}:${port}`;
 }
 

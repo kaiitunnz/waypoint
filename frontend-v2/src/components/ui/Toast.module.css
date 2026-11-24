@@ -38,7 +38,7 @@
 }
 
 .action {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 10px;
   border-radius: var(--r-sm);
   font-weight: 600;
@@ -46,6 +46,10 @@
 }
 
 @media (min-width: 900px) {
+  .action {
+    min-height: 36px;
+  }
+
   .viewport {
     bottom: 20px;
     align-items: flex-end;

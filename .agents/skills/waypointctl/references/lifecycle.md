@@ -1,13 +1,18 @@
 # Lifecycle Commands
 
-Targets are `backend`, `frontend`, or `all`:
+Targets are `backend`, `frontend`, `frontend-preview`, or `all`:
 
 ```bash
-waypointctl start [backend|frontend|all]
-waypointctl stop [backend|frontend|all]
-waypointctl restart [backend|frontend|all]
+waypointctl start [backend|frontend|frontend-preview|all]
+waypointctl stop [backend|frontend|frontend-preview|all]
+waypointctl restart [backend|frontend|frontend-preview|all]
 waypointctl status
 ```
+
+`frontend` covers the optional preview too; `frontend-preview` addresses only the
+preview. A failing preview is reported (exit 1) without stopping the rest. A lone
+preview start or restart is refused when it would disturb the running primary;
+the error names the command to run.
 
 Starting is generally safe. Frontend restart is safe for frontend-only changes.
 Backend or full-stack restart requires confirmation because it interrupts live

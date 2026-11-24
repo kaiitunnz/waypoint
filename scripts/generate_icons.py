@@ -46,7 +46,7 @@ SVG_LIGHT_TARGET = PUBLIC_DIR / "waypoint-light.svg"
 FAVICON_SVG_TARGET = PUBLIC_DIR / "favicon.svg"
 FAVICON_ICO_TARGET = PUBLIC_DIR / "favicon.ico"
 APP_FAVICON_ICO_TARGET = APP_DIR / "favicon.ico"
-SHARP_MODULE = REPO_ROOT / "frontend" / "node_modules" / "sharp"
+SHARP_MODULE = REPO_ROOT / "node_modules" / "sharp"
 
 # Matches `background_color` / `theme_color` in frontend/src/app/manifest.ts.
 MASKABLE_BG = (6, 8, 11, 255)

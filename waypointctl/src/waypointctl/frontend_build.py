@@ -1,21 +1,35 @@
 import subprocess
 from pathlib import Path
 
-BUILD_INPUTS_RELATIVE: tuple[str, ...] = (
-    "frontend/src",
-    "frontend/public",
-    "frontend/package.json",
-    "frontend/package-lock.json",
-    "frontend/next.config.ts",
-    "frontend/tsconfig.json",
-)
+from waypointctl.workspace import APP_DIRS, ROOT_LOCKFILE, WEB_CORE_DIR, FrontendVariant
 
 
-def is_fresh(home: Path, *, backend_port: int, force: bool = False) -> bool:
+def build_inputs(variant: FrontendVariant) -> tuple[str, ...]:
+    app_dir = APP_DIRS[variant]
+    return (
+        f"{app_dir}/src",
+        f"{app_dir}/public",
+        f"{app_dir}/package.json",
+        f"{app_dir}/next.config.ts",
+        f"{app_dir}/tsconfig.json",
+        "package.json",
+        ROOT_LOCKFILE,
+        f"{WEB_CORE_DIR}/src",
+        f"{WEB_CORE_DIR}/package.json",
+    )
+
+
+def _next_dir(home: Path, variant: FrontendVariant) -> Path:
+    return home / APP_DIRS[variant] / ".next"
+
+
+def is_fresh(
+    home: Path, variant: FrontendVariant, *, backend_port: int, force: bool = False
+) -> bool:
     if force:
         return False
 
-    next_dir = home / "frontend" / ".next"
+    next_dir = _next_dir(home, variant)
     marker = next_dir / "BUILD_ID"
     if not marker.exists():
         return False
@@ -32,29 +46,29 @@ def is_fresh(home: Path, *, backend_port: int, force: bool = False) -> bool:
         current_ref = _current_git_head(home)
         last_ref = _read_ref(ref_file)
         if current_ref and last_ref and current_ref != last_ref:
-            changes = _git_diff_inputs(home, last_ref, current_ref)
+            changes = _git_diff_inputs(home, variant, last_ref, current_ref)
             if changes is None:
                 return False
             if changes:
                 return False
-            record_build_ref(home)
+            record_build_ref(home, variant)
 
-    return not _has_newer_input(home, marker)
+    return not _has_newer_input(home, variant, marker)
 
 
-def record_build(home: Path, *, backend_port: int) -> None:
-    record_build_ref(home)
-    port_marker = home / "frontend" / ".next" / "BUILD_BACKEND_PORT"
+def record_build(home: Path, variant: FrontendVariant, *, backend_port: int) -> None:
+    record_build_ref(home, variant)
+    port_marker = _next_dir(home, variant) / "BUILD_BACKEND_PORT"
     if not port_marker.parent.exists():
         return
     port_marker.write_text(f"{backend_port}\n", encoding="utf-8")
 
 
-def record_build_ref(home: Path) -> None:
+def record_build_ref(home: Path, variant: FrontendVariant) -> None:
     head = _current_git_head(home)
     if not head:
         return
-    ref_file = home / "frontend" / ".next" / "BUILD_REF"
+    ref_file = _next_dir(home, variant) / "BUILD_REF"
     if not ref_file.parent.exists():
         return
     ref_file.write_text(f"{head}\n", encoding="utf-8")
@@ -82,7 +96,9 @@ def _current_git_head(home: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def _git_diff_inputs(home: Path, base: str, head: str) -> list[str] | None:
+def _git_diff_inputs(
+    home: Path, variant: FrontendVariant, base: str, head: str
+) -> list[str] | None:
     try:
         result = subprocess.run(
             [
@@ -94,7 +110,7 @@ def _git_diff_inputs(home: Path, base: str, head: str) -> list[str] | None:
                 base,
                 head,
                 "--",
-                *BUILD_INPUTS_RELATIVE,
+                *build_inputs(variant),
             ],
             check=False,
             capture_output=True,
@@ -107,9 +123,9 @@ def _git_diff_inputs(home: Path, base: str, head: str) -> list[str] | None:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def _has_newer_input(home: Path, marker: Path) -> bool:
+def _has_newer_input(home: Path, variant: FrontendVariant, marker: Path) -> bool:
     marker_mtime = marker.stat().st_mtime
-    inputs = [home / rel for rel in BUILD_INPUTS_RELATIVE if (home / rel).exists()]
+    inputs = [home / rel for rel in build_inputs(variant) if (home / rel).exists()]
     if not inputs:
         return True
     for path in inputs:

@@ -88,16 +88,25 @@
     for (var k in running) if (running[k]) return true;
     return false;
   }
-  function laneBusy(target) {
+  // The preview shares the frontend lane server-side, so an op on either
+  // frontend service holds both cards.
+  function laneOf(key) { return key === "frontend-preview" ? "frontend" : key; }
+  function laneActive(lane) {
     if (active("all")) return true;
-    return target === "all" ? anyActive() : active(target);
+    var keys = Object.keys(pending).concat(Object.keys(running));
+    for (var i = 0; i < keys.length; i++) {
+      if (active(keys[i]) && laneOf(keys[i]) === lane) return true;
+    }
+    return false;
+  }
+  function laneBusy(target) {
+    return target === "all" ? anyActive() : laneActive(laneOf(target));
   }
   function applyBusy() {
-    var allBusy = active("all");
     for (var name in cards) {
       var c = cards[name];
       if (!c.toggle) continue;
-      var d = allBusy || active(name);
+      var d = laneActive(laneOf(name));
       c.toggle.disabled = d; c.restart.disabled = d;
     }
     var rb = document.querySelectorAll(".redeploy button");
@@ -208,6 +217,7 @@
     var bits = [];
     if (s.pid) bits.push("pid " + s.pid);
     if (s.port) bits.push(":" + s.port);
+    if (s.variant) bits.push(s.variant);
     if (s.health) bits.push(s.health);
     return bits.join("  ·  ");
   }
@@ -230,6 +240,23 @@
     for (var name in cards) {
       if (!present[name]) { cards[name].el.remove(); delete cards[name]; }
     }
+    syncPreviewLog(!!present["frontend-preview"]);
+  }
+
+  function syncPreviewLog(present) {
+    var seg = $("logSeg");
+    seg.querySelector('button[data-log="frontend-preview"]').classList.toggle("hidden", !present);
+    if (!present && curLog === "frontend-preview") {
+      selectLog(seg.querySelector("button[data-log]"));
+    }
+  }
+
+  function selectLog(btn) {
+    curLog = btn.getAttribute("data-log");
+    var all = $("logSeg").querySelectorAll("button[data-log]");
+    for (var i = 0; i < all.length; i++) all[i].classList.remove("on");
+    btn.classList.add("on");
+    loadLog();
   }
 
   // ── status poll ──
@@ -335,12 +362,7 @@
 
   var logBtns = $("logSeg").querySelectorAll("button[data-log]");
   for (var k = 0; k < logBtns.length; k++) {
-    logBtns[k].addEventListener("click", function () {
-      curLog = this.getAttribute("data-log");
-      for (var m = 0; m < logBtns.length; m++) logBtns[m].classList.remove("on");
-      this.classList.add("on");
-      loadLog();
-    });
+    logBtns[k].addEventListener("click", function () { selectLog(this); });
   }
 
   if (token) enterConsole(); else setBeat(false);

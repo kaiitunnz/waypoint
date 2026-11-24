@@ -231,3 +231,62 @@ def test_daemon_status_e2e(state_dir: Path) -> None:
         assert "frontend:" in text
     finally:
         _terminate(proc)
+
+
+def _spawn_daemon_without_preview(home: Path, state_dir: Path) -> subprocess.Popen:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
+    }
+    env["WAYPOINTCTL_STATE_DIR"] = str(state_dir)
+    return subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+
+
+def test_daemon_rejects_deferred_restart_it_cannot_run(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    proc = _spawn_daemon_without_preview(home, state_dir)
+    try:
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
+        client = DaemonClient(home)
+
+        # Deferred commands ack before running, so a bad target has to be
+        # refused up front or the caller would see success.
+        preview = client.request("restart", ["frontend-preview"], log=lambda *_: None)
+        unknown = client.request("restart", ["teleporter"], log=lambda *_: None)
+
+        assert preview.ok is False
+        assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in (preview.error or "")
+        assert unknown.ok is False
+        assert "unknown service" in (unknown.error or "")
+    finally:
+        _terminate(proc)
+
+
+def test_daemon_stops_a_preview_that_is_no_longer_configured(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    orphan = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    pid_path = state_dir / "run" / "frontend-preview.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(f"{orphan.pid}\n")
+    proc = _spawn_daemon_without_preview(home, state_dir)
+    try:
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
+        client = DaemonClient(home)
+
+        refused = client.request("restart", ["frontend-preview"], log=lambda *_: None)
+        stopped = client.request("stop", ["frontend-preview"], log=lambda *_: None)
+
+        assert refused.ok is False
+        assert stopped.ok is True
+        assert _wait_until(lambda: orphan.poll() is not None, timeout=15.0)
+        assert _wait_until(lambda: not pid_path.exists(), timeout=15.0)
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+        orphan.wait(timeout=10)
+        _terminate(proc)

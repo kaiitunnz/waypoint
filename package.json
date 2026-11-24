@@ -1,0 +1,9 @@
+{
+  "name": "waypoint-workspace",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "frontend-v2",
+    "packages/*"
+  ]
+}

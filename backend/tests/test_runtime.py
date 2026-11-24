@@ -17,6 +17,7 @@ from waypoint.backends.claude_code.models import SONNET55_MIN_CLI_VERSION
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
+from waypoint.backends.codex import plugin as codex_plugin_module
 from waypoint.backends.codex import subagents as codex_subagents_module
 from waypoint.backends.codex.permission_modes import (
     codex_mode_developer_instructions,
@@ -2020,6 +2021,16 @@ async def test_create_session_direct_mode_uses_requested_backend(
     monkeypatch.setattr(
         runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
     )
+    status_probes: list[dict[str, str] | None] = []
+
+    async def fake_probe_codex_status(
+        *, cwd: str, binary: str, env: dict[str, str] | None = None
+    ) -> None:
+        status_probes.append(env)
+
+    monkeypatch.setattr(
+        codex_plugin_module, "probe_codex_status", fake_probe_codex_status
+    )
 
     request = SessionCreateRequest(
         backend="codex",
@@ -2033,11 +2044,15 @@ async def test_create_session_direct_mode_uses_requested_backend(
     session = await runtime.create_session(request)
     # Re-enter the preflight with the correct symlink already in place.
     second_session = await runtime.create_session(request)
+    await runtime._drain_account_probe_tasks()
 
     assert create_calls == [
         (session.id, LaunchMode.DIRECT),
         (second_session.id, LaunchMode.DIRECT),
     ]
+    # The verified-account probe would run the real codex CLI under the
+    # profile's fresh CODEX_HOME, which starts a detached managed daemon (#579).
+    assert status_probes == []
     assert session.backend == "codex"
     assert session.transport == "codex_app_server"
     assert session.cwd == str(tmp_path)
@@ -5580,6 +5595,7 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
         thread_id="thread-xyz",
         account_profile_id="work",
     )
+    await runtime._drain_account_probe_tasks()
 
     assert summary.session_id == "codex-imported"
     assert runtime.assistant_session_id == "codex-imported"

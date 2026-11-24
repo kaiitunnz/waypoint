@@ -13,9 +13,11 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 from starlette.testclient import TestClient
 
 from waypoint.api import create_app
+from waypoint.backends.claude_code import command_candidates
 from waypoint.backends.claude_code.plugin import (
     ClaudeCodePlugin,
     _claude_waypoint_completions,
@@ -78,6 +80,12 @@ def _client(app: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     )
+
+
+@pytest.fixture(autouse=True)
+def no_claude_plugin_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Completion listing shells out to `claude plugin list`.
+    monkeypatch.setattr(command_candidates, "_enabled_plugin_paths", lambda *_args: [])
 
 
 def _make_runtime(tmp_path: Path) -> tuple[SessionRuntime, Storage, Settings]:

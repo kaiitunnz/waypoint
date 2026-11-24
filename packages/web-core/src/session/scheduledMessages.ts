@@ -17,7 +17,7 @@ export function describeScheduledDelivery(
   return formatRelative(new Date(schedule.scheduled_at), now);
 }
 
-export function scheduledAtMs(m: MessageSchedule): number {
+function scheduledAtMs(m: MessageSchedule): number {
   return m.scheduled_at
     ? new Date(m.scheduled_at).getTime()
     : Number.POSITIVE_INFINITY;

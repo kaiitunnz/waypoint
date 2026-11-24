@@ -4,9 +4,9 @@
  * The backend stamps every persisted event with `metadata.version = 1`
  * (see `waypoint.backends.events.EventEnvelope`). This module is the
  * single place the frontend reads the versioned fields out of
- * `metadata`; transcript components (TranscriptCard, ApprovalCard,
- * etc.) consume the typed envelope so adding a v2 field doesn't
- * scatter optional-chain guards across the UI.
+ * `metadata`; transcript and approval components consume the typed
+ * envelope so adding a v2 field doesn't scatter optional-chain guards
+ * across the UI.
  *
  * Unknown versions degrade gracefully: the metadata is still
  * surfaced via `extra` so renderers can fall back to their existing

@@ -44,9 +44,7 @@ export function useSessionScheduledMessages(
 
   // Adaptive polling: a message fires server-side and leaves the pending list,
   // but the session page never receives the schedule broadcast, so we poll to
-  // notice. Poll fast when the soonest delivery is imminent or already past
-  // (so a just-fired message clears within a few seconds instead of lingering
-  // on "any moment"), and slowly otherwise.
+  // notice.
   useEffect(() => {
     const interval = schedulePollIntervalMs(messages);
     const id = window.setInterval(() => void refresh(), interval);

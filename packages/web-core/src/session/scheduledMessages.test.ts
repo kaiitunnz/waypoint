@@ -5,7 +5,6 @@ import {
   describeScheduledDelivery,
   pendingSchedulesSorted,
   sameSchedules,
-  scheduledAtMs,
   schedulePollIntervalMs,
 } from "./scheduledMessages";
 
@@ -64,15 +63,6 @@ describe("describeScheduledDelivery", () => {
     it("defaults to the current time", () => {
       expect(describeScheduledDelivery(at(2 * HOUR))).toBe("in 2h");
     });
-  });
-});
-
-describe("scheduledAtMs", () => {
-  it("parses the timestamp and sorts undated schedules last", () => {
-    expect(scheduledAtMs(at(0))).toBe(NOW);
-    expect(scheduledAtMs(schedule({ scheduled_at: null }))).toBe(Number.POSITIVE_INFINITY);
-    expect(scheduledAtMs(schedule())).toBe(Number.POSITIVE_INFINITY);
-    expect(scheduledAtMs(schedule({ scheduled_at: "not-a-date" }))).toBeNaN();
   });
 });
 

@@ -499,6 +499,7 @@ def test_delete_publishes_debounced_telemetry_update(tmp_path: Path) -> None:
     with TestClient(app) as client:
         with client.websocket_connect(f"/ws/sessions?token={token}") as ws:
             ws.receive_json()  # initial session_list_update hydration frame
+            assert ws.receive_json()["type"] == "pending_asks"  # and its feed frame
             client.delete(
                 "/api/telemetry", headers={"Authorization": f"Bearer {token}"}
             )

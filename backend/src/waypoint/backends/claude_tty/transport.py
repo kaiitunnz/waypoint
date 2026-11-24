@@ -106,6 +106,10 @@ class ClaudeTtyTransport(TmuxTransport):
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return session.id in self._plugin._pending_approvals
 
+    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
+        pending = self._plugin._pending_approvals.get(session.id)
+        return (pending.approval_id,) if pending is not None else ()
+
     async def input_blocked(self, session: SessionRecord) -> bool:
         return self.has_pending_approval(session) or await super().input_blocked(
             session
@@ -135,6 +139,7 @@ class ClaudeTtyTransport(TmuxTransport):
         except Exception:
             # Nothing reached the dialog: keep it answerable.
             self._plugin._pending_approvals.setdefault(session.id, pending)
+            self._runtime.asks.mark_dirty(session.id)
             raise
         if approve and pending.is_plan:
             # Approving exits plan mode in the TUI; the pressed option already

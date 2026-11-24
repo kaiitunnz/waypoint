@@ -75,6 +75,10 @@ class CodexTransport(TransportAdapter):
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.adapter.has_pending_approval(session.id)
 
+    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
+        adapter = self._plugin.adapter
+        return adapter.pending_approval_ids(session.id) if adapter else ()
+
 
 def input_http_error(exc: Exception) -> HTTPException:
     """The HTTP error for input Codex refused."""

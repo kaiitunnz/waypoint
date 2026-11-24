@@ -521,6 +521,48 @@ ended and the session is safe to message. A status change or an approval request
 clears it; a plugin rolling a status back after a failed send uses
 `storage.restore_status`.
 
+### Approval requests and plans
+
+Tool approvals and plan approvals reach the human as `APPROVAL_REQUEST` events
+and appear in the cross-session [pending-asks feed](pending_asks.md). The feed
+reads only the backend-neutral parts:
+
+- `metadata["interaction"]` — the `InteractionEnvelope` with `kind` (`approval`
+  or `plan_approval`), `request_id`, `title`, and `body`. `request_id` is the
+  id the approve endpoint takes, and equals the id a transport reports from
+  `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
+  `body`; one with an empty body is listed as a plain approval.
+- `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
+- The resolution notes `open_approval_requests`
+  ([`approvals.py`](../backend/src/waypoint/backends/approvals.py)) understands:
+  a system note whose method is `approval.invalidated`, or whose text contains
+  "Approval response sent" or "Approval timed out", carrying the `approval_id`.
+
+A structured transport overrides `pending_approval_ids(session)` to return the
+ids of the tool approvals its provider is waiting on (the default is empty). The
+feed lists an approval request only while its id is in that tuple, so requests
+left open in the transcript by a terminate or a restart are not offered for an
+answer.
+
+When what a session can answer changes without any event recording it (claude_tty
+adopting a dialog already open in the pane, OpenCode reseeding its questions
+after a restart), call `runtime.asks.mark_dirty(session_id)` so the feed
+re-derives that session.
+
+### Plan approval lifecycle (optional)
+
+An agent that decides plans through `approve_plan` implements the
+`PlanApprovalLifecycle` protocol in
+[`base.py`](../backend/src/waypoint/backends/base.py).
+`pending_plan_approval(runtime, session)` returns the plan awaiting a decision as
+a `PendingPlanApproval`, or `None`; implementations check cheap gates (the
+permission mode) before reading events. The feed lists the plan with
+`resolve_via: "approve_plan"`, so the client answers through
+`POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
+`affects_plan_approval(event)` is a pure test of which events (a plan item, a
+recorded decision) can change the result; the feed calls it for every event of a
+tracked session. Codex implements the protocol in `backends/codex/plugin.py`.
+
 ### Task notifications (optional)
 
 A background task's lifecycle — a subagent finishing, a monitor firing, a

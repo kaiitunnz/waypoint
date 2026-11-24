@@ -2,10 +2,12 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.claude_code.adapter import (
     ClaudeCliAdapter,
     ClaudeSessionState,
@@ -19,8 +21,14 @@ from waypoint.backends.claude_code.models import (
     claude_default_model_id,
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
+from waypoint.backends.claude_code.transport import ClaudeTransport
 from waypoint.questions import QuestionLiveness
-from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    EventRecord,
+    SessionContextUsage,
+    SessionStatus,
+)
 
 
 def test_claude_token_usage_record_threads_model_and_effort() -> None:
@@ -298,6 +306,49 @@ async def test_can_use_tool_resolves_via_respond() -> None:
     results = _permission_results(process)
     assert results[-1] == {"behavior": "allow", "updatedInput": {"command": "ls"}}
     assert not adapter.has_pending_approval("sess")
+
+
+@pytest.mark.asyncio
+async def test_live_approval_ids_skip_questions_and_match_the_request() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    bash = {
+        "tool_use_id": "toolu_1",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+    }
+    question = {
+        "tool_use_id": "toolu_q",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "Which?", "options": []}]},
+    }
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(bash))
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(question, "req-2"))
+
+    [(session_id, kind, text, metadata, _)] = [
+        e for e in emitted if e[1] is EventKind.APPROVAL_REQUEST
+    ]
+    request = EventRecord(
+        session_id=session_id,
+        ts=datetime.now(UTC),
+        kind=kind,
+        text=text,
+        metadata=metadata,
+        sequence=1,
+    )
+    transport = ClaudeTransport(
+        runtime=None, plugin=SimpleNamespace(adapter=adapter)  # type: ignore[arg-type]
+    )
+    session: Any = SimpleNamespace(id="sess")
+
+    assert transport.pending_approval_ids(session) == (approval_request_id(request),)
+    assert approval_request_id(request) == "toolu_1"
+    # The parked question still counts for the any-pending check, not the ids.
+    assert transport.has_pending_approval(session)
+    assert adapter.pending_approval_ids("sess") == ("toolu_1", "toolu_q")
+    await adapter.respond_to_approval("sess", "approve")
+    assert transport.pending_approval_ids(session) == ()
 
 
 @pytest.mark.asyncio

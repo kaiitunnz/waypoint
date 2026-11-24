@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.opencode.adapter import OpenCodeAdapter
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -76,7 +77,15 @@ class OpenCodeTransport(TransportAdapter):
         # Pure introspection — must not provoke an SSH server start on a
         # session whose adapter happens to be missing (e.g. cross-backend
         # poll). Treat "no adapter" as "no pending approval".
-        adapter = self._plugin._adapters.get(
+        adapter = self._existing_adapter(session)
+        return adapter is not None and adapter.has_pending_approval(session.id)
+
+    def pending_approval_ids(self, session: SessionRecord) -> tuple[str, ...]:
+        adapter = self._existing_adapter(session)
+        return adapter.pending_approval_ids(session.id) if adapter else ()
+
+    def _existing_adapter(self, session: SessionRecord) -> OpenCodeAdapter | None:
+        return self._plugin._adapters.get(
             self._plugin._adapter_key(
                 self._runtime,
                 session.launch_target_id,
@@ -84,6 +93,3 @@ class OpenCodeTransport(TransportAdapter):
                 self._effective_args(session),
             )
         )
-        if adapter is None:
-            return False
-        return adapter.has_pending_approval(session.id)

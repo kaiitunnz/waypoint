@@ -11,6 +11,7 @@ decline.
 
 import re
 
+from waypoint.backends.events import INTERACTION_METADATA_KEY
 from waypoint.schemas import EventKind, EventRecord
 
 APPROVE_DECISIONS = frozenset(
@@ -34,7 +35,19 @@ def is_approve_decision(decision: str) -> bool:
 _RESOLUTION_TEXT = re.compile(r"Approval response sent|Approval timed out", re.I)
 
 
-def _is_resolution(event: EventRecord) -> bool:
+def approval_request_id(event: EventRecord) -> str | None:
+    """The id the approve endpoint takes for an approval request event: the
+    interaction envelope's ``request_id``, else the top-level ``approval_id``
+    events recorded before that envelope carry."""
+    interaction = event.metadata.get(INTERACTION_METADATA_KEY)
+    candidates = (
+        interaction.get("request_id") if isinstance(interaction, dict) else None,
+        event.metadata.get("approval_id"),
+    )
+    return next((c for c in candidates if isinstance(c, str) and c), None)
+
+
+def is_approval_resolution(event: EventRecord) -> bool:
     return event.kind is EventKind.SYSTEM_NOTE and (
         event.metadata.get("method") == "approval.invalidated"
         or bool(_RESOLUTION_TEXT.search(event.text))
@@ -43,21 +56,17 @@ def _is_resolution(event: EventRecord) -> bool:
 
 def open_approval_requests(events: list[EventRecord]) -> list[EventRecord]:
     """Approval requests the transcript still shows as pending, oldest first.
-
-    Mirrors the frontend's approval pager: a resolution note dequeues its
-    ``approval_id``, or the oldest request when it carries none.
-    """
+    A resolution note dequeues the request whose id is its ``approval_id``, or
+    the oldest request when it carries none."""
     queue: list[EventRecord] = []
     for event in events:
         if event.kind is EventKind.APPROVAL_REQUEST:
             queue.append(event)
-        elif _is_resolution(event):
+        elif is_approval_resolution(event):
             approval_id = event.metadata.get("approval_id")
             if isinstance(approval_id, str):
                 queue = [
-                    item
-                    for item in queue
-                    if item.metadata.get("approval_id") != approval_id
+                    item for item in queue if approval_request_id(item) != approval_id
                 ]
             elif queue:
                 queue.pop(0)

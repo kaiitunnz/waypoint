@@ -101,7 +101,7 @@ def set_completed_outcome(
         metadata["is_error"] = is_error
 
 
-_PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
+PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
 
 
 def plan_metadata_for_item(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -122,7 +122,7 @@ def plan_metadata_for_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "id": plan_id if isinstance(plan_id, str) and plan_id else None,
         "text": text,
         "source": "codex",
-        "decisions": list(_PLAN_DECISIONS),
+        "decisions": list(PLAN_DECISIONS),
     }
 
 

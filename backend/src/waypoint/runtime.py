@@ -86,6 +86,7 @@ from waypoint.notifications import (
     intent_from_event,
     intent_from_inbox_item,
 )
+from waypoint.pending_asks import PendingAskFeed
 from waypoint.pending_questions import PendingQuestionTracker
 from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
@@ -587,6 +588,7 @@ class SessionRuntime:
         self.scheduler = Scheduler(self)
         self.held = HeldQueue(self)
         self.questions = PendingQuestionTracker(self)
+        self.asks = PendingAskFeed(self)
         self.session_presence = SessionPresenceRegistry()
         self.notifications: NotificationService | None = (
             NotificationService(
@@ -4022,6 +4024,8 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
+        # Marked once the row is gone, so the next flush drops the session.
+        self.asks.mark_dirty(session_id)
         # If this session ran `manager init` for any project(s), it owns those
         # managers; tear their state down with it so no orphaned backlog lingers.
         self.managers.deinit_owned_by(session_id)
@@ -4634,6 +4638,7 @@ class SessionRuntime:
         await plugin.apply_permission_mode(self, session, validated)
         updated = self.storage.update_session(session_id, permission_mode=validated)
         await self.broadcast_session_list()
+        self.asks.mark_dirty(session_id)
         return updated
 
     async def _rebase_context_usage(
@@ -5309,6 +5314,7 @@ class SessionRuntime:
         )
         self._derive_telemetry_from_event(event)
         self.questions.note_event(event)
+        self.asks.note_event(event)
         self._publish_session_state(event.session_id)
         # Backend-neutral idle wake: the just-persisted event's canonical status
         # already updated the session record (see Storage._insert_event), so a
@@ -5402,6 +5408,7 @@ class SessionRuntime:
     async def broadcast_session_list(self) -> None:
         """Publish the session list after a mutation that may touch history rows."""
         self._history_mutations += 1
+        self.asks.mark_watched_dirty()
         await self.broadcast.publish(self.session_list_envelope())
 
     async def _broadcast_session_state(self, session_id: str) -> None:
@@ -5826,6 +5833,7 @@ class SessionRuntime:
             for session_id in dirty_ids:
                 await self._broadcast_session_state(session_id)
             await self.questions.flush(dirty_ids)
+            await self.asks.flush(dirty_ids)
             if list_dirty:
                 # Streaming churn only moves live rows; a session crossing
                 # into or out of history changes history_count instead.

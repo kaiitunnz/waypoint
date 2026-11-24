@@ -617,6 +617,89 @@ export interface PendingQuestionsSnapshot {
   revision: number;
 }
 
+export type PendingAskAvailability = PendingQuestionAvailability;
+
+export interface PendingAskOption {
+  // The answer value, verbatim. `recommended` reflects a trailing
+  // "(Recommended)" marker in the label.
+  label: string;
+  description: string | null;
+  recommended: boolean;
+}
+
+export interface PendingAskPrompt {
+  question: string;
+  header: string | null;
+  multi_select: boolean;
+  options: PendingAskOption[];
+}
+
+// Answered with POST /api/sessions/{id}/answer-question or .../cancel-question.
+export interface PendingAskQuestion {
+  tool_use_id: string;
+  questions: PendingAskPrompt[];
+}
+
+// Answered with POST /api/sessions/{id}/approve.
+export interface PendingAskApproval {
+  approval_id: string;
+  tool_name: string | null;
+  // Long string values are cut to 2,000 characters plus an ellipsis.
+  tool_input: Record<string, unknown> | null;
+  tool_input_truncated: boolean;
+  decisions: string[];
+  supports_note: boolean;
+}
+
+// `approve` answers through /approve with approval_id = plan_id; `approve_plan`
+// through /approve-plan with plan_item_id = plan_id.
+export interface PendingAskPlan {
+  plan_id: string;
+  text: string;
+  decisions: string[];
+  supports_note: boolean;
+  resolve_via: "approve" | "approve_plan";
+}
+
+export interface PendingAskBase {
+  id: string;
+  session_id: string;
+  session_title: string;
+  session_backend: string;
+  spawner_session_id: string | null;
+  created_at: string;
+  sequence: number;
+  availability: PendingAskAvailability;
+  title: string;
+  body: string | null;
+}
+
+export interface PendingQuestionAsk extends PendingAskBase {
+  kind: "question";
+  question: PendingAskQuestion;
+}
+
+export interface PendingApprovalAsk extends PendingAskBase {
+  kind: "approval";
+  approval: PendingAskApproval;
+}
+
+export interface PendingPlanAsk extends PendingAskBase {
+  kind: "plan_approval";
+  plan: PendingAskPlan;
+}
+
+// One request waiting on the human; narrow on `kind` to reach its payload.
+export type PendingAsk = PendingQuestionAsk | PendingApprovalAsk | PendingPlanAsk;
+
+// GET /api/pending-asks and the `pending_asks` frame on /ws/sessions: every
+// pending ask across live sessions, oldest first (docs/pending_asks.md).
+export interface PendingAsksSnapshot {
+  epoch: string;
+  revision: number;
+  items: PendingAsk[];
+}
+
 export interface LaunchTargetSummary {
   id: string;
   name: string;
@@ -889,6 +972,7 @@ export interface SessionEnvelope {
     | "side_question"
     | "held_messages"
     | "pending_questions"
+    | "pending_asks"
     | "inbox_update"
     | "telemetry_update"
     | "nl_insight_status";

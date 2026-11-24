@@ -88,12 +88,3 @@ An item is listed while its request is open and still answerable:
 - Sessions that have exited and throwaway telemetry sessions contribute nothing.
   Approvals and plans also need a structured transport, and a session in an
   error state contributes its questions only.
-
-The feed derives each session's items from durable state and re-derives a session
-when an event that can change its asks arrives, when its status or permission mode
-changes, or when a plugin reports a change no event records. The first read scans
-live sessions once.
-
-A transport reports its pending approvals by id. One that can only say whether
-any is pending reports no ids, and the feed then lists every open request of a
-session that has one pending.

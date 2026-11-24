@@ -1252,6 +1252,7 @@ class PendingQuestionsSnapshot(BaseModel):
 
 
 PendingAskKind = Literal["question", "approval", "plan_approval"]
+PendingAskAvailability = PendingQuestionAvailability
 PendingAskPlanResolver = Literal["approve", "approve_plan"]
 
 
@@ -1308,7 +1309,7 @@ class PendingAsk(BaseModel):
     spawner_session_id: str | None = None
     created_at: datetime
     sequence: int
-    availability: PendingQuestionAvailability
+    availability: PendingAskAvailability
     title: str
     body: str | None = None
     question: PendingAskQuestion | None = None

@@ -619,6 +619,8 @@ export interface PendingQuestionsSnapshot {
 
 export type PendingAskKind = "question" | "approval" | "plan_approval";
 
+export type PendingAskAvailability = PendingQuestionAvailability;
+
 export interface PendingAskOption {
   // The answer value, verbatim. `recommended` reflects a trailing
   // "(Recommended)" marker in the label.
@@ -673,7 +675,7 @@ export interface PendingAsk {
   spawner_session_id: string | null;
   created_at: string;
   sequence: number;
-  availability: PendingQuestionAvailability;
+  availability: PendingAskAvailability;
   title: string;
   body: string | null;
   question: PendingAskQuestion | null;

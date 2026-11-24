@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from waypoint.schemas import EventKind, PendingQuestionAvailability, SessionStatus
+from waypoint.schemas import EventKind, PendingAskAvailability, SessionStatus
 
 
 class ItemPayload(BaseModel):
@@ -82,7 +82,7 @@ class PendingPlanApproval(BaseModel):
     text: str
     decisions: list[str]
     supports_note: bool = False
-    availability: PendingQuestionAvailability = "actionable"
+    availability: PendingAskAvailability = "actionable"
     created_at: datetime
     sequence: int
 

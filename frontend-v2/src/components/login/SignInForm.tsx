@@ -21,6 +21,7 @@ interface SignInFormProps {
   portValid: boolean;
   // A finished host and a valid port.
   canConnect: boolean;
+  autoFocusPassword: boolean;
   onPortChange: (text: string) => void;
   onChangeHost: () => void;
   probe: ProbeStatus;
@@ -45,6 +46,7 @@ export function SignInForm({
   portText,
   portValid,
   canConnect,
+  autoFocusPassword,
   onPortChange,
   onChangeHost,
   probe,
@@ -98,7 +100,7 @@ export function SignInForm({
           id={passwordId}
           name="password"
           autoComplete="current-password"
-          autoFocus
+          autoFocus={autoFocusPassword}
           value={password}
           onChange={(event) => onPasswordChange(event.target.value)}
         />

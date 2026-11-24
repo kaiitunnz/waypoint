@@ -166,6 +166,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       portText={portText}
       portValid={port !== null}
       canConnect={url !== null}
+      autoFocusPassword={!desktop}
       onPortChange={setPortText}
       onChangeHost={changeHost}
       probe={probe}

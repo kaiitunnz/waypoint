@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from waypoint.backends.base import (
     ConfigDirReadiness,
     DefaultLaunchContract,
+    PendingPlanApproval,
     config_dir_for,
 )
 from waypoint.backends.capabilities import (
@@ -72,7 +73,6 @@ from waypoint.backends.codex.subagents import (
 )
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.events import PendingPlanApproval
 from waypoint.backends.plugin_config import (
     AccountProfileConfig,
     PluginConfig,
@@ -867,7 +867,8 @@ class CodexPlugin(DefaultLaunchContract):
         current = _current_plan(runtime, session.id)
         if current is None:
             return None
-        # A fork copies its parent's events, including plans of the parent's thread.
+        # A fork copies its parent's events, plans included; this thread never
+        # asked for a plan copied from the parent's.
         thread_id = session.transport_state.get("thread_id")
         plan_thread = _event_thread_id(current.event)
         if plan_thread and thread_id and plan_thread != thread_id:
@@ -2151,6 +2152,10 @@ def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, An
     return {"decision": "decline"}
 
 
+# How many of a session's newest plan items the current-plan lookup reads.
+_PLAN_ITEM_WINDOW = 200
+
+
 class _CurrentPlan(NamedTuple):
     event: EventRecord
     plan_id: str
@@ -2163,14 +2168,16 @@ def _current_plan(runtime: "SessionRuntime", session_id: str) -> _CurrentPlan | 
     item has no id, a decision followed it, or an older item of another id is
     reached before any text."""
     current_id: str | None = None
-    for event in runtime.storage.plan_item_events(session_id):
+    for event in runtime.storage.events_by_metadata(
+        session_id, "item_type", "plan", newest_first=True, limit=_PLAN_ITEM_WINDOW
+    ):
         plan_id = _plan_id_for_event(event)
         if not plan_id or (current_id is not None and plan_id != current_id):
             return None
         decided = {
             decision.metadata["plan_item_id"]
-            for decision in runtime.storage.plan_decision_events(
-                session_id, event.sequence
+            for decision in runtime.storage.events_by_metadata(
+                session_id, "plan_decision", after_sequence=event.sequence
             )
             if isinstance(decision.metadata.get("plan_item_id"), str)
             and decision.metadata.get("plan_decision") in PLAN_DECISIONS

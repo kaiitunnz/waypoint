@@ -145,8 +145,8 @@ def test_only_plan_mode_sessions_have_a_pending_plan_and_skip_the_event_query(
 ) -> None:
     make_session(runtime, mode="default")
     seed_plan(runtime)
-    spy = MagicMock(wraps=runtime.storage.plan_item_events)
-    runtime.storage.plan_item_events = spy  # type: ignore[method-assign]
+    spy = MagicMock(wraps=runtime.storage.events_by_metadata)
+    runtime.storage.events_by_metadata = spy  # type: ignore[method-assign]
 
     assert pending(runtime, plugin) is None
     assert spy.call_count == 0
@@ -279,22 +279,3 @@ def test_affects_plan_approval_recognizes_plan_items_and_decisions(
     )
     assert not plugin.affects_plan_approval(event({"item_type": "agentMessage"}))
     assert not plugin.affects_plan_approval(event({}))
-
-
-def test_storage_plan_queries_are_session_scoped_and_ordered(
-    runtime: SessionRuntime,
-) -> None:
-    make_session(runtime)
-    first = seed_plan(runtime, "plan-1")
-    second = seed_plan(runtime, "plan-2")
-    decide(runtime, "plan-1")
-
-    assert [e.sequence for e in runtime.storage.plan_item_events("sess")] == [
-        second.sequence,
-        first.sequence,
-    ]
-    assert len(runtime.storage.plan_item_events("sess", limit=1)) == 1
-    assert runtime.storage.plan_item_events("elsewhere") == []
-    decisions = runtime.storage.plan_decision_events("sess", first.sequence)
-    assert [e.metadata["plan_item_id"] for e in decisions] == ["plan-1"]
-    assert runtime.storage.plan_decision_events("sess", second.sequence + 1) == []

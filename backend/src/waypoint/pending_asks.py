@@ -20,9 +20,9 @@ from waypoint.backends.approvals import (
     is_approval_resolution,
     open_approval_requests,
 )
-from waypoint.backends.base import PlanApprovalLifecycle
+from waypoint.backends.base import PendingPlanApproval, PlanApprovalLifecycle
 from waypoint.backends.capabilities import BackendCapabilities
-from waypoint.backends.events import INTERACTION_METADATA_KEY, PendingPlanApproval
+from waypoint.backends.events import INTERACTION_METADATA_KEY
 from waypoint.pending_questions import is_question_lifecycle_event
 from waypoint.schemas import (
     EventKind,
@@ -117,33 +117,45 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+_State = tuple[SessionStatus, str | None]
+
+
+def _state(session: SessionRecord) -> _State:
+    return (session.status, session.permission_mode)
+
+
 @dataclass
 class _Entry:
-    """What the feed knows about one session."""
-
     asks: list[PendingAsk] = field(default_factory=list)
     # The state the last derivation saw; a change re-derives even an idle entry.
-    status: SessionStatus | None = None
-    permission_mode: str | None = None
+    state: _State | None = None
     # Apart from the question tracker's ids so that reading the feed never makes
     # the tracker treat the session as tracked.
     question_ids: frozenset[str] = frozenset()
     plan_plugin: PlanApprovalLifecycle | None = None
-    # Asking for the open approvals or the pending plan walks the session's
-    # events, so the last answer stands until an ask-relevant event arrives (the
-    # plan also until the session's status or mode changes).
+
+    @property
+    def watch(self) -> bool:
+        """Whether state churn re-derives the session: it has asks or open
+        questions."""
+        return bool(self.asks) or bool(self.question_ids)
+
+
+@dataclass
+class _EventWalks:
+    """Answers that cost a walk of the session's events. They stand until an
+    ask-relevant event arrives, and the plan also until the session's state
+    changes."""
+
     open_approvals: list[EventRecord] | None = None
-    plan: PendingPlanApproval | None = None
-    plan_cached: bool = False
-    # Whether the session has items or open question events, so state churn
-    # re-derives it.
-    watch: bool = False
+    plan: tuple[_State, PendingPlanApproval | None] | None = None
 
 
 class PendingAskFeed:
     def __init__(self, runtime: "SessionRuntime") -> None:
         self._runtime = runtime
         self._entries: dict[str, _Entry] = {}
+        self._walks: dict[str, _EventWalks] = {}
         self._dirty: set[str] = set()
         # ``_active`` once something has asked for the feed (events are then
         # recorded); ``_scanned`` once the first full scan has finished.
@@ -164,7 +176,7 @@ class PendingAskFeed:
 
     def _snapshot(self) -> PendingAsksSnapshot:
         return PendingAsksSnapshot(
-            epoch=self.epoch, revision=self._revision, items=list(self._current)
+            epoch=self.epoch, revision=self._revision, items=self._current
         )
 
     @staticmethod
@@ -232,8 +244,7 @@ class PendingAskFeed:
             )
             relevant = True
         if relevant:
-            entry.open_approvals = None
-            entry.plan_cached = False
+            self._walks.pop(event.session_id, None)
             self._dirty.add(event.session_id)
 
     def mark_dirty(self, session_id: str) -> None:
@@ -287,10 +298,7 @@ class PendingAskFeed:
         session = self._runtime.storage.get_session(session_id)
         if session is None:
             return True
-        return (session.status, session.permission_mode) != (
-            entry.status,
-            entry.permission_mode,
-        )
+        return _state(session) != entry.state
 
     def _take_dirty(self) -> set[str]:
         dirty, self._dirty = self._dirty, set()
@@ -303,6 +311,7 @@ class PendingAskFeed:
             session = self._runtime.storage.get_session(session_id)
             if session is None:
                 self._entries.pop(session_id, None)
+                self._walks.pop(session_id, None)
             else:
                 self._derive_into_entries(session)
         items = sorted(
@@ -322,17 +331,15 @@ class PendingAskFeed:
             log.exception(
                 "pending-asks derivation failed", extra={"session_id": session.id}
             )
-            self._entries[session.id] = _Entry(
-                status=session.status, permission_mode=session.permission_mode
-            )
+            self._entries[session.id] = _Entry(state=_state(session))
 
     def _derive(self, session: SessionRecord) -> _Entry:
-        previous = self._entries.get(session.id)
-        entry = _Entry(status=session.status, permission_mode=session.permission_mode)
+        entry = _Entry(state=_state(session))
         if (
             session.status is SessionStatus.EXITED
             or session.source is SessionSource.TELEMETRY
         ):
+            self._walks.pop(session.id, None)
             return entry
         runtime = self._runtime
         plugin = runtime.registry.plugin_for(session)
@@ -348,33 +355,22 @@ class PendingAskFeed:
         if session.status is not SessionStatus.ERROR:
             transport = runtime.transport_for(session)
             if transport.is_structured:
-                asks += self._approval_asks(session, transport, previous, entry)
+                asks += self._approval_asks(session, transport)
                 if plan_plugin is not None and (
-                    plan := self._plan(session, plan_plugin, previous, entry)
+                    plan := self._plan(session, plan_plugin)
                 ):
                     asks.append(self._plan_ask(session, plan))
         entry.asks = asks
-        entry.watch = bool(asks) or bool(question_ids)
         return entry
 
     def _plan(
-        self,
-        session: SessionRecord,
-        plugin: PlanApprovalLifecycle,
-        previous: _Entry | None,
-        entry: _Entry,
+        self, session: SessionRecord, plugin: PlanApprovalLifecycle
     ) -> PendingPlanApproval | None:
-        if (
-            previous is not None
-            and previous.plan_cached
-            and (previous.status, previous.permission_mode)
-            == (session.status, session.permission_mode)
-        ):
-            entry.plan = previous.plan
-        else:
-            entry.plan = plugin.pending_plan_approval(self._runtime, session)
-        entry.plan_cached = True
-        return entry.plan
+        walks = self._walks.setdefault(session.id, _EventWalks())
+        state = _state(session)
+        if walks.plan is None or walks.plan[0] != state:
+            walks.plan = (state, plugin.pending_plan_approval(self._runtime, session))
+        return walks.plan[1]
 
     def _question_ask(
         self, session: SessionRecord, question: PendingQuestion
@@ -397,24 +393,19 @@ class PendingAskFeed:
         )
 
     def _approval_asks(
-        self,
-        session: SessionRecord,
-        transport: TransportAdapter,
-        previous: _Entry | None,
-        entry: _Entry,
+        self, session: SessionRecord, transport: TransportAdapter
     ) -> list[PendingAsk]:
         live = transport.pending_approval_ids(session)
         if not live:
             return []
-        if previous is not None and previous.open_approvals is not None:
-            entry.open_approvals = previous.open_approvals
-        else:
-            entry.open_approvals = open_approval_requests(
+        walks = self._walks.setdefault(session.id, _EventWalks())
+        if walks.open_approvals is None:
+            walks.open_approvals = open_approval_requests(
                 self._runtime.storage.list_approval_events(session.id)
             )
         capabilities = self._runtime.registry.capabilities_for(session)
         asks: list[PendingAsk] = []
-        for event in entry.open_approvals:
+        for event in walks.open_approvals:
             request_id = approval_request_id(event)
             if request_id is None or request_id not in live:
                 continue
@@ -445,15 +436,17 @@ class PendingAskFeed:
         tool_name = _text(event.metadata.get("tool_name"))
         raw_input = event.metadata.get("tool_input")
         tool_input = _cut_strings(raw_input) if isinstance(raw_input, dict) else None
-        title = _text(interaction.get("title")) or (
-            f"Approve {tool_name}" if tool_name else "Approval requested"
+        title = _cut(
+            _text(interaction.get("title"))
+            or (f"Approve {tool_name}" if tool_name else "Approval requested")
         )
+        body = _cut(_text(interaction.get("body")) or event.text)
         return PendingApprovalAsk(
             id=f"approval:{session.id}:{request_id}",
             **self._common(session, event.ts, event.sequence),
             availability="actionable",
-            title=_cut(title),
-            body=_cut(_text(interaction.get("body")) or event.text) or None,
+            title=title,
+            body=body if body and body != title else None,
             approval=PendingAskApproval(
                 approval_id=request_id,
                 tool_name=tool_name,

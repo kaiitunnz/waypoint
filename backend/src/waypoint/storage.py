@@ -2468,35 +2468,33 @@ class Storage:
         return [self._event_from_row(row) for row in rows]
 
     @_synchronized
-    def plan_item_events(self, session_id: str, limit: int = 200) -> list[EventRecord]:
-        """Events for plan items (``item_type == "plan"``), newest first."""
+    def events_by_metadata(
+        self,
+        session_id: str,
+        key: str,
+        value: str | None = None,
+        *,
+        after_sequence: int = 0,
+        newest_first: bool = False,
+        limit: int = -1,
+    ) -> list[EventRecord]:
+        """Events whose top-level metadata ``key`` equals ``value``, or is set
+        when ``value`` is ``None``, after ``after_sequence``. ``limit`` caps the
+        result; a negative limit means no cap."""
+        direction = "DESC" if newest_first else "ASC"
+        path = f"$.{key}"
+        if value is None:
+            matches, params = "json_extract(metadata, ?) IS NOT NULL", [path]
+        else:
+            matches, params = "json_extract(metadata, ?) = ?", [path, value]
         rows = self.connection.execute(
-            """
+            f"""
             SELECT * FROM events
-            WHERE session_id = ?
-              AND json_extract(metadata, '$.item_type') = 'plan'
-            ORDER BY sequence DESC, id DESC
+            WHERE session_id = ? AND sequence > ? AND {matches}
+            ORDER BY sequence {direction}, id {direction}
             LIMIT ?
             """,
-            [session_id, limit],
-        ).fetchall()
-        return [self._event_from_row(row) for row in rows]
-
-    @_synchronized
-    def plan_decision_events(
-        self, session_id: str, after_sequence: int
-    ) -> list[EventRecord]:
-        """Events after ``after_sequence`` that record a plan decision, in
-        order."""
-        rows = self.connection.execute(
-            """
-            SELECT * FROM events
-            WHERE session_id = ?
-              AND sequence > ?
-              AND json_extract(metadata, '$.plan_decision') IS NOT NULL
-            ORDER BY sequence ASC, id ASC
-            """,
-            [session_id, after_sequence],
+            [session_id, after_sequence, *params, limit],
         ).fetchall()
         return [self._event_from_row(row) for row in rows]
 

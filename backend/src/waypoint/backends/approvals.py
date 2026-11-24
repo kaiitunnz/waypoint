@@ -56,10 +56,8 @@ def is_approval_resolution(event: EventRecord) -> bool:
 
 def open_approval_requests(events: list[EventRecord]) -> list[EventRecord]:
     """Approval requests the transcript still shows as pending, oldest first.
-
-    Mirrors the frontend's approval pager: a resolution note dequeues its
-    ``approval_id``, or the oldest request when it carries none.
-    """
+    A resolution note dequeues the request whose id is its ``approval_id``, or
+    the oldest request when it carries none."""
     queue: list[EventRecord] = []
     for event in events:
         if event.kind is EventKind.APPROVAL_REQUEST:

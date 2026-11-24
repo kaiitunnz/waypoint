@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
-from waypoint.backends.events import PendingPlanApproval
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     CommandCompletion,
     EventRecord,
+    PendingAskAvailability,
     SessionContextUsage,
     SessionRecord,
 )
@@ -183,13 +183,26 @@ class QuestionLifecycle(Protocol):
         ...
 
 
+class PendingPlanApproval(BaseModel):
+    """A plan awaiting the human's decision, as reported by a
+    ``PlanApprovalLifecycle`` agent."""
+
+    plan_id: str
+    text: str
+    decisions: list[str]
+    supports_note: bool = False
+    availability: PendingAskAvailability = "actionable"
+    created_at: datetime
+    sequence: int
+
+
 @runtime_checkable
 class PlanApprovalLifecycle(Protocol):
     """An agent that decides plans through ``approve_plan``.
 
-    The pending-asks feed asks it which plan, if any, awaits the human. An agent
-    that raises plan approvals as approval requests (``interaction.kind ==
-    "plan_approval"``) needs no protocol: the feed reads those events itself.
+    The pending-asks feed asks it which plan, if any, awaits the human. The feed
+    reads plan approvals raised as approval requests (``interaction.kind ==
+    "plan_approval"``) from their events.
     """
 
     def pending_plan_approval(

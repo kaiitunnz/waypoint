@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from waypoint import pending_asks
-from waypoint.backends.events import PendingPlanApproval
+from waypoint.backends.base import PendingPlanApproval
 from waypoint.pending_asks import TEXT_LIMIT
 from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.runtime import SessionRuntime
@@ -278,7 +278,6 @@ async def items(env: Env) -> list[PendingAsk]:
 
 async def test_question_item_carries_the_inline_answer_payload(env: Env) -> None:
     await ask(env.runtime, "q1")
-    add_session(env.runtime, "child", spawner="s1", title="child work")
 
     snapshot = await env.runtime.asks.snapshot()
 
@@ -407,7 +406,7 @@ async def test_toolless_approval_uses_its_text(env: Env) -> None:
     item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
     assert item.title == "Approve command: ls"
-    assert item.body == "Approve command: ls"
+    assert item.body is None
     assert item.approval.tool_name is None and item.approval.tool_input is None
 
 

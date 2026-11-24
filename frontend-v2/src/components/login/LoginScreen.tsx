@@ -17,6 +17,7 @@ import {
   splitBackendUrl,
   type BackendProtocol,
   type HostRow,
+  type TypedAddress,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts, writeRecentHost } from "@waypoint/web-core/recentHosts";
 
@@ -28,7 +29,7 @@ import { Logo } from "@/components/ui/Logo";
 import { signIn } from "@/lib/auth";
 import { DESKTOP_QUERY } from "@/lib/layout";
 
-import { HostPicker, type TypedAddress } from "@/components/hosts/HostPicker";
+import { HostPicker } from "@/components/hosts/HostPicker";
 import { SignInForm } from "./SignInForm";
 import styles from "./LoginScreen.module.css";
 

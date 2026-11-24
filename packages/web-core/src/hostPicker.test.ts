@@ -12,7 +12,9 @@ import {
   pageDevice,
   parseAddress,
   parsePort,
+  portAfterHostEdit,
   portForHost,
+  resolveTypedAddress,
   splitBackendUrl,
 } from "./hostPicker";
 import type { RecentHost } from "./recentHosts";
@@ -34,12 +36,12 @@ const names = (rows: { name: string }[]) => rows.map((row) => row.name);
 
 describe("parseAddress", () => {
   it("reads a bare host", () => {
-    expect(parseAddress("10.0.4.12")).toEqual({ protocol: "http", hostname: "10.0.4.12", port: null });
+    expect(parseAddress("10.0.4.12")).toEqual({ protocol: null, hostname: "10.0.4.12", port: null });
   });
 
   it("reads host:port", () => {
     expect(parseAddress("Studio.local:9000")).toEqual({
-      protocol: "http",
+      protocol: null,
       hostname: "studio.local",
       port: 9000,
     });
@@ -54,7 +56,7 @@ describe("parseAddress", () => {
   });
 
   it("reads bracketed IPv6", () => {
-    expect(parseAddress("[::1]:8787")).toEqual({ protocol: "http", hostname: "[::1]", port: 8787 });
+    expect(parseAddress("[::1]:8787")).toEqual({ protocol: null, hostname: "[::1]", port: 8787 });
   });
 
   it("reads a URL with a scheme and no port as the scheme's default port", () => {
@@ -78,6 +80,46 @@ describe("parseAddress", () => {
     expect(parseAddress("host:0")).toBeNull();
     expect(parseAddress("host:70000")).toBeNull();
     expect(parseAddress("a b")).toBeNull();
+  });
+});
+
+describe("resolveTypedAddress", () => {
+  it("takes the scheme in the text, else the page's", () => {
+    expect(resolveTypedAddress("100.64.0.5", "8787", "https")).toEqual({
+      protocol: "https",
+      hostname: "100.64.0.5",
+      portText: "8787",
+    });
+    expect(resolveTypedAddress("http://10.0.0.5", "8787", "https")?.protocol).toBe("http");
+    expect(resolveTypedAddress("https://box.example.com", "8787", "http")?.protocol).toBe("https");
+  });
+
+  it("uses the port field's text whatever the host text names", () => {
+    expect(resolveTypedAddress("https://h", "8443", "http")?.portText).toBe("8443");
+    expect(resolveTypedAddress("h:9000", "9100", "http")?.portText).toBe("9100");
+  });
+
+  it("is null for text that is not an address", () => {
+    expect(resolveTypedAddress("", "8787", "http")).toBeNull();
+    expect(resolveTypedAddress("a b", "8787", "http")).toBeNull();
+  });
+});
+
+describe("portAfterHostEdit", () => {
+  it("follows a port the text newly names", () => {
+    expect(portAfterHostEdit("h:900", "h:9000", "900")).toBe("9000");
+    expect(portAfterHostEdit("", "https://h", "8787")).toBe("443");
+    expect(portAfterHostEdit("h", "h:9000", "8787")).toBe("9000");
+  });
+
+  it("keeps what was entered in the port field while the text's port is unchanged", () => {
+    expect(portAfterHostEdit("https://h", "https://hx", "8443")).toBe("8443");
+    expect(portAfterHostEdit("h:9000", "h:9000/", "9100")).toBe("9100");
+  });
+
+  it("keeps the port field when the text names no port", () => {
+    expect(portAfterHostEdit("h", "ho", "9100")).toBe("9100");
+    expect(portAfterHostEdit("h:9", "h:", "9")).toBe("9");
   });
 });
 

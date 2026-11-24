@@ -72,7 +72,8 @@ export function isCompleteHost(hostname: string): boolean {
 }
 
 export interface ParsedAddress {
-  protocol: BackendProtocol;
+  // Null when the text names no scheme, so the caller keeps its own.
+  protocol: BackendProtocol | null;
   hostname: string;
   // Null when the text names no port, so the caller keeps its own default.
   port: number | null;
@@ -89,7 +90,7 @@ export function parseAddress(text: string): ParsedAddress | null {
   if (!trimmed) {
     return null;
   }
-  let protocol: BackendProtocol = "http";
+  let protocol: BackendProtocol | null = null;
   let rest = trimmed;
   const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(trimmed);
   if (scheme) {
@@ -109,10 +110,36 @@ export function parseAddress(text: string): ParsedAddress | null {
     return null;
   }
   if (match[2] === undefined) {
-    return { protocol, hostname, port: scheme ? protocolDefaultPort(protocol) : null };
+    return { protocol, hostname, port: protocol ? protocolDefaultPort(protocol) : null };
   }
   const port = parsePort(match[2]);
   return port === null ? null : { protocol, hostname, port };
+}
+
+// What the address box hands the picker: a host with the port field's text, which
+// the caller validates.
+export interface TypedAddress {
+  protocol: BackendProtocol;
+  hostname: string;
+  portText: string;
+}
+
+// The scheme in the text wins, else `pageProtocol` (an https page cannot reach an
+// http backend); the port is the port field's.
+export function resolveTypedAddress(
+  hostText: string,
+  portText: string,
+  pageProtocol: BackendProtocol,
+): TypedAddress | null {
+  const parsed = parseAddress(hostText);
+  return parsed ? { protocol: parsed.protocol ?? pageProtocol, hostname: parsed.hostname, portText } : null;
+}
+
+// The port field after the host text changes: it follows a port the text newly
+// names (`host:9000`, `https://host`), and otherwise keeps what was entered there.
+export function portAfterHostEdit(previousText: string, nextText: string, portText: string): string {
+  const next = parseAddress(nextText)?.port ?? null;
+  return next !== null && next !== (parseAddress(previousText)?.port ?? null) ? String(next) : portText;
 }
 
 // The address shown next to a host: the hostname, plus `:port` unless the port

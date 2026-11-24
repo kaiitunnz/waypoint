@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, type ClipboardEvent, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import {
   formatLastUsed,
   pageDevice,
-  parseAddress,
   parsePort,
-  type BackendProtocol,
+  portAfterHostEdit,
+  resolveTypedAddress,
   type HostGroups,
   type HostRow,
+  type TypedAddress,
 } from "@waypoint/web-core/hostPicker";
 import { DEFAULT_BACKEND_PORT } from "@waypoint/web-core/tailnet";
 
@@ -20,12 +21,6 @@ import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
 
 import styles from "./HostPicker.module.css";
-
-export interface TypedAddress {
-  protocol: BackendProtocol;
-  hostname: string;
-  portText: string;
-}
 
 interface ExtraGroup {
   id: string;
@@ -184,46 +179,19 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
   const [open, setOpen] = useState(false);
   const [hostText, setHostText] = useState("");
   const [ownPortText, setOwnPortText] = useState(String(DEFAULT_BACKEND_PORT));
-  const [protocol, setProtocol] = useState<BackendProtocol>(() => pageDevice().protocol);
   const portText = port ? port.text : ownPortText;
   const setPortText = port ? port.onChange : setOwnPortText;
+  const pageProtocol = pageDevice().protocol;
 
-  const resolve = (nextHost: string, nextPort: string, nextProtocol: BackendProtocol) => {
-    const parsed = parseAddress(nextHost);
-    if (!parsed) return null;
-    return {
-      protocol: parsed.protocol === "https" ? "https" : nextProtocol,
-      hostname: parsed.hostname,
-      portText: nextPort,
-    } satisfies TypedAddress;
-  };
-
-  // A port in the host text (`host:9000`, `https://host`) moves the Port field;
-  // editing the Port field afterwards wins.
-  const portFromHost = (text: string) => {
-    const typedPort = parseAddress(text)?.port;
-    return typedPort == null ? portText : String(typedPort);
-  };
-
-  const update = (nextHost: string, nextPort: string, nextProtocol = protocol) => {
+  const update = (nextHost: string, nextPort: string) => {
     setHostText(nextHost);
     setPortText(nextPort);
-    setProtocol(nextProtocol);
-    if (live) onAddress(resolve(nextHost, nextPort, nextProtocol));
-  };
-
-  // A pasted URL fills the port field and drops the scheme and path.
-  const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
-    const text = event.clipboardData.getData("text");
-    const parsed = parseAddress(text);
-    if (!parsed || parsed.port === null) return;
-    event.preventDefault();
-    update(parsed.hostname, String(parsed.port), parsed.protocol);
+    if (live) onAddress(resolveTypedAddress(nextHost, nextPort, pageProtocol));
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const address = resolve(hostText, portText, protocol);
+    const address = resolveTypedAddress(hostText, portText, pageProtocol);
     if (address && parsePort(address.portText) !== null) onAddress(address);
   };
 
@@ -252,8 +220,9 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
               autoCapitalize="none"
               spellCheck={false}
               value={hostText}
-              onChange={(event) => update(event.target.value, portFromHost(event.target.value))}
-              onPaste={onPaste}
+              onChange={(event) =>
+                update(event.target.value, portAfterHostEdit(hostText, event.target.value, portText))
+              }
             />
           </Field>
           <Field label="Port" htmlFor="address-port">
@@ -273,7 +242,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
               size="sm"
               type="submit"
               className={styles.continue}
-              disabled={!resolve(hostText, portText, protocol) || portInvalid}
+              disabled={!resolveTypedAddress(hostText, portText, pageProtocol) || portInvalid}
             >
               Continue
             </Button>

@@ -66,7 +66,8 @@ def stub_pane(runtime: SessionRuntime, monkeypatch, screen: str) -> list[str]:
     enters: list[str] = []
 
     async def capture_snapshot(target: str, start_line: int = -200) -> str:
-        return screen
+        # Enter submits the composer's message, which clears it.
+        return EMPTY_COMPOSER if enters else screen
 
     async def resume(target: str) -> None:
         enters.append(target)

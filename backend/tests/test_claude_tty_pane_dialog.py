@@ -695,8 +695,30 @@ _PENDING_MESSAGE = "\n".join(
 )
 
 
+_RULE = "─" * 40
+_PROMPT_ECHO = "❯ Run this exact shell command and report the output."
+_STATUS_PANEL = "\n".join(
+    [
+        _PROMPT_ECHO,
+        "● Done.",
+        "▔" * 40,
+        "  Settings  Status   Config   Usage   Stats",
+        "  Version:           2.1.331",
+        "  ←/→ to switch · Esc to close",
+    ]
+)
+_SHELL_MODE = "\n".join(
+    [_PROMPT_ECHO, "● Done.", _RULE, "! ", _RULE, "  ! for shell mode"]
+)
+
+
 def test_composer_holds_input_for_unsent_message() -> None:
     assert composer_holds_input(_PENDING_MESSAGE) is True
+
+
+def test_composer_holds_wrapped_input() -> None:
+    screen = "\n".join([_RULE, "❯ ", "  second line of a typed message", _RULE])
+    assert composer_holds_input(screen) is True
 
 
 @pytest.mark.parametrize(
@@ -708,8 +730,19 @@ def test_composer_holds_input_for_unsent_message() -> None:
         _load("approval_with_queued.txt"),
         _load("trust_dialog.txt"),
         _load("question_dialog.txt"),
+        _STATUS_PANEL,
+        _SHELL_MODE,
     ],
-    ids=["placeholder", "bare-prompt", "booting", "approval", "trust", "question"],
+    ids=[
+        "placeholder",
+        "bare-prompt",
+        "booting",
+        "approval",
+        "trust",
+        "question",
+        "status-panel",
+        "shell-mode",
+    ],
 )
 def test_composer_holds_no_input_enter_would_submit(screen: str) -> None:
     assert composer_holds_input(screen) is False

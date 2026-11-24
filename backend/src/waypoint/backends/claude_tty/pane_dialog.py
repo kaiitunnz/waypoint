@@ -229,8 +229,8 @@ def _is_column0_rule(line: str) -> bool:
     return len(stripped) >= _MIN_RULE_WIDTH and set(stripped) == {_RULE_CHAR}
 
 
-def _live_composer_bottom(lines: list[str]) -> int | None:
-    """Index of the live composer's bottom border, when the composer is drawn.
+def _live_composer_frame(lines: list[str]) -> tuple[int, int] | None:
+    """Indices of the live composer's top and bottom borders, when it is drawn.
 
     The composer is framed by two full-width rules starting at column 0, with
     the ``❯`` prompt at column 0 directly under the top one. Its text wraps onto
@@ -248,7 +248,7 @@ def _live_composer_bottom(lines: list[str]) -> int | None:
         width = len(lines[top].rstrip())
         for bottom in range(top + 2, len(lines)):
             if _is_column0_rule(lines[bottom]) and len(lines[bottom].rstrip()) == width:
-                return bottom
+                return top, bottom
         return None
     return None
 
@@ -263,9 +263,8 @@ def _active_region(lines: list[str]) -> list[str]:
     resting on a dialog footer is queued messages or a free-text answer field,
     so the scan skips it and continues above the footer.
     """
-    composer_bottom = _live_composer_bottom(lines)
-    if composer_bottom is not None:
-        return lines[composer_bottom:]
+    if (frame := _live_composer_frame(lines)) is not None:
+        return lines[frame[1] :]
     i = len(lines) - 1
     while i >= 0:
         if not _is_composer_line(lines[i]):
@@ -342,12 +341,20 @@ def classify(screen: str) -> PaneScreen:
 
 
 def composer_holds_input(screen: str) -> bool:
-    """Whether the composer holds a typed, unsent message that ``Enter`` submits."""
-    return (
-        composer_ready(screen)
-        and not composer_is_empty(screen)
-        and not shows_blocking_dialog(screen)
-    )
+    """Whether the live composer holds a typed, unsent message that ``Enter``
+    submits.
+
+    Read from the framed composer only: a panel or shell-mode prompt replaces
+    it, and earlier prompts echo above with the same ``❯`` glyph.
+    """
+    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    frame = _live_composer_frame(lines)
+    if frame is None or shows_blocking_dialog(screen):
+        return False
+    top, bottom = frame
+    first = lines[top + 1].split(_COMPOSER_PROMPT, 1)[1]
+    text = "\n".join([first, *lines[top + 2 : bottom]]).strip()
+    return bool(text) and not text.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
 
 
 def shows_blocking_dialog(screen: str) -> bool:

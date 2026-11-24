@@ -132,7 +132,7 @@ export function SessionsHome() {
   );
 
   const loading = feed.sessions === null;
-  const empty = !loading && sessions.length === 0 && asks.length === 0 && exitedCount === 0;
+  const empty = !loading && sessions.length === 0 && needsYou === 0 && exitedCount === 0;
   const shownCount = listed.items.length;
 
   const results = searching ? (

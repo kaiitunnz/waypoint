@@ -5,7 +5,9 @@ import { useState } from "react";
 
 import type { PendingAsk } from "@waypoint/web-core/types";
 
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 import { DecisionAsk } from "./DecisionAsk";
@@ -26,23 +28,15 @@ interface NeedsYouSectionProps {
 
 export function NeedsYouSection({ asks, waiting, desktop, agentLabel, now }: NeedsYouSectionProps) {
   const [all, setAll] = useState(false);
-  if (asks.length === 0) return null;
+  // Inbox items have no card here; one row opens the inbox until the queue lists them.
+  const inbox = Math.max(0, waiting - asks.length);
+  if (asks.length === 0 && inbox === 0) return null;
   const folded = !desktop && !all && asks.length > MOBILE_LIMIT;
   const shown = folded ? asks.slice(0, MOBILE_LIMIT) : asks;
-  const inbox = waiting - asks.length;
 
   return (
     <section className={styles.section}>
-      <SectionHeading
-        title="Needs you"
-        count={asks.length}
-        dense={!desktop}
-        action={
-          inbox > 0 ? (
-            <Link href="/inbox">{desktop ? "Open queue" : `See all ${waiting}`}</Link>
-          ) : undefined
-        }
-      />
+      <SectionHeading title="Needs you" count={asks.length + inbox} dense={!desktop} />
       <div className={styles.cards}>
         {shown.map((ask) => {
           const agent = agentLabel(ask);
@@ -58,6 +52,15 @@ export function NeedsYouSection({ asks, waiting, desktop, agentLabel, now }: Nee
           <Button variant="text" size="sm" onClick={() => setAll(true)}>
             Show {asks.length - MOBILE_LIMIT} more
           </Button>
+        </div>
+      ) : null}
+      {inbox > 0 ? (
+        <div className={styles.inboxWrap}>
+          <Link href="/inbox" className={styles.inbox} aria-label={`${inbox} in inbox`}>
+            <Badge count={inbox} />
+            <span aria-hidden="true">in inbox</span>
+            <Icon name="chevron-right" size={16} strokeWidth={2} />
+          </Link>
         </div>
       ) : null}
     </section>

@@ -16,11 +16,12 @@ import {
   parsePort,
   splitBackendUrl,
   type HostRow,
+  type TypedAddress,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts } from "@waypoint/web-core/recentHosts";
 import { sameBackendUrl } from "@waypoint/web-core/tailnet";
 
-import { HostPicker, type TypedAddress } from "@/components/hosts/HostPicker";
+import { HostPicker } from "@/components/hosts/HostPicker";
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
@@ -218,6 +219,11 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
               </Button>
             )}
           </div>
+        ) : null}
+        {launchTargets.error ? (
+          <p className={styles.error} role="alert">
+            {launchTargets.error}
+          </p>
         ) : null}
         {!desktop ? (
           <div className={styles.theme}>

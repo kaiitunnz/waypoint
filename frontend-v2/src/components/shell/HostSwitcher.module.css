@@ -61,6 +61,11 @@
   color: var(--error);
 }
 
+.error {
+  font-size: var(--f-meta);
+  color: var(--error);
+}
+
 .theme {
   display: flex;
   align-items: center;

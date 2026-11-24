@@ -11,9 +11,11 @@ import type {
   UsageWindow,
 } from "./types";
 import {
+  accountWindows,
   bucketPeak,
   bucketSourceLabel,
   findUsageWindow,
+  formatResetsIn,
   formatShortWhen,
   mostConstrainedWindow,
   orderBucketsWorstFirst,
@@ -96,17 +98,48 @@ describe("usage windows", () => {
 
   it("picks the most constrained window across accounts, the 5h window on a tie", () => {
     const max = sessionBucket("Claude Max", [
-      window({ label: "5h", used_percent: 77, resets_at: new Date(Date.now() + 3_600_000).toISOString() }),
+      window({ label: "5h", used_percent: 77, resets_at: new Date(NOW + 72 * 60_000).toISOString() }),
       window({ label: "week", used_percent: 16 }),
     ]);
     const codex = sessionBucket("Codex Pro", [
       window({ label: "5h", used_percent: 24 }),
       window({ label: "week", used_percent: 77 }),
     ]);
-    const pick = mostConstrainedWindow([max, codex]);
-    expect(pick).toMatchObject({ accountLabel: "Claude Max", label: "5H", percent: 77, tone: "warn" });
+    const pick = mostConstrainedWindow([max, codex], NOW);
+    expect(pick).toMatchObject({
+      accountLabel: "Claude Max",
+      label: "5H",
+      percent: 77,
+      tone: "warn",
+      resetsIn: "1h 12m",
+    });
     expect(mostConstrainedWindow([])).toBeNull();
     expect(mostConstrainedWindow([sessionBucket("x", [])])).toBeNull();
+  });
+
+  it("reads each window an account reports", () => {
+    const bucket = sessionBucket("Max", [
+      window({ label: "5h", used_percent: 40, resets_at: new Date(NOW + 5 * 60_000).toISOString() }),
+      window({ label: "week", used_percent: 95, reset_description: "Mon" }),
+    ]);
+    expect(accountWindows(bucket, NOW)).toEqual([
+      { kind: "5h", label: "5H", percent: 40, tone: "good", resetsIn: "5m" },
+      { kind: "weekly", label: "WK", percent: 95, tone: "danger", resetsIn: "Mon" },
+    ]);
+    expect(accountWindows(sessionBucket("none", []), NOW)).toEqual([]);
+  });
+
+  it("says how long until a reset", () => {
+    const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
+    expect(formatResetsIn(at(0.2), NOW)).toBe("1m");
+    expect(formatResetsIn(at(42), NOW)).toBe("42m");
+    expect(formatResetsIn(at(72), NOW)).toBe("1h 12m");
+    expect(formatResetsIn(at(120), NOW)).toBe("2h");
+    expect(formatResetsIn(at(60 * 28), NOW)).toBe("1d 4h");
+    expect(formatResetsIn(at(60 * 48), NOW)).toBe("2d");
+    expect(formatResetsIn(at(-5), NOW)).toBeNull();
+    expect(formatResetsIn(null, NOW)).toBeNull();
+    expect(formatResetsIn("nonsense", NOW)).toBeNull();
   });
 });
 

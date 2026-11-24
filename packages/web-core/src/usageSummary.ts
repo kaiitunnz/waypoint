@@ -12,8 +12,6 @@ import type {
   UsageWindow,
 } from "./types";
 import {
-  formatRateLimitWindowReset,
-  formatRateLimitWindowResetShort,
   rateLimitUsageTone,
   rateLimitWindowPercent,
   usageTone,
@@ -60,35 +58,63 @@ export function bucketSourceLabel(bucket: UsageDashboardBucket, catalog: Backend
   return humaniseBackend(bucket.backend, catalog ?? undefined);
 }
 
-export interface ConstrainedWindow {
-  accountLabel: string;
+// "1h 12m", "42m", "3d 4h": how long until a window resets; null once it has, or
+// when the time is unknown.
+export function formatResetsIn(iso: string | null | undefined, now: number = Date.now()): string | null {
+  if (!iso) return null;
+  const target = Date.parse(iso);
+  if (!Number.isFinite(target) || target <= now) return null;
+  const minutes = Math.round((target - now) / 60000);
+  if (minutes < 60) return `${Math.max(minutes, 1)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? `${days}d ${hours % 24}h` : `${days}d`;
+}
+
+export interface WindowReading {
   kind: UsageWindowKind;
   label: "5H" | "WK";
   percent: number;
   tone: UsageTone;
-  // Terse ("in 4h") and full reset text, when the window reports one.
-  resetShort: string | null;
-  resetFull: string | null;
+  // "1h 12m", or the backend's own description when it gives no reset time.
+  resetsIn: string | null;
+}
+
+function readWindow(kind: UsageWindowKind, window: UsageWindow | null, now: number): WindowReading | null {
+  const percent = window ? rateLimitWindowPercent(window) : null;
+  if (!window || percent === null) return null;
+  return {
+    kind,
+    label: kind === "5h" ? "5H" : "WK",
+    percent,
+    tone: usageTone(percent),
+    resetsIn: formatResetsIn(window.resets_at, now) ?? window.reset_description ?? null,
+  };
+}
+
+// An account's 5-hour and weekly windows, whichever it reports.
+export function accountWindows(bucket: UsageDashboardBucket, now: number = Date.now()): WindowReading[] {
+  return (["5h", "weekly"] as const)
+    .map((kind) => readWindow(kind, findUsageWindow(bucket, kind), now))
+    .filter((reading): reading is WindowReading => reading !== null);
+}
+
+export interface ConstrainedWindow extends WindowReading {
+  accountLabel: string;
 }
 
 // The window closest to its limit across every account; the 5-hour window wins a tie.
-export function mostConstrainedWindow(buckets: UsageDashboardBucket[]): ConstrainedWindow | null {
+export function mostConstrainedWindow(
+  buckets: UsageDashboardBucket[],
+  now: number = Date.now(),
+): ConstrainedWindow | null {
   let best: ConstrainedWindow | null = null;
   for (const bucket of buckets) {
-    for (const kind of ["5h", "weekly"] as const) {
-      const window = findUsageWindow(bucket, kind);
-      const percent = window ? rateLimitWindowPercent(window) : null;
-      if (!window || percent === null) continue;
-      if (best !== null && percent <= best.percent) continue;
-      best = {
-        accountLabel: bucket.account_label,
-        kind,
-        label: kind === "5h" ? "5H" : "WK",
-        percent,
-        tone: usageTone(percent),
-        resetShort: formatRateLimitWindowResetShort(window),
-        resetFull: formatRateLimitWindowReset(window),
-      };
+    for (const reading of accountWindows(bucket, now)) {
+      if (best === null || reading.percent > best.percent) {
+        best = { ...reading, accountLabel: bucket.account_label };
+      }
     }
   }
   return best;

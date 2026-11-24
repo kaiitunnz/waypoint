@@ -139,6 +139,7 @@ class ClaudeTtyTransport(TmuxTransport):
         except Exception:
             # Nothing reached the dialog: keep it answerable.
             self._plugin._pending_approvals.setdefault(session.id, pending)
+            self._runtime.asks.mark_dirty(session.id)
             raise
         if approve and pending.is_plan:
             # Approving exits plan mode in the TUI; the pressed option already

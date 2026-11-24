@@ -182,6 +182,29 @@ def test_stream_sends_the_feed_after_the_session_list_then_live_changes(
     ]
 
 
+def test_a_later_connection_is_hydrated_right_after_the_session_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, context, token = _build(tmp_path, monkeypatch)
+    runtime = context.runtime
+    with TestClient(app) as client:
+        assert client.portal is not None
+        with client.websocket_connect(f"/ws/sessions?token={token}") as ws:
+            ws.receive_json()
+            first = ws.receive_json()
+        client.portal.call(runtime.asks.flush, set())
+
+        with client.websocket_connect(f"/ws/sessions?token={token}") as ws:
+            assert ws.receive_json()["type"] == "session_list_update"
+            # A later session-list frame would take this slot if hydration were
+            # skipped, so the check fails rather than waiting.
+            client.portal.call(runtime.broadcast_session_list)
+            second = ws.receive_json()
+
+    assert second["type"] == "pending_asks"
+    assert second["payload"] == first["payload"]
+
+
 def test_a_failing_feed_does_not_close_the_sessions_stream(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -229,13 +229,24 @@ class PendingAskFeed:
             # An unknown session is derived from durable state the first time a
             # flush sees it change.
             return
-        plugin = entry.plan_plugin
-        if (
-            event.kind is EventKind.APPROVAL_REQUEST
-            or is_approval_resolution(event)
-            or is_question_lifecycle_event(event, entry.question_ids)
-            or (plugin is not None and plugin.affects_plan_approval(event))
-        ):
+        try:
+            relevant = (
+                event.kind is EventKind.APPROVAL_REQUEST
+                or is_approval_resolution(event)
+                or is_question_lifecycle_event(event, entry.question_ids)
+                or (
+                    entry.plan_plugin is not None
+                    and entry.plan_plugin.affects_plan_approval(event)
+                )
+            )
+        except Exception:
+            # Runs on the event-ingest path: re-derive rather than fail the event.
+            log.exception(
+                "pending-asks event check failed",
+                extra={"session_id": event.session_id},
+            )
+            relevant = True
+        if relevant:
             self._mark(event.session_id, events_changed=True)
 
     def mark_dirty(self, session_id: str) -> None:

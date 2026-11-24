@@ -1299,6 +1299,10 @@ async def test_failed_keystroke_keeps_the_approval_pending() -> None:
         await transport.respond_to_approval(_make_session(), "approve", None)
 
     assert "sess-1" in plugin._pending_approvals
+    # Answerable again with no event to say so: the pending-asks feed is told.
+    cast(MagicMock, transport._runtime).asks.mark_dirty.assert_called_once_with(
+        "sess-1"
+    )
 
 
 async def test_terminate_closes_the_pending_card() -> None:

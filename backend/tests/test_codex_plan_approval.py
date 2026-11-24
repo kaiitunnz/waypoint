@@ -333,8 +333,8 @@ def test_storage_plan_queries_are_session_scoped_and_ordered(
     assert runtime.storage.plan_decision_events("sess", second.sequence + 1) == []
 
 
-def _legacy_plan_text(runtime: SessionRuntime, plan_item_id: str) -> str:
-    """The pre-feed implementation: walk every event newest first."""
+def _full_scan_plan_text(runtime: SessionRuntime, plan_item_id: str) -> str:
+    """Reference implementation: walk every event newest first."""
     decided: set[str] = set()
     for event in reversed(runtime.storage.list_events("sess")):
         if event.metadata.get("item_type") != "plan":
@@ -357,7 +357,7 @@ def _legacy_plan_text(runtime: SessionRuntime, plan_item_id: str) -> str:
 
 
 @pytest.mark.parametrize("seed", range(40))
-def test_plan_lookup_matches_the_full_scan_it_replaced(
+def test_plan_lookup_matches_a_full_scan_of_the_events(
     runtime: SessionRuntime, seed: int
 ) -> None:
     rng = random.Random(seed)
@@ -389,4 +389,4 @@ def test_plan_lookup_matches_the_full_scan_it_replaced(
     for plan_item_id in ("a", "b", "c", "missing"):
         assert _current_plan_text_for_item(
             runtime, "sess", plan_item_id
-        ) == _legacy_plan_text(runtime, plan_item_id)
+        ) == _full_scan_plan_text(runtime, plan_item_id)

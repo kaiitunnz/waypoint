@@ -922,7 +922,7 @@ async def test_plan_item_events_refresh_a_plugin_plan(env: Env) -> None:
         EventKind.SYSTEM_NOTE,
         "Completed plan",
         {"item_type": "plan"},
-        SessionStatus.IDLE,
+        SessionStatus.WAITING_INPUT,
     )
 
     assert [i.id for i in await items(env)] == ["plan_approval:s1:plan-a"]
@@ -1075,8 +1075,13 @@ async def test_a_held_plan_is_not_requeried_under_state_churn(env: Env) -> None:
     await env.runtime.asks.flush({"s1"})
     assert spy.call_count == 1
 
+    # The session's own status, so only the plan event can force the re-read.
     await env.runtime._emit_adapter_event(
-        "s1", EventKind.SYSTEM_NOTE, "plan", {"item_type": "plan"}, SessionStatus.IDLE
+        "s1",
+        EventKind.SYSTEM_NOTE,
+        "plan",
+        {"item_type": "plan"},
+        SessionStatus.WAITING_INPUT,
     )
     await items(env)
     assert spy.call_count == 2
@@ -1117,6 +1122,53 @@ async def test_deleting_a_session_leaves_nothing_in_the_feed(env: Env) -> None:
     assert "s1" not in env.runtime.asks._entries
     assert env.runtime.asks._current == []
     assert env.published()[-1]["items"] == []
+
+
+async def test_a_failing_plan_hook_does_not_break_event_ingestion(env: Env) -> None:
+    await start(env)
+
+    def broken(event: EventRecord) -> bool:
+        raise RuntimeError("hook bug")
+
+    env.plugin.affects_plan_approval = broken  # type: ignore[method-assign]
+
+    await env.runtime._emit_adapter_event(
+        "s1", EventKind.AGENT_OUTPUT, "hi", {}, SessionStatus.WAITING_INPUT
+    )
+
+    assert "s1" in env.runtime.asks._dirty
+    assert env.runtime.storage.list_events("s1")[-1].text == "hi"
+
+
+async def test_a_question_that_becomes_answerable_is_listed_without_an_event(
+    env: Env,
+) -> None:
+    await ask(env.runtime, "q1")
+    env.plugin.liveness = {"q1": QuestionLiveness.CLOSED}
+    await start(env)
+    assert env.runtime.asks._current == []
+
+    env.plugin.liveness = {}
+    await env.runtime.asks.flush({"s1"})
+
+    assert [i.id for i in env.runtime.asks._current] == ["question:s1:q1"]
+
+
+async def test_the_broadcast_loop_drives_the_feed(env: Env) -> None:
+    await start(env)
+    env.transport.ids = ("a1",)
+    loop = asyncio.create_task(env.runtime._session_broadcast_loop())
+    try:
+        await approval(env.runtime, "a1")
+        async with asyncio.timeout(5):
+            while True:
+                message = await env.queue.get()
+                if message["type"] == "pending_asks" and message["payload"]["items"]:
+                    break
+    finally:
+        loop.cancel()
+
+    assert [i["id"] for i in message["payload"]["items"]] == ["approval:s1:a1"]
 
 
 def test_the_feed_is_backend_neutral() -> None:

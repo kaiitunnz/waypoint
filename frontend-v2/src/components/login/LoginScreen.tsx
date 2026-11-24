@@ -20,7 +20,7 @@ import {
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts, writeRecentHost } from "@waypoint/web-core/recentHosts";
-import { tailnetSummary, type TailnetSnapshot } from "@waypoint/web-core/tailnet";
+import { DEFAULT_BACKEND_PORT, tailnetSummary, type TailnetSnapshot } from "@waypoint/web-core/tailnet";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { Button } from "@/components/ui/Button";
@@ -34,12 +34,12 @@ import { HostPicker } from "@/components/hosts/HostPicker";
 import { SignInForm } from "./SignInForm";
 import styles from "./LoginScreen.module.css";
 
-type Choice = TypedAddress & { name: string };
+type Choice = Omit<TypedAddress, "portText"> & { name: string };
 
-function choiceFromUrl(url: string, name: string): Choice | null {
+function choiceFromUrl(url: string, name: string): { choice: Choice; portText: string } | null {
   const address = splitBackendUrl(url);
   return address
-    ? { name, protocol: address.protocol, hostname: address.hostname, portText: String(address.port) }
+    ? { choice: { name, protocol: address.protocol, hostname: address.hostname }, portText: String(address.port) }
     : null;
 }
 
@@ -66,9 +66,10 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
   const [recents] = useState(readRecentHosts);
   const { snapshot, loading, refresh } = useTailnetSnapshot({ kind: "local" });
   const [query, setQuery] = useState("");
-  const [choice, setChoice] = useState(() =>
-    choiceFromUrl(defaultHost, hostName || describeHost(defaultHost, { recents })),
-  );
+  const [start] = useState(() => choiceFromUrl(defaultHost, hostName || describeHost(defaultHost, { recents })));
+  const [choice, setChoice] = useState(start?.choice ?? null);
+  // Kept apart from the choice so the port field survives an invalid host text.
+  const [portText, setPortText] = useState(start?.portText ?? String(DEFAULT_BACKEND_PORT));
   const [step, setStep] = useState<"hosts" | "password">(notice && choice ? "password" : "hosts");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -86,28 +87,31 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
     [snapshot, recents, query],
   );
 
-  const port = choice ? parsePort(choice.portText) : null;
-  const url = choice && port !== null ? buildBackendUrl({ ...choice, port }) : null;
-  const probeable = choice !== null && isCompleteHost(choice.hostname);
+  const port = parsePort(portText);
+  // Set only for a finished host and a valid port: the one address Connect signs in to.
+  const url = choice && port !== null && isCompleteHost(choice.hostname) ? buildBackendUrl({ ...choice, port }) : null;
   // The only probe: the chosen host and port, once its sign-in form is on screen.
-  const probe = useBackendProbe(probeable && (desktop || step === "password") ? url : null);
-
-  const setPortText = (portText: string) => setChoice((current) => current && { ...current, portText });
+  const probe = useBackendProbe(desktop || step === "password" ? url : null);
 
   const select = (row: HostRow) => {
     const next = choiceFromUrl(row.url, row.name);
     if (!next) return;
-    setChoice(next);
+    setChoice(next.choice);
+    setPortText(next.portText);
     setPassword("");
     setError("");
     setStep("password");
   };
 
   const typed = (address: TypedAddress | null) => {
-    if (!address) return;
-    if (address.hostname !== choice?.hostname) setPassword("");
-    setChoice({ name: address.hostname, ...address });
     setError("");
+    if (!address) {
+      setChoice(null);
+      return;
+    }
+    if (address.hostname !== choice?.hostname) setPassword("");
+    setChoice({ name: address.hostname, protocol: address.protocol, hostname: address.hostname });
+    setPortText(address.portText);
     if (!desktop) setStep("password");
   };
 
@@ -120,7 +124,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
   };
 
   async function submit() {
-    if (!choice || port === null || !url) return;
+    if (!choice || !url) return;
     setBusy(true);
     setError("");
     try {
@@ -149,7 +153,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       onSelect={select}
       onAddress={typed}
       liveAddress={desktop}
-      port={desktop && choice ? { text: choice.portText, onChange: setPortText } : undefined}
+      port={desktop ? { text: portText, onChange: setPortText } : undefined}
       searchRef={searchRef}
       headingLevel="h2"
     />
@@ -159,8 +163,9 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       name={choice.name}
       protocol={choice.protocol}
       hostname={choice.hostname}
-      portText={choice.portText}
+      portText={portText}
       portValid={port !== null}
+      canConnect={url !== null}
       onPortChange={setPortText}
       onChangeHost={changeHost}
       probe={probe}

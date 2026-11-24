@@ -19,6 +19,8 @@ interface SignInFormProps {
   hostname: string;
   portText: string;
   portValid: boolean;
+  // A finished host and a valid port.
+  canConnect: boolean;
   onPortChange: (text: string) => void;
   onChangeHost: () => void;
   probe: ProbeStatus;
@@ -42,6 +44,7 @@ export function SignInForm({
   hostname,
   portText,
   portValid,
+  canConnect,
   onPortChange,
   onChangeHost,
   probe,
@@ -56,7 +59,7 @@ export function SignInForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!busy && portValid && password) onSubmit();
+    if (!busy && canConnect && password) onSubmit();
   };
 
   return (
@@ -105,7 +108,7 @@ export function SignInForm({
           {error}
         </p>
       ) : null}
-      <Button variant="primary" block type="submit" busy={busy} disabled={!password || !portValid}>
+      <Button variant="primary" block type="submit" busy={busy} disabled={!password || !canConnect}>
         {busy ? "Connecting" : "Connect"}
       </Button>
     </form>

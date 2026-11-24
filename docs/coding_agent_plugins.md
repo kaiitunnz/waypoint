@@ -547,8 +547,9 @@ left open in the transcript by a terminate or a restart are not offered for an
 answer.
 
 When what a session can answer changes without any event recording it (claude_tty
-adopting a dialog already open in the pane), call
-`runtime.asks.mark_dirty(session_id)` so the feed re-derives that session.
+adopting a dialog already open in the pane, OpenCode reseeding its questions
+after a restart), call `runtime.asks.mark_dirty(session_id)` so the feed
+re-derives that session.
 
 ### Plan approval lifecycle (optional)
 
@@ -562,8 +563,8 @@ def affects_plan_approval(self, event) -> bool: ...
 ```
 
 `pending_plan_approval` returns the plan awaiting a decision (`PendingPlanApproval`
-in [`events.py`](../backend/src/waypoint/backends/events.py): `plan_id`, `text`,
-`decisions`, `supports_note`, `availability`, timestamp, and sequence), or `None`.
+in `base.py`: `plan_id`, `text`, `decisions`, `supports_note`, `availability`,
+`created_at`, and `sequence`), or `None`.
 It checks cheap gates (the permission mode) before reading events. The feed lists
 the plan with `resolve_via: "approve_plan"`, so the client answers through
 `POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
@@ -1088,7 +1089,7 @@ When Claude or Codex ships a new protocol message:
   `TransportCapabilities`, `PermissionModeSpec`, `SlashCommandSpec`,
   `ModelSource`.
 - [`backend/src/waypoint/backends/events.py`](../backend/src/waypoint/backends/events.py)
-  — `EventEnvelope`, `InteractionEnvelope`, and `PendingPlanApproval` schemas.
+  — `EventEnvelope` schema.
 - [`backend/src/waypoint/backends/registry.py`](../backend/src/waypoint/backends/registry.py)
   — `BackendRegistry` and `get_registry()`.
 - [`backend/src/waypoint/backends/bootstrap.py`](../backend/src/waypoint/backends/bootstrap.py)

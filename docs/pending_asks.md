@@ -5,10 +5,7 @@ live sessions: `AskUserQuestion` questions, tool approvals, and plan approvals.
 Each item carries what an inline answer needs; answers use the per-session
 endpoints.
 
-The feed is backend-neutral. It reads durable events, the backend-neutral
-`interaction` envelope, the transport, and optional plugin protocols; it never
-branches on a backend id. Plugin obligations are in
-[`coding_agent_plugins.md`](coding_agent_plugins.md).
+Plugin obligations are in [`coding_agent_plugins.md`](coding_agent_plugins.md).
 
 ## API
 
@@ -41,10 +38,11 @@ Items are ordered by `created_at`, oldest first, then by `session_id` and
 | `session_id`, `session_title`, `session_backend`, `spawner_session_id` | The asking session; `spawner_session_id` marks a subagent session |
 | `created_at`, `sequence` | Timestamp and sequence of the request's event |
 | `availability` | `actionable`, `starting` (asked, not yet able to take a reply), or `unavailable` (not reachable now, may recover) |
-| `title`, `body` | Headline and body text for a list row |
+| `title`, `body` | Headline and body text for a list row; `body` is null when it would repeat `title` |
 
-An item carries one payload field named for its `kind` (`question`, `approval`,
-or `plan`) and omits the other two.
+A `question` item carries a `question` payload, an `approval` item an `approval`
+payload, and a `plan_approval` item a `plan` payload; the other two payload
+fields are omitted.
 
 **`question`** — `{tool_use_id, questions: [{question, header, multi_select, options: [{label, description, recommended}]}]}`.
 `label` is the answer value, verbatim. `recommended` is true when the label ends
@@ -66,20 +64,19 @@ listed as a plain `approval`.
 
 ## Bounded payloads
 
-Snapshots carry every item, so free text is bounded. In an `approval`, each
+Free text is bounded. In an `approval`, each
 string in `tool_input` longer than 2,000 characters is cut to 2,000 characters
 plus `…` and `tool_input_truncated` is true. An item's `title` and `body` are cut
 the same way. The full input stays in the session transcript. Plan text and
-question prompts are what the human decides on and are never cut.
+question prompts are never cut.
 
 ## What stays listed
 
 An item is listed while its request is open and still answerable:
 
 - A question stays until a paired result, an answer, a cancellation, or a
-  closure note resolves it, and until the agent's own liveness report ends it.
-  An agent that reports a session's questions as unreachable lists them as
-  `unavailable`; one that reports them ended drops them.
+  closure note resolves it. A question the agent cannot reach now is
+  `unavailable`; one the agent has ended is dropped.
 - An approval stays until a resolution note or an invalidation resolves it, and
   only while the transport still holds that request. A request left open in the
   transcript after a terminate or a restart is not listed.

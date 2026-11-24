@@ -617,8 +617,6 @@ export interface PendingQuestionsSnapshot {
   revision: number;
 }
 
-export type PendingAskKind = "question" | "approval" | "plan_approval";
-
 export type PendingAskAvailability = PendingQuestionAvailability;
 
 export interface PendingAskOption {
@@ -649,7 +647,6 @@ export interface PendingAskApproval {
   // Long string values are cut to 2,000 characters plus an ellipsis.
   tool_input: Record<string, unknown> | null;
   tool_input_truncated: boolean;
-  summary: string;
   decisions: string[];
   supports_note: boolean;
 }
@@ -664,11 +661,8 @@ export interface PendingAskPlan {
   resolve_via: "approve" | "approve_plan";
 }
 
-// One request waiting on the human; exactly one of question / approval / plan
-// is set, matching `kind`.
-export interface PendingAsk {
+export interface PendingAskBase {
   id: string;
-  kind: PendingAskKind;
   session_id: string;
   session_title: string;
   session_backend: string;
@@ -678,10 +672,27 @@ export interface PendingAsk {
   availability: PendingAskAvailability;
   title: string;
   body: string | null;
-  question: PendingAskQuestion | null;
-  approval: PendingAskApproval | null;
-  plan: PendingAskPlan | null;
 }
+
+export interface PendingQuestionAsk extends PendingAskBase {
+  kind: "question";
+  question: PendingAskQuestion;
+}
+
+export interface PendingApprovalAsk extends PendingAskBase {
+  kind: "approval";
+  approval: PendingAskApproval;
+}
+
+export interface PendingPlanAsk extends PendingAskBase {
+  kind: "plan_approval";
+  plan: PendingAskPlan;
+}
+
+// One request waiting on the human; narrow on `kind` to reach its payload.
+export type PendingAsk = PendingQuestionAsk | PendingApprovalAsk | PendingPlanAsk;
+
+export type PendingAskKind = PendingAsk["kind"];
 
 // Every pending ask across live sessions, oldest first (GET /api/pending-asks
 // and the `pending_asks` frame on /ws/sessions). Apply a snapshot when `epoch`

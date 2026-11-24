@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 
 from agent_cli_guard import AgentCliGuard, real_agent_cli
+from waypoint.backends.codex import plugin as codex_plugin
+from waypoint.runtime import SessionRuntime
+from waypoint.settings import Settings
+from waypoint.storage import Storage
 
 
 def _fake_cli(directory: Path, name: str = "codex") -> Path:
@@ -77,3 +81,29 @@ async def test_guard_covers_asyncio_subprocesses(
 
     assert guard.spawned == [str(binary.resolve())]
     assert not os.path.exists(binary.parent / "ran")
+
+
+async def test_verified_account_probe_stays_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    status_probes: list[dict[str, str] | None] = []
+
+    async def fake_probe_codex_status(
+        *, cwd: str, binary: str, env: dict[str, str] | None = None
+    ) -> None:
+        status_probes.append(env)
+
+    monkeypatch.setattr(codex_plugin, "probe_codex_status", fake_probe_codex_status)
+    settings = Settings(data_dir=tmp_path / "data")
+    runtime = SessionRuntime(settings, Storage(settings.database_path))
+
+    runtime._schedule_verified_account_probe(
+        "session-1",
+        "codex",
+        {"CODEX_HOME": str(tmp_path / "codex-work")},
+        launch_target=None,
+        cwd=str(tmp_path),
+    )
+    await runtime._drain_account_probe_tasks()
+
+    assert status_probes == []

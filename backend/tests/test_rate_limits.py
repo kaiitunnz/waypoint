@@ -209,8 +209,6 @@ def test_codex_oauth_probe_logs_http_status_on_failure(
     assert "codex OAuth usage request failed (HTTP 401)" in caplog.text
 
 
-# ``-c`` rather than ``--disable``: a codex that predates the feature rejects
-# ``--disable daemon_auto_start`` but accepts the config override.
 _CODEX_STATUS_ARGV = [
     "codex",
     "-c",

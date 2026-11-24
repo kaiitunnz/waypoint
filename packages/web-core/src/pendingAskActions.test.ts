@@ -185,6 +185,14 @@ describe("retryWhileNotReady", () => {
     expect(run).toHaveBeenCalledTimes(3);
   });
 
+  it("recognises both not-ready details and no other conflict", () => {
+    expect(isAgentNotReady(new api.ApiError("the agent is not ready for a reply to this question yet", 409))).toBe(true);
+    expect(isAgentNotReady(new api.ApiError("session is not running; resume it to act on this question", 409))).toBe(
+      false,
+    );
+    expect(isAgentNotReady(new api.ApiError("question operation already in progress", 409))).toBe(false);
+  });
+
   it("does not retry other errors", async () => {
     const run = vi.fn().mockRejectedValue(new api.ApiError("nope", 400));
     await expect(retryWhileNotReady(run, { sleep: async () => {} })).rejects.toThrow("nope");
@@ -237,7 +245,7 @@ describe("respondToAsk", () => {
 
   it("retries a 409 on the way", async () => {
     vi.mocked(api.approveSession)
-      .mockRejectedValueOnce(new api.ApiError("dialog", 409))
+      .mockRejectedValueOnce(new api.ApiError("the session is waiting on a dialog", 409))
       .mockResolvedValueOnce(undefined);
     const ask = {
       ...base,

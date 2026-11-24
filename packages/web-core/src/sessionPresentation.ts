@@ -1,5 +1,5 @@
 import { humaniseBackend, displayAgentFor, type BackendCatalog } from "./backends";
-import { formatResolvedModelLabel } from "./modelDisplay";
+import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDisplay";
 import type { SessionRecord } from "./types";
 
 // One attention vocabulary across the home, the switcher and the rail: lamps
@@ -39,17 +39,14 @@ export function lampWord(lamp: SessionLamp, status: SessionRecord["status"]): st
   }
 }
 
-const CLAUDE_ALIAS = /^(opus|sonnet|haiku|fable)(?:\[[^\]]*\])?$/;
-
 // A short model name for a row: "Opus 4.8", "gpt-6.2-sol", "Sonnet".
 export function shortModelLabel(session: SessionRecord): string | null {
   const resolved = formatResolvedModelLabel(session.resolved_model, null, []);
   if (resolved) return resolved;
   const selection = session.model;
   if (!selection) return null;
-  const alias = CLAUDE_ALIAS.exec(selection);
-  if (alias) return alias[1].charAt(0).toUpperCase() + alias[1].slice(1);
-  return selection.replace(/\[[^\]]*\]$/, "").split("/").pop() ?? selection;
+  const bare = selection.replace(/\[[^\]]*\]$/, "");
+  return CLAUDE_MODEL_FAMILY_LABELS[bare] ?? bare.split("/").pop() ?? selection;
 }
 
 // "Claude Code, Opus 4.8".

@@ -71,7 +71,7 @@ export function useSessionActions(
             applySessionState(host, updated);
           },
           "failed to update title",
-          () => patchSession(session.id, (current) => revertTitle(current, title, session)),
+          () => patchSession(session.id, (current) => revertTitle(current, title, session.title)),
         );
       },
       terminate: (sessionId) =>

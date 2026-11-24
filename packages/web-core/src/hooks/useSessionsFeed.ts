@@ -74,6 +74,7 @@ export function useSessionsFeed(
     // A frame is newer than any REST seed that resolves after it.
     let listFrameSeen = false;
     let scheduleFrameSeen = false;
+    let opened = false;
 
     const failAuth = () => {
       if (active) onAuthFailure?.();
@@ -98,13 +99,15 @@ export function useSessionsFeed(
         setHistoryRevision(live.historyRevision);
       })
       .catch(ignoreAuth);
-    Promise.all([fetchSchedules(host, token), fetchMessageSchedules(host, token)])
-      .then(([launches, messages]) => {
-        if (!active || scheduleFrameSeen) return;
-        setSchedules(launches);
-        setMessageSchedules(messages);
-      })
-      .catch(ignoreAuth);
+    const seedSchedules = (replaceFrames: boolean) =>
+      Promise.all([fetchSchedules(host, token), fetchMessageSchedules(host, token)])
+        .then(([launches, messages]) => {
+          if (!active || (scheduleFrameSeen && !replaceFrames)) return;
+          setSchedules(launches);
+          setMessageSchedules(messages);
+        })
+        .catch(ignoreAuth);
+    seedSchedules(false);
     refreshAsks();
 
     function connect() {
@@ -149,6 +152,13 @@ export function useSessionsFeed(
             attempt = 0;
             if (active) setConnection("open");
             refreshAsks();
+            // The socket replays the session list and asks on connect, not schedules
+            // or board activity, so a reconnect re-reads what it missed.
+            if (opened) {
+              seedSchedules(true);
+              setBoardRevision((revision) => revision + 1);
+            }
+            opened = true;
           },
           onClose: () => {
             if (!active) return;

@@ -114,6 +114,32 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("asks again after a failed fetch, once it settles, and then stays quiet", async () => {
+    let calls = 0;
+    const fetch = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("offline");
+      return "ok";
+    });
+    const onResult = vi.fn();
+    const loader = new ActivityLoader<string>({ fetch, onResult, settleMs: 1000 });
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(onResult).toHaveBeenCalledWith("a", "ok");
+
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("settles a change before fetching again", async () => {
     const { loader, fetch, settle } = make({ settleMs: 1000 });
     loader.request("a", "t1");

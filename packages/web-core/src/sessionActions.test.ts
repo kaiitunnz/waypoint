@@ -15,9 +15,19 @@ describe("session rename", () => {
   it("reverts only while the optimistic title is still current", () => {
     const previous = session();
     const optimistic = withTitle(previous, "New");
-    expect(revertTitle(optimistic, "New", previous).title).toBe("Old");
+    expect(revertTitle(optimistic, "New", previous.title).title).toBe("Old");
     const superseded = withTitle(previous, "Newer");
-    expect(revertTitle(superseded, "New", previous).title).toBe("Newer");
+    expect(revertTitle(superseded, "New", previous.title).title).toBe("Newer");
+  });
+
+  it("keeps whatever else changed while the rename was in flight", () => {
+    const optimistic = withTitle(session({ status: "running" }), "New");
+    const moved = { ...optimistic, status: "idle" as const, read_at: "2026-01-02T00:00:00Z" };
+    expect(revertTitle(moved, "New", "Old")).toMatchObject({
+      title: "Old",
+      status: "idle",
+      read_at: "2026-01-02T00:00:00Z",
+    });
   });
 
   it("sends a trimmed title and nothing for a blank or unchanged one", () => {

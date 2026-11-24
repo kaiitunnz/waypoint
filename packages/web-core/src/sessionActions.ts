@@ -5,13 +5,14 @@ export function withTitle(session: SessionRecord, title: string): SessionRecord 
 }
 
 // Undoes an optimistic rename, unless a newer rename or a server update has
-// superseded it since.
+// superseded it since. Only the title goes back: the rest of the record may have
+// moved on while the request was in flight.
 export function revertTitle(
   session: SessionRecord,
   optimisticTitle: string,
-  previous: SessionRecord,
+  previousTitle: string,
 ): SessionRecord {
-  return session.title === optimisticTitle ? previous : session;
+  return session.title === optimisticTitle ? { ...session, title: previousTitle } : session;
 }
 
 // The trimmed title to send, or null when renaming would change nothing.

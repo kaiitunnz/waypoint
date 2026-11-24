@@ -138,9 +138,13 @@ export function planPreview(text: string, maxLines = 3): string {
 export const NOT_READY_MESSAGE = "The agent isn't ready for a reply yet. Try again in a moment.";
 
 // A reply sent right after a question appears can hit a session that is still
-// opening its dialog: 409 "the session is waiting on a dialog".
+// opening its dialog: 409 "the session is waiting on a dialog" or "the agent is
+// not ready for a reply". Other conflicts (a session that is not running, an
+// operation already in progress) are real answers and are not retried.
+const NOT_READY_DETAIL = /not ready|waiting on a dialog/i;
+
 export function isAgentNotReady(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 409;
+  return error instanceof ApiError && error.status === 409 && NOT_READY_DETAIL.test(error.message);
 }
 
 export interface RetryOptions {

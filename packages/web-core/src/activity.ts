@@ -139,6 +139,8 @@ export class ActivityLoader<T> {
   private readonly maxWaitMs: number;
   private readonly concurrency: number;
   private readonly loaded = new Map<string, string>();
+  // Sessions whose last fetch failed: asked for again on the next request, after a settle.
+  private readonly failed = new Set<string>();
   private readonly pending = new Map<string, PendingFetch>();
   private readonly inflight = new Map<string, { lastEventAt: string; controller: AbortController }>();
   private readonly queue: string[] = [];
@@ -160,7 +162,7 @@ export class ActivityLoader<T> {
       if (held.lastEventAt === lastEventAt) return;
       clearTimeout(held.timer);
     }
-    const first = !this.loaded.has(id) && !this.inflight.has(id) && !held;
+    const first = !this.loaded.has(id) && !this.failed.has(id) && !this.inflight.has(id) && !held;
     const firstAt = held?.firstAt ?? now;
     const delay = first ? 0 : Math.max(0, Math.min(this.settleMs, firstAt + this.maxWaitMs - now));
     this.pending.set(id, {
@@ -177,6 +179,7 @@ export class ActivityLoader<T> {
     this.inflight.get(id)?.controller.abort();
     this.inflight.delete(id);
     this.loaded.delete(id);
+    this.failed.delete(id);
     const queued = this.queue.indexOf(id);
     if (queued !== -1) this.queue.splice(queued, 1);
   }
@@ -199,15 +202,23 @@ export class ActivityLoader<T> {
       this.pending.delete(id);
       const controller = new AbortController();
       this.inflight.set(id, { lastEventAt: held.lastEventAt, controller });
+      let succeeded = false;
       this.options
         .fetch(id, controller.signal)
         .then((result) => {
-          if (!controller.signal.aborted) this.options.onResult(id, result);
+          if (controller.signal.aborted) return;
+          succeeded = true;
+          this.options.onResult(id, result);
         })
         .catch(() => {})
         .finally(() => {
           if (controller.signal.aborted) return;
-          this.loaded.set(id, held.lastEventAt);
+          if (succeeded) {
+            this.loaded.set(id, held.lastEventAt);
+            this.failed.delete(id);
+          } else {
+            this.failed.add(id);
+          }
           this.inflight.delete(id);
           this.pump();
         });

@@ -1,4 +1,5 @@
 import { rankItems } from "./fuzzy";
+import { byRecency } from "./sessionHistory";
 import type { SessionRecord } from "./types";
 
 // The same order as the home: Needs you, Pinned, Live, Exited.
@@ -24,10 +25,6 @@ function sectionOf(session: SessionRecord, askSessionIds: ReadonlySet<string>): 
   if (session.status === "exited") return session.pinned_at ? "pinned" : "exited";
   if (askSessionIds.has(session.id)) return "needs";
   return session.pinned_at ? "pinned" : "live";
-}
-
-function byRecency(a: SessionRecord, b: SessionRecord): number {
-  return b.last_event_at.localeCompare(a.last_event_at) || b.id.localeCompare(a.id);
 }
 
 const where = (session: SessionRecord) =>

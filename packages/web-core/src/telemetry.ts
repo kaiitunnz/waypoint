@@ -117,7 +117,7 @@ export function telemetryParams(
   return params;
 }
 
-// ── Persistence (mirrors lib/store.ts conventions) ───────────────────────
+// ── Persistence (mirrors store.ts conventions) ───────────────────────────
 
 const QUERY_KEY = "waypoint.telemetry-query";
 

@@ -90,7 +90,7 @@ export const EMPTY_ASK_DRAFT: AskDraft = {
 // Durable evidence that resolved an AskUserQuestion, keyed by tool_use_id.
 // Indexed over every loaded event before transcript filtering so hiding a
 // system note never reopens its card.
-interface AskQuestionEvidence {
+export interface AskQuestionEvidence {
   answers: Map<string, EventRecord>;
   cancels: Map<string, EventRecord>;
   endings: Map<string, EventRecord>;

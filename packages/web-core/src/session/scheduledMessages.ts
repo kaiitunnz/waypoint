@@ -1,4 +1,5 @@
 import { isIdle } from "../recurrence";
+import { formatRelative } from "../scheduleTime";
 import type { MessageSchedule } from "../types";
 
 export function describeScheduledDelivery(
@@ -13,23 +14,7 @@ export function describeScheduledDelivery(
   if (!schedule.scheduled_at) {
     return "";
   }
-  const diff = new Date(schedule.scheduled_at).getTime() - now;
-  if (diff <= 0) {
-    return "any moment";
-  }
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 1) {
-    return "in <1m";
-  }
-  if (minutes < 60) {
-    return `in ${minutes}m`;
-  }
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days}d`;
+  return formatRelative(new Date(schedule.scheduled_at), now);
 }
 
 export function scheduledAtMs(m: MessageSchedule): number {

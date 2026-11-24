@@ -13,8 +13,8 @@ export function formatClock(target: Date): string {
   });
 }
 
-export function formatRelative(target: Date): string {
-  const diff = target.getTime() - Date.now();
+export function formatRelative(target: Date, now: number = Date.now()): string {
+  const diff = target.getTime() - now;
   if (diff <= 0) {
     return "any moment";
   }

@@ -351,6 +351,7 @@ interface SessionDetailProps {
 
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
+
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
 // sensible for the very first paint before the observer fires.

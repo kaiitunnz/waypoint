@@ -380,7 +380,7 @@ export function isTodoListEvent(event: EventRecord): boolean {
 }
 
 // Tool calls that render as their own card instead of folding into a collapsed
-// tool run — the dedicated cards in TranscriptCard.
+// tool run.
 function isStandaloneToolCard(toolName: string | null): boolean {
   return toolName === "AskUserQuestion" || toolName === "SendUserFile";
 }

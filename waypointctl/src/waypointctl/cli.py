@@ -413,11 +413,7 @@ def daemon_start(ctx: typer.Context) -> None:
         typer.echo("waypointd already running")
         return
     _load_config(home)
-    try:
-        ensure_daemon(home)
-    except DaemonUnavailableError as exc:
-        typer.echo(f"failed to start waypointd: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+    _ensure_daemon_or_exit(home)
     typer.echo("waypointd started")
 
 
@@ -489,11 +485,7 @@ def daemon_restart(ctx: typer.Context) -> None:
                 err=True,
             )
             raise typer.Exit(code=1)
-    try:
-        ensure_daemon(home)
-    except DaemonUnavailableError as exc:
-        typer.echo(f"failed to start waypointd: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+    _ensure_daemon_or_exit(home)
     typer.echo("waypointd restarted")
 
 
@@ -687,6 +679,10 @@ def _daemon_client(home: Path) -> DaemonClient | None:
     # A daemon that can't load its configuration only surfaces as a startup
     # timeout, so reject a bad configuration before spawning one.
     _load_config(home)
+    return _ensure_daemon_or_exit(home)
+
+
+def _ensure_daemon_or_exit(home: Path) -> DaemonClient:
     try:
         return ensure_daemon(home)
     except DaemonUnavailableError as exc:
@@ -707,8 +703,7 @@ def _check_agent_restart_safety(
     # path; the check is unconditional in that case.
     if _should_use_daemon(home) and not wait:
         return
-    config = _load_config(home)
-    stack = WaypointStack(config)
+    stack = WaypointStack(_load_config(home))
 
     target = (args[0] if args else "all").lower()
     self_pid = os.getpid()

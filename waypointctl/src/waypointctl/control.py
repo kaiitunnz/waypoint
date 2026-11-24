@@ -313,12 +313,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 {"error": f"action must be one of {', '.join(commands.ACTIONS)}"},
             )
             return
-        if target not in ("frontend", "frontend-preview", "backend", "all"):
+        if target not in commands.ACTION_TARGETS:
             self._send_json(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": (
-                        "target must be frontend, frontend-preview, backend, or all"
+                        f"target must be one of {', '.join(commands.ACTION_TARGETS)}"
                     )
                 },
             )

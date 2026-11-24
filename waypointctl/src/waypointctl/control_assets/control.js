@@ -243,20 +243,12 @@
     syncPreviewLog(!!present["frontend-preview"]);
   }
 
-  // The preview has its own log tab, present only while the service is listed.
+  // The preview's log tab shows only while the service is listed.
   function syncPreviewLog(present) {
     var seg = $("logSeg");
-    var btn = seg.querySelector('button[data-log="frontend-preview"]');
-    if (present && !btn) {
-      btn = document.createElement("button");
-      btn.setAttribute("data-log", "frontend-preview");
-      btn.textContent = "preview";
-      btn.addEventListener("click", function () { selectLog(btn); });
-      seg.appendChild(btn);
-    } else if (!present && btn) {
-      var wasCurrent = curLog === "frontend-preview";
-      btn.remove();
-      if (wasCurrent) selectLog(seg.querySelector("button[data-log]"));
+    seg.querySelector('button[data-log="frontend-preview"]').classList.toggle("hidden", !present);
+    if (!present && curLog === "frontend-preview") {
+      selectLog(seg.querySelector("button[data-log]"));
     }
   }
 

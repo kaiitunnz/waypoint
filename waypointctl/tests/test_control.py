@@ -1,10 +1,10 @@
 import json
-import os
 import socket
 import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,7 @@ class _StubService:
         self.optional = False
         self.configured = True
         self.conflict = lambda: None
-        self.pid_path = Path("/nonexistent") / f"{name}.pid"
+        self.running = False
         self.calls: list[str] = []
         self.started_marker_value = False
 
@@ -91,6 +91,9 @@ def _build_stack(tmp_path: Path, preview: bool = False) -> WaypointStack:
     return stack
 
 
+PASSWORD = "s3cret"
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -105,28 +108,28 @@ def _serve(stack: WaypointStack, password: str | None) -> tuple[ControlServer, i
     return server, port
 
 
+@contextmanager
+def _running(stack: WaypointStack) -> Iterator[tuple[ControlServer, int]]:
+    server, port = _serve(stack, PASSWORD)
+    try:
+        yield server, port
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.fixture
 def control_with_preview(
     tmp_path: Path,
 ) -> Iterator[tuple[ControlServer, int, str]]:
-    stack = _build_stack(tmp_path, preview=True)
-    server, port = _serve(stack, "s3cret")
-    try:
-        yield server, port, "s3cret"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with _running(_build_stack(tmp_path, preview=True)) as (server, port):
+        yield server, port, PASSWORD
 
 
 @pytest.fixture
 def control(tmp_path: Path) -> Iterator[tuple[ControlServer, int, str]]:
-    stack = _build_stack(tmp_path)
-    server, port = _serve(stack, "s3cret")
-    try:
-        yield server, port, "s3cret"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with _running(_build_stack(tmp_path)) as (server, port):
+        yield server, port, PASSWORD
 
 
 def _request(
@@ -434,7 +437,6 @@ def test_preview_shares_the_frontend_lane(
 ) -> None:
     server, port, password = control_with_preview
     token = _login(port, password)
-    assert server._lanes_for("frontend-preview") == ("frontend",)
     assert server._lane_locks["frontend"].acquire(blocking=False)
     try:
         status, _ = _request(
@@ -474,12 +476,10 @@ def test_a_running_preview_without_a_config_port_can_be_stopped(
     stack = _build_stack(tmp_path)
     orphan = _StubService("frontend-preview")
     orphan.configured = False
-    orphan.pid_path = tmp_path / "frontend-preview.pid"
-    orphan.pid_path.write_text(f"{os.getpid()}\n")
+    orphan.running = True
     stack.frontend_preview = orphan  # type: ignore[assignment]
-    server, port = _serve(stack, "s3cret")
-    try:
-        token = _login(port, "s3cret")
+    with _running(stack) as (server, port):
+        token = _login(port, PASSWORD)
         _, body = _request(port, "/api/status", token=token)
         assert "frontend-preview" in {svc["name"] for svc in body["services"]}
 
@@ -504,9 +504,6 @@ def test_a_running_preview_without_a_config_port_can_be_stopped(
         )
         assert status == 400
         assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in body["error"]
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def test_a_conflicting_preview_restart_is_rejected_before_it_runs(

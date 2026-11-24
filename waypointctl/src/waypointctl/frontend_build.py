@@ -5,7 +5,6 @@ from waypointctl.workspace import APP_DIRS, ROOT_LOCKFILE, WEB_CORE_DIR, Fronten
 
 
 def build_inputs(variant: FrontendVariant) -> tuple[str, ...]:
-    """Paths (relative to the repo root) whose changes invalidate an app's build."""
     app_dir = APP_DIRS[variant]
     return (
         f"{app_dir}/src",

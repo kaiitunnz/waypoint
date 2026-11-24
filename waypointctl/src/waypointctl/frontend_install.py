@@ -6,8 +6,7 @@ from pathlib import Path
 
 from waypointctl.workspace import APP_DIRS, ROOT_LOCKFILE, WORKSPACE_MANIFESTS
 
-# The frontend services start in parallel threads but share one root
-# node_modules, so installs must not overlap.
+# Frontend services start in parallel but share one root node_modules.
 install_lock = threading.Lock()
 
 
@@ -53,12 +52,8 @@ def run_install(home: Path, log_path: Path, env: Mapping[str, str]) -> int:
 
 
 def _legacy_node_modules(home: Path) -> list[Path]:
-    """Per-app installs left from before the workspace.
-
-    npm writes `.package-lock.json` only at the root of an install, so an app
-    directory carrying one holds its own standalone dependency tree, which
-    would shadow the shared root install.
-    """
+    # npm writes `.package-lock.json` only at an install root, so one inside an
+    # app directory is a standalone install that would shadow the shared one.
     return [
         path
         for app_dir in APP_DIRS.values()

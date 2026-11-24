@@ -1,5 +1,3 @@
-"""Layout of the npm workspace at the repo root."""
-
 from typing import Literal
 
 FrontendVariant = Literal["v1", "v2"]
@@ -15,12 +13,16 @@ WORKSPACE_MANIFESTS: tuple[str, ...] = (
 )
 
 
+def as_variant(raw: str) -> FrontendVariant | None:
+    match raw.strip().lower():
+        case "v1" | "v2" as variant:
+            return variant
+    return None
+
+
 def parse_variant(raw: str | None) -> FrontendVariant:
-    value = (raw or "v1").strip().lower()
-    if value == "v1":
-        return "v1"
-    if value == "v2":
-        return "v2"
+    if variant := as_variant(raw or "v1"):
+        return variant
     raise ValueError(f"WAYPOINT_STACK_FRONTEND must be v1 or v2, got {raw!r}")
 
 

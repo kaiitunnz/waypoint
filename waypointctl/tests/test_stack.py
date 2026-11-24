@@ -47,12 +47,12 @@ class _StubService:
         *,
         optional: bool = False,
         configured: bool = True,
-        pid_path: Path | None = None,
+        running: bool = False,
     ) -> None:
         self.name = name
         self.optional = optional
         self.configured = configured
-        self.pid_path = pid_path or Path("/nonexistent") / f"{name}.pid"
+        self.running = running
         self.conflict_message: str | None = None
         self.calls: list[str] = []
         self.started_marker_value = False
@@ -277,10 +277,10 @@ def test_format_status_variants() -> None:
 
 
 def _install_preview_stub(
-    stack: WaypointStack, *, configured: bool = True, pid_path: Path | None = None
+    stack: WaypointStack, *, configured: bool = True, running: bool = False
 ) -> _StubService:
     preview = _StubService(
-        "frontend-preview", optional=True, configured=configured, pid_path=pid_path
+        "frontend-preview", optional=True, configured=configured, running=running
     )
     stack.frontend_preview = preview  # type: ignore[assignment]
     return preview
@@ -327,7 +327,6 @@ def test_select_without_a_preview_matches_the_two_service_stack(
     assert _names(stack.select("frontend")) == ["frontend"]
     assert _names(stack.select("all")) == ["backend", "frontend"]
     assert stack.select("teleporter") is None
-    assert stack.preview_active is False
 
 
 def test_select_with_a_preview_groups_it_under_frontend(
@@ -351,7 +350,6 @@ def test_unconfigured_but_running_preview_stays_selectable(
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(f"{os.getpid()}\n")
 
-    assert stack.preview_active is True
     assert _names(stack.select("frontend")) == ["frontend", "frontend-preview"]
 
 
@@ -569,9 +567,7 @@ def test_starting_an_already_running_preview_is_not_a_conflict(
     stack = WaypointStack(
         _build_config(tmp_path, state_dir, frontend_preview_port=3011)
     )
-    pid_path = tmp_path / "frontend-preview.pid"
-    pid_path.write_text(f"{os.getpid()}\n")
-    preview = _install_preview_stub(stack, pid_path=pid_path)
+    preview = _install_preview_stub(stack, running=True)
     preview.conflict_message = "frontend dependencies changed; run restart frontend"
 
     assert stack.check_target("frontend-preview", "start") is None

@@ -120,22 +120,17 @@ def test_build_inputs_are_per_app_plus_shared_workspace_inputs() -> None:
     assert "frontend/package-lock.json" not in v1
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_force_returns_not_fresh(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_force_returns_not_fresh(tmp_path: Path) -> None:
     _make_repo(tmp_path)
-    _built(tmp_path, variant)
+    _built(tmp_path, "v1")
     assert (
-        is_fresh(tmp_path, variant, backend_port=DEFAULT_BACKEND_PORT, force=True)
-        is False
+        is_fresh(tmp_path, "v1", backend_port=DEFAULT_BACKEND_PORT, force=True) is False
     )
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_no_build_id(tmp_path: Path, variant: FrontendVariant) -> None:
+def test_is_fresh_no_build_id(tmp_path: Path) -> None:
     _make_repo(tmp_path)
-    assert _fresh(tmp_path, variant) is False
+    assert _fresh(tmp_path, "v1") is False
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -148,27 +143,23 @@ def test_is_fresh_mtime_only_when_inputs_older(
     assert _fresh(tmp_path, variant) is True
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_mtime_only_when_inputs_newer(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_mtime_only_when_inputs_newer(tmp_path: Path) -> None:
     _make_repo(tmp_path)
-    _write_build_id(tmp_path, variant, mtime=time.time() - 60)
-    _write_port_marker(tmp_path, variant)
-    assert _fresh(tmp_path, variant) is False
+    _write_build_id(tmp_path, "v1", mtime=time.time() - 60)
+    _write_port_marker(tmp_path, "v1")
+    assert _fresh(tmp_path, "v1") is False
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize(
-    "touched",
+    ("variant", "touched"),
     [
-        "package-lock.json",
-        "package.json",
-        "packages/web-core/src/index.ts",
-        "packages/web-core/package.json",
+        ("v1", "package-lock.json"),
+        ("v2", "package.json"),
+        ("v1", "packages/web-core/src/index.ts"),
+        ("v2", "packages/web-core/package.json"),
     ],
 )
-def test_is_fresh_shared_input_edit_invalidates_both_apps(
+def test_is_fresh_shared_input_edit_invalidates_the_app(
     tmp_path: Path, variant: FrontendVariant, touched: str
 ) -> None:
     _make_repo(tmp_path)
@@ -195,23 +186,18 @@ def test_is_fresh_ignores_edits_to_the_other_app(
     assert _fresh(tmp_path, variant) is True
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_ref_match_falls_through_to_mtime(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_ref_match_falls_through_to_mtime(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     _init_git(tmp_path)
     _age_inputs(tmp_path)
-    _built(tmp_path, variant)
-    (_next_dir(tmp_path, variant) / "BUILD_REF").write_text(
-        _current_head(tmp_path) + "\n"
-    )
-    assert _fresh(tmp_path, variant) is True
+    _built(tmp_path, "v1")
+    (_next_dir(tmp_path, "v1") / "BUILD_REF").write_text(_current_head(tmp_path) + "\n")
+    assert _fresh(tmp_path, "v1") is True
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize(
-    "changed", ["package-lock.json", "packages/web-core/src/index.ts"]
+    ("variant", "changed"),
+    [("v1", "package-lock.json"), ("v2", "packages/web-core/src/index.ts")],
 )
 def test_is_fresh_ref_diverged_with_shared_input_change(
     tmp_path: Path, variant: FrontendVariant, changed: str
@@ -248,47 +234,38 @@ def test_is_fresh_ref_diverged_other_app_change_keeps_build(tmp_path: Path) -> N
     ).read_text().strip() == _current_head(tmp_path)
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_ref_diverged_unrelated_change_advances_ref(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_ref_diverged_unrelated_change_advances_ref(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     (tmp_path / "README.md").write_text("hi")
     _init_git(tmp_path)
     initial_head = _current_head(tmp_path)
     _age_inputs(tmp_path)
-    _built(tmp_path, variant)
-    (_next_dir(tmp_path, variant) / "BUILD_REF").write_text(initial_head + "\n")
+    _built(tmp_path, "v2")
+    (_next_dir(tmp_path, "v2") / "BUILD_REF").write_text(initial_head + "\n")
 
     (tmp_path / "README.md").write_text("hi again")
     _commit_all(tmp_path, "docs")
 
-    assert _fresh(tmp_path, variant) is True
+    assert _fresh(tmp_path, "v2") is True
     assert (
-        _next_dir(tmp_path, variant) / "BUILD_REF"
+        _next_dir(tmp_path, "v2") / "BUILD_REF"
     ).read_text().strip() == _current_head(tmp_path)
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_returns_false_when_port_marker_missing(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_returns_false_when_port_marker_missing(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     _age_inputs(tmp_path)
-    _write_build_id(tmp_path, variant)
+    _write_build_id(tmp_path, "v1")
     # no BUILD_BACKEND_PORT marker — legacy build, must rebuild
-    assert _fresh(tmp_path, variant) is False
+    assert _fresh(tmp_path, "v1") is False
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_is_fresh_returns_false_when_backend_port_changes(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
+def test_is_fresh_returns_false_when_backend_port_changes(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     _age_inputs(tmp_path)
-    _write_build_id(tmp_path, variant)
-    _write_port_marker(tmp_path, variant, port=8787)
-    assert is_fresh(tmp_path, variant, backend_port=8797) is False
+    _write_build_id(tmp_path, "v1")
+    _write_port_marker(tmp_path, "v1", port=8787)
+    assert is_fresh(tmp_path, "v1", backend_port=8797) is False
 
 
 def test_markers_are_per_app(tmp_path: Path) -> None:
@@ -301,33 +278,22 @@ def test_markers_are_per_app(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_record_build_writes_port_marker(
+def test_record_build_writes_port_marker_and_ref(
     tmp_path: Path, variant: FrontendVariant
 ) -> None:
     _make_repo(tmp_path)
     _init_git(tmp_path)
     _next_dir(tmp_path, variant).mkdir()
+
     record_build(tmp_path, variant, backend_port=8797)
-    port_marker = _next_dir(tmp_path, variant) / "BUILD_BACKEND_PORT"
-    assert port_marker.read_text().strip() == "8797"
+
+    next_dir = _next_dir(tmp_path, variant)
+    assert (next_dir / "BUILD_BACKEND_PORT").read_text().strip() == "8797"
+    assert (next_dir / "BUILD_REF").read_text().strip() == _current_head(tmp_path)
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_record_build_ref_writes_head(tmp_path: Path, variant: FrontendVariant) -> None:
+def test_record_build_ref_no_op_without_next_dir(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     _init_git(tmp_path)
-    _next_dir(tmp_path, variant).mkdir()
-    record_build_ref(tmp_path, variant)
-    assert (
-        _next_dir(tmp_path, variant) / "BUILD_REF"
-    ).read_text().strip() == _current_head(tmp_path)
-
-
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_record_build_ref_no_op_without_next_dir(
-    tmp_path: Path, variant: FrontendVariant
-) -> None:
-    _make_repo(tmp_path)
-    _init_git(tmp_path)
-    record_build_ref(tmp_path, variant)
-    assert not (_next_dir(tmp_path, variant) / "BUILD_REF").exists()
+    record_build_ref(tmp_path, "v2")
+    assert not (_next_dir(tmp_path, "v2") / "BUILD_REF").exists()

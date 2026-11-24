@@ -233,19 +233,23 @@ def test_daemon_status_e2e(state_dir: Path) -> None:
         _terminate(proc)
 
 
-def test_daemon_rejects_deferred_restart_it_cannot_run(state_dir: Path) -> None:
-    home = _make_home(state_dir)
+def _spawn_daemon_without_preview(home: Path, state_dir: Path) -> subprocess.Popen:
     env = {
         key: value
         for key, value in os.environ.items()
         if key != "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
     }
     env["WAYPOINTCTL_STATE_DIR"] = str(state_dir)
-    proc = subprocess.Popen(
+    return subprocess.Popen(
         [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
         env=env,
         start_new_session=True,
     )
+
+
+def test_daemon_rejects_deferred_restart_it_cannot_run(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    proc = _spawn_daemon_without_preview(home, state_dir)
     try:
         assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
         client = DaemonClient(home)
@@ -265,21 +269,11 @@ def test_daemon_rejects_deferred_restart_it_cannot_run(state_dir: Path) -> None:
 
 def test_daemon_stops_a_preview_that_is_no_longer_configured(state_dir: Path) -> None:
     home = _make_home(state_dir)
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key != "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
-    }
-    env["WAYPOINTCTL_STATE_DIR"] = str(state_dir)
     orphan = subprocess.Popen(["sleep", "300"], start_new_session=True)
     pid_path = state_dir / "run" / "frontend-preview.pid"
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(f"{orphan.pid}\n")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
-        env=env,
-        start_new_session=True,
-    )
+    proc = _spawn_daemon_without_preview(home, state_dir)
     try:
         assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
         client = DaemonClient(home)

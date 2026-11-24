@@ -16,6 +16,7 @@ LogFn = Callable[[str, str], None]
 
 ACTIONS = ("start", "stop", "restart")
 LOG_TARGETS = ("backend", "frontend", "frontend-preview")
+ACTION_TARGETS = (*LOG_TARGETS, "all")
 _MAX_LOG_LINES = 1000
 _TAIL_BYTES = 256 * 1024
 
@@ -33,9 +34,7 @@ def run_action(
 
 
 def status_payload(stack: WaypointStack) -> list[dict[str, object]]:
-    services = [_status_dict(stack.backend), _status_dict(stack.frontend)]
-    if stack.preview_active:
-        services.append(_status_dict(stack.frontend_preview))
+    services = [_status_dict(svc) for svc in stack.services]
     caffeinate = stack.caffeinate.status()
     if caffeinate.state == "running":
         services.append(

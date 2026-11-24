@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 from waypointctl.config import StackConfig
 from waypointctl.paths import log_file_for
-from waypointctl.process import running_pid
 from waypointctl.services import (
     BackendService,
     CaffeinateService,
@@ -37,16 +36,17 @@ class WaypointStack:
         self.caffeinate = CaffeinateService(config)
 
     @property
-    def preview_active(self) -> bool:
-        """Whether the preview is configured, or still running from an earlier config.
+    def frontends(self) -> tuple[FrontendService, ...]:
+        # An unconfigured preview that still runs stays listed so stop and
+        # restart can reach it.
+        preview = self.frontend_preview
+        if preview.configured or preview.running:
+            return (self.frontend, preview)
+        return (self.frontend,)
 
-        An unconfigured but live preview stays selectable so `stop` and
-        `restart` never leave it orphaned.
-        """
-        return (
-            self.frontend_preview.configured
-            or running_pid(self.frontend_preview.pid_path) is not None
-        )
+    @property
+    def services(self) -> tuple[ManagedService, ...]:
+        return (self.backend, *self.frontends)
 
     def start(self, log: LogFn, target: str = "all") -> ServiceResult:
         if message := self.check_target(target, "start"):
@@ -63,23 +63,21 @@ class WaypointStack:
             self._stop_started(services, log)
             return _aggregate(results)
 
-        # Only optional services failed (the preview): drop them and keep the
-        # rest of the stack serving, but still report the failure.
+        # A broken preview must not take the primary down with it.
         self._stop_started(failed, log)
         self.caffeinate.start(log)
         self._emit_status(log)
         return _aggregate(results)
 
     def stop(self, log: LogFn, target: str = "all") -> ServiceResult:
-        services = self.select(target)
-        if services is None:
-            return ServiceResult(ok=False, message=f"unknown service: {target}")
+        if message := self.check_target(target, "stop"):
+            return ServiceResult(ok=False, message=message)
+        services = self.select(target) or ()
         # Caffeinate spans the whole stack — only stop it on `stop all`.
         targets: tuple[ManagedService, ...] = (
             (self.caffeinate, *services) if target in {"all", ""} else services
         )
-        results = self._parallel(targets, "stop", log)
-        return _aggregate(results)
+        return _aggregate(self._parallel(targets, "stop", log))
 
     def restart(self, target: str, log: LogFn) -> ServiceResult:
         if message := self.check_target(target, "restart"):
@@ -88,48 +86,33 @@ class WaypointStack:
         return self.start(log, target)
 
     def check_target(self, target: str, action: str) -> str | None:
-        """Why `action` on `target` can't run, if it can't.
-
-        `stop` is exempt from the preview-configured check so a preview left
-        running after its port was removed from the config can still be stopped.
-        """
         if self.select(target) is None:
             return f"unknown service: {target}"
-        if (
-            action != "stop"
-            and target == "frontend-preview"
-            and not self.frontend_preview.configured
-        ):
+        # A preview left running after its port was removed can still be stopped.
+        if action == "stop" or target != "frontend-preview":
+            return None
+        preview = self.frontend_preview
+        if not preview.configured:
             return (
                 "frontend-preview is not configured; "
                 "set WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"
             )
-        if action == "stop" or target != "frontend-preview":
+        # Checked before `restart` stops the preview; starting a running one is
+        # a no-op, so it has nothing to conflict with.
+        if action == "start" and preview.running:
             return None
-        # Refuse a lone preview start before `restart` stops the preview; starting
-        # one that already runs is a no-op, so it has nothing to conflict with.
-        if (
-            action == "start"
-            and running_pid(self.frontend_preview.pid_path) is not None
-        ):
-            return None
-        return self.frontend_preview.conflict()
+        return preview.conflict()
 
     def select(self, target: str) -> tuple[ManagedService, ...] | None:
-        """Services a target names; `frontend` covers the preview alongside it."""
-        frontends: tuple[ManagedService, ...] = (
-            (self.frontend, self.frontend_preview)
-            if self.preview_active
-            else (self.frontend,)
-        )
-        if target == "backend":
-            return (self.backend,)
-        if target == "frontend":
-            return frontends
-        if target == "frontend-preview":
-            return (self.frontend_preview,)
-        if target in {"all", ""}:
-            return (self.backend, *frontends)
+        match target:
+            case "backend":
+                return (self.backend,)
+            case "frontend":
+                return self.frontends
+            case "frontend-preview":
+                return (self.frontend_preview,)
+            case "all" | "":
+                return self.services
         return None
 
     def status(self, log: LogFn) -> ServiceResult:
@@ -149,7 +132,7 @@ class WaypointStack:
         ]
 
     def _emit_status(self, log: LogFn) -> None:
-        for svc in self.select("all") or ():
+        for svc in self.services:
             log("stdout", _format_status(svc.status()))
         cf_status = self.caffeinate.status()
         if cf_status.state == "running":

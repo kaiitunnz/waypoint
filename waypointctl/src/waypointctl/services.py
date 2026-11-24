@@ -21,7 +21,7 @@ from waypointctl.paths import (
 )
 from waypointctl.process import running_pid, write_pid_file
 from waypointctl.procgroup import spawn_detached, terminate_group
-from waypointctl.workspace import APP_DIRS, FrontendVariant, parse_variant
+from waypointctl.workspace import APP_DIRS, FrontendVariant, as_variant
 
 LogFn = Callable[[str, str], None]
 
@@ -47,8 +47,7 @@ class ServiceStatus:
 
 class ManagedService:
     name: str = ""
-    # A failing optional service is reported but never takes the rest of the
-    # stack down with it.
+    # Reported on failure but never stops the rest of the stack.
     optional: bool = False
 
     def __init__(self, config: StackConfig) -> None:
@@ -74,6 +73,10 @@ class ManagedService:
 
     def stop(self, log: LogFn) -> ServiceResult:
         return _stop_managed_service(self.name, self.pid_path, log)
+
+    def _write_marker(self) -> None:
+        self.started_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.started_marker.write_text("")
 
 
 class BackendService(ManagedService):
@@ -135,18 +138,10 @@ class BackendService(ManagedService):
 
         return ServiceResult(ok=True)
 
-    def _write_marker(self) -> None:
-        self.started_marker.parent.mkdir(parents=True, exist_ok=True)
-        self.started_marker.write_text("")
-
 
 class FrontendService(ManagedService):
-    """One Next.js app (`variant`) served on `port`.
-
-    The primary service is named `frontend`; the preview service runs the other
-    variant beside it and is only configured when it has a port.
-    """
-
+    # `frontend-preview` runs the other variant beside the primary and is
+    # configured only when it has a port.
     def __init__(
         self,
         config: StackConfig,
@@ -167,54 +162,41 @@ class FrontendService(ManagedService):
         return self.port is not None
 
     @property
+    def running(self) -> bool:
+        return running_pid(self.pid_path) is not None
+
+    @property
     def variant_path(self) -> Path:
         return variant_file_for(self.name)
 
-    @property
-    def _sibling(self) -> str:
-        return "frontend-preview" if self.name == "frontend" else "frontend"
-
     def status(self) -> ServiceStatus:
-        if self.port is None:
-            pid = running_pid(self.pid_path)
-            if pid is None:
-                return ServiceStatus(name=self.name, state="stopped")
-            status = ServiceStatus(name=self.name, state="running", pid=pid)
-        else:
+        if self.port is not None:
             status = _http_service_status(
                 self.name,
                 self.pid_path,
                 port=self.port,
                 health_url=f"http://127.0.0.1:{self.port}",
             )
+        elif pid := running_pid(self.pid_path):
+            status = ServiceStatus(name=self.name, state="running", pid=pid)
+        else:
+            status = ServiceStatus(name=self.name, state="stopped")
         if status.state != "running":
             return status
-        return dataclasses.replace(status, variant=self._running_variant())
+        return dataclasses.replace(status, variant=_read_variant(self.variant_path))
 
     def stop(self, log: LogFn) -> ServiceResult:
         result = super().stop(log)
         self.variant_path.unlink(missing_ok=True)
         return result
 
-    def _running_variant(self) -> FrontendVariant | None:
-        # What the live process serves, recorded at spawn, rather than what the
-        # current config would start.
-        return _read_variant(self.variant_path)
-
+    # Both frontends share one root node_modules and each build rewrites its own
+    # .next, so neither may happen under a live sibling.
     def conflict(self) -> str | None:
-        """Why starting now would disturb the running sibling frontend, if it would."""
-        return self._sibling_conflict(frontend_install.needs_install(self.config.home))
-
-    def _sibling_conflict(self, install_needed: bool) -> str | None:
-        """Why starting beside an already-running sibling frontend would hurt it.
-
-        Both frontends share one root node_modules, and each app's `.next` is
-        rewritten by its build, so neither may happen under a live sibling.
-        """
-        sibling = self._sibling
+        sibling = "frontend-preview" if self.name == "frontend" else "frontend"
         if running_pid(pid_file_for(sibling)) is None:
             return None
-        if install_needed:
+        if frontend_install.needs_install(self.config.home):
             return (
                 f"frontend dependencies changed while {sibling} is running; "
                 "run `waypointctl restart frontend` to reinstall"
@@ -244,81 +226,27 @@ class FrontendService(ManagedService):
         self._write_marker()
         self.log_path.write_text("")
 
+        if failure := self._ensure_dependencies(log):
+            return failure
+
         app_dir = self.config.home / APP_DIRS[self.variant]
-        port_env = str(self.port)
-        backend_port_env = str(self.config.backend_port)
-
-        with frontend_install.install_lock:
-            install_needed = frontend_install.needs_install(self.config.home)
-            if conflict := self._sibling_conflict(install_needed):
-                log("stderr", conflict)
-                return ServiceResult(ok=False, message=conflict)
-            if install_needed:
-                log("stdout", "installing frontend dependencies")
-                install_rc = frontend_install.run_install(
-                    self.config.home, self.log_path, self.config.child_env
-                )
-                if install_rc != 0:
-                    log("stderr", "frontend dependency install failed")
-                    _emit_recent_log(self.log_path, log)
-                    return ServiceResult(
-                        ok=False,
-                        message=f"frontend dependency install exited with {install_rc}",
-                    )
-            else:
-                log("stdout", "frontend dependencies up to date")
-
+        env = dict(
+            self.config.child_env,
+            PORT=str(self.port),
+            NEXT_PUBLIC_BACKEND_PORT=str(self.config.backend_port),
+        )
         if self.config.frontend_dev:
             log(
                 "stdout",
-                f"starting {self.name} in development mode on 0.0.0.0:{port_env}",
+                f"starting {self.name} in development mode on 0.0.0.0:{self.port}",
             )
-            env = dict(
-                self.config.child_env,
-                PORT=port_env,
-                NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
-            )
-            pid = spawn_detached(
-                ["npm", "run", "dev"],
-                cwd=app_dir,
-                env=env,
-                log_path=self.log_path,
-            )
+            argv = ["npm", "run", "dev"]
         else:
-            if frontend_build.is_fresh(
-                self.config.home,
-                self.variant,
-                backend_port=self.config.backend_port,
-                force=self.config.force_frontend_build,
-            ):
-                log("stdout", f"{self.name} build up to date, skipping rebuild")
-            else:
-                log("stdout", f"building {self.name}")
-                build_rc = self._run_build(app_dir, port_env, backend_port_env)
-                if build_rc != 0:
-                    log("stderr", f"{self.name} build failed")
-                    _emit_recent_log(self.log_path, log)
-                    return ServiceResult(
-                        ok=False, message=f"{self.name} build exited with {build_rc}"
-                    )
-                frontend_build.record_build(
-                    self.config.home,
-                    self.variant,
-                    backend_port=self.config.backend_port,
-                )
-
-            log("stdout", f"starting {self.name} on 0.0.0.0:{port_env}")
-            env = dict(
-                self.config.child_env,
-                PORT=port_env,
-                NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
-            )
-            pid = spawn_detached(
-                ["npm", "run", "start"],
-                cwd=app_dir,
-                env=env,
-                log_path=self.log_path,
-            )
+            if failure := self._ensure_build(app_dir, env, log):
+                return failure
+            log("stdout", f"starting {self.name} on 0.0.0.0:{self.port}")
+            argv = ["npm", "run", "start"]
+        pid = spawn_detached(argv, cwd=app_dir, env=env, log_path=self.log_path)
 
         write_pid_file(self.pid_path, pid)
         self.variant_path.write_text(f"{self.variant}\n", encoding="utf-8")
@@ -336,12 +264,39 @@ class FrontendService(ManagedService):
 
         return ServiceResult(ok=True)
 
-    def _run_build(self, app_dir: Path, port_env: str, backend_port_env: str) -> int:
-        env = dict(
-            self.config.child_env,
-            PORT=port_env,
-            NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
-        )
+    def _ensure_dependencies(self, log: LogFn) -> ServiceResult | None:
+        with frontend_install.install_lock:
+            if conflict := self.conflict():
+                log("stderr", conflict)
+                return ServiceResult(ok=False, message=conflict)
+            if not frontend_install.needs_install(self.config.home):
+                log("stdout", "frontend dependencies up to date")
+                return None
+            log("stdout", "installing frontend dependencies")
+            install_rc = frontend_install.run_install(
+                self.config.home, self.log_path, self.config.child_env
+            )
+        if install_rc != 0:
+            log("stderr", "frontend dependency install failed")
+            _emit_recent_log(self.log_path, log)
+            return ServiceResult(
+                ok=False,
+                message=f"frontend dependency install exited with {install_rc}",
+            )
+        return None
+
+    def _ensure_build(
+        self, app_dir: Path, env: dict[str, str], log: LogFn
+    ) -> ServiceResult | None:
+        if frontend_build.is_fresh(
+            self.config.home,
+            self.variant,
+            backend_port=self.config.backend_port,
+            force=self.config.force_frontend_build,
+        ):
+            log("stdout", f"{self.name} build up to date, skipping rebuild")
+            return None
+        log("stdout", f"building {self.name}")
         with self.log_path.open("a", encoding="utf-8") as log_file:
             proc = subprocess.run(
                 ["npm", "run", "build"],
@@ -352,11 +307,16 @@ class FrontendService(ManagedService):
                 stderr=subprocess.STDOUT,
                 check=False,
             )
-        return proc.returncode
-
-    def _write_marker(self) -> None:
-        self.started_marker.parent.mkdir(parents=True, exist_ok=True)
-        self.started_marker.write_text("")
+        if proc.returncode != 0:
+            log("stderr", f"{self.name} build failed")
+            _emit_recent_log(self.log_path, log)
+            return ServiceResult(
+                ok=False, message=f"{self.name} build exited with {proc.returncode}"
+            )
+        frontend_build.record_build(
+            self.config.home, self.variant, backend_port=self.config.backend_port
+        )
+        return None
 
 
 class CaffeinateService(ManagedService):
@@ -401,10 +361,9 @@ class CaffeinateService(ManagedService):
 
 def _read_variant(path: Path) -> FrontendVariant | None:
     try:
-        recorded = path.read_text(encoding="utf-8").strip()
+        return as_variant(path.read_text(encoding="utf-8"))
     except OSError:
         return None
-    return parse_variant(recorded) if recorded in APP_DIRS else None
 
 
 def _stop_managed_service(name: str, pid_path: Path, log: LogFn) -> ServiceResult:

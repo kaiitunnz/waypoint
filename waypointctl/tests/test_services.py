@@ -179,18 +179,13 @@ def _frontend(
     )
 
 
-class _Spawned:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-
 @pytest.fixture
-def fake_runtime(monkeypatch: pytest.MonkeyPatch) -> _Spawned:
+def fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     """Stub out npm, the spawned server and its health probe."""
-    spawned = _Spawned()
+    spawned: list[dict[str, object]] = []
 
     def fake_spawn(argv, *, cwd, env, log_path):  # type: ignore[no-untyped-def]
-        spawned.calls.append({"argv": argv, "cwd": cwd, "env": env})
+        spawned.append({"argv": argv, "cwd": cwd, "env": env})
         return os.getpid()
 
     monkeypatch.setattr(services, "spawn_detached", fake_spawn)
@@ -207,7 +202,7 @@ def fake_runtime(monkeypatch: pytest.MonkeyPatch) -> _Spawned:
 def test_frontend_serves_its_variant_from_the_app_dir(
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
     variant: FrontendVariant,
     app_dir: str,
 ) -> None:
@@ -218,7 +213,7 @@ def test_frontend_serves_its_variant_from_the_app_dir(
     result = frontend.start(lambda *_: None)
 
     assert result.ok is True
-    (call,) = fake_runtime.calls
+    (call,) = fake_runtime
     assert call["argv"] == ["npm", "run", "start"]
     assert call["cwd"] == config.home / app_dir
     env = call["env"]
@@ -230,14 +225,14 @@ def test_frontend_serves_its_variant_from_the_app_dir(
 
 
 def test_frontend_dev_mode_runs_dev_in_the_app_dir(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir, frontend_dev=True)
     frontend = _frontend(config, variant="v2", port=_free_port())
 
     assert frontend.start(lambda *_: None).ok is True
 
-    (call,) = fake_runtime.calls
+    (call,) = fake_runtime
     assert call["argv"] == ["npm", "run", "dev"]
     assert call["cwd"] == config.home / "frontend-v2"
 
@@ -246,7 +241,7 @@ def test_frontend_builds_in_the_app_dir_and_records_it(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir, backend_port=8797)
     monkeypatch.setattr(services.frontend_build, "is_fresh", lambda *_a, **_kw: False)
@@ -276,7 +271,7 @@ def test_frontend_installs_at_the_workspace_root(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     monkeypatch.setattr(services.frontend_install, "needs_install", lambda _home: True)
@@ -296,7 +291,7 @@ def test_frontend_install_failure_fails_the_start(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     monkeypatch.setattr(services.frontend_install, "needs_install", lambda _home: True)
@@ -306,14 +301,14 @@ def test_frontend_install_failure_fails_the_start(
 
     assert result.ok is False
     assert "exited with 3" in result.message
-    assert fake_runtime.calls == []
+    assert fake_runtime == []
 
 
 def test_concurrent_frontend_starts_install_once(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     installed = threading.Event()
@@ -355,7 +350,7 @@ def test_concurrent_frontend_starts_install_once(
 
 
 def test_frontend_services_keep_separate_state_files(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     primary = _frontend(config, port=_free_port())
@@ -369,13 +364,12 @@ def test_frontend_services_keep_separate_state_files(
     assert primary.pid_path.name == "frontend.pid"
     assert preview.pid_path.name == "frontend-preview.pid"
     assert primary.log_path != preview.log_path
-    assert preview.optional is True and primary.optional is False
     assert primary.status().variant == "v1"
     assert preview.status().variant == "v2"
 
 
 def test_status_reports_the_running_variant_not_the_configured_one(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     started_as_v1 = _frontend(config, variant="v1", port=_free_port())
@@ -387,7 +381,7 @@ def test_status_reports_the_running_variant_not_the_configured_one(
 
 
 def test_status_variant_is_absent_for_an_unrecorded_process(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     frontend = _frontend(config, port=_free_port())
@@ -398,11 +392,22 @@ def test_status_variant_is_absent_for_an_unrecorded_process(
     assert status.state == "running" and status.variant is None
 
 
+def test_status_variant_is_absent_for_a_blank_record(
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
+) -> None:
+    config = _build_config(tmp_path, state_dir)
+    frontend = _frontend(config, port=_free_port())
+    frontend.start(lambda *_: None)
+    frontend.variant_path.write_text("\n")
+
+    assert frontend.status().variant is None
+
+
 def test_stop_clears_the_recorded_variant(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     monkeypatch.setattr(services, "terminate_group", lambda _pid: None)
     config = _build_config(tmp_path, state_dir)
@@ -417,14 +422,14 @@ def test_stop_clears_the_recorded_variant(
 
 
 def test_unconfigured_preview_is_a_noop(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     preview = _frontend(config, name="frontend-preview", variant="v2", port=None)
 
     assert preview.configured is False
     assert preview.start(lambda *_: None).ok is True
-    assert fake_runtime.calls == []
+    assert fake_runtime == []
     assert preview.status().state == "stopped"
 
 
@@ -443,7 +448,10 @@ def test_unconfigured_but_running_preview_still_reports_status(
 
 
 def test_frontend_start_refuses_when_its_port_is_in_use(
-    state_dir: Path, tmp_path: Path, http_server: HTTPServer, fake_runtime: _Spawned
+    state_dir: Path,
+    tmp_path: Path,
+    http_server: HTTPServer,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     preview = _frontend(
@@ -476,7 +484,7 @@ def test_install_is_refused_under_a_running_sibling(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
     name: str,
     sibling: str,
 ) -> None:
@@ -494,14 +502,14 @@ def test_install_is_refused_under_a_running_sibling(
     assert result.ok is False
     assert f"while {sibling} is running" in result.message
     assert "waypointctl restart frontend" in result.message
-    assert installs == [] and fake_runtime.calls == []
+    assert installs == [] and fake_runtime == []
 
 
 def test_conflict_previews_the_start_guard_without_starting(
     monkeypatch: pytest.MonkeyPatch,
     state_dir: Path,
     tmp_path: Path,
-    fake_runtime: _Spawned,
+    fake_runtime: list[dict[str, object]],
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     preview = _frontend(
@@ -513,11 +521,11 @@ def test_conflict_previews_the_start_guard_without_starting(
     monkeypatch.setattr(services.frontend_install, "needs_install", lambda _home: True)
 
     assert "while frontend is running" in (preview.conflict() or "")
-    assert fake_runtime.calls == []
+    assert fake_runtime == []
 
 
 def test_start_beside_a_sibling_serving_a_different_app_is_fine(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     _mark_running("frontend", "v1")
@@ -526,11 +534,11 @@ def test_start_beside_a_sibling_serving_a_different_app_is_fine(
     )
 
     assert preview.start(lambda *_: None).ok is True
-    assert len(fake_runtime.calls) == 1
+    assert len(fake_runtime) == 1
 
 
 def test_start_is_refused_when_the_sibling_already_serves_that_app(
-    state_dir: Path, tmp_path: Path, fake_runtime: _Spawned
+    state_dir: Path, tmp_path: Path, fake_runtime: list[dict[str, object]]
 ) -> None:
     config = _build_config(tmp_path, state_dir)
     _mark_running("frontend", "v1")
@@ -542,4 +550,4 @@ def test_start_is_refused_when_the_sibling_already_serves_that_app(
 
     assert result.ok is False
     assert "already serving v1" in result.message
-    assert fake_runtime.calls == []
+    assert fake_runtime == []

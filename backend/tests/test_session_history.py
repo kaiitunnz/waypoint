@@ -142,7 +142,7 @@ def test_get_sessions_by_ids_keeps_requested_order(tmp_path: Path) -> None:
     assert [session.id for session in found] == ["c", "a"]
 
 
-# ─── Search parity with frontend/src/lib/search.ts ───
+# ─── Search parity with packages/web-core/src/search.ts ───
 
 
 ROW = {

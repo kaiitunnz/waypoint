@@ -1,4 +1,4 @@
-"""Server-side port of the dashboard's session search (``frontend/src/lib/search.ts``).
+"""Server-side port of the dashboard's session search (web-core ``search.ts``).
 
 A query is OR-separated groups of AND terms. A term is an optional ``field:``
 prefix (with the dashboard's aliases) and a bare word, a quoted phrase, or a

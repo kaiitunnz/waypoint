@@ -119,9 +119,9 @@ _IN_FLIGHT_STATES: frozenset[ManagerTicketState] = frozenset(
 )
 
 # The lifecycle-lane taxonomy the board groups cards by. The keys and their
-# state membership mirror ``frontend/src/lib/board.ts`` (LANES); the backend owns
-# this copy so the query summary can report lane counts without importing the
-# frontend. The dict order is the canonical lane order.
+# state membership mirror ``packages/web-core/src/board.ts`` (LANES); the
+# backend owns this copy so the query summary can report lane counts without
+# importing the frontend. The dict order is the canonical lane order.
 _LANES: dict[str, tuple[ManagerTicketState, ...]] = {
     "intake": (_S.INTAKE, _S.TRIAGED),
     "spec": (_S.SPEC_PENDING, _S.SPEC_REVIEW),

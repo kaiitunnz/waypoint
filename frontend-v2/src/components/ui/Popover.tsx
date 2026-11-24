@@ -67,7 +67,7 @@ export function Popover({
 
 export function Menu({ children, label }: { children: ReactNode; label: string }) {
   return (
-    <div role="menu" aria-label={label} className={styles.menu}>
+    <div role="group" aria-label={label} className={styles.menu}>
       {children}
     </div>
   );
@@ -84,7 +84,7 @@ export function MenuItem({ onSelect, children, selected, tone = "default" }: Men
   return (
     <button
       type="button"
-      role="menuitem"
+      aria-current={selected || undefined}
       className={cx(styles.item, selected && styles.selected, tone === "danger" && styles.danger)}
       onClick={onSelect}
     >

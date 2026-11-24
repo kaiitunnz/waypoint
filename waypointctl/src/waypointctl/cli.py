@@ -6,7 +6,7 @@ import subprocess
 import time
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Protocol, cast, runtime_checkable
 
 import click
 import typer
@@ -165,6 +165,19 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+@runtime_checkable
+class _TypeLabelled(Protocol):
+    def bare_type(self) -> str: ...
+
+
+def _option_type(param: click.Parameter) -> str:
+    # typer >= 0.29 vendors click; its parameters label their type instead of
+    # carrying a click ParamType.
+    if isinstance(param, _TypeLabelled):
+        return param.bare_type()
+    return param.type.name
+
+
 def _describe_command(cmd: click.Command, path: str) -> dict[str, Any]:
     arguments: list[dict[str, Any]] = []
     options: list[dict[str, Any]] = []
@@ -176,7 +189,7 @@ def _describe_command(cmd: click.Command, path: str) -> dict[str, Any]:
                 options.append(
                     {
                         "flags": list(param.opts),
-                        "type": param.type.name,
+                        "type": _option_type(param),
                         "required": param.required,
                         "default": _json_safe(param.default),
                         "help": getattr(param, "help", None),

@@ -5,8 +5,8 @@ description: Use when managing Waypoint coding sessions through the `waypoint` C
 
 # Waypoint Sessions
 
-Use this skill for the `waypoint` backend CLI. Session commands live under
-`waypoint sessions ...` and run against the running Waypoint server.
+Use this skill for the `waypoint` backend CLI, which manages sessions on a
+running Waypoint server.
 
 Run `waypoint help` to dump the entire CLI surface — every nested command, its
 arguments, and its options — in one call (`waypoint help --json` for structured

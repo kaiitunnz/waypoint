@@ -80,18 +80,13 @@ the ids you pin are real.
 
 ## Attaching an existing tmux pane
 
-To put a pane you (or the human) started outside Waypoint under its management,
-attach it instead of launching a new agent:
+Attach a pane started outside Waypoint instead of launching a new agent:
 
 ```bash
 waypoint sessions attach-tmux --tmux <target>                  # pane id (%3), session, or session:window.pane
 waypoint sessions attach-tmux --tmux <target> --backend-hint <agent-id> --title <title>
 ```
 
-The server mirrors the pane's output and monitors it as a `tmux`-transport
-session. `--backend-hint` names the agent running in the pane; without it the
-agent is inferred from the target name, falling back to the server's default
-backend. Inside a Waypoint session the attached session is owned by the caller
-(`--spawner-session-id` defaults to `$WAYPOINT_SESSION_ID`). The pane belongs
-to whoever created it: terminating or deleting the session stops the mirror
-but leaves the pane running.
+Pass `--backend-hint` when the target name doesn't identify the agent. Run
+inside a Waypoint session, the attached session is yours (`sessions list
+--mine`, `reap --mine`). Terminating or deleting it leaves the pane running.

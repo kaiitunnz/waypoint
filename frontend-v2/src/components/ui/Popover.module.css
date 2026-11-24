@@ -1,5 +1,5 @@
 .popover {
-  z-index: var(--z-popover);
+  z-index: var(--z-overlay);
   display: flex;
   flex-direction: column;
   overflow: hidden;

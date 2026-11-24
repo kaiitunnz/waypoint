@@ -78,11 +78,10 @@
   --tabbar-height: 52px;
   --bar-height: 48px;
 
-  /* Layers. */
+  /* Layers. Sheets, modals and popovers share one, so whichever opened last is
+     on top, whether a dialog opens from a popover or a popover from a dialog. */
   --z-bar: 20;
-  --z-scrim: 40;
-  --z-dialog: 41;
-  --z-popover: 50;
+  --z-overlay: 40;
   --z-toast: 60;
 }
 

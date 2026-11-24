@@ -99,6 +99,7 @@ from waypoint.backends.claude_code.threads import (
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.backends.claude_code.version import detect_claude_cli_version
 from waypoint.backends.claude_tty.pane_dialog import (
+    composer_holds_input,
     composer_is_empty,
     composer_ready,
     shows_blocking_dialog,
@@ -363,6 +364,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # image paths become ``[Image]`` chips, so emptiness is the only signal.
         # Shared with claude_tty, which wraps the same TUI.
         return composer_is_empty(pane_text)
+
+    def pane_composer_holds_input(self, pane_text: str) -> bool:
+        return composer_holds_input(pane_text)
 
     async def terminal_appearance(
         self, runtime: "SessionRuntime", session: SessionRecord

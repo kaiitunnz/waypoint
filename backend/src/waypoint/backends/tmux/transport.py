@@ -18,6 +18,7 @@ from waypoint.attachments import (
 )
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.base import (
+    PaneComposerReading,
     PaneSubmitConfirming,
     PaneTypedInput,
     PaneTypingSpec,
@@ -271,8 +272,16 @@ class TmuxTransport(TransportAdapter):
         artifacts = agent.native_thread_artifacts(session, config_dir)
         return artifacts[0] if artifacts else None
 
-    async def resume(self, session: SessionRecord) -> None:
-        await self.adapter.resume(self._target(session))
+    async def resume(self, session: SessionRecord) -> bool:
+        target = self._target(session)
+        plugin = self._runtime.registry.get(session.backend)
+        submits = isinstance(
+            plugin, PaneComposerReading
+        ) and plugin.pane_composer_holds_input(
+            await self.adapter.capture_snapshot(target)
+        )
+        await self.adapter.resume(target)
+        return submits
 
     async def terminate(self, session: SessionRecord) -> None:
         target = self._target(session)

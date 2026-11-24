@@ -11,6 +11,7 @@ import pytest
 from waypoint.backends.claude_tty.pane_dialog import (
     PaneScreen,
     classify,
+    composer_holds_input,
     composer_is_empty,
     composer_ready,
     parse_approval,
@@ -681,6 +682,37 @@ def test_composer_is_empty_for_idle_placeholder() -> None:
     # (e.g. ``❯ Try "fix typecheck errors"``); it is empty for submit-confirm
     # purposes, so the confirm loop must not keep firing Enter at it.
     assert composer_is_empty(_load("ready.txt")) is True
+
+
+_PENDING_MESSAGE = "\n".join(
+    [
+        "❯ earlier submitted message",
+        "────────────────────────────",
+        "❯ Write the numbers 1 to 30.",
+        "────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts",
+    ]
+)
+
+
+def test_composer_holds_input_for_unsent_message() -> None:
+    assert composer_holds_input(_PENDING_MESSAGE) is True
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [
+        _load("ready.txt"),
+        "────────────────────────────\n❯ \n────────────────────────────",
+        "loading Claude...\nno prompt yet",
+        _load("approval_with_queued.txt"),
+        _load("trust_dialog.txt"),
+        _load("question_dialog.txt"),
+    ],
+    ids=["placeholder", "bare-prompt", "booting", "approval", "trust", "question"],
+)
+def test_composer_holds_no_input_enter_would_submit(screen: str) -> None:
+    assert composer_holds_input(screen) is False
 
 
 def test_composer_ready_when_prompt_drawn() -> None:

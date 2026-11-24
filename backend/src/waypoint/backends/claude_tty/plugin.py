@@ -324,6 +324,9 @@ class ClaudeTtyPlugin:
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         return self._claude.confirm_pane_submit(pane_text, sent_text)
 
+    def pane_composer_holds_input(self, pane_text: str) -> bool:
+        return self._claude.pane_composer_holds_input(pane_text)
+
     async def terminal_appearance(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> TerminalAppearance:

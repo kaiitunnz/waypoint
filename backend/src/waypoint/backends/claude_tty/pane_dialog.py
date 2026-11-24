@@ -341,6 +341,15 @@ def classify(screen: str) -> PaneScreen:
     return PaneScreen.OTHER
 
 
+def composer_holds_input(screen: str) -> bool:
+    """Whether the composer holds a typed, unsent message that ``Enter`` submits."""
+    return (
+        composer_ready(screen)
+        and not composer_is_empty(screen)
+        and not shows_blocking_dialog(screen)
+    )
+
+
 def shows_blocking_dialog(screen: str) -> bool:
     """Whether a modal popup is on screen that would capture ``Enter``.
 

@@ -3113,10 +3113,14 @@ class SessionRuntime:
         # reattach guard, so "Resume" on an exited session brings it back.
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             return await self._reattach_session(session)
-        await self.transport_for(session).resume(session)
-        # The keypress may start no turn, so leave the status to the
-        # transport's own driver, which reports a turn that does start.
-        await self._record_system_event(session.id, "Sent resume")
+        submitted = await self.transport_for(session).resume(session)
+        # An Enter that submits nothing starts no turn, so only a submit stamps
+        # RUNNING; otherwise the transport's own status driver reports any turn.
+        await self._record_system_event(
+            session.id,
+            "Sent resume",
+            status=SessionStatus.RUNNING if submitted else None,
+        )
         return self.get_session(session.id)
 
     async def terminate(self, session_id: str) -> SessionRecord:

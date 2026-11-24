@@ -1,7 +1,7 @@
-"""Live resume presses Enter on a pane without claiming a turn started."""
+"""A live resume marks a session running only when its Enter submits input."""
 
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +16,19 @@ from waypoint.schemas import (
 from waypoint.settings import Settings
 from waypoint.storage import Storage
 
+PANES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
+EMPTY_COMPOSER = (PANES / "ready.txt").read_text()
+APPROVAL_DIALOG = (PANES / "approval_bash.txt").read_text()
+PENDING_MESSAGE = "\n".join(
+    [
+        "● ready",
+        "────────────────────────────",
+        "❯ Write the numbers 1 to 30.",
+        "────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts",
+    ]
+)
+
 
 def make_runtime(tmp_path) -> SessionRuntime:
     settings = Settings(data_dir=tmp_path / "data")
@@ -24,14 +37,17 @@ def make_runtime(tmp_path) -> SessionRuntime:
 
 
 def make_session(
-    settings: Settings, transport: str, status: SessionStatus
+    settings: Settings,
+    transport: str,
+    status: SessionStatus,
+    backend: str = "claude_code",
 ) -> SessionRecord:
     session_dir = settings.sessions_dir / "sess"
     session_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
     return SessionRecord(
         id="sess",
-        backend="claude_code",
+        backend=backend,
         source=SessionSource.MANAGED,
         transport=transport,
         title="t",
@@ -46,45 +62,84 @@ def make_session(
     )
 
 
-def record_tmux_commands(runtime: SessionRuntime, monkeypatch) -> list[tuple[Any]]:
-    calls: list[tuple[Any]] = []
+def stub_pane(runtime: SessionRuntime, monkeypatch, screen: str) -> list[str]:
+    enters: list[str] = []
 
-    async def fake_run(*args: Any) -> str:
-        calls.append(args)
-        return ""
+    async def capture_snapshot(target: str, start_line: int = -200) -> str:
+        return screen
 
-    monkeypatch.setattr(runtime.tmux, "_run", fake_run)
-    return calls
+    async def resume(target: str) -> None:
+        enters.append(target)
+
+    monkeypatch.setattr(runtime.tmux, "capture_snapshot", capture_snapshot)
+    monkeypatch.setattr(runtime.tmux, "resume", resume)
+    return enters
+
+
+def resume_note(runtime: SessionRuntime):
+    note = runtime.storage.list_events("sess")[-1]
+    assert note.kind == EventKind.SYSTEM_NOTE
+    assert note.text == "Sent resume"
+    return note
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+@pytest.mark.parametrize("screen", [EMPTY_COMPOSER, APPROVAL_DIALOG])
 @pytest.mark.parametrize(
     "status",
     [SessionStatus.IDLE, SessionStatus.INTERRUPTED, SessionStatus.WAITING_INPUT],
 )
-async def test_live_resume_presses_enter_and_keeps_status(
-    tmp_path, monkeypatch, transport: str, status: SessionStatus
+async def test_resume_that_submits_nothing_keeps_status(
+    tmp_path, monkeypatch, transport: str, screen: str, status: SessionStatus
 ) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(make_session(runtime.settings, transport, status))
-    commands = record_tmux_commands(runtime, monkeypatch)
+    enters = stub_pane(runtime, monkeypatch, screen)
 
     updated = await runtime.resume("sess")
 
-    # The Enter may start no turn; the transport's own status driver (the
-    # transcript tailer, or the pane-output heuristic) reports one that does.
-    assert commands == [("send-keys", "-t", "%7", "Enter")]
+    assert enters == ["%7"]
     assert updated.status == status
-    assert runtime.get_session("sess").status == status
-    note = runtime.storage.list_events("sess")[-1]
-    assert note.kind == EventKind.SYSTEM_NOTE
-    assert note.text == "Sent resume"
-    assert "status" not in note.metadata
+    assert "status" not in resume_note(runtime).metadata
 
 
 @pytest.mark.asyncio
-async def test_live_resume_keeps_awaiting_answer(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+async def test_resume_that_submits_input_marks_running(
+    tmp_path, monkeypatch, transport: str
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(
+        make_session(runtime.settings, transport, SessionStatus.IDLE)
+    )
+    enters = stub_pane(runtime, monkeypatch, PENDING_MESSAGE)
+
+    updated = await runtime.resume("sess")
+
+    assert enters == ["%7"]
+    assert updated.status == SessionStatus.RUNNING
+    assert resume_note(runtime).metadata["status"] == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_resume_on_unreadable_pane_keeps_status(tmp_path, monkeypatch) -> None:
+    # The agent can't read its composer off a generic tmux pane, so the pane-output
+    # heuristic stays the only status driver.
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(
+        make_session(runtime.settings, "tmux", SessionStatus.IDLE, backend="codex")
+    )
+    enters = stub_pane(runtime, monkeypatch, PENDING_MESSAGE)
+
+    updated = await runtime.resume("sess")
+
+    assert enters == ["%7"]
+    assert updated.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_resume_keeps_awaiting_answer(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(
         make_session(runtime.settings, "claude_tty", SessionStatus.WAITING_INPUT)
@@ -92,10 +147,10 @@ async def test_live_resume_keeps_awaiting_answer(tmp_path, monkeypatch) -> None:
     runtime.storage.update_session(
         "sess", status=SessionStatus.WAITING_INPUT, awaiting_answer=True
     )
-    record_tmux_commands(runtime, monkeypatch)
+    stub_pane(runtime, monkeypatch, EMPTY_COMPOSER)
 
     updated = await runtime.resume("sess")
 
     assert updated.status == SessionStatus.WAITING_INPUT
     assert updated.awaiting_answer
-    assert AWAITING_ANSWER_KEY not in runtime.storage.list_events("sess")[-1].metadata
+    assert AWAITING_ANSWER_KEY not in resume_note(runtime).metadata

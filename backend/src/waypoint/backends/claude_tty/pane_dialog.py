@@ -355,21 +355,18 @@ def trust_option_offset(screen: str) -> int | None:
     row is missing. Callers classify the screen as the trust prompt first.
     """
     rows = [line for line in _strip_ansi(screen).splitlines() if line.strip()]
-    selected = next(
-        (i for i in reversed(range(len(rows))) if _COMPOSER_PROMPT_RE.match(rows[i])),
-        None,
+    selected = max(
+        (i for i, row in enumerate(rows) if _COMPOSER_PROMPT_RE.match(row)),
+        default=None,
     )
-    trust = next(
-        (i for i in reversed(range(len(rows))) if _TRUST_OPTION in rows[i]), None
-    )
+    trust = max((i for i, row in enumerate(rows) if _TRUST_OPTION in row), default=None)
     if selected is None or trust is None:
         return None
     return trust - selected
 
 
 def composer_holds_input(screen: str) -> bool:
-    """Whether the live composer holds a typed, unsent message that ``Enter``
-    submits.
+    """Whether the live composer holds an unsent message that ``Enter`` submits.
 
     Read from the framed composer only: a panel or shell-mode prompt replaces
     it, and earlier prompts echo above with the same ``❯`` glyph.
@@ -379,8 +376,7 @@ def composer_holds_input(screen: str) -> bool:
     if frame is None or shows_blocking_dialog(screen):
         return False
     top, bottom = frame
-    first = lines[top + 1].split(_COMPOSER_PROMPT, 1)[1]
-    text = "\n".join([first, *lines[top + 2 : bottom]]).strip()
+    text = "\n".join(lines[top + 1 : bottom]).removeprefix(_COMPOSER_PROMPT).strip()
     return bool(text) and not text.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
 
 

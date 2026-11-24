@@ -33,8 +33,7 @@ Enter on a live tmux / claude_tty pane. When the Enter submits a message typed
 into a Claude composer, the session goes `running` and `sessions wait` tracks
 the turn; otherwise the status stays as it was. A generic tmux pane of another
 agent keeps its pane-output status. While a dialog is open, `resume` fails
-(HTTP 409, exit 1) instead of pressing Enter, which would pick the highlighted
-option. Answer an approval with `sessions approve` or a plan with
+(HTTP 409, exit 1). Answer an approval with `sessions approve` or a plan with
 `approve-plan`. A claude_tty session accepts its folder-trust prompt by itself
 within a few seconds, so retry then; on a generic tmux pane the human answers
 it in the terminal. Codex and OpenCode panes can't be read for dialogs, so

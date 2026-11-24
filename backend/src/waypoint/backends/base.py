@@ -258,11 +258,7 @@ class PaneSubmitConfirming(Protocol):
 
 @runtime_checkable
 class PaneComposerReading(Protocol):
-    """A plugin that can tell whether its TUI's composer holds unsent input.
-
-    The tmux transport consults it on resume: an ``Enter`` submits that input
-    and starts a turn, while on an empty composer it starts nothing.
-    """
+    """A plugin that can tell whether its TUI's composer holds unsent input."""
 
     def pane_composer_holds_input(self, pane_text: str) -> bool:
         """Return whether the composer holds a typed message that ``Enter``

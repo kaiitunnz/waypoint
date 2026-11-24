@@ -394,15 +394,12 @@ class TranscriptTailer:
         screen_type = pane_dialog.classify(snapshot)
 
         if screen_type is pane_dialog.PaneScreen.TRUST:
-            # A fresh cwd opens with the workspace-trust prompt, which blocks the
-            # session (including autonomously-spawned ones in fresh worktrees)
-            # until answered. Newer CLIs preselect "No, exit", and Enter on it
-            # ends the session, so move the highlight onto the trust option first.
-            # The option list wraps, so arrows are not re-sent until the pane
-            # redraws (or a dropped burst times out), and Enter waits for the
-            # selection to hold across polls so it never queues behind an arrow.
-            # The Enter is re-sent while the prompt persists; a stray one at the
-            # ready prompt after it clears is a harmless empty submit.
+            # A fresh cwd opens at the workspace-trust prompt, which blocks the
+            # session until answered. Enter on "No, exit" ends the session, so
+            # arrow onto the trust option first. The options wrap, so arrows wait
+            # for a redraw (or a dropped-burst timeout) and Enter waits for the
+            # selection to hold; a stray Enter after the prompt clears is a
+            # harmless empty submit.
             offset = pane_dialog.trust_option_offset(snapshot)
             if offset is None:
                 log.warning(

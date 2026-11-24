@@ -488,8 +488,8 @@ async def test_auto_mode_dialog_still_surfaced() -> None:
 
 async def test_trust_prompt_is_accepted() -> None:
     # A fresh-cwd session opens at the workspace-trust prompt; the tailer must
-    # accept it (bare Enter, once the selection holds) so the session — including autonomous ones — does
-    # not hang, without emitting any approval.
+    # accept it (bare Enter, once the selection holds) so the session, including
+    # an autonomous one, does not hang, without emitting any approval.
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     runtime = _make_runtime(session, _load("trust_dialog.txt"))

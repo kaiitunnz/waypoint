@@ -702,18 +702,16 @@ def test_composer_is_empty_for_idle_placeholder() -> None:
     assert composer_is_empty(_load("ready.txt")) is True
 
 
+_RULE = "─" * 40
 _PENDING_MESSAGE = "\n".join(
     [
         "❯ earlier submitted message",
-        "────────────────────────────",
+        _RULE,
         "❯ Write the numbers 1 to 30.",
-        "────────────────────────────",
+        _RULE,
         "  ⏸ manual mode on · ? for shortcuts",
     ]
 )
-
-
-_RULE = "─" * 40
 _PROMPT_ECHO = "❯ Run this exact shell command and report the output."
 _STATUS_PANEL = "\n".join(
     [
@@ -743,7 +741,7 @@ def test_composer_holds_wrapped_input() -> None:
     "screen",
     [
         _load("ready.txt"),
-        "────────────────────────────\n❯ \n────────────────────────────",
+        "\n".join([_RULE, "❯ ", _RULE]),
         "loading Claude...\nno prompt yet",
         _load("approval_with_queued.txt"),
         _load("trust_dialog.txt"),

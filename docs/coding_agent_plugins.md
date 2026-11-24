@@ -606,17 +606,12 @@ a typed, unsent message implements the `PaneComposerReading` protocol from
 def pane_composer_holds_input(self, pane_text: str) -> bool: ...
 ```
 
-Resume on a tmux or `claude_tty` pane presses Enter, which starts a turn only
-when it submits such a message. The transport reads the composer first, and the
-runtime marks the session `running` only on a submit; otherwise the transport's
-own status driver reports any turn. Without this protocol, resume never changes
-the status. Claude implements it; `claude_tty` delegates to its composed Claude
+Resume on a tmux or `claude_tty` pane presses Enter; when this method reports a
+typed message on the pre-Enter snapshot, the runtime marks the session
+`running`. Without it, resume leaves the status to the transport. Resume refuses
+with `InputBlockedError` (409) while `pane_shows_blocking_dialog` reports a
+dialog. Claude implements it; `claude_tty` delegates to its composed Claude
 agent.
-
-Resume is refused with the send path's `InputBlockedError` (409) while a dialog
-is open, since Enter would pick its highlighted option. The runtime checks the
-transport's `input_blocked`, and the tmux transport rechecks the snapshot it
-presses Enter on through `PaneSubmitConfirming.pane_shows_blocking_dialog`.
 
 ## Token & context usage
 

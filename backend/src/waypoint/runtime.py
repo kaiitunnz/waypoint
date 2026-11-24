@@ -3121,8 +3121,7 @@ class SessionRuntime:
         if await transport.input_blocked(session):
             raise InputBlockedError()
         submitted = await transport.resume(session)
-        # An Enter that submits nothing starts no turn, so only a submit stamps
-        # RUNNING; otherwise the transport's own status driver reports any turn.
+        # Only an Enter that submits input starts a turn.
         await self._record_system_event(
             session.id,
             "Sent resume",

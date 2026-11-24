@@ -1,10 +1,12 @@
-"""A live resume marks a session running only when its Enter submits input."""
+"""Live resume: the status after its Enter, and refusal while a dialog is open."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
@@ -63,12 +65,15 @@ def make_session(
     )
 
 
-def stub_pane(runtime: SessionRuntime, monkeypatch, screen: str) -> list[str]:
+def stub_pane(runtime: SessionRuntime, monkeypatch, *screens: str) -> list[str]:
+    pending = list(screens)
     enters: list[str] = []
 
     async def capture_snapshot(target: str, start_line: int = -200) -> str:
         # Enter submits the composer's message, which clears it.
-        return EMPTY_COMPOSER if enters else screen
+        if enters:
+            return EMPTY_COMPOSER
+        return pending.pop(0) if len(pending) > 1 else pending[0]
 
     async def resume(target: str) -> None:
         enters.append(target)
@@ -160,13 +165,7 @@ async def test_resume_refuses_a_dialog_that_opens_after_the_guard(
     runtime.storage.create_session(
         make_session(runtime.settings, transport, SessionStatus.RUNNING)
     )
-    screens = iter([EMPTY_COMPOSER, APPROVAL_DIALOG])
-    enters = stub_pane(runtime, monkeypatch, "")
-
-    async def capture_snapshot(target: str, start_line: int = -200) -> str:
-        return next(screens)
-
-    monkeypatch.setattr(runtime.tmux, "capture_snapshot", capture_snapshot)
+    enters = stub_pane(runtime, monkeypatch, EMPTY_COMPOSER, APPROVAL_DIALOG)
 
     with pytest.raises(InputBlockedError):
         await runtime.resume("sess")
@@ -209,3 +208,25 @@ async def test_resume_keeps_awaiting_answer(tmp_path, monkeypatch) -> None:
     assert updated.status == SessionStatus.WAITING_INPUT
     assert updated.awaiting_answer
     assert AWAITING_ANSWER_KEY not in resume_note(runtime).metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+async def test_resume_waits_for_a_send_in_progress(
+    tmp_path, monkeypatch, transport: str
+) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, transport, SessionStatus.IDLE)
+    runtime.storage.create_session(session)
+    enters = stub_pane(runtime, monkeypatch, EMPTY_COMPOSER)
+    adapter = runtime.transport_for(session)
+    assert isinstance(adapter, TmuxTransport)
+    lock = adapter._input_lock(session)
+
+    async with lock:
+        task = asyncio.create_task(runtime.resume("sess"))
+        await asyncio.sleep(0.05)
+        assert enters == []
+    await task
+
+    assert enters == ["%7"]

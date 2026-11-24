@@ -96,6 +96,10 @@ class TmuxTransport(TransportAdapter):
         async with self._input_lock(session):
             await self._send(target, payload, deliver, confirmer)
 
+    def _composer_reader(self, session: SessionRecord) -> PaneComposerReading | None:
+        plugin = self._runtime.registry.get(session.backend)
+        return plugin if isinstance(plugin, PaneComposerReading) else None
+
     def _typing_spec(self, session: SessionRecord) -> PaneTypingSpec | None:
         plugin = self._runtime.registry.get(session.backend)
         return plugin.pane_typing_spec() if isinstance(plugin, PaneTypedInput) else None
@@ -274,19 +278,22 @@ class TmuxTransport(TransportAdapter):
 
     async def resume(self, session: SessionRecord) -> bool:
         target = self._target(session)
-        plugin = self._runtime.registry.get(session.backend)
         confirmer = self._confirmer(session)
-        reader = plugin if isinstance(plugin, PaneComposerReading) else None
-        if confirmer is None and reader is None:
+        reader = self._composer_reader(session)
+        submits = False
+        async with self._input_lock(session):
+            if confirmer is not None or reader is not None:
+                snapshot = await self.adapter.capture_snapshot(target)
+                # Recheck the screen the Enter lands on: a dialog may have opened
+                # since the runtime's guard.
+                if confirmer is not None and confirmer.pane_shows_blocking_dialog(
+                    snapshot
+                ):
+                    raise InputBlockedError()
+                submits = reader is not None and reader.pane_composer_holds_input(
+                    snapshot
+                )
             await self.adapter.resume(target)
-            return False
-        snapshot = await self.adapter.capture_snapshot(target)
-        # Recheck the screen the Enter lands on: a dialog may have opened since
-        # the runtime's guard, and Enter would select its highlighted option.
-        if confirmer is not None and confirmer.pane_shows_blocking_dialog(snapshot):
-            raise InputBlockedError()
-        submits = reader is not None and reader.pane_composer_holds_input(snapshot)
-        await self.adapter.resume(target)
         return submits
 
     async def terminate(self, session: SessionRecord) -> None:

@@ -10,9 +10,9 @@ implements every operation, so there is one remote command surface to reason
 about instead of a bespoke ``ssh`` invocation per op.
 
 Fail-before-destroy: read-only queries (``exists``/``is_dir``/``is_symlink``/
-``listdir``/``glob_artifacts``) degrade to a "not found" answer when the
-round-trip itself fails (timeout, dropped connection, bad output) rather than
-raising — the worst outcome is a wrong turn that itself degrades to a clean,
+``listdir``/``glob_artifacts``/``find_derived``) degrade to a "not found"
+answer when the round-trip itself fails (timeout, dropped connection, bad
+output) rather than raising — the worst outcome is a wrong turn that itself degrades to a clean,
 non-destructive :class:`~waypoint.backends.transcripts.TranscriptUnavailableError`
 further down the policy (a stale symlink target compares unequal, a copy finds
 no source, a final re-check reports the thread still unavailable). Mutating
@@ -113,6 +113,20 @@ class RemoteTranscriptFilesystem:
             return []
         paths = self._run("glob", config_dir, pattern).get("paths", [])
         return paths if isinstance(paths, list) else []
+
+    def find_derived(
+        self, root: str, pattern: str, parent_id: str, via: str, max_age_seconds: float
+    ) -> list[str]:
+        """Stems of recent transcripts under ``root``/``pattern`` whose
+        ``derived-from`` header names ``parent_id`` via ``via``; ``[]`` on any
+        failure."""
+        result = self._run(
+            "find_derived", root, pattern, parent_id, via, str(max_age_seconds)
+        )
+        ids = result.get("ids", [])
+        if not isinstance(ids, list):
+            return []
+        return [item for item in ids if isinstance(item, str)]
 
     def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
         """Read up to ``limit`` bytes of ``path`` starting at ``offset``.

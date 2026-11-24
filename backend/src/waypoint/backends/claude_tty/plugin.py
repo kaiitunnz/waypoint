@@ -26,6 +26,7 @@ import asyncio
 import logging
 import posixpath
 import shutil
+import time
 import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -80,9 +81,9 @@ from waypoint.backends.claude_code.threads import (
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
+    ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
-    TranscriptByteSource,
     resolve_remote_config_root,
     transcript_path,
 )
@@ -119,6 +120,13 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 # in the control-swap helper, so a caller can clear a flag (effort=None) while
 # the unspecified flags keep the session's current value.
 _UNSET: Any = object()
+
+# A composer ``/clear`` is followed by a bounded lookup for the transcript it
+# started. The age window spans the send's pane-ready and submit-confirm waits;
+# the deadline bounds how long the lookup runs after the send returns.
+_CLEAR_SUCCESSOR_MAX_AGE_SECONDS = 120.0
+_CLEAR_LOOKUP_DEADLINE_SECONDS = 5.0
+_CLEAR_LOOKUP_INTERVAL_SECONDS = 0.5
 
 # CLI flags Waypoint owns; users may not smuggle them in through custom args.
 _RESERVED_CLI_FLAGS = frozenset(
@@ -572,17 +580,9 @@ class ClaudeTtyPlugin:
     ) -> None:
         if session_id in self._tailer_tasks:
             return
-        # A local session tails the shared projects tree directly; a session on
-        # an SSH launch target reads its transcript over the remote filesystem
-        # seam. The selection lives here in the transport plugin so the runtime
-        # stays unaware of Claude-specific transcript storage.
-        source: TranscriptByteSource
-        if launch_target is None:
-            source = LocalTranscriptByteSource(cwd, thread_id, config_dir)
-        else:
-            source = RemoteClaudeTranscriptByteSource(
-                runtime, session_id, self, launch_target, config_dir
-            )
+        source = self._byte_source(
+            runtime, session_id, thread_id, cwd, config_dir, launch_target
+        )
         session = runtime.storage.get_session(session_id)
         backend_id = session.backend if session is not None else self.id
         tailer = TranscriptTailer(
@@ -597,6 +597,102 @@ class ClaudeTtyPlugin:
             ),
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
+
+    def _byte_source(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        thread_id: str,
+        cwd: str,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> ClaudeTranscriptSource:
+        # A local session reads the shared projects tree directly; a session on
+        # an SSH launch target reads its transcript over the remote filesystem
+        # seam. The selection lives here in the transport plugin so the runtime
+        # stays unaware of Claude-specific transcript storage.
+        if launch_target is None:
+            return LocalTranscriptByteSource(cwd, thread_id, config_dir)
+        return RemoteClaudeTranscriptByteSource(
+            runtime, session_id, self, launch_target, config_dir
+        )
+
+    async def follow_clear(self, runtime: "SessionRuntime", session_id: str) -> bool:
+        """Move the session onto the conversation a ``/clear`` just started.
+
+        ``/clear`` makes the CLI write a new transcript whose ``derived-from``
+        header names the old thread. Once found, the session's thread id and
+        tailer move to it, so the post-clear records are read from byte 0 and
+        every later relaunch resumes the cleared conversation. Returns whether
+        the successor was found.
+        """
+        session = runtime.storage.get_session(session_id)
+        if session is None:
+            return False
+        parent = session.transport_state.get("thread_id")
+        if not isinstance(parent, str) or not parent:
+            return False
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        config_dir = self._config_dir(session)
+        source = self._byte_source(
+            runtime, session_id, parent, session.cwd, config_dir, launch_target
+        )
+        deadline = time.monotonic() + _CLEAR_LOOKUP_DEADLINE_SECONDS
+        while (
+            successor := await asyncio.to_thread(
+                source.find_clear_successor, parent, _CLEAR_SUCCESSOR_MAX_AGE_SECONDS
+            )
+        ) is None:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(_CLEAR_LOOKUP_INTERVAL_SECONDS)
+        # Shielded so a dropped request cannot strand the session between
+        # cancelling the old tailer and starting the new one.
+        return await asyncio.shield(
+            self._rebind_thread(
+                runtime, session_id, parent, successor, config_dir, launch_target
+            )
+        )
+
+    async def _rebind_thread(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        parent: str,
+        successor: str,
+        config_dir: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
+        session = runtime.storage.get_session(session_id)
+        # A relaunch or terminate during the lookup owns the thread now.
+        if session is None or session.transport_state.get("thread_id") != parent:
+            return False
+        tailer_task = self._tailer_tasks.pop(session_id, None)
+        if tailer_task is not None:
+            tailer_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await tailer_task
+        session = runtime.storage.get_session(session_id)
+        if session is None:
+            return False
+        await runtime.update_session_fields(
+            session_id,
+            transport_state={**session.transport_state, "thread_id": successor},
+            context_usage=None,
+        )
+        self._start_tailer(
+            runtime,
+            session_id,
+            successor,
+            session.cwd,
+            config_dir=config_dir,
+            launch_target=launch_target,
+        )
+        log.info(
+            "following /clear onto a new thread",
+            extra={"session_id": session_id, "thread_id": successor},
+        )
+        return True
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str

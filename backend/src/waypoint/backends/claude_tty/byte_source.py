@@ -28,6 +28,7 @@ from waypoint.backends.claude_code.threads import (
     encode_project_dir,
 )
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
+from waypoint.backends.transcript_fs_remote_script import find_derived_transcripts
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 if TYPE_CHECKING:
@@ -39,6 +40,14 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 _STEADY_INTERVAL = 1.0  # seconds between remote reads at steady state
 _MAX_BACKOFF = 10.0  # cap on the exponential error backoff
 _READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
+# ``derived-from`` provenance Claude writes on the transcript ``/clear`` starts.
+_CLEAR_VIA = "clear"
+
+
+def _single(ids: list[str]) -> str | None:
+    # A UUID names one conversation; several matches are ambiguous, so refuse to
+    # pick rather than follow an arbitrary file.
+    return ids[0] if len(ids) == 1 else None
 
 
 def resolve_remote_config_root(
@@ -114,6 +123,15 @@ class TranscriptByteSource(Protocol):
         ...
 
 
+class ClaudeTranscriptSource(TranscriptByteSource, Protocol):
+    def find_clear_successor(
+        self, parent_thread_id: str, max_age_seconds: float
+    ) -> str | None:
+        """The thread id of the transcript a ``/clear`` on ``parent_thread_id``
+        started, if one was written within ``max_age_seconds``. Never raises."""
+        ...
+
+
 class LocalTranscriptByteSource:
     """Reads a transcript straight off the local filesystem."""
 
@@ -141,6 +159,19 @@ class LocalTranscriptByteSource:
             return TranscriptRead(observed=False)
         return TranscriptRead(
             observed=True, data=data, size=st.st_size, identity=identity
+        )
+
+    def find_clear_successor(
+        self, parent_thread_id: str, max_age_seconds: float
+    ) -> str | None:
+        return _single(
+            find_derived_transcripts(
+                str(self._path.parent),
+                "*.jsonl",
+                parent_thread_id,
+                _CLEAR_VIA,
+                max_age_seconds,
+            )
         )
 
 
@@ -189,6 +220,30 @@ class RemoteClaudeTranscriptByteSource:
             self._schedule(error=True)
             self._warn_once("read-error", "remote transcript read failed")
             return TranscriptRead(observed=False)
+
+    def find_clear_successor(
+        self, parent_thread_id: str, max_age_seconds: float
+    ) -> str | None:
+        # Searches the whole projects tree rather than the parent's directory: a
+        # ``/clear`` before the first turn links to a parent never written, so
+        # there is no parent file to locate the directory from.
+        session = self._runtime.storage.get_session(self._session_id)
+        if session is None:
+            return None
+        try:
+            root = self._resolved_config_root(session.cwd)
+        except Exception:
+            self._warn_once("clear-lookup", "remote /clear successor lookup failed")
+            return None
+        return _single(
+            self._fs.find_derived(
+                root,
+                "projects/*/*.jsonl",
+                parent_thread_id,
+                _CLEAR_VIA,
+                max_age_seconds,
+            )
+        )
 
     def _read(self, offset: int, metadata_only: bool) -> TranscriptRead:
         if self._path is None:

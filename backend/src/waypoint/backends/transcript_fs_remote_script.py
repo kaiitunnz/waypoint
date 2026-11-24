@@ -18,6 +18,7 @@ Output schema (always one line, ``SENTINEL`` immediately followed by JSON,
     {"target": str} | {"error": str}            # readlink
     {"entries": [str, ...]} | {"error": str}    # listdir
     {"paths": [str, ...]}                       # glob
+    {"ids": [str, ...]} | {"error": str}        # find_derived
     {"size": int, "device": int, "inode": int,  # read_range
      "data_b64": str} | {"error": str}
 
@@ -38,9 +39,15 @@ import os
 import shutil
 import stat as _stat
 import sys
+import time
 from collections.abc import Callable
 
 SENTINEL = "__WP_FS_BEGIN__"
+# A Claude transcript's ``derived-from`` link sits in its first few records,
+# ahead of any conversation record.
+_HEADER_LINES = 16
+_HEADER_BYTES = 64 * 1024
+_CONVERSATION_RECORD_TYPES = ("user", "assistant", "system")
 
 
 def emit(payload):
@@ -147,6 +154,57 @@ def op_glob(config_dir, pattern):
     emit({"paths": matches})
 
 
+def _derives_from(head, parent_id, via):
+    for line in head.split(b"\n")[:_HEADER_LINES]:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        rec_type = record.get("type")
+        if rec_type in _CONVERSATION_RECORD_TYPES:
+            return False
+        if rec_type != "derived-from":
+            continue
+        sessions = record.get("sessions")
+        if isinstance(sessions, list) and any(
+            isinstance(entry, dict)
+            and entry.get("id") == parent_id
+            and entry.get("via") == via
+            for entry in sessions
+        ):
+            return True
+    return False
+
+
+def find_derived_transcripts(root, pattern, parent_id, via, max_age_seconds):
+    """Stems of the ``.jsonl`` files under ``root``/``pattern`` modified within
+    ``max_age_seconds`` whose header links them to ``parent_id`` via ``via``."""
+    cutoff = time.time() - max_age_seconds
+    found = []
+    for path in _glob.glob(os.path.join(_u(root), pattern)):
+        try:
+            if os.stat(path).st_mtime < cutoff:
+                continue
+            with open(path, "rb") as fh:
+                head = fh.read(_HEADER_BYTES)
+        except OSError:
+            continue
+        if _derives_from(head, parent_id, via):
+            found.append(os.path.splitext(os.path.basename(path))[0])
+    return sorted(found)
+
+
+def op_find_derived(root, pattern, parent_id, via, max_age_seconds):
+    try:
+        max_age = float(max_age_seconds)
+    except (TypeError, ValueError):
+        emit({"error": "max_age_seconds must be a number"})
+        return
+    emit({"ids": find_derived_transcripts(root, pattern, parent_id, via, max_age)})
+
+
 def op_read_range(path, offset, limit):
     # Bounded, read-only tail: seek to ``offset`` and read at most ``limit``
     # bytes of a regular file, returning the file's size and stable identity
@@ -203,6 +261,7 @@ OPS: dict[str, Callable[..., None]] = {
     "copy_file": op_copy_file,
     "glob": op_glob,
     "read_range": op_read_range,
+    "find_derived": op_find_derived,
     "expanduser": op_expanduser,
 }
 

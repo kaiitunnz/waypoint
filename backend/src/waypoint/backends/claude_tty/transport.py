@@ -6,6 +6,8 @@ Thin subclass of ``TmuxTransport`` that overrides:
   the frontend must not fall back to the heuristic raw-terminal view.
 - ``interrupt`` sends ``Esc`` instead of ``Ctrl-C``; ``Esc`` is the Claude TUI's
   cancel key and cancels the running generation without terminating the process.
+- ``send_input`` follows a ``/clear`` onto the new conversation it starts, so
+  the tailer keeps reading the transcript the TUI now writes.
 - ``has_pending_approval`` / ``respond_to_approval`` — drive tool-permission
   dialogs by sending the appropriate digit + Enter keystroke to the TUI pane.
   Pending state is owned by the plugin singleton (``ClaudeTtyPlugin``).
@@ -14,12 +16,13 @@ Thin subclass of ``TmuxTransport`` that overrides:
 import asyncio
 from typing import TYPE_CHECKING
 
+from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
-from waypoint.schemas import SessionRecord
+from waypoint.schemas import SessionRecord, SessionStatus
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
@@ -38,6 +41,12 @@ _INTERRUPTIBLE_DIALOGS = frozenset(
 # dialog left the pane and re-send it a bounded number of times.
 _INTERRUPT_ESC_RETRIES = 4
 _INTERRUPT_ESC_POLL_SECONDS = 0.3
+_CLEAR_COMMAND = "/clear"
+_CLEAR_UNFOLLOWED_NOTE = (
+    "Couldn't follow the new conversation started by /clear; "
+    "replies after it may not appear here."
+)
+_TURN_IN_FLIGHT = frozenset({SessionStatus.RUNNING, SessionStatus.WAITING_INPUT})
 
 
 class ClaudeTtyTransport(TmuxTransport):
@@ -47,6 +56,26 @@ class ClaudeTtyTransport(TmuxTransport):
     def __init__(self, runtime: "SessionRuntime", plugin: "ClaudeTtyPlugin") -> None:
         super().__init__(runtime)
         self._plugin = plugin
+
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
+        await super().send_input(session, text, attachments)
+        if text.split(maxsplit=1)[:1] != [_CLEAR_COMMAND]:
+            return
+        if await self._plugin.follow_clear(self._runtime, session.id):
+            return
+        # The clear's own completion record sits in the unfollowed transcript,
+        # so resolve the turn here — unless a turn was already in flight, which
+        # the TUI may still be running with the /clear queued behind it.
+        await self._runtime._record_system_event(
+            session.id,
+            _CLEAR_UNFOLLOWED_NOTE,
+            status=None if session.status in _TURN_IN_FLIGHT else SessionStatus.IDLE,
+        )
 
     async def interrupt(self, session: SessionRecord) -> None:
         # Esc cancels whatever the pane is showing — including an open

@@ -2,14 +2,18 @@
 
 import { useEffect, useState } from "react";
 
-import { connectSessionsSocket, fetchInboxUnresolvedCount } from "../api";
+import { connectSessionsSocket, fetchInboxUnresolvedCount, isAuthError } from "../api";
 import type { SessionEnvelope } from "../types";
 
 // Shared unresolved-inbox count for the nav count and the floater badge. Seeds
 // from the REST count, then tracks the absolute `unresolved_count` on every
 // `inbox_update` over a dedicated session socket, re-fetching on (re)connect to
 // close the reconnect gap.
-export function useInboxCount(host: string, token: string): number {
+export function useInboxCount(
+  host: string,
+  token: string,
+  onAuthFailure?: () => void,
+): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
@@ -27,7 +31,9 @@ export function useInboxCount(host: string, token: string): number {
         .then((value) => {
           if (active) setCount(value);
         })
-        .catch(() => {});
+        .catch((error) => {
+          if (active && isAuthError(error)) onAuthFailure?.();
+        });
     };
     refresh();
 
@@ -36,12 +42,18 @@ export function useInboxCount(host: string, token: string): number {
         host,
         token,
         (message: SessionEnvelope) => {
+          if (message.type === "auth_revoked") {
+            if (active) onAuthFailure?.();
+            return;
+          }
           if (message.type !== "inbox_update") return;
           const value = message.payload.unresolved_count;
           if (typeof value === "number") setCount(value);
         },
         () => {
-          if (active) setCount(0);
+          if (!active) return;
+          setCount(0);
+          onAuthFailure?.();
         },
         {
           onOpen: () => {
@@ -64,7 +76,7 @@ export function useInboxCount(host: string, token: string): number {
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [host, token]);
+  }, [host, token, onAuthFailure]);
 
   return count;
 }

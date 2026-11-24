@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, PasswordInput, TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
+import { cx } from "@/lib/cx";
 
 import styles from "./SignInForm.module.css";
 
@@ -69,7 +70,7 @@ export function SignInForm({
           Change
         </Button>
         <span className={styles.url}>
-          <span className="mono">
+          <span className={cx("mono", styles.address)}>
             {protocol}://{hostname}
           </span>
           <label className={styles.port}>

@@ -4,6 +4,7 @@ import { useState, type ClipboardEvent, type FormEvent } from "react";
 
 import {
   formatLastUsed,
+  pageDevice,
   parseAddress,
   parsePort,
   type BackendProtocol,
@@ -49,10 +50,6 @@ interface HostPickerProps {
   // Level of the group headings, so they nest under the page's own headings.
   headingLevel?: "h2" | "h3";
 }
-
-// A typed address on an https-served page must be https too, or the browser blocks it.
-const pageProtocol: BackendProtocol =
-  typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http";
 
 const LAMP: Record<HostRow["online"], LampState> = {
   online: "done",
@@ -187,7 +184,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
   const [open, setOpen] = useState(false);
   const [hostText, setHostText] = useState("");
   const [ownPortText, setOwnPortText] = useState(String(DEFAULT_BACKEND_PORT));
-  const [protocol, setProtocol] = useState<BackendProtocol>(pageProtocol);
+  const [protocol, setProtocol] = useState<BackendProtocol>(() => pageDevice().protocol);
   const portText = port ? port.text : ownPortText;
   const setPortText = port ? port.onChange : setOwnPortText;
 
@@ -197,8 +194,15 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
     return {
       protocol: parsed.protocol === "https" ? "https" : nextProtocol,
       hostname: parsed.hostname,
-      portText: parsed.port !== null ? String(parsed.port) : nextPort,
+      portText: nextPort,
     } satisfies TypedAddress;
+  };
+
+  // A port in the host text (`host:9000`, `https://host`) moves the Port field;
+  // editing the Port field afterwards wins.
+  const portFromHost = (text: string) => {
+    const typedPort = parseAddress(text)?.port;
+    return typedPort == null ? portText : String(typedPort);
   };
 
   const update = (nextHost: string, nextPort: string, nextProtocol = protocol) => {
@@ -212,9 +216,9 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
   const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
     const text = event.clipboardData.getData("text");
     const parsed = parseAddress(text);
-    if (!parsed || (parsed.port === null && !/^https?:\/\//i.test(text))) return;
+    if (!parsed || parsed.port === null) return;
     event.preventDefault();
-    update(parsed.hostname, parsed.port !== null ? String(parsed.port) : portText, parsed.protocol);
+    update(parsed.hostname, String(parsed.port), parsed.protocol);
   };
 
   const submit = (event: FormEvent) => {
@@ -248,7 +252,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
               autoCapitalize="none"
               spellCheck={false}
               value={hostText}
-              onChange={(event) => update(event.target.value, portText)}
+              onChange={(event) => update(event.target.value, portFromHost(event.target.value))}
               onPaste={onPaste}
             />
           </Field>

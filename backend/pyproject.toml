@@ -45,6 +45,7 @@ waypoint = "waypoint.cli:main"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+faulthandler_timeout = 300
 
 [tool.setuptools_scm]
 root = ".."

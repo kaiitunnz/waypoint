@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.registry import get_registry
 from waypoint.recurrence import (
     MISSED_RUN_GRACE_SECONDS,
@@ -136,11 +137,7 @@ class Scheduler:
         task = self._task
         self._task = None
         if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            await cancel_and_wait(task)
 
     def list_schedules(self) -> list[ScheduledSessionRecord]:
         return self._runtime.storage.list_schedules()

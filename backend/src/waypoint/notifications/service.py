@@ -14,6 +14,7 @@ import random
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.notifications.contracts import (
     ChannelHealth,
     DeliveryRecord,
@@ -94,9 +95,7 @@ class NotificationService:
         self._stopping = True
         self._wake.set()
         if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+            await cancel_and_wait(self._task)
             self._task = None
         for channel in self._channels.values():
             with contextlib.suppress(Exception):

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import (
     ResolvedAttachment,
     append_attachment_paths,
@@ -306,9 +307,8 @@ class TmuxTransport(TransportAdapter):
                 await self.adapter.kill_session(tmux_session)
         monitor = self._runtime.monitor_tasks.pop(session.id, None)
         if monitor is not None:
-            monitor.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await monitor
+            with suppress(Exception):
+                await cancel_and_wait(monitor)
 
     async def respond_to_approval(
         self,

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.base import (
     ConfigDirNotReadyError,
     ConfigDirReadiness,
@@ -430,9 +431,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
         for task in list(self._sq_tasks.values()):
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+            with suppress(Exception):
+                await cancel_and_wait(task)
         self._sq_tasks.clear()
         if self.adapter is not None:
             await self.adapter.shutdown()

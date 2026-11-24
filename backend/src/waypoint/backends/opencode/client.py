@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 import aiohttp
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends.opencode.connection_config import (
     http_control_timeout,
     with_ssh_keepalive,
@@ -293,9 +294,7 @@ class RemoteOpenCodeClient:
                     yield (line + b"\n").decode("utf-8", errors="replace")
         finally:
             if self._sse_stderr_task is not None:
-                self._sse_stderr_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await self._sse_stderr_task
+                await cancel_and_wait(self._sse_stderr_task)
                 self._sse_stderr_task = None
 
         returncode = await self._sse_process.wait()
@@ -306,9 +305,7 @@ class RemoteOpenCodeClient:
 
     async def close(self) -> None:
         if self._sse_stderr_task is not None:
-            self._sse_stderr_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._sse_stderr_task
+            await cancel_and_wait(self._sse_stderr_task)
             self._sse_stderr_task = None
         if self._sse_process is not None:
             try:

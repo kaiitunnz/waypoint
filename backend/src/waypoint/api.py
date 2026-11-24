@@ -28,6 +28,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
 from waypoint.backends.account_profiles import (
@@ -2917,22 +2918,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stream_task = asyncio.create_task(stream_loop())
         recv_task = asyncio.create_task(recv_loop())
         try:
-            _, pending = await asyncio.wait(
-                {stream_task, recv_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            await asyncio.wait(
+                {stream_task, recv_task}, return_when=asyncio.FIRST_COMPLETED
             )
-            for task in pending:
-                task.cancel()
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         finally:
             for task in (stream_task, recv_task):
-                if not task.done():
-                    task.cancel()
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    await cancel_and_wait(task)
                 except Exception:
                     log.debug(
                         "terminal-ws task raised during cleanup",

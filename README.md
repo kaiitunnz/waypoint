@@ -137,7 +137,7 @@ Frontend dev notes:
 - `npm run lint && npm run build` run per app; `cd packages/web-core && npm run typecheck && npm test` cover the shared package.
 - `npm run dev` binds to `0.0.0.0` so the phone can reach the dev server over Tailscale.
 - The dev config auto-allows the machine's non-internal IPv4 addresses, including typical Tailscale `100.x.x.x` addresses, and emits both bare hosts and full `http://host:3000` origins.
-- If you still need extra origins, set `NEXT_ALLOWED_DEV_ORIGINS` (comma-separated) in your shell or in a `frontend/.env.local` you create yourself.
+- If you still need extra origins, set `NEXT_ALLOWED_DEV_ORIGINS` (comma-separated) in your shell or in a `.env.local` you create yourself in the app directory (`frontend/` or `frontend-v2/`).
 - For the most reliable phone check-in flow, prefer `npm run build && npm run start` over `npm run dev`.
 
 The frontend stores the backend base URL and bearer token in local storage.

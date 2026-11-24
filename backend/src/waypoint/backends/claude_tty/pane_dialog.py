@@ -69,6 +69,11 @@ _EFFORT_MARKER = "Effort"
 _AUTO_MODE_TEACHING_TITLE = "Teach auto mode about your environment?"
 _AUTO_MODE_TEACHING_FOOTER = "←/→ to change usage · Enter to continue · Esc to cancel"
 _TRUST_MARKER = "Is this a project you created or one you trust?"
+# Claude Code 2.1.331 lists "No, exit" first, preselected and unnumbered. Its
+# ``❯`` row reads as a composer prompt, so the active region starts below the
+# question; the trust option and footer under it still identify the prompt.
+_TRUST_OPTION = "Yes, I trust this folder"
+_TRUST_FOOTER = "Enter to confirm"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
@@ -323,7 +328,10 @@ def classify(screen: str) -> PaneScreen:
         return PaneScreen.PLAN
     if all(_contains(region, compact, marker) for marker in _QUESTION_MARKERS):
         return PaneScreen.QUESTION
-    if _contains(region, compact, _TRUST_MARKER):
+    if _contains(region, compact, _TRUST_MARKER) or (
+        _contains(region, compact, _TRUST_OPTION)
+        and _contains(region, compact, _TRUST_FOOTER)
+    ):
         return PaneScreen.TRUST
     if _contains(region, compact, _MODEL_FOOTER) and _contains(
         region, compact, _MODEL_MARKER
@@ -338,6 +346,25 @@ def classify(screen: str) -> PaneScreen:
     ):
         return PaneScreen.AUTO_MODE_TEACHING
     return PaneScreen.OTHER
+
+
+def trust_option_offset(screen: str) -> int | None:
+    """Rows from the trust prompt's highlighted option to its trust option.
+
+    Positive means the trust option is below the highlight. None when either
+    row is missing. Callers classify the screen as the trust prompt first.
+    """
+    rows = [line for line in _strip_ansi(screen).splitlines() if line.strip()]
+    selected = next(
+        (i for i in reversed(range(len(rows))) if _COMPOSER_PROMPT_RE.match(rows[i])),
+        None,
+    )
+    trust = next(
+        (i for i in reversed(range(len(rows))) if _TRUST_OPTION in rows[i]), None
+    )
+    if selected is None or trust is None:
+        return None
+    return trust - selected
 
 
 def composer_holds_input(screen: str) -> bool:

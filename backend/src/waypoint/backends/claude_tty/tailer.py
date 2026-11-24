@@ -60,6 +60,8 @@ _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
+_ARROW_DOWN = b"\x1b[B"
+_ARROW_UP = b"\x1b[A"
 # Popups cancelled with one Escape after the debounce. The message is fixed —
 # never interpolate pane contents, which can hold personal environment data.
 _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
@@ -388,10 +390,23 @@ class TranscriptTailer:
         if screen_type is pane_dialog.PaneScreen.TRUST:
             # A fresh cwd opens with the workspace-trust prompt, which blocks the
             # session (including autonomously-spawned ones in fresh worktrees)
-            # until answered. Option 1 ("trust") is preselected, so a bare Enter
-            # accepts. Re-sent each tick it persists — idempotent, and self-heals
-            # if a keystroke is dropped; a stray Enter at the ready prompt after
-            # it clears is a harmless empty submit.
+            # until answered. Newer CLIs preselect "No, exit", so move the
+            # highlight onto the trust option and press Enter only on a later tick
+            # that shows it selected; Enter on the wrong row ends the session.
+            # Re-sent each tick it persists — idempotent, and self-heals if a
+            # keystroke is dropped; a stray Enter at the ready prompt after it
+            # clears is a harmless empty submit.
+            offset = pane_dialog.trust_option_offset(snapshot)
+            if offset is None:
+                log.warning(
+                    "workspace-trust prompt has no trust option to select",
+                    extra={"session_id": self._session_id},
+                )
+                return
+            if offset:
+                arrow = _ARROW_DOWN if offset > 0 else _ARROW_UP
+                await self._runtime.tmux.send_bytes(pane, arrow * abs(offset))
+                return
             log.info(
                 "accepting workspace-trust prompt",
                 extra={"session_id": self._session_id},

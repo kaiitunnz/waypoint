@@ -502,6 +502,32 @@ async def test_trust_prompt_is_accepted() -> None:
     assert "sess-1" not in plugin._pending_approvals
 
 
+async def test_trust_prompt_selects_trust_option_before_accepting() -> None:
+    # Claude Code 2.1.331 preselects "No, exit"; Enter there would end the
+    # session, so the tailer moves the highlight down and presses nothing else.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("trust_dialog_2_1_331.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+
+    runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b[B")
+    runtime.tmux.send_input.assert_not_called()
+
+
+async def test_trust_prompt_accepts_once_trust_option_is_selected() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("trust_dialog_2_1_331_trust_selected.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+
+    runtime.tmux.send_bytes.assert_not_called()
+    runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
+
+
 async def test_non_approval_screen_does_not_emit() -> None:
     for fixture in ("ready.txt", "trust_dialog.txt", "model_selector.txt"):
         plugin = ClaudeTtyPlugin()

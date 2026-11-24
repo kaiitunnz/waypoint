@@ -18,6 +18,7 @@ from waypoint.backends.claude_tty.pane_dialog import (
     parse_model_selector,
     parse_plan_dialog,
     shows_blocking_dialog,
+    trust_option_offset,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
@@ -41,6 +42,8 @@ def _load(name: str) -> str:
         ("approval_with_queued.txt", PaneScreen.APPROVAL),
         ("overflow_bash.txt", PaneScreen.APPROVAL),
         ("trust_dialog.txt", PaneScreen.TRUST),
+        ("trust_dialog_2_1_331.txt", PaneScreen.TRUST),
+        ("trust_dialog_2_1_331_trust_selected.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
         ("auto_mode_teaching.txt", PaneScreen.AUTO_MODE_TEACHING),
@@ -65,6 +68,8 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
         ("approval_with_queued.txt", True),
         ("overflow_bash.txt", True),
         ("trust_dialog.txt", True),
+        ("trust_dialog_2_1_331.txt", True),
+        ("trust_dialog_2_1_331_trust_selected.txt", True),
         ("model_selector.txt", True),
         ("effort_popup.txt", True),
         ("auto_mode_teaching.txt", True),
@@ -631,6 +636,19 @@ def test_quoted_footer_directly_above_composer_does_not_mask_it() -> None:
     )
     assert classify(screen) is PaneScreen.OTHER
     assert shows_blocking_dialog(screen) is False
+
+
+@pytest.mark.parametrize(
+    "fixture, offset",
+    [
+        ("trust_dialog.txt", 0),
+        ("trust_dialog_2_1_331.txt", 1),
+        ("trust_dialog_2_1_331_trust_selected.txt", 0),
+        ("ready.txt", None),
+    ],
+)
+def test_trust_option_offset(fixture: str, offset: int | None) -> None:
+    assert trust_option_offset(_load(fixture)) == offset
 
 
 def test_composer_is_empty_for_bare_prompt() -> None:

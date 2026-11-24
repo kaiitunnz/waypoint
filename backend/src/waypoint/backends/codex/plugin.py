@@ -180,6 +180,7 @@ class CodexPlugin(DefaultLaunchContract):
     config_schema: type[PluginConfig] = CodexPluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = CodexLaunchTargetConfig
     extra_env: dict[str, str] = {}
+    question_parks_turn = False
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -255,9 +256,6 @@ class CodexPlugin(DefaultLaunchContract):
             runtime._emit_adapter_event,
             runtime.session_update_callback(),
             on_token_usage=runtime.token_usage_callback(),
-            open_question_ids=lambda session_id: set(
-                runtime.storage.open_question_tool_use_ids(session_id)
-            ),
             task_output_capture_enabled=runtime.settings.task_output_capture_enabled,
         )
 
@@ -818,7 +816,6 @@ class CodexPlugin(DefaultLaunchContract):
             target_mode = CODEX_PLAN_MODE
             prompt = _format_plan_rejection_prompt(decision, text)
 
-        previous_status = session.status
         runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
         try:
             await self._require_adapter().send_input(
@@ -832,7 +829,7 @@ class CodexPlugin(DefaultLaunchContract):
                 ),
             )
         except Exception as exc:  # noqa: BLE001
-            runtime.storage.update_session(session.id, status=previous_status)
+            runtime.storage.restore_status(session)
             raise input_http_error(exc) from exc
 
         if accept:
@@ -882,7 +879,6 @@ class CodexPlugin(DefaultLaunchContract):
             ]
             if invocation.arguments:
                 items.append({"type": "text", "text": invocation.arguments})
-            previous_status = session.status
             updated = runtime.storage.update_session(
                 session.id, status=SessionStatus.RUNNING
             )
@@ -899,7 +895,7 @@ class CodexPlugin(DefaultLaunchContract):
                     turn_params=self.turn_params_for(updated),
                 )
             except Exception as exc:  # noqa: BLE001
-                runtime.storage.update_session(session.id, status=previous_status)
+                runtime.storage.restore_status(session)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
@@ -942,7 +938,6 @@ class CodexPlugin(DefaultLaunchContract):
                 )
                 return updated
 
-            previous_status = updated.status
             running = runtime.storage.update_session(
                 session.id, status=SessionStatus.RUNNING
             )
@@ -953,7 +948,7 @@ class CodexPlugin(DefaultLaunchContract):
                     turn_params=self.turn_params_for(running),
                 )
             except Exception as exc:  # noqa: BLE001
-                runtime.storage.update_session(session.id, status=previous_status)
+                runtime.storage.restore_status(updated)
                 raise input_http_error(exc) from exc
             return running
 
@@ -1193,8 +1188,6 @@ class CodexPlugin(DefaultLaunchContract):
                 status=SessionStatus.ERROR,
             )
             return
-        settled = runtime.questions.restored_status(session)
-        runtime.storage.update_session(session.id, status=settled)
         await self._register_rate_limit_probe(
             runtime,
             session.id,
@@ -1204,7 +1197,7 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
-            status=settled,
+            status=SessionStatus.IDLE,
         )
 
     async def restart_unpersisted_session(
@@ -1997,18 +1990,11 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime.seed_thread_history(
             session.id, read_history, enabled=request.import_history
         )
-        # The imported thread's last turn may have ended waiting on its question.
-        settled = (
-            SessionStatus.WAITING_INPUT
-            if runtime.storage.open_question_tool_use_ids(session.id)
-            else SessionStatus.IDLE
-        )
-        runtime.storage.update_session(session.id, status=settled)
         await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),
-            status=settled,
+            status=SessionStatus.IDLE,
             metadata={"imported_thread_id": thread.id},
         )
         return runtime.get_session(session.id)

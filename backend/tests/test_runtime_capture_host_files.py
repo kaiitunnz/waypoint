@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from waypoint.attachments import AttachmentStore
+from waypoint.pending_questions import PendingQuestionTracker
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import AttachmentOrigin, EventKind, EventRecord, SessionStatus
 
@@ -30,6 +31,7 @@ def _runtime(
     if session is ...:
         session = SimpleNamespace(worktree_path=None, cwd=str(tmp_path))
     runtime.storage = SimpleNamespace(get_session=lambda _sid: session)
+    runtime.questions = PendingQuestionTracker(runtime)
     return runtime
 
 

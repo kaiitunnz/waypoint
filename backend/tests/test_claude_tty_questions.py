@@ -7,8 +7,16 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
+from waypoint.questions import QuestionLiveness
 from waypoint.runtime import SessionRuntime
-from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    AWAITING_ANSWER_KEY,
+    EventKind,
+    SessionInputRequest,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 from waypoint.settings import Settings
 from waypoint.storage import Storage
 
@@ -308,3 +316,259 @@ async def test_cancel_conflicts_with_an_answer_in_flight(tmp_path, monkeypatch) 
 
     assert exc.value.status_code == 409
     assert runtime.storage.open_question_tool_use_ids("s1") == []
+
+
+# ── Turn ends while a question is open ──────────────────────────────────────
+
+
+def input_transport(runtime: SessionRuntime, monkeypatch) -> MagicMock:
+    transport = fake_transport(runtime, monkeypatch)
+    transport.is_structured = False
+    transport.input_blocked = AsyncMock(return_value=False)
+    transport.has_pending_approval = MagicMock(return_value=False)
+    return transport
+
+
+async def task_notification_turn(runtime: SessionRuntime) -> None:
+    """A Monitor event starts a fresh turn that ends without a reply."""
+    await runtime._emit_adapter_event(
+        "s1",
+        EventKind.SYSTEM_NOTE,
+        'Monitor event: "build finished"',
+        {"method": "task_notification"},
+        SessionStatus.RUNNING,
+    )
+    await end_turn(runtime)
+
+
+async def end_turn(runtime: SessionRuntime) -> None:
+    await runtime._emit_adapter_event(
+        "s1",
+        EventKind.SYSTEM_NOTE,
+        "Turn complete",
+        {"method": "result", "stop_reason": "end_turn"},
+        SessionStatus.IDLE,
+    )
+
+
+def last_event(runtime: SessionRuntime):
+    return runtime.storage.list_events("s1")[-1]
+
+
+async def test_a_clarification_exchange_keeps_the_wait(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+
+    for text in ("What does option A change?", "And option B?"):
+        await runtime.handle_input("s1", SessionInputRequest(text=text))
+        assert runtime.get_session("s1").status is SessionStatus.RUNNING
+        await runtime._emit_adapter_event(
+            "s1",
+            EventKind.AGENT_OUTPUT,
+            "It changes the default.",
+            {"method": "assistant.text"},
+            SessionStatus.RUNNING,
+        )
+        await end_turn(runtime)
+
+        session = runtime.get_session("s1")
+        assert session.status is SessionStatus.WAITING_INPUT
+        assert session.awaiting_answer
+    assert runtime.storage.open_question_tool_use_ids("s1") == ["q1"]
+
+
+async def test_answered_question_lets_the_turn_end_idle(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await answer(ClaudeTtyPlugin(), runtime, "q1")
+
+    await end_turn(runtime)
+
+    assert runtime.get_session("s1").status is SessionStatus.IDLE
+
+
+async def test_closed_question_lets_the_turn_end_idle(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    monkeypatch.setattr(
+        runtime.questions,
+        "liveness",
+        lambda session, ids: dict.fromkeys(ids, QuestionLiveness.CLOSED),
+    )
+
+    await task_notification_turn(runtime)
+
+    assert runtime.get_session("s1").status is SessionStatus.IDLE
+
+
+async def test_cancel_after_a_settled_wait_marks_idle(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await task_notification_turn(runtime)
+
+    updated = await cancel(runtime, "q1")
+
+    assert updated.status is SessionStatus.IDLE
+
+
+async def test_cancel_keeps_waiting_on_an_older_open_question(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q_old")
+    await runtime.handle_input("s1", SessionInputRequest(text="do this instead"))
+    await end_turn(runtime)
+    await ask(runtime, "q_new")
+
+    updated = await cancel(runtime, "q_new")
+
+    assert updated.status is SessionStatus.WAITING_INPUT
+    assert (await cancel(runtime, "q_old")).status is SessionStatus.IDLE
+
+
+async def test_relaunch_note_keeps_the_wait(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+
+    await runtime._record_system_event(
+        "s1", "Restarted Claude TUI session", status=SessionStatus.IDLE
+    )
+
+    assert runtime.get_session("s1").status is SessionStatus.WAITING_INPUT
+
+
+# ── awaiting_answer ──────────────────────────────────────────────────────────
+
+
+async def test_a_turn_ending_on_the_question_is_awaiting_an_answer(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    assert not runtime.get_session("s1").awaiting_answer
+
+    await task_notification_turn(runtime)
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
+    metadata = last_event(runtime).metadata
+    assert metadata["status"] == SessionStatus.WAITING_INPUT
+    assert metadata[AWAITING_ANSWER_KEY] is True
+
+
+async def test_the_dismissal_status_update_settles_awaiting(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+
+    await runtime.update_session_fields("s1", status=SessionStatus.IDLE)
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
+
+
+async def test_a_pending_approval_keeps_the_wait_but_not_awaiting(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = input_transport(runtime, monkeypatch)
+    transport.has_pending_approval = MagicMock(return_value=True)
+    await ask(runtime, "q1")
+
+    await end_turn(runtime)
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert not session.awaiting_answer
+
+
+async def test_awaiting_survives_a_status_reassert_and_clears_on_change(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+
+    await runtime._record_system_event(
+        "s1", "Model changed", status=SessionStatus.WAITING_INPUT
+    )
+    assert runtime.get_session("s1").awaiting_answer
+    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
+    assert runtime.get_session("s1").awaiting_answer
+
+    await runtime.handle_input("s1", SessionInputRequest(text="[wp-msg] hi"))
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.RUNNING
+    assert not session.awaiting_answer
+
+
+async def test_an_approval_request_clears_awaiting(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+
+    await runtime._emit_adapter_event(
+        "s1",
+        EventKind.APPROVAL_REQUEST,
+        "Bash",
+        {"approval_id": "a1"},
+        SessionStatus.WAITING_INPUT,
+    )
+
+    assert not runtime.get_session("s1").awaiting_answer
+
+
+async def test_a_failed_send_restores_awaiting(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    transport = input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+    transport.send_input.side_effect = RuntimeError("pane gone")
+
+    with pytest.raises(RuntimeError):
+        await runtime.handle_input("s1", SessionInputRequest(text="[wp-msg] hi"))
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
+
+
+async def test_answering_clears_awaiting(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+
+    await answer(ClaudeTtyPlugin(), runtime, "q1")
+
+    assert not runtime.get_session("s1").awaiting_answer
+
+
+async def test_closing_open_questions_ends_a_settled_wait(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+    assert runtime.get_session("s1").awaiting_answer
+
+    await runtime.questions.close_open("s1", "Question closed: new conversation")
+
+    assert runtime.storage.open_question_tool_use_ids("s1") == []
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.IDLE
+    assert not session.awaiting_answer

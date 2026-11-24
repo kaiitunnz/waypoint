@@ -159,6 +159,10 @@ class QuestionLifecycle(Protocol):
     cancels.
     """
 
+    # True when the agent's turn blocks on an open question; a session waiting
+    # on one is never ``awaiting_answer``.
+    question_parks_turn: bool
+
     def question_liveness(
         self,
         runtime: "SessionRuntime",

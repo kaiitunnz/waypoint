@@ -38,6 +38,9 @@ GROUNDINGS = ["proceed", "park"]
 DEFAULTS = {"first": 0.60, "second": 0.70, "interval": 60, "handoff": None}
 QUEUES_COMPACT = {"claude_cli", "claude_tty"}
 TURN_ENDED = ("idle", "interrupted", "exited", "error")
+# The session field, and `sessions wait` token, for a waiting_input target whose
+# turn ended on its own open question.
+AWAITING_ANSWER = "awaiting_answer"
 STOPPED = ("error", "interrupted")
 GONE_EXIT_SEC = 600
 REMINDER_SEC = 900
@@ -248,6 +251,15 @@ def write_phase(
 
 def epoch(iso: str | None) -> float:
     return datetime.fromisoformat(iso).timestamp() if iso else 0.0
+
+
+def at_rest(target: dict[str, Any]) -> bool:
+    """Whether the target's turn ended with nothing parking it: idle, or waiting
+    only on its own question."""
+    status = target.get("status")
+    return status == "idle" or (
+        status == "waiting_input" and bool(target.get(AWAITING_ANSWER))
+    )
 
 
 def context_fraction(target: dict[str, Any]) -> float | None:
@@ -617,10 +629,12 @@ def begin_pair(
         status = target.get("status")
         # A Bash dialog answered in the terminal leaves the caller at waiting_input
         # until the tool returns, and a real dialog comes back held.
-        if status in STOPPED or (status == "waiting_input" and not own_turn):
+        if status in STOPPED or (
+            status == "waiting_input" and not own_turn and not at_rest(target)
+        ):
             sys.exit(f"session {sid} is {status} and needs a person first")
         if target.get("transport") in QUEUES_COMPACT:
-            target_idle = status == "idle" and not own_turn
+            target_idle = at_rest(target) and not own_turn
             send_queued_pair(sid, grounding, grounding_only, target_idle)
             return
         write_phase(sid, "parking", grounding)
@@ -653,19 +667,21 @@ def settle_sec(target: dict[str, Any]) -> float:
 
 def await_turn_end(sid: str, timeout: float) -> None:
     """Block until the target's turn ends; each CLI call costs too much to poll with."""
+    until = ",".join((*TURN_ENDED, AWAITING_ANSWER))
     try:
         out = subprocess.run(
             [waypoint_cli(), "sessions", "wait", sid]
-            + ["--until", ",".join(TURN_ENDED), "--timeout", str(int(timeout) + 1)],
+            + ["--until", until, "--timeout", str(int(timeout) + 1)],
             capture_output=True,
             text=True,
             timeout=timeout + 60,
         )
-        status = json.loads(out.stdout)["session"]["status"]
+        session = json.loads(out.stdout)["session"]
+        ended = session["status"] in TURN_ENDED or at_rest(session)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        status = None
+        ended = False
     # A server that is down exits like a timeout and prints no status.
-    if status not in TURN_ENDED:
+    if not ended:
         time.sleep(PAIR_POLL_SEC)
 
 
@@ -677,7 +693,7 @@ def deliver(
     give_up: float = PAIR_GIVE_UP_SEC,
     send_in_focus: bool = False,
 ) -> str:
-    """Send `text` once the target is idle and quiet; return the delivery status.
+    """Send `text` once the target is at rest and quiet; return the delivery status.
 
     Readiness is checked before every attempt, so a refused send is retried only
     while the target is ready for it. `send_in_focus` sends during Focus, where the
@@ -702,7 +718,7 @@ def deliver(
             time.sleep(PAIR_POLL_SEC)
             continue
         if not focus:
-            if seen != "idle":
+            if not at_rest(target):
                 await_turn_end(sid, deadline - now())
                 continue
             quiet_left = quiet_for(target) - (

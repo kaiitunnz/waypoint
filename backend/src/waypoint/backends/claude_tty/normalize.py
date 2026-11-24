@@ -575,8 +575,7 @@ class TranscriptNormalizer:
                 if turn_aborted:
                     # The "user rejected" result the TUI writes when Waypoint
                     # Escs the popup to surface it. Drop it so the question card
-                    # stays answerable, and skip the abort note below — the
-                    # session waits on the user, it has not ended the turn.
+                    # stays answerable, and skip the abort note below.
                     dismissed_question = True
                     continue
                 # A genuine terminal failure (InputValidationError, timeout) for
@@ -624,9 +623,14 @@ class TranscriptNormalizer:
                 )
             )
 
-        # A declined tool ends the turn with no terminal-stop_reason record to
-        # follow, so resolve the session to idle here or it stays stuck running.
-        if turn_aborted and not dismissed_question:
+        if dismissed_question:
+            # The dismissal lands after any sibling tool's result, so it marks
+            # the turn's end.
+            events.extend(_status_only(SessionStatus.IDLE))
+        elif turn_aborted:
+            # A declined tool ends the turn with no terminal-stop_reason record
+            # to follow, so resolve the session to idle here or it stays stuck
+            # running.
             events.append(
                 NormalizedEvent(
                     kind=EventKind.SYSTEM_NOTE,

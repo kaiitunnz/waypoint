@@ -117,6 +117,7 @@ def _make_runtime(session: SessionRecord, snapshot: str) -> MagicMock:
     runtime.tmux = tmux
     runtime._emit_adapter_event = AsyncMock()
     runtime._record_system_event = AsyncMock()
+    runtime.update_session_fields = AsyncMock()
     runtime.storage.list_approval_events.return_value = []
     return runtime
 
@@ -698,6 +699,10 @@ async def test_question_drain_stays_answerable_after_rejection() -> None:
     assert EventKind.TOOL_CALL in kinds
     assert EventKind.TOOL_RESULT not in kinds
     assert SessionStatus.WAITING_INPUT in statuses
+    # The dismissal reports the turn's end; the runtime settles it.
+    runtime.update_session_fields.assert_awaited_once_with(
+        session.id, status=SessionStatus.IDLE
+    )
 
 
 async def test_interrupt_retries_esc_until_dialog_clears() -> None:

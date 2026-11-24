@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
@@ -64,6 +64,9 @@ WAIT_DEFAULT_STATUSES: frozenset[str] = frozenset(
         SessionStatus.ERROR,
     }
 )
+# `sessions wait --until` token matching `waiting_input` only when
+# `awaiting_answer` is set.
+WAIT_AWAITING_ANSWER = "awaiting_answer"
 # Lifecycle-terminal statuses that stop `sessions events --follow` — the
 # process is gone, so no further events will arrive.
 FOLLOW_TERMINAL_STATUSES: frozenset[str] = frozenset(
@@ -949,7 +952,8 @@ def compute_ready_tasks(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def parse_wait_until(raw: str | None) -> frozenset[str]:
-    """Parse a comma-separated ``--until`` list into a set of valid statuses.
+    """Parse a comma-separated ``--until`` list into a set of valid statuses,
+    plus ``awaiting_answer``.
 
     ``None`` yields the default terminal/idle set; unknown statuses are an
     error so a typo never blocks forever.
@@ -959,12 +963,32 @@ def parse_wait_until(raw: str | None) -> frozenset[str]:
     requested = {item.strip() for item in raw.split(",") if item.strip()}
     if not requested:
         raise typer.BadParameter("--until needs at least one status")
-    unknown = sorted(requested - {str(status) for status in SessionStatus})
+    unknown = sorted(
+        requested - {str(status) for status in SessionStatus} - {WAIT_AWAITING_ANSWER}
+    )
     if unknown:
         raise typer.BadParameter(
             f"--until has unknown status(es): {', '.join(unknown)}"
         )
     return frozenset(requested)
+
+
+def reached_wait_status(
+    session: Mapping[str, Any], until: frozenset[str]
+) -> str | None:
+    """The session's status when it satisfies ``until``, else ``None``."""
+    status = session.get("status")
+    if not isinstance(status, str):
+        return None
+    if status in until:
+        return status
+    if (
+        WAIT_AWAITING_ANSWER in until
+        and status == SessionStatus.WAITING_INPUT
+        and session.get("awaiting_answer")
+    ):
+        return status
+    return None
 
 
 def exit_code_for_wait(status: str | None) -> int:
@@ -1272,11 +1296,11 @@ async def _await_status_via_ws(
     """
     try:
         async for envelope in client.stream_session_envelopes(session_id):
-            status = session_status_from_envelope(envelope)
-            if status is None:
+            if session_status_from_envelope(envelope) is None:
                 continue
-            if status in until:
-                return envelope["payload"]["session"], status
+            session = envelope["payload"]["session"]
+            if (status := reached_wait_status(session, until)) is not None:
+                return session, status
     except (OSError, WebSocketException):
         return None
     return None
@@ -1289,8 +1313,7 @@ async def _await_status_via_poll(
         # Off the event loop: get_session is sync httpx, so running it inline
         # would block asyncio.timeout from firing until the request returned.
         session = await asyncio.to_thread(client.get_session, session_id)
-        status = session.get("status")
-        if isinstance(status, str) and status in until:
+        if (status := reached_wait_status(session, until)) is not None:
             return session, status
         await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
 
@@ -1787,7 +1810,9 @@ def sessions_wait(
         typer.Option(
             "--until",
             help="Comma-separated statuses to wait for. Defaults to "
-            "idle,waiting_input,exited,error.",
+            "idle,waiting_input,exited,error. awaiting_answer matches "
+            "waiting_input only when the session's turn ended on its own "
+            "open question.",
         ),
     ] = None,
     timeout: Annotated[

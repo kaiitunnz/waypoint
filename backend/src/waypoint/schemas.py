@@ -443,6 +443,10 @@ class UsageDashboardResponse(BaseModel):
     providers: list[ProviderUsageStatus] = Field(default_factory=list)
 
 
+# Event metadata key a status write sets to mark ``SessionRecord.awaiting_answer``.
+AWAITING_ANSWER_KEY = "awaiting_answer"
+
+
 class SessionRecord(BaseModel):
     id: str
     backend: BackendId
@@ -476,6 +480,9 @@ class SessionRecord(BaseModel):
     # Focus holds agent sends, scheduled firings, and board/inbox wakes as
     # ``HeldMessageRecord``s.
     focus: bool = False
+    # ``WAITING_INPUT`` because a finished turn left a question open with nothing
+    # parking the turn: safe to message.
+    awaiting_answer: bool = False
     # Sequence of the todo snapshot the human dismissed from the task dock; any
     # other snapshot shows the dock again. ``None`` = not dismissed.
     task_dock_dismissed_sequence: int | None = None

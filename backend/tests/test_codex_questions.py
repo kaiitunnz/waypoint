@@ -265,31 +265,62 @@ async def test_cancel_sends_nothing_and_settles_idle(tmp_path, monkeypatch) -> N
     assert runtime.storage.open_question_tool_use_ids("s1") == []
 
 
-async def test_restore_keeps_a_wait_only_for_a_question_since_the_last_message(
-    tmp_path,
+async def restore_note(runtime: SessionRuntime) -> None:
+    await runtime._record_system_event(
+        "s1",
+        "Codex session restored from previous backend process",
+        status=SessionStatus.IDLE,
+    )
+
+
+async def test_restore_keeps_the_wait_while_a_question_is_open(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path, status=SessionStatus.INTERRUPTED)
+    fake_transport(runtime, monkeypatch)
+    await ask(runtime, "call_1")
+    await runtime._record_user_event("s1", "do something else", submit=True)
+
+    await restore_note(runtime)
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
+
+
+async def test_restore_ends_a_wait_with_no_reachable_question(
+    tmp_path, monkeypatch
 ) -> None:
     runtime = make_runtime(tmp_path, status=SessionStatus.WAITING_INPUT)
-    await runtime._record_user_event("s1", "go", submit=True)
+    fake_transport(runtime, monkeypatch)
+    # A fork's copy of its parent's card: asked on another thread.
+    await ask(runtime, "call_1", thread_id="thread-parent")
+
+    await restore_note(runtime)
+
+    assert runtime.get_session("s1").status is SessionStatus.IDLE
+
+
+async def test_a_turn_ending_with_an_open_question_waits_on_the_human(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    fake_transport(runtime, monkeypatch)
     await ask(runtime, "call_1")
-    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
-    assert runtime.questions.restored_status(runtime.get_session("s1")) is (
-        SessionStatus.WAITING_INPUT
+    # A steer that does not answer the question.
+    await runtime._record_user_event("s1", "also check the docs", submit=True)
+
+    await runtime._emit_adapter_event(
+        "s1",
+        EventKind.SYSTEM_NOTE,
+        "Turn completed",
+        {"method": "turn/completed"},
+        SessionStatus.IDLE,
     )
 
-    # The human moved on with an ordinary message; a later wait (an approval
-    # that died with the process) must not resurrect the old card's wait.
-    await runtime._record_user_event("s1", "do something else", submit=True)
-    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
-    assert (
-        runtime.questions.restored_status(runtime.get_session("s1"))
-        is SessionStatus.IDLE
-    )
-
-    runtime.storage.update_session("s1", status=SessionStatus.INTERRUPTED)
-    assert (
-        runtime.questions.restored_status(runtime.get_session("s1"))
-        is SessionStatus.IDLE
-    )
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert session.awaiting_answer
 
 
 # ── History import ──────────────────────────────────────────────────────

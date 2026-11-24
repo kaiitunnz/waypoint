@@ -166,6 +166,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     extra_env: dict[str, str] = {}
 
+    question_parks_turn = True
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -1060,7 +1061,6 @@ class OpenCodePlugin(DefaultLaunchContract):
         arguments: str,
         submit: bool,
     ) -> SessionRecord:
-        previous_status = session.status
         updated = runtime.storage.update_session(
             session.id, status=SessionStatus.RUNNING
         )
@@ -1068,7 +1068,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         try:
             await adapter.execute_command(session.id, command, arguments)
         except OpenCodeError as exc:
-            runtime.storage.update_session(session.id, status=previous_status)
+            runtime.storage.restore_status(session)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),

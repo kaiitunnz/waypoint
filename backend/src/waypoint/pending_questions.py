@@ -110,19 +110,39 @@ class PendingQuestionTracker:
             detail="question is no longer open",
         )
 
-    def restored_status(self, session: SessionRecord) -> SessionStatus:
-        """Only a question asked since the human's last message keeps
-        ``WAITING_INPUT`` across a restore; a wait on an approval ends with the
-        process that held it."""
-        if session.status is not SessionStatus.WAITING_INPUT:
-            return SessionStatus.IDLE
-        events = self._runtime.storage.open_question_events(session.id)
-        last_input = self._runtime.storage.latest_event_sequence(
-            session.id, EventKind.USER_INPUT
+    def settle_idle(
+        self, session_id: str, status: SessionStatus | None, resolving_id: Any
+    ) -> tuple[SessionStatus | None, bool]:
+        """The status to store, and whether the session is ``awaiting_answer``.
+
+        An ``IDLE`` stays ``WAITING_INPUT`` while an actionable question other
+        than ``resolving_id`` is open. It is ``awaiting_answer`` unless a request
+        parks the turn: an agent whose questions block it, or a pending approval.
+        """
+        if status != SessionStatus.IDLE:
+            return status, False
+        session = self._runtime.storage.get_session(session_id)
+        if session is None:
+            return status, False
+        ids = [
+            tool_use_id
+            for tool_use_id in self._runtime.storage.open_question_tool_use_ids(
+                session_id
+            )
+            if tool_use_id != resolving_id
+        ]
+        if not any(
+            state is QuestionLiveness.ACTIONABLE
+            for state in self.liveness(session, ids).values()
+        ):
+            return status, False
+        plugin = self._runtime.registry.plugin_for(session)
+        at_rest = (
+            isinstance(plugin, QuestionLifecycle)
+            and not plugin.question_parks_turn
+            and not self._runtime.transport_for(session).has_pending_approval(session)
         )
-        if events and (last_input is None or events[-1].sequence > last_input):
-            return SessionStatus.WAITING_INPUT
-        return SessionStatus.IDLE
+        return SessionStatus.WAITING_INPUT, at_rest
 
     # ── Answers ─────────────────────────────────────────────────────────
 
@@ -255,16 +275,38 @@ class PendingQuestionTracker:
         tool_use_id: str,
         reason: QuestionCloseReason,
         text: str,
+        status: SessionStatus | None = None,
     ) -> None:
         await self._runtime._record_system_event(
             session_id,
             text,
+            status=status,
             metadata={
                 "kind": ASK_QUESTION_CLOSED,
                 "tool_use_id": tool_use_id,
                 "reason": reason.value,
             },
         )
+
+    async def close_open(self, session_id: str, text: str) -> None:
+        """Record a closure for every open question not in flight; a session
+        awaiting their answer goes idle."""
+        session = self._runtime.storage.get_session(session_id)
+        settled = (
+            SessionStatus.IDLE
+            if session is not None and session.awaiting_answer
+            else None
+        )
+        for tool_use_id in self._runtime.storage.open_question_tool_use_ids(session_id):
+            if (session_id, tool_use_id) in self._operations:
+                continue
+            await self._record_closed(
+                session_id,
+                tool_use_id,
+                QuestionCloseReason.PROVIDER_CLOSED,
+                text,
+                settled,
+            )
 
     # ── Liveness, snapshot, reconciliation ──────────────────────────────
 

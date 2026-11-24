@@ -201,6 +201,9 @@ export interface SessionRecord {
   structured_log_path: string;
   pinned_at?: string | null;
   focus?: boolean;
+  // waiting_input because a finished turn left a question open, with nothing
+  // parking the turn: safe to message.
+  awaiting_answer?: boolean;
   // Sequence of the todo snapshot dismissed from the task dock; any other
   // snapshot shows the dock again.
   task_dock_dismissed_sequence?: number | null;

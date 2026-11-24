@@ -127,6 +127,10 @@ waypoint sessions wait "$sid" --until exited,error --timeout 600 \
   && waypoint sessions output "$sid" --messages 40 --compact
 ```
 
+`--until idle,awaiting_answer` returns once the child is safe to message: idle,
+or `waiting_input` with its turn ended on its own open question
+(`awaiting_answer: true`). An approval or a blocking question keeps it waiting.
+
 After `wait`, use `sessions output` for the child's normal answer. If the child
 stopped in `waiting_input`, inspect `sessions events "$sid" --compact` for a
 pending approval or question. Use `events --coalesce` when you need full

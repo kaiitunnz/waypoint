@@ -90,6 +90,7 @@ from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    AWAITING_ANSWER_KEY,
     PLUGIN_USAGE_SELECTION,
     USAGE_SELECTION_FIELDS,
     AccountProbeResult,
@@ -2828,7 +2829,6 @@ class SessionRuntime:
         # a stuck "running" state for an unsent message. Input queued behind a
         # pending approval or question does not start a turn, so the session
         # keeps waiting on the human.
-        previous_status = session.status
         next_status = (
             SessionStatus.WAITING_INPUT
             if session.status == SessionStatus.WAITING_INPUT
@@ -2854,7 +2854,7 @@ class SessionRuntime:
         try:
             await transport.send_input(session, request.text, attachments or None)
         except Exception as exc:
-            self.storage.update_session(session.id, status=previous_status)
+            self.storage.restore_status(session)
             if isinstance(exc, InputBlockedError):
                 # A dialog opened after the check above; the message recorded
                 # above never reached the agent.
@@ -5167,6 +5167,11 @@ class SessionRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         event_metadata = dict(metadata or {})
+        status, awaiting = self.questions.settle_idle(
+            session_id, status, event_metadata.get("tool_use_id")
+        )
+        if awaiting:
+            event_metadata[AWAITING_ANSWER_KEY] = True
         if status is not None:
             event_metadata["status"] = status
         event = EventRecord(
@@ -5199,6 +5204,13 @@ class SessionRuntime:
             updates = {k: v for k, v in updates.items() if k != "rate_limit_usage"}
             if not updates:
                 return self.get_session(session_id)
+        if "status" in updates:
+            status, awaiting = self.questions.settle_idle(
+                session_id, updates["status"], None
+            )
+            updates = {**updates, "status": status}
+            if awaiting:
+                updates["awaiting_answer"] = True
         session = self.storage.update_session(session_id, **updates)
         if self.telemetry_ingester is not None and (
             "context_usage" in updates or "rate_limit_usage" in updates
@@ -6018,6 +6030,11 @@ class SessionRuntime:
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
         await self._run_capture_sinks(session_id, metadata)
+        status, awaiting = self.questions.settle_idle(
+            session_id, status, metadata.get("tool_use_id")
+        )
+        if awaiting:
+            metadata[AWAITING_ANSWER_KEY] = True
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),

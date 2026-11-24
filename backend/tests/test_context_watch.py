@@ -931,6 +931,42 @@ def test_an_idle_claude_target_gets_both_at_once_with_no_helper(
     assert ph["phase"] == "compacting" and "grounding_pending" not in ph
 
 
+def test_a_claude_target_awaiting_its_answer_gets_both_at_once(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawned = _claude(cw, fake, monkeypatch, status="waiting_input")
+    fake.sessions[T]["awaiting_answer"] = True
+    cw.begin_pair(T, "park")
+    assert fake.sent == [(T, "/compact"), (T, G.replace("proceed", "park"))]
+    assert spawned == []
+
+
+def test_a_target_awaiting_its_answer_elsewhere_gets_a_helper(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _watch(cw)
+    spawned = _capture_spawn(cw, monkeypatch)
+    fake.sessions[T].update(status="waiting_input", awaiting_answer=True)
+    cw.begin_pair(T, "park")
+    assert spawned == [["pair", "--target", T, "--grounding", "park"]]
+    assert cw.current_phase(T) == "parking"
+
+
+def test_the_helper_sends_the_grounding_once_the_turn_ends_on_a_question(
+    cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claude(cw, fake, monkeypatch, status="running")
+    cw.write_phase(T, "compacting", "proceed", pending=True)
+    waiting = fake.sessions[T]
+    fake.on_sleep = [
+        lambda: waiting.update(status="waiting_input"),
+        lambda: waiting.update(awaiting_answer=True),
+    ]
+    _pair(cw, after_compact=True)
+    assert fake.sent == [(T, G)]
+    assert len(fake.waits) == 2
+
+
 def test_a_running_claude_target_gets_compact_now_and_its_grounding_after_the_turn(
     cw: ModuleType, fake: Fake, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1515,6 +1551,13 @@ def test_send_returns_none_on_a_missing_cli_or_a_timeout(
         ('{"session": {"id": "x", "status": "interrupted"}}', 0, False),
         ('{"session": {"id": "x", "status": "exited"}}', 0, False),
         ('{"session": {"id": "x", "status": "error"}}', 1, False),
+        (
+            '{"session": {"id": "x", "status": "waiting_input", '
+            '"awaiting_answer": true}}',
+            0,
+            False,
+        ),
+        ('{"session": {"id": "x", "status": "waiting_input"}}', 124, True),
         ('{"session": {"id": "x", "status": "running"}}', 124, True),
         ('{"session": {"id": "x"}}', 124, True),
         ("", 1, True),
@@ -1539,9 +1582,9 @@ def test_await_turn_end_reads_the_status_rather_than_the_exit_code(
     monkeypatch.setattr(cw.time, "sleep", slept.append)
     cw.await_turn_end(T, 30.5)
     assert slept == ([cw.PAIR_POLL_SEC] if sleeps else [])
-    assert (
-        args_file.read_text().strip()
-        == f"sessions wait {T} --until idle,interrupted,exited,error --timeout 31"
+    assert args_file.read_text().strip() == (
+        f"sessions wait {T} --until idle,interrupted,exited,error,awaiting_answer "
+        "--timeout 31"
     )
 
 

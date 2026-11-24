@@ -172,6 +172,7 @@ class ClaudeTtyPlugin:
     config_schema: type[PluginConfig] = ClaudeTtyPluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     extra_env = {"CLAUDE_CODE_NO_FLICKER": "1"}
+    question_parks_turn = False
     # Catalogues are the claude agent's, sourced from its capabilities so the
     # two backends can't drift; the flags below are this transport's own.
     capabilities = BackendCapabilities(
@@ -680,6 +681,9 @@ class ClaudeTtyPlugin:
             session_id,
             transport_state={**session.transport_state, "thread_id": successor},
             context_usage=None,
+        )
+        await runtime.questions.close_open(
+            session_id, "Question closed: /clear started a new conversation"
         )
         log.info(
             "following /clear onto a new thread",

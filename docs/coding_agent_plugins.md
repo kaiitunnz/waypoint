@@ -465,6 +465,7 @@ implements the `QuestionLifecycle` protocol from
 [`base.py`](../backend/src/waypoint/backends/base.py):
 
 ```python
+question_parks_turn: bool
 def question_liveness(self, runtime, session, tool_use_ids) -> dict[str, QuestionLiveness]: ...
 async def decline_question(self, runtime, session, tool_use_id) -> QuestionDecline: ...
 ```
@@ -502,10 +503,23 @@ An agent that keeps working after it asks gets a stand-in card instead of a
 parked request: its plugin delivers the answer as an ordinary message and
 records it with `runtime.questions.record_answer` inside the operation, and its
 `decline_question` sends nothing and returns `AGENT_IDLE`. `claude_tty` and
-Codex work this way; Codex's `request_user_input_async` mapping lives in
-[`codex/questions.py`](../backend/src/waypoint/backends/codex/questions.py). A
-Codex turn that ends with one of its own questions still open settles at
-`WAITING_INPUT`.
+Codex work this way and declare `question_parks_turn = False`; Codex's
+`request_user_input_async` mapping lives in
+[`codex/questions.py`](../backend/src/waypoint/backends/codex/questions.py).
+
+An `IDLE` written through the adapter-event sink, `_record_system_event`, or
+`update_session_fields` is stored as `WAITING_INPUT` while any `ACTIONABLE`
+question is open. A normalizer reports a turn's end as `IDLE` and leaves the
+settling to the runtime. A plugin whose agent replaces its conversation
+(`claude_tty` after `/clear`) closes the old conversation's questions with
+`runtime.questions.close_open`.
+
+A plugin declares `question_parks_turn` true when the agent's turn blocks on an
+open question (claude_code, OpenCode). For a stand-in agent with no pending
+approval, a settled wait also sets the session's `awaiting_answer`: the turn
+ended and the session is safe to message. A status change or an approval request
+clears it; a plugin rolling a status back after a failed send uses
+`storage.restore_status`.
 
 ### Task notifications (optional)
 

@@ -253,20 +253,12 @@ def epoch(iso: str | None) -> float:
     return datetime.fromisoformat(iso).timestamp() if iso else 0.0
 
 
-def sends_from_a_session() -> bool:
-    """A send without a session id is the human's own message, which moves the
-    target past an open question."""
-    return bool(os.environ.get("WAYPOINT_SESSION_ID"))
-
-
 def at_rest(target: dict[str, Any]) -> bool:
-    """Whether the target's turn ended with nothing parking it: idle, or, when
-    sending from a session, waiting only on its own question."""
+    """Whether the target's turn ended with nothing parking it: idle, or waiting
+    only on its own question."""
     status = target.get("status")
     return status == "idle" or (
-        status == "waiting_input"
-        and bool(target.get(AWAITING_ANSWER))
-        and sends_from_a_session()
+        status == "waiting_input" and bool(target.get(AWAITING_ANSWER))
     )
 
 
@@ -676,10 +668,7 @@ def settle_sec(target: dict[str, Any]) -> float:
 def await_turn_end(sid: str, timeout: float) -> None:
     """Block until the target's turn ends; each CLI call costs too much to poll with."""
     session: Any = None
-    until_sets: list[tuple[str, ...]] = [TURN_ENDED]
-    if sends_from_a_session():
-        until_sets.insert(0, (*TURN_ENDED, AWAITING_ANSWER))
-    for until in until_sets:
+    for until in ((*TURN_ENDED, AWAITING_ANSWER), TURN_ENDED):
         try:
             out = subprocess.run(
                 [waypoint_cli(), "sessions", "wait", sid]

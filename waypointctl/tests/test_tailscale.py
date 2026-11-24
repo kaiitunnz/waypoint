@@ -320,6 +320,7 @@ def test_helper_up_uses_repo_dotenv_and_exposes_ports(
     monkeypatch.delenv("WAYPOINT_STACK_FRONTEND_PORT", raising=False)
     monkeypatch.delenv("WAYPOINT_STACK_BACKEND_PORT", raising=False)
     monkeypatch.delenv("WAYPOINT_STACK_CONTROL_PORT", raising=False)
+    monkeypatch.delenv("WAYPOINT_STACK_FRONTEND_PREVIEW_PORT", raising=False)
 
     bash = shutil.which("bash") or "/bin/bash"
     completed = subprocess.run(
@@ -364,6 +365,53 @@ def test_helper_up_uses_repo_dotenv_and_exposes_ports(
         in text
     )
     assert "tailscale container ready: waypoint-tailscale-profile-a" in completed.stdout
+    assert "preview:" not in completed.stdout
+
+
+def test_helper_up_exposes_the_frontend_preview_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    (repo / ".env").write_text(
+        "TS_AUTHKEY=tskey-auth-123\nTS_HOSTNAME=wp-profile-a\n",
+        encoding="utf-8",
+    )
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file)
+    for name in (
+        "WAYPOINT_STACK_FRONTEND_PORT",
+        "WAYPOINT_STACK_BACKEND_PORT",
+        "WAYPOINT_STACK_CONTROL_PORT",
+        "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [bash, str(repo / "scripts" / "waypoint_tailscale.sh"), "up", "profile-a"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+            # waypointctl exports the repo .env before running the helper.
+            "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": "3012",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    text = log_file.read_text(encoding="utf-8")
+    assert (
+        "tailscale serve --bg --yes --http=3012 http://host.docker.internal:3012"
+        in text
+    )
+    assert "preview: https://wp-profile-a:3012" in completed.stdout
 
 
 def test_helper_does_not_expand_shell_substitutions_in_dotenv(

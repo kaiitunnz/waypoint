@@ -17,6 +17,19 @@ export function isComposingKeyEvent(event: KeyboardEventLike): boolean {
   return event.isComposing === true || event.nativeEvent?.isComposing === true;
 }
 
+// Cmd/Ctrl+K, the session switcher.
+export function isSwitcherShortcut(
+  event: KeyboardEventLike & Pick<globalThis.KeyboardEvent, "altKey">,
+): boolean {
+  return (
+    !isComposingKeyEvent(event) &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === "k"
+  );
+}
+
 export function isModifiedEnterShortcut(
   event: ReactKeyboardEvent<HTMLTextAreaElement>,
 ): boolean {

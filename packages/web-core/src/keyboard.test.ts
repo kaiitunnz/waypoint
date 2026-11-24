@@ -5,6 +5,7 @@ import {
   isComposingKeyEvent,
   isInlineMenuAcceptKey,
   isModifiedEnterShortcut,
+  isSwitcherShortcut,
   isUnmodifiedEnterKey,
   trapTabFocus,
 } from "./keyboard";
@@ -72,5 +73,22 @@ describe("trapTabFocus", () => {
   it("does nothing for non-Tab keys or a missing root", () => {
     expect(trapTabFocus(key({ key: "a" }) as unknown as KeyboardEvent, {} as HTMLElement)).toBe(false);
     expect(trapTabFocus(key({ key: "Tab" }) as unknown as KeyboardEvent, null)).toBe(false);
+  });
+});
+
+describe("isSwitcherShortcut", () => {
+  const key = (overrides: Record<string, unknown> = {}) =>
+    ({ key: "k", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...overrides }) as Parameters<
+      typeof isSwitcherShortcut
+    >[0];
+
+  it("is Cmd or Ctrl plus K, and nothing else", () => {
+    expect(isSwitcherShortcut(key({ metaKey: true }))).toBe(true);
+    expect(isSwitcherShortcut(key({ ctrlKey: true, key: "K" }))).toBe(true);
+    expect(isSwitcherShortcut(key())).toBe(false);
+    expect(isSwitcherShortcut(key({ ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(isSwitcherShortcut(key({ ctrlKey: true, altKey: true }))).toBe(false);
+    expect(isSwitcherShortcut(key({ ctrlKey: true, key: "j" }))).toBe(false);
+    expect(isSwitcherShortcut(key({ ctrlKey: true, isComposing: true }))).toBe(false);
   });
 });

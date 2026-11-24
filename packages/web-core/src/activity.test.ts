@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ActivityLoader, deriveActivity, describeStep } from "./activity";
+import type { EventRecord } from "./types";
+import { ev } from "./test-helpers";
+
+const claudeTool = (sequence: number, name: string, input: Record<string, unknown>) =>
+  ev(sequence, "tool_call", name, { tool_name: name, payload: { type: "tool_use", name, input } });
+
+const agent = (sequence: number, text: string) => ev(sequence, "agent_output", text);
+
+describe("describeStep", () => {
+  it("names shell commands, edits and reads in plain words", () => {
+    expect(describeStep(claudeTool(1, "Bash", { command: "npm run lint\nmore" }))).toBe("Running npm run lint");
+    expect(describeStep(claudeTool(2, "Edit", { file_path: "/a/backend/runtime.py" }))).toBe("Editing runtime.py");
+    expect(describeStep(claudeTool(3, "Read", { file_path: "/a/b.ts" }))).toBe("Reading b.ts");
+    expect(describeStep(claudeTool(4, "Grep", { pattern: "x" }))).toBe("Searching the code");
+    expect(describeStep(claudeTool(5, "Agent", {}))).toBe("Running a subagent");
+  });
+
+  it("unwraps a Codex shell command and truncates a long one", () => {
+    const codex = ev(1, "tool_call", "", {
+      item: { item: { command: '/bin/bash -lc "npm run lint -- --fix"' } },
+    });
+    expect(describeStep(codex)).toBe("Running npm run lint -- --fix");
+    const long = describeStep(claudeTool(2, "Bash", { command: "x".repeat(200) })) ?? "";
+    expect(long.length).toBeLessThanOrEqual("Running ".length + 80);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("falls back to the tool name, or nothing", () => {
+    expect(describeStep(claudeTool(1, "mcp__thing", {}))).toBe("mcp__thing");
+    expect(describeStep(ev(1, "tool_call", ""))).toBeNull();
+  });
+});
+
+describe("deriveActivity", () => {
+  it("shows the current step while working", () => {
+    const events = [agent(1, "Looking at it."), claudeTool(2, "Bash", { command: "npm test" })];
+    expect(deriveActivity(events, null, "running").line).toBe("Running npm test");
+  });
+
+  it("falls back to the last message while working with no step", () => {
+    expect(deriveActivity([agent(1, "Thinking about it")], null, "running").line).toBe("Thinking about it");
+  });
+
+  it("shows the last reply, joined from streamed deltas, when idle", () => {
+    const events: EventRecord[] = [
+      agent(1, "Old reply."),
+      claudeTool(2, "Bash", { command: "ls" }),
+      agent(3, "**Sweep"),
+      agent(4, " finished:"),
+      agent(5, " 48 configs.\n\nMore detail below."),
+      ev(6, "system_note", "Turn completed"),
+    ];
+    expect(deriveActivity(events, null, "idle").line).toBe("Sweep finished: 48 configs.");
+  });
+
+  it("cleans markdown and caps the line", () => {
+    expect(deriveActivity([agent(1, "## `Done` - all green")], null, "idle").line).toBe("Done - all green");
+    const long = deriveActivity([agent(1, "word ".repeat(80))], null, "idle").line ?? "";
+    expect(long.length).toBeLessThanOrEqual(140);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("has no line without events", () => {
+    expect(deriveActivity([], null, "idle")).toEqual({ line: null, progress: null });
+  });
+
+  it("reports task progress until every task is done", () => {
+    const todo = (statuses: string[]) =>
+      ev(9, "tool_call", "TodoWrite", {
+        tool_name: "TodoWrite",
+        tool_input: { todos: statuses.map((status, i) => ({ content: `t${i}`, status })) },
+      });
+    expect(deriveActivity([], todo(["completed", "in_progress", "pending"]), "running").progress).toEqual({
+      done: 1,
+      total: 3,
+    });
+    expect(deriveActivity([], todo(["completed", "completed"]), "idle").progress).toBeNull();
+  });
+});
+
+describe("ActivityLoader", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const make = (overrides: { settleMs?: number; maxWaitMs?: number; concurrency?: number } = {}) => {
+    const resolvers: Array<() => void> = [];
+    const fetch = vi.fn(
+      (id: string) =>
+        new Promise<string>((resolve) => {
+          resolvers.push(() => resolve(`result:${id}`));
+        }),
+    );
+    const onResult = vi.fn();
+    const loader = new ActivityLoader<string>({ fetch, onResult, ...overrides });
+    const settle = async () => {
+      resolvers.splice(0).forEach((resolve) => resolve());
+      await vi.advanceTimersByTimeAsync(0);
+    };
+    return { loader, fetch, onResult, settle };
+  };
+
+  it("fetches a session the first time it is seen, at once", async () => {
+    const { loader, fetch, onResult, settle } = make();
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(onResult).toHaveBeenCalledWith("a", "result:a");
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles a change before fetching again", async () => {
+    const { loader, fetch, settle } = make({ settleMs: 1000 });
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    loader.request("a", "t2");
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    loader.request("a", "t3");
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes a constantly changing session within the max wait", async () => {
+    const { loader, fetch, settle } = make({ settleMs: 1000, maxWaitMs: 4000 });
+    loader.request("a", "t0", Date.now());
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    for (let i = 1; i <= 12; i += 1) {
+      loader.request("a", `t${i}`, Date.now());
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("runs at most the concurrency limit at once", async () => {
+    const { loader, fetch, settle } = make({ concurrency: 2 });
+    ["a", "b", "c"].forEach((id) => loader.request(id, "t1"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops everything once disposed", async () => {
+    const { loader, fetch, onResult, settle } = make();
+    loader.request("a", "t1");
+    loader.dispose();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetch).not.toHaveBeenCalled();
+    await settle();
+    expect(onResult).not.toHaveBeenCalled();
+    loader.request("b", "t1");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

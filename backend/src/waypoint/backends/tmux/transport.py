@@ -275,11 +275,17 @@ class TmuxTransport(TransportAdapter):
     async def resume(self, session: SessionRecord) -> bool:
         target = self._target(session)
         plugin = self._runtime.registry.get(session.backend)
-        submits = isinstance(
-            plugin, PaneComposerReading
-        ) and plugin.pane_composer_holds_input(
-            await self.adapter.capture_snapshot(target)
-        )
+        confirmer = self._confirmer(session)
+        reader = plugin if isinstance(plugin, PaneComposerReading) else None
+        if confirmer is None and reader is None:
+            await self.adapter.resume(target)
+            return False
+        snapshot = await self.adapter.capture_snapshot(target)
+        # Recheck the screen the Enter lands on: a dialog may have opened since
+        # the runtime's guard, and Enter would select its highlighted option.
+        if confirmer is not None and confirmer.pane_shows_blocking_dialog(snapshot):
+            raise InputBlockedError()
+        submits = reader is not None and reader.pane_composer_holds_input(snapshot)
         await self.adapter.resume(target)
         return submits
 

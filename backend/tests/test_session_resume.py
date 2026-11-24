@@ -152,6 +152,29 @@ async def test_resume_refuses_while_a_dialog_is_open(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+async def test_resume_refuses_a_dialog_that_opens_after_the_guard(
+    tmp_path, monkeypatch, transport: str
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(
+        make_session(runtime.settings, transport, SessionStatus.RUNNING)
+    )
+    screens = iter([EMPTY_COMPOSER, APPROVAL_DIALOG])
+    enters = stub_pane(runtime, monkeypatch, "")
+
+    async def capture_snapshot(target: str, start_line: int = -200) -> str:
+        return next(screens)
+
+    monkeypatch.setattr(runtime.tmux, "capture_snapshot", capture_snapshot)
+
+    with pytest.raises(InputBlockedError):
+        await runtime.resume("sess")
+
+    assert enters == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("screen", [PENDING_MESSAGE, APPROVAL_DIALOG])
 async def test_resume_on_unreadable_pane_presses_enter_and_keeps_status(
     tmp_path, monkeypatch, screen: str

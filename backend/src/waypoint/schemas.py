@@ -1244,6 +1244,91 @@ class PendingQuestionsSnapshot(BaseModel):
     revision: int = 0
 
 
+PendingAskAvailability = PendingQuestionAvailability
+
+
+class PendingAskOption(BaseModel):
+    # Kept verbatim: it is the answer value. ``recommended`` reflects a trailing
+    # "(Recommended)" marker the asking agent put in the label.
+    label: str
+    description: str | None = None
+    recommended: bool
+
+
+class PendingAskPrompt(BaseModel):
+    question: str
+    header: str | None = None
+    multi_select: bool
+    options: list[PendingAskOption]
+
+
+class PendingAskQuestion(BaseModel):
+    tool_use_id: str
+    questions: list[PendingAskPrompt]
+
+
+class PendingAskApproval(BaseModel):
+    approval_id: str
+    tool_name: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_input_truncated: bool
+    decisions: list[str]
+    supports_note: bool
+
+
+class PendingAskPlan(BaseModel):
+    plan_id: str
+    text: str
+    decisions: list[str]
+    supports_note: bool
+    resolve_via: Literal["approve", "approve_plan"]
+
+
+class PendingAskBase(BaseModel):
+    """One human-actionable request in one session. The subclass for each
+    ``kind`` carries the payload an inline answer needs."""
+
+    id: str
+    session_id: str
+    session_title: str
+    session_backend: str
+    spawner_session_id: str | None = None
+    created_at: datetime
+    sequence: int
+    availability: PendingAskAvailability
+    title: str
+    body: str | None = None
+
+
+class PendingQuestionAsk(PendingAskBase):
+    kind: Literal["question"] = "question"
+    question: PendingAskQuestion
+
+
+class PendingApprovalAsk(PendingAskBase):
+    kind: Literal["approval"] = "approval"
+    approval: PendingAskApproval
+
+
+class PendingPlanAsk(PendingAskBase):
+    kind: Literal["plan_approval"] = "plan_approval"
+    plan: PendingAskPlan
+
+
+PendingAsk = Annotated[
+    PendingQuestionAsk | PendingApprovalAsk | PendingPlanAsk,
+    Field(discriminator="kind"),
+]
+
+
+class PendingAsksSnapshot(BaseModel):
+    """Every pending ask across live sessions, oldest first."""
+
+    epoch: str
+    revision: int
+    items: list[PendingAsk]
+
+
 class EventsPageResponse(BaseModel):
     events: list[EventRecord] = Field(default_factory=list)
     has_more: bool = False

@@ -2447,14 +2447,54 @@ class Storage:
 
     @_synchronized
     def list_approval_events(self, session_id: str) -> list[EventRecord]:
-        """Approval requests and system notes, in order."""
+        """Approval requests and the notes that resolve them, in order.
+
+        The note predicate mirrors ``backends.approvals.is_approval_resolution``
+        (``LIKE`` is case-insensitive for ASCII, like its ``re.I``).
+        """
         rows = self.connection.execute(
             """
             SELECT * FROM events
-            WHERE session_id = ? AND kind IN (?, ?)
+            WHERE session_id = ?
+              AND (kind = ?
+                   OR (kind = ?
+                       AND (json_extract(metadata, '$.method') = 'approval.invalidated'
+                            OR text LIKE '%Approval response sent%'
+                            OR text LIKE '%Approval timed out%')))
             ORDER BY sequence ASC, id ASC
             """,
             [session_id, EventKind.APPROVAL_REQUEST, EventKind.SYSTEM_NOTE],
+        ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
+    def events_by_metadata(
+        self,
+        session_id: str,
+        key: str,
+        value: str | None = None,
+        after_sequence: int = 0,
+        limit: int | None = None,
+        *,
+        newest_first: bool = False,
+    ) -> list[EventRecord]:
+        """Events whose top-level metadata ``key`` equals ``value``, or is set
+        when ``value`` is ``None``, after ``after_sequence``, capped at
+        ``limit`` when given."""
+        direction = "DESC" if newest_first else "ASC"
+        path = f"$.{key}"
+        if value is None:
+            matches, params = "json_extract(metadata, ?) IS NOT NULL", [path]
+        else:
+            matches, params = "json_extract(metadata, ?) = ?", [path, value]
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM events
+            WHERE session_id = ? AND sequence > ? AND {matches}
+            ORDER BY sequence {direction}, id {direction}
+            LIMIT ?
+            """,
+            [session_id, after_sequence, *params, -1 if limit is None else limit],
         ).fetchall()
         return [self._event_from_row(row) for row in rows]
 

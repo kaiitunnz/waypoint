@@ -1908,3 +1908,38 @@ def test_schedule_usage_provider_selection_round_trip(tmp_path) -> None:
 def test_vacuum_runs_without_error(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     storage.vacuum()  # Should not raise
+
+
+def test_events_by_metadata_filters_orders_and_bounds(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "s1", "one")
+    _make_session(storage, "s2", "two")
+
+    def append(session_id: str, metadata: dict) -> int:
+        return storage.append_event(
+            EventRecord(
+                session_id=session_id,
+                ts=datetime.now(UTC),
+                kind=EventKind.SYSTEM_NOTE,
+                text="",
+                metadata=metadata,
+                sequence=storage.next_sequence(session_id),
+            )
+        ).sequence
+
+    first = append("s1", {"item_type": "plan"})
+    append("s1", {"item_type": "agentMessage"})
+    second = append("s1", {"item_type": "plan"})
+    decided = append("s1", {"plan_decision": "accept"})
+    append("s2", {"item_type": "plan"})
+
+    def sequences(*args, **kwargs) -> list[int]:
+        return [e.sequence for e in storage.events_by_metadata("s1", *args, **kwargs)]
+
+    assert sequences("item_type", "plan") == [first, second]
+    assert sequences("item_type", "plan", newest_first=True) == [second, first]
+    assert sequences("item_type", "plan", newest_first=True, limit=1) == [second]
+    assert sequences("item_type", "plan", after_sequence=first) == [second]
+    assert sequences("plan_decision") == [decided]
+    assert sequences("missing") == []
+    assert storage.events_by_metadata("elsewhere", "item_type", "plan") == []

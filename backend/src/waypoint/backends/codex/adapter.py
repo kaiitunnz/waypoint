@@ -821,6 +821,12 @@ class CodexAppServerAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending_approval is not None)
 
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        state = self._sessions.get(session_id)
+        if state is None or state.pending_approval is None:
+            return ()
+        return (state.pending_approval.approval_id,)
+
     async def shutdown(self) -> None:
         for session_id in list(self._sessions.keys()):
             await self.terminate_session(session_id)

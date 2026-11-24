@@ -410,6 +410,10 @@ class OpenCodePlugin(DefaultLaunchContract):
             def _on_server_died(active_session_ids: list[str]) -> None:
                 self._handle_server_died(runtime, key, active_session_ids)
 
+            def _on_questions_changed(sid: str) -> None:
+                runtime.questions.mark_dirty(sid)
+                runtime.asks.mark_dirty(sid)
+
             session_update_callback = getattr(runtime, "session_update_callback", None)
             token_usage_callback = getattr(runtime, "token_usage_callback", None)
             adapter = OpenCodeAdapter(
@@ -425,7 +429,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,
-                on_questions_changed=lambda sid: runtime.questions.mark_dirty(sid),
+                on_questions_changed=_on_questions_changed,
                 workdir=key[1],
                 extra_args=custom_args,
                 launch_env=dict(key[3]),

@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.claude_tty import transport as transport_mod
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
@@ -31,7 +32,13 @@ from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 from waypoint.backends.tmux.adapter import TmuxError
-from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    EventRecord,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 
@@ -163,6 +170,31 @@ async def test_stable_write_dialog_emits_approval_request() -> None:
     assert pending.tool_name == "Write"
     assert pending.approve_number == 1
     assert pending.decline_number == 3
+
+
+async def test_live_approval_ids_match_the_emitted_request() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("approval_write.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+
+    call = runtime._emit_adapter_event.call_args
+    request = EventRecord(
+        session_id="sess-1",
+        ts=datetime.now(UTC),
+        kind=call.args[1],
+        text=call.args[2],
+        metadata=call.args[3],
+        sequence=1,
+    )
+    transport = ClaudeTtyTransport(runtime, plugin)
+    assert transport.pending_approval_ids(session) == (approval_request_id(request),)
+
+    plugin._pending_approvals.clear()
+    assert transport.pending_approval_ids(session) == ()
 
 
 async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
@@ -1197,6 +1229,8 @@ async def test_restarted_tailer_adopts_the_open_plan_card() -> None:
     pending = restarted._plugin._pending_approvals["sess-1"]
     assert pending.approval_id == card["approval_id"]
     assert pending.is_plan
+    # Nothing recorded the adoption, so the pending-asks feed is told directly.
+    runtime.asks.mark_dirty.assert_called_once_with("sess-1")
     runtime._record_system_event.assert_awaited_once_with(
         "sess-1",
         "Pending approval expired",
@@ -1265,6 +1299,10 @@ async def test_failed_keystroke_keeps_the_approval_pending() -> None:
         await transport.respond_to_approval(_make_session(), "approve", None)
 
     assert "sess-1" in plugin._pending_approvals
+    # Answerable again with no event to say so: the pending-asks feed is told.
+    cast(MagicMock, transport._runtime).asks.mark_dirty.assert_called_once_with(
+        "sess-1"
+    )
 
 
 async def test_terminate_closes_the_pending_card() -> None:

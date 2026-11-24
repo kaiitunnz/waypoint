@@ -13,6 +13,8 @@ from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     CommandCompletion,
+    EventRecord,
+    PendingAskAvailability,
     SessionContextUsage,
     SessionRecord,
 )
@@ -178,6 +180,37 @@ class QuestionLifecycle(Protocol):
     ) -> QuestionDecline:
         """Decline exactly ``tool_use_id`` with the provider. The runtime records
         the outcome and serializes this against answers."""
+        ...
+
+
+class PendingPlanApproval(BaseModel):
+    """A plan awaiting the human's decision, as reported by a
+    ``PlanApprovalLifecycle`` agent."""
+
+    plan_id: str
+    text: str
+    decisions: list[str]
+    supports_note: bool
+    availability: PendingAskAvailability
+    created_at: datetime
+    sequence: int
+
+
+@runtime_checkable
+class PlanApprovalLifecycle(Protocol):
+    """An agent that decides plans through ``approve_plan``. The pending-asks feed
+    asks it which plan, if any, awaits the human."""
+
+    def pending_plan_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> PendingPlanApproval | None:
+        """The plan awaiting a decision, or ``None``. Check cheap gates (the
+        session's mode) before querying events."""
+        ...
+
+    def affects_plan_approval(self, event: EventRecord) -> bool:
+        """Whether ``event`` can change the session's pending plan (a plan item
+        or a recorded decision). Pure; runs for every event of a tracked session."""
         ...
 
 

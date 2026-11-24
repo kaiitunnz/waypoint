@@ -1,14 +1,16 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 
 import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
 import { useLaunchTargets, type LaunchTargetsState } from "@waypoint/web-core/hooks/useLaunchTargets";
-import { usePendingAsks } from "@waypoint/web-core/hooks/usePendingAsks";
+import { useSessionActions, type SessionActions } from "@waypoint/web-core/hooks/useSessionActions";
+import { useSessionsFeed, type SessionsFeed } from "@waypoint/web-core/hooks/useSessionsFeed";
 import type { ConnectionState } from "@waypoint/web-core/session/connection";
 import { pendingAsksCount } from "@waypoint/web-core/pendingAsks";
 
 import { handleAuthFailure } from "@/lib/auth";
+import { useToast } from "@/components/ui/Toast";
 
 export interface ShellData {
   host: string;
@@ -20,6 +22,22 @@ export interface ShellData {
 }
 
 const ShellDataContext = createContext<ShellData | null>(null);
+
+// The sessions feed and the row actions live apart from ShellData: the feed
+// changes on every session event, and the navigation only needs the counts.
+export interface SessionsData extends SessionsFeed {
+  actions: SessionActions;
+}
+
+const SessionsDataContext = createContext<SessionsData | null>(null);
+
+export function useSessionsData(): SessionsData {
+  const value = useContext(SessionsDataContext);
+  if (!value) {
+    throw new Error("useSessionsData needs a ShellDataProvider");
+  }
+  return value;
+}
 
 export function useShellData(): ShellData {
   const value = useContext(ShellDataContext);
@@ -40,13 +58,22 @@ export function ShellDataProvider({
   children: ReactNode;
 }) {
   const inboxCount = useInboxCount(host, token, handleAuthFailure);
-  const { snapshot, connection } = usePendingAsks(host, token, handleAuthFailure);
+  const feed = useSessionsFeed(host, token, handleAuthFailure);
   const launchTargets = useLaunchTargets(host, token, handleAuthFailure);
-  const needsYou = pendingAsksCount(snapshot) + inboxCount;
+  const { toast } = useToast();
+  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
+  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
+  const needsYou = pendingAsksCount(feed.pendingAsks) + inboxCount;
+  const { connection } = feed;
 
-  const value = useMemo(
+  const shell = useMemo(
     () => ({ host, token, needsYou, connection, launchTargets }),
     [host, token, needsYou, connection, launchTargets],
   );
-  return <ShellDataContext.Provider value={value}>{children}</ShellDataContext.Provider>;
+  const sessions = useMemo(() => ({ ...feed, actions }), [feed, actions]);
+  return (
+    <ShellDataContext.Provider value={shell}>
+      <SessionsDataContext.Provider value={sessions}>{children}</SessionsDataContext.Provider>
+    </ShellDataContext.Provider>
+  );
 }

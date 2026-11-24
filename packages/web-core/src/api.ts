@@ -65,6 +65,17 @@ export class AuthError extends Error {
   }
 }
 
+// A non-2xx answer other than 401, with the HTTP status for callers that react to one.
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function probeBackend(host: string, signal?: AbortSignal): Promise<boolean> {
   try {
     const response = await fetch(`${host}/health`, { cache: "no-store", signal });
@@ -318,7 +329,7 @@ export async function fetchEvents(
   host: string,
   token: string,
   sessionId: string,
-  options: { messages?: number; beforeSequence?: number } = {},
+  options: { messages?: number; beforeSequence?: number; signal?: AbortSignal } = {},
 ): Promise<EventsPage> {
   const params = new URLSearchParams();
   if (options.messages !== undefined) {
@@ -332,6 +343,7 @@ export async function fetchEvents(
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
+    signal: options.signal,
   });
   await ensureOk(response, "failed to fetch events");
   const payload = await response.json();
@@ -2417,7 +2429,7 @@ async function ensureOk(response: Response, fallbackMessage: string): Promise<vo
   if (response.status === 401) {
     throw new AuthError(detail ?? "session expired");
   }
-  throw new Error(detail ?? fallbackMessage);
+  throw new ApiError(detail ?? fallbackMessage, response.status);
 }
 
 async function readErrorDetail(response: Response): Promise<string | null> {

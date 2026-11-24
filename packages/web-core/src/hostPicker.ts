@@ -78,10 +78,11 @@ export interface ParsedAddress {
 }
 
 const HOST_WITH_PORT = /^(\[[^\]]+\]|[^\s:/?#]+)(?::(\d+))?(?:[/?#].*)?$/;
+const VALID_HOSTNAME = /^(?:\[[0-9a-f:.]+\]|[a-z0-9_.-]+)$/;
 
 // Reads what a person types or pastes into "Enter an address": a bare host, a
 // `host:port`, or a full URL. A port in the text is returned so the port field
-// can follow it.
+// can follow it; a URL with a scheme and no port is on the scheme's default.
 export function parseAddress(text: string): ParsedAddress | null {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -103,8 +104,11 @@ export function parseAddress(text: string): ParsedAddress | null {
     return null;
   }
   const hostname = match[1].toLowerCase();
+  if (!VALID_HOSTNAME.test(hostname)) {
+    return null;
+  }
   if (match[2] === undefined) {
-    return { protocol, hostname, port: null };
+    return { protocol, hostname, port: scheme ? protocolDefaultPort(protocol) : null };
   }
   const port = parsePort(match[2]);
   return port === null ? null : { protocol, hostname, port };
@@ -179,6 +183,10 @@ export interface BuildHostGroupsInput {
   // The deployment's backend port, used for the host serving this page.
   devicePort?: number;
   snapshot: TailnetSnapshot | null;
+  // True when the snapshot is the page host's own tailnet view, so its `is_self`
+  // peer is This device. A signed-in backend's snapshot is that backend's view,
+  // where `is_self` is the backend, so This device is the peer matching `pageHost`.
+  selfIsPageHost?: boolean;
   recents: RecentHost[];
   query?: string;
 }
@@ -199,7 +207,7 @@ function makeRow(fields: Omit<HostRow, "key" | "address" | "searchText"> & {
     .toLowerCase();
   return {
     ...row,
-    key: row.kind === "ssh" ? `ssh:${row.targetId}` : hostKey(row.url),
+    key: hostKey(row.url),
     address,
     searchText: haystack,
   };
@@ -235,12 +243,15 @@ export function buildHostGroups({
   protocol = "http",
   devicePort = DEFAULT_BACKEND_PORT,
   snapshot,
+  selfIsPageHost = true,
   recents,
   query = "",
 }: BuildHostGroupsInput): HostGroups {
   const claimed = new Set<string>();
   const available = snapshot?.available ? snapshot : null;
-  const selfPeer = available?.peers.find((peer) => peer.is_self) ?? null;
+  const selfPeer = selfIsPageHost
+    ? (available?.peers.find((peer) => peer.is_self) ?? null)
+    : peerMatching(snapshot, pageHost);
 
   const deviceUrl = buildBackendUrl({ protocol, hostname: pageHost, port: devicePort });
   const thisDevice = makeRow({
@@ -263,7 +274,7 @@ export function buildHostGroups({
     if (!address) continue;
     const peer = peerMatching(snapshot, address.hostname);
     // The host serving this page is This device however it was typed.
-    if (peer?.is_self && address.port === devicePort) continue;
+    if (peer && peer === selfPeer && address.port === devicePort) continue;
     const row = makeRow({
       kind: "host",
       name: entry.name,
@@ -282,7 +293,7 @@ export function buildHostGroups({
   const online: HostRow[] = [];
   const offline: HostRow[] = [];
   for (const peer of available?.peers ?? []) {
-    if (peer.is_self) continue;
+    if (peer === selfPeer) continue;
     const port = portForHost([peer.ip, peer.dns_name, peer.name], recents, DEFAULT_BACKEND_PORT);
     const row = makeRow({
       kind: "host",

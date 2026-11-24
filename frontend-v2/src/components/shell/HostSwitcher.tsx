@@ -127,6 +127,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
         protocol: window.location.protocol === "https:" ? "https" : "http",
         devicePort: deploymentBackendPort(),
         snapshot,
+        selfIsPageHost: false,
         recents,
         query,
       }),

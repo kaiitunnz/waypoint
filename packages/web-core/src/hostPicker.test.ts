@@ -56,6 +56,21 @@ describe("parseAddress", () => {
     expect(parseAddress("[::1]:8787")).toEqual({ protocol: "http", hostname: "[::1]", port: 8787 });
   });
 
+  it("reads a URL with a scheme and no port as the scheme's default port", () => {
+    expect(parseAddress("https://waypoint.example.com")).toEqual({
+      protocol: "https",
+      hostname: "waypoint.example.com",
+      port: 443,
+    });
+    expect(parseAddress("http://10.0.4.12/")).toEqual({ protocol: "http", hostname: "10.0.4.12", port: 80 });
+  });
+
+  it("rejects hosts a URL parser would read differently", () => {
+    expect(parseAddress("evil.example\\@good.example")).toBeNull();
+    expect(parseAddress("user@good.example")).toBeNull();
+    expect(parseAddress("http://a%2eb")).toBeNull();
+  });
+
   it("rejects empty text, other schemes and bad ports", () => {
     expect(parseAddress("   ")).toBeNull();
     expect(parseAddress("ftp://host")).toBeNull();
@@ -183,6 +198,50 @@ describe("buildHostGroups", () => {
     });
     expect(groups.thisDevice).toMatchObject({ name: "studio", hostname: "localhost" });
     expect(names(groups.recent)).toEqual(["studio-9000"]);
+  });
+
+  describe("with a signed-in backend's snapshot", () => {
+    // Page served from laptop L, signed in to backend S: the snapshot is S's view, so `is_self` is S.
+    const backendView = () =>
+      snapshot([
+        peer("server-s", "100.64.0.9", true, { is_self: true }),
+        peer("laptop-l", "100.64.0.2", true),
+        peer("box", "100.64.0.5", true),
+      ]);
+
+    it("names This device after the peer that serves the page and keeps the backend listed", () => {
+      const groups = buildHostGroups({
+        pageHost: "100.64.0.2",
+        devicePort: 8787,
+        snapshot: backendView(),
+        selfIsPageHost: false,
+        recents: [recent("http://100.64.0.9:8787", 1, "server-s")],
+      });
+      expect(groups.thisDevice).toMatchObject({ name: "laptop-l", url: "http://100.64.0.2:8787" });
+      expect(names(groups.recent)).toEqual(["server-s"]);
+      expect(names(groups.online)).toEqual(["box"]);
+    });
+
+    it("lists the backend under Online when it was never signed in to from here", () => {
+      const groups = buildHostGroups({
+        pageHost: "100.64.0.2",
+        snapshot: backendView(),
+        selfIsPageHost: false,
+        recents: [],
+      });
+      expect(names(groups.online)).toEqual(["box", "server-s"]);
+    });
+
+    it("falls back to the page host when the backend's tailnet does not list it", () => {
+      const groups = buildHostGroups({
+        pageHost: "localhost",
+        snapshot: backendView(),
+        selfIsPageHost: false,
+        recents: [],
+      });
+      expect(groups.thisDevice).toMatchObject({ name: "localhost" });
+      expect(names(groups.online)).toEqual(["box", "laptop-l", "server-s"]);
+    });
   });
 
   it("lists a peer once when its recent is an https address on the default port", () => {

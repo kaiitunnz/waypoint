@@ -10,12 +10,10 @@ $W compact --target <sid> --grounding proceed|park
 
 Use the grounding you recorded with `phase`. If the target's events show a compaction note since it parked, the user already compacted it: pass `--grounding-only`. The note reads `Context compacted` on Claude Code and Codex, and `Session compacted` on opencode.
 
-`compact` refuses a target at `interrupted` or `error`, and at `waiting_input` unless it is waiting only on its own question (`awaiting_answer: true` in `sessions list`) and you run `$W` from a session. Such a target counts as idle, and its question stays answerable. Otherwise the pair goes out by backend:
+`compact` refuses a target at `interrupted` or `error`, or at `waiting_input` unless `awaiting_answer` is true and you run `$W` from a session; that target counts as idle below, and its question stays answerable. Otherwise the pair goes out by backend:
 
-- **Claude Code** queues `/compact` until its turn ends, so `compact` sends it at once, and a refusal fails the command. An idle target gets the grounding right after it. A running turn would consume plain text, so a detached helper sends that target's grounding once the turn has ended, including a turn that ends waiting on its own question.
+- **Claude Code** queues `/compact` until its turn ends, so `compact` sends it at once, and a refusal fails the command. An idle target gets the grounding right after it. A running turn would consume plain text, so a detached helper sends that target's grounding once the turn has ended.
 - **Codex and opencode** can't queue it, so `compact` returns at once and a detached helper sends both: `/compact` once the target is idle and quiet (2 s on Codex, 5 s on opencode), then the grounding once the compaction has ended. Focus counts as not ready.
-
-"Idle" here includes waiting only on its own question. The helper never sends while an approval or a blocking question parks the target's turn.
 
 With `park`, wait until the target has run a turn after the compaction note before sending follow-up work. With `proceed`, you are done.
 

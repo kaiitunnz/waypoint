@@ -127,9 +127,7 @@ workspace themselves.
 
 The `waypoint` skill is the authoritative assistant workflow for this CLI.
 At a high level, the assistant manages your coding sessions through the
-`waypoint` CLI, which
-talks to the running server over HTTP (distinct from the in-process `waypoint
-session` commands):
+`waypoint` CLI, which talks to the running server over HTTP:
 
 ```
 waypoint sessions list

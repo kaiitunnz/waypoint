@@ -5,9 +5,8 @@ description: Use when managing Waypoint coding sessions through the `waypoint` C
 
 # Waypoint Sessions
 
-Use this skill for the `waypoint` backend CLI. Prefer `waypoint sessions ...`
-for a running Waypoint server; avoid the singular `waypoint session ...` flow
-unless the user explicitly wants an in-process one-shot runtime.
+Use this skill for the `waypoint` backend CLI, which manages sessions on a
+running Waypoint server.
 
 Run `waypoint help` to dump the entire CLI surface — every nested command, its
 arguments, and its options — in one call (`waypoint help --json` for structured
@@ -22,7 +21,8 @@ trusting any flag list reproduced in this skill.
 ## Common Routing
 
 - Read session state or transcript: see `references/sessions-read.md`; list importable threads with `waypoint backends threads <backend>`, import one with `waypoint sessions import <backend> --thread-id <id>` (replays the thread's prior conversation into the new session by default; pass `--no-import-history` to start empty), or pipe just the assistant text with `waypoint sessions output <session-id> --text`.
-- Launch a new coding agent: see `references/sessions-launch.md`.
+- Launch a new coding agent, or attach an existing tmux pane as a session
+  (`sessions attach-tmux`): see `references/sessions-launch.md`.
 - Fork or clone a session, revive an exited one (`reattach`, `resume`), or
   search exited sessions (`history`): see `references/sessions-lifecycle.md`.
 - Keep a long-running session from filling its context window (watch usage, park at a checkpoint, compact): the `waypoint-context` skill.

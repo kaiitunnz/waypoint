@@ -35,6 +35,7 @@
     "./tokens": "./src/tokens.ts",
     "./types": "./src/types.ts",
     "./usage": "./src/usage.ts",
+    "./usageSummary": "./src/usageSummary.ts",
     "./usageLimitSource": "./src/usageLimitSource.ts",
     "./variant": "./src/variant.ts",
     "./workspacePaths": "./src/workspacePaths.ts",

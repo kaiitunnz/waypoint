@@ -598,3 +598,35 @@ async def test_answering_clears_awaiting(tmp_path, monkeypatch) -> None:
     await answer(ClaudeTtyPlugin(), runtime, "q1")
 
     assert not runtime.get_session("s1").awaiting_answer
+
+
+async def test_closing_open_questions_lets_turns_end_idle(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+
+    await runtime.questions.close_open("s1", "Question closed: new conversation")
+    await end_turn(runtime)
+
+    assert runtime.storage.open_question_tool_use_ids("s1") == []
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.IDLE
+    assert not session.awaiting_answer
+
+
+async def test_closing_open_questions_ends_a_settled_wait(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    input_transport(runtime, monkeypatch)
+    await ask(runtime, "q1")
+    await end_turn(runtime)
+    assert runtime.get_session("s1").awaiting_answer
+
+    await runtime.questions.close_open("s1", "Question closed: new conversation")
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.IDLE
+    assert not session.awaiting_answer

@@ -477,8 +477,8 @@ class SessionRecord(BaseModel):
     # ``HeldMessageRecord``s.
     focus: bool = False
     # ``WAITING_INPUT`` because a finished turn left a question open, with no
-    # request parking the turn: safe to message. Every other status write
-    # clears it.
+    # request parking the turn: safe to message. A status change or an approval
+    # request clears it; a write that keeps the status keeps it.
     awaiting_answer: bool = False
     # Sequence of the todo snapshot the human dismissed from the task dock; any
     # other snapshot shows the dock again. ``None`` = not dismissed.

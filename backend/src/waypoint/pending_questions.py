@@ -294,6 +294,24 @@ class PendingQuestionTracker:
             },
         )
 
+    async def close_open(self, session_id: str, text: str) -> None:
+        """Record a closure for every open question, e.g. once the agent's
+        conversation is replaced and none of them can be answered. A session
+        whose finished turn was waiting on them goes idle."""
+        closed = False
+        for tool_use_id in self._runtime.storage.open_question_tool_use_ids(session_id):
+            if (session_id, tool_use_id) in self._operations:
+                continue
+            await self._record_closed(
+                session_id, tool_use_id, QuestionCloseReason.PROVIDER_CLOSED, text
+            )
+            closed = True
+        session = self._runtime.storage.get_session(session_id)
+        if closed and session is not None and session.awaiting_answer:
+            await self._runtime.update_session_fields(
+                session_id, status=SessionStatus.IDLE
+            )
+
     # ── Liveness, snapshot, reconciliation ──────────────────────────────
 
     def liveness(

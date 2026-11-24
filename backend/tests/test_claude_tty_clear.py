@@ -243,6 +243,7 @@ def _runtime(session: SessionRecord) -> MagicMock:
         return store.session
 
     runtime.update_session_fields = AsyncMock(side_effect=update_session_fields)
+    runtime.questions.close_open = AsyncMock()
     return runtime
 
 
@@ -299,6 +300,8 @@ async def test_follow_clear_rebinds_after_the_old_tailer_drains(
     session = runtime.storage.session
     assert session.transport_state == {"thread_id": CHILD, "tmux_pane": "%0"}
     assert session.context_usage is None
+    # The old conversation's questions cannot be answered in the new one.
+    runtime.questions.close_open.assert_awaited_once()
     assert [args[2] for args in built] == [PARENT, CHILD]
     new = plugin._tailers["s1"]
     assert isinstance(new.tailer, _FakeTailer)

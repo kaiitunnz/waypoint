@@ -683,6 +683,9 @@ class ClaudeTtyPlugin:
             transport_state={**session.transport_state, "thread_id": successor},
             context_usage=None,
         )
+        await runtime.questions.close_open(
+            session_id, "Question closed: /clear started a new conversation"
+        )
         log.info(
             "following /clear onto a new thread",
             extra={"session_id": session_id, "thread_id": successor},

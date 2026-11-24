@@ -32,5 +32,8 @@ boundaries, original sequence/timestamps, overwritten metadata, duplicate or
 paging diagnosis, or transport artifacts such as `raw_terminal_chunk`.
 
 When summarizing, distinguish status (`running`, `waiting_input`, `idle`,
-`exited`, `error`) from your interpretation of progress. Quote only the minimum
+`exited`, `error`) from your interpretation of progress. A `waiting_input`
+session with `awaiting_answer: true` finished its turn and waits only on its own
+open question, so a message reaches it as at an idle one. Without the flag it may
+be parked on an approval or a blocking question. Quote only the minimum
 transcript text needed to justify the conclusion.

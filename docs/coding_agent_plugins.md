@@ -508,17 +508,28 @@ Codex turn that ends with one of its own questions still open settles at
 `WAITING_INPUT`.
 
 The runtime keeps a session waiting on the human while a question is open. An
-`IDLE` an event stamps (through the adapter-event sink or a runtime system
-note) becomes `WAITING_INPUT` while an `ACTIONABLE` question asked since the
-human's last message is still open. That holds even when an agent message, a
-wake, or a task notification started the turn that ended. A `user_input` event
-for a message the human did not type carries `input_origin` (`agent`,
-`schedule`, or `wake`); only events without it count as the human's message, so
-a plugin recording its own `user_input` during dispatch gets the key without
-passing it. A normalizer only needs to report the turn's end as `IDLE`. An
-agent that dismisses its own question to surface it (`claude_tty`) marks the
-dismissal `WAITING_INPUT`, since a sibling tool's result can land after the
-card and mark the session running.
+`IDLE` written through the adapter-event sink, a runtime system note, or
+`update_session_fields` becomes `WAITING_INPUT` while an `ACTIONABLE` question
+asked since the human's last message is still open. That holds even when an
+agent message, a wake, or a task notification started the turn that ended. A
+`user_input` event for a message the human did not type carries `input_origin`
+(`agent`, `schedule`, or `wake`). Only events without it count as the human's
+message, so a plugin recording its own `user_input` during dispatch gets the
+key without passing it. A normalizer only needs to report the turn's end as
+`IDLE`. `claude_tty` reports it at the dismissal of the question it surfaces,
+which lands after any sibling tool's result.
+
+The plugin declares `question_parks_turn`: true when the agent's turn blocks on
+an open question (claude_code, OpenCode), false when it ends with a stand-in
+card (`claude_tty`, Codex). A settled wait on a stand-in agent with no pending
+approval also sets the session's `awaiting_answer`. That marks the session at
+rest and safe to message, which callers such as `sessions wait --until
+awaiting_answer` and the waypoint-context watcher rely on. Any other status
+change clears it, and so does an approval request. A plugin that settles its
+own turn end onto a question (Codex's guard, restore, and import) sets
+`awaiting_answer` itself: the `AWAITING_ANSWER_KEY` event metadata, or the
+`update_session` field. A status rollback after a failed send restores the
+previous value.
 
 ### Task notifications (optional)
 

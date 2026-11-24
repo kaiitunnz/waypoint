@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 
 import {
+  isCompleteHost,
   parsePort,
   portAfterHostEdit,
   resolveTypedAddress,
@@ -197,13 +198,15 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
     if (live) onAddress(resolveTypedAddress(nextHost, nextPort, pageProtocol));
   };
 
+  const address = resolveTypedAddress(hostText, portText, pageProtocol);
+  const portInvalid = parsePort(portText) === null;
+  const complete = address !== null && !portInvalid && isCompleteHost(address.hostname);
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const address = resolveTypedAddress(hostText, portText, pageProtocol);
-    if (address && parsePort(address.portText) !== null) onAddress(address);
+    if (address && complete) onAddress(address);
   };
 
-  const portInvalid = parsePort(portText) === null;
   return (
     <form className={styles.addressForm} onSubmit={submit}>
       <button
@@ -250,7 +253,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
               size="sm"
               type="submit"
               className={styles.continue}
-              disabled={!resolveTypedAddress(hostText, portText, pageProtocol) || portInvalid}
+              disabled={!complete}
             >
               Continue
             </Button>

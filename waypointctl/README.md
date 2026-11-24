@@ -95,7 +95,8 @@ check. `status` shows which app each service is running (`variant=v1|v2`).
   the app, `packages/web-core`, the root `package.json`, the root
   `package-lock.json`, or `WAYPOINT_STACK_BACKEND_PORT` changes.
 - The preview is optional: if it fails to start, the error is reported and the
-  exit code is 1, but the backend and primary frontend keep running.
+  exit code is 1, but the backend and primary frontend keep running. The Docker
+  tailnet sidecar does not proxy the preview port.
 - Both apps share one `node_modules`, so a command that would reinstall
   dependencies under a running frontend is refused; use `restart frontend`.
 - `WAYPOINT_STACK_FRONTEND_DEV=1` runs both services with `npm run dev`.

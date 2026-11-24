@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ def state_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def _build_config(tmp_path: Path, state_dir: Path, **overrides: object) -> StackConfig:
     home = tmp_path / "repo"
     home.mkdir(exist_ok=True)
-    defaults: dict[str, object] = dict(
+    defaults: dict[str, Any] = dict(
         home=home,
         state_dir=state_dir.resolve(),
         backend_host="127.0.0.1",
@@ -36,7 +37,7 @@ def _build_config(tmp_path: Path, state_dir: Path, **overrides: object) -> Stack
         child_env={},
     )
     defaults.update(overrides)
-    return StackConfig(**defaults)  # type: ignore[arg-type]
+    return StackConfig(**defaults)
 
 
 class _StubService:
@@ -560,6 +561,21 @@ def test_a_conflicting_lone_preview_is_refused_before_anything_stops(
     assert preview.calls == []
     assert stack.check_target("frontend-preview", action) == preview.conflict_message
     assert stack.check_target("frontend-preview", "stop") is None
+
+
+def test_starting_an_already_running_preview_is_not_a_conflict(
+    state_dir: Path, tmp_path: Path
+) -> None:
+    stack = WaypointStack(
+        _build_config(tmp_path, state_dir, frontend_preview_port=3011)
+    )
+    pid_path = tmp_path / "frontend-preview.pid"
+    pid_path.write_text(f"{os.getpid()}\n")
+    preview = _install_preview_stub(stack, pid_path=pid_path)
+    preview.conflict_message = "frontend dependencies changed; run restart frontend"
+
+    assert stack.check_target("frontend-preview", "start") is None
+    assert stack.check_target("frontend-preview", "restart") == preview.conflict_message
 
 
 def test_the_frontend_group_ignores_the_sibling_conflict(

@@ -509,6 +509,27 @@ def test_a_running_preview_without_a_config_port_can_be_stopped(
         server.server_close()
 
 
+def test_a_conflicting_preview_restart_is_rejected_before_it_runs(
+    control_with_preview: tuple[ControlServer, int, str],
+) -> None:
+    server, port, password = control_with_preview
+    server.stack.frontend_preview.conflict = lambda: "run restart frontend"  # type: ignore[attr-defined]
+    token = _login(port, password)
+
+    status, body = _request(
+        port,
+        "/api/action",
+        "POST",
+        token=token,
+        body={"action": "restart", "target": "frontend-preview"},
+    )
+
+    assert status == 400
+    assert body["error"] == "run restart frontend"
+    assert server.stack.frontend_preview.calls == []  # type: ignore[attr-defined]
+    assert server.ops_snapshot() == []
+
+
 def test_preview_log_target_is_served(
     control_with_preview: tuple[ControlServer, int, str],
     monkeypatch: pytest.MonkeyPatch,

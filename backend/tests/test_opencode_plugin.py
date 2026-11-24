@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -1497,3 +1497,33 @@ async def test_agent_launch_contract_async() -> None:
     await plugin.capture_thread_id(
         cast(Any, None), "sess", "/cwd", datetime.now(UTC), None
     )
+
+
+@pytest.mark.asyncio
+async def test_a_questions_change_reaches_the_tracker_and_the_asks_feed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = OpenCodePlugin()
+    callbacks: list[Any] = []
+
+    class FakeAdapter:
+        def __init__(self, emit_event, on_questions_changed=None, **_: Any) -> None:
+            callbacks.append(on_questions_changed)
+
+    runtime: Any = SimpleNamespace(
+        settings=SimpleNamespace(default_cwd="~/"),
+        _find_launch_target=lambda _launch_target_id: None,
+        _emit_adapter_event=lambda *args, **kwargs: None,
+        questions=MagicMock(),
+        asks=MagicMock(),
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.opencode.plugin.OpenCodeAdapter", FakeAdapter
+    )
+    await plugin._get_or_create_adapter(runtime, None, "/tmp/a")
+
+    [on_questions_changed] = callbacks
+    on_questions_changed("sess-1")
+
+    runtime.questions.mark_dirty.assert_called_once_with("sess-1")
+    runtime.asks.mark_dirty.assert_called_once_with("sess-1")

@@ -759,7 +759,7 @@ class EventEnvelope(BaseModel):
 ```
 
 Per-plugin `normalize.py` modules turn raw protocol events into the envelope
-shape. The frontend's `lib/events.ts::parseEvent` reads the envelope back out
+shape. The frontend's `parseEvent` (`packages/web-core/src/events.ts`) reads the envelope back out
 — components no longer poke `metadata.tool_name` etc. directly. When an agent
 bumps its protocol, the change lands inside that agent's `normalize.py`; the
 frontend reader stays put.
@@ -810,7 +810,7 @@ bootstrap can hydrate the picker without a second round-trip.
 
 The frontend consumes it via:
 
-- `frontend/src/lib/backends.ts::useBackendCatalog()` — React hook fed by
+- `packages/web-core/src/backends.ts::useBackendCatalog()` — React hook fed by
   `MeResponse.backends`, falls back to `/api/backends` when rendering before
   login.
 - `humaniseBackend(id)`, `transportLabel(transport)`, `fidelityFor(transport)`,
@@ -1053,8 +1053,8 @@ When Claude or Codex ships a new protocol message:
 - [`backend/src/waypoint/backends/tmux/plugin.py`](../backend/src/waypoint/backends/tmux/plugin.py)
   — the generic pane wrapper that dispatches the launch contract with no agent
   literals.
-- [`frontend/src/lib/backends.ts`](../frontend/src/lib/backends.ts)
+- [`packages/web-core/src/backends.ts`](../packages/web-core/src/backends.ts)
   — the catalog hook and capability fallbacks.
-- [`frontend/src/lib/events.ts`](../frontend/src/lib/events.ts)
+- [`packages/web-core/src/events.ts`](../packages/web-core/src/events.ts)
   — `parseEvent` envelope reader.
 ```

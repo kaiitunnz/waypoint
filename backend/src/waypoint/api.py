@@ -2918,12 +2918,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stream_task = asyncio.create_task(stream_loop())
         recv_task = asyncio.create_task(recv_loop())
         try:
-            _, pending = await asyncio.wait(
-                {stream_task, recv_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            await asyncio.wait(
+                {stream_task, recv_task}, return_when=asyncio.FIRST_COMPLETED
             )
-            for task in pending:
-                task.cancel()
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         finally:

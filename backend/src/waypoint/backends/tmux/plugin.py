@@ -171,24 +171,16 @@ class TmuxPlugin:
         if session.source != SessionSource.ATTACHED_TMUX and tmux_session:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(tmux_session)
-        monitor = runtime.monitor_tasks.pop(session.id, None)
-        if monitor is not None:
-            try:
-                await cancel_and_wait(monitor)
-            except Exception:
-                log.debug("monitor task raised during terminate", exc_info=True)
-        capture = runtime._thread_id_watchers.pop(session.id, None)
-        if capture is not None:
-            try:
-                await cancel_and_wait(capture)
-            except Exception:
-                log.debug("thread-id watcher raised during terminate", exc_info=True)
-        rl_watcher = runtime._rate_limit_watchers.pop(session.id, None)
-        if rl_watcher is not None:
-            try:
-                await cancel_and_wait(rl_watcher)
-            except Exception:
-                log.debug("rate-limit watcher raised during terminate", exc_info=True)
+        for tasks, label in (
+            (runtime.monitor_tasks, "monitor task"),
+            (runtime._thread_id_watchers, "thread-id watcher"),
+            (runtime._rate_limit_watchers, "rate-limit watcher"),
+        ):
+            if (task := tasks.pop(session.id, None)) is not None:
+                try:
+                    await cancel_and_wait(task)
+                except Exception:
+                    log.debug("%s raised during terminate", label, exc_info=True)
 
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")

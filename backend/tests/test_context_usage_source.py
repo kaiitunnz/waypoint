@@ -10,6 +10,7 @@ Verifies that:
 - A source is cancelled when the session transitions to EXITED/ERROR via
   _record_system_event (natural tmux exits).
 - A source is cancelled by delete() even when the session is already EXITED.
+- A caller cancelled while _cancel_context_usage_source waits ends cancelled.
 """
 
 import asyncio
@@ -158,12 +159,8 @@ async def test_source_cancelled_on_cancel(tmp_path: Path) -> None:
 async def test_cancel_propagates_the_callers_own_cancellation(
     tmp_path: Path,
 ) -> None:
-    """A monitor cancelled while it waits for its source to stop must stop too.
-
-    Shaped like the session monitor: it cancels the source while marking the
-    session exited, then keeps polling. Swallowing its cancellation leaves it
-    polling forever, which hung ``runtime.stop()`` (#595).
-    """
+    """A monitor cancelled while _cancel_context_usage_source waits on a
+    slow-to-stop source ends cancelled."""
     release = asyncio.Event()
     source_cancelled = asyncio.Event()
 
@@ -194,7 +191,6 @@ async def test_cancel_propagates_the_callers_own_cancellation(
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(monitor_task, 2.0)
-    assert monitor_task.cancelled()
 
 
 async def test_none_source_starts_nothing(tmp_path: Path) -> None:

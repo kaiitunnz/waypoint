@@ -65,8 +65,7 @@ class HeldQueue:
         for handle in self._retries.values():
             handle.cancel()
         self._retries.clear()
-        tasks = list(self._tasks)
-        await cancel_and_wait(*tasks)
+        await cancel_and_wait(*self._tasks)
 
     async def deliver(
         self,

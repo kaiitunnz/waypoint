@@ -789,14 +789,13 @@ class SessionRuntime:
             await cancel_and_wait(self._telemetry_maintenance_task)
             self._telemetry_maintenance_task = None
         await cancel_and_wait(
-            *(
-                instance_task
-                for instance_task in (
+            *filter(
+                None,
+                (
                     self._instance_bootstrap_task,
                     self._instance_refresh_task,
                     self._nl_generation_task,
-                )
-                if instance_task is not None
+                ),
             )
         )
         self._instance_bootstrap_task = None
@@ -808,8 +807,7 @@ class SessionRuntime:
         self.monitor_tasks.clear()
         await cancel_and_wait(*self._context_usage_sources.values())
         self._context_usage_sources.clear()
-        restore_tasks = list(self._restore_tasks)
-        await cancel_and_wait(*restore_tasks)
+        await cancel_and_wait(*self._restore_tasks)
         self._restore_tasks.clear()
         completion_tasks = list(self._completion_refresh_tasks.values())
         self._completion_refresh_tasks.clear()

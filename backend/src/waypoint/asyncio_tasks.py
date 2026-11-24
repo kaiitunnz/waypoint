@@ -10,13 +10,12 @@ async def cancel_and_wait(*tasks: asyncio.Future[Any]) -> None:
     the wait always propagates, even when a task ignores its cancel and
     returns or raises instead; the remaining tasks are then left cancelled but
     not awaited.
-
-    Comparing ``cancelling()`` against its value on entry, rather than against
-    zero, lets the caller run this from its own cancellation cleanup.
     """
     for task in tasks:
         task.cancel()
     current = asyncio.current_task()
+    # Relative to entry: the caller may be running this from its own
+    # cancellation cleanup.
     baseline = 0 if current is None else current.cancelling()
 
     def caller_cancelled() -> bool:

@@ -1481,14 +1481,13 @@ class OpenCodeAdapter:
             with suppress(Exception):
                 await cancel_and_wait(task)
         self._question_seed_tasks.clear()
-        if self._context_window_lookup_tasks:
-            lookups = list(self._context_window_lookup_tasks)
-            for task in lookups:
-                task.cancel()
-            for task in lookups:
-                with suppress(Exception):
-                    await cancel_and_wait(task)
-            self._context_window_lookup_tasks.clear()
+        lookups = list(self._context_window_lookup_tasks)
+        for task in lookups:
+            task.cancel()
+        for task in lookups:
+            with suppress(Exception):
+                await cancel_and_wait(task)
+        self._context_window_lookup_tasks.clear()
         if self._sse_task is not None:
             await cancel_and_wait(self._sse_task)
             self._sse_task = None

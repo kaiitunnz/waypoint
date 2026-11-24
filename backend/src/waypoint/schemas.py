@@ -1304,6 +1304,23 @@ class SessionLaunchRequest(SessionCreateRequest):
     cwd: str | None = None  # type: ignore[assignment]
 
 
+SessionTitle = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
+
+
+class SessionDeriveRequest(BaseModel):
+    """Optional overrides for a session forked or cloned from another.
+
+    ``spawner_session_id`` is ownership only: the derived session keeps its
+    source's permission mode and usage selection.
+    """
+
+    spawner_session_id: str | None = Field(default=None, min_length=1)
+    title: SessionTitle | None = None
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
 class SessionTagsUpdateRequest(BaseModel):
     # Merge ``set`` into the session's tags and drop each key in ``unset``.
     set: dict[str, str] = Field(default_factory=dict)
@@ -1335,9 +1352,16 @@ class SessionApprovalRequest(BaseModel):
     approval_id: str | None = None
 
 
+class PlanDecision(StrEnum):
+    ACCEPT = "accept"
+    ACCEPT_FOR_SESSION = "acceptForSession"
+    DECLINE = "decline"
+    CANCEL = "cancel"
+
+
 class SessionPlanApprovalRequest(BaseModel):
     plan_item_id: str
-    decision: Literal["accept", "acceptForSession", "decline", "cancel"] = "accept"
+    decision: PlanDecision = PlanDecision.ACCEPT
     text: str | None = None
 
 
@@ -1356,10 +1380,7 @@ class TaskDockDismissRequest(BaseModel):
 
 
 class SessionTitleRequest(BaseModel):
-    title: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
-    ]
+    title: SessionTitle
 
 
 class SessionPermissionModeRequest(BaseModel):
@@ -1535,7 +1556,7 @@ class SessionAnswerQuestionRequest(BaseModel):
 
 
 class SessionCancelQuestionRequest(BaseModel):
-    tool_use_id: str = Field(min_length=1)
+    tool_use_id: str | None = Field(default=None, min_length=1)
 
 
 class ScheduleStatus(StrEnum):

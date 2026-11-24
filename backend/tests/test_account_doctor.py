@@ -35,18 +35,7 @@ from waypoint.storage import Storage
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The test host may run Waypoint itself, whose WAYPOINT_* env vars would
-    # otherwise override the per-test config file (notably data_dir).
-    for var in (
-        "WAYPOINT_DATA_DIR",
-        "WAYPOINT_CONFIG_PATH",
-        "WAYPOINT_HOST",
-        "WAYPOINT_PORT",
-        "WAYPOINT_PASSWORD",
-    ):
-        monkeypatch.delenv(var, raising=False)
+pytestmark = pytest.mark.usefixtures("isolate_waypoint_env")
 
 
 def _onboarded_claude_dir(path: Path) -> Path:

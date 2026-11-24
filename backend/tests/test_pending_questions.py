@@ -318,6 +318,33 @@ async def test_runtime_routes_cancel_to_the_plugin(tmp_path, monkeypatch) -> Non
     assert runtime.storage.open_question_tool_use_ids("s1") == []
 
 
+async def test_cancel_without_id_targets_the_newest_question(
+    tmp_path, monkeypatch
+) -> None:
+    plugin = FakeQuestionPlugin()
+    runtime = make_runtime(tmp_path, monkeypatch, plugin)
+    await ask(runtime, "q1")
+    await ask(runtime, "q2")
+
+    await runtime.cancel_question("s1", None)
+
+    assert plugin.cancelled == ["q2"]
+    assert runtime.storage.open_question_tool_use_ids("s1") == ["q1"]
+
+
+async def test_cancel_without_id_and_no_question_is_rejected(
+    tmp_path, monkeypatch
+) -> None:
+    plugin = FakeQuestionPlugin()
+    runtime = make_runtime(tmp_path, monkeypatch, plugin)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await runtime.cancel_question("s1", None)
+
+    assert excinfo.value.status_code == 400
+    assert plugin.cancelled == []
+
+
 def native_claude_plugin(deny_ok: bool) -> Any:
     plugin = ClaudeCodePlugin()
     adapter = MagicMock()

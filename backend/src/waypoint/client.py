@@ -527,7 +527,11 @@ class WaypointClient:
                 json=body,
             ).json()
             if "held_message" in payload:
-                return {**payload["session"], "send": "held"}
+                return {
+                    **payload["session"],
+                    "send": "held",
+                    "held_message_id": payload["held_message"]["id"],
+                }
             return payload["session"]
         except WaypointError as exc:
             if not isinstance(exc.__cause__, httpx.TimeoutException):
@@ -557,6 +561,127 @@ class WaypointClient:
             "POST", f"/api/sessions/{session_id}/answer-question", json=body
         ).json()["session"]
         return data
+
+    def cancel_question(
+        self, session_id: str, tool_use_id: str | None = None
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/cancel-question",
+            json={"tool_use_id": tool_use_id},
+        ).json()["session"]
+        return data
+
+    def approve_plan(
+        self,
+        session_id: str,
+        plan_item_id: str,
+        decision: str = "accept",
+        *,
+        text: str | None = None,
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/approve-plan",
+            json={"plan_item_id": plan_item_id, "decision": decision, "text": text},
+        ).json()["session"]
+        return data
+
+    def fork_session(
+        self,
+        session_id: str,
+        *,
+        spawner_session_id: str | None = None,
+        title: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return self._derive_session(session_id, "fork", spawner_session_id, title, tags)
+
+    def clone_session(
+        self,
+        session_id: str,
+        *,
+        spawner_session_id: str | None = None,
+        title: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return self._derive_session(
+            session_id, "clone", spawner_session_id, title, tags
+        )
+
+    def _derive_session(
+        self,
+        session_id: str,
+        action: str,
+        spawner_session_id: str | None,
+        title: str | None,
+        tags: dict[str, str] | None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if spawner_session_id:
+            body["spawner_session_id"] = spawner_session_id
+        if title is not None:
+            body["title"] = title
+        if tags:
+            body["tags"] = tags
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/{action}", json=body
+        ).json()["session"]
+        return data
+
+    def reattach(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/reattach"
+        ).json()["session"]
+        return data
+
+    def resume(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/resume"
+        ).json()["session"]
+        return data
+
+    def list_history(
+        self,
+        query: str = "",
+        *,
+        cursor: str | None = None,
+        limit: int = 20,
+        exclude_sources: list[str] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"q": query, "limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if exclude_sources:
+            params["exclude_source"] = exclude_sources
+        data: dict[str, Any] = self._request(
+            "GET", "/api/sessions/history", params=params
+        ).json()
+        return data
+
+    def list_held_messages(self, session_id: str) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = self._request(
+            "GET", f"/api/sessions/{session_id}/held-messages"
+        ).json()["held_messages"]
+        return data
+
+    def release_held_message(self, held_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/held-messages/{held_id}/release"
+        ).json()["session"]
+        return data
+
+    def release_held_messages(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/held-messages/release"
+        ).json()["session"]
+        return data
+
+    def cancel_held_message(self, held_id: str) -> None:
+        self._request("DELETE", f"/api/held-messages/{held_id}")
+
+    def cancel_held_messages(self, session_id: str) -> None:
+        self._request("DELETE", f"/api/sessions/{session_id}/held-messages")
 
     def set_permission_mode(self, session_id: str, mode: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(

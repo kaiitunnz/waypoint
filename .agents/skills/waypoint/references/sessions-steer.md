@@ -6,9 +6,22 @@ Send input:
 waypoint sessions send <session-id> <text>
 ```
 
-A message sent from another session is held, reported as `"send": "held"`,
-while the target is in Focus (its human releases or cancels it) or waiting on a
-dialog (it is delivered once the human answers).
+A message sent from another session is held, reported as `"send": "held"` with
+a `held_message_id`, while the target is in Focus or waiting on a dialog (it is
+delivered once the human answers).
+
+## Held messages
+
+```bash
+waypoint sessions held list <session-id>
+waypoint sessions held cancel <held-message-id>
+waypoint sessions held release <held-message-id>
+```
+
+Cancel your own held message when it has gone stale. Release delivers at once,
+overriding Focus, so release only when the human asks. `cancel-all` and
+`release-all <session-id>` act on every held message, including other senders'
+and scheduled ones.
 
 Attach files to a message with `--attach` (upload-and-send in one step):
 

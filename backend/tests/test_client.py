@@ -591,7 +591,7 @@ def test_send_input_from_session_reports_held(
     with _client(_settings(tmp_path), state) as client:
         result = client.send_input("s1", "hi", sender_session_id="peer")
     assert state["input_body"]["sender_session_id"] == "peer"
-    assert result == {"id": "s1", "send": "held"}
+    assert result == {"id": "s1", "send": "held", "held_message_id": "h1"}
 
 
 def test_upload_attachment_pin_sends_form_field(

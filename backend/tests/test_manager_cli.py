@@ -20,18 +20,7 @@ from waypoint.settings import Settings
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in (
-        "WAYPOINT_DATA_DIR",
-        "WAYPOINT_CONFIG_PATH",
-        "WAYPOINT_HOST",
-        "WAYPOINT_PORT",
-        "WAYPOINT_PASSWORD",
-        "WAYPOINT_TOKEN",
-        "WAYPOINT_SESSION_ID",
-    ):
-        monkeypatch.delenv(var, raising=False)
+pytestmark = pytest.mark.usefixtures("isolate_waypoint_env")
 
 
 def _cli_config(tmp_path: Path) -> Path:

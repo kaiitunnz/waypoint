@@ -170,8 +170,11 @@ class PendingQuestionTracker:
 
     # ── Cancellation ────────────────────────────────────────────────────
 
-    async def cancel(self, session: SessionRecord, tool_use_id: str) -> SessionRecord:
-        """Decline ``tool_use_id`` with the provider and record the cancellation.
+    async def cancel(
+        self, session: SessionRecord, tool_use_id: str | None
+    ) -> SessionRecord:
+        """Decline ``tool_use_id`` (the newest open question when ``None``) with
+        the provider and record the cancellation.
 
         Records nothing when the provider decline fails.
         """
@@ -181,8 +184,8 @@ class PendingQuestionTracker:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"cancelling questions is not supported for {session.backend}",
             )
+        tool_use_id = self.resolve_open(session.id, tool_use_id).metadata["tool_use_id"]
         with self.operation(session.id, tool_use_id):
-            self.resolve_open(session.id, tool_use_id)
             self._require_actionable(session, tool_use_id)
             outcome = await plugin.decline_question(self._runtime, session, tool_use_id)
             if outcome is QuestionDecline.MISSING:

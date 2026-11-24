@@ -43,6 +43,7 @@ from waypoint.schemas import (
     SessionApprovalRequest,
     SessionContextUsage,
     SessionCreateRequest,
+    SessionDeriveRequest,
     SessionInputRequest,
     SessionPlanApprovalRequest,
     SessionRecord,
@@ -3763,6 +3764,46 @@ async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
     assert adapter.fork_env is not None
     assert adapter.fork_env["SECRET_TOKEN"] == "sk-fork"
     assert adapter.fork_env["WAYPOINT_SESSION_ID"] == forked.id
+
+
+class _CodexForkFake(FakeCodexRuntimeAdapter):
+    async def fork_session(self, *args: Any, **kwargs: Any) -> str:
+        return "thread-forked"
+
+
+@pytest.mark.asyncio
+async def test_runtime_fork_applies_owner_overrides(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, _CodexForkFake())
+    storage.create_session(make_session(settings))
+    storage.create_session(make_session(settings, id="lead"))
+
+    forked = await runtime.fork_session(
+        "sess",
+        SessionDeriveRequest(
+            spawner_session_id="lead", title="Child", tags={"role": "worker"}
+        ),
+    )
+
+    assert forked.spawner_session_id == "lead"
+    assert forked.title == "Child"
+    assert forked.tags == {"role": "worker"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_fork_rejects_unknown_spawner(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, _CodexForkFake())
+    storage.create_session(make_session(settings))
+    before = {s.id for s in storage.list_sessions()}
+
+    with pytest.raises(HTTPException) as excinfo:
+        await runtime.fork_session(
+            "sess", SessionDeriveRequest(spawner_session_id="ghost")
+        )
+
+    assert excinfo.value.status_code == 400
+    assert {s.id for s in storage.list_sessions()} == before
 
 
 @pytest.mark.asyncio

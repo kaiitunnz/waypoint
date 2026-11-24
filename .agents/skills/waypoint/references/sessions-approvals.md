@@ -1,6 +1,6 @@
 # Approvals
 
-Use approvals when a coding backend is waiting for a plan or tool decision.
+Use approvals when a coding backend is waiting for a tool decision.
 
 ```bash
 waypoint sessions approve <session-id> <decision>
@@ -17,6 +17,21 @@ full metadata, exact event ordering, duplicate diagnosis, or per-chunk metadata.
 Do not approve destructive, privileged, or unclear requests without user
 confirmation.
 
+## Plans
+
+A plan-mode session (backends with `supports_plan_approval`, e.g. codex) ends
+its turn with a plan: an `item_type: plan` event in `events --compact`. Decide
+it with `approve-plan`, passing that event's `item_id`; `approve` does not
+release it.
+
+```bash
+waypoint sessions approve-plan <session-id> --plan-item-id <item_id>
+waypoint sessions approve-plan <session-id> --plan-item-id <item_id> --decision decline --text "<why>"
+```
+
+Decided plans show `plan_item_id` and `plan_decision` on the following system
+event.
+
 ## Questions
 
 A session can also block on a question (an `AskUserQuestion` prompt), which is
@@ -31,5 +46,13 @@ waypoint sessions answer-question <session-id> --answers-json '[{"question": "..
 ```
 
 `sessions send` injects a normal message and will **not** satisfy the blocking
-question; only `answer-question` does. Pass `--tool-use-id` when several
-questions are pending.
+question; only `answer-question` does. Without `--tool-use-id` it answers the
+newest pending question.
+
+To dismiss a question without answering it, cancel it (the newest, without
+`--tool-use-id`). The agent sees it declined and may end its turn (Claude does),
+so send a follow-up if it should carry on:
+
+```bash
+waypoint sessions cancel-question <session-id> [--tool-use-id <id>]
+```

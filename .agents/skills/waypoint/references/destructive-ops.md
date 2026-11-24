@@ -8,6 +8,8 @@ Destructive or irreversible operations require confirmation:
 - `waypoint reset --yes`
 - changing another session's permission mode
   (`waypoint sessions set-permission-mode` / `mode`)
+- releasing any held message, or cancelling one you did not send
+  (`waypoint sessions held ...`)
 - deleting files, overwriting user work, or discarding transcripts
 
 `waypoint reset` wipes runtime data such as sessions, events, tokens,

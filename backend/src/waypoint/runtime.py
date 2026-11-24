@@ -125,6 +125,7 @@ from waypoint.schemas import (
     SessionAttachRequest,
     SessionCommandInvocation,
     SessionCreateRequest,
+    SessionDeriveRequest,
     SessionEnvelope,
     SessionHistoryPage,
     SessionInputRequest,
@@ -2621,7 +2622,9 @@ class SessionRuntime:
         await self.broadcast_session_list()
         return new_session
 
-    async def fork_session(self, session_id: str) -> SessionRecord:
+    async def fork_session(
+        self, session_id: str, overrides: SessionDeriveRequest | None = None
+    ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         if not plugin.capabilities.supports_fork:
@@ -2629,6 +2632,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Backend {session.backend} does not support forking",
             )
+        overrides = overrides or SessionDeriveRequest()
+        self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(session, "fork")
 
         new_session_id = self._generate_session_id(session.backend)
@@ -2644,10 +2649,10 @@ class SessionRuntime:
             if src.exists():
                 shutil.copy2(src, dst)
 
-        # Add branch/fork suffix to the original title if it doesn't already have one
         base_title = session.title or session.id
-        match = re.match(r"^(.+) \(fork #(\d+)\)$", base_title)
-        if match:
+        if overrides.title is not None:
+            new_title = overrides.title
+        elif match := re.match(r"^(.+) \(fork #(\d+)\)$", base_title):
             new_title = f"{match.group(1)} (fork #{int(match.group(2)) + 1})"
         else:
             new_title = f"{base_title} (fork #1)"
@@ -2660,12 +2665,30 @@ class SessionRuntime:
             raw_log,
             structured_log,
         )
+        new_session = self._stamp_owner(new_session, overrides)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
 
-    async def clone_session_launch(self, session_id: str) -> SessionRecord:
+    def _stamp_owner(
+        self, session: SessionRecord, overrides: SessionDeriveRequest
+    ) -> SessionRecord:
+        fields = overrides.model_dump(
+            include={"spawner_session_id", "tags"}, exclude_defaults=True
+        )
+        return self.storage.update_session(session.id, **fields) if fields else session
+
+    def _require_spawner(self, spawner_session_id: str | None) -> None:
+        if spawner_session_id and self.storage.get_session(spawner_session_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown spawner session: {spawner_session_id}",
+            )
+
+    async def clone_session_launch(
+        self, session_id: str, overrides: SessionDeriveRequest | None = None
+    ) -> SessionRecord:
         """Start a fresh managed session from a source session's launch settings.
 
         Backs ``/new``: reads the private source record and reuses the managed
@@ -2680,6 +2703,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
+        overrides = overrides or SessionDeriveRequest()
+        self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(
             source, "start a new session from"
         )
@@ -2691,6 +2716,7 @@ class SessionRuntime:
             launch_target_id=source.launch_target_id,
             launch_mode=source.launch_mode,
             transport=source.transport,
+            title=overrides.title,
             args=list(source.args),
             config_overrides=list(source.config_overrides),
             model=source.model,
@@ -2705,7 +2731,13 @@ class SessionRuntime:
             launch_env=dict(source.launch_env),
             account_profile_label=source.account_profile_label,
         )
-        return await self.create_session(request, clone_snapshot=snapshot)
+        # The spawner is stamped after create: on the request it would let a
+        # source with no explicit permission mode inherit the spawner's instead.
+        created = await self.create_session(request, clone_snapshot=snapshot)
+        stamped = self._stamp_owner(created, overrides)
+        if stamped is not created:
+            await self.broadcast_session_list()
+        return stamped
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:
@@ -4802,7 +4834,9 @@ class SessionRuntime:
         plugin = self.registry.plugin_for(session)
         return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
-    async def cancel_question(self, session_id: str, tool_use_id: str) -> SessionRecord:
+    async def cancel_question(
+        self, session_id: str, tool_use_id: str | None
+    ) -> SessionRecord:
         return await self.questions.cancel(self.get_session(session_id), tool_use_id)
 
     async def approve(

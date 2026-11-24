@@ -89,7 +89,7 @@
     display: grid;
     place-items: center;
     min-height: 100dvh;
-    padding: 16px;
+    padding: 16px max(16px, var(--safe-right)) 16px max(16px, var(--safe-left));
     background: var(--ground);
   }
 

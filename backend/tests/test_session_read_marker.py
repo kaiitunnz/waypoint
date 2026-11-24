@@ -2,13 +2,21 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
 from waypoint.api import create_app
+from waypoint.backends.tmux.adapter import TmuxTarget
 from waypoint.runtime import SessionRuntime
-from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    SessionAttachRequest,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 from waypoint.settings import Settings
 from waypoint.storage import Storage
 
@@ -246,3 +254,119 @@ async def test_content_bump_on_heuristic_transport_follows_presence(
     session = storage.get_session("s1")
     assert session is not None
     assert _unread(session)
+
+
+class _RestoringPlugin:
+    """A plugin whose restore records a lifecycle note, as the real ones do."""
+
+    async def restore_session(self, runtime: SessionRuntime, session: Any) -> None:
+        await runtime._record_system_event(session.id, "Restored the session")
+
+
+def _quiet_restore(runtime: SessionRuntime, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime, "_warm_command_completions", lambda *_, **__: None)
+    monkeypatch.setattr(runtime, "_start_context_usage_source", lambda *_: None)
+
+
+async def test_restoring_a_read_session_keeps_it_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    _quiet_restore(runtime, monkeypatch)
+    storage.create_session(_session(last_event_at=datetime.now(UTC)))
+    session = storage.get_session("s1")
+    assert session is not None
+
+    await runtime._restore_session_and_warm_completions(_RestoringPlugin(), session)
+
+    restored = storage.get_session("s1")
+    assert restored is not None
+    assert restored.last_event_at > session.last_event_at
+    assert not _unread(restored)
+
+    await _activity(runtime, "s1")
+    unwatched = storage.get_session("s1")
+    assert unwatched is not None
+    assert _unread(unwatched)
+
+
+async def test_restoring_an_unread_session_leaves_it_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    _quiet_restore(runtime, monkeypatch)
+    storage.create_session(_session(last_event_at=datetime.now(UTC)))
+    await _activity(runtime, "s1")
+    unread = storage.get_session("s1")
+    assert unread is not None
+    assert _unread(unread)
+
+    await runtime._restore_session_and_warm_completions(_RestoringPlugin(), unread)
+
+    restored = storage.get_session("s1")
+    assert restored is not None
+    assert _unread(restored)
+    assert restored.read_at == unread.read_at
+
+
+async def test_launched_session_counts_as_read_until_the_agent_acts(
+    tmp_path: Path,
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    storage.create_session(_session(last_event_at=datetime.now(UTC)))
+    await runtime._record_system_event("s1", "Started the session")
+    noted = storage.get_session("s1")
+    assert noted is not None
+    assert _unread(noted)
+
+    launched = runtime._launched_read("s1")
+    assert not _unread(launched)
+
+    await _activity(runtime, "s1")
+    acted = storage.get_session("s1")
+    assert acted is not None
+    assert _unread(acted)
+
+
+async def test_attached_session_starts_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    runtime.settings.ensure_dirs()
+    target = TmuxTarget(
+        session="work",
+        window="1",
+        pane="%3",
+        cwd=str(tmp_path),
+        pane_dead=False,
+        pane_pid=None,
+    )
+
+    async def describe_target(_: str) -> TmuxTarget:
+        return target
+
+    async def capture_snapshot(_: str, __: int) -> str:
+        return ""
+
+    async def pipe_output(_: str, __: Path) -> None:
+        return None
+
+    monkeypatch.setattr(runtime.tmux, "describe_target", describe_target)
+    monkeypatch.setattr(runtime.tmux, "capture_snapshot", capture_snapshot)
+    monkeypatch.setattr(runtime.tmux, "pipe_output", pipe_output)
+    monkeypatch.setattr(runtime, "_ensure_monitor", lambda _: None)
+
+    attached = await runtime.attach_tmux(
+        SessionAttachRequest(tmux_target="work:1.0", backend_hint="codex")
+    )
+
+    assert attached.read_at is not None
+    assert not _unread(attached)
+    stored = storage.get_session(attached.id)
+    assert stored is not None
+    assert not _unread(stored)
+
+    await _activity(runtime, attached.id)
+    acted = storage.get_session(attached.id)
+    assert acted is not None
+    assert _unread(acted)

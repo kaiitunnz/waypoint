@@ -13,6 +13,7 @@ import subprocess
 import uuid
 from collections import defaultdict
 from collections.abc import (
+    AsyncIterator,
     Awaitable,
     Callable,
     Iterable,
@@ -20,7 +21,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -948,6 +949,29 @@ class SessionRuntime:
             session_id, max(datetime.now(UTC), session.last_event_at)
         )
 
+    def _launched_read(self, session_id: str) -> SessionRecord:
+        """Count what launching recorded as seen: the notes a start writes are not
+        activity, so a new session stays read until the agent produces some."""
+        session = self.get_session(session_id)
+        self.mark_session_read(session_id, session.last_event_at)
+        return self.get_session(session_id)
+
+    @asynccontextmanager
+    async def _keep_read(self, session_id: str) -> AsyncIterator[None]:
+        """Restoring a session records lifecycle notes that are not activity: a
+        session that was read stays read, one with unseen activity stays unread."""
+        before = self.storage.get_session(session_id)
+        yield
+        after = self.storage.get_session(session_id)
+        if (
+            before is not None
+            and after is not None
+            and not (
+                before.read_at is not None and before.last_event_at > before.read_at
+            )
+        ):
+            self.mark_session_read(session_id, after.last_event_at)
+
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.
 
@@ -1861,7 +1885,7 @@ class SessionRuntime:
         session = await self._apply_usage_selection(session, usage_selection)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
-        return session
+        return self._launched_read(session.id)
 
     async def _apply_usage_selection(
         self, session: SessionRecord, selection: UsageSelection
@@ -2498,7 +2522,7 @@ class SessionRuntime:
                 launch_target=launch_target,
                 cwd=session.cwd,
             )
-        return session
+        return self._launched_read(session.id)
 
     async def attach_assistant(
         self,
@@ -2622,6 +2646,7 @@ class SessionRuntime:
             structured_log=structured_log,
         )
         new_session = await self._apply_usage_selection(new_session, usage_selection)
+        new_session = self._launched_read(new_session.id)
         await self.broadcast_session_list()
         return new_session
 
@@ -2670,6 +2695,7 @@ class SessionRuntime:
         )
         new_session = self._stamp_owner(new_session, overrides)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
+        new_session = self._launched_read(new_session.id)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
@@ -2792,7 +2818,7 @@ class SessionRuntime:
             session.id, f"Attached to tmux target {request.tmux_target}"
         )
         self._ensure_monitor(session.id)
-        return self.get_session(session.id)
+        return self._launched_read(session.id)
 
     async def handle_input(
         self, session_id: str, request: SessionInputRequest
@@ -2955,7 +2981,8 @@ class SessionRuntime:
     async def _restore_session_and_warm_completions(
         self, plugin: Any, session: SessionRecord
     ) -> None:
-        await plugin.restore_session(self, session)
+        async with self._keep_read(session.id):
+            await plugin.restore_session(self, session)
         refreshed = self.storage.get_session(session.id)
         if refreshed is not None:
             # Deliver items a dialog held before the restart, now that the
@@ -3353,7 +3380,8 @@ class SessionRuntime:
             clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
             if clear_cooldown is not None:
                 clear_cooldown(self, session)
-            await plugin.restore_session(self, session)
+            async with self._keep_read(session.id):
+                await plugin.restore_session(self, session)
             # _restore_*_session swallows failures (it tags the session ERROR or
             # EXITED and emits a system_note instead of raising). Re-read storage
             # so the caller sees the post-restore status, and translate any
@@ -3930,12 +3958,13 @@ class SessionRuntime:
         )
         restored_session = self.get_session(session.id)
         target_plugin = self.registry.resolve(session.backend, target_transport)
-        if fresh_thread_restarter is not None:
-            await fresh_thread_restarter.restart_unpersisted_session(
-                self, restored_session
-            )
-        else:
-            await target_plugin.restore_session(self, restored_session)
+        async with self._keep_read(session.id):
+            if fresh_thread_restarter is not None:
+                await fresh_thread_restarter.restart_unpersisted_session(
+                    self, restored_session
+                )
+            else:
+                await target_plugin.restore_session(self, restored_session)
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —

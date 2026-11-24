@@ -25,6 +25,7 @@
     "./scheduleTime": "./src/scheduleTime.ts",
     "./search": "./src/search.ts",
     "./sessionHistory": "./src/sessionHistory.ts",
+    "./shellNav": "./src/shellNav.ts",
     "./store": "./src/store.ts",
     "./tailnet": "./src/tailnet.ts",
     "./tailnet-server": "./src/tailnet-server.ts",

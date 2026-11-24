@@ -59,6 +59,18 @@ export function splitBackendUrl(url: string): BackendAddress | null {
   }
 }
 
+// Whether a typed host is finished enough to be worth probing: a host made of
+// digits and dots must be a whole IPv4 address, and none may end in a dot.
+export function isCompleteHost(hostname: string): boolean {
+  if (!hostname || hostname.endsWith(".")) {
+    return false;
+  }
+  if (/^[\d.]+$/.test(hostname)) {
+    return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+  }
+  return true;
+}
+
 export interface ParsedAddress {
   protocol: BackendProtocol;
   hostname: string;
@@ -171,7 +183,7 @@ export interface BuildHostGroupsInput {
   query?: string;
 }
 
-function hostKey(url: string): string {
+export function hostKey(url: string): string {
   const address = splitBackendUrl(url);
   return address ? `${address.hostname.toLowerCase()}:${address.port}` : url.trim().toLowerCase();
 }
@@ -249,21 +261,20 @@ export function buildHostGroups({
   for (const entry of recents) {
     const address = splitBackendUrl(entry.url);
     if (!address) continue;
+    const peer = peerMatching(snapshot, address.hostname);
+    // The host serving this page is This device however it was typed.
+    if (peer?.is_self && address.port === devicePort) continue;
     const row = makeRow({
       kind: "host",
       name: entry.name,
       url: entry.url,
       hostname: address.hostname,
-      online: "unknown",
+      online: peer ? (peer.online ? "online" : "offline") : "unknown",
       lastUsedAt: entry.lastUsedAt,
+      extraSearch: peer ? [peer.dns_name, peer.ip, peer.os] : [],
     });
     if (claimed.has(row.key)) continue;
-    const peer = peerMatching(snapshot, address.hostname);
-    if (peer) {
-      row.online = peer.online ? "online" : "offline";
-      row.searchText += ` ${[peer.dns_name, peer.ip, peer.os].filter(Boolean).join(" ").toLowerCase()}`;
-      claimedPeerPorts.add(`${peer.ip}:${address.port}`);
-    }
+    if (peer) claimedPeerPorts.add(`${peer.ip}:${address.port}`);
     claimed.add(row.key);
     recent.push(row);
   }

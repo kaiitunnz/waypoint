@@ -7,6 +7,8 @@ import {
   describeHost,
   formatAddress,
   formatLastUsed,
+  hostKey,
+  isCompleteHost,
   parseAddress,
   parsePort,
   portForHost,
@@ -155,6 +157,28 @@ describe("buildHostGroups", () => {
     expect(groups.thisDevice?.name).toBe("studio");
   });
 
+  it("folds a recent typed with the DNS name into the peer it names", () => {
+    const groups = buildHostGroups({
+      pageHost: "h",
+      snapshot: snapshot([peer("lab", "100.7.7.7")]),
+      recents: [recent("http://lab.tail1234.ts.net:8787", 1, "lab")],
+    });
+    expect(groups.recent).toHaveLength(1);
+    expect(groups.recent[0].online).toBe("online");
+    expect(groups.online).toEqual([]);
+  });
+
+  it("treats a recent that names the host serving the page as This device", () => {
+    const groups = buildHostGroups({
+      pageHost: "localhost",
+      devicePort: 8787,
+      snapshot: snapshot([peer("studio", "100.83.12.4", true, { is_self: true })]),
+      recents: [recent("http://100.83.12.4:8787", 1, "studio"), recent("http://100.83.12.4:9000", 0, "studio-9000")],
+    });
+    expect(groups.thisDevice).toMatchObject({ name: "studio", hostname: "localhost" });
+    expect(names(groups.recent)).toEqual(["studio-9000"]);
+  });
+
   it("keeps a recent host in Recent even when the tailnet says it is offline", () => {
     const groups = buildHostGroups({
       pageHost: "h",
@@ -252,6 +276,30 @@ describe("formatLastUsed", () => {
   it("uses a weekday within the week and a date after", () => {
     expect(formatLastUsed(at(23), now)).toBe("Mon");
     expect(formatLastUsed(at(3), now)).toBe("Nov 3");
+  });
+});
+
+describe("isCompleteHost", () => {
+  it("waits for a whole IPv4 address", () => {
+    expect(isCompleteHost("10.0")).toBe(false);
+    expect(isCompleteHost("10.0.4.")).toBe(false);
+    expect(isCompleteHost("10.0.4.12")).toBe(true);
+    expect(isCompleteHost("10.0.4.12.5")).toBe(false);
+  });
+
+  it("accepts names and rejects empty or dangling ones", () => {
+    expect(isCompleteHost("studio")).toBe(true);
+    expect(isCompleteHost("studio.tail1234.ts.net")).toBe(true);
+    expect(isCompleteHost("studio.")).toBe(false);
+    expect(isCompleteHost("")).toBe(false);
+  });
+});
+
+describe("hostKey", () => {
+  it("is the same for the same host and port however the URL is written", () => {
+    expect(hostKey("http://Studio:8787")).toBe(hostKey("http://studio:8787/"));
+    expect(hostKey("http://studio:8787")).not.toBe(hostKey("http://studio:9000"));
+    expect(hostKey("https://studio")).toBe("studio:443");
   });
 });
 

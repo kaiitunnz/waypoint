@@ -54,7 +54,7 @@ The design language is **flat instruments, liquid-glass chrome**:
 
 Rules for any v2 surface:
 - **Surface tiers.** Ground (`--ground`) is receding chrome (rail, tab bar, side panes), the plane (`--plane`) is content, and the attention tier (`--attention` with `--attention-line`) is only for items that need the human.
-- **Brass budget.** Brass is the primary action, needs-you markers (lamp, badge, card hairline) and the dog-ear, plus the logo as the brand mark. Limit pressure is `--warn`. Active navigation, links and selection use bright text and quiet fills.
+- **Brass budget.** Brass is the primary action, needs-you markers (lamp, badge, card hairline, the recommended answer) and the dog-ear, plus the logo as the brand mark. Limit pressure is `--warn`. Active navigation, links and selection use bright text and quiet fills.
 - **No edge accents.** No per-item left highlight, accent rail or edge stripe; a selected row takes a fill.
 - **Glass only on floating chrome.** Floating bars, popovers and toasts use `--glass` with `--glass-blur`; sheets and modals carry text and stay opaque. In-flow content is flat: no gradients, blur or shadows. Write `backdrop-filter` unprefixed only.
 - **Type.** Six sizes (`--f-page`, `--f-title`, `--f-head`, `--f-body`, `--f-meta`, `--f-code`); never a literal `font-size`. Serif names things, sans carries UI and prose, mono is only for machine strings (paths, hosts, ids). Body is 16px on mobile, which also keeps iOS from zooming into form fields.

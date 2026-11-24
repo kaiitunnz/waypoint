@@ -1603,9 +1603,30 @@ def test_await_turn_end_reads_the_status_rather_than_the_exit_code(
     )
 
 
+def test_await_turn_end_waits_past_a_question_outside_a_session(
+    cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args_file = tmp_path / "args"
+    cli = tmp_path / "waypoint"
+    cli.write_text(
+        f'#!/bin/sh\necho "$@" > {args_file}\n'
+        """printf '%s' '{"session": {"id": "x", "status": "idle"}}'\n"""
+    )
+    cli.chmod(0o755)
+    monkeypatch.setenv("CTX_WATCH_WAYPOINT", str(cli))
+    monkeypatch.setattr(cw.time, "sleep", lambda _: None)
+
+    cw.await_turn_end(T, 30.5)
+
+    assert args_file.read_text().strip() == (
+        f"sessions wait {T} --until idle,interrupted,exited,error --timeout 31"
+    )
+
+
 def test_await_turn_end_falls_back_for_a_cli_without_awaiting_answer(
     cw: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", L)
     args_file = tmp_path / "args"
     cli = tmp_path / "waypoint"
     cli.write_text(

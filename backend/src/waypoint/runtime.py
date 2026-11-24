@@ -21,6 +21,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -90,6 +91,7 @@ from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    INPUT_ORIGIN_KEY,
     PLUGIN_USAGE_SELECTION,
     USAGE_SELECTION_FIELDS,
     AccountProbeResult,
@@ -225,6 +227,12 @@ CWD_NOT_FOUND_DETAIL = "cwd-not-found"
 # authoritative payload — the woken session re-reads the board/inbox itself.
 WAKE_INPUT_TEXT = "Board/inbox changed — run your cycle."
 
+# Origin of the input being dispatched, so every user_input a dispatch records
+# (including a plugin's own, e.g. a slash command) carries INPUT_ORIGIN_KEY.
+_DISPATCH_ORIGIN: ContextVar[HeldMessageOrigin | None] = ContextVar(
+    "dispatch_origin", default=None
+)
+
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -286,6 +294,7 @@ class PreparedInput:
     session: SessionRecord
     request: SessionInputRequest
     attachments: list[ResolvedAttachment]
+    origin: HeldMessageOrigin | None = None
 
 
 @dataclass
@@ -2790,12 +2799,22 @@ class SessionRuntime:
         return self.get_session(session.id)
 
     async def handle_input(
-        self, session_id: str, request: SessionInputRequest
+        self,
+        session_id: str,
+        request: SessionInputRequest,
+        origin: HeldMessageOrigin | None = None,
     ) -> SessionRecord:
-        return await self.dispatch_input(await self.prepare_input(session_id, request))
+        """``origin`` marks a message the human did not type (see
+        ``INPUT_ORIGIN_KEY``)."""
+        return await self.dispatch_input(
+            await self.prepare_input(session_id, request, origin)
+        )
 
     async def prepare_input(
-        self, session_id: str, request: SessionInputRequest
+        self,
+        session_id: str,
+        request: SessionInputRequest,
+        origin: HeldMessageOrigin | None = None,
     ) -> PreparedInput:
         """Checks that can fail before anything reaches the transcript or agent:
         the session exists (reattached if exited) and every attachment resolves."""
@@ -2803,9 +2822,18 @@ class SessionRuntime:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             session = await self._reattach_session(session)
         attachments = self.resolve_attachments(session.id, request.attachments)
-        return PreparedInput(session=session, request=request, attachments=attachments)
+        return PreparedInput(
+            session=session, request=request, attachments=attachments, origin=origin
+        )
 
     async def dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
+        token = _DISPATCH_ORIGIN.set(prepared.origin)
+        try:
+            return await self._dispatch_input(prepared)
+        finally:
+            _DISPATCH_ORIGIN.reset(token)
+
+    async def _dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
         session = prepared.session
         request = prepared.request
         attachments = prepared.attachments
@@ -5090,6 +5118,8 @@ class SessionRuntime:
         attachments: list[AttachmentSpec] | None = None,
     ) -> None:
         metadata: dict[str, Any] = {"submit": submit, "status": status}
+        if (origin := _DISPATCH_ORIGIN.get()) is not None:
+            metadata[INPUT_ORIGIN_KEY] = origin
         if attachments:
             metadata["attachments"] = [
                 spec.model_dump(mode="json") for spec in attachments
@@ -5167,6 +5197,7 @@ class SessionRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         event_metadata = dict(metadata or {})
+        status = self._settled_status(session_id, status, event_metadata)
         if status is not None:
             event_metadata["status"] = status
         event = EventRecord(
@@ -6018,6 +6049,7 @@ class SessionRuntime:
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
         await self._run_capture_sinks(session_id, metadata)
+        status = self._settled_status(session_id, status, metadata)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -6051,6 +6083,22 @@ class SessionRuntime:
             persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
+
+    def _settled_status(
+        self, session_id: str, status: SessionStatus | None, metadata: dict[str, Any]
+    ) -> SessionStatus | None:
+        """An ``IDLE`` stays ``WAITING_INPUT`` while a question the human has yet
+        to answer is open (see ``PendingQuestionTracker.awaits_answer``).
+        ``metadata``'s ``tool_use_id`` names the question the event resolves."""
+        if status != SessionStatus.IDLE:
+            return status
+        session = self.storage.get_session(session_id)
+        resolving_id = metadata.get("tool_use_id")
+        if session is not None and self.questions.awaits_answer(
+            session, resolving_id if isinstance(resolving_id, str) else None
+        ):
+            return SessionStatus.WAITING_INPUT
+        return status
 
     async def _run_capture_sinks(
         self, session_id: str, metadata: dict[str, Any]

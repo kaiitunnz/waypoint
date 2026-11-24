@@ -158,7 +158,9 @@ async def test_fire_due_schedules_creates_session_and_sends_prompt(
     async def fake_create_session(request, **_kwargs) -> SessionRecord:
         return created_session
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         inputs.append((session_id, request.text))
         return created_session
 
@@ -485,7 +487,9 @@ async def test_recurring_schedule_stays_pending_and_advances(
         launches += 1
         return created_session
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         return created_session
 
     monkeypatch.setattr(runtime, "create_session", fake_create_session)
@@ -528,7 +532,9 @@ async def test_recurring_failure_keeps_pending_then_clears_on_success(
             raise RuntimeError("launch boom")
         return created_session
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         return created_session
 
     monkeypatch.setattr(runtime, "create_session", fake_create_session)
@@ -598,7 +604,9 @@ async def test_multiple_due_recurring_all_fire_in_one_batch(
     async def fake_create_session(request, **_kwargs) -> SessionRecord:
         return session
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         return session
 
     monkeypatch.setattr(runtime, "create_session", fake_create_session)

@@ -1673,6 +1673,11 @@ class HeldMessageOrigin(StrEnum):
     WAKE = "wake"
 
 
+# user_input metadata key naming the HeldMessageOrigin of a message the human
+# did not type; absent on the human's own messages.
+INPUT_ORIGIN_KEY = "input_origin"
+
+
 class HeldReason(StrEnum):
     """What releases a held message."""
 

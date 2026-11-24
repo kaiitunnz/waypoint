@@ -116,13 +116,41 @@ class PendingQuestionTracker:
         process that held it."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return SessionStatus.IDLE
-        events = self._runtime.storage.open_question_events(session.id)
-        last_input = self._runtime.storage.latest_event_sequence(
-            session.id, EventKind.USER_INPUT
-        )
-        if events and (last_input is None or events[-1].sequence > last_input):
+        if self._asked_since_human_input(session.id):
             return SessionStatus.WAITING_INPUT
         return SessionStatus.IDLE
+
+    def awaits_answer(
+        self, session: SessionRecord, resolving_id: str | None = None
+    ) -> bool:
+        """Whether an actionable question asked since the human's last message
+        is still open, leaving aside ``resolving_id`` (the question the incoming
+        event resolves, if any).
+
+        A turn that ends while one is open leaves the session waiting on the
+        human, even when an agent message or task notification started the turn
+        after the question was asked.
+        """
+        ids = [
+            tool_use_id
+            for event in self._asked_since_human_input(session.id)
+            if (tool_use_id := str(event.metadata["tool_use_id"])) != resolving_id
+        ]
+        return any(
+            state is QuestionLiveness.ACTIONABLE
+            for state in self.liveness(session, ids).values()
+        )
+
+    def _asked_since_human_input(self, session_id: str) -> list[EventRecord]:
+        """Open questions the human has not moved past with a message of their
+        own; agent, scheduled, and wake deliveries do not count."""
+        events = self._runtime.storage.open_question_events(session_id)
+        if not events:
+            return []
+        last_input = self._runtime.storage.latest_human_input_sequence(session_id)
+        if last_input is None:
+            return events
+        return [event for event in events if event.sequence > last_input]
 
     # ── Answers ─────────────────────────────────────────────────────────
 

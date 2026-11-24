@@ -889,6 +889,18 @@ def test_ask_question_surfaces_as_waiting_input() -> None:
     )
 
 
+def _question_dismissal(tool_use_id: str) -> dict:
+    rejection = _user_record(
+        [_tool_result_block(tool_use_id, "The tool use was rejected", is_error=True)]
+    )
+    rejection["toolUseResult"] = "User rejected tool use"
+    return rejection
+
+
+def _status_updates(events: list[NormalizedEvent]) -> list[SessionStatus | None]:
+    return [e.status for e in events if e.kind is EventKind.STATUS_UPDATE]
+
+
 def test_ask_question_swallows_rejection_and_stays_waiting() -> None:
     # Esc-ing the popup to surface it makes the TUI write a "user rejected"
     # result; it must be dropped so the card stays answerable and the session
@@ -897,12 +909,45 @@ def test_ask_question_swallows_rejection_and_stays_waiting() -> None:
     norm.process_record(
         _assistant_record("msg1", [_ask_question_block("auq1")], stop_reason="tool_use")
     )
-    rejection = _user_record(
-        [_tool_result_block("auq1", "The tool use was rejected", is_error=True)]
+    events = norm.process_record(_question_dismissal("auq1"))
+    assert [e.kind for e in events] == [EventKind.STATUS_UPDATE]
+    assert _status_updates(events) == [SessionStatus.WAITING_INPUT]
+
+
+def test_question_dismissal_settles_wait_after_a_sibling_tool_result() -> None:
+    # A question asked alongside another tool: the sibling's result lands after
+    # the card and marks the session running; the dismissal that follows ends
+    # the turn, so it must settle the wait again.
+    norm = TranscriptNormalizer()
+    card = norm.process_record(
+        _assistant_record(
+            "msg1",
+            [
+                _tool_use_block("mon1", "Monitor", {"command": "tail -f log"}),
+                _ask_question_block("auq1"),
+            ],
+            stop_reason="tool_use",
+        )
     )
-    rejection["toolUseResult"] = "User rejected tool use"
-    events = norm.process_record(rejection)
-    assert events == []
+    assert card[-1].status == SessionStatus.WAITING_INPUT
+    sibling = norm.process_record(
+        _user_record([_tool_result_block("mon1", "Monitor started")])
+    )
+    assert sibling[-1].status == SessionStatus.RUNNING
+
+    events = norm.process_record(_question_dismissal("auq1"))
+
+    assert not [e for e in events if e.kind is EventKind.TOOL_RESULT]
+    assert events[-1].kind is EventKind.STATUS_UPDATE
+    assert events[-1].status == SessionStatus.WAITING_INPUT
+    # The interrupt marker and turn_duration that follow carry no status.
+    assert (
+        norm.process_record(
+            _user_record([_text_block("[Request interrupted by user for tool use]")])
+        )
+        == []
+    )
+    assert norm.process_record({"type": "system", "subtype": "turn_duration"}) == []
 
 
 def test_ask_question_genuine_failure_surfaces_as_result() -> None:

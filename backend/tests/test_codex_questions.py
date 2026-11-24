@@ -17,7 +17,14 @@ from waypoint.backends.codex.questions import (
 )
 from waypoint.questions import QuestionLiveness
 from waypoint.runtime import SessionRuntime
-from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    INPUT_ORIGIN_KEY,
+    EventKind,
+    HeldMessageOrigin,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 from waypoint.settings import Settings
 from waypoint.storage import Storage
 
@@ -289,6 +296,22 @@ async def test_restore_keeps_a_wait_only_for_a_question_since_the_last_message(
     assert (
         runtime.questions.restored_status(runtime.get_session("s1"))
         is SessionStatus.IDLE
+    )
+
+
+async def test_restore_keeps_a_wait_past_an_agent_message(tmp_path) -> None:
+    runtime = make_runtime(tmp_path, status=SessionStatus.WAITING_INPUT)
+    await ask(runtime, "call_1")
+    await runtime._record_user_event(
+        "s1",
+        "[wp-msg] status?",
+        submit=True,
+        extra_metadata={INPUT_ORIGIN_KEY: HeldMessageOrigin.AGENT},
+    )
+    runtime.storage.update_session("s1", status=SessionStatus.WAITING_INPUT)
+
+    assert runtime.questions.restored_status(runtime.get_session("s1")) is (
+        SessionStatus.WAITING_INPUT
     )
 
 

@@ -186,7 +186,9 @@ async def test_run_oneshot_returns_assembled_reply_and_tears_down(
         created_ids.append(session.id)
         return session
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         storage.append_event(
             EventRecord(
                 session_id=session_id,
@@ -251,7 +253,9 @@ async def test_run_oneshot_relabels_session_to_telemetry_source(
 
     seen_source_at_input: list[SessionSource] = []
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         current = storage.get_session(session_id)
         assert current is not None
         seen_source_at_input.append(current.source)
@@ -290,7 +294,9 @@ async def test_run_oneshot_times_out_and_still_tears_down(tmp_path: Path) -> Non
         storage.create_session(session)
         return session
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         # Flips to RUNNING and never settles — simulates a hung turn.
         return storage.update_session(session_id, status=SessionStatus.RUNNING)
 
@@ -350,7 +356,9 @@ async def test_run_oneshot_returns_none_on_backend_error_status(
         storage.create_session(session)
         return session
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         return storage.update_session(session_id, status=SessionStatus.ERROR)
 
     async def fake_terminate(session_id: str, **_kwargs: Any) -> None:
@@ -425,7 +433,9 @@ async def test_run_oneshot_pane_transport_uses_file_handoff(tmp_path: Path) -> N
         storage.create_session(session)
         return session
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         captured_prompts.append(request.text)
         session = storage.get_session(session_id)
         assert session is not None
@@ -501,7 +511,9 @@ async def test_run_oneshot_programmatic_transport_sends_full_payload_in_prompt(
         storage.create_session(session)
         return session
 
-    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request: Any, origin: Any = None
+    ) -> SessionRecord:
         captured_prompts.append(request.text)
         return storage.update_session(session_id, status=SessionStatus.IDLE)
 

@@ -86,7 +86,9 @@ class HeldQueue:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
             if self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
-                    delivered = await self._runtime.handle_input(session_id, request)
+                    delivered = await self._runtime.handle_input(
+                        session_id, request, origin
+                    )
                     if wake and self._runtime.storage.delete_held_wake(session_id):
                         await self._publish(session_id)
                     return delivered
@@ -269,7 +271,9 @@ class HeldQueue:
         try:
             try:
                 await self._publish(record.session_id)
-                prepared = await self._runtime.prepare_input(record.session_id, request)
+                prepared = await self._runtime.prepare_input(
+                    record.session_id, request, record.origin
+                )
             except (Exception, asyncio.CancelledError):
                 # Nothing reached the transcript: put it back.
                 self._put_back(record)

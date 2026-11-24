@@ -347,7 +347,9 @@ async def test_fire_due_message_schedule_sends_input(tmp_path, monkeypatch) -> N
 
     inputs: list[tuple[str, str, bool]] = []
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         inputs.append((session_id, request.text, request.submit))
         return session
 
@@ -428,7 +430,7 @@ async def test_fire_due_message_schedule_records_failure(tmp_path, monkeypatch) 
         record.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
     )
 
-    async def fake_handle_input(_session_id, _request) -> SessionRecord:
+    async def fake_handle_input(_session_id, _request, _origin=None) -> SessionRecord:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
@@ -501,7 +503,7 @@ async def test_recurring_message_stays_pending_and_advances(
 
     sends = 0
 
-    async def fake_handle_input(session_id, request) -> SessionRecord:
+    async def fake_handle_input(session_id, request, _origin=None) -> SessionRecord:
         nonlocal sends
         sends += 1
         return session
@@ -578,7 +580,9 @@ def _record_sends(runtime, monkeypatch) -> list[tuple[str, str]]:
     """Patch handle_input to record (session_id, text) and no-op the send."""
     sends: list[tuple[str, str]] = []
 
-    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+    async def fake_handle_input(
+        session_id: str, request, _origin=None
+    ) -> SessionRecord:
         sends.append((session_id, request.text))
         return runtime.get_session(session_id)
 
@@ -898,7 +902,7 @@ async def test_idle_delivery_failure_arms_next_batch(tmp_path, monkeypatch) -> N
     session = make_session(runtime.settings, "sess-1")  # IDLE
     runtime.storage.create_session(session)
 
-    async def boom(_session_id, _request) -> SessionRecord:
+    async def boom(_session_id, _request, _origin=None) -> SessionRecord:
         raise RuntimeError("send failed")
 
     monkeypatch.setattr(runtime, "handle_input", boom)

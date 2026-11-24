@@ -32,9 +32,10 @@ waypoint sessions resume <session-id>
 `reattach` brings an `exited` or `error` session back with its conversation,
 without sending it a message; `sessions send` to an exited session reattaches it
 too. `resume` reattaches an exited session and, on a live terminal pane (tmux /
-claude_tty), presses Enter and marks it `running` until the pane's next turn
-ends. Use it for a tmux pane waiting on Enter, and `reattach` for anything
-exited.
+claude_tty), presses Enter and marks it `running`. A pane that wasn't waiting on
+Enter then stays `running` with no turn, so `sessions wait` on it blocks until
+timeout. Use `resume` for a tmux pane waiting on Enter, and `reattach` for
+anything exited.
 
 ## Find exited sessions
 

@@ -123,7 +123,6 @@ Use one of these, in order of fidelity:
    branch and include only parent findings plus a short Shepherd summary.
    Record `context=findings-only`.
 
-
 ## Multi-parent Setup
 
 A synthesizer should receive an already prepared branch. The Shepherd prepares

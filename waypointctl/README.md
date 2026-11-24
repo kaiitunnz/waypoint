@@ -69,10 +69,10 @@ are not supported.
 | `WAYPOINT_STACK_FRONTEND_PORT` | `3000` | Frontend port. |
 | `WAYPOINT_STACK_FRONTEND` | `v1` | App served on the frontend port: `v1` (`frontend/`) or `v2` (`frontend-v2/`). |
 | `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` | unset | Also serve the other app on this port as the `frontend-preview` service. Must differ from the backend and frontend ports. |
-| `WAYPOINT_STACK_FRONTEND_DEV` | `0` | When `1`, start the frontend in `npm run dev` mode. |
+| `WAYPOINT_STACK_FRONTEND_DEV` | `0` | When `1`, start the frontend app(s) in `npm run dev` mode. |
 | `WAYPOINT_STACK_START_TIMEOUT` | `30` | Seconds to wait for health probes. |
 | `WAYPOINT_STACK_UV_CACHE_DIR` | `<state-dir>/uv-cache` | Backend `UV_CACHE_DIR`. |
-| `WAYPOINT_STACK_FORCE_FRONTEND_BUILD` | `0` | When `1`, always rebuild the frontend before `npm run start`. |
+| `WAYPOINT_STACK_FORCE_FRONTEND_BUILD` | `0` | When `1`, always rebuild the frontend app(s) before `npm run start`. |
 | `WAYPOINT_STACK_CAFFEINATE` | `1` | macOS only: hold a `caffeinate -i -s` for the lifetime of the stack. |
 | `WAYPOINT_STACK_CONTROL_HOST` | `0.0.0.0` | Bind host for the daemon's remote-control console. |
 | `WAYPOINT_STACK_CONTROL_PORT` | `8799` | Port for the daemon's remote-control console; `0` disables it. |

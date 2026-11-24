@@ -178,8 +178,8 @@ waypointctl daemon start            # opt in to the long-lived waypointd supervi
 What it does:
 
 - starts `uv run waypoint serve` in `backend/` (in its own process group)
-- installs dependencies at the workspace root if needed, builds the frontend if needed, then runs `npm run start` in `frontend/`
-- waits for backend `http://127.0.0.1:8787/health` and the frontend root URL
+- installs dependencies at the workspace root if needed, then builds (if needed) and runs `npm run start` for the selected frontend app, `frontend/` or `frontend-v2/` per `WAYPOINT_STACK_FRONTEND`, plus the other app when `WAYPOINT_STACK_FRONTEND_PREVIEW_PORT` is set
+- waits for backend `http://127.0.0.1:8787/health` and each frontend's root URL
   before reporting success
 - stores PID files, logs, and default backend/uv-cache directories under
   `WAYPOINTCTL_STATE_DIR` (defaults to `~/.waypoint/`)

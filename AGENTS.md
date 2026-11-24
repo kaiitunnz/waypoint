@@ -12,8 +12,8 @@ Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `
 - `cd backend && uv run pytest` runs the backend test suite.
 - `cd backend && uv run pre-commit run --all-files` runs the backend formatting and type/lint checks on demand.
 - `npm install` (repo root) installs the dependencies of `frontend/`, `frontend-v2/` and `packages/web-core/`.
-- `cd frontend && npm run dev` starts the phone-accessible Next.js dev server on `0.0.0.0`.
-- `cd frontend && npm run build && npm run start` runs a production-like frontend check.
+- `cd frontend && npm run dev` starts the phone-accessible Next.js dev server on `0.0.0.0` (`frontend-v2` has the same scripts).
+- `cd frontend && npm run build && npm run start` runs a production-like frontend check (`frontend-v2` has the same scripts).
 - `cd frontend && npm run lint` runs the v1 linter; `cd frontend-v2 && npm run lint && npm run build` does the same for v2.
 - `cd packages/web-core && npm run lint && npm run typecheck && npm test` checks the shared package.
 

@@ -10,10 +10,10 @@ import {
   buildBackendUrl,
   buildHostGroups,
   describeHost,
-  hostKey,
   isCompleteHost,
   pageDevice,
   parsePort,
+  rowKeyFor,
   splitBackendUrl,
   type BackendProtocol,
   type HostRow,
@@ -155,7 +155,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       query={query}
       onQueryChange={setQuery}
       // On mobile a pick moves straight to the password screen, so only desktop shows it.
-      selectedKey={desktop && url ? hostKey(url) : null}
+      selectedKey={desktop && url ? rowKeyFor(groups, url) : null}
       onSelect={select}
       onAddress={typed}
       liveAddress={desktop}

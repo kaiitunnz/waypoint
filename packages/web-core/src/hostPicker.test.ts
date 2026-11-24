@@ -15,6 +15,7 @@ import {
   portAfterHostEdit,
   portForHost,
   resolveTypedAddress,
+  rowKeyFor,
   splitBackendUrl,
 } from "./hostPicker";
 import type { RecentHost } from "./recentHosts";
@@ -280,6 +281,27 @@ describe("buildHostGroups", () => {
       });
       expect(groups.thisDevice?.lastUsedAt).toBeNull();
       expect(names(groups.recent)).toEqual(["laptop"]);
+    });
+
+    it("maps every address of the machine to the This device row and finds it by the folded name", () => {
+      const groups = buildHostGroups({
+        pageHost: "localhost",
+        devicePort: 8797,
+        snapshot: self(),
+        recents: [recent("http://127.0.0.1:8797", 5, "studio")],
+        query: "127.0.0",
+      });
+      expect(groups.thisDevice?.name).toBe("studio");
+      expect(rowKeyFor(groups, "http://127.0.0.1:8797")).toBe("localhost:8797");
+      expect(rowKeyFor(groups, "http://100.83.12.4:8797")).toBe("localhost:8797");
+      expect(rowKeyFor(groups, "http://localhost:8797")).toBe("localhost:8797");
+      expect(rowKeyFor(groups, "http://127.0.0.1:9000")).toBe("127.0.0.1:9000");
+    });
+
+    it("does not alias loopback to This device from another machine", () => {
+      const groups = buildHostGroups({ pageHost: "100.83.12.4", devicePort: 8787, snapshot: self(), recents: [] });
+      expect(rowKeyFor(groups, "http://127.0.0.1:8787")).toBe("127.0.0.1:8787");
+      expect(rowKeyFor(groups, "http://100.83.12.4:8787")).toBe("100.83.12.4:8787");
     });
 
     it("leaves a different port in Recent", () => {

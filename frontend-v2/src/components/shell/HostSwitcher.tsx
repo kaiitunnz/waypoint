@@ -9,17 +9,16 @@ import {
   buildHostGroups,
   buildSshRows,
   describeHost,
-  hostKey,
   isCompleteHost,
   buildBackendUrl,
   pageDevice,
   parsePort,
+  rowKeyFor,
   splitBackendUrl,
   type HostRow,
   type TypedAddress,
 } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts } from "@waypoint/web-core/recentHosts";
-import { sameBackendUrl } from "@waypoint/web-core/tailnet";
 
 import { HostPicker } from "@/components/hosts/HostPicker";
 import { Button } from "@/components/ui/Button";
@@ -148,14 +147,15 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
     ? { kind: "ssh", targetId: activeId, name: "" }
     : { kind: "host", url: host, name: "" };
   const picked = selection ?? current;
-  const selectedKey = picked.kind === "ssh" ? `ssh:${picked.targetId}` : hostKey(picked.url);
-  const dirty =
-    picked.kind === "ssh" ? picked.targetId !== activeId : activeId !== "" || !sameBackendUrl(picked.url, host);
+  // An address of this machine and its This device row are the same host.
+  const isCurrentHost = (url: string) => rowKeyFor(groups, url) === rowKeyFor(groups, host);
+  const selectedKey = picked.kind === "ssh" ? `ssh:${picked.targetId}` : rowKeyFor(groups, picked.url);
+  const dirty = picked.kind === "ssh" ? picked.targetId !== activeId : activeId !== "" || !isCurrentHost(picked.url);
 
   const target = picked.kind === "ssh" ? launchTargets.targets.find((t) => t.id === picked.targetId) ?? null : null;
   const pickedHost = picked.kind === "host" ? splitBackendUrl(picked.url)?.hostname : undefined;
   const probe = useBackendProbe(
-    picked.kind === "host" && !sameBackendUrl(picked.url, host) && pickedHost && isCompleteHost(pickedHost)
+    picked.kind === "host" && !isCurrentHost(picked.url) && pickedHost && isCompleteHost(pickedHost)
       ? picked.url
       : null,
   );
@@ -186,7 +186,7 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
   const apply = () => {
     if (picked.kind === "ssh") {
       launchTargets.selectTarget(picked.targetId);
-    } else if (sameBackendUrl(picked.url, host)) {
+    } else if (isCurrentHost(picked.url)) {
       launchTargets.selectTarget("");
     } else if (splitBackendUrl(picked.url)) {
       switchHost(picked.url, picked.name);

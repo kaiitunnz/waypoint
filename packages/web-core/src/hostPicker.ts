@@ -201,6 +201,10 @@ export interface HostGroups {
   recent: HostRow[];
   online: HostRow[];
   offline: HostRow[];
+  // The This device row's key, and the keys of every address that names the same
+  // machine, so a selection made under an alias still lands on that row.
+  deviceKey: string;
+  deviceAliases: ReadonlySet<string>;
 }
 
 export interface BuildHostGroupsInput {
@@ -291,7 +295,8 @@ export function buildHostGroups({
     : peerMatching(snapshot, pageHost);
 
   const deviceUrl = buildBackendUrl({ protocol, hostname: pageHost, port: devicePort });
-  claimed.add(hostKey(deviceUrl));
+  const deviceKey = hostKey(deviceUrl);
+  claimed.add(deviceKey);
   // Every hostname that reaches the machine serving this page. Loopback counts
   // only when the page itself was opened on loopback; from another machine
   // `localhost` is the browser's own machine.
@@ -304,8 +309,10 @@ export function buildHostGroups({
   if (LOOPBACK.has(pageHost.toLowerCase())) {
     LOOPBACK.forEach((name) => deviceHosts.add(name));
   }
+  const deviceAliases = new Set([...deviceHosts].map((name) => `${name}:${devicePort}`));
   // A sign-in to this machine is kept on its This device row, not listed twice.
   let deviceLastUsed: number | null = null;
+  const foldedHosts: string[] = [];
 
   // A recent entry may name a peer by IP, DNS name or short name; the peer must
   // not also be listed under Online or Offline at that port.
@@ -316,6 +323,7 @@ export function buildHostGroups({
     if (!address) continue;
     if (address.port === devicePort && deviceHosts.has(address.hostname.toLowerCase())) {
       deviceLastUsed = Math.max(deviceLastUsed ?? 0, entry.lastUsedAt);
+      foldedHosts.push(address.hostname);
       continue;
     }
     const peer = peerMatching(snapshot, address.hostname);
@@ -341,7 +349,7 @@ export function buildHostGroups({
     hostname: pageHost,
     online: "online",
     lastUsedAt: deviceLastUsed,
-    extraSearch: [selfPeer?.dns_name ?? null, selfPeer?.ip ?? null, selfPeer?.os ?? null],
+    extraSearch: [selfPeer?.dns_name ?? null, selfPeer?.ip ?? null, selfPeer?.os ?? null, ...foldedHosts],
   });
 
   const online: HostRow[] = [];
@@ -372,7 +380,16 @@ export function buildHostGroups({
     recent: recent.filter(keep),
     online: online.filter(keep),
     offline: offline.filter(keep),
+    deviceKey,
+    deviceAliases,
   };
+}
+
+// The key of the row that stands for `url`: the This device row for any address
+// of this machine, else the address's own key.
+export function rowKeyFor(groups: Pick<HostGroups, "deviceKey" | "deviceAliases">, url: string): string {
+  const key = hostKey(url);
+  return groups.deviceAliases.has(key) ? groups.deviceKey : key;
 }
 
 // Rows for the host switcher's SSH group; `online` reads as connected.

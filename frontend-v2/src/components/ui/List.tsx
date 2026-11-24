@@ -22,7 +22,6 @@ interface ListRowProps {
   compact?: boolean;
   dimmed?: boolean;
   onClick?: () => void;
-  className?: string;
 }
 
 export function ListRow({
@@ -36,7 +35,6 @@ export function ListRow({
   compact,
   dimmed,
   onClick,
-  className,
 }: ListRowProps) {
   const classes = cx(
     styles.row,
@@ -45,7 +43,6 @@ export function ListRow({
     dimmed && styles.dimmed,
     pinned && styles.pinned,
     selected && styles.selected,
-    className,
   );
   return (
     <li className={styles.item}>

@@ -54,7 +54,7 @@ export function writeRecentHost(entry: Omit<RecentHost, "lastUsedAt">): void {
   try {
     window.localStorage.setItem(RECENT_HOSTS_KEY, JSON.stringify(next));
   } catch {
-    // Storage may be unavailable; the list then lasts only for the page.
+    // Best effort; the entry is dropped when storage is unavailable.
   }
 }
 

@@ -19,7 +19,6 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   label: string;
-  className?: string;
 }
 
 export function SegmentedControl<T extends string>({
@@ -27,7 +26,6 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   label,
-  className,
 }: SegmentedControlProps<T>) {
   const group = useRef<HTMLDivElement>(null);
 
@@ -46,7 +44,7 @@ export function SegmentedControl<T extends string>({
       ref={group}
       role="radiogroup"
       aria-label={label}
-      className={cx(styles.group, className)}
+      className={styles.group}
       onKeyDown={onKeyDown}
     >
       {segments.map((segment) => (

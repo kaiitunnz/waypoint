@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { deleteMessageSchedule, fetchMessageSchedules } from "../api";
+import {
+  pendingSchedulesSorted,
+  sameSchedules,
+  schedulePollIntervalMs,
+} from "../session/scheduledMessages";
 import { MessageSchedule } from "../types";
 
 // Live view of the *pending* scheduled messages for a single session, for the
@@ -23,11 +28,7 @@ export function useSessionScheduledMessages(
     }
     try {
       const all = await fetchMessageSchedules(host, token, sessionId);
-      const pending = all
-        .filter((m) => m.status === "pending")
-        // Soonest first, undated last, so the dock's messages[0] is a robust
-        // "next" regardless of backend ordering.
-        .sort((a, b) => scheduledAtMs(a) - scheduledAtMs(b));
+      const pending = pendingSchedulesSorted(all);
       // Keep the previous reference when nothing changed so the polling effect
       // doesn't tear down its interval and no needless re-render fires.
       setMessages((current) => (sameSchedules(current, pending) ? current : pending));
@@ -47,14 +48,7 @@ export function useSessionScheduledMessages(
   // (so a just-fired message clears within a few seconds instead of lingering
   // on "any moment"), and slowly otherwise.
   useEffect(() => {
-    const soonest = messages.reduce((min, m) => {
-      if (!m.scheduled_at) {
-        return min;
-      }
-      return Math.min(min, new Date(m.scheduled_at).getTime());
-    }, Number.POSITIVE_INFINITY);
-    const dueSoon = soonest - Date.now() <= 30_000;
-    const interval = dueSoon ? 4_000 : 15_000;
+    const interval = schedulePollIntervalMs(messages);
     const id = window.setInterval(() => void refresh(), interval);
     return () => window.clearInterval(id);
   }, [refresh, messages]);
@@ -73,26 +67,4 @@ export function useSessionScheduledMessages(
   );
 
   return { messages, refresh, cancel };
-}
-
-function scheduledAtMs(m: MessageSchedule): number {
-  return m.scheduled_at
-    ? new Date(m.scheduled_at).getTime()
-    : Number.POSITIVE_INFINITY;
-}
-
-function sameSchedules(a: MessageSchedule[], b: MessageSchedule[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  return a.every((m, i) => {
-    const other = b[i];
-    return (
-      m.id === other.id &&
-      m.status === other.status &&
-      m.scheduled_at === other.scheduled_at &&
-      m.cron === other.cron &&
-      m.last_run_at === other.last_run_at
-    );
-  });
 }

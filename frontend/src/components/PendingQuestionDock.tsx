@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useState } from "react";
 
-import { AskQuestionForm, parseAskUserQuestion } from "@/components/AskQuestion";
+import { AskQuestionForm } from "@/components/AskQuestion";
+import { parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
 import type { PendingQuestion } from "@waypoint/web-core/types";
 
 // Single up-chevron; orientation handled with a CSS rotation, matching the

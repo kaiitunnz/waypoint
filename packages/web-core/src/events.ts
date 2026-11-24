@@ -201,6 +201,15 @@ export function normalizeToolName(name: string | null | undefined): string | nul
   return normalized;
 }
 
+export function readToolName(event: EventRecord): string | null {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  if (!meta) return null;
+  if (typeof meta.tool_name === "string" && meta.tool_name) {
+    return normalizeToolName(meta.tool_name);
+  }
+  return null;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

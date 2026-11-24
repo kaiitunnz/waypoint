@@ -3,6 +3,11 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
+import {
+  heldMessageOriginLabel,
+  heldMessageText,
+  holdReasonLabel,
+} from "@waypoint/web-core/session/heldMessages";
 import { HeldMessage } from "@waypoint/web-core/types";
 import { formatRelativeTime } from "@waypoint/web-core/usage";
 
@@ -149,7 +154,7 @@ export function HeldMessagesDock({
               {messages.map((m) => (
                 <div key={m.id} className="held-dock-item">
                   <div className="held-dock-item-meta">
-                    <span className="held-dock-origin">{originLabel(m)}</span>
+                    <span className="held-dock-origin">{heldMessageOriginLabel(m)}</span>
                     <span className="held-dock-age">{formatRelativeTime(m.created_at)}</span>
                     <span className="held-dock-item-actions">
                       <button
@@ -171,7 +176,7 @@ export function HeldMessagesDock({
                   <HoldReason message={m} focus={focus} />
                   <ExpandableText
                     className="held-dock-item-text"
-                    text={messageText(m)}
+                    text={heldMessageText(m)}
                     collapsedMaxHeight="3em"
                   />
                 </div>
@@ -190,7 +195,7 @@ export function HeldMessagesDock({
           <span className="held-dock-glyph" aria-hidden>
             ◎
           </span>
-          <span className="held-dock-label">{messageText(latest)}</span>
+          <span className="held-dock-label">{heldMessageText(latest)}</span>
           <span className="held-dock-count">{count} held</span>
           <span className="held-dock-chevron" aria-hidden>
             <ChevronIcon />
@@ -205,27 +210,6 @@ export function HeldMessagesDock({
 }
 
 function HoldReason({ message, focus }: { message: HeldMessage; focus: boolean }) {
-  if (message.hold_reason === "focus") {
-    return <span className="held-dock-when manual">Held by Focus</span>;
-  }
-  if (focus) {
-    return <span className="held-dock-when manual">Paused by Focus</span>;
-  }
-  return (
-    <span className="held-dock-when">
-      {message.hold_reason === "dialog" ? "Sends after you respond" : "Sends when idle"}
-    </span>
-  );
-}
-
-function originLabel(message: HeldMessage): string {
-  if (message.origin === "schedule") return "Scheduled";
-  if (message.origin === "wake") return "Wake-up";
-  return `From ${message.sender_title || message.sender_session_id || "a session"}`;
-}
-
-function messageText(message: HeldMessage): string {
-  const attached = message.attachments.length;
-  const suffix = attached ? ` (+${attached} file${attached === 1 ? "" : "s"})` : "";
-  return (message.text || "(no text)") + suffix;
+  const { text, manual } = holdReasonLabel(message, focus);
+  return <span className={`held-dock-when${manual ? " manual" : ""}`}>{text}</span>;
 }

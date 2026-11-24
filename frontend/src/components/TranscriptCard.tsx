@@ -26,10 +26,10 @@ import {
   inlineAttachmentIds,
   isModelChangeEvent,
   isModelSwitchEvent,
-  normalizeToolName,
   parseEvent,
   parseTaskNotification,
   planTextForEvent,
+  readToolName,
   type EventDiffPreview,
   type TaskNotificationKind,
   type TaskNotificationView,
@@ -51,26 +51,18 @@ import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
+import { AskQuestionForm, useAskQuestionController } from "@/components/AskQuestion";
 import {
-  AskQuestionForm,
   askFormState,
   askToolUseId,
   parseAskUserQuestion,
-  useAskQuestionController,
   type AskQuestionResolution,
   type AskUserQuestion,
-} from "@/components/AskQuestion";
+} from "@waypoint/web-core/session/askQuestion";
+import type { ToolPair } from "@waypoint/web-core/session/transcript";
 
 // Claude Code's tool for handing local files to the human.
 const SEND_USER_FILE_TOOL = "SendUserFile";
-
-export interface ToolPair {
-  call: EventRecord | null;
-  result: EventRecord | null;
-  itemId: string;
-  ts: string;
-  sequence: number;
-}
 
 // Measure the meta strip's real width and surface it as `--meta-reserve`
 // on the bubble, so the inline phantom at the end of the last paragraph
@@ -524,15 +516,6 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
   // Unlisted tools stay neutral by design — badging harness plumbing (waits,
   // polling, mode toggles) would add glare, not signal.
   return { glyph: "ƒ", variant: "default", label: toolName };
-}
-
-export function readToolName(event: EventRecord): string | null {
-  const meta = event.metadata as Record<string, unknown> | undefined;
-  if (!meta) return null;
-  if (typeof meta.tool_name === "string" && meta.tool_name) {
-    return normalizeToolName(meta.tool_name);
-  }
-  return null;
 }
 
 function isFileEditToolName(toolName: string | null | undefined): boolean {
@@ -1352,7 +1335,7 @@ function AskUserQuestionCard({
   const resolution: AskQuestionResolution = toolUseId
     ? controller.resolution(toolUseId)
     : { state: "pending" };
-  const formState = askFormState(controller, event, resolution);
+  const formState = askFormState(controller.snapshot, event, resolution);
   const closedResultEvent =
     resolution.state === "closed_unanswered" ? resolution.resultEvent : null;
   const notAnswered = resolution.state === "closed_unanswered" || formState === "gone";

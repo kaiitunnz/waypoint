@@ -77,16 +77,39 @@ import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
   isModelChangeEvent,
-  isModelSwitchEvent,
-  isPlanEvent,
   isTaskNotificationEvent,
-  itemIdForEvent,
   parseTaskNotification,
   planForEvent,
+  readToolName,
   type PlanDecision,
   type PlanViewModel,
   type TaskNotificationKind,
 } from "@waypoint/web-core/events";
+import { approvalPager, findPendingApprovals, stepApprovalPage } from "@waypoint/web-core/session/approvals";
+import {
+  connectionLabel,
+  connectionTitle,
+  connectionVariant,
+  isAgentBusy,
+  type ConnectionState,
+} from "@waypoint/web-core/session/connection";
+import { isImportantEvent } from "@waypoint/web-core/session/importance";
+import {
+  formatCwdSegments,
+  matchControlCommand,
+  wrapBracketedPaste,
+} from "@waypoint/web-core/session/terminalText";
+import {
+  buildTranscriptItems,
+  collapseSupersededPlanEvents,
+  foldOlderEvents,
+  isTodoListEvent,
+  latestActionablePlanEvent,
+  mergeEvents,
+  minRawSequence,
+  removeConfirmedOptimisticMessages,
+  sanitizeEvent,
+} from "@waypoint/web-core/session/transcript";
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionPresence } from "@waypoint/web-core/hooks/useSessionPresence";
 import { formatRelativeTime } from "@waypoint/web-core/usage";
@@ -123,8 +146,6 @@ import {
   TranscriptCard,
   ToolCallRunGroup,
   TaskNotificationRunGroup,
-  readToolName,
-  type ToolPair,
 } from "@/components/TranscriptCard";
 import {
   AskQuestionContext,
@@ -271,16 +292,6 @@ function isSafariFamily(): boolean {
   return /Safari\//.test(ua) && !/Chrome|Chromium|Edg\/|OPR\//.test(ua);
 }
 
-// Bracketed-paste wraps the payload so TUIs that have enabled mode
-// 2004 treat the bytes as a single paste event rather than a stream of
-// keystrokes. Normalize ``\r\n`` and lone ``\r`` to ``\n`` first so a
-// stray CR can't fire a mid-paste submit on the way in. Wrapped CLIs
-// (CC, Codex, OpenCode) all enable mode 2004; raw shells will show the
-// literal escape codes, which is the documented trade-off.
-function wrapBracketedPaste(text: string): string {
-  return `\x1b[200~${text.replace(/\r\n?/g, "\n")}\x1b[201~`;
-}
-
 // An existing backend-native thread the assistant can adopt.
 export interface AssistantThreadOption {
   id: string;
@@ -340,8 +351,6 @@ interface SessionDetailProps {
 
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
-type ConnectionState = "connecting" | "open" | "reconnecting";
-
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
 // sensible for the very first paint before the observer fires.
@@ -1457,9 +1466,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         : [],
     [session, catalog, events],
   );
-  const approvalCount = pendingApprovals.length;
-  const safeApprovalPage = approvalCount > 0 ? Math.min(approvalPageIndex, approvalCount - 1) : 0;
-  const pendingApproval = pendingApprovals[safeApprovalPage] ?? null;
+  const {
+    count: approvalCount,
+    page: safeApprovalPage,
+    current: pendingApproval,
+  } = approvalPager(pendingApprovals, approvalPageIndex);
   const agentBusy = session ? isAgentBusy(session, connection) : false;
   const displayEvents = useMemo(
     () => collapseSupersededPlanEvents(renderedEvents),
@@ -2578,7 +2589,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => Math.max(0, i - 1))}
+                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "prev", approvalCount))}
                 disabled={safeApprovalPage === 0}
                 aria-label="Previous approval"
               >
@@ -2590,7 +2601,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => Math.min(approvalCount - 1, i + 1))}
+                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "next", approvalCount))}
                 disabled={safeApprovalPage === approvalCount - 1}
                 aria-label="Next approval"
               >
@@ -4387,459 +4398,6 @@ const ReplyComposer = memo(function ReplyComposer({
   );
 });
 
-function minRawSequence(events: EventRecord[]): number | null {
-  let min: number | null = null;
-  for (const event of events) {
-    if (min === null || event.sequence < min) {
-      min = event.sequence;
-    }
-  }
-  return min;
-}
-
-function foldOlderEvents(
-  current: EventRecord[],
-  older: EventRecord[],
-): EventRecord[] {
-  // `older` arrives ascending and sits entirely before `current` in
-  // sequence space. We must replicate what the forward merge would have
-  // produced if the events had originally arrived in true sequence order
-  // — naive text prepending breaks tool_result snapshots (a final
-  // non-delta supersedes earlier deltas; mergeEventText handles this,
-  // but only when we run it in the right direction). So: build a
-  // per-target accumulator by replaying mergeEvents over the older
-  // events for that item_id, then merge the accumulator with the
-  // matching current entry exactly as if the accumulator had arrived
-  // first and the current entry second.
-  const seenIds = new Set<number>();
-  const seenSequences = new Set<number>();
-  for (const event of current) {
-    if (typeof event.id === "number") seenIds.add(event.id);
-    seenSequences.add(event.sequence);
-  }
-  const currentItemIndex = new Map<string, number>();
-  for (let i = 0; i < current.length; i += 1) {
-    const event = current[i];
-    if (event.kind !== "agent_output" && event.kind !== "tool_result") continue;
-    const itemId = readItemId(event);
-    if (!itemId) continue;
-    currentItemIndex.set(`${event.kind}:${itemId}`, i);
-  }
-  // For each target current index, the (single) accumulator EventRecord
-  // built up from older events sharing that item_id, in sequence order.
-  const accumulators = new Map<number, EventRecord>();
-  // Older events that don't fold into anything currently visible.
-  // Coalesced amongst themselves via mergeEvents — the forward pass is
-  // correct here because they are sequence-ascending.
-  let standalone: EventRecord[] = [];
-  for (const event of older) {
-    if (typeof event.id === "number" && seenIds.has(event.id)) continue;
-    if (seenSequences.has(event.sequence)) continue;
-    const itemId = readItemId(event);
-    if ((event.kind === "agent_output" || event.kind === "tool_result") && itemId) {
-      const targetIdx = currentItemIndex.get(`${event.kind}:${itemId}`);
-      if (targetIdx !== undefined) {
-        const existing = accumulators.get(targetIdx);
-        if (existing === undefined) {
-          accumulators.set(targetIdx, event);
-        } else {
-          // Replay mergeEvents on a one-element array to get the same
-          // text/metadata combine the forward path would have produced.
-          const merged = mergeEvents([existing], event);
-          accumulators.set(targetIdx, merged[0]);
-        }
-        continue;
-      }
-    }
-    standalone = mergeEvents(standalone, event);
-  }
-  let next = current;
-  if (accumulators.size > 0) {
-    next = current.map((event, index) => {
-      const acc = accumulators.get(index);
-      if (acc === undefined) return event;
-      // Final fold: accumulator (older) plays the role of "existing",
-      // the current entry plays the role of "incoming". This routes
-      // the merge through mergeEventText with the same arguments
-      // forward processing would have used, so all of its branches
-      // (snapshot supersedes deltas, todo_list state-replacement,
-      // delta append, newline separator for non-delta concat) keep
-      // working on the backward path.
-      const merged = mergeEvents([acc], event);
-      return merged[0];
-    });
-  }
-  return [...standalone, ...next];
-}
-
-function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {
-  const dup = current.some((event) => event.id === incoming.id || event.sequence === incoming.sequence);
-  if (dup) {
-    return current;
-  }
-  const incomingItemId = readItemId(incoming);
-  if ((incoming.kind === "agent_output" || incoming.kind === "tool_result") && incomingItemId) {
-    const index = current.findIndex(
-      (event) => event.kind === incoming.kind && readItemId(event) === incomingItemId,
-    );
-    if (index !== -1) {
-      const next = current.slice();
-      const existing = next[index];
-      next[index] = {
-        ...existing,
-        text: mergeEventText(existing, incoming),
-        metadata: { ...existing.metadata, ...incoming.metadata },
-        ts: incoming.ts,
-        sequence: incoming.sequence,
-      };
-      return next;
-    }
-  }
-  return [...current, incoming];
-}
-
-function readItemId(event: EventRecord): string | null {
-  return itemIdForEvent(event);
-}
-
-function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
-  if (incoming.kind === "agent_output") {
-    return `${existing.text}${incoming.text}`;
-  }
-  if (incoming.kind !== "tool_result") {
-    return incoming.text;
-  }
-  if (isTodoListEvent(existing) || isTodoListEvent(incoming)) {
-    return incoming.text || existing.text;
-  }
-  if (isToolResultDelta(incoming)) {
-    return `${existing.text}${incoming.text}`;
-  }
-  if (isToolResultDelta(existing)) {
-    return existing.text || incoming.text;
-  }
-  if (!existing.text) {
-    return incoming.text;
-  }
-  if (!incoming.text || existing.text === incoming.text) {
-    return existing.text;
-  }
-  const separator = existing.text.endsWith("\n") || incoming.text.startsWith("\n") ? "" : "\n";
-  return `${existing.text}${separator}${incoming.text}`;
-}
-
-function collapseSupersededPlanEvents(events: EventRecord[]): EventRecord[] {
-  const latestPlanByItemId = new Map<string, EventRecord>();
-  for (const event of events) {
-    if (!isPlanEvent(event)) {
-      continue;
-    }
-    const itemId = readItemId(event);
-    if (itemId) {
-      latestPlanByItemId.set(itemId, event);
-    }
-  }
-  if (latestPlanByItemId.size === 0) {
-    return events;
-  }
-  return events.filter((event) => {
-    if (!isPlanEvent(event)) {
-      return true;
-    }
-    const itemId = readItemId(event);
-    return !itemId || latestPlanByItemId.get(itemId) === event;
-  });
-}
-
-function latestActionablePlanEvent(events: EventRecord[]): EventRecord | null {
-  const decidedPlanIds = new Set<string>();
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    const decisionPlanId = planDecisionItemId(event);
-    if (decisionPlanId) {
-      decidedPlanIds.add(decisionPlanId);
-      continue;
-    }
-    const plan = planForEvent(event);
-    if (!plan || event.kind === "approval_request") {
-      continue;
-    }
-    return decidedPlanIds.has(plan.id) ? null : event;
-  }
-  return null;
-}
-
-function planDecisionItemId(event: EventRecord): string | null {
-  const planItemId = event.metadata.plan_item_id;
-  if (typeof planItemId !== "string" || !planItemId) {
-    return null;
-  }
-  const decision = event.metadata.plan_decision;
-  return typeof decision === "string" ? planItemId : null;
-}
-
-type TranscriptItem =
-  | { kind: "single"; event: EventRecord }
-  | { kind: "pair"; event: EventRecord; pair: ToolPair }
-  | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
-  | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
-
-function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
-  const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
-  const pairIndex = new Map<string, number>();
-  for (const event of events) {
-    if (event.kind !== "tool_call" && event.kind !== "tool_result") {
-      result.push({ kind: "single", event });
-      continue;
-    }
-    const itemId = readItemId(event);
-    if (!itemId) {
-      result.push({ kind: "single", event });
-      continue;
-    }
-    const existingIdx = pairIndex.get(itemId);
-    if (existingIdx === undefined) {
-      const pair: ToolPair = {
-        itemId,
-        call: event.kind === "tool_call" ? event : null,
-        result: event.kind === "tool_result" ? event : null,
-        ts: event.ts,
-        sequence: event.sequence,
-      };
-      pairIndex.set(itemId, result.length);
-      result.push({ kind: "pair", event, pair });
-      continue;
-    }
-    const item = result[existingIdx];
-    if (item.kind !== "pair") {
-      continue;
-    }
-    if (event.kind === "tool_call") {
-      item.pair.call = event;
-    } else {
-      item.pair.result = item.pair.result
-        ? mergeToolResultEvent(item.pair.result, event)
-        : event;
-    }
-    item.pair.ts = event.ts;
-    item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
-  }
-
-  // Classify each item so the grouping loop is easy to reason about.
-  // "content"  → user messages, agent text, approvals, ask-questions:
-  //              always breaks (and terminates) the current tool run.
-  // "tool"     → ordinary tool call/result pairs/singles, including todos:
-  //              join the run. The live task list lives in the dock now, so
-  //              the transcript todo marker is just a historical tool record
-  //              and folds into the run instead of standing alone.
-  // "absorbed" → system_note / status_update lifecycle noise: silently join
-  //              the active run (rendered as quiet separators when expanded),
-  //              or fall through as standalone if no run is active yet.
-  function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "notification" | "absorbed" {
-    if (item.kind === "pair") {
-      const { call, result } = item.pair;
-      const isSpecial = (e: EventRecord | null) =>
-        e !== null && isStandaloneToolCard(readToolName(e));
-      return isSpecial(call) || isSpecial(result) ? "content" : "tool";
-    }
-    const { event } = item;
-    switch (event.kind) {
-      case "user_input":
-      case "agent_output":
-      case "approval_request":
-        return "content";
-      case "tool_call":
-      case "tool_result":
-        return isStandaloneToolCard(readToolName(event)) ? "content" : "tool";
-      default:
-        if (isModelChangeEvent(event)) {
-          // Switch divider stands alone; launch-time mismatch is absorbed.
-          return isModelSwitchEvent(event) ? "content" : "absorbed";
-        }
-        if (isTaskNotificationEvent(event)) {
-          // Consecutive task cards batch into their own run, so they neither
-          // fold into an adjacent tool run nor stand alone one per card.
-          return "notification";
-        }
-        return isPlanEvent(event) ? "content" : "absorbed";
-    }
-  }
-
-  const grouped: TranscriptItem[] = [];
-  // At most one run is open at a time: a tool item flushes an open notification
-  // run and vice versa, so the accumulator carries its own kind.
-  let run:
-    | {
-        kind: "tool" | "notification";
-        items: Extract<TranscriptItem, { kind: "single" | "pair" }>[];
-      }
-    | null = null;
-  const flush = () => {
-    if (!run) return;
-    grouped.push({
-      kind: run.kind === "tool" ? "tool_run" : "notification_run",
-      items: run.items,
-    });
-    run = null;
-  };
-
-  for (const item of result) {
-    const cls = classifyItem(item);
-    if (cls === "tool" || cls === "notification") {
-      if (run && run.kind !== cls) flush();
-      if (!run) run = { kind: cls, items: [] };
-      run.items.push(item);
-    } else if (cls === "absorbed") {
-      // Lifecycle noise folds into whichever run is active, else stands alone.
-      if (run) run.items.push(item);
-      else grouped.push(item);
-    } else {
-      flush();
-      grouped.push(item);
-    }
-  }
-  flush();
-
-  return grouped;
-}
-
-function mergeToolResultEvent(existing: EventRecord, incoming: EventRecord): EventRecord {
-  return {
-    ...existing,
-    text: mergeEventText(existing, incoming),
-    metadata: { ...existing.metadata, ...incoming.metadata },
-    ts: incoming.ts,
-    sequence: Math.max(existing.sequence, incoming.sequence),
-  };
-}
-
-function removeConfirmedOptimisticMessages<T extends { text: string }>(
-  messages: T[],
-  confirmedTexts: string[],
-): T[] {
-  const confirmedCounts = new Map<string, number>();
-  for (const text of confirmedTexts) {
-    confirmedCounts.set(text, (confirmedCounts.get(text) ?? 0) + 1);
-  }
-  if (confirmedCounts.size === 0) {
-    return messages;
-  }
-  const next: T[] = [];
-  for (const message of messages) {
-    const count = confirmedCounts.get(message.text) ?? 0;
-    if (count > 0) {
-      confirmedCounts.set(message.text, count - 1);
-      continue;
-    }
-    next.push(message);
-  }
-  return next;
-}
-
-function isToolResultDelta(event: EventRecord): boolean {
-  if (event.kind !== "tool_result") {
-    return false;
-  }
-  const method = event.metadata?.method;
-  return method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta";
-}
-
-function isTodoListEvent(event: EventRecord): boolean {
-  return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
-}
-
-// Tool calls that render as their own card instead of folding into a collapsed
-// tool run — the dedicated cards in TranscriptCard.
-function isStandaloneToolCard(toolName: string | null): boolean {
-  return toolName === "AskUserQuestion" || toolName === "SendUserFile";
-}
-
-function isAgentBusy(
-  session: SessionRecord,
-  connection: ConnectionState,
-): boolean {
-  // Trust session.status: the runtime flips it to RUNNING when the user's
-  // input lands and to IDLE/ERROR/etc. once the turn ends. The previous
-  // implementation walked `events` to corroborate, but events flush via
-  // startTransition + rAF, lagging the urgent setSession update — so the
-  // walk could see the prior turn's `result` system_note and report idle
-  // for the entire window between "user sent" and "agent's first chunk."
-  return connection === "open" && session.status === "running";
-}
-
-function findPendingApprovals(events: EventRecord[]): EventRecord[] {
-  // Track approvals as a queue: every approval_request enqueues, every
-  // "Approval response sent" / "Approval timed out" system note dequeues
-  // its matching entry (by approval_id, falling back to oldest-first).
-  const queue: EventRecord[] = [];
-  for (const event of events) {
-    if (event.kind === "approval_request") {
-      queue.push(event);
-    } else if (event.kind === "system_note" && isApprovalResolutionEvent(event)) {
-      const approvalId = event.metadata?.approval_id;
-      if (typeof approvalId === "string") {
-        const index = queue.findIndex((e) => e.metadata?.approval_id === approvalId);
-        if (index !== -1) queue.splice(index, 1);
-      } else {
-        queue.shift();
-      }
-    }
-  }
-  return queue;
-}
-
-function isApprovalResolutionEvent(event: EventRecord): boolean {
-  if (event.metadata?.method === "approval.invalidated") {
-    return true;
-  }
-  return /(Approval response sent|Approval timed out)/i.test(event.text);
-}
-
-function isImportantEvent(event: EventRecord): boolean {
-  // A backend's own verdict on a note wins over the rules below.
-  const visibility = event.metadata?.visibility;
-  if (visibility === "detail") {
-    return false;
-  }
-  if (visibility === "important") {
-    return true;
-  }
-  switch (event.kind) {
-    case "user_input":
-    case "agent_output":
-    case "tool_call":
-    case "tool_result":
-    case "approval_request":
-      return true;
-    case "system_note":
-    case "status_update":
-      if (event.metadata?.method === "approval.invalidated") {
-        return true;
-      }
-      // Switch draws an inline divider; keep it in the important view.
-      if (isModelChangeEvent(event)) {
-        return isModelSwitchEvent(event);
-      }
-      if (isPlanEvent(event)) {
-        return true;
-      }
-      if (isTaskNotificationEvent(event)) {
-        // Task cards are first-class chronological events; the keyword regex
-        // below would otherwise include only the ones that happen to say
-        // "failed"/"error" and hide "finished"/"completed" ones.
-        return true;
-      }
-      if (typeof event.metadata?.builtin_command === "string") {
-        return true;
-      }
-      return /(approval response|approval timed out|attached|started|terminated|interrupt|resume|failed|error|exited|compact)/i.test(event.text);
-    case "raw_terminal_chunk":
-      return false;
-    default:
-      return false;
-  }
-}
-
 function SessionHeader({
   session,
   connection,
@@ -5069,74 +4627,6 @@ function AssistantWelcome({
   );
 }
 
-// Match a Waypoint control command (e.g. ``/new``) and return its trailing
-// argument string, or null when the text isn't that command. The trailing
-// space requirement keeps ``/news`` from being read as ``/new``.
-function matchControlCommand(text: string, name: string): string | null {
-  const command = `/${name}`;
-  if (text === command) return "";
-  if (text.startsWith(`${command} `)) return text.slice(command.length + 1).trim();
-  return null;
-}
-
-function formatCwdSegments(cwd: string): string[] {
-  if (!cwd) return [""];
-  // Render the path as breadcrumb-style segments, but keep the leading slash
-  // (or `~`) attached to the first segment so root paths still read correctly.
-  const trimmed = cwd.replace(/\/+$/, "");
-  const segments = trimmed.split("/").filter(Boolean);
-  if (trimmed.startsWith("/")) {
-    return segments.length ? [`/${segments[0]}`, ...segments.slice(1)] : ["/"];
-  }
-  return segments.length ? segments : [trimmed];
-}
-
-function connectionVariant(
-  connection: ConnectionState,
-  status: SessionRecord["status"],
-): string {
-  if (connection !== "open") return connection;
-  if (status === "running" || status === "waiting_input") return "open running";
-  if (status === "error" || status === "interrupted") return "open warn";
-  if (status === "exited") return "open dim";
-  return "open";
-}
-
-function connectionLabel(
-  connection: ConnectionState,
-  status: SessionRecord["status"],
-): string {
-  if (connection === "connecting") return "Connecting";
-  if (connection === "reconnecting") return "Reconnecting";
-  switch (status) {
-    case "running":
-      return "Running";
-    case "waiting_input":
-      return "Waiting on you";
-    case "interrupted":
-      return "Interrupted";
-    case "error":
-      return "Error";
-    case "exited":
-      return "Exited";
-    case "starting":
-      return "Starting";
-    case "idle":
-    default:
-      return "Live";
-  }
-}
-
-function connectionTitle(
-  connection: ConnectionState,
-  status: SessionRecord["status"],
-): string {
-  if (connection !== "open") {
-    return `Socket ${connection}`;
-  }
-  return `Socket open · session ${status.replace("_", " ")}`;
-}
-
 function TranscriptEmpty({
   status,
   filterMode,
@@ -5179,18 +4669,4 @@ function TranscriptEmpty({
       </p>
     </div>
   );
-}
-
-function sanitizeEvent(event: EventRecord): EventRecord {
-  return {
-    ...event,
-    text: stripAnsi(event.text),
-  };
-}
-
-function stripAnsi(text: string): string {
-  return text
-    .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/g, "")
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001B[@-_]/g, "");
 }

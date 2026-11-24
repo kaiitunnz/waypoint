@@ -4,7 +4,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from waypoint.launch_env import LaunchEnv
 
@@ -1242,6 +1249,95 @@ class PendingQuestionsSnapshot(BaseModel):
     questions: list[PendingQuestion] = Field(default_factory=list)
     as_of_sequence: int = 0
     revision: int = 0
+
+
+PendingAskKind = Literal["question", "approval", "plan_approval"]
+PendingAskPlanResolver = Literal["approve", "approve_plan"]
+
+
+class PendingAskOption(BaseModel):
+    # Kept verbatim: it is the answer value. ``recommended`` reflects a trailing
+    # "(Recommended)" marker the asking agent put in the label.
+    label: str
+    description: str | None = None
+    recommended: bool = False
+
+
+class PendingAskPrompt(BaseModel):
+    question: str
+    header: str | None = None
+    multi_select: bool = False
+    options: list[PendingAskOption] = Field(default_factory=list)
+
+
+class PendingAskQuestion(BaseModel):
+    tool_use_id: str
+    questions: list[PendingAskPrompt]
+
+
+class PendingAskApproval(BaseModel):
+    approval_id: str
+    tool_name: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_input_truncated: bool = False
+    summary: str
+    decisions: list[str] = Field(default_factory=list)
+    supports_note: bool = False
+
+
+class PendingAskPlan(BaseModel):
+    plan_id: str
+    text: str
+    decisions: list[str] = Field(default_factory=list)
+    supports_note: bool = False
+    # ``approve`` answers through ``/approve`` with ``approval_id=plan_id``;
+    # ``approve_plan`` through ``/approve-plan`` with ``plan_item_id=plan_id``.
+    resolve_via: PendingAskPlanResolver
+
+
+class PendingAsk(BaseModel):
+    """One human-actionable request in one session, with the payload an inline
+    answer needs. Exactly one of ``question`` / ``approval`` / ``plan`` is set,
+    matching ``kind``."""
+
+    id: str
+    kind: PendingAskKind
+    session_id: str
+    session_title: str
+    session_backend: str
+    spawner_session_id: str | None = None
+    created_at: datetime
+    sequence: int
+    availability: PendingQuestionAvailability
+    title: str
+    body: str | None = None
+    question: PendingAskQuestion | None = None
+    approval: PendingAskApproval | None = None
+    plan: PendingAskPlan | None = None
+
+    @model_validator(mode="after")
+    def _payload_matches_kind(self) -> Self:
+        payloads = {
+            "question": self.question,
+            "approval": self.approval,
+            "plan_approval": self.plan,
+        }
+        present = [kind for kind, payload in payloads.items() if payload is not None]
+        if present != [self.kind]:
+            raise ValueError(f"{self.kind} ask must carry only its own payload")
+        return self
+
+
+class PendingAsksSnapshot(BaseModel):
+    """Every pending ask across live sessions, oldest first.
+
+    Clients apply a snapshot when ``epoch`` differs from the one they hold or
+    ``revision`` is higher; ``revision`` bumps whenever the item list changes.
+    """
+
+    epoch: str
+    revision: int
+    items: list[PendingAsk] = Field(default_factory=list)
 
 
 class EventsPageResponse(BaseModel):

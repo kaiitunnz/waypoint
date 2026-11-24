@@ -1,8 +1,9 @@
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, PendingQuestionAvailability, SessionStatus
 
 
 class ItemPayload(BaseModel):
@@ -71,6 +72,19 @@ class InteractionEnvelope(BaseModel):
 
 
 INTERACTION_METADATA_KEY = "interaction"
+
+
+class PendingPlanApproval(BaseModel):
+    """A plan the agent is waiting for the human to approve, for agents that
+    track it outside an approval request (see ``PlanApprovalLifecycle``)."""
+
+    plan_id: str
+    text: str
+    decisions: list[str]
+    supports_note: bool = False
+    availability: PendingQuestionAvailability = "actionable"
+    created_at: datetime
+    sequence: int
 
 
 def question_interaction(

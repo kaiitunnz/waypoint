@@ -566,6 +566,9 @@ class TranscriptTailer:
         approval_id = adopted or str(uuid.uuid4())
         self._plugin._pending_approvals[self._session_id] = make(approval_id)
         self._surfaced_sig = sig
+        if adopted:
+            # No event reports the adoption, but the card is answerable again.
+            self._runtime.asks.mark_dirty(self._session_id)
         return None if adopted else approval_id
 
     def _load_adoptable(self) -> None:

@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from fastapi import HTTPException, status
 from openai_codex.client import CodexClient
@@ -71,6 +71,7 @@ from waypoint.backends.codex.subagents import (
 )
 from waypoint.backends.codex.transport import input_http_error
 from waypoint.backends.completions import static_slash_completions
+from waypoint.backends.events import PendingPlanApproval
 from waypoint.backends.plugin_config import (
     AccountProfileConfig,
     PluginConfig,
@@ -856,6 +857,45 @@ class CodexPlugin(DefaultLaunchContract):
             metadata={"plan_item_id": plan_item_id, "plan_decision": decision},
         )
         return running
+
+    def pending_plan_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> PendingPlanApproval | None:
+        if session.permission_mode != CODEX_PLAN_MODE:
+            return None
+        current = _current_plan(runtime, session.id)
+        if current is None:
+            return None
+        # A fork copies its parent's events; a plan from another thread can
+        # never be approved on this one.
+        thread_id = session.transport_state.get("thread_id")
+        plan_thread = _event_thread_id(current.event)
+        if plan_thread and thread_id and plan_thread != thread_id:
+            return None
+        envelope = current.event.metadata.get("plan")
+        offered = envelope.get("decisions") if isinstance(envelope, dict) else None
+        decisions = [
+            decision
+            for decision in _PLAN_DECISION_ORDER
+            if isinstance(offered, list) and decision in offered
+        ]
+        return PendingPlanApproval(
+            plan_id=current.plan_id,
+            text=current.text,
+            decisions=decisions or list(_PLAN_DECISION_ORDER),
+            supports_note=True,
+            availability=(
+                "starting" if session.status is SessionStatus.STARTING else "actionable"
+            ),
+            created_at=current.event.ts,
+            sequence=current.event.sequence,
+        )
+
+    def affects_plan_approval(self, event: EventRecord) -> bool:
+        return (
+            event.metadata.get("item_type") == "plan"
+            or event.metadata.get("plan_decision") is not None
+        )
 
     async def maybe_handle_input(
         self,
@@ -2118,28 +2158,46 @@ def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, An
     return {"decision": "decline"}
 
 
+class _CurrentPlan(NamedTuple):
+    event: EventRecord
+    plan_id: str
+    text: str
+
+
+def _current_plan(runtime: "SessionRuntime", session_id: str) -> _CurrentPlan | None:
+    """The plan awaiting a decision.
+
+    The newest plan item defines the current plan id: with no resolvable id, a
+    decision recorded after it, or only older items of another id, there is no
+    current plan. Its text is the newest non-empty one among that id's items.
+    """
+    current_id: str | None = None
+    for event in runtime.storage.plan_item_events(session_id):
+        plan_id = _plan_id_for_event(event)
+        if not plan_id or (current_id is not None and plan_id != current_id):
+            return None
+        decided = {
+            decision.metadata["plan_item_id"]
+            for decision in runtime.storage.plan_decision_events(
+                session_id, event.sequence
+            )
+            if isinstance(decision.metadata.get("plan_item_id"), str)
+            and decision.metadata.get("plan_decision") in _PLAN_DECISIONS
+        }
+        if plan_id in decided:
+            return None
+        current_id = plan_id
+        text = _plan_text_for_event(event)
+        if text:
+            return _CurrentPlan(event, plan_id, text)
+    return None
+
+
 def _current_plan_text_for_item(
     runtime: "SessionRuntime", session_id: str, plan_item_id: str
 ) -> str:
-    decided_plan_ids: set[str] = set()
-    for event in reversed(runtime.storage.list_events(session_id)):
-        if event.metadata.get("item_type") != "plan":
-            decision_plan_id = event.metadata.get("plan_item_id")
-            if (
-                isinstance(decision_plan_id, str)
-                and event.metadata.get("plan_decision") in _PLAN_DECISIONS
-            ):
-                decided_plan_ids.add(decision_plan_id)
-            continue
-        current_plan_id = _plan_id_for_event(event)
-        if not current_plan_id or current_plan_id in decided_plan_ids:
-            return ""
-        if current_plan_id != plan_item_id:
-            return ""
-        text = _plan_text_for_event(event)
-        if text:
-            return text
-    return ""
+    current = _current_plan(runtime, session_id)
+    return current.text if current and current.plan_id == plan_item_id else ""
 
 
 def _plan_id_for_event(event: EventRecord) -> str | None:
@@ -2179,7 +2237,8 @@ def _plan_text_for_event(event: EventRecord) -> str:
     return ""
 
 
-_PLAN_DECISIONS = frozenset({"accept", "acceptForSession", "decline", "cancel"})
+_PLAN_DECISION_ORDER = ("accept", "acceptForSession", "decline", "cancel")
+_PLAN_DECISIONS = frozenset(_PLAN_DECISION_ORDER)
 
 
 def _format_plan_approval_prompt(plan: str, note: str | None = None) -> str:

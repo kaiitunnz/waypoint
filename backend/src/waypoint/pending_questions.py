@@ -344,11 +344,12 @@ class PendingQuestionTracker:
             detail="session is not running; resume it to act on this question",
         )
 
-    def compute(self, session_id: str) -> PendingQuestionsSnapshot:
-        """Snapshot of the session's open questions, omitting those the
-        provider has ended."""
-        session = self._runtime.get_session(session_id)
-        events = self._runtime.storage.open_question_events(session_id)
+    def open_questions(
+        self, session: SessionRecord
+    ) -> tuple[list[str], list[PendingQuestion]]:
+        """The session's open question ids, and those of them the provider has
+        not ended. Reads state only."""
+        events = self._runtime.storage.open_question_events(session.id)
         ids = [str(event.metadata["tool_use_id"]) for event in events]
         liveness = self.liveness(session, ids)
         questions = [
@@ -360,6 +361,13 @@ class PendingQuestionTracker:
             for tid, event in zip(ids, events, strict=True)
             if liveness[tid] is not QuestionLiveness.CLOSED
         ]
+        return ids, questions
+
+    def compute(self, session_id: str) -> PendingQuestionsSnapshot:
+        """Snapshot of the session's open questions, omitting those the
+        provider has ended."""
+        session = self._runtime.get_session(session_id)
+        ids, questions = self.open_questions(session)
         self._open_ids[session_id] = frozenset(ids)
         signature: _Signature = tuple(
             (question.tool_use_id, question.availability) for question in questions

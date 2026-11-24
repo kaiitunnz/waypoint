@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
+from waypoint.backends.events import PendingPlanApproval
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AccountProbeResult,
     CommandCompletion,
+    EventRecord,
     SessionContextUsage,
     SessionRecord,
 )
@@ -178,6 +180,29 @@ class QuestionLifecycle(Protocol):
     ) -> QuestionDecline:
         """Decline exactly ``tool_use_id`` with the provider. The runtime records
         the outcome and serializes this against answers."""
+        ...
+
+
+@runtime_checkable
+class PlanApprovalLifecycle(Protocol):
+    """An agent whose plans are approved through ``approve_plan`` rather than an
+    approval request.
+
+    The pending-asks feed asks it which plan, if any, awaits the human. An agent
+    that raises plan approvals as approval requests (``interaction.kind ==
+    "plan_approval"``) needs no protocol: the feed reads those events itself.
+    """
+
+    def pending_plan_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> PendingPlanApproval | None:
+        """The plan awaiting a decision, or ``None``. Check cheap gates (the
+        session's mode) before querying events."""
+        ...
+
+    def affects_plan_approval(self, event: EventRecord) -> bool:
+        """Whether ``event`` can change the session's pending plan (a plan item
+        or a recorded decision). Pure; runs for every event of a tracked session."""
         ...
 
 

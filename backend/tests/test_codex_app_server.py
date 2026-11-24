@@ -17,6 +17,7 @@ from openai_codex.errors import (
 )
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
+from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.codex import adapter as adapter_module
 from waypoint.backends.codex import subagents as subagents_module
 from waypoint.backends.codex.adapter import (
@@ -34,7 +35,7 @@ from waypoint.backends.codex.subagents import (
     read_report,
 )
 from waypoint.backends.codex.transport import CodexTransport, input_http_error
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, EventRecord, SessionStatus
 
 
 @pytest.mark.parametrize(
@@ -648,6 +649,45 @@ async def test_steer_and_interrupt_do_not_wait_for_a_parked_stream() -> None:
 
     names = [call[0] for call in fake.calls]
     assert names[-2:] == ["turn_steer", "turn_interrupt"]
+    assert await adapter.terminate_session("sess") is True
+
+
+@pytest.mark.asyncio
+async def test_live_approval_ids_match_the_emitted_request() -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    handler = fake.approval_handler
+    assert handler is not None
+    reader: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/commandExecution/requestApproval",
+            {"itemId": "cmd-1", "command": "ls"},
+        )
+    )
+    while not any(kind == EventKind.APPROVAL_REQUEST for _, kind, *_ in emitted):
+        await asyncio.sleep(0.01)
+    session_id, kind, text, metadata, _ = next(
+        e for e in emitted if e[1] == EventKind.APPROVAL_REQUEST
+    )
+    request = EventRecord(
+        session_id=session_id,
+        ts=datetime.now(UTC),
+        kind=kind,
+        text=text,
+        metadata=metadata,
+        sequence=1,
+    )
+    transport = CodexTransport(None, SimpleNamespace(adapter=adapter))  # type: ignore[arg-type]
+    session: Any = SimpleNamespace(id="sess")
+
+    assert transport.pending_approval_ids(session) == (approval_request_id(request),)
+
+    assert await adapter.respond_to_approval("sess", "approve")
+    assert await asyncio.wait_for(reader, timeout=2) == {"decision": "accept"}
+    assert transport.pending_approval_ids(session) == ()
     assert await adapter.terminate_session("sess") is True
 
 

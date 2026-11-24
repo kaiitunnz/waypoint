@@ -2447,14 +2447,56 @@ class Storage:
 
     @_synchronized
     def list_approval_events(self, session_id: str) -> list[EventRecord]:
-        """Approval requests and system notes, in order."""
+        """Approval requests and the notes that resolve them, in order.
+
+        The note predicate mirrors ``backends.approvals.is_approval_resolution``
+        (``LIKE`` is case-insensitive for ASCII, like its ``re.I``).
+        """
         rows = self.connection.execute(
             """
             SELECT * FROM events
-            WHERE session_id = ? AND kind IN (?, ?)
+            WHERE session_id = ?
+              AND (kind = ?
+                   OR (kind = ?
+                       AND (json_extract(metadata, '$.method') = 'approval.invalidated'
+                            OR text LIKE '%Approval response sent%'
+                            OR text LIKE '%Approval timed out%')))
             ORDER BY sequence ASC, id ASC
             """,
             [session_id, EventKind.APPROVAL_REQUEST, EventKind.SYSTEM_NOTE],
+        ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
+    def plan_item_events(self, session_id: str, limit: int = 200) -> list[EventRecord]:
+        """Events for plan items (``item_type == "plan"``), newest first."""
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ?
+              AND json_extract(metadata, '$.item_type') = 'plan'
+            ORDER BY sequence DESC, id DESC
+            LIMIT ?
+            """,
+            [session_id, limit],
+        ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
+    def plan_decision_events(
+        self, session_id: str, after_sequence: int
+    ) -> list[EventRecord]:
+        """Events after ``after_sequence`` that record a plan decision, in
+        order."""
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ?
+              AND sequence > ?
+              AND json_extract(metadata, '$.plan_decision') IS NOT NULL
+            ORDER BY sequence ASC, id ASC
+            """,
+            [session_id, after_sequence],
         ).fetchall()
         return [self._event_from_row(row) for row in rows]
 

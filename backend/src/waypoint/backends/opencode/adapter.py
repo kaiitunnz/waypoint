@@ -1511,6 +1511,10 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending_permission_ids)
 
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        state = self._sessions.get(session_id)
+        return tuple(state.pending_permission_ids) if state else ()
+
 
 def build_adapter(
     emit_event: EmitEvent,

@@ -1308,6 +1308,18 @@ class ClaudeCliAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending)
 
+    def pending_tool_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        """Tool approvals awaiting a decision; excludes parked AskUserQuestion
+        requests, which share ``state.pending``."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return ()
+        return tuple(
+            tool_use_id
+            for tool_use_id, entry in state.pending.items()
+            if entry.payload.get("tool_name") != "AskUserQuestion"
+        )
+
     def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
         state = self._sessions.get(session_id)
         if state is None:

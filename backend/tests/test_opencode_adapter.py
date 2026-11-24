@@ -1,9 +1,12 @@
 import asyncio
 import time
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
+from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.opencode.adapter import (
     OpenCodeAdapter,
     OpenCodeError,
@@ -11,7 +14,9 @@ from waypoint.backends.opencode.adapter import (
     _context_usage_snapshot_from_message,
 )
 from waypoint.backends.opencode.client import OpenCodeHttpError
+from waypoint.backends.opencode.transport import OpenCodeTransport
 from waypoint.questions import QuestionLiveness
+from waypoint.schemas import EventRecord
 
 
 def _build_adapter() -> OpenCodeAdapter:
@@ -271,6 +276,67 @@ async def test_dispatch_event_short_circuits_on_closing_state() -> None:
     assert emitted == []
     # _tag_part_type should not have populated _part_sessions for a closing state
     assert adapter._part_sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_live_approval_ids_match_the_emitted_request() -> None:
+    emitted: list[tuple[Any, ...]] = []
+
+    async def _emit(*args: Any) -> None:
+        emitted.append(args)
+
+    adapter = OpenCodeAdapter(emit_event=_emit)
+    adapter._register_session(
+        OpenCodeSessionState(
+            session_id="local-1", cwd="/tmp", opencode_session_id="ses_1"
+        )
+    )
+
+    await adapter._dispatch_event(
+        {
+            "type": "permission.asked",
+            "properties": {
+                "id": "per_1",
+                "sessionID": "ses_1",
+                "permission": "bash",
+                "patterns": ["ls"],
+                "metadata": {"command": "ls"},
+            },
+        }
+    )
+
+    [(session_id, kind, text, metadata, _)] = emitted
+    request = EventRecord(
+        session_id=session_id,
+        ts=datetime.now(UTC),
+        kind=kind,
+        text=text,
+        metadata=metadata,
+        sequence=1,
+    )
+    plugin = SimpleNamespace(
+        _adapters={"key": adapter},
+        _adapter_key=lambda *_: "key",
+        _effective_args=lambda *_: (),
+    )
+    transport = OpenCodeTransport(None, plugin)  # type: ignore[arg-type]
+    session: Any = SimpleNamespace(
+        id="local-1", launch_target_id=None, cwd="/tmp", args=[]
+    )
+
+    # The id lives only in ``approval`` / ``interaction``, not at the top level.
+    assert "approval_id" not in metadata
+    assert approval_request_id(request) == "per_1"
+    assert transport.pending_approval_ids(session) == ("per_1",)
+    assert transport.has_pending_approval(session)
+
+    await adapter._dispatch_event(
+        {
+            "type": "permission.replied",
+            "properties": {"sessionID": "ses_1", "requestID": "per_1", "reply": "once"},
+        }
+    )
+    assert transport.pending_approval_ids(session) == ()
 
 
 @pytest.mark.asyncio

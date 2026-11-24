@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Sans_3, Source_Serif_4 } from "next/font/google";
 
 import { Providers } from "@/components/shell/Providers";
-import { ANTI_FLASH_SCRIPT } from "@/lib/theme";
+import { ANTI_FLASH_SCRIPT } from "@/lib/theme-script";
 
 import "@/styles/tokens.css";
 import "@/styles/base.css";

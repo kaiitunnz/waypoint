@@ -320,7 +320,7 @@ def _image_generation_completed(item: dict[str, Any]) -> Rendered:
 
 
 def _without_image_bytes(item: dict[str, Any]) -> dict[str, Any]:
-    return {**item, "result": ""}
+    return {**item, "result": ""} if "result" in item else item
 
 
 def _hook_prompt(item: dict[str, Any]) -> Rendered | None:

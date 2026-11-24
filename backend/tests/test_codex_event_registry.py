@@ -290,6 +290,7 @@ def test_file_id_image_generation_captures_the_saved_path() -> None:
         "is_error": False,
         "capture_host_files": ["/home/u/.codex/generated_images/t/ig1.png"],
     }
+    assert persisted_item(item) == item
 
 
 def test_failed_image_generation_is_an_error_without_capture() -> None:

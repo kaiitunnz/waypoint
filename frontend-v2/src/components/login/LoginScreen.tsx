@@ -71,6 +71,8 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
   // Kept apart from the choice so the port field survives an invalid host text.
   const [portText, setPortText] = useState(start?.portText ?? String(DEFAULT_BACKEND_PORT));
   const [step, setStep] = useState<"hosts" | "password">(notice && choice ? "password" : "hosts");
+  // Typing a host remounts the sign-in card, whose autofocus would pull focus off the host field.
+  const [addressTyped, setAddressTyped] = useState(false);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -104,6 +106,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
   };
 
   const typed = (address: TypedAddress | null) => {
+    setAddressTyped(true);
     setError("");
     if (!address) {
       setChoice(null);
@@ -166,7 +169,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       portText={portText}
       portValid={port !== null}
       canConnect={url !== null}
-      autoFocusPassword={!desktop}
+      autoFocusPassword={!desktop || !addressTyped}
       onPortChange={setPortText}
       onChangeHost={changeHost}
       probe={probe}

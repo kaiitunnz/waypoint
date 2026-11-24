@@ -204,7 +204,7 @@ function AddressEntry({ onAddress, live, port }: AddressEntryProps) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (address && complete) onAddress(address);
+    if (complete) onAddress(address);
   };
 
   return (

@@ -39,16 +39,12 @@ export function foldOlderEvents(
   current: EventRecord[],
   older: EventRecord[],
 ): EventRecord[] {
-  // `older` arrives ascending and sits entirely before `current` in
-  // sequence space. We must replicate what the forward merge would have
-  // produced if the events had originally arrived in true sequence order
-  // — naive text prepending breaks tool_result snapshots (a final
-  // non-delta supersedes earlier deltas; mergeEventText handles this,
-  // but only when we run it in the right direction). So: build a
-  // per-target accumulator by replaying mergeEvents over the older
-  // events for that item_id, then merge the accumulator with the
-  // matching current entry exactly as if the accumulator had arrived
-  // first and the current entry second.
+  // `older` arrives ascending and sits entirely before `current` in sequence
+  // space. Older events sharing an item_id are replayed through mergeEvents
+  // into one accumulator per target, which is then merged ahead of the matching
+  // current entry, so the result equals a forward merge in true sequence order.
+  // Prepending text instead would break tool_result snapshots, where a final
+  // non-delta supersedes earlier deltas.
   const seenIds = new Set<number>();
   const seenSequences = new Set<number>();
   for (const event of current) {
@@ -96,13 +92,7 @@ export function foldOlderEvents(
     next = current.map((event, index) => {
       const acc = accumulators.get(index);
       if (acc === undefined) return event;
-      // Final fold: accumulator (older) plays the role of "existing",
-      // the current entry plays the role of "incoming". This routes
-      // the merge through mergeEventText with the same arguments
-      // forward processing would have used, so all of its branches
-      // (snapshot supersedes deltas, todo_list state-replacement,
-      // delta append, newline separator for non-delta concat) keep
-      // working on the backward path.
+      // Accumulator first, current entry second: the order forward merging uses.
       const merged = mergeEvents([acc], event);
       return merged[0];
     });
@@ -253,13 +243,15 @@ export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
 
-  // "content"  → user messages, agent text, approvals, ask-questions:
-  //              always breaks (and terminates) the current tool run.
-  // "tool"     → ordinary tool call/result pairs and singles, todos included:
-  //              join the run.
-  // "absorbed" → system_note / status_update lifecycle noise: silently join
-  //              the active run (rendered as quiet separators when expanded),
-  //              or fall through as standalone if no run is active yet.
+  // "content"      → user messages, agent text, approvals, ask-questions:
+  //                  always breaks (and terminates) the current tool run.
+  // "tool"         → ordinary tool call/result pairs and singles, todos
+  //                  included: join the run.
+  // "notification" → task cards: consecutive ones batch into their own run.
+  // "absorbed"     → system_note / status_update lifecycle noise: silently
+  //                  join the active run (rendered as quiet separators when
+  //                  expanded), or fall through as standalone if no run is
+  //                  active yet.
   function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "notification" | "absorbed" {
     if (item.kind === "pair") {
       const { call, result } = item.pair;

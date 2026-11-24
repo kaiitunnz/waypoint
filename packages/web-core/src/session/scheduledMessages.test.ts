@@ -117,7 +117,7 @@ describe("sameSchedules", () => {
     expect(sameSchedules([a], [{ ...a, ...change }])).toBe(false);
   });
 
-  it("ignores fields the dock does not render", () => {
+  it("ignores text and failure_reason, which cannot change while a schedule is pending", () => {
     const a = at(HOUR, { id: "a" });
     expect(sameSchedules([a], [{ ...a, text: "edited", failure_reason: "x" }])).toBe(true);
   });

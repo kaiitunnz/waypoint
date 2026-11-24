@@ -29,9 +29,8 @@ const COMMAND_QUERY = /^[A-Za-z0-9_.:-]*$/;
 const PATH_TRIGGER = "./";
 
 // `/new` works on every structured backend so we surface it locally
-// while the debounced fetch is in flight or if the request fails. Tmux
-// sessions don't support `/new`, so the term composer opts out of this
-// fallback (`localFallback: []`).
+// while the debounced fetch is in flight or if the request fails. A caller
+// whose backend rejects `/new` (tmux) passes `localFallback: []`.
 export const SLASH_NEW_FALLBACK: CommandCompletion = {
   id: "waypoint:builtin:new",
   trigger: "/",
@@ -212,8 +211,8 @@ interface UseCommandCompletionsOptions {
   enabled: boolean;
   // Gates `./` path completion. Defaults to ``enabled``.
   pathEnabled?: boolean;
-  // Override the local fallback list. Chat composer uses ``/new``; the
-  // tmux composer passes ``[]`` because its backend doesn't accept it.
+  // Override the local fallback list. Defaults to ``[SLASH_NEW_FALLBACK]``;
+  // pass ``[]`` to disable.
   localFallback?: ReadonlyArray<CommandCompletion>;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }

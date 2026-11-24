@@ -1,0 +1,71 @@
+.chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  height: 40px;
+  padding: 0 10px 0 12px;
+  border-radius: var(--r);
+  background: var(--fill-quiet);
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.chip > :last-child {
+  color: var(--faint);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(640px, calc(100dvh - 160px));
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.status[data-state="reachable"] {
+  color: var(--done);
+}
+
+.status[data-state="unreachable"] {
+  color: var(--error);
+}
+
+.theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+@media (min-width: 900px) {
+  .chip {
+    height: 36px;
+  }
+}

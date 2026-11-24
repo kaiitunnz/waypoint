@@ -9,6 +9,7 @@
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-pop);
   color: var(--text);
+  outline: none;
 }
 
 .menu {
@@ -46,6 +47,6 @@
 @media (min-width: 900px) {
   .item {
     min-height: 36px;
-    font-size: 14px;
+    font-size: var(--f-body);
   }
 }

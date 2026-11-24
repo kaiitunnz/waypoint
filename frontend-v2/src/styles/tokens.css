@@ -124,8 +124,12 @@ html[data-theme="light"] {
   --error: #b83038;
 }
 
+/* On mobile the body is 16px (iOS also zooms into smaller form fields), the item
+   headline 18px and the page title 26px. */
 @media (max-width: 899.98px) {
   :root {
     --f-page: 26px;
+    --f-head: 18px;
+    --f-body: 16px;
   }
 }

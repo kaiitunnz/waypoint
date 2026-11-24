@@ -105,7 +105,7 @@
 }
 
 .modal .title {
-  font-size: 22px;
+  font-size: var(--f-title);
   line-height: 28px;
 }
 

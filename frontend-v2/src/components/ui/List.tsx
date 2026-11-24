@@ -49,6 +49,7 @@ export function ListRow({
 }: ListRowProps) {
   const classes = cx(
     styles.row,
+    !lamp && styles.noLamp,
     compact && styles.compact,
     dimmed && styles.dimmed,
     pinned && styles.pinned,
@@ -57,7 +58,11 @@ export function ListRow({
   );
   const content = (
     <>
-      <span className={styles.lamp}>{lamp ? <StatusLamp state={lamp} /> : null}</span>
+      {lamp ? (
+        <span className={styles.lamp}>
+          <StatusLamp state={lamp} />
+        </span>
+      ) : null}
       <span className={styles.body}>
         <span className={cx(styles.title, titleFont === "sans" && styles.sans)}>{title}</span>
         {status ? <span className={styles.status}>{status}</span> : null}

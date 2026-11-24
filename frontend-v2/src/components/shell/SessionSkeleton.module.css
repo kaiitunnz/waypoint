@@ -1,0 +1,39 @@
+.screen {
+  position: relative;
+  min-height: 100dvh;
+}
+
+.body {
+  padding-top: calc(var(--safe-top) + var(--bar-height));
+}
+
+.back {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--muted);
+}
+
+.titles {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+}
+
+.id {
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

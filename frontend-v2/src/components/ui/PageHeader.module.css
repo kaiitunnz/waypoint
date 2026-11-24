@@ -5,8 +5,18 @@
   padding: calc(var(--safe-top) + 4px) calc(10px + var(--safe-right)) 4px calc(16px + var(--safe-left));
 }
 
+.back {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-left: -12px;
+  color: var(--muted);
+}
+
 .titles {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -29,10 +39,15 @@
   flex: none;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 @media (min-width: 900px) {
   .header {
     padding: 20px 36px 4px;
+  }
+
+  .back {
+    display: none;
   }
 }

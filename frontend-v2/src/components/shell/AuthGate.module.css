@@ -1,0 +1,4 @@
+.splash {
+  min-height: 100dvh;
+  background: var(--ground);
+}

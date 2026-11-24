@@ -23,7 +23,7 @@
   height: 40px;
   padding: 0 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--f-body);
   color: var(--muted);
   white-space: nowrap;
 }

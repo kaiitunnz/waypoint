@@ -6,7 +6,7 @@
   border-radius: 9px;
   background: var(--action);
   color: var(--on-action);
-  font-size: 11.5px;
+  font-size: var(--f-meta);
   font-weight: 700;
   line-height: 18px;
   text-align: center;

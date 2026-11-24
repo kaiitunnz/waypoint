@@ -1,6 +1,15 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
@@ -50,18 +59,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(() => ({ toast }), [toast]);
+  // The portal waits for the browser, so hydration never sees it.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   return (
     <ToastContext.Provider value={value}>
       {children}
-      {typeof document !== "undefined" && entries.length > 0
+      {mounted
         ? createPortal(
-            <div className={styles.viewport}>
+            // Always present, so assistive tech is already watching when a toast arrives.
+            <div className={styles.viewport} role="status" aria-live="polite">
               {entries.map((entry) => (
-                <div
-                  key={entry.id}
-                  role={entry.tone === "error" ? "alert" : "status"}
-                  className={cx(styles.toast, entry.tone === "error" && styles.error)}
-                >
+                <div key={entry.id} className={cx(styles.toast, entry.tone === "error" && styles.error)}>
                   <span className={styles.message}>{entry.message}</span>
                   {entry.action ? (
                     <button

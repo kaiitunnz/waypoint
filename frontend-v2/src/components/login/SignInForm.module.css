@@ -1,0 +1,93 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.host {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r-card);
+  background: var(--plane-raised);
+}
+
+.name {
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change {
+  grid-column: 3;
+  grid-row: 1 / 4;
+}
+
+.url {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  color: var(--muted);
+}
+
+.port {
+  display: inline-flex;
+  align-items: center;
+}
+
+.port input {
+  width: 78px;
+  min-height: 40px;
+  padding: 0 8px;
+}
+
+.colon {
+  padding: 0 4px 0 2px;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--faint);
+}
+
+.probe {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin-top: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.probe[data-state="reachable"] {
+  color: var(--done);
+}
+
+.probe[data-state="unreachable"] {
+  color: var(--error);
+}
+
+.password {
+  margin-top: 4px;
+}
+
+.error {
+  font-size: var(--f-body);
+  color: var(--error);
+}
+
+@media (min-width: 900px) {
+  .port input {
+    width: 68px;
+    min-height: 32px;
+    font-size: var(--f-code);
+  }
+}

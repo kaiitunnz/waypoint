@@ -7,7 +7,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
   background: var(--plane);
-  font-size: 14.5px;
+  font-size: var(--f-body);
   font-weight: 600;
   color: var(--text-strong);
   white-space: nowrap;
@@ -19,7 +19,7 @@
 }
 
 .label {
-  font-size: 12px;
+  font-size: var(--f-meta);
   font-weight: 400;
   color: var(--brass-text);
 }

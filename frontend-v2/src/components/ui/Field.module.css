@@ -25,7 +25,7 @@
   background: var(--field);
   color: var(--text-strong);
   /* 16px or more: iOS zooms the page when a smaller field takes focus. */
-  font-size: 16px;
+  font-size: var(--f-body);
   outline: none;
 }
 
@@ -34,6 +34,7 @@
 }
 
 .input:focus-visible {
+  outline: none;
   border-color: color-mix(in srgb, var(--text-strong) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-strong) 10%, transparent);
 }
@@ -44,7 +45,6 @@
 
 .mono {
   font-family: var(--mono);
-  font-size: 16px;
 }
 
 .withLead {
@@ -82,11 +82,11 @@
     min-height: 38px;
     padding: 0 10px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: var(--f-body);
   }
 
   .mono {
-    font-size: 13px;
+    font-size: var(--f-code);
   }
 
   .withLead {

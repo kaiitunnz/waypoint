@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
@@ -36,6 +36,12 @@ export function Popover({
   const panel = useRef<HTMLDivElement>(null);
   const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 });
   usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
+  const placed = open && anchor.style !== null;
+  // The panel is portaled to the end of the page; move focus into it so the
+  // keyboard reaches its controls.
+  useEffect(() => {
+    if (placed) panel.current?.focus({ preventScroll: true });
+  }, [placed]);
 
   if (!open || typeof document === "undefined" || !anchor.style) {
     return null;
@@ -45,6 +51,7 @@ export function Popover({
       ref={panel}
       role="dialog"
       aria-label={label}
+      tabIndex={-1}
       className={cx(styles.popover, className)}
       style={{
         ...anchor.style,

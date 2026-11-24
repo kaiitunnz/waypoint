@@ -978,6 +978,14 @@ class Storage:
             assert updated is not None
             return updated
 
+    def restore_status(self, previous: SessionRecord) -> SessionRecord:
+        """Write back ``previous``'s status and ``awaiting_answer``."""
+        return self.update_session(
+            previous.id,
+            status=previous.status,
+            awaiting_answer=previous.awaiting_answer,
+        )
+
     @_synchronized
     def delete_session(self, session_id: str) -> bool:
         cursor = self.connection.execute(
@@ -2113,9 +2121,7 @@ class Storage:
             ),
         )
         status = event.metadata.get("status")
-        # A status write marks awaiting_answer, keeps it when it re-asserts the
-        # stored status, and clears it on a change or an approval request. The
-        # right-hand side reads the row as it was before this update.
+        # The right-hand side reads the row as it was before this update.
         self.connection.execute(
             """
             UPDATE sessions

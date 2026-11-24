@@ -9,6 +9,7 @@ import logging
 import uuid
 from collections import defaultdict
 from contextlib import suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -271,9 +272,7 @@ class HeldQueue:
         try:
             try:
                 await self._publish(record.session_id)
-                prepared = await self._runtime.prepare_input(
-                    record.session_id, request, record.origin
-                )
+                prepared = await self._runtime.prepare_input(record.session_id, request)
             except (Exception, asyncio.CancelledError):
                 # Nothing reached the transcript: put it back.
                 self._put_back(record)
@@ -283,7 +282,9 @@ class HeldQueue:
                 return
             self._dispatching.add(record.id)
             try:
-                await self._runtime.dispatch_input(prepared)
+                await self._runtime.dispatch_input(
+                    replace(prepared, origin=record.origin)
+                )
             except InputBlockedError:
                 # A dialog opened first; keep the item for the next edge.
                 self._put_back(record)

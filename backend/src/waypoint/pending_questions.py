@@ -116,7 +116,7 @@ class PendingQuestionTracker:
         process that held it."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return SessionStatus.IDLE
-        if self._asked_since_human_input(session.id):
+        if self._question_ids_since_human_input(session.id):
             return SessionStatus.WAITING_INPUT
         return SessionStatus.IDLE
 
@@ -125,32 +125,28 @@ class PendingQuestionTracker:
     ) -> bool:
         """Whether an actionable question asked since the human's last message
         is still open, leaving aside ``resolving_id`` (the question the incoming
-        event resolves, if any).
-
-        A turn that ends while one is open leaves the session waiting on the
-        human, even when an agent message or task notification started the turn
-        after the question was asked.
-        """
-        ids = [
-            tool_use_id
-            for event in self._asked_since_human_input(session.id)
-            if (tool_use_id := str(event.metadata["tool_use_id"])) != resolving_id
-        ]
+        event resolves, if any)."""
+        ids = self._question_ids_since_human_input(session.id, resolving_id)
         return any(
             state is QuestionLiveness.ACTIONABLE
             for state in self.liveness(session, ids).values()
         )
 
-    def _asked_since_human_input(self, session_id: str) -> list[EventRecord]:
+    def _question_ids_since_human_input(
+        self, session_id: str, excluding: str | None = None
+    ) -> list[str]:
         """Open questions the human has not moved past with a message of their
         own; agent, scheduled, and wake deliveries do not count."""
         events = self._runtime.storage.open_question_events(session_id)
         if not events:
             return []
         last_input = self._runtime.storage.latest_human_input_sequence(session_id)
-        if last_input is None:
-            return events
-        return [event for event in events if event.sequence > last_input]
+        return [
+            tool_use_id
+            for event in events
+            if (last_input is None or event.sequence > last_input)
+            and (tool_use_id := str(event.metadata["tool_use_id"])) != excluding
+        ]
 
     # ── Answers ─────────────────────────────────────────────────────────
 
@@ -252,11 +248,7 @@ class PendingQuestionTracker:
             return False
         if self._runtime.transport_for(session).has_pending_approval(session):
             return False
-        others = [
-            other
-            for event in self._asked_since_human_input(session.id)
-            if (other := str(event.metadata["tool_use_id"])) != tool_use_id
-        ]
+        others = self._question_ids_since_human_input(session.id, tool_use_id)
         return all(
             state is QuestionLiveness.CLOSED
             for state in self.liveness(session, others).values()
@@ -283,10 +275,12 @@ class PendingQuestionTracker:
         tool_use_id: str,
         reason: QuestionCloseReason,
         text: str,
+        status: SessionStatus | None = None,
     ) -> None:
         await self._runtime._record_system_event(
             session_id,
             text,
+            status=status,
             metadata={
                 "kind": ASK_QUESTION_CLOSED,
                 "tool_use_id": tool_use_id,
@@ -295,21 +289,23 @@ class PendingQuestionTracker:
         )
 
     async def close_open(self, session_id: str, text: str) -> None:
-        """Record a closure for every open question, e.g. once the agent's
-        conversation is replaced and none of them can be answered. A session
-        whose finished turn was waiting on them goes idle."""
-        closed = False
+        """Record a closure for every open question not in flight; a session
+        awaiting their answer goes idle."""
+        session = self._runtime.storage.get_session(session_id)
+        settled = (
+            SessionStatus.IDLE
+            if session is not None and session.awaiting_answer
+            else None
+        )
         for tool_use_id in self._runtime.storage.open_question_tool_use_ids(session_id):
             if (session_id, tool_use_id) in self._operations:
                 continue
             await self._record_closed(
-                session_id, tool_use_id, QuestionCloseReason.PROVIDER_CLOSED, text
-            )
-            closed = True
-        session = self._runtime.storage.get_session(session_id)
-        if closed and session is not None and session.awaiting_answer:
-            await self._runtime.update_session_fields(
-                session_id, status=SessionStatus.IDLE
+                session_id,
+                tool_use_id,
+                QuestionCloseReason.PROVIDER_CLOSED,
+                text,
+                settled,
             )
 
     # ── Liveness, snapshot, reconciliation ──────────────────────────────

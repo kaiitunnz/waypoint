@@ -357,19 +357,6 @@ def last_event(runtime: SessionRuntime):
     return runtime.storage.list_events("s1")[-1]
 
 
-async def test_turn_after_an_open_question_settles_waiting(
-    tmp_path, monkeypatch
-) -> None:
-    runtime = make_runtime(tmp_path)
-    fake_transport(runtime, monkeypatch)
-    await ask(runtime, "q1")
-
-    await task_notification_turn(runtime)
-
-    assert runtime.get_session("s1").status is SessionStatus.WAITING_INPUT
-    assert last_event(runtime).metadata["status"] == SessionStatus.WAITING_INPUT
-
-
 async def test_agent_message_does_not_end_the_wait(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     input_transport(runtime, monkeypatch)
@@ -500,7 +487,9 @@ async def test_a_turn_ending_on_the_question_is_awaiting_an_answer(
     session = runtime.get_session("s1")
     assert session.status is SessionStatus.WAITING_INPUT
     assert session.awaiting_answer
-    assert last_event(runtime).metadata[AWAITING_ANSWER_KEY] is True
+    metadata = last_event(runtime).metadata
+    assert metadata["status"] == SessionStatus.WAITING_INPUT
+    assert metadata[AWAITING_ANSWER_KEY] is True
 
 
 async def test_the_dismissal_status_update_settles_awaiting(
@@ -600,22 +589,6 @@ async def test_answering_clears_awaiting(tmp_path, monkeypatch) -> None:
     assert not runtime.get_session("s1").awaiting_answer
 
 
-async def test_closing_open_questions_lets_turns_end_idle(
-    tmp_path, monkeypatch
-) -> None:
-    runtime = make_runtime(tmp_path)
-    input_transport(runtime, monkeypatch)
-    await ask(runtime, "q1")
-
-    await runtime.questions.close_open("s1", "Question closed: new conversation")
-    await end_turn(runtime)
-
-    assert runtime.storage.open_question_tool_use_ids("s1") == []
-    session = runtime.get_session("s1")
-    assert session.status is SessionStatus.IDLE
-    assert not session.awaiting_answer
-
-
 async def test_closing_open_questions_ends_a_settled_wait(
     tmp_path, monkeypatch
 ) -> None:
@@ -627,6 +600,7 @@ async def test_closing_open_questions_ends_a_settled_wait(
 
     await runtime.questions.close_open("s1", "Question closed: new conversation")
 
+    assert runtime.storage.open_question_tool_use_ids("s1") == []
     session = runtime.get_session("s1")
     assert session.status is SessionStatus.IDLE
     assert not session.awaiting_answer

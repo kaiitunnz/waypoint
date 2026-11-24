@@ -172,10 +172,9 @@ class ClaudeTtyPlugin:
     config_schema: type[PluginConfig] = ClaudeTtyPluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     extra_env = {"CLAUDE_CODE_NO_FLICKER": "1"}
+    question_parks_turn = False
     # Catalogues are the claude agent's, sourced from its capabilities so the
     # two backends can't drift; the flags below are this transport's own.
-    # Its question popup is dismissed to surface the card, ending the turn.
-    question_parks_turn = False
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=True,

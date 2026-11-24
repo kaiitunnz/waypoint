@@ -683,7 +683,7 @@ async def test_cancelled_drain_puts_the_item_back(tmp_path, monkeypatch) -> None
     started = asyncio.Event()
 
     async def stuck_prepare(
-        session_id: str, request: SessionInputRequest, origin: Any = None
+        session_id: str, request: SessionInputRequest
     ) -> PreparedInput:
         started.set()
         await asyncio.Event().wait()

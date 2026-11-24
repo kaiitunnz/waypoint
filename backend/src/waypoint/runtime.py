@@ -22,7 +22,7 @@ from collections.abc import (
 )
 from contextlib import suppress
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import monotonic
@@ -2808,15 +2808,11 @@ class SessionRuntime:
     ) -> SessionRecord:
         """``origin`` marks a message the human did not type (see
         ``INPUT_ORIGIN_KEY``)."""
-        return await self.dispatch_input(
-            await self.prepare_input(session_id, request, origin)
-        )
+        prepared = await self.prepare_input(session_id, request)
+        return await self.dispatch_input(replace(prepared, origin=origin))
 
     async def prepare_input(
-        self,
-        session_id: str,
-        request: SessionInputRequest,
-        origin: HeldMessageOrigin | None = None,
+        self, session_id: str, request: SessionInputRequest
     ) -> PreparedInput:
         """Checks that can fail before anything reaches the transcript or agent:
         the session exists (reattached if exited) and every attachment resolves."""
@@ -2824,9 +2820,7 @@ class SessionRuntime:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             session = await self._reattach_session(session)
         attachments = self.resolve_attachments(session.id, request.attachments)
-        return PreparedInput(
-            session=session, request=request, attachments=attachments, origin=origin
-        )
+        return PreparedInput(session=session, request=request, attachments=attachments)
 
     async def dispatch_input(self, prepared: PreparedInput) -> SessionRecord:
         token = _DISPATCH_ORIGIN.set(prepared.origin)
@@ -2858,8 +2852,6 @@ class SessionRuntime:
         # a stuck "running" state for an unsent message. Input queued behind a
         # pending approval or question does not start a turn, so the session
         # keeps waiting on the human.
-        previous_status = session.status
-        previous_awaiting = session.awaiting_answer
         next_status = (
             SessionStatus.WAITING_INPUT
             if session.status == SessionStatus.WAITING_INPUT
@@ -2885,9 +2877,7 @@ class SessionRuntime:
         try:
             await transport.send_input(session, request.text, attachments or None)
         except Exception as exc:
-            self.storage.update_session(
-                session.id, status=previous_status, awaiting_answer=previous_awaiting
-            )
+            self.storage.restore_status(session)
             if isinstance(exc, InputBlockedError):
                 # A dialog opened after the check above; the message recorded
                 # above never reached the agent.
@@ -5202,7 +5192,11 @@ class SessionRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         event_metadata = dict(metadata or {})
-        status = self._settled_status(session_id, status, event_metadata)
+        status, awaiting = self._settle_on_open_question(
+            session_id, status, event_metadata.get("tool_use_id")
+        )
+        if awaiting:
+            event_metadata[AWAITING_ANSWER_KEY] = True
         if status is not None:
             event_metadata["status"] = status
         event = EventRecord(
@@ -5236,7 +5230,9 @@ class SessionRuntime:
             if not updates:
                 return self.get_session(session_id)
         if "status" in updates:
-            status, awaiting = self._settle(session_id, updates["status"], None)
+            status, awaiting = self._settle_on_open_question(
+                session_id, updates["status"], None
+            )
             updates = {**updates, "status": status}
             if awaiting:
                 updates["awaiting_answer"] = True
@@ -6059,7 +6055,11 @@ class SessionRuntime:
     ) -> None:
         """``status=None`` keeps the session's status as stored at insert time."""
         await self._run_capture_sinks(session_id, metadata)
-        status = self._settled_status(session_id, status, metadata)
+        status, awaiting = self._settle_on_open_question(
+            session_id, status, metadata.get("tool_use_id")
+        )
+        if awaiting:
+            metadata[AWAITING_ANSWER_KEY] = True
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
@@ -6094,36 +6094,23 @@ class SessionRuntime:
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
 
-    def _settled_status(
-        self, session_id: str, status: SessionStatus | None, metadata: dict[str, Any]
-    ) -> SessionStatus | None:
-        """:meth:`_settle` for an event's status, marking ``awaiting_answer`` on
-        ``metadata``. Its ``tool_use_id`` names the question the event resolves."""
-        resolving_id = metadata.get("tool_use_id")
-        settled, awaiting = self._settle(
-            session_id, status, resolving_id if isinstance(resolving_id, str) else None
-        )
-        if awaiting:
-            metadata[AWAITING_ANSWER_KEY] = True
-        return settled
-
-    def _settle(
-        self,
-        session_id: str,
-        status: SessionStatus | None,
-        resolving_id: str | None,
+    def _settle_on_open_question(
+        self, session_id: str, status: SessionStatus | None, resolving_id: Any
     ) -> tuple[SessionStatus | None, bool]:
         """The status to store, and whether the session is ``awaiting_answer``.
 
         An ``IDLE`` stays ``WAITING_INPUT`` while a question the human has yet to
-        answer is open (see ``PendingQuestionTracker.awaits_answer``). It is
-        ``awaiting_answer`` unless a request parks the turn: an agent whose
-        questions block it, or a pending approval.
+        answer is open, leaving aside ``resolving_id`` (see
+        ``PendingQuestionTracker.awaits_answer``). It is ``awaiting_answer``
+        unless a request parks the turn: an agent whose questions block it, or a
+        pending approval.
         """
         if status != SessionStatus.IDLE:
             return status, False
         session = self.storage.get_session(session_id)
-        if session is None or not self.questions.awaits_answer(session, resolving_id):
+        if session is None or not self.questions.awaits_answer(
+            session, resolving_id if isinstance(resolving_id, str) else None
+        ):
             return status, False
         plugin = self.registry.plugin_for(session)
         at_rest = (

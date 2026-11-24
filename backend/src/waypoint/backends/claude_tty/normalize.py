@@ -640,9 +640,8 @@ class TranscriptNormalizer:
                 )
             )
         elif dismissed_question:
-            # The dismissal ends the turn, after every sibling tool's result
-            # (Monitor, background Bash) that may have marked the session
-            # running. The runtime settles this idle onto the open question.
+            # The dismissal lands after any sibling tool's result, so it marks
+            # the turn's end.
             events.extend(_status_only(SessionStatus.IDLE))
 
         return events

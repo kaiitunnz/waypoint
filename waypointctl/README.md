@@ -97,7 +97,6 @@ check. `status` shows which app each service is running (`variant=v1|v2`).
   tailnet sidecar does not proxy the preview port.
 - Both apps share one `node_modules`, so a command that would reinstall
   dependencies under a running frontend is refused; use `restart frontend`.
-- `WAYPOINT_STACK_FRONTEND_DEV=1` runs both services with `npm run dev`.
 
 ## Multiple tailnets per host
 

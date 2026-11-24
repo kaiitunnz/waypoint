@@ -140,8 +140,6 @@ class BackendService(ManagedService):
 
 
 class FrontendService(ManagedService):
-    # `frontend-preview` runs the other variant beside the primary and is
-    # configured only when it has a port.
     def __init__(
         self,
         config: StackConfig,

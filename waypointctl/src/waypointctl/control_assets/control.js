@@ -243,7 +243,6 @@
     syncPreviewLog(!!present["frontend-preview"]);
   }
 
-  // The preview's log tab shows only while the service is listed.
   function syncPreviewLog(present) {
     var seg = $("logSeg");
     seg.querySelector('button[data-log="frontend-preview"]').classList.toggle("hidden", !present);

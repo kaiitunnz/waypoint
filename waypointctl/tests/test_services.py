@@ -297,11 +297,47 @@ def test_frontend_install_failure_fails_the_start(
     monkeypatch.setattr(services.frontend_install, "needs_install", lambda _home: True)
     monkeypatch.setattr(services.frontend_install, "run_install", lambda *_a: 3)
 
-    result = _frontend(config, port=_free_port()).start(lambda *_: None)
+    logs: list[tuple[str, str]] = []
+
+    result = _frontend(config, port=_free_port()).start(
+        lambda stream, line: logs.append((stream, line))
+    )
 
     assert result.ok is False
     assert "exited with 3" in result.message
+    assert ("stderr", "frontend dependency install failed") in logs
     assert fake_runtime == []
+
+
+def test_frontend_build_failure_fails_the_start_and_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    state_dir: Path,
+    tmp_path: Path,
+    fake_runtime: list[dict[str, object]],
+) -> None:
+    config = _build_config(tmp_path, state_dir, backend_port=8797)
+    monkeypatch.setattr(services.frontend_build, "is_fresh", lambda *_a, **_kw: False)
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[0] != "npm":
+            return real_run(cmd, **kwargs)
+        (kwargs["cwd"] / ".next").mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 5)
+
+    monkeypatch.setattr(services.subprocess, "run", fake_run)
+    logs: list[tuple[str, str]] = []
+
+    result = _frontend(config, variant="v2", port=_free_port()).start(
+        lambda stream, line: logs.append((stream, line))
+    )
+
+    assert result.ok is False
+    assert "build exited with 5" in result.message
+    assert ("stderr", "frontend build failed") in logs
+    assert fake_runtime == []
+    marker = config.home / "frontend-v2" / ".next" / "BUILD_BACKEND_PORT"
+    assert not marker.exists()
 
 
 def test_concurrent_frontend_starts_install_once(

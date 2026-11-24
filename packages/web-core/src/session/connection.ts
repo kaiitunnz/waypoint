@@ -32,7 +32,6 @@ export function connectionLabel(
       return "Exited";
     case "starting":
       return "Starting";
-    case "idle":
     default:
       return "Live";
   }

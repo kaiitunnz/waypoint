@@ -12,7 +12,7 @@ import {
   instanceCategoryColor,
   instanceCategoryLabel,
   insightSeverityTone,
-} from "@/lib/telemetry";
+} from "@waypoint/web-core/telemetry";
 import {
   CategoryFootprint,
   DatabaseReclaim,
@@ -21,7 +21,7 @@ import {
   InstanceHistoryPoint,
   InstanceSnapshot,
   TelemetryInstance,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 const DB_DETAILS_REGION_ID = "tm-inst-db-details";
 const DB_DETAILS_HEADING_ID = "tm-inst-db-details-heading";

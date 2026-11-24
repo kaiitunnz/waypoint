@@ -4,7 +4,7 @@ import {
   UNIFIED_TOKEN_CATEGORIES,
   UNIFIED_TOKEN_LABELS,
   UnifiedTokenCategory,
-} from "@/lib/tokens";
+} from "./tokens";
 import {
   InsightSeverity,
   InstanceStorageCategory,
@@ -15,8 +15,8 @@ import {
   TokenCoverage,
   TokenGroupBy,
   TurnKind,
-} from "@/lib/types";
-import { UsageTone } from "@/lib/usage";
+} from "./types";
+import { UsageTone } from "./usage";
 
 // ── Range + filter state ─────────────────────────────────────────────────
 //

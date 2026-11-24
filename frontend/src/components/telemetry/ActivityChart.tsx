@@ -3,8 +3,8 @@
 import { useEffect, useId, useMemo, useState } from "react";
 
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
-import { DOW_LABELS, formatDayLabel, formatHourLabel } from "@/lib/telemetry";
-import { ActivityDaily, TelemetryActivity } from "@/lib/types";
+import { DOW_LABELS, formatDayLabel, formatHourLabel } from "@waypoint/web-core/telemetry";
+import { ActivityDaily, TelemetryActivity } from "@waypoint/web-core/types";
 
 interface ActivityChartProps {
   activity: TelemetryActivity | null;

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchBackendModels, isAuthError } from "@/lib/api";
-import { Backend, BackendModelListResponse, BackendModelOption } from "@/lib/types";
+import { fetchBackendModels, isAuthError } from "@waypoint/web-core/api";
+import { Backend, BackendModelListResponse, BackendModelOption } from "@waypoint/web-core/types";
 
 interface ModelPickerProps {
   host: string;

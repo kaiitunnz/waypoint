@@ -3,8 +3,8 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
-import { HeldMessage } from "@/lib/types";
-import { formatRelativeTime } from "@/lib/usage";
+import { HeldMessage } from "@waypoint/web-core/types";
+import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 function ChevronIcon() {
   return (

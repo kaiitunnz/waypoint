@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
-import { copyText } from "@/lib/clipboard";
-import { useCopied } from "@/lib/use-copied";
+import { copyText } from "@waypoint/web-core/clipboard";
+import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 
 export function CopyMessageButton({
   text,

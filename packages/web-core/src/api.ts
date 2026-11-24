@@ -52,10 +52,10 @@ import {
   UsageDashboardResponse,
   UsageLimitSource,
   UsageProviderOption,
-} from "@/lib/types";
-import { parseDiffPreviewPayload, type EventDiffPreview } from "@/lib/events";
-import type { TelemetryFiltersState, TelemetryRangeState } from "@/lib/telemetry";
-import { telemetryParams } from "@/lib/telemetry";
+} from "./types";
+import { parseDiffPreviewPayload, type EventDiffPreview } from "./events";
+import type { TelemetryFiltersState, TelemetryRangeState } from "./telemetry";
+import { telemetryParams } from "./telemetry";
 
 export class AuthError extends Error {
   constructor(message = "session expired") {

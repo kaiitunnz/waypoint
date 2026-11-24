@@ -11,8 +11,8 @@ import {
   CHANNEL_GROUP_LABELS,
   CHANNEL_GROUP_ORDER,
   groupChannels,
-} from "@/lib/board";
-import { BoardChannel, ManagerSummary } from "@/lib/types";
+} from "@waypoint/web-core/board";
+import { BoardChannel, ManagerSummary } from "@waypoint/web-core/types";
 
 export type PostMode = "ticket" | "update";
 export type UpdateWriteMode = "append" | "cell";

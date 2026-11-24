@@ -3,11 +3,11 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { useActiveRow, wordRangeAt } from "@/lib/composer-completions";
-import { fetchSessionAttachments } from "@/lib/api";
-import { rankItems } from "@/lib/fuzzy";
-import { isInlineMenuAcceptKey } from "@/lib/keyboard";
-import type { SessionAttachment } from "@/lib/types";
+import { useActiveRow, wordRangeAt } from "../composer-completions";
+import { fetchSessionAttachments } from "../api";
+import { rankItems } from "../fuzzy";
+import { isInlineMenuAcceptKey } from "../keyboard";
+import type { SessionAttachment } from "../types";
 
 interface UseFileMentionsOptions {
   host: string;

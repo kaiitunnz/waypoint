@@ -7,7 +7,7 @@ import {
   type WorkspaceGitFileStatus,
   type WorkspaceTreeEntry,
   type WorkspaceTreePage,
-} from "@/lib/api";
+} from "@waypoint/web-core/api";
 import { FileIcon, FolderIcon } from "@/components/AttachmentTray";
 
 type GitDecorationKind =

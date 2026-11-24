@@ -10,13 +10,13 @@ import {
   useState,
 } from "react";
 
-import type { EventDiffPreview, EventDiffPreviewFile } from "@/lib/events";
+import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/events";
 import {
   buildPlainDiffLines,
   highlightDiffToLines,
   type DiffLine,
   type HighlightToken,
-} from "@/lib/highlight";
+} from "@waypoint/web-core/highlight";
 
 // Below this container width the side-by-side layout is too cramped, so the
 // diff defaults to inline until the user explicitly switches.

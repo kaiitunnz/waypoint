@@ -4,19 +4,19 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { trapTabFocus } from "@/lib/keyboard";
-import { matchesQuery, parseQuery } from "@/lib/search";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
+import { matchesQuery, parseQuery } from "@waypoint/web-core/search";
 import {
   byRecency,
   isHistorySession,
   SESSION_SEARCH_FIELDS,
   useMergedSessionPage,
   useSessionHistory,
-} from "@/lib/sessionHistory";
-import { SessionRecord } from "@/lib/types";
+} from "@waypoint/web-core/sessionHistory";
+import { SessionRecord } from "@waypoint/web-core/types";
 import { SearchInput } from "@/components/SearchInput";
-import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
-import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@/lib/useShowExitedSessions";
+import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
+import { SWITCHER_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 
 interface SessionSwitcherProps {
   host: string;

@@ -16,10 +16,10 @@ import {
   deleteResolvedInboxItems,
   fetchInboxList,
   isAuthError,
-} from "@/lib/api";
-import { clearToken, readHost, readToken } from "@/lib/store";
+} from "@waypoint/web-core/api";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
-import type { InboxItem, InboxStatus, SessionEnvelope } from "@/lib/types";
+import type { InboxItem, InboxStatus, SessionEnvelope } from "@waypoint/web-core/types";
 
 type StatusFilter = InboxStatus | "all";
 

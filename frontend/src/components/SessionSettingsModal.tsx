@@ -14,13 +14,13 @@ import {
   permissionModesFor,
   transportLabel,
   useBackendCatalog,
-} from "@/lib/backends";
-import { trapTabFocus } from "@/lib/keyboard";
-import type { Backend, SessionRecord, SessionTransport } from "@/lib/types";
+} from "@waypoint/web-core/backends";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
+import type { Backend, SessionRecord, SessionTransport } from "@waypoint/web-core/types";
 import {
   useSessionSettings,
   type AssistantSettingsControls,
-} from "@/lib/useSessionSettings";
+} from "@waypoint/web-core/hooks/useSessionSettings";
 
 export interface AssistantThreadOption {
   id: string;

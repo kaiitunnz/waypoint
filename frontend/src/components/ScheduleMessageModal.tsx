@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { RecurrenceControl } from "@/components/RecurrenceControl";
-import { createMessageSchedule } from "@/lib/api";
-import { trapTabFocus } from "@/lib/keyboard";
+import { createMessageSchedule } from "@waypoint/web-core/api";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
 import {
   cronFromState,
   defaultRecurrenceState,
   RecurrenceState,
   TimingMode,
-} from "@/lib/recurrence";
+} from "@waypoint/web-core/recurrence";
 
 interface ScheduleMessageModalProps {
   host: string;

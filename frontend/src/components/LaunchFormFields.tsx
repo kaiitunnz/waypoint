@@ -21,12 +21,12 @@ import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { SessionContextFields } from "@/components/SessionContextFields";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
-import type { BackendCatalog } from "@/lib/backends";
-import { permissionModesFor } from "@/lib/backends";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
+import { permissionModesFor } from "@waypoint/web-core/backends";
 import {
   PLUGIN_SELECTION,
   type UsageLimitSourceValue,
-} from "@/components/UsageLimitSourceField";
+} from "@waypoint/web-core/session/usageLimitSource";
 import {
   AccountProfile,
   Backend,
@@ -34,7 +34,7 @@ import {
   SessionPresetSpec,
   SessionTransport,
   UsageProviderOption,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 interface UseLaunchFormParams {
   defaultBackend: Backend;

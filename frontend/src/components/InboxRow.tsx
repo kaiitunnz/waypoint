@@ -2,7 +2,7 @@
 
 import { useRef, useState, type PointerEvent } from "react";
 
-import type { InboxItem } from "@/lib/types";
+import type { InboxItem } from "@waypoint/web-core/types";
 
 export interface InboxRowChip {
   key: string;

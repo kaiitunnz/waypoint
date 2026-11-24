@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { dismissSideQuestion, forkSideQuestion } from "@/lib/api";
-import { type SideQuestion } from "@/lib/types";
+import { dismissSideQuestion, forkSideQuestion } from "@waypoint/web-core/api";
+import { type SideQuestion } from "@waypoint/web-core/types";
 
 // Single up-chevron; orientation handled with a CSS rotation, matching the
 // task-progress dock so the two docks read as one family.

@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useId, useState } from "react";
 
-import { previewSchedule } from "@/lib/api";
+import { previewSchedule } from "@waypoint/web-core/api";
 import {
   Cadence,
   CADENCES,
@@ -13,7 +13,7 @@ import {
   timezoneAbbrev,
   TimingMode,
   WEEKDAY_LABELS,
-} from "@/lib/recurrence";
+} from "@waypoint/web-core/recurrence";
 
 const CADENCE_LABELS: Record<Cadence, string> = {
   daily: "Daily",

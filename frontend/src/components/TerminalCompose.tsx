@@ -23,9 +23,9 @@ import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { type TerminalSubmitResult } from "@/lib/composer";
-import { isModifiedEnterShortcut } from "@/lib/keyboard";
-import { useCommandCompletions } from "@/lib/composer-completions";
-import { useFileMentions } from "@/lib/use-file-mentions";
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
+import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
+import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 

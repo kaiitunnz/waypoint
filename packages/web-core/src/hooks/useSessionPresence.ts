@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { registerSessionPresence, releaseSessionPresence } from "@/lib/api";
+import { registerSessionPresence, releaseSessionPresence } from "../api";
 
 // Renew cadence for a visible tab. The backend lease is longer (45s), so a
 // single missed renewal does not drop presence.

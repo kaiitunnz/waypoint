@@ -11,7 +11,7 @@ import {
   rowLabel,
   rowSection,
   type SuggestionRow,
-} from "@/lib/composer-completions";
+} from "@waypoint/web-core/composer-completions";
 
 interface CommandSuggestionsProps {
   suggestions: ReadonlyArray<SuggestionRow>;

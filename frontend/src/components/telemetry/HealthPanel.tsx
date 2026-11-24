@@ -4,9 +4,9 @@ import { useId, useMemo, useState } from "react";
 
 import { UsageBar } from "@/components/UsageReadout";
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
-import { shortId } from "@/lib/telemetry";
-import { LimitSeries, LimitSnapshotView, TelemetryHealth } from "@/lib/types";
-import { formatRelativeTime, usageTone, UsageTone } from "@/lib/usage";
+import { shortId } from "@waypoint/web-core/telemetry";
+import { LimitSeries, LimitSnapshotView, TelemetryHealth } from "@waypoint/web-core/types";
+import { formatRelativeTime, usageTone, UsageTone } from "@waypoint/web-core/usage";
 
 interface HealthPanelProps {
   health: TelemetryHealth | null;

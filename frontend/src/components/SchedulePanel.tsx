@@ -1,7 +1,7 @@
 "use client";
 
-import type { BackendCatalog } from "@/lib/backends";
-import { MessageSchedule, ScheduledSession, SessionRecord } from "@/lib/types";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
+import { MessageSchedule, ScheduledSession, SessionRecord } from "@waypoint/web-core/types";
 import { ScheduledMessagesGroup } from "@/components/ScheduledMessagesPanel";
 import { ScheduledSessionsGroup } from "@/components/ScheduledSessionsPanel";
 

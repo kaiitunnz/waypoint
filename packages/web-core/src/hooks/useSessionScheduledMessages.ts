@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { deleteMessageSchedule, fetchMessageSchedules } from "@/lib/api";
-import { MessageSchedule } from "@/lib/types";
+import { deleteMessageSchedule, fetchMessageSchedules } from "../api";
+import { MessageSchedule } from "../types";
 
 // Live view of the *pending* scheduled messages for a single session, for the
 // in-session dock. The global schedule_list_update broadcast only reaches the

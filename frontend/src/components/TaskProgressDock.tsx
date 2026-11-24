@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { TodoProgress } from "@/lib/todos";
+import { TodoProgress } from "@waypoint/web-core/todos";
 import { TodoListBody } from "@/components/TodoList";
 
 // A single chevron glyph (pointing up) so the expand and collapse affordances

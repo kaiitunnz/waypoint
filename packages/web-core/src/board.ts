@@ -7,7 +7,7 @@ import {
   ManagerTicketScale,
   ManagerTicketSort,
   ManagerTicketState,
-} from "@/lib/types";
+} from "./types";
 
 // ─── Channel grouping (navigator) ───
 

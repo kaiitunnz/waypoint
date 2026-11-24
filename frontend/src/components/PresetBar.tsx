@@ -4,8 +4,8 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { LaunchForm } from "@/components/LaunchFormFields";
-import { humaniseBackend } from "@/lib/backends";
-import { trapTabFocus } from "@/lib/keyboard";
+import { humaniseBackend } from "@waypoint/web-core/backends";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
 import type {
   AccountProfile,
   Backend,
@@ -13,7 +13,7 @@ import type {
   SessionPresetSummary,
   SessionPresetWriteRequest,
   UsageProviderOption,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 interface SummaryChip {
   text: string;

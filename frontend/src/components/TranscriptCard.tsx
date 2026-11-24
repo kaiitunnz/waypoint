@@ -12,15 +12,15 @@ import {
   fidelityFor,
   humaniseBackend,
   type BackendCatalog,
-} from "@/lib/backends";
-import { fetchAttachmentPreview, type AttachmentPreview } from "@/lib/api";
+} from "@waypoint/web-core/backends";
+import { fetchAttachmentPreview, type AttachmentPreview } from "@waypoint/web-core/api";
 import {
   AttachmentSpec,
   BackendModelOption,
   EventRecord,
   SessionTransport,
-} from "@/lib/types";
-import { modelLabelFor } from "@/lib/modelDisplay";
+} from "@waypoint/web-core/types";
+import { modelLabelFor } from "@waypoint/web-core/modelDisplay";
 import {
   capturedTexts,
   inlineAttachmentIds,
@@ -33,13 +33,13 @@ import {
   type EventDiffPreview,
   type TaskNotificationKind,
   type TaskNotificationView,
-} from "@/lib/events";
+} from "@waypoint/web-core/events";
 import {
   isTodoToolEvent,
   readTodoEntries,
   summarizeTodos,
   type TodoEntry,
-} from "@/lib/todos";
+} from "@waypoint/web-core/todos";
 import {
   attachmentSpecsFor,
   MessageAttachments,

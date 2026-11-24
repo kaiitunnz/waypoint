@@ -1,6 +1,6 @@
 "use client";
 
-import { SessionRateLimitUsage } from "@/lib/types";
+import { SessionRateLimitUsage } from "@waypoint/web-core/types";
 import {
   formatRateLimitWindowReset,
   formatRateLimitWindowTokens,
@@ -8,7 +8,7 @@ import {
   rateLimitWindowPercent,
   usageTone,
   UsageTone,
-} from "@/lib/usage";
+} from "@waypoint/web-core/usage";
 
 const USAGE_BAR_SEGMENTS = 14;
 

@@ -13,7 +13,7 @@
  * heuristics rather than dropping the event.
  */
 
-import type { EventRecord } from "@/lib/types";
+import type { EventRecord } from "./types";
 
 export interface EventEnvelopeItem {
   itemId?: string | null;

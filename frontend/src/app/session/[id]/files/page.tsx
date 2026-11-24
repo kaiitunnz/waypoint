@@ -7,11 +7,11 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { fetchSession, resolveWorkspacePath } from "@/lib/api";
-import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
-import { readHost, readToken } from "@/lib/store";
+import { fetchSession, resolveWorkspacePath } from "@waypoint/web-core/api";
+import { humaniseBackend, useBackendCatalog } from "@waypoint/web-core/backends";
+import { readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
-import type { SessionRecord } from "@/lib/types";
+import type { SessionRecord } from "@waypoint/web-core/types";
 
 export default function SessionFilesPage() {
   const params = useParams<{ id: string }>();

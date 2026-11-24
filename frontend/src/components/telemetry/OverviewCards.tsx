@@ -8,9 +8,9 @@ import {
   tokenCategoryLabel,
   TOKEN_TIER_NEW_WORK,
   shortId,
-} from "@/lib/telemetry";
-import { TelemetryOverview } from "@/lib/types";
-import { formatRelativeTime, usageTone } from "@/lib/usage";
+} from "@waypoint/web-core/telemetry";
+import { TelemetryOverview } from "@waypoint/web-core/types";
+import { formatRelativeTime, usageTone } from "@waypoint/web-core/usage";
 
 interface OverviewCardsProps {
   overview: TelemetryOverview | null;

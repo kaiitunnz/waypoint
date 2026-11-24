@@ -43,7 +43,7 @@ import {
   setSessionPermissionMode,
   setSessionPinned,
   setSessionTitle,
-} from "@/lib/api";
+} from "@waypoint/web-core/api";
 import {
   agentTransports,
   approvalDecisionsFor,
@@ -68,13 +68,13 @@ import {
   transportLabel,
   transportPresentation,
   useBackendCatalog,
-} from "@/lib/backends";
-import { clearToken } from "@/lib/store";
+} from "@waypoint/web-core/backends";
+import { clearToken } from "@waypoint/web-core/store";
 import { type TerminalSubmitResult } from "@/lib/composer";
-import { isModifiedEnterShortcut } from "@/lib/keyboard";
-import { useCommandCompletions } from "@/lib/composer-completions";
-import { useFileMentions } from "@/lib/use-file-mentions";
-import { useCopied } from "@/lib/use-copied";
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
+import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
+import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
+import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
   isModelChangeEvent,
   isModelSwitchEvent,
@@ -86,10 +86,10 @@ import {
   type PlanDecision,
   type PlanViewModel,
   type TaskNotificationKind,
-} from "@/lib/events";
-import { useSessionScheduledMessages } from "@/lib/useSessionScheduledMessages";
-import { useSessionPresence } from "@/lib/useSessionPresence";
-import { formatRelativeTime } from "@/lib/usage";
+} from "@waypoint/web-core/events";
+import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
+import { useSessionPresence } from "@waypoint/web-core/hooks/useSessionPresence";
+import { formatRelativeTime } from "@waypoint/web-core/usage";
 import {
   AttachmentContextProvider,
   AttachmentTray,
@@ -134,12 +134,12 @@ import {
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
-import { readTodoEntries, summarizeTodos } from "@/lib/todos";
+import { readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import {
   effortLabel,
   formatResolvedModelLabel,
   modelLabelFor,
-} from "@/lib/modelDisplay";
+} from "@waypoint/web-core/modelDisplay";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   AccountProfile,
@@ -156,7 +156,7 @@ import {
   SessionRecord,
   SessionTransport,
   SideQuestion,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 // iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
 // click handler — the Promise microtask ends the transient activation

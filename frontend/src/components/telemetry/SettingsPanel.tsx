@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { TelemetryDeleteResponse, TelemetrySettingsResponse } from "@/lib/types";
+import { TelemetryDeleteResponse, TelemetrySettingsResponse } from "@waypoint/web-core/types";
 
 interface SettingsPanelProps {
   settings: TelemetrySettingsResponse | null;

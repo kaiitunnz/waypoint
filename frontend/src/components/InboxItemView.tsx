@@ -14,14 +14,14 @@ import { InboxAttachment, InboxAttachments } from "@/components/InboxAttachment"
 import { InboxQuestionCard } from "@/components/InboxQuestionCard";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { SharedApprovalCard } from "@/components/ApprovalCard";
-import { submitInboxBlock, type InboxBlockSubmit } from "@/lib/api";
+import { submitInboxBlock, type InboxBlockSubmit } from "@waypoint/web-core/api";
 import type {
   InboxApprovalAnswer,
   InboxAttachmentRef,
   InboxBlock,
   InboxItem,
   InboxQuestionAnswer,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 function formatTime(value: string): string {
   const date = new Date(value);

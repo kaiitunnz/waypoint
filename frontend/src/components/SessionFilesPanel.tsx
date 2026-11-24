@@ -9,9 +9,9 @@ import {
   deleteAllAttachments,
   deleteAttachment,
   fetchSessionAttachments,
-} from "@/lib/api";
-import type { SessionAttachment } from "@/lib/types";
-import { formatRelativeTime } from "@/lib/usage";
+} from "@waypoint/web-core/api";
+import type { SessionAttachment } from "@waypoint/web-core/types";
+import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 interface SessionFilesPanelProps {
   host: string;

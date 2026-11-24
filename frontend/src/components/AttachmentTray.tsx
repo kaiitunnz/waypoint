@@ -9,8 +9,8 @@ import {
   useState,
 } from "react";
 
-import { attachmentUrl, deleteAttachment, uploadAttachment } from "@/lib/api";
-import type { AttachmentSpec, EventRecord } from "@/lib/types";
+import { attachmentUrl, deleteAttachment, uploadAttachment } from "@waypoint/web-core/api";
+import type { AttachmentSpec, EventRecord } from "@waypoint/web-core/types";
 
 export interface PendingAttachment {
   localId: string;

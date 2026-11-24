@@ -4,16 +4,16 @@ import { useEffect, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
 import { Pager } from "@/components/Pager";
-import { usePagination } from "@/lib/usePagination";
-import { formatClock, formatRelative } from "@/lib/scheduleTime";
+import { usePagination } from "@waypoint/web-core/hooks/usePagination";
+import { formatClock, formatRelative } from "@waypoint/web-core/scheduleTime";
 import {
   cronToLabel,
   formatInZone,
   isIdle,
   isRecurring,
   timezoneAbbrev,
-} from "@/lib/recurrence";
-import { MessageSchedule, SessionRecord } from "@/lib/types";
+} from "@waypoint/web-core/recurrence";
+import { MessageSchedule, SessionRecord } from "@waypoint/web-core/types";
 
 const PAGE_SIZE = 5;
 

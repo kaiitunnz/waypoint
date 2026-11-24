@@ -14,8 +14,8 @@ import {
   transitionLabel,
   turnKindLabel,
   ToneWithNeutral,
-} from "@/lib/telemetry";
-import { DrilldownItem, TelemetryDrilldown, TelemetryFactKind } from "@/lib/types";
+} from "@waypoint/web-core/telemetry";
+import { DrilldownItem, TelemetryDrilldown, TelemetryFactKind } from "@waypoint/web-core/types";
 
 interface DrilldownPanelProps {
   drilldown: TelemetryDrilldown | null;

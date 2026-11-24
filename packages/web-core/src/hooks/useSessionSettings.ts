@@ -13,8 +13,8 @@ import {
   setSessionTitle,
   setUsageLimitSource,
   updateLaunchSettings,
-} from "@/lib/api";
-import type { BackendCatalog } from "@/lib/backends";
+} from "../api";
+import type { BackendCatalog } from "../backends";
 import type {
   Backend,
   BackendCapabilities,
@@ -24,33 +24,13 @@ import type {
   SessionRecord,
   TransportSettingsOption,
   UsageProviderOption,
-} from "@/lib/types";
+} from "../types";
 import {
   PLUGIN_SELECTION,
+  sameSelection,
+  selectionFromRecord,
   type UsageLimitSourceValue,
-} from "@/components/UsageLimitSourceField";
-
-function selectionFromRecord(record: SessionRecord): UsageLimitSourceValue {
-  if (record.usage_limit_source === "usage_provider") {
-    return {
-      source: "usage_provider",
-      providerId: record.usage_provider_id ?? null,
-      accountKey: record.usage_provider_account_key ?? null,
-    };
-  }
-  return PLUGIN_SELECTION;
-}
-
-function sameSelection(
-  a: UsageLimitSourceValue,
-  b: UsageLimitSourceValue,
-): boolean {
-  return (
-    a.source === b.source &&
-    a.providerId === b.providerId &&
-    a.accountKey === b.accountKey
-  );
-}
+} from "../session/usageLimitSource";
 
 // Editing model for an existing (redacted) env key. Its stored value is never
 // fetched or prefilled: the user may keep it, replace it (typing a new value),

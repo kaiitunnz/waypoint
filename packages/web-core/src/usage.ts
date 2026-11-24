@@ -1,4 +1,4 @@
-import { UsageWindow } from "@/lib/types";
+import { UsageWindow } from "./types";
 
 const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {

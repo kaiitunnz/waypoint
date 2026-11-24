@@ -4,7 +4,7 @@
  * label maps can't drift between call sites.
  */
 
-import type { BackendModelOption } from "@/lib/types";
+import type { BackendModelOption } from "./types";
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
-import { trapTabFocus } from "@/lib/keyboard";
+import { trapTabFocus } from "@waypoint/web-core/keyboard";
 
 // Glass slide-over (desktop) / bottom sheet (mobile) used to host the launch
 // form and the schedule manager. Traps focus, closes on Escape or scrim click,

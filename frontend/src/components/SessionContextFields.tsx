@@ -4,9 +4,9 @@ import { useMemo } from "react";
 
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { AgentPicker, TransportPicker } from "@/components/AgentTransportPicker";
-import type { BackendCatalog } from "@/lib/backends";
-import { agentTransports } from "@/lib/backends";
-import { AccountProfile, Backend, SessionTransport } from "@/lib/types";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
+import { agentTransports } from "@waypoint/web-core/backends";
+import { AccountProfile, Backend, SessionTransport } from "@waypoint/web-core/types";
 
 interface SessionContextFieldsProps {
   agents: Backend[];

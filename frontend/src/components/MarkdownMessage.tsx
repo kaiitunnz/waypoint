@@ -14,13 +14,13 @@ import ReactMarkdown, { type Components } from "react-markdown";
 
 import { CopyCodeButton } from "@/components/CopyCodeButton";
 import { useWorkspaceFileLink } from "@/components/WorkspaceFileLinkContext";
-import { highlightFenceToLines, type HighlightToken } from "@/lib/highlight";
+import { highlightFenceToLines, type HighlightToken } from "@waypoint/web-core/highlight";
 import {
   COMMON_REHYPE_PLUGINS,
   COMMON_REMARK_PLUGINS,
   orderedListMarkerDigits,
-} from "@/lib/markdown";
-import { isWorkspacePathHref, remarkLinkifyPaths } from "@/lib/workspacePaths";
+} from "@waypoint/web-core/markdown";
+import { isWorkspacePathHref, remarkLinkifyPaths } from "@waypoint/web-core/workspacePaths";
 
 interface MarkdownMessageProps {
   text: string;

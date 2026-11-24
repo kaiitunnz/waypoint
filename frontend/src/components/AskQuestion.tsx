@@ -11,14 +11,14 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { answerAskQuestion, cancelAskQuestion } from "@/lib/api";
-import { normalizeToolName } from "@/lib/events";
-import { isModifiedEnterShortcut } from "@/lib/keyboard";
+import { answerAskQuestion, cancelAskQuestion } from "@waypoint/web-core/api";
+import { normalizeToolName } from "@waypoint/web-core/events";
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import type {
   EventRecord,
   PendingQuestionAvailability,
   PendingQuestionsSnapshot,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 export interface AskQuestionOption {
   label: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Backend, SessionPresetSummary } from "@/lib/types";
+import type { Backend, SessionPresetSummary } from "@waypoint/web-core/types";
 
 // Compact launch action that replaces the always-open form on the homepage: a
 // row of preset quick-launch chips plus a "New session" button, both of which

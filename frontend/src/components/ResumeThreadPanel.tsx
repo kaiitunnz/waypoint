@@ -12,11 +12,11 @@ import {
   recordToEntries,
 } from "@/components/EnvVarRows";
 import { LaunchOptionsDetails } from "@/components/LaunchOptions";
-import { fetchBackendModels } from "@/lib/api";
-import type { BackendCatalog } from "@/lib/backends";
-import { defaultTransportFor, humaniseBackend } from "@/lib/backends";
-import { matchesQuery, parseQuery } from "@/lib/search";
-import { Backend, BackendModelOption, SessionTransport } from "@/lib/types";
+import { fetchBackendModels } from "@waypoint/web-core/api";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
+import { defaultTransportFor, humaniseBackend } from "@waypoint/web-core/backends";
+import { matchesQuery, parseQuery } from "@waypoint/web-core/search";
+import { Backend, BackendModelOption, SessionTransport } from "@waypoint/web-core/types";
 
 import { SearchInput } from "./SearchInput";
 

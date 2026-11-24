@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { connectSessionsSocket, fetchInboxUnresolvedCount } from "@/lib/api";
-import type { SessionEnvelope } from "@/lib/types";
+import { connectSessionsSocket, fetchInboxUnresolvedCount } from "../api";
+import type { SessionEnvelope } from "../types";
 
 // Shared unresolved-inbox count for the nav count and the floater badge. Seeds
 // from the REST count, then tracks the absolute `unresolved_count` on every

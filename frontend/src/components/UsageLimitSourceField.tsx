@@ -1,18 +1,7 @@
 "use client";
 
-import type { UsageLimitSource, UsageProviderOption } from "@/lib/types";
-
-export interface UsageLimitSourceValue {
-  source: UsageLimitSource;
-  providerId: string | null;
-  accountKey: string | null;
-}
-
-export const PLUGIN_SELECTION: UsageLimitSourceValue = {
-  source: "plugin",
-  providerId: null,
-  accountKey: null,
-};
+import type { UsageProviderOption } from "@waypoint/web-core/types";
+import type { UsageLimitSourceValue } from "@waypoint/web-core/session/usageLimitSource";
 
 interface UsageLimitSourceFieldProps {
   variant: "launch" | "settings";

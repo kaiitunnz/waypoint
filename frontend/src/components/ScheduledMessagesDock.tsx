@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { ExpandableText } from "@/components/ExpandableText";
-import { cronToLabel, isIdle, isRecurring } from "@/lib/recurrence";
-import { MessageSchedule } from "@/lib/types";
+import { cronToLabel, isIdle, isRecurring } from "@waypoint/web-core/recurrence";
+import { MessageSchedule } from "@waypoint/web-core/types";
 
 // A single chevron glyph (pointing up); orientation handled with a CSS rotation,
 // matching the task-progress and side-question docks so the three read as one

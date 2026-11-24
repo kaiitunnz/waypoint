@@ -16,11 +16,11 @@ import {
   reattachAssistant,
   resetAssistant,
   terminateAssistant,
-} from "@/lib/api";
-import { buildCatalog, humaniseBackend, transportPresentation } from "@/lib/backends";
-import { copyText } from "@/lib/clipboard";
-import { useCopied } from "@/lib/use-copied";
-import { clearToken, readHost, readToken } from "@/lib/store";
+} from "@waypoint/web-core/api";
+import { buildCatalog, humaniseBackend, transportPresentation } from "@waypoint/web-core/backends";
+import { copyText } from "@waypoint/web-core/clipboard";
+import { useCopied } from "@waypoint/web-core/hooks/use-copied";
+import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
 import {
   AssistantSummary,
@@ -28,7 +28,7 @@ import {
   BackendDescriptor,
   SessionStatus,
   SessionTransport,
-} from "@/lib/types";
+} from "@waypoint/web-core/types";
 
 type LoadState = "loading" | "ready" | "disabled" | "error";
 

@@ -8,13 +8,13 @@ import {
   fetchWorkspaceFind,
   fetchWorkspaceTree,
   type WorkspaceTreeEntry,
-} from "@/lib/api";
-import { matchPath, rankItems, span } from "@/lib/fuzzy";
-import { isInlineMenuAcceptKey } from "@/lib/keyboard";
+} from "./api";
+import { matchPath, rankItems, span } from "./fuzzy";
+import { isInlineMenuAcceptKey } from "./keyboard";
 import type {
   CommandCompletion,
   SessionCommandInvocation,
-} from "@/lib/types";
+} from "./types";
 
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 const COMPLETION_REFRESH_POLL_MS = 750;

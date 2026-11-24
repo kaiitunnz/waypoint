@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { AuthError, fetchSessionHistory } from "@/lib/api";
-import { matchesQuery, parseQuery } from "@/lib/search";
-import { SessionRecord } from "@/lib/types";
+import { AuthError, fetchSessionHistory } from "./api";
+import { matchesQuery, parseQuery } from "./search";
+import { SessionRecord } from "./types";
 
 // Exited, unpinned sessions ("history") are paged from the server; live and
 // pinned sessions arrive over the sessions socket. This module caches history

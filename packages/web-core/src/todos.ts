@@ -1,5 +1,5 @@
-import { EventRecord } from "@/lib/types";
-import { normalizeToolName } from "@/lib/events";
+import { EventRecord } from "./types";
+import { normalizeToolName } from "./events";
 
 export type TodoStatus = "completed" | "in-progress" | "pending";
 

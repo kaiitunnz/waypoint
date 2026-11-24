@@ -22,7 +22,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchBackends } from "@/lib/api";
+import { fetchBackends } from "./api";
 import type {
   AccountProfile,
   AgentCapabilities,
@@ -33,7 +33,7 @@ import type {
   MeResponse,
   SessionTransport,
   TransportCapabilities,
-} from "@/lib/types";
+} from "./types";
 
 export interface BackendCatalog {
   byId: (id: Backend) => BackendDescriptor | undefined;

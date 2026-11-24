@@ -9,8 +9,8 @@ import {
   fetchInboxItem,
   isAuthError,
   markInboxRead,
-} from "@/lib/api";
-import type { InboxItem, SessionEnvelope } from "@/lib/types";
+} from "@waypoint/web-core/api";
+import type { InboxItem, SessionEnvelope } from "@waypoint/web-core/types";
 
 // Smart wrapper for a single inbox item: hydrates it, marks it read, keeps it
 // live over /ws/inbox/{id}, and owns delete. Shared by the desktop split-view

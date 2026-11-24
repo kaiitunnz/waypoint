@@ -14,11 +14,9 @@ import {
   formatExactBytes,
   formatHourLabel,
   formatRangeLabel,
-  hasActiveFilters,
   insightSeverityTone,
   instanceCategoryColor,
   instanceCategoryLabel,
-  orderedTokenCategories,
   readTelemetryQuery,
   shortId,
   splitTokenTiers,
@@ -37,27 +35,6 @@ import type { TelemetryRange } from "./types";
 const filters = (overrides: Partial<TelemetryFiltersState> = {}): TelemetryFiltersState => ({
   ...DEFAULT_FILTERS,
   ...overrides,
-});
-
-describe("hasActiveFilters", () => {
-  it("is false for the defaults, including a blank parent id", () => {
-    expect(hasActiveFilters(DEFAULT_FILTERS)).toBe(false);
-    expect(hasActiveFilters(filters({ parentSessionId: "   " }))).toBe(false);
-    expect(hasActiveFilters(filters({ includeDescendants: false }))).toBe(false);
-  });
-
-  it.each([
-    { backends: ["claude_code"] },
-    { models: ["m"] },
-    { repos: ["r"] },
-    { tags: ["k:v"] },
-    { sources: ["managed"] },
-    { transports: ["claude_tty"] },
-    { parentScope: "roots" as TelemetryFiltersState["parentScope"] },
-    { parentSessionId: "claude_code-1" },
-  ])("is true when %o is set", (override) => {
-    expect(hasActiveFilters(filters(override))).toBe(true);
-  });
 });
 
 describe("telemetryParams", () => {
@@ -204,16 +181,6 @@ describe("token categories", () => {
   it("labels known categories and title-cases unknown ones", () => {
     expect(tokenCategoryLabel("cache_read")).toBe("Cached input (read)");
     expect(tokenCategoryLabel("some_new_bucket")).toBe("Some New Bucket");
-  });
-
-  it("orders known categories first in the fixed order, then the rest alphabetically", () => {
-    expect(orderedTokenCategories({ zeta: 1, output: 1, alpha: 1, fresh_input: 1 })).toEqual([
-      "fresh_input",
-      "output",
-      "alpha",
-      "zeta",
-    ]);
-    expect(orderedTokenCategories({})).toEqual([]);
   });
 
   it("colours categories and falls back to the last series slot", () => {

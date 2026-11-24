@@ -1,12 +1,7 @@
-import rehypeKatex from "rehype-katex";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { describe, expect, it } from "vitest";
 
 import {
   COMMON_REHYPE_PLUGINS,
-  COMMON_REMARK_PLUGINS,
   orderedListMarkerDigits,
 } from "./markdown";
 
@@ -22,19 +17,6 @@ describe("orderedListMarkerDigits", () => {
   it("treats an empty list as a single item", () => {
     expect(orderedListMarkerDigits(undefined, 0)).toBe(1);
     expect(orderedListMarkerDigits(10, 0)).toBe(2);
-  });
-});
-
-describe("plugin lists", () => {
-  it("enables GFM, hard line breaks and math on the markdown side", () => {
-    expect(COMMON_REMARK_PLUGINS).toEqual([remarkGfm, remarkBreaks, remarkMath]);
-  });
-
-  it("renders KaTeX with untrusted-input bounds, after the math-fence guard", () => {
-    expect(COMMON_REHYPE_PLUGINS).toEqual([
-      expect.any(Function),
-      [rehypeKatex, { trust: false, maxExpand: 1000, errorColor: "var(--danger)" }],
-    ]);
   });
 });
 

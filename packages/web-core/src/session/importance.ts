@@ -39,8 +39,6 @@ export function isImportantEvent(event: EventRecord): boolean {
         return true;
       }
       return /(approval response|approval timed out|attached|started|terminated|interrupt|resume|failed|error|exited|compact)/i.test(event.text);
-    case "raw_terminal_chunk":
-      return false;
     default:
       return false;
   }

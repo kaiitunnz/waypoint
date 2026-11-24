@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  UNIFIED_TOKEN_CATEGORIES,
-  UNIFIED_TOKEN_LABELS,
-  UnifiedTokenCategory,
-} from "./tokens";
+import { UNIFIED_TOKEN_LABELS, UnifiedTokenCategory } from "./tokens";
 import {
   InsightSeverity,
   InstanceStorageCategory,
@@ -69,19 +65,6 @@ export const DEFAULT_FILTERS: TelemetryFiltersState = {
   parentSessionId: "",
   includeDescendants: true,
 };
-
-export function hasActiveFilters(filters: TelemetryFiltersState): boolean {
-  return (
-    filters.backends.length > 0 ||
-    filters.models.length > 0 ||
-    filters.repos.length > 0 ||
-    filters.tags.length > 0 ||
-    filters.sources.length > 0 ||
-    filters.transports.length > 0 ||
-    filters.parentScope !== "all" ||
-    Boolean(filters.parentSessionId.trim())
-  );
-}
 
 // Builds the shared range+filter query params every endpoint reads. `extra`
 // layers endpoint-specific params (group_by, kind, page, ...) on the same base.
@@ -245,13 +228,6 @@ export function coverageLabel(coverage: TokenCoverage): string {
   return COVERAGE_LABELS[coverage] ?? coverage;
 }
 
-// Category keys a token totals map may carry — order here is the fixed
-// stacking/legend order (never resorted by value; see the telemetry CSS
-// section's `--tm-series-*` categorical slots). Mirrors the backend's 5
-// unified buckets (`telemetry/tokens.py`) that every aggregate response's
-// `totals` now carries.
-export const TOKEN_CATEGORY_ORDER = UNIFIED_TOKEN_CATEGORIES;
-
 export function tokenCategoryLabel(category: string): string {
   const known = UNIFIED_TOKEN_LABELS[category as UnifiedTokenCategory];
   if (known) return known;
@@ -259,14 +235,6 @@ export function tokenCategoryLabel(category: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-export function orderedTokenCategories(totals: Record<string, number>): string[] {
-  const known = TOKEN_CATEGORY_ORDER.filter((key) => key in totals);
-  const rest = Object.keys(totals)
-    .filter((key) => !TOKEN_CATEGORY_ORDER.includes(key as (typeof TOKEN_CATEGORY_ORDER)[number]))
-    .sort();
-  return [...known, ...rest];
 }
 
 // The two spend tiers the Tokens card and legend group by: fresh work the

@@ -28,6 +28,12 @@ function schedule(overrides: Partial<MessageSchedule> = {}): MessageSchedule {
 const at = (offsetMs: number, overrides: Partial<MessageSchedule> = {}) =>
   schedule({ scheduled_at: new Date(NOW + offsetMs).toISOString(), ...overrides });
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+});
+afterEach(() => vi.useRealTimers());
+
 describe("describeScheduledDelivery", () => {
   it.each([
     [-1_000, "any moment"],
@@ -36,33 +42,21 @@ describe("describeScheduledDelivery", () => {
     [HOUR, "in 1h"],
     [48 * HOUR, "in 2d"],
   ])("counts down a delivery %d ms away as %j, as formatRelative does", (offset, label) => {
-    expect(describeScheduledDelivery(at(offset), NOW)).toBe(label);
+    expect(describeScheduledDelivery(at(offset))).toBe(label);
   });
 
   it("shows an idle schedule as waiting on session state, never a countdown", () => {
-    expect(describeScheduledDelivery(at(HOUR, { trigger: "idle" }), NOW)).toBe("When idle");
-    expect(describeScheduledDelivery(schedule({ trigger: "idle" }), NOW)).toBe("When idle");
+    expect(describeScheduledDelivery(at(HOUR, { trigger: "idle" }))).toBe("When idle");
+    expect(describeScheduledDelivery(schedule({ trigger: "idle" }))).toBe("When idle");
   });
 
   it("is blank for an undated schedule", () => {
-    expect(describeScheduledDelivery(schedule({ scheduled_at: null }), NOW)).toBe("");
-    expect(describeScheduledDelivery(schedule(), NOW)).toBe("");
+    expect(describeScheduledDelivery(schedule({ scheduled_at: null }))).toBe("");
+    expect(describeScheduledDelivery(schedule())).toBe("");
   });
 
   it("renders an unparsable date as NaN days, since every comparison against NaN is false", () => {
-    expect(describeScheduledDelivery(schedule({ scheduled_at: "not-a-date" }), NOW)).toBe("in NaNd");
-  });
-
-  describe("with the system clock", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-      vi.setSystemTime(NOW);
-    });
-    afterEach(() => vi.useRealTimers());
-
-    it("defaults to the current time", () => {
-      expect(describeScheduledDelivery(at(2 * HOUR))).toBe("in 2h");
-    });
+    expect(describeScheduledDelivery(schedule({ scheduled_at: "not-a-date" }))).toBe("in NaNd");
   });
 });
 
@@ -131,38 +125,27 @@ describe("sameSchedules", () => {
 
 describe("schedulePollIntervalMs", () => {
   it("polls fast when the soonest delivery is due within 30 seconds or already past", () => {
-    expect(schedulePollIntervalMs([at(-HOUR)], NOW)).toBe(4_000);
-    expect(schedulePollIntervalMs([at(0)], NOW)).toBe(4_000);
-    expect(schedulePollIntervalMs([at(30_000)], NOW)).toBe(4_000);
+    expect(schedulePollIntervalMs([at(-HOUR)])).toBe(4_000);
+    expect(schedulePollIntervalMs([at(0)])).toBe(4_000);
+    expect(schedulePollIntervalMs([at(30_000)])).toBe(4_000);
   });
 
   it("polls slowly otherwise", () => {
-    expect(schedulePollIntervalMs([at(30_001)], NOW)).toBe(15_000);
-    expect(schedulePollIntervalMs([at(DAY)], NOW)).toBe(15_000);
+    expect(schedulePollIntervalMs([at(30_001)])).toBe(15_000);
+    expect(schedulePollIntervalMs([at(DAY)])).toBe(15_000);
   });
 
   it("is decided by the soonest dated schedule", () => {
-    expect(schedulePollIntervalMs([at(DAY), at(10_000)], NOW)).toBe(4_000);
+    expect(schedulePollIntervalMs([at(DAY), at(10_000)])).toBe(4_000);
   });
 
   it("polls slowly with no schedules or only undated ones", () => {
-    expect(schedulePollIntervalMs([], NOW)).toBe(15_000);
-    expect(schedulePollIntervalMs([schedule()], NOW)).toBe(15_000);
+    expect(schedulePollIntervalMs([])).toBe(15_000);
+    expect(schedulePollIntervalMs([schedule()])).toBe(15_000);
   });
 
   it("polls slowly when any date is unparsable, because the minimum becomes NaN", () => {
-    expect(schedulePollIntervalMs([at(DAY), schedule({ scheduled_at: "not-a-date" })], NOW)).toBe(15_000);
-    expect(schedulePollIntervalMs([at(0), schedule({ scheduled_at: "not-a-date" })], NOW)).toBe(15_000);
-  });
-
-  it("defaults to the current time", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(NOW);
-    try {
-      expect(schedulePollIntervalMs([at(0)])).toBe(4_000);
-      expect(schedulePollIntervalMs([at(HOUR)])).toBe(15_000);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(schedulePollIntervalMs([at(DAY), schedule({ scheduled_at: "not-a-date" })])).toBe(15_000);
+    expect(schedulePollIntervalMs([at(0), schedule({ scheduled_at: "not-a-date" })])).toBe(15_000);
   });
 });

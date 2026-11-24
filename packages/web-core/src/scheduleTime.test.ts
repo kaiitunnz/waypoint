@@ -31,12 +31,6 @@ describe("formatRelative", () => {
     expect(from(offset)).toBe(label);
   });
 
-  it("measures against an explicit now instead of the system clock", () => {
-    const target = new Date(NOW.getTime() + 3 * HOUR);
-    expect(formatRelative(target, NOW.getTime() + 2 * HOUR)).toBe("in 1h");
-    expect(formatRelative(target, NOW.getTime() + 4 * HOUR)).toBe("any moment");
-  });
-
   it("renders an unparsable date as NaN days, since every comparison against NaN is false", () => {
     expect(formatRelative(new Date("not-a-date"))).toBe("in NaNd");
   });

@@ -1,7 +1,4 @@
-/**
- * Time formatting shared by the Scheduled Sessions and Messages panels, which
- * render the same launch/send clock and countdown.
- */
+/** Clock and countdown formatting for scheduled sessions and messages. */
 
 export function formatClock(target: Date): string {
   const sameDay = new Date().toDateString() === target.toDateString();
@@ -13,8 +10,8 @@ export function formatClock(target: Date): string {
   });
 }
 
-export function formatRelative(target: Date, now: number = Date.now()): string {
-  const diff = target.getTime() - now;
+export function formatRelative(target: Date): string {
+  const diff = target.getTime() - Date.now();
   if (diff <= 0) {
     return "any moment";
   }

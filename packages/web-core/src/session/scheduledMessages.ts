@@ -2,10 +2,7 @@ import { isIdle } from "../recurrence";
 import { formatRelative } from "../scheduleTime";
 import type { MessageSchedule } from "../types";
 
-export function describeScheduledDelivery(
-  schedule: MessageSchedule,
-  now: number = Date.now(),
-): string {
+export function describeScheduledDelivery(schedule: MessageSchedule): string {
   // An idle schedule delivers on session state, not a clock; its scheduled_at
   // is only the enqueue time, so it must never render as a countdown.
   if (isIdle(schedule)) {
@@ -14,7 +11,7 @@ export function describeScheduledDelivery(
   if (!schedule.scheduled_at) {
     return "";
   }
-  return formatRelative(new Date(schedule.scheduled_at), now);
+  return formatRelative(new Date(schedule.scheduled_at));
 }
 
 function scheduledAtMs(m: MessageSchedule): number {
@@ -50,16 +47,13 @@ export function sameSchedules(a: MessageSchedule[], b: MessageSchedule[]): boole
 // Poll fast when the soonest delivery is imminent or already past (so a
 // just-fired message clears within a few seconds instead of lingering on "any
 // moment"), and slowly otherwise.
-export function schedulePollIntervalMs(
-  messages: MessageSchedule[],
-  now: number = Date.now(),
-): number {
+export function schedulePollIntervalMs(messages: MessageSchedule[]): number {
   const soonest = messages.reduce((min, m) => {
     if (!m.scheduled_at) {
       return min;
     }
     return Math.min(min, new Date(m.scheduled_at).getTime());
   }, Number.POSITIVE_INFINITY);
-  const dueSoon = soonest - now <= 30_000;
+  const dueSoon = soonest - Date.now() <= 30_000;
   return dueSoon ? 4_000 : 15_000;
 }

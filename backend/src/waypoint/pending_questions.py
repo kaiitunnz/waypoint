@@ -111,8 +111,9 @@ class PendingQuestionTracker:
         )
 
     def restored_status(self, session: SessionRecord) -> SessionStatus:
-        """An open question keeps ``WAITING_INPUT`` across a restore; a wait on
-        an approval ends with the process that held it."""
+        """A session at ``WAITING_INPUT`` keeps it across a restore while an open
+        question is not ``CLOSED``; a wait on an approval ends with the process
+        that held it."""
         if session.status is not SessionStatus.WAITING_INPUT:
             return SessionStatus.IDLE
         ids = self._runtime.storage.open_question_tool_use_ids(session.id)

@@ -63,14 +63,14 @@ def async_questions(item: dict[str, Any]) -> list[dict[str, Any]] | None:
     return questions or None
 
 
-def apply_async_question(metadata: dict[str, Any], item: dict[str, Any]) -> bool:
+def apply_async_question(metadata: dict[str, Any], item: dict[str, Any]) -> None:
     """Mark ``metadata`` as an AskUserQuestion card when ``item`` is an async
     question, copying the questions to ``payload["input"]`` where the frontend
-    reads them. Returns whether it was one."""
+    reads them."""
     item_id = item.get("id")
     questions = async_questions(item)
     if questions is None or not isinstance(item_id, str) or not item_id:
-        return False
+        return
     metadata["payload"]["input"] = {"questions": questions}
     metadata.update(
         tool_name=ASK_USER_QUESTION_TOOL,
@@ -80,7 +80,6 @@ def apply_async_question(metadata: dict[str, Any], item: dict[str, Any]) -> bool
     interaction = question_interaction(item_id, questions)
     if interaction is not None:
         metadata[INTERACTION_METADATA_KEY] = interaction.to_metadata()
-    return True
 
 
 def build_reply(

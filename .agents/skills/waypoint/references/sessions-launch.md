@@ -80,8 +80,8 @@ the ids you pin are real.
 
 ## Attaching an existing tmux pane
 
-To bring a pane you (or the human) already started under Waypoint, attach it
-instead of launching a new agent:
+To put a pane you (or the human) started outside Waypoint under its management,
+attach it instead of launching a new agent:
 
 ```bash
 waypoint sessions attach-tmux --tmux <target>                  # pane id (%3), session, or session:window.pane

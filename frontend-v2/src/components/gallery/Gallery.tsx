@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Field";
@@ -12,6 +13,8 @@ import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { List, ListRow } from "@/components/ui/List";
+import { MenuButton } from "@/components/ui/MenuButton";
+import { Meter } from "@/components/ui/Meter";
 import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
@@ -29,6 +32,8 @@ export function Gallery() {
   const [sheet, setSheet] = useState(false);
   const [modal, setModal] = useState(false);
   const [popover, setPopover] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [wide, setWide] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
@@ -115,17 +120,47 @@ export function Gallery() {
         ))}
         <Badge count={5} />
         <Badge count={120} />
+        <span className={styles.lamp}>
+          <StatusLamp state="needs" flat />
+          needs, flat
+        </span>
+      </div>
+
+      <SectionHeading title="Meters" dense />
+      <div className={styles.fields}>
+        <Meter label="Task progress" value={57} />
+        <Meter label="Calm" value={30} tone="calm" />
+        <Meter label="Approaching the limit" value={77} tone="warn" />
+        <Meter label="At the limit" value={96} tone="danger" />
       </div>
 
       <SectionHeading title="List rows" count={4} action="See all" />
       <List>
         <ListRow lamp="needs" title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
         <ListRow lamp="idle" title="Paper figures" compact pinned trailing="Yesterday" />
-        <ListRow lamp="working" title="Heatmap keyboard access" status="Running npm run lint" trailing="2m" />
+        <ListRow
+          lamp="working"
+          title="Heatmap keyboard access"
+          status="Running npm run lint"
+          trailing="2m"
+          href="/gallery"
+          actions={
+            <MenuButton
+              label="Row actions"
+              title="Heatmap keyboard access"
+              subtitle="Claude Code, Opus 4.8"
+              items={[
+                { id: "pin", label: "Pin" },
+                { id: "terminate", label: "Terminate…", tone: "danger" },
+              ]}
+              onSelect={() => {}}
+            />
+          }
+        />
         <ListRow lamp="exited" title="597 exited" titleFont="sans" compact dimmed selected trailing="" />
       </List>
 
-      <SectionHeading title="Fields" />
+      <SectionHeading title="Fields" dense />
       <div className={styles.fields}>
         <SearchInput aria-label="Search sessions" placeholder="Search sessions" />
         <Field label="Host" htmlFor="g-host">
@@ -140,6 +175,8 @@ export function Gallery() {
       <div className={styles.row}>
         <Button onClick={() => setSheet(true)}>Sheet</Button>
         <Button onClick={() => setModal(true)}>Modal</Button>
+        <Button onClick={() => setWide(true)}>Wide modal</Button>
+        <Button onClick={() => setConfirm(true)}>Confirm</Button>
         <Button ref={trigger} onClick={() => setPopover((open) => !open)}>
           Popover
         </Button>
@@ -204,6 +241,28 @@ export function Gallery() {
           <PasswordInput id="g-ssh" />
         </Field>
       </Modal>
+      <Modal
+        open={wide}
+        onClose={() => setWide(false)}
+        title="Switch session"
+        subtitle="Claude Code, Opus 4.8"
+        size="lg"
+        footer={
+          <Button variant="primary" onClick={() => setWide(false)}>
+            Close
+          </Button>
+        }
+      >
+        <p>A wide modal with a subtitle under its title.</p>
+      </Modal>
+      <ConfirmDialog
+        open={confirm}
+        title="Terminate this session?"
+        detail="The agent stops and the session moves to Exited."
+        confirmLabel="Terminate"
+        onConfirm={() => {}}
+        onClose={() => setConfirm(false)}
+      />
       <Popover open={popover} onOpenChange={setPopover} triggerRef={trigger} label="Actions" width={240}>
         <Menu label="Actions">
           <MenuItem onSelect={() => setPopover(false)} selected>

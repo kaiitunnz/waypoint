@@ -11,6 +11,9 @@
 }
 
 .retry {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   font-size: var(--f-meta);
   font-weight: 600;
   color: var(--text);

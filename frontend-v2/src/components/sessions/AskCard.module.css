@@ -20,7 +20,7 @@
   min-width: 0;
   overflow: hidden;
   font-family: var(--serif);
-  font-size: 14px;
+  font-size: var(--f-body);
   font-weight: 600;
   color: var(--text);
   text-overflow: ellipsis;

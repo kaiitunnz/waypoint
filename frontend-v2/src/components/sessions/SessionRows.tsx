@@ -2,8 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { SessionActivity } from "@waypoint/web-core/activity";
-import { lampWord, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
-import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
+import { formatSessionTime, lampWord, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ListRow } from "@/components/ui/List";
@@ -36,6 +35,7 @@ export function LiveRow({
     <ListRow
       href={href(session)}
       lamp={lamp}
+      lampLabel={lampWord(lamp, session.status)}
       title={session.title}
       status={
         <ActivityLine
@@ -64,6 +64,7 @@ export function CompactRow({
     <ListRow
       href={href(session)}
       lamp={lamp}
+      lampLabel={lampWord(lamp, session.status)}
       title={session.title}
       compact
       pinned={pinned}
@@ -100,7 +101,7 @@ export function LiveTile({
           <span className={styles.time}>{time(session, now)}</span>
         </span>
         <span className={styles.step}>
-          <StatusLamp state={lamp} size="sm" />
+          <StatusLamp state={lamp} size="sm" label={lampWord(lamp, session.status)} />
           <ActivityLine
             fallback={lampWord(lamp, session.status)}
             activity={activity}
@@ -122,6 +123,7 @@ export function ResultRow({ session, lamp, now, agent, menu }: RowProps) {
     <ListRow
       href={href(session)}
       lamp={lamp}
+      lampLabel={lampWord(lamp, session.status)}
       title={session.title}
       dimmed={lamp === "exited"}
       status={where}

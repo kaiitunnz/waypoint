@@ -5,7 +5,12 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 
 import { useBackendCatalog } from "@waypoint/web-core/backends";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { agentModelLabel, formatSessionTime, sessionLamp } from "@waypoint/web-core/sessionPresentation";
+import {
+  agentModelLabel,
+  formatSessionTime,
+  lampWord,
+  sessionLamp,
+} from "@waypoint/web-core/sessionPresentation";
 import { HOME_HIDDEN_SOURCES, visibleSessions } from "@waypoint/web-core/sessionSections";
 import { useSessionHistory } from "@waypoint/web-core/sessionHistory";
 import {
@@ -137,6 +142,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
       <ul ref={list} id={listId} role="listbox" aria-label="Sessions" className={styles.list}>
         {entries.map((entry, index) => {
           const { session } = entry;
+          const lamp = sessionLamp(session, askSessionIds.has(session.id));
           const heading = entry.section !== previous ? SWITCHER_SECTION_LABELS[entry.section] : null;
           previous = entry.section;
           return (
@@ -152,7 +158,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
                 onMouseMove={() => setActive(index)}
                 onClick={() => open(session)}
               >
-                <StatusLamp state={sessionLamp(session, askSessionIds.has(session.id))} />
+                <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
                 <span className={styles.text}>
                   <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>
                   <span className={styles.meta}>{agentModelLabel(session, catalog)}</span>

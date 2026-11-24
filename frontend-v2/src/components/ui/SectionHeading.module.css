@@ -22,6 +22,14 @@
   color: var(--muted);
 }
 
+/* A 44px tap target that leaves the heading's rhythm as it was. */
+.action > * {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-block: -14px;
+}
+
 .dense {
   padding-top: 18px;
   padding-bottom: 8px;

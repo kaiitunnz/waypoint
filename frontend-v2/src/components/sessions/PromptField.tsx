@@ -39,7 +39,8 @@ export function PromptField({
   onSubmitCustom,
 }: PromptFieldProps) {
   const [expanded, setExpanded] = useState(false);
-  const [otherOpen, setOtherOpen] = useState(pick.other !== "");
+  // With no options to choose, the free-text field is the whole question.
+  const [otherOpen, setOtherOpen] = useState(pick.other !== "" || prompt.options.length === 0);
   // A multi-select prompt shows every option, so a choice is never out of sight.
   const limited =
     limit !== undefined && !prompt.multi_select && !expanded && prompt.options.length > limit;

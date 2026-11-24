@@ -51,12 +51,15 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
 
   function pickOption(index: number, label: string) {
     const prompt = prompts[index];
-    const next = toggleOption(picks[index], label, prompt.multi_select);
-    update(index, () => next);
-    // A lone single-select question has nothing left to ask once an option is chosen.
-    if (single && !prompt.multi_select && next.labels.length === 1) {
-      void submit([{ labels: next.labels, other: "" }]);
+    // A lone single-select question has nothing left to ask once an option is chosen,
+    // so a tap always sends it, including a second tap after a failed send.
+    if (single && !prompt.multi_select) {
+      const chosen = { labels: [label], other: "" };
+      update(index, () => chosen);
+      void submit([chosen]);
+      return;
     }
+    update(index, () => toggleOption(picks[index], label, prompt.multi_select));
   }
 
   const Surface = desktop ? Modal : Sheet;

@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 36px;
+  min-height: 44px;
   padding: 0 16px;
   font-size: var(--f-meta);
   color: var(--muted);
@@ -74,7 +74,7 @@
   column-gap: 10px;
   align-items: center;
   min-height: 26px;
-  font-size: 14px;
+  font-size: var(--f-body);
 }
 
 .accountName {
@@ -92,7 +92,7 @@
 }
 
 .windowLabel {
-  font-size: 12px;
+  font-size: var(--f-meta);
   color: var(--faint);
 }
 
@@ -120,7 +120,7 @@
   align-items: baseline;
   min-height: 40px;
   padding: 4px 0;
-  font-size: 14px;
+  font-size: var(--f-body);
 }
 
 .glyph {
@@ -172,7 +172,7 @@
 }
 
 .count b {
-  font-size: 22px;
+  font-size: var(--f-title);
   font-weight: 600;
   line-height: 28px;
   color: var(--text-strong);
@@ -184,6 +184,6 @@
 
 .channels {
   padding: 0 16px;
-  font-size: 14px;
+  font-size: var(--f-body);
   color: var(--text);
 }

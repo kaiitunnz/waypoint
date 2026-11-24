@@ -12,6 +12,8 @@ export function List({ children }: { children: ReactNode }) {
 
 interface ListRowProps {
   lamp?: LampState;
+  // Spoken name of the lamp, when no text beside it says the same.
+  lampLabel?: string;
   title: ReactNode;
   titleFont?: "serif" | "sans";
   status?: ReactNode;
@@ -31,6 +33,7 @@ interface ListRowProps {
 
 export function ListRow({
   lamp,
+  lampLabel,
   title,
   titleFont = "serif",
   status,
@@ -55,7 +58,7 @@ export function ListRow({
     <>
       {lamp ? (
         <span className={styles.lamp}>
-          <StatusLamp state={lamp} />
+          <StatusLamp state={lamp} label={lampLabel} />
         </span>
       ) : null}
       <span className={styles.body}>

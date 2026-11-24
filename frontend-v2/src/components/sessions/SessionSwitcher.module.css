@@ -78,6 +78,9 @@
 }
 
 .more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   font-weight: 600;
   color: var(--text);
 }

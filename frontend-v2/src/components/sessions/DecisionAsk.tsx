@@ -90,7 +90,7 @@ export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
           </Button>
         ) : null}
         {supportsNote && !noteOpen ? (
-          <Button variant="text" size="sm" className={styles.danger} onClick={() => setNoteOpen(true)}>
+          <Button variant="text" size="sm" className={styles.end} onClick={() => setNoteOpen(true)}>
             Add note
           </Button>
         ) : null}

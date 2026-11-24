@@ -1,7 +1,6 @@
 /**
- * Display helpers for model/effort values shared across the launch panel,
- * the effort picker, and the session header badge. Single-sourced so the
- * label maps can't drift between call sites.
+ * Display helpers for model/effort values, single-sourced so the label maps
+ * can't drift between call sites.
  */
 
 import type { BackendModelOption } from "./types";

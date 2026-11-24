@@ -10,26 +10,26 @@ import {
 
 // Where the popover is pinned relative to its trigger. ``dropdown`` drops the
 // panel just below the trigger and is portaled to ``document.body`` with
-// ``position: fixed`` (the term-bar case, whose trigger lives inside
-// ``.session-terminal``'s ``overflow: hidden`` box). ``composer`` renders the
-// panel in-tree above the trigger; CSS owns its ``position: absolute``
-// bottom/right anchor, so the hook emits no position, only bounds.
+// ``position: fixed``, so a trigger inside an ``overflow: hidden`` box can't
+// clip it. ``composer`` renders the panel in-tree above the trigger; CSS owns
+// its ``position: absolute`` bottom/right anchor, so the hook emits no
+// position, only bounds.
 export type PopoverPlacement = "dropdown" | "composer";
 
 interface PopoverAnchorOptions {
   gap?: number;
-  // Below this viewport width, return null style/bounds so a CSS bottom-sheet
-  // media query (e.g. the generic ``.usage-panel`` mobile rule) takes over
-  // instead of the fixed drop-down. Omit for popovers whose mobile styling is
-  // specific to a different anchor and must not apply once portaled.
+  // Below this viewport width, return null style/bounds so the caller's CSS
+  // bottom-sheet media query takes over instead of the fixed drop-down. Omit
+  // for popovers whose mobile styling is specific to a different anchor and
+  // must not apply once portaled.
   deferBelow?: number;
   // Minimum inset kept between the panel and every visual-viewport edge.
   margin?: number;
 }
 
 // The space available for the panel to grow into, measured from its fixed
-// anchor toward the free edges, in layout-viewport CSS pixels. ``SessionUsagePill``
-// clamps a user's saved size against these bounds on every remeasurement.
+// anchor toward the free edges, in layout-viewport CSS pixels. Callers clamp a
+// saved size against these bounds on every remeasurement.
 export interface PopoverBounds {
   minWidth: number;
   maxWidth: number;

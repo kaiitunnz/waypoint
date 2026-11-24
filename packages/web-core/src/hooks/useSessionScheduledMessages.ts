@@ -10,11 +10,11 @@ import {
 } from "../session/scheduledMessages";
 import { MessageSchedule } from "../types";
 
-// Live view of the *pending* scheduled messages for a single session, for the
-// in-session dock. The global schedule_list_update broadcast only reaches the
-// /ws/sessions socket (published with session_id=None), which the session page
-// doesn't hold — so we fetch on mount, poll on a slow cadence, apply an
-// optimistic cancel, and refresh after a create to keep the dock responsive.
+// Live view of the *pending* scheduled messages for a single session. The
+// global schedule_list_update broadcast only reaches the /ws/sessions socket
+// (published with session_id=None), which the session page doesn't hold — so we
+// fetch on mount, poll on a slow cadence, apply an optimistic cancel, and
+// refresh after a create to keep the list responsive.
 export function useSessionScheduledMessages(
   host: string,
   token: string,

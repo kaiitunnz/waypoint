@@ -8,9 +8,8 @@
  * envelope so adding a v2 field doesn't scatter optional-chain guards
  * across the UI.
  *
- * Unknown versions degrade gracefully: the metadata is still
- * surfaced via `extra` so renderers can fall back to their existing
- * heuristics rather than dropping the event.
+ * An unknown version still surfaces its metadata via `extra`, so renderers
+ * can fall back to their existing heuristics.
  */
 
 import type { EventRecord } from "./types";

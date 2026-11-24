@@ -112,7 +112,7 @@ export function HostPicker({
         <SearchInput
           ref={searchRef}
           aria-label="Search hosts"
-          placeholder={groups.total > 1 ? `Search ${groups.total} hosts` : "Search hosts"}
+          placeholder="Search hosts"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
         />

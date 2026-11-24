@@ -188,7 +188,6 @@ describe("buildHostGroups", () => {
     expect(groups.recent[1].address).toBe("100.70.8.33");
     expect(groups.online).toHaveLength(32);
     expect(groups.offline).toHaveLength(61);
-    expect(groups.total).toBe(1 + 2 + 32 + 61);
   });
 
   it("sorts online hosts alphabetically with natural numbers", () => {
@@ -239,8 +238,60 @@ describe("buildHostGroups", () => {
       snapshot: snapshot([peer("studio", "100.83.12.4", true, { is_self: true })]),
       recents: [recent("http://100.83.12.4:8787", 1, "studio"), recent("http://100.83.12.4:9000", 0, "studio-9000")],
     });
-    expect(groups.thisDevice).toMatchObject({ name: "studio", hostname: "localhost" });
+    expect(groups.thisDevice).toMatchObject({ name: "studio", hostname: "localhost", lastUsedAt: 1 });
     expect(names(groups.recent)).toEqual(["studio-9000"]);
+  });
+
+  describe("loopback aliases of This device", () => {
+    const self = () => snapshot([peer("studio", "100.83.12.4", true, { is_self: true })]);
+
+    it("folds a recent on the same port into This device and keeps its recency there", () => {
+      const groups = buildHostGroups({
+        pageHost: "localhost",
+        devicePort: 8797,
+        snapshot: self(),
+        recents: [
+          recent("http://127.0.0.1:8797", 5, "studio"),
+          recent("http://[::1]:8797", 7, "studio"),
+          recent("http://127.0.0.1:9000", 3, "second"),
+        ],
+      });
+      expect(groups.thisDevice).toMatchObject({ name: "studio", address: "localhost:8797", lastUsedAt: 7 });
+      expect(names(groups.recent)).toEqual(["second"]);
+    });
+
+    it("also folds the page host however it is cased", () => {
+      const groups = buildHostGroups({
+        pageHost: "Studio.tail1234.ts.net",
+        devicePort: 8787,
+        snapshot: null,
+        recents: [recent("http://studio.TAIL1234.ts.net:8787", 4, "studio")],
+      });
+      expect(groups.thisDevice?.lastUsedAt).toBe(4);
+      expect(groups.recent).toEqual([]);
+    });
+
+    it("keeps loopback as its own recent when the page is served from another machine", () => {
+      const groups = buildHostGroups({
+        pageHost: "100.83.12.4",
+        devicePort: 8787,
+        snapshot: self(),
+        recents: [recent("http://127.0.0.1:8787", 2, "laptop")],
+      });
+      expect(groups.thisDevice?.lastUsedAt).toBeNull();
+      expect(names(groups.recent)).toEqual(["laptop"]);
+    });
+
+    it("leaves a different port in Recent", () => {
+      const groups = buildHostGroups({
+        pageHost: "localhost",
+        devicePort: 8797,
+        snapshot: self(),
+        recents: [recent("http://localhost:8787", 2, "other-backend")],
+      });
+      expect(groups.thisDevice?.lastUsedAt).toBeNull();
+      expect(names(groups.recent)).toEqual(["other-backend"]);
+    });
   });
 
   describe("with a signed-in backend's snapshot", () => {
@@ -343,7 +394,7 @@ describe("buildHostGroups", () => {
     });
     expect(groups.online).toEqual([]);
     expect(groups.offline).toEqual([]);
-    expect(groups.total).toBe(2);
+    expect(names(groups.recent)).toEqual(["http://10.0.4.12:9000"]);
   });
 
   it("searches name, DNS name, address and OS, and expands nothing itself", () => {
@@ -361,7 +412,6 @@ describe("buildHostGroups", () => {
     expect(names(run("ios ipad").online)).toEqual(["ipad"]);
     expect(run("zzz").online).toEqual([]);
     expect(run("zzz").thisDevice).toBeNull();
-    expect(run("zzz").total).toBe(4);
   });
 });
 

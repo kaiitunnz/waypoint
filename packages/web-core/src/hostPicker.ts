@@ -9,6 +9,8 @@ import {
 
 export type BackendProtocol = "http" | "https";
 
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
 export interface BackendAddress {
   protocol: BackendProtocol;
   hostname: string;
@@ -199,8 +201,6 @@ export interface HostGroups {
   recent: HostRow[];
   online: HostRow[];
   offline: HostRow[];
-  // Hosts known before filtering: the denominator of "Search N hosts".
-  total: number;
 }
 
 export interface BuildHostGroupsInput {
@@ -291,16 +291,21 @@ export function buildHostGroups({
     : peerMatching(snapshot, pageHost);
 
   const deviceUrl = buildBackendUrl({ protocol, hostname: pageHost, port: devicePort });
-  const thisDevice = makeRow({
-    kind: "host",
-    name: selfPeer?.name ?? pageHost,
-    url: deviceUrl,
-    hostname: pageHost,
-    online: "online",
-    lastUsedAt: null,
-    extraSearch: [selfPeer?.dns_name ?? null, selfPeer?.ip ?? null, selfPeer?.os ?? null],
-  });
-  claimed.add(thisDevice.key);
+  claimed.add(hostKey(deviceUrl));
+  // Every hostname that reaches the machine serving this page. Loopback counts
+  // only when the page itself was opened on loopback; from another machine
+  // `localhost` is the browser's own machine.
+  const deviceHosts = new Set([pageHost.toLowerCase()]);
+  if (selfPeer) {
+    for (const name of [selfPeer.ip, selfPeer.dns_name, selfPeer.name]) {
+      if (name) deviceHosts.add(name.toLowerCase());
+    }
+  }
+  if (LOOPBACK.has(pageHost.toLowerCase())) {
+    LOOPBACK.forEach((name) => deviceHosts.add(name));
+  }
+  // A sign-in to this machine is kept on its This device row, not listed twice.
+  let deviceLastUsed: number | null = null;
 
   // A recent entry may name a peer by IP, DNS name or short name; the peer must
   // not also be listed under Online or Offline at that port.
@@ -309,9 +314,11 @@ export function buildHostGroups({
   for (const entry of recents) {
     const address = splitBackendUrl(entry.url);
     if (!address) continue;
+    if (address.port === devicePort && deviceHosts.has(address.hostname.toLowerCase())) {
+      deviceLastUsed = Math.max(deviceLastUsed ?? 0, entry.lastUsedAt);
+      continue;
+    }
     const peer = peerMatching(snapshot, address.hostname);
-    // The host serving this page is This device however it was typed.
-    if (peer && peer === selfPeer && address.port === devicePort) continue;
     const row = makeRow({
       kind: "host",
       name: entry.name,
@@ -326,6 +333,16 @@ export function buildHostGroups({
     claimed.add(row.key);
     recent.push(row);
   }
+
+  const thisDevice = makeRow({
+    kind: "host",
+    name: selfPeer?.name ?? pageHost,
+    url: deviceUrl,
+    hostname: pageHost,
+    online: "online",
+    lastUsedAt: deviceLastUsed,
+    extraSearch: [selfPeer?.dns_name ?? null, selfPeer?.ip ?? null, selfPeer?.os ?? null],
+  });
 
   const online: HostRow[] = [];
   const offline: HostRow[] = [];
@@ -355,7 +372,6 @@ export function buildHostGroups({
     recent: recent.filter(keep),
     online: online.filter(keep),
     offline: offline.filter(keep),
-    total: 1 + recent.length + online.length + offline.length,
   };
 }
 
@@ -407,8 +423,6 @@ export function formatLastUsed(timestamp: number, now: number = Date.now()): str
   }
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
-
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 // The short name a host goes by in the host chip: the SSH target's name, the
 // name recorded at sign-in, "Local" for loopback, the whole hostname for an IP,

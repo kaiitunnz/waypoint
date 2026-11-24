@@ -963,16 +963,18 @@ class SessionRuntime:
         """Restoring a session records lifecycle notes that are not activity: a
         session that was read stays read, one with unseen activity stays unread."""
         before = self.storage.get_session(session_id)
-        yield
-        after = self.storage.get_session(session_id)
-        if (
-            before is not None
-            and after is not None
-            and not (
-                before.read_at is not None and before.last_event_at > before.read_at
-            )
-        ):
-            self.mark_session_read(session_id, after.last_event_at)
+        try:
+            yield
+        finally:
+            after = self.storage.get_session(session_id)
+            if (
+                before is not None
+                and after is not None
+                and not (
+                    before.read_at is not None and before.last_event_at > before.read_at
+                )
+            ):
+                self.mark_session_read(session_id, after.last_event_at)
 
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.

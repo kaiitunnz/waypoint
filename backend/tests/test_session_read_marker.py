@@ -370,3 +370,19 @@ async def test_attached_session_starts_read(
     acted = storage.get_session(attached.id)
     assert acted is not None
     assert _unread(acted)
+
+
+async def test_a_restore_that_fails_still_leaves_a_read_session_read(
+    tmp_path: Path,
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    storage.create_session(_session(last_event_at=datetime.now(UTC)))
+
+    with pytest.raises(RuntimeError):
+        async with runtime._keep_read("s1"):
+            await runtime._record_system_event("s1", "Restoring")
+            raise RuntimeError("restore failed")
+
+    session = storage.get_session("s1")
+    assert session is not None
+    assert not _unread(session)

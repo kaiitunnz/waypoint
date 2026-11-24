@@ -1245,7 +1245,6 @@ class PendingQuestionsSnapshot(BaseModel):
 
 
 PendingAskAvailability = PendingQuestionAvailability
-PendingAskPlanResolver = Literal["approve", "approve_plan"]
 
 
 class PendingAskOption(BaseModel):
@@ -1253,14 +1252,14 @@ class PendingAskOption(BaseModel):
     # "(Recommended)" marker the asking agent put in the label.
     label: str
     description: str | None = None
-    recommended: bool = False
+    recommended: bool
 
 
 class PendingAskPrompt(BaseModel):
     question: str
     header: str | None = None
-    multi_select: bool = False
-    options: list[PendingAskOption] = Field(default_factory=list)
+    multi_select: bool
+    options: list[PendingAskOption]
 
 
 class PendingAskQuestion(BaseModel):
@@ -1272,17 +1271,17 @@ class PendingAskApproval(BaseModel):
     approval_id: str
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
-    tool_input_truncated: bool = False
-    decisions: list[str] = Field(default_factory=list)
-    supports_note: bool = False
+    tool_input_truncated: bool
+    decisions: list[str]
+    supports_note: bool
 
 
 class PendingAskPlan(BaseModel):
     plan_id: str
     text: str
-    decisions: list[str] = Field(default_factory=list)
-    supports_note: bool = False
-    resolve_via: PendingAskPlanResolver
+    decisions: list[str]
+    supports_note: bool
+    resolve_via: Literal["approve", "approve_plan"]
 
 
 class PendingAskBase(BaseModel):
@@ -1327,7 +1326,7 @@ class PendingAsksSnapshot(BaseModel):
 
     epoch: str
     revision: int
-    items: list[PendingAsk] = Field(default_factory=list)
+    items: list[PendingAsk]
 
 
 class EventsPageResponse(BaseModel):

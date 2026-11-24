@@ -2473,10 +2473,10 @@ class Storage:
         session_id: str,
         key: str,
         value: str | None = None,
-        *,
         after_sequence: int = 0,
-        newest_first: bool = False,
         limit: int | None = None,
+        *,
+        newest_first: bool = False,
     ) -> list[EventRecord]:
         """Events whose top-level metadata ``key`` equals ``value``, or is set
         when ``value`` is ``None``, after ``after_sequence``, capped at

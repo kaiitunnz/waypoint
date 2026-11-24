@@ -1,12 +1,5 @@
 """Cross-session pending asks: every question, tool approval, and plan approval
-awaiting the human, across live sessions.
-
-Durable events and the plugin protocols stay the source of truth (see
-:mod:`waypoint.pending_questions`, :mod:`waypoint.backends.approvals`, and
-``PlanApprovalLifecycle``); this module derives one item list from them, keeps
-it current incrementally, and pushes ``pending_asks`` snapshots on the global
-sessions stream when it changes.
-"""
+awaiting the human, across live sessions."""
 
 import asyncio
 import logging
@@ -124,6 +117,109 @@ def _distinct_body(title: str, text: str | None) -> str | None:
     return body if body != title else None
 
 
+def _question_ask(
+    session: SessionRecord, question: PendingQuestion
+) -> PendingQuestionAsk | None:
+    prompts = _question_prompts(question.event)
+    if not prompts:
+        return None
+    interaction = _interaction(question.event)
+    title = _cut(_text(interaction.get("title")) or prompts[0].question or "Question")
+    return PendingQuestionAsk(
+        id=f"question:{session.id}:{question.tool_use_id}",
+        **_common(session, question.event.ts, question.event.sequence),
+        availability=question.availability,
+        title=title,
+        body=_distinct_body(title, _text(interaction.get("body"))),
+        question=PendingAskQuestion(
+            tool_use_id=question.tool_use_id, questions=prompts
+        ),
+    )
+
+
+def _approval_ask(
+    session: SessionRecord,
+    event: EventRecord,
+    interaction: dict[str, Any],
+    request_id: str,
+    capabilities: BackendCapabilities,
+) -> PendingApprovalAsk:
+    tool_name = _text(event.metadata.get("tool_name"))
+    raw_input = event.metadata.get("tool_input")
+    tool_input = _cut_strings(raw_input) if isinstance(raw_input, dict) else None
+    title = _cut(
+        _text(interaction.get("title"))
+        or (f"Approve {tool_name}" if tool_name else "Approval requested")
+    )
+    return PendingApprovalAsk(
+        id=f"approval:{session.id}:{request_id}",
+        **_common(session, event.ts, event.sequence),
+        availability="actionable",
+        title=title,
+        body=_distinct_body(title, _text(interaction.get("body")) or event.text),
+        approval=PendingAskApproval(
+            approval_id=request_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_input_truncated=tool_input is not None and tool_input != raw_input,
+            decisions=capabilities.approval_decisions,
+            supports_note=capabilities.supports_approval_note,
+        ),
+    )
+
+
+def _plan_request_ask(
+    session: SessionRecord,
+    event: EventRecord,
+    interaction: dict[str, Any],
+    request_id: str,
+    text: str,
+    capabilities: BackendCapabilities,
+) -> PendingPlanAsk:
+    return PendingPlanAsk(
+        id=f"plan_approval:{session.id}:{request_id}",
+        **_common(session, event.ts, event.sequence),
+        availability="actionable",
+        title=_cut(_text(interaction.get("title")) or "Approve plan"),
+        plan=PendingAskPlan(
+            plan_id=request_id,
+            text=text,
+            decisions=capabilities.approval_decisions,
+            supports_note=capabilities.supports_approval_note,
+            resolve_via="approve",
+        ),
+    )
+
+
+def _plan_ask(session: SessionRecord, plan: PendingPlanApproval) -> PendingPlanAsk:
+    return PendingPlanAsk(
+        id=f"plan_approval:{session.id}:{plan.plan_id}",
+        **_common(session, plan.created_at, plan.sequence),
+        availability=plan.availability,
+        title="Approve plan",
+        plan=PendingAskPlan(
+            plan_id=plan.plan_id,
+            text=plan.text,
+            decisions=plan.decisions,
+            supports_note=plan.supports_note,
+            resolve_via="approve_plan",
+        ),
+    )
+
+
+def _common(
+    session: SessionRecord, created_at: datetime, sequence: int
+) -> dict[str, Any]:
+    return {
+        "session_id": session.id,
+        "session_title": session.title,
+        "session_backend": session.backend,
+        "spawner_session_id": session.spawner_session_id,
+        "created_at": created_at,
+        "sequence": sequence,
+    }
+
+
 _State = tuple[SessionStatus, str | None]
 
 
@@ -143,8 +239,6 @@ class _Entry:
 
     @property
     def watch(self) -> bool:
-        """Whether state churn re-derives the session: it has asks or open
-        questions."""
         return bool(self.asks) or bool(self.question_ids)
 
 
@@ -227,7 +321,6 @@ class PendingAskFeed:
     # ── Triggers ────────────────────────────────────────────────────────
 
     def note_event(self, event: EventRecord) -> None:
-        """Flag the session when ``event`` can change its pending asks."""
         entry = self._entries.get(event.session_id)
         if not self._active or entry is None:
             # An unknown session is derived from durable state the first time a
@@ -359,7 +452,7 @@ class PendingAskFeed:
         asks: list[PendingAsk] = [
             ask
             for question in questions
-            if (ask := self._question_ask(session, question)) is not None
+            if (ask := _question_ask(session, question)) is not None
         ]
         if session.status is not SessionStatus.ERROR:
             transport = runtime.transport_for(session)
@@ -368,7 +461,7 @@ class PendingAskFeed:
                 if plan_plugin is not None and (
                     plan := self._plan(session, plan_plugin)
                 ):
-                    asks.append(self._plan_ask(session, plan))
+                    asks.append(_plan_ask(session, plan))
         entry.asks = asks
         return entry
 
@@ -380,27 +473,6 @@ class PendingAskFeed:
         if walks.plan is None or walks.plan[0] != state:
             walks.plan = (state, plugin.pending_plan_approval(self._runtime, session))
         return walks.plan[1]
-
-    def _question_ask(
-        self, session: SessionRecord, question: PendingQuestion
-    ) -> PendingQuestionAsk | None:
-        prompts = _question_prompts(question.event)
-        if not prompts:
-            return None
-        interaction = _interaction(question.event)
-        title = _cut(
-            _text(interaction.get("title")) or prompts[0].question or "Question"
-        )
-        return PendingQuestionAsk(
-            id=f"question:{session.id}:{question.tool_use_id}",
-            **self._common(session, question.event.ts, question.event.sequence),
-            availability=question.availability,
-            title=title,
-            body=_distinct_body(title, _text(interaction.get("body"))),
-            question=PendingAskQuestion(
-                tool_use_id=question.tool_use_id, questions=prompts
-            ),
-        )
 
     def _approval_asks(
         self, session: SessionRecord, transport: TransportAdapter
@@ -423,98 +495,12 @@ class PendingAskFeed:
             plan_text = _text(interaction.get("body"))
             if interaction.get("kind") == "plan_approval" and plan_text:
                 asks.append(
-                    self._plan_request_ask(
+                    _plan_request_ask(
                         session, event, interaction, request_id, plan_text, capabilities
                     )
                 )
             else:
                 asks.append(
-                    self._approval_ask(
-                        session, event, interaction, request_id, capabilities
-                    )
+                    _approval_ask(session, event, interaction, request_id, capabilities)
                 )
         return asks
-
-    def _approval_ask(
-        self,
-        session: SessionRecord,
-        event: EventRecord,
-        interaction: dict[str, Any],
-        request_id: str,
-        capabilities: BackendCapabilities,
-    ) -> PendingApprovalAsk:
-        tool_name = _text(event.metadata.get("tool_name"))
-        raw_input = event.metadata.get("tool_input")
-        tool_input = _cut_strings(raw_input) if isinstance(raw_input, dict) else None
-        title = _cut(
-            _text(interaction.get("title"))
-            or (f"Approve {tool_name}" if tool_name else "Approval requested")
-        )
-        return PendingApprovalAsk(
-            id=f"approval:{session.id}:{request_id}",
-            **self._common(session, event.ts, event.sequence),
-            availability="actionable",
-            title=title,
-            body=_distinct_body(title, _text(interaction.get("body")) or event.text),
-            approval=PendingAskApproval(
-                approval_id=request_id,
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_input_truncated=tool_input is not None and tool_input != raw_input,
-                decisions=capabilities.approval_decisions,
-                supports_note=capabilities.supports_approval_note,
-            ),
-        )
-
-    def _plan_request_ask(
-        self,
-        session: SessionRecord,
-        event: EventRecord,
-        interaction: dict[str, Any],
-        request_id: str,
-        text: str,
-        capabilities: BackendCapabilities,
-    ) -> PendingPlanAsk:
-        return PendingPlanAsk(
-            id=f"plan_approval:{session.id}:{request_id}",
-            **self._common(session, event.ts, event.sequence),
-            availability="actionable",
-            title=_cut(_text(interaction.get("title")) or "Approve plan"),
-            plan=PendingAskPlan(
-                plan_id=request_id,
-                text=text,
-                decisions=capabilities.approval_decisions,
-                supports_note=capabilities.supports_approval_note,
-                resolve_via="approve",
-            ),
-        )
-
-    def _plan_ask(
-        self, session: SessionRecord, plan: PendingPlanApproval
-    ) -> PendingPlanAsk:
-        return PendingPlanAsk(
-            id=f"plan_approval:{session.id}:{plan.plan_id}",
-            **self._common(session, plan.created_at, plan.sequence),
-            availability=plan.availability,
-            title="Approve plan",
-            plan=PendingAskPlan(
-                plan_id=plan.plan_id,
-                text=plan.text,
-                decisions=plan.decisions,
-                supports_note=plan.supports_note,
-                resolve_via="approve_plan",
-            ),
-        )
-
-    @staticmethod
-    def _common(
-        session: SessionRecord, created_at: datetime, sequence: int
-    ) -> dict[str, Any]:
-        return {
-            "session_id": session.id,
-            "session_title": session.title,
-            "session_backend": session.backend,
-            "spawner_session_id": session.spawner_session_id,
-            "created_at": created_at,
-            "sequence": sequence,
-        }

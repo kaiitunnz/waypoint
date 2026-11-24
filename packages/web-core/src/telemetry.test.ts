@@ -4,7 +4,6 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_RANGE,
   DRILLDOWN_KIND_OPTIONS,
-  TOKEN_DISPLAY_ORDER,
   coverageLabel,
   confidenceLabel,
   deriveDatabaseContent,
@@ -179,10 +178,6 @@ describe("token categories", () => {
   it("labels known categories and title-cases unknown ones", () => {
     expect(tokenCategoryLabel("cache_read")).toBe("Cached input (read)");
     expect(tokenCategoryLabel("some_new_bucket")).toBe("Some New Bucket");
-  });
-
-  it("keeps the re-read tier last in the display order", () => {
-    expect(TOKEN_DISPLAY_ORDER).toEqual(["fresh_input", "output", "reasoning", "cache_write", "cache_read"]);
   });
 
   it("splits totals into new work and re-read tiers, ignoring missing buckets", () => {

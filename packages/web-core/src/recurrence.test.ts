@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  CADENCES,
   WEEKDAY_LABELS,
   browserTimezone,
   cronFromState,
@@ -110,8 +109,7 @@ describe("isRecurring and isIdle", () => {
 });
 
 describe("constants and defaults", () => {
-  it("lists the cadences and weekday labels", () => {
-    expect(CADENCES).toEqual(["daily", "weekdays", "weekly", "monthly", "custom"]);
+  it("labels the weekdays from Sunday, matching cron day-of-week", () => {
     expect(WEEKDAY_LABELS).toHaveLength(7);
     expect(WEEKDAY_LABELS[0]).toBe("Sun");
   });

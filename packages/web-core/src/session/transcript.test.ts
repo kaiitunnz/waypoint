@@ -123,7 +123,7 @@ describe("buildTranscriptItems", () => {
     ]);
   });
 
-  it("renders AskUserQuestion and SendUserFile calls as their own cards", () => {
+  it("keeps AskUserQuestion and SendUserFile calls out of tool runs", () => {
     const items = buildTranscriptItems([
       call(1, "a"),
       call(2, "q", "AskUserQuestion"),
@@ -306,6 +306,16 @@ describe("foldOlderEvents", () => {
     expect(folded).toHaveLength(1);
     expect(folded[0].text).toBe("abc");
     expect(folded[0].sequence).toBe(10);
+  });
+
+  it("keeps older tool_result deltas over the current snapshot, as a forward merge would", () => {
+    const delta = { item_id: "i", method: "item/fileChange/outputDelta" };
+    const folded = foldOlderEvents(
+      [ev(10, "tool_result", "final", { item_id: "i" })],
+      [ev(1, "tool_result", "a", delta), ev(2, "tool_result", "b", delta)],
+    );
+    expect(folded).toHaveLength(1);
+    expect(folded[0].text).toBe("ab");
   });
 
   it("coalesces older events that fold into nothing visible among themselves", () => {

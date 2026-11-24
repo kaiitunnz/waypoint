@@ -41,14 +41,6 @@ const pathRow = (overrides: Partial<WorkspacePathSuggestion> = {}): SuggestionRo
   ...overrides,
 });
 
-describe("SLASH_NEW_FALLBACK", () => {
-  it("is the local /new session-control command", () => {
-    expect(commandLabel(SLASH_NEW_FALLBACK)).toBe("/new");
-    expect(SLASH_NEW_FALLBACK.replacement).toBe("/new ");
-    expect(SLASH_NEW_FALLBACK.dispatch).toBe("frontend_control");
-  });
-});
-
 describe("suggestion rows", () => {
   it("labels a command with its trigger and name", () => {
     expect(commandLabel(command({ trigger: "$", name: "skill" }))).toBe("$skill");

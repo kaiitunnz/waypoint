@@ -4,13 +4,7 @@ import nextTypeScript from "eslint-config-next/typescript";
 const config = [
   ...nextCoreWebVitals,
   ...nextTypeScript,
-  {
-    rules: {
-      "@next/next/no-html-link-for-pages": "off",
-      "react-hooks/immutability": "off",
-      "react-hooks/set-state-in-effect": "off",
-    },
-  },
+  { rules: { "@next/next/no-html-link-for-pages": "off" } },
 ];
 
 export default config;

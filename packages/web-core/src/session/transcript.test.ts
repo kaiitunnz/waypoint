@@ -201,6 +201,8 @@ describe("mergeEvents", () => {
     expect(mergeEvents(current, ev(1, "agent_output", "b"))).toBe(current);
     const sameSequence = ev(9, "agent_output", "c", {}, { sequence: 1 });
     expect(mergeEvents(current, sameSequence)).toBe(current);
+    const sameId = ev(9, "agent_output", "d", {}, { id: 1 });
+    expect(mergeEvents(current, sameId)).toBe(current);
   });
 
   it("appends events without an item id", () => {

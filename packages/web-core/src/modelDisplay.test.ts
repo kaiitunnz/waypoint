@@ -34,9 +34,12 @@ describe("formatResolvedModelLabel", () => {
     ["claude-sonnet-5", "Sonnet 5"],
     ["claude-haiku-5-5", "Haiku 5.5"],
     ["claude-fable-5-2", "Fable 5.2"],
-    ["claude-opus-4-8-20260101", "Opus 4.8.20260101"],
   ])("parses the concrete claude id %s as %s", (id, label) => {
     expect(formatResolvedModelLabel(id, null, [])).toBe(label);
+  });
+
+  it("joins every version segment with dots, so a date-suffixed id keeps its date in the label", () => {
+    expect(formatResolvedModelLabel("claude-opus-4-8-20260101", null, [])).toBe("Opus 4.8.20260101");
   });
 
   it("falls back to the raw id for ids it cannot parse", () => {

@@ -9,6 +9,7 @@ import {
   formatLastUsed,
   hostKey,
   isCompleteHost,
+  isPageDeviceBackend,
   pageDevice,
   parseAddress,
   parsePort,
@@ -467,6 +468,24 @@ describe("formatLastUsed", () => {
   it("uses a weekday within the week and a date after", () => {
     expect(formatLastUsed(at(23), now)).toBe("Mon");
     expect(formatLastUsed(at(3), now)).toBe("Nov 3");
+  });
+});
+
+describe("isPageDeviceBackend", () => {
+  it("is true for the page's own host name, however cased", () => {
+    expect(isPageDeviceBackend("http://100.83.12.4:8787", "100.83.12.4")).toBe(true);
+    expect(isPageDeviceBackend("http://Studio.tail1234.ts.net:8797", "studio.TAIL1234.ts.net")).toBe(true);
+  });
+
+  it("treats loopback on both sides as one machine", () => {
+    expect(isPageDeviceBackend("http://127.0.0.1:8797", "localhost")).toBe(true);
+    expect(isPageDeviceBackend("http://[::1]:8797", "127.0.0.1")).toBe(true);
+  });
+
+  it("is false for another machine, and for loopback from a remote page", () => {
+    expect(isPageDeviceBackend("http://100.64.0.9:8787", "100.64.0.2")).toBe(false);
+    expect(isPageDeviceBackend("http://127.0.0.1:8787", "100.64.0.2")).toBe(false);
+    expect(isPageDeviceBackend("not a url", "localhost")).toBe(false);
   });
 });
 

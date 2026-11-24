@@ -385,6 +385,19 @@ export function buildHostGroups({
   };
 }
 
+// Whether a signed-in backend runs on the machine serving the page: the same host
+// name, or loopback on both sides. Its tailnet snapshot then marks This device as
+// `is_self`.
+export function isPageDeviceBackend(backendUrl: string, pageHost: string): boolean {
+  const address = splitBackendUrl(backendUrl);
+  if (!address) {
+    return false;
+  }
+  const host = address.hostname.toLowerCase();
+  const page = pageHost.toLowerCase();
+  return host === page || (LOOPBACK.has(host) && LOOPBACK.has(page));
+}
+
 // The key of the row that stands for `url`: the This device row for any address
 // of this machine, else the address's own key.
 export function rowKeyFor(groups: Pick<HostGroups, "deviceKey" | "deviceAliases">, url: string): string {

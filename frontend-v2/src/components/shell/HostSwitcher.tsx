@@ -10,6 +10,7 @@ import {
   buildSshRows,
   describeHost,
   isCompleteHost,
+  isPageDeviceBackend,
   buildBackendUrl,
   pageDevice,
   parsePort,
@@ -129,17 +130,18 @@ function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps
   const [sshError, setSshError] = useState("");
 
   const activeId = launchTargets.activeTargetId;
-  const groups = useMemo(
-    () =>
-      buildHostGroups({
-        ...pageDevice(),
-        snapshot,
-        selfIsPageHost: false,
-        recents,
-        query,
-      }),
-    [snapshot, recents, query],
-  );
+  // The snapshot is the signed-in backend's view: its `is_self` peer is This device
+  // only when that backend runs on the machine serving the page.
+  const groups = useMemo(() => {
+    const device = pageDevice();
+    return buildHostGroups({
+      ...device,
+      snapshot,
+      selfIsPageHost: isPageDeviceBackend(host, device.pageHost),
+      recents,
+      query,
+    });
+  }, [host, snapshot, recents, query]);
   const sshRows = useMemo(() => buildSshRows(launchTargets.targets, query), [launchTargets.targets, query]);
 
   // What the panel shows as selected: the person's pick, else what is active now.

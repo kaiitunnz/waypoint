@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 
 import { probeBackend } from "../api";
 
+// A host that never answers (a dropped route) reads as unreachable after this long.
+const PROBE_TIMEOUT_MS = 6000;
+
 export type ProbeStatus = "idle" | "checking" | "reachable" | "unreachable";
 
 // One reachability probe (GET {url}/health) of the host the user chose. It
@@ -18,13 +21,20 @@ export function useBackendProbe(url: string | null, debounceMs = 350): ProbeStat
       return;
     }
     const controller = new AbortController();
+    const attempt = new AbortController();
+    const abortAttempt = () => attempt.abort();
+    controller.signal.addEventListener("abort", abortAttempt);
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
-      probeBackend(url, controller.signal).then((ok) => {
+      giveUp = setTimeout(abortAttempt, PROBE_TIMEOUT_MS);
+      probeBackend(url, attempt.signal).then((ok) => {
+        clearTimeout(giveUp);
         if (!controller.signal.aborted) setResult({ url, ok });
       });
     }, debounceMs);
     return () => {
       clearTimeout(timer);
+      clearTimeout(giveUp);
       controller.abort();
     };
   }, [url, debounceMs]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   connectLaunchTarget,
@@ -130,5 +130,8 @@ export function useLaunchTargets(
     [host, token, onAuthFailure],
   );
 
-  return { targets, activeTargetId, selectTarget, connect, disconnect, error };
+  return useMemo(
+    () => ({ targets, activeTargetId, selectTarget, connect, disconnect, error }),
+    [targets, activeTargetId, selectTarget, connect, disconnect, error],
+  );
 }

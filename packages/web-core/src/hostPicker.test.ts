@@ -88,12 +88,17 @@ describe("ports and URLs", () => {
     expect(formatAddress("https://box.example.com")).toBe("box.example.com");
   });
 
+  it("reads an address with no port as the scheme's default port", () => {
+    expect(portForHost(["alpha.ts.net"], [recent("https://alpha.ts.net", 1)], 8787)).toBe(443);
+    expect(portForHost(["alpha.ts.net"], [recent("http://alpha.ts.net", 1)], 8787)).toBe(80);
+  });
+
   it("takes a host's port from its most recent sign-in", () => {
     const recents = [recent("http://100.1.1.1:9000", 2), recent("http://100.1.1.1:8800", 1)];
     expect(portForHost(["100.1.1.1"], recents, 8787)).toBe(9000);
     expect(portForHost(["100.2.2.2"], recents, 8787)).toBe(8787);
     expect(portForHost(["100.2.2.2"], recents, 8123)).toBe(8123);
-    expect(portForHost([null, "100.1.1.1"], [recent("http://100.1.1.1", 1)], 8787)).toBe(8787);
+    expect(portForHost([null, "100.1.1.1"], recents, 8787)).toBe(9000);
   });
 });
 
@@ -177,6 +182,17 @@ describe("buildHostGroups", () => {
     });
     expect(groups.thisDevice).toMatchObject({ name: "studio", hostname: "localhost" });
     expect(names(groups.recent)).toEqual(["studio-9000"]);
+  });
+
+  it("lists a peer once when its recent is an https address on the default port", () => {
+    const groups = buildHostGroups({
+      pageHost: "h",
+      snapshot: snapshot([peer("alpha", "100.1.1.2")]),
+      recents: [recent("https://alpha.tail1234.ts.net", 1, "alpha")],
+    });
+    expect(names(groups.recent)).toEqual(["alpha"]);
+    expect(groups.recent[0].address).toBe("alpha.tail1234.ts.net");
+    expect(groups.online).toEqual([]);
   });
 
   it("keeps a recent host in Recent even when the tailnet says it is offline", () => {

@@ -125,7 +125,8 @@ export function formatAddress(url: string): string {
 }
 
 // The port a host should start with: the port of its most recent sign-in under
-// any of `hostnames`, else `fallback`. `recents` is newest first.
+// any of `hostnames` (an address with no port is on its scheme's default), else
+// `fallback`. `recents` is newest first.
 export function portForHost(
   hostnames: (string | null | undefined)[],
   recents: RecentHost[],
@@ -137,7 +138,7 @@ export function portForHost(
   for (const recent of recents) {
     const address = splitBackendUrl(recent.url);
     if (address && wanted.has(address.hostname.toLowerCase())) {
-      return backendPortFromUrl(recent.url) ?? fallback;
+      return address.port;
     }
   }
   return fallback;

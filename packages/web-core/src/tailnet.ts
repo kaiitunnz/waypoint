@@ -15,6 +15,12 @@ export interface TailnetSnapshot {
 
 export const DEFAULT_BACKEND_PORT = 8787;
 
+// The backend port this deployment was built for (NEXT_PUBLIC_BACKEND_PORT).
+export function deploymentBackendPort(): number {
+  const port = Number.parseInt(process.env.NEXT_PUBLIC_BACKEND_PORT ?? "", 10);
+  return port > 0 && port <= 65535 ? port : DEFAULT_BACKEND_PORT;
+}
+
 // Two backend URLs address the same backend when their host and port match,
 // ignoring protocol (http vs https) and a missing explicit default port.
 // Selection matching compares on this canonical key rather than the raw string.

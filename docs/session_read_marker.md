@@ -35,12 +35,19 @@ Sessions that existed before the marker was introduced start read
 (`read_at = last_event_at`). A new session starts read and becomes unread when
 it produces activity nobody watched.
 
+The notes a lifecycle step records are not activity. Starting a session
+(launch, import, fork, side-question fork, tmux attach) marks it read once the
+step completes, and restoring one (backend startup, reattach, a launch-settings
+switch) leaves it as it was: a read session stays read and one with unseen
+activity stays unread. A backend restart therefore does not turn restored
+sessions into Done.
+
 ## Done
 
 The v2 sessions home shows **Done** for a session that is idle, is not waiting
-on a question or approval, and is unread. Any recorded event moves
-`last_event_at`, including system notes, so an idle session can show Done after
-activity that is not a finished turn.
+on a question or approval, and is unread. Any other recorded event
+moves `last_event_at`, including system notes, so an idle session can show Done
+after activity that is not a finished turn.
 
 Leases are held in memory, so a restart drops them; the next renewal (every 15
 seconds) restores presence and marks the session read.

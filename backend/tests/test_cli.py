@@ -21,6 +21,7 @@ from waypoint.cli import (
     app,
     exit_code_for_wait,
     parse_wait_until,
+    reached_wait_status,
 )
 from waypoint.client import WaypointClient
 from waypoint.schemas import (
@@ -1462,6 +1463,20 @@ def test_parse_wait_until_defaults_and_validates() -> None:
         parse_wait_until("bogus,idle")
     with pytest.raises(typer.BadParameter):
         parse_wait_until(",")
+    assert parse_wait_until("idle,awaiting_answer") == frozenset(
+        {"idle", "awaiting_answer"}
+    )
+
+
+def test_awaiting_answer_matches_only_a_turn_ended_on_its_question() -> None:
+    until = parse_wait_until("idle,awaiting_answer")
+    waiting = {"status": "waiting_input", "awaiting_answer": False}
+    assert reached_wait_status(waiting, until) is None
+    assert reached_wait_status({**waiting, "awaiting_answer": True}, until) == (
+        "waiting_input"
+    )
+    assert reached_wait_status({"status": "idle"}, until) == "idle"
+    assert reached_wait_status({"status": "running"}, until) is None
 
 
 def test_exit_code_for_wait_maps_terminal_status() -> None:

@@ -34,7 +34,7 @@ from waypoint.backends.codex.subagents import (
     read_report,
 )
 from waypoint.backends.codex.transport import CodexTransport, input_http_error
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import AWAITING_ANSWER_KEY, EventKind, SessionStatus
 
 
 @pytest.mark.parametrize(
@@ -1748,6 +1748,9 @@ async def test_turn_end_waits_only_on_its_own_open_question(
     )
     assert emitted[-1][2] == "Turn completed"
     assert emitted[-1][4] == expected
+    assert emitted[-1][3].get(AWAITING_ANSWER_KEY, False) is (
+        expected is SessionStatus.WAITING_INPUT
+    )
 
 
 @pytest.mark.asyncio

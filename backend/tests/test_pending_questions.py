@@ -23,6 +23,8 @@ from waypoint.storage import Storage
 
 
 class FakeQuestionPlugin:
+    question_parks_turn = True
+
     def __init__(self) -> None:
         self.liveness: dict[str, QuestionLiveness] = {}
         self.cancelled: list[str] = []
@@ -463,3 +465,21 @@ async def test_cancel_settles_when_the_other_open_questions_are_closed(
     updated = await runtime.cancel_question("s1", "q1")
 
     assert updated.status is SessionStatus.RUNNING
+
+
+async def test_a_parked_question_keeps_the_wait_but_not_awaiting(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch, FakeQuestionPlugin())
+    transport = MagicMock()
+    transport.has_pending_approval = MagicMock(return_value=False)
+    monkeypatch.setattr(runtime, "transport_for", lambda session: transport)
+    await ask(runtime, "q1")
+
+    await runtime._emit_adapter_event(
+        "s1", EventKind.SYSTEM_NOTE, "step finished", {}, SessionStatus.IDLE
+    )
+
+    session = runtime.get_session("s1")
+    assert session.status is SessionStatus.WAITING_INPUT
+    assert not session.awaiting_answer

@@ -699,9 +699,9 @@ async def test_question_drain_stays_answerable_after_rejection() -> None:
     assert EventKind.TOOL_CALL in kinds
     assert EventKind.TOOL_RESULT not in kinds
     assert SessionStatus.WAITING_INPUT in statuses
-    # The dismissal settles the wait directly on the session.
+    # The dismissal reports the turn's end; the runtime settles it.
     runtime.update_session_fields.assert_awaited_once_with(
-        session.id, status=SessionStatus.WAITING_INPUT
+        session.id, status=SessionStatus.IDLE
     )
 
 

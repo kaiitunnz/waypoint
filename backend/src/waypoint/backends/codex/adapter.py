@@ -54,6 +54,7 @@ from waypoint.backends.events import (
 )
 from waypoint.backends.task_notifications import CAPTURE_DISABLED
 from waypoint.schemas import (
+    AWAITING_ANSWER_KEY,
     EventKind,
     SessionContextUsage,
     SessionRateLimitUsage,
@@ -1089,6 +1090,8 @@ class CodexAppServerAdapter:
                 return
         if status is not None and settle:
             metadata["status"] = status
+            if method == "turn/completed" and status is SessionStatus.WAITING_INPUT:
+                metadata[AWAITING_ANSWER_KEY] = True
         await self._emit_event(
             state.session_id, kind, rendered.text, metadata, status if settle else None
         )

@@ -22,6 +22,7 @@ from waypoint.questions import (
     ASK_USER_QUESTION_TOOL,
 )
 from waypoint.schemas import (
+    AWAITING_ANSWER_KEY,
     INPUT_ORIGIN_KEY,
     BoardChannel,
     BoardEntry,
@@ -614,6 +615,7 @@ class Storage:
             "INTEGER NOT NULL DEFAULT 0",
         )
         self._ensure_column("sessions", "focus", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("sessions", "awaiting_answer", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("sessions", "task_dock_dismissed_sequence", "INTEGER")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
@@ -943,10 +945,18 @@ class Storage:
 
     @_synchronized
     def update_session(self, session_id: str, **fields: Any) -> SessionRecord:
+        """A ``status`` change clears ``awaiting_answer`` unless it is passed."""
         fields.setdefault("updated_at", datetime.now(UTC))
         with debug_timer(log, "Storage.update_session", fields=sorted(fields)):
             assignments = ", ".join(f"{name} = ?" for name in fields)
             values = [self._serialize_field(value) for value in fields.values()]
+            if "status" in fields and "awaiting_answer" not in fields:
+                # The right-hand side reads the row's status before this update.
+                assignments += (
+                    ", awaiting_answer = "
+                    "CASE WHEN status = ? THEN awaiting_answer ELSE 0 END"
+                )
+                values.append(self._serialize_field(fields["status"]))
             values.append(session_id)
             if _SUPPORTS_RETURNING:
                 row = self.connection.execute(
@@ -2102,16 +2112,30 @@ class Storage:
                 event.sequence,
             ),
         )
+        status = event.metadata.get("status")
+        # A status write marks awaiting_answer, keeps it when it re-asserts the
+        # stored status, and clears it on a change or an approval request. The
+        # right-hand side reads the row as it was before this update.
         self.connection.execute(
             """
             UPDATE sessions
-            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
+            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status),
+                awaiting_answer = CASE
+                    WHEN ? IS NULL THEN awaiting_answer
+                    WHEN ? THEN 1
+                    WHEN ? = status AND NOT ? THEN awaiting_answer
+                    ELSE 0
+                END
             WHERE id = ?
             """,
             (
                 ts_iso,
                 ts_iso,
-                event.metadata.get("status"),
+                status,
+                status,
+                bool(event.metadata.get(AWAITING_ANSWER_KEY)),
+                status,
+                event.kind == EventKind.APPROVAL_REQUEST,
                 event.session_id,
             ),
         )
@@ -2197,10 +2221,21 @@ class Storage:
         self.connection.execute(
             """
             UPDATE sessions
-            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
+            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status),
+                awaiting_answer = CASE
+                    WHEN ? IS NULL OR ? = status THEN awaiting_answer
+                    ELSE 0
+                END
             WHERE id = ?
             """,
-            (last_ts_iso, last_ts_iso, last_status, session_id),
+            (
+                last_ts_iso,
+                last_ts_iso,
+                last_status,
+                last_status,
+                last_status,
+                session_id,
+            ),
         )
         self.connection.commit()
         persisted = self.connection.execute(
@@ -3716,6 +3751,7 @@ class Storage:
         )
         payload["status"] = SessionStatus(payload["status"])
         payload["focus"] = bool(payload.get("focus", 0))
+        payload["awaiting_answer"] = bool(payload.get("awaiting_answer", 0))
         payload["launch_mode"] = payload.get("launch_mode") or "auto"
         raw_state = payload.pop("transport_state", None) or "{}"
         try:

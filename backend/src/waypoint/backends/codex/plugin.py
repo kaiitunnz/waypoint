@@ -180,6 +180,8 @@ class CodexPlugin(DefaultLaunchContract):
     config_schema: type[PluginConfig] = CodexPluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = CodexLaunchTargetConfig
     extra_env: dict[str, str] = {}
+    # Async questions leave the turn running to its end.
+    question_parks_turn = False
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -819,6 +821,7 @@ class CodexPlugin(DefaultLaunchContract):
             prompt = _format_plan_rejection_prompt(decision, text)
 
         previous_status = session.status
+        previous_awaiting = session.awaiting_answer
         runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
         try:
             await self._require_adapter().send_input(
@@ -832,7 +835,9 @@ class CodexPlugin(DefaultLaunchContract):
                 ),
             )
         except Exception as exc:  # noqa: BLE001
-            runtime.storage.update_session(session.id, status=previous_status)
+            runtime.storage.update_session(
+                session.id, status=previous_status, awaiting_answer=previous_awaiting
+            )
             raise input_http_error(exc) from exc
 
         if accept:
@@ -883,6 +888,7 @@ class CodexPlugin(DefaultLaunchContract):
             if invocation.arguments:
                 items.append({"type": "text", "text": invocation.arguments})
             previous_status = session.status
+            previous_awaiting = session.awaiting_answer
             updated = runtime.storage.update_session(
                 session.id, status=SessionStatus.RUNNING
             )
@@ -899,7 +905,11 @@ class CodexPlugin(DefaultLaunchContract):
                     turn_params=self.turn_params_for(updated),
                 )
             except Exception as exc:  # noqa: BLE001
-                runtime.storage.update_session(session.id, status=previous_status)
+                runtime.storage.update_session(
+                    session.id,
+                    status=previous_status,
+                    awaiting_answer=previous_awaiting,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
@@ -943,6 +953,7 @@ class CodexPlugin(DefaultLaunchContract):
                 return updated
 
             previous_status = updated.status
+            previous_awaiting = updated.awaiting_answer
             running = runtime.storage.update_session(
                 session.id, status=SessionStatus.RUNNING
             )
@@ -953,7 +964,11 @@ class CodexPlugin(DefaultLaunchContract):
                     turn_params=self.turn_params_for(running),
                 )
             except Exception as exc:  # noqa: BLE001
-                runtime.storage.update_session(session.id, status=previous_status)
+                runtime.storage.update_session(
+                    session.id,
+                    status=previous_status,
+                    awaiting_answer=previous_awaiting,
+                )
                 raise input_http_error(exc) from exc
             return running
 
@@ -1194,7 +1209,11 @@ class CodexPlugin(DefaultLaunchContract):
             )
             return
         settled = runtime.questions.restored_status(session)
-        runtime.storage.update_session(session.id, status=settled)
+        runtime.storage.update_session(
+            session.id,
+            status=settled,
+            awaiting_answer=settled is SessionStatus.WAITING_INPUT,
+        )
         await self._register_rate_limit_probe(
             runtime,
             session.id,
@@ -2003,7 +2022,11 @@ class CodexPlugin(DefaultLaunchContract):
             if runtime.storage.open_question_tool_use_ids(session.id)
             else SessionStatus.IDLE
         )
-        runtime.storage.update_session(session.id, status=settled)
+        runtime.storage.update_session(
+            session.id,
+            status=settled,
+            awaiting_answer=settled is SessionStatus.WAITING_INPUT,
+        )
         await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(
             session.id,

@@ -476,6 +476,10 @@ class SessionRecord(BaseModel):
     # Focus holds agent sends, scheduled firings, and board/inbox wakes as
     # ``HeldMessageRecord``s.
     focus: bool = False
+    # ``WAITING_INPUT`` because a finished turn left a question open, with no
+    # request parking the turn: safe to message. Every other status write
+    # clears it.
+    awaiting_answer: bool = False
     # Sequence of the todo snapshot the human dismissed from the task dock; any
     # other snapshot shows the dock again. ``None`` = not dismissed.
     task_dock_dismissed_sequence: int | None = None
@@ -1676,6 +1680,8 @@ class HeldMessageOrigin(StrEnum):
 # user_input metadata key naming the HeldMessageOrigin of a message the human
 # did not type; absent on the human's own messages.
 INPUT_ORIGIN_KEY = "input_origin"
+# Event metadata key a status write sets to mark ``SessionRecord.awaiting_answer``.
+AWAITING_ANSWER_KEY = "awaiting_answer"
 
 
 class HeldReason(StrEnum):

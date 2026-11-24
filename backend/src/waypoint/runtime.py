@@ -50,6 +50,7 @@ from waypoint.backends.base import (
     ContextUsageRebasing,
     DefaultConfigDirProviding,
     FreshThreadRestarting,
+    QuestionLifecycle,
     config_dir_for,
 )
 from waypoint.backends.capabilities import BackendCapabilities
@@ -91,6 +92,7 @@ from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    AWAITING_ANSWER_KEY,
     INPUT_ORIGIN_KEY,
     PLUGIN_USAGE_SELECTION,
     USAGE_SELECTION_FIELDS,
@@ -2857,6 +2859,7 @@ class SessionRuntime:
         # pending approval or question does not start a turn, so the session
         # keeps waiting on the human.
         previous_status = session.status
+        previous_awaiting = session.awaiting_answer
         next_status = (
             SessionStatus.WAITING_INPUT
             if session.status == SessionStatus.WAITING_INPUT
@@ -2882,7 +2885,9 @@ class SessionRuntime:
         try:
             await transport.send_input(session, request.text, attachments or None)
         except Exception as exc:
-            self.storage.update_session(session.id, status=previous_status)
+            self.storage.update_session(
+                session.id, status=previous_status, awaiting_answer=previous_awaiting
+            )
             if isinstance(exc, InputBlockedError):
                 # A dialog opened after the check above; the message recorded
                 # above never reached the agent.
@@ -5230,6 +5235,11 @@ class SessionRuntime:
             updates = {k: v for k, v in updates.items() if k != "rate_limit_usage"}
             if not updates:
                 return self.get_session(session_id)
+        if "status" in updates:
+            status, awaiting = self._settle(session_id, updates["status"], None)
+            updates = {**updates, "status": status}
+            if awaiting:
+                updates["awaiting_answer"] = True
         session = self.storage.update_session(session_id, **updates)
         if self.telemetry_ingester is not None and (
             "context_usage" in updates or "rate_limit_usage" in updates
@@ -6087,18 +6097,41 @@ class SessionRuntime:
     def _settled_status(
         self, session_id: str, status: SessionStatus | None, metadata: dict[str, Any]
     ) -> SessionStatus | None:
-        """An ``IDLE`` stays ``WAITING_INPUT`` while a question the human has yet
-        to answer is open (see ``PendingQuestionTracker.awaits_answer``).
-        ``metadata``'s ``tool_use_id`` names the question the event resolves."""
-        if status != SessionStatus.IDLE:
-            return status
-        session = self.storage.get_session(session_id)
+        """:meth:`_settle` for an event's status, marking ``awaiting_answer`` on
+        ``metadata``. Its ``tool_use_id`` names the question the event resolves."""
         resolving_id = metadata.get("tool_use_id")
-        if session is not None and self.questions.awaits_answer(
-            session, resolving_id if isinstance(resolving_id, str) else None
-        ):
-            return SessionStatus.WAITING_INPUT
-        return status
+        settled, awaiting = self._settle(
+            session_id, status, resolving_id if isinstance(resolving_id, str) else None
+        )
+        if awaiting:
+            metadata[AWAITING_ANSWER_KEY] = True
+        return settled
+
+    def _settle(
+        self,
+        session_id: str,
+        status: SessionStatus | None,
+        resolving_id: str | None,
+    ) -> tuple[SessionStatus | None, bool]:
+        """The status to store, and whether the session is ``awaiting_answer``.
+
+        An ``IDLE`` stays ``WAITING_INPUT`` while a question the human has yet to
+        answer is open (see ``PendingQuestionTracker.awaits_answer``). It is
+        ``awaiting_answer`` unless a request parks the turn: an agent whose
+        questions block it, or a pending approval.
+        """
+        if status != SessionStatus.IDLE:
+            return status, False
+        session = self.storage.get_session(session_id)
+        if session is None or not self.questions.awaits_answer(session, resolving_id):
+            return status, False
+        plugin = self.registry.plugin_for(session)
+        at_rest = (
+            isinstance(plugin, QuestionLifecycle)
+            and not plugin.question_parks_turn
+            and not self.transport_for(session).has_pending_approval(session)
+        )
+        return SessionStatus.WAITING_INPUT, at_rest
 
     async def _run_capture_sinks(
         self, session_id: str, metadata: dict[str, Any]

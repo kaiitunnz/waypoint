@@ -640,11 +640,10 @@ class TranscriptNormalizer:
                 )
             )
         elif dismissed_question:
-            # The dismissal ends the turn. A sibling tool's result (Monitor,
-            # background Bash) can land after the card and mark the session
-            # running, so settle the wait here; the dismissal is written after
-            # every sibling result.
-            events.extend(_status_only(SessionStatus.WAITING_INPUT))
+            # The dismissal ends the turn, after every sibling tool's result
+            # (Monitor, background Bash) that may have marked the session
+            # running. The runtime settles this idle onto the open question.
+            events.extend(_status_only(SessionStatus.IDLE))
 
         return events
 

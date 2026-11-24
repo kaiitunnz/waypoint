@@ -901,23 +901,23 @@ def _status_updates(events: list[NormalizedEvent]) -> list[SessionStatus | None]
     return [e.status for e in events if e.kind is EventKind.STATUS_UPDATE]
 
 
-def test_ask_question_swallows_rejection_and_stays_waiting() -> None:
+def test_ask_question_swallows_rejection_and_ends_the_turn() -> None:
     # Esc-ing the popup to surface it makes the TUI write a "user rejected"
-    # result; it must be dropped so the card stays answerable and the session
-    # does not flip to idle — with no arming step required.
+    # result; it must be dropped so the card stays answerable. The dismissal
+    # reports the turn's end, which the runtime settles onto the open card.
     norm = TranscriptNormalizer()
     norm.process_record(
         _assistant_record("msg1", [_ask_question_block("auq1")], stop_reason="tool_use")
     )
     events = norm.process_record(_question_dismissal("auq1"))
     assert [e.kind for e in events] == [EventKind.STATUS_UPDATE]
-    assert _status_updates(events) == [SessionStatus.WAITING_INPUT]
+    assert _status_updates(events) == [SessionStatus.IDLE]
 
 
-def test_question_dismissal_settles_wait_after_a_sibling_tool_result() -> None:
+def test_question_dismissal_ends_the_turn_after_a_sibling_tool_result() -> None:
     # A question asked alongside another tool: the sibling's result lands after
     # the card and marks the session running; the dismissal that follows ends
-    # the turn, so it must settle the wait again.
+    # the turn.
     norm = TranscriptNormalizer()
     card = norm.process_record(
         _assistant_record(
@@ -939,7 +939,7 @@ def test_question_dismissal_settles_wait_after_a_sibling_tool_result() -> None:
 
     assert not [e for e in events if e.kind is EventKind.TOOL_RESULT]
     assert events[-1].kind is EventKind.STATUS_UPDATE
-    assert events[-1].status == SessionStatus.WAITING_INPUT
+    assert events[-1].status == SessionStatus.IDLE
     # The interrupt marker and turn_duration that follow carry no status.
     assert (
         norm.process_record(

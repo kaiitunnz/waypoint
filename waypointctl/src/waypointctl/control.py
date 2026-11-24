@@ -324,7 +324,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             )
             return
         stack = self.control.stack
-        if message := stack.check_target(target):
+        if message := stack.check_target(target, action):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": message})
             return
         started = self.control.start_op(

@@ -463,11 +463,21 @@ def test_check_target_reports_unknown_and_unconfigured(
 ) -> None:
     stack = WaypointStack(_build_config(tmp_path, state_dir))
 
-    assert stack.check_target("all") is None
-    assert stack.check_target("") is None
-    assert stack.check_target("frontend") is None
-    assert "unknown service" in (stack.check_target("teleporter") or "")
-    assert "not configured" in (stack.check_target("frontend-preview") or "")
+    for action in ("start", "stop", "restart"):
+        assert stack.check_target("all", action) is None
+        assert stack.check_target("", action) is None
+        assert stack.check_target("frontend", action) is None
+        assert "unknown service" in (stack.check_target("teleporter", action) or "")
+    assert "not configured" in (stack.check_target("frontend-preview", "start") or "")
+    assert "not configured" in (stack.check_target("frontend-preview", "restart") or "")
+
+
+def test_stop_is_allowed_for_an_unconfigured_preview(
+    state_dir: Path, tmp_path: Path
+) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+
+    assert stack.check_target("frontend-preview", "stop") is None
 
 
 def test_logs_argv_includes_the_preview_log(state_dir: Path, tmp_path: Path) -> None:

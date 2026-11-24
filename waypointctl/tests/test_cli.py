@@ -103,6 +103,24 @@ def test_restart_backend_ignores_the_preview_process_tree(
     assert result.exit_code == 0
 
 
+@pytest.mark.parametrize(
+    "command", [["status"], ["daemon", "start"], ["daemon", "restart"]]
+)
+def test_invalid_configuration_is_rejected_before_a_daemon_is_spawned(
+    cli_home: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    monkeypatch.setenv("WAYPOINTCTL_DAEMON", "1")
+    monkeypatch.setenv("WAYPOINT_STACK_FRONTEND", "v3")
+    spawned: list[Path] = []
+    monkeypatch.setattr(cli, "ensure_daemon", lambda home: spawned.append(home))
+
+    result = runner.invoke(app, ["--home", str(cli_home), *command])
+
+    assert result.exit_code == 2
+    assert "invalid stack configuration" in result.output
+    assert spawned == []
+
+
 def test_invalid_stack_configuration_is_reported_in_one_line(
     cli_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

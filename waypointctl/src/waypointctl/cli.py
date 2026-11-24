@@ -412,6 +412,7 @@ def daemon_start(ctx: typer.Context) -> None:
     if daemon_available(home):
         typer.echo("waypointd already running")
         return
+    _load_config(home)
     try:
         ensure_daemon(home)
     except DaemonUnavailableError as exc:
@@ -477,6 +478,7 @@ def daemon_stop(
 def daemon_restart(ctx: typer.Context) -> None:
     """Stop the daemon (waiting for full exit) and start a fresh one."""
     home = _ctx_home(ctx)
+    _load_config(home)
     pid = read_pid_file(waypoint_pid_path())
     if pid is not None and is_pid_running(pid):
         os.kill(pid, signal.SIGTERM)
@@ -682,6 +684,9 @@ def _daemon_client(home: Path) -> DaemonClient | None:
         return DaemonClient(home)
     if not _env_flag("WAYPOINTCTL_DAEMON"):
         return None
+    # A daemon that can't load its configuration only surfaces as a startup
+    # timeout, so reject a bad configuration before spawning one.
+    _load_config(home)
     try:
         return ensure_daemon(home)
     except DaemonUnavailableError as exc:

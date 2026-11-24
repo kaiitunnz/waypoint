@@ -49,7 +49,7 @@ class WaypointStack:
         )
 
     def start(self, log: LogFn, target: str = "all") -> ServiceResult:
-        if message := self.check_target(target):
+        if message := self.check_target(target, "start"):
             return ServiceResult(ok=False, message=message)
         services = self.select(target) or ()
         for svc in services:
@@ -82,16 +82,24 @@ class WaypointStack:
         return _aggregate(results)
 
     def restart(self, target: str, log: LogFn) -> ServiceResult:
-        if message := self.check_target(target):
+        if message := self.check_target(target, "restart"):
             return ServiceResult(ok=False, message=message)
         self.stop(log, target)
         return self.start(log, target)
 
-    def check_target(self, target: str) -> str | None:
-        """Why a lifecycle action on `target` can't run, if it can't."""
+    def check_target(self, target: str, action: str) -> str | None:
+        """Why `action` on `target` can't run, if it can't.
+
+        `stop` is exempt from the preview-configured check so a preview left
+        running after its port was removed from the config can still be stopped.
+        """
         if self.select(target) is None:
             return f"unknown service: {target}"
-        if target == "frontend-preview" and not self.frontend_preview.configured:
+        if (
+            action != "stop"
+            and target == "frontend-preview"
+            and not self.frontend_preview.configured
+        ):
             return (
                 "frontend-preview is not configured; "
                 "set WAYPOINT_STACK_FRONTEND_PREVIEW_PORT"

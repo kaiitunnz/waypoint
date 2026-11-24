@@ -173,6 +173,15 @@ def test_blank_frontend_preview_port_disables_the_preview(
     assert config.frontend_preview_port is None
 
 
+def test_frontend_preview_port_must_be_an_integer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="WAYPOINT_STACK_FRONTEND_PREVIEW_PORT.*'abc'"):
+        _config_for(
+            monkeypatch, tmp_path, {"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT": "abc"}
+        )
+
+
 @pytest.mark.parametrize("raw", ["0", "-1", "70000"])
 def test_frontend_preview_port_out_of_range(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str

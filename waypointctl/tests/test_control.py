@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import threading
 import urllib.error
@@ -464,6 +465,47 @@ def test_action_on_an_unconfigured_preview_is_rejected(
     assert status == 400
     assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in body["error"]
     assert server.ops_snapshot() == []
+
+
+def test_a_running_preview_without_a_config_port_can_be_stopped(
+    tmp_path: Path,
+) -> None:
+    stack = _build_stack(tmp_path)
+    orphan = _StubService("frontend-preview")
+    orphan.configured = False
+    orphan.pid_path = tmp_path / "frontend-preview.pid"
+    orphan.pid_path.write_text(f"{os.getpid()}\n")
+    stack.frontend_preview = orphan  # type: ignore[assignment]
+    server, port = _serve(stack, "s3cret")
+    try:
+        token = _login(port, "s3cret")
+        _, body = _request(port, "/api/status", token=token)
+        assert "frontend-preview" in {svc["name"] for svc in body["services"]}
+
+        status, _ = _request(
+            port,
+            "/api/action",
+            "POST",
+            token=token,
+            body={"action": "stop", "target": "frontend-preview"},
+        )
+        assert status == 202
+        server.join_op(timeout=5)
+        assert orphan.calls == ["stop"]
+
+        # It can't be started or restarted without a configured port.
+        status, body = _request(
+            port,
+            "/api/action",
+            "POST",
+            token=token,
+            body={"action": "restart", "target": "frontend-preview"},
+        )
+        assert status == 400
+        assert "WAYPOINT_STACK_FRONTEND_PREVIEW_PORT" in body["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_preview_log_target_is_served(

@@ -100,7 +100,12 @@ def load_stack_config(home: Path, env: dict[str, str] | None = None) -> StackCon
 def _parse_preview_port(raw: str | None, *, taken: dict[str, int]) -> int | None:
     if raw is None or not raw.strip():
         return None
-    port = int(raw)
+    try:
+        port = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT must be an integer, got {raw!r}"
+        ) from None
     if not 0 < port < 65536:
         raise ValueError(f"WAYPOINT_STACK_FRONTEND_PREVIEW_PORT out of range: {port}")
     for name, other in taken.items():

@@ -156,7 +156,7 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
         if command in DEFERRED_COMMANDS:
             target = request.args[0] if request.args else "all"
             # Rejections must precede the ack: afterwards the caller is gone.
-            if message := stack.check_target(target):
+            if message := stack.check_target(target, command):
                 self._send_result(DaemonResult(ok=False, returncode=1, error=message))
                 return
 

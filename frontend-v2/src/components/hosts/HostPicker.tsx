@@ -153,15 +153,21 @@ export function HostPicker({
           ))}
         {groups.offline.length > 0 ? (
           <section aria-label="Offline">
-            <button
-              type="button"
-              className={styles.more}
-              aria-expanded={showOffline}
-              onClick={() => setOfflineOpen((open) => !open)}
-            >
-              Offline <span>{groups.offline.length}</span>
-              <Icon name={showOffline ? "chevron-up" : "chevron-down"} size={15} strokeWidth={2} />
-            </button>
+            {searching ? (
+              <Heading className={styles.head}>
+                Offline <span>{groups.offline.length}</span>
+              </Heading>
+            ) : (
+              <button
+                type="button"
+                className={styles.more}
+                aria-expanded={offlineOpen}
+                onClick={() => setOfflineOpen((open) => !open)}
+              >
+                Offline <span>{groups.offline.length}</span>
+                <Icon name={offlineOpen ? "chevron-up" : "chevron-down"} size={15} strokeWidth={2} />
+              </button>
+            )}
             {showOffline ? renderRows(groups.offline) : null}
           </section>
         ) : null}

@@ -265,6 +265,15 @@ de-duplicated with ` (1)`, ` (2)` … on collision, so the paths appended for
 path-based agents stay legible; the server-issued uuid remains the resolution
 key and the only token the client ever sends back.
 
+A transport that can list the tool approvals its provider is waiting on
+overrides `pending_approval_ids(session)` to return their ids (the default
+returns `None`). The pending-asks feed lists an approval request only while its
+id is in that tuple, so requests left open in the transcript by a terminate or a
+restart are not offered for an answer. With `None` the feed falls back to
+`has_pending_approval`, which cannot separate a stale request from a live one.
+The returned ids are the ids the approval request events carry (see
+[Approval requests](#approval-requests-and-plans)).
+
 ### Lifecycle
 
 ```python
@@ -520,6 +529,52 @@ approval, a settled wait also sets the session's `awaiting_answer`: the turn
 ended and the session is safe to message. A status change or an approval request
 clears it; a plugin rolling a status back after a failed send uses
 `storage.restore_status`.
+
+### Approval requests and plans
+
+Tool approvals and plan approvals reach the human as `APPROVAL_REQUEST` events
+and appear in the cross-session [pending-asks feed](pending_asks.md). The feed
+reads only the backend-neutral parts:
+
+- `metadata["interaction"]` — the `InteractionEnvelope` with `kind` (`approval`
+  or `plan_approval`), `request_id`, `title`, and `body`. `request_id` is the
+  id the approve endpoint takes, and equals the id a transport reports from
+  `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
+  `body`; one with an empty body is listed as a plain approval.
+- `metadata["tool_name"]` / `metadata["tool_input"]` (or the same keys under
+  `metadata["approval"]`), when the backend has them. A backend whose requests
+  carry no tool (Codex) relies on `title` and the event text.
+- The resolution notes `open_approval_requests`
+  ([`approvals.py`](../backend/src/waypoint/backends/approvals.py)) understands:
+  a system note whose method is `approval.invalidated`, or whose text contains
+  "Approval response sent" or "Approval timed out", carrying the `approval_id`.
+
+`approval_request_id(event)` resolves the request id from `interaction.request_id`,
+then `approval_id`, then `approval.approval_id`; resolution notes match against it.
+
+An agent that approves plans through `approve_plan` rather than an approval
+request implements the `PlanApprovalLifecycle` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def pending_plan_approval(self, runtime, session) -> PendingPlanApproval | None: ...
+def affects_plan_approval(self, event) -> bool: ...
+```
+
+`pending_plan_approval` returns the plan awaiting a decision (`PendingPlanApproval`
+in [`events.py`](../backend/src/waypoint/backends/events.py): `plan_id`, `text`,
+`decisions`, `supports_note`, `availability`, timestamp, and sequence), or `None`.
+It checks cheap gates (the permission mode) before reading events. The feed lists
+the plan with `resolve_via: "approve_plan"`, so the client answers through
+`POST /api/sessions/{id}/approve-plan` with `plan_item_id` set to `plan_id`.
+`affects_plan_approval` is a pure test of which events (a plan item, a recorded
+decision) can change the result; the feed calls it for every event of a tracked
+session so the plan's private event keys stay inside the plugin. Codex implements
+the protocol in `backends/codex/plugin.py`.
+
+When what a session can answer changes without any event recording it (claude_tty
+adopting a dialog already open in the pane), call
+`runtime.asks.mark_dirty(session_id)` so the feed re-derives that session.
 
 ### Task notifications (optional)
 
@@ -1038,7 +1093,7 @@ When Claude or Codex ships a new protocol message:
   `TransportCapabilities`, `PermissionModeSpec`, `SlashCommandSpec`,
   `ModelSource`.
 - [`backend/src/waypoint/backends/events.py`](../backend/src/waypoint/backends/events.py)
-  — `EventEnvelope` schema.
+  — `EventEnvelope`, `InteractionEnvelope`, and `PendingPlanApproval` schemas.
 - [`backend/src/waypoint/backends/registry.py`](../backend/src/waypoint/backends/registry.py)
   — `BackendRegistry` and `get_registry()`.
 - [`backend/src/waypoint/backends/bootstrap.py`](../backend/src/waypoint/backends/bootstrap.py)

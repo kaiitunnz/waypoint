@@ -3412,6 +3412,7 @@ def sessions_resume(
 
     Live resume applies to tmux / claude_tty panes; other transports reject it.
     The session goes running only when the Enter submits a typed message.
+    Refused while a dialog is open, since Enter would pick its highlighted option.
     """
     _emit(_settings_from_ctx(ctx), lambda c: {"session": c.resume(session_id)})
 

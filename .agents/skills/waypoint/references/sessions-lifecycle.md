@@ -32,7 +32,11 @@ a live session it restarts the agent and ends any running turn. `resume` presses
 Enter on a live tmux / claude_tty pane. When the Enter submits a message typed
 into a Claude composer, the session goes `running` and `sessions wait` tracks
 the turn; otherwise the status stays as it was. A generic tmux pane of another
-agent keeps its pane-output status.
+agent keeps its pane-output status. While a dialog is open (approval, plan,
+question, folder trust), `resume` fails (HTTP 409, exit 1) instead of pressing
+Enter, which would pick the highlighted option; answer it with
+`sessions approve`, `approve-plan`, or `answer-question`. Codex and OpenCode
+panes can't be read for dialogs, so resume presses Enter on them regardless.
 
 ## Find exited sessions
 

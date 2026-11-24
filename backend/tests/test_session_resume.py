@@ -15,6 +15,7 @@ from waypoint.schemas import (
 )
 from waypoint.settings import Settings
 from waypoint.storage import Storage
+from waypoint.transports import InputBlockedError
 
 PANES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 EMPTY_COMPOSER = (PANES / "ready.txt").read_text()
@@ -86,17 +87,16 @@ def resume_note(runtime: SessionRuntime):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
-@pytest.mark.parametrize("screen", [EMPTY_COMPOSER, APPROVAL_DIALOG])
 @pytest.mark.parametrize(
     "status",
     [SessionStatus.IDLE, SessionStatus.INTERRUPTED, SessionStatus.WAITING_INPUT],
 )
 async def test_resume_that_submits_nothing_keeps_status(
-    tmp_path, monkeypatch, transport: str, screen: str, status: SessionStatus
+    tmp_path, monkeypatch, transport: str, status: SessionStatus
 ) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(make_session(runtime.settings, transport, status))
-    enters = stub_pane(runtime, monkeypatch, screen)
+    enters = stub_pane(runtime, monkeypatch, EMPTY_COMPOSER)
 
     updated = await runtime.resume("sess")
 
@@ -124,14 +124,45 @@ async def test_resume_that_submits_input_marks_running(
 
 
 @pytest.mark.asyncio
-async def test_resume_on_unreadable_pane_keeps_status(tmp_path, monkeypatch) -> None:
-    # The agent can't read its composer off a generic tmux pane, so the pane-output
-    # heuristic stays the only status driver.
+@pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "approval_bash.txt",
+        "plan_approval.txt",
+        "trust_dialog.txt",
+        "trust_dialog_2_1_331.txt",
+    ],
+)
+async def test_resume_refuses_while_a_dialog_is_open(
+    tmp_path, monkeypatch, transport: str, fixture: str
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(
+        make_session(runtime.settings, transport, SessionStatus.WAITING_INPUT)
+    )
+    enters = stub_pane(runtime, monkeypatch, (PANES / fixture).read_text())
+
+    with pytest.raises(InputBlockedError):
+        await runtime.resume("sess")
+
+    assert enters == []
+    assert runtime.get_session("sess").status == SessionStatus.WAITING_INPUT
+    assert runtime.storage.list_events("sess") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("screen", [PENDING_MESSAGE, APPROVAL_DIALOG])
+async def test_resume_on_unreadable_pane_presses_enter_and_keeps_status(
+    tmp_path, monkeypatch, screen: str
+) -> None:
+    # The agent reads neither its composer nor its dialogs off a generic tmux
+    # pane, so resume presses Enter and the pane-output heuristic drives status.
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(
         make_session(runtime.settings, "tmux", SessionStatus.IDLE, backend="codex")
     )
-    enters = stub_pane(runtime, monkeypatch, PENDING_MESSAGE)
+    enters = stub_pane(runtime, monkeypatch, screen)
 
     updated = await runtime.resume("sess")
 

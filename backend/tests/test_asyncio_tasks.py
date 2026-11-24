@@ -18,7 +18,7 @@ async def _slow_to_cancel(release: asyncio.Event, entered: asyncio.Event) -> Non
 
 async def _cancel_while_waiting(
     child_exit: type[BaseException] | None,
-) -> asyncio.Task[None]:
+) -> tuple[asyncio.Task[None], asyncio.Task[None]]:
     """Cancel a caller mid-wait on a slow-to-stop child that then raises
     *child_exit*, or returns normally when it is ``None``."""
     release = asyncio.Event()
@@ -42,7 +42,7 @@ async def _cancel_while_waiting(
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(caller, TIMEOUT)
-    return caller
+    return caller, child_task
 
 
 async def test_absorbs_the_childs_own_cancellation() -> None:
@@ -55,18 +55,21 @@ async def test_absorbs_the_childs_own_cancellation() -> None:
 
 
 async def test_propagates_caller_cancellation_while_child_stops() -> None:
-    caller = await _cancel_while_waiting(asyncio.CancelledError)
+    caller, child = await _cancel_while_waiting(asyncio.CancelledError)
     assert caller.cancelled()
+    assert child.cancelled()
 
 
 async def test_propagates_caller_cancellation_when_child_ignores_its_cancel() -> None:
-    caller = await _cancel_while_waiting(None)
+    caller, child = await _cancel_while_waiting(None)
     assert caller.cancelled()
+    assert child.result() is None
 
 
 async def test_propagates_caller_cancellation_when_child_raises() -> None:
-    caller = await _cancel_while_waiting(ValueError)
+    caller, child = await _cancel_while_waiting(ValueError)
     assert caller.cancelled()
+    assert isinstance(child.exception(), ValueError)
 
 
 async def test_propagates_the_exception_a_child_finished_with() -> None:

@@ -83,7 +83,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto 14px;
+  grid-template-columns: 8px minmax(5rem, 1fr) auto 14px;
   align-items: center;
   column-gap: 12px;
   width: 100%;
@@ -122,7 +122,10 @@
 }
 
 .address {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

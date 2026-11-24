@@ -27,7 +27,7 @@ No manual tagging or version-file editing is required.
 
 ## Versioning
 
-All three packages share a single version number derived from the root git tag:
+All packages share a single version number derived from the root git tag:
 
 - **Backend** (`backend/`) and **waypointctl** (`waypointctl/`) both declare `dynamic = ["version"]` with `[tool.setuptools_scm] root = ".."`. At build time, `setuptools-scm` reads the nearest `vX.Y.Z` tag from the repo root.
 - **Frontend** (`frontend/`, `frontend-v2/`) and **web-core** (`packages/web-core/`) have their `package.json` versions updated directly by release-please via the `extra-files` entries in `release-please-config.json`.

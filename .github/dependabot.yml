@@ -18,6 +18,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # vitest 4 crashes npm 10's resolver and vitest 5 needs Node 22 (CI runs 20).
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "build"
 

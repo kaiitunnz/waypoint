@@ -759,6 +759,7 @@ class ClaudeTtyPlugin:
         await self.drop_pending_approval(
             runtime, session.id, "Pending approval cleared by terminate"
         )
+        self._tailers.pop(session.id, None)
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
@@ -1291,6 +1292,7 @@ class ClaudeTtyPlugin:
         await self.drop_pending_approval(
             runtime, session.id, "Pending approval cleared by restart"
         )
+        self._tailers.pop(session.id, None)
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()

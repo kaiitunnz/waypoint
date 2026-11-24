@@ -237,7 +237,7 @@ export function tokenCategoryLabel(category: string): string {
     .join(" ");
 }
 
-// The two spend tiers the Tokens card and legend group by: fresh work the
+// The two spend tiers token breakdowns group by: fresh work the
 // model actually did this range vs. cheap prior context re-sent to it. Keeping
 // `cache_read` in its own tier is what stops it visually drowning the rest.
 export const TOKEN_TIER_NEW_WORK: readonly UnifiedTokenCategory[] = [
@@ -256,21 +256,9 @@ export const TOKEN_DISPLAY_ORDER: readonly UnifiedTokenCategory[] = [
   ...TOKEN_TIER_REREAD,
 ];
 
-const TOKEN_CATEGORY_COLORS: Record<UnifiedTokenCategory, string> = {
-  fresh_input: "var(--tm-series-1)",
-  output: "var(--tm-series-2)",
-  reasoning: "var(--tm-series-3)",
-  cache_write: "var(--tm-series-5)",
-  cache_read: "var(--tm-token-reread)",
-};
-
-export function tokenCategoryColor(category: string): string {
-  return TOKEN_CATEGORY_COLORS[category as UnifiedTokenCategory] ?? "var(--tm-series-6)";
-}
-
 // ── Instance health & capacity categories ────────────────────────────────
 // Fixed accounting order (mirrors the backend StorageCategory enum) — also the
-// stacked-bar order. Colors draw from the shared categorical series slots.
+// stacked-bar order.
 export const INSTANCE_CATEGORY_ORDER: readonly InstanceStorageCategory[] = [
   "database",
   "sqlite_companions",
@@ -289,15 +277,6 @@ const INSTANCE_CATEGORY_LABELS: Record<InstanceStorageCategory, string> = {
   unclassified: "Unclassified",
 };
 
-const INSTANCE_CATEGORY_COLORS: Record<InstanceStorageCategory, string> = {
-  database: "var(--tm-series-1)",
-  sqlite_companions: "var(--tm-series-2)",
-  live_sessions: "var(--tm-series-3)",
-  orphan_sessions: "var(--tm-series-4)",
-  attachments: "var(--tm-series-5)",
-  unclassified: "var(--tm-series-6)",
-};
-
 export function instanceCategoryLabel(category: string): string {
   return (
     INSTANCE_CATEGORY_LABELS[category as InstanceStorageCategory] ??
@@ -306,10 +285,6 @@ export function instanceCategoryLabel(category: string): string {
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ")
   );
-}
-
-export function instanceCategoryColor(category: string): string {
-  return INSTANCE_CATEGORY_COLORS[category as InstanceStorageCategory] ?? "var(--tm-series-6)";
 }
 
 // ── Database content breakdown ───────────────────────────────────────────

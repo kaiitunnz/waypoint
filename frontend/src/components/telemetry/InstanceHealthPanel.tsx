@@ -9,10 +9,10 @@ import {
   formatBytes,
   formatExactBytes,
   INSTANCE_CATEGORY_ORDER,
-  instanceCategoryColor,
   instanceCategoryLabel,
   insightSeverityTone,
 } from "@waypoint/web-core/telemetry";
+import { instanceCategoryColor } from "./palette";
 import {
   CategoryFootprint,
   DatabaseReclaim,

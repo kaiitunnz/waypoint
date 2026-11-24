@@ -11,9 +11,9 @@ import {
   coverageLabel,
   formatCompactNumber,
   splitTokenTiers,
-  tokenCategoryColor,
   tokenCategoryLabel,
 } from "@waypoint/web-core/telemetry";
+import { tokenCategoryColor } from "./palette";
 import { TelemetryTokens, TokenGroupBy } from "@waypoint/web-core/types";
 
 interface TokenChartProps {

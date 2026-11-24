@@ -15,13 +15,11 @@ import {
   formatHourLabel,
   formatRangeLabel,
   insightSeverityTone,
-  instanceCategoryColor,
   instanceCategoryLabel,
   readTelemetryQuery,
   shortId,
   splitTokenTiers,
   telemetryParams,
-  tokenCategoryColor,
   tokenCategoryLabel,
   toolOutcomeLabel,
   toolOutcomeTone,
@@ -183,12 +181,6 @@ describe("token categories", () => {
     expect(tokenCategoryLabel("some_new_bucket")).toBe("Some New Bucket");
   });
 
-  it("colours categories and falls back to the last series slot", () => {
-    expect(tokenCategoryColor("fresh_input")).toBe("var(--tm-series-1)");
-    expect(tokenCategoryColor("cache_read")).toBe("var(--tm-token-reread)");
-    expect(tokenCategoryColor("other")).toBe("var(--tm-series-6)");
-  });
-
   it("keeps the re-read tier last in the display order", () => {
     expect(TOKEN_DISPLAY_ORDER).toEqual(["fresh_input", "output", "reasoning", "cache_write", "cache_read"]);
   });
@@ -204,11 +196,9 @@ describe("token categories", () => {
 });
 
 describe("instance categories", () => {
-  it("labels and colours storage categories with fallbacks", () => {
+  it("labels storage categories, title-casing unknown ones", () => {
     expect(instanceCategoryLabel("sqlite_companions")).toBe("SQLite companions");
     expect(instanceCategoryLabel("brand_new")).toBe("Brand New");
-    expect(instanceCategoryColor("database")).toBe("var(--tm-series-1)");
-    expect(instanceCategoryColor("brand_new")).toBe("var(--tm-series-6)");
   });
 });
 

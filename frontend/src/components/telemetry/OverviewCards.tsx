@@ -4,11 +4,11 @@ import {
   coverageLabel,
   formatCompactNumber,
   splitTokenTiers,
-  tokenCategoryColor,
   tokenCategoryLabel,
   TOKEN_TIER_NEW_WORK,
   shortId,
 } from "@waypoint/web-core/telemetry";
+import { tokenCategoryColor } from "./palette";
 import { TelemetryOverview } from "@waypoint/web-core/types";
 import { formatRelativeTime, usageTone } from "@waypoint/web-core/usage";
 

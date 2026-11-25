@@ -4,6 +4,7 @@ import queue
 import threading
 import weakref
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -2669,4 +2670,36 @@ async def test_interrupted_launch_closes_the_client() -> None:
         await launch
 
     assert await asyncio.to_thread(closed.wait, 5)
+    assert "sess" not in adapter._sessions
+
+
+@pytest.mark.asyncio
+async def test_cancelled_resume_releases_its_thread_when_the_executor_is_full() -> None:
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
+    entered = threading.Event()
+    closed = threading.Event()
+
+    class HangingClient(FakeCodexClient):
+        def thread_resume(self, thread_id: str) -> Any:
+            entered.set()
+            # The SDK waits without a timeout; only close() releases it.
+            closed.wait(timeout=10)
+            raise RuntimeError("closed")
+
+        def close(self) -> None:
+            closed.set()
+
+    adapter = CodexAppServerAdapter(
+        lambda *_: None,  # type: ignore[arg-type]
+        client_factory=lambda *_: cast(CodexClient, HangingClient()),
+    )
+    restore = asyncio.create_task(adapter.restore_session("sess", "/tmp/work", "t"))
+    async with asyncio.timeout(5):
+        while not entered.is_set():
+            await asyncio.sleep(0.01)
+        restore.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await restore
+
+    assert closed.is_set()
     assert "sess" not in adapter._sessions

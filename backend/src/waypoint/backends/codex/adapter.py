@@ -465,10 +465,7 @@ class CodexAppServerAdapter:
             await asyncio.to_thread(client.start)
             await asyncio.to_thread(client.initialize)
         except BaseException:
-            # The SDK waits without a timeout; closing the client releases the
-            # worker thread a cancellation leaves behind. On its own thread,
-            # since the executor may be full of such waits.
-            threading.Thread(target=client.close, daemon=True).start()
+            _close_detached(client)
             raise
         state = CodexSessionState(
             session_id=session_id,
@@ -490,7 +487,11 @@ class CodexAppServerAdapter:
         client when it fails."""
         try:
             return await self._call_client(state, func, *args)
-        except BaseException:
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                # ``terminate_session`` closes through the executor, which may
+                # be full of abandoned waits.
+                _close_detached(state.client)
             await self.terminate_session(state.session_id)
             raise
 
@@ -1213,6 +1214,13 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _close_detached(client: CodexClient) -> None:
+    """Close ``client`` on a thread of its own. The SDK waits without a timeout,
+    so this is what releases a worker thread a cancellation leaves behind, even
+    when such threads fill the executor."""
+    threading.Thread(target=client.close, daemon=True).start()
 
 
 def _release_stuck_read(state: CodexSessionState) -> None:

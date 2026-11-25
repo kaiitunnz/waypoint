@@ -54,7 +54,7 @@ function Single({ event, first }: { event: EventRecord; first: boolean }) {
     case "user_message":
       return <Bubble tone="user" first={first} text={event.text} ts={event.ts} attachments={attachmentSpecsFor(event)} />;
     case "ask_answer":
-      return <AnswerCard event={event} ts={event.ts} first={first} />;
+      return <AnswerCard event={event} first={first} />;
     case "agent_message":
       return <Bubble tone="agent" first={first} text={event.text} ts={event.ts} attachments={attachmentSpecsFor(event)} />;
     case "status":

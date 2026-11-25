@@ -4,6 +4,7 @@
   gap: 10px;
   min-height: 20px;
   font-size: var(--f-stamp);
+  line-height: 16px;
   color: var(--faint);
 }
 
@@ -16,7 +17,8 @@
   background: var(--line);
 }
 
-.body {
+.body,
+.toggle {
   display: inline-flex;
   flex: 0 1 auto;
   align-items: center;
@@ -27,10 +29,58 @@
 
 .text {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toggle {
+  composes: hit from "../../../styles/hit.module.css";
+  position: relative;
+  color: inherit;
   text-align: center;
+}
+
+.toggle:hover {
+  color: var(--muted);
+}
+
+.toggle:active {
+  color: var(--text);
+}
+
+.chev {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
 }
 
 .time {
   flex: none;
+}
+
+/* Opened, the note wraps; the hairlines, glyph, chevron and time keep to its first line. */
+.open,
+.open .body,
+.open .toggle {
+  align-items: flex-start;
+}
+
+.open {
+  padding-top: 2px;
+}
+
+.open::before,
+.open::after {
+  margin-top: 8px;
+}
+
+.open .text {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.open .chev {
+  height: 16px;
 }

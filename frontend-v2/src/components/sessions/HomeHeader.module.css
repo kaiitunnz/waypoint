@@ -38,29 +38,33 @@
   padding: 4px 16px 0;
 }
 
-/* The full header: the search field sits in the row, and takes a row of its own
-   when the header is tight. */
+/* The full header: one row of title, host, search field and button, where a tight
+   width truncates the host and moves the field to a row of its own. */
 .full {
   container-type: inline-size;
-  flex-wrap: wrap;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: auto fit-content(12rem) minmax(0, 1fr) auto;
+  column-gap: 14px;
+  row-gap: 8px;
   padding: calc(var(--safe-top) + 20px) 16px 4px;
 }
 
 .full .grow {
-  flex: none;
-  margin-left: auto;
+  display: none;
 }
 
-/* The field takes what is left over, so it never pushes the button to a new row. */
 .full .search {
-  flex: 1 1 0;
+  grid-column: 3;
+}
+
+.full > :last-child {
+  grid-column: 4;
 }
 
 @container (max-width: 600px) {
   .full .search {
-    order: 1;
-    flex: 1 0 100%;
+    grid-row: 2;
+    grid-column: 1 / -1;
     max-width: none;
   }
 }

@@ -77,8 +77,8 @@ class HeldQueue:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
         if self._runtime.restores.holds_sends(session_id):
-            # Without the send lock: a send that reopened the session keeps it
-            # through the restore.
+            # No send lock: a send that reopened the session holds it until the
+            # restore ends.
             reason = HeldReason.IDLE if wake else HeldReason.RESTORE
             record = await self._hold(session_id, request, origin, reason)
         else:
@@ -108,8 +108,8 @@ class HeldQueue:
 
     def _queued_behind_restore(self, session: SessionRecord) -> bool:
         """Whether a send waits for a restore, or behind sends still held from
-        one. A send reopens an exited session, so nothing queues behind what that
-        left."""
+        one. A send reopens an exited session, so nothing queues behind what it
+        left held."""
         if self._runtime.restores.holds_sends(session.id):
             return True
         return session.status is not SessionStatus.EXITED and (

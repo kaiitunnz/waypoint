@@ -48,10 +48,9 @@ inspection is unaffected.
 
 ## Lifecycle
 
-- The assistant is set up in the background after the backend starts serving.
-  Until it finishes, its reset, attach, terminate and reconnect controls return
-  `409` (terminate is accepted while the thread is still being restored). While a
-  replacement thread launches, messages to the previous one return `409` too.
+- The assistant is set up in the background. Until that finishes, reset, attach
+  and reconnect return `409`, and so does terminate once a new thread is
+  launching. Messages to a thread being replaced return `409`.
 - On startup the runtime refreshes the assistant workspace asset links, then
   reuses the assistant thread that lives in the managed workspace,
   **regardless of its agent or interface**. The thread is the source of truth,
@@ -59,13 +58,12 @@ inspection is unaffected.
   `assistant` block in `waypoint.yaml` only seeds the *first* creation; editing
   `assistant.backend` / `assistant.transport` later has no effect while a thread
   exists — clear the context to re-seed.
-- A thread in `error` is kept, so its context survives: reconnect it, or clear
-  the context to replace it. A pane-backed thread (Emulated or Terminal) in
-  `error` is replaced, because it cannot relaunch.
-- If no usable thread exists (first boot, or the previous one exited), a fresh
-  thread is created from the `waypoint.yaml` defaults. If that launch fails, the
-  previous thread stays the assistant. A launch without a terminal pane fails
-  after `session_restore_timeout_seconds`.
+- A thread in `error` is kept: reconnect it, or clear the context to replace it.
+  A pane-backed thread (Emulated or Terminal) cannot relaunch and is replaced.
+- With no thread, or one that exited or errored in a pane, a fresh thread is
+  created from the `waypoint.yaml` defaults. If that launch fails, the previous
+  thread stays the assistant. A launch without a terminal pane fails after
+  `session_restore_timeout_seconds`.
 - The assistant cannot be **deleted**, and the generic session terminate/delete
   endpoints reject it (it is a protected singleton).
 

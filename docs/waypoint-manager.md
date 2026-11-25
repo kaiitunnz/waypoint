@@ -124,8 +124,8 @@ held wake survives a backend restart, and one whose session exits fires after th
 session is resumed. A wake held while the session is in Focus waits for the human to
 release it. A wake into `exited` or `error` is dropped — a stopped session is not
 resurrected by a board post; an explicit resume, or a pending liveness self-wake
-(which delivers through the input path), recovers it. Sends held through a failed
-restore stay ahead of the self-wake and wait for a reconnect.
+(which delivers through the input path), recovers it. A self-wake queued behind
+sends held by a failed restore waits for a reconnect.
 
 `waypoint board wait` blocks until a watched channel changes and is an interactive
 convenience for a human or a one-off script. It is not the manager's loop driver;

@@ -1,5 +1,5 @@
-"""Whether a plugin can drive a session. A plugin that fails to wire, or that no
-longer loads, leaves its sessions visibly unavailable."""
+"""Whether a plugin can drive a session. A plugin that fails to wire, or is not
+loaded, leaves its sessions visibly unavailable."""
 
 import logging
 from collections.abc import Iterator

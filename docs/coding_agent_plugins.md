@@ -292,9 +292,8 @@ async def create_session(
 
 - `setup(runtime)` runs once during `SessionRuntime.__init__`. Build any
   external resources here (Claude resolves its host-side support bundle).
-  Resilient to missing prerequisites: log and bail without raising so a
-  partial install still boots. A `setup` that raises marks the plugin
-  unavailable.
+  Log and return on a missing prerequisite. A `setup` that raises marks the
+  plugin unavailable.
 - `shutdown(runtime)` runs from `SessionRuntime.stop` so the plugin can
   close adapters and drain background state in the order it was brought up.
 - `register_routes(app, context)` runs once during `create_app`. Mount
@@ -314,40 +313,38 @@ async def create_session(
 ### Startup and restore
 
 No registered plugin can keep the backend from starting or serving. An
-entry-point plugin that fails to load is logged and left unregistered, so a
-config that names it is rejected as an unknown backend. Boot restores run
-concurrently in the background, one per session, as do the orphaned one-shot
-sweep and the [assistant bootstrap](personal_assistant.md#lifecycle). Sessions
-on a `password` SSH target with no live connection are left as stored.
+entry-point plugin that fails to load is logged and not registered, so a config
+naming it is rejected as an unknown backend. Boot restores, the orphaned
+one-shot sweep and the [assistant bootstrap](personal_assistant.md#lifecycle)
+run in the background. Sessions on a `password` SSH target with no live
+connection are left as stored.
 
-What happens during a restore depends on the driver's `has_terminal_pane`:
+A restore depends on the driver's `has_terminal_pane`:
 
 - **No terminal pane** (a native structured adapter). The session shows
-  `starting` and the restore is bounded by `session_restore_timeout_seconds`
-  (default 90). Requests that drive the agent return `409`. Agent sends,
-  scheduled messages and wakes are held and delivered once the session can take
-  them; a reconnect or settings change holds them from before it tears the old
-  process down. Terminate and delete cancel the restore.
-- **Terminal pane** (tmux, `claude_tty`). The pane is live, so the session keeps
-  its status and the restore is not bounded or cancelled.
+  `starting` for at most `session_restore_timeout_seconds` (default 90).
+  Requests that drive the agent return `409`. Agent sends, scheduled messages
+  and wakes are held until the session can take them, from before a reconnect or
+  settings change stops the old process. Terminate and delete cancel the
+  restore.
+- **Terminal pane** (tmux, `claude_tty`). The session keeps its status, and the
+  restore is unbounded and cannot be cancelled.
 
 A restore that raises or times out records "Could not restore this session:
-<reason>. Reconnect to try again." A session without a pane becomes `error`;
-messages held for it stay queued and go out in order after a successful
-reconnect. A pane-backed session keeps its status.
+<reason>. Reconnect to try again." A session without a pane becomes `error`, and
+messages held for it go out in order after a successful reconnect.
 
-A plugin that raises in `setup`, `transport_view` or `register_routes`, and a
-session whose backend or transport no plugin provides, are logged with the
-plugin's name. Their sessions become `error` with a "Session unavailable" note
-saying why, and requests that drive them return `503`; terminate and delete still
-work. No launch, import, tmux attach or interface switch lands on a failed
-plugin. A session returns to its earlier status on the first start where its
-plugin works again.
+A plugin that raises in `setup`, `transport_view` or `register_routes` is
+unavailable, as is a backend or transport no plugin provides. It is logged by
+name. Its sessions become `error` with a "Session unavailable" note, requests
+that drive them return `503`, and terminate and delete still work. Launch,
+import, tmux attach and interface switch refuse it. A session returns to its
+earlier status on the first start where the plugin works.
 
-A restore without a pane must tolerate cancellation, including calls it offloads
-to a thread, and release the processes it started. No restore may block the event
-loop. Fail at once when the agent's server speaks an incompatible protocol rather
-than waiting out the timeout.
+`restore_session` for a session without a pane, and `create_session` for an
+assistant without one, must tolerate cancellation, including calls offloaded to
+a thread, and release the processes they started. No restore may block the event
+loop. Fail at once when the agent's server speaks an incompatible protocol.
 
 ### Control surface
 

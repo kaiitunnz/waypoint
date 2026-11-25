@@ -35,14 +35,10 @@ waypoint sessions send <target-id> "[wp-msg from=$ME reply-to=$ME] Run the backe
 waypoint sessions send <target-id> "[wp-msg from=$ME] Run the backend test suite in /home/me/proj and report pass/fail counts."
 ```
 
-`"send": "held"` in the result means the target is in Focus (its human releases
-or cancels the message later), waiting on a dialog (the message is delivered
-once the human answers it), or, without a terminal pane, being restored or
-restarted (after a backend restart, a reconnect or a settings change; it is
-delivered afterwards, and after a failed restore once the session is
-reconnected).
-Expect a delayed reply, or none. To retract it,
-`waypoint sessions held cancel <held_message_id>`.
+`"send": "held"` in the result means the message is queued: the target is in
+Focus (its human releases or cancels it), on a dialog, or restoring (delivered
+afterwards; after a failed restore, once reconnected). Expect a delayed reply,
+or none. To retract it, `waypoint sessions held cancel <held_message_id>`.
 
 ## Pull: read the target's stream (you omitted `reply-to`)
 

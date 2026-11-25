@@ -2064,7 +2064,7 @@ class SessionRuntime:
         ]
 
     def _assistant_is_reusable(self, session: SessionRecord) -> bool:
-        """Whether boot keeps ``session`` as the assistant rather than replace it."""
+        """Whether boot keeps ``session`` as the assistant."""
         if (
             session.cwd != str(self._assistant_workspace_dir())
             or session.status == SessionStatus.EXITED

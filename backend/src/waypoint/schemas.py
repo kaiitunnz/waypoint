@@ -15,8 +15,8 @@ from pydantic import (
 
 from waypoint.launch_env import LaunchEnv
 
-# Validation context for a stored row. It may name a plugin that no longer loads
-# and must still be readable, so the runtime can report the plugin as missing.
+# Validation context for a stored row, which stays readable when it names a
+# plugin that is not loaded, so the runtime can report it.
 STORED_ROW_CONTEXT = {"stored_row": True}
 
 
@@ -721,7 +721,7 @@ class LaunchTargetConnectResponse(BaseModel):
 
 class AssistantSummary(BaseModel):
     session_id: str
-    # Plain strings: a stored assistant may name a plugin that no longer loads.
+    # Plain strings: a stored assistant may name a plugin that is not loaded.
     backend: str
     # Transport the assistant is driven over, so the UI can label it (Chat /
     # Emulated / Terminal) and preselect it in the settings popover.

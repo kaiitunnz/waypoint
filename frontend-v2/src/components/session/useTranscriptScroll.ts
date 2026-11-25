@@ -64,7 +64,8 @@ export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boole
   }, [olderPending, onLoadOlder]);
 
   const jumpToEnd = useCallback(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, []);
 
   return { scroller, content, away, onScroll, loadOlder, jumpToEnd };

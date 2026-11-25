@@ -8,14 +8,27 @@
   background: var(--ground);
 }
 
-.tabs {
+.top {
   display: flex;
   flex: none;
+  align-items: center;
+  height: calc(var(--bar-height) + var(--safe-top));
+  padding-top: var(--safe-top);
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs {
+  display: flex;
+  flex: 1 1 auto;
+  align-self: stretch;
   align-items: flex-end;
   gap: 18px;
-  height: var(--bar-height);
   padding: 0 20px;
-  border-bottom: 1px solid var(--line);
+}
+
+.close {
+  display: inline-flex;
+  margin-right: 8px;
 }
 
 .tab {
@@ -38,4 +51,11 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  padding-bottom: var(--safe-bottom);
+}
+
+@media not all and (hover: hover) and (pointer: fine) {
+  .tab {
+    height: 44px;
+  }
 }

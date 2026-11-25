@@ -91,7 +91,7 @@
   color: var(--error);
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .port input {
     width: 68px;
     min-height: 32px;

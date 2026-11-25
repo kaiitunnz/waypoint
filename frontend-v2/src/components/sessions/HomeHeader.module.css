@@ -29,23 +29,37 @@
 }
 
 .search {
-  flex: 1 1 280px;
   max-width: 420px;
-  min-width: 0;
 }
 
 .searchRow {
   padding: 4px 16px 0;
 }
 
-@media (min-width: 900px) {
-  .header {
-    gap: 14px;
-    padding: 20px 16px 4px;
-  }
+/* The field keeps 10rem, so the host name is what truncates. */
+.full {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) 1fr auto;
+  column-gap: 14px;
+  row-gap: 8px;
+  padding: calc(var(--safe-top) + 20px) 16px 4px;
+}
 
-  .grow {
-    flex: none;
-    margin-left: auto;
+.full .search {
+  grid-column: 3;
+  min-width: 10rem;
+}
+
+.full > :last-child {
+  grid-column: 4;
+}
+
+@container (max-width: 600px) {
+  .full .search {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: none;
   }
 }

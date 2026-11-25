@@ -16,45 +16,83 @@
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin: 0;
   padding: 0 16px;
   list-style: none;
 }
 
+/* The full layout: every client but a phone. */
+.full {
+  padding-bottom: 0;
+}
+
+.main {
+  min-width: 0;
+}
+
+.full .main {
+  padding-bottom: 24px;
+}
+
+/* Hairlines run the width of the tiles above; the row text keeps the heading's
+   edge. The rows size their detail by this box. */
+.full .inset {
+  container-type: inline-size;
+  margin: 0 16px;
+}
+
+.full .inset li > :first-child {
+  padding-left: 0;
+}
+
+.side {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.sideInner {
+  padding-bottom: 32px;
+}
+
 @media (min-width: 900px) {
-  .desktop {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
-    padding-bottom: 0;
+  .tiles {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   }
 
-  .main {
-    min-width: 0;
+  .full {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+
+  .full .main {
     padding: 0 20px 32px;
   }
 
-  /* Hairlines run the width of the tiles above; the row text keeps the heading's edge. */
-  .inset {
-    margin: 0 16px;
-  }
-
-  .inset li > :first-child {
-    padding-left: 0;
-  }
-
   .side {
-    min-width: 0;
+    border-top: 0;
     border-left: 1px solid var(--line);
-    background: var(--ground);
   }
 
   .sideInner {
     position: sticky;
-    top: 0;
-    max-height: 100dvh;
+    top: var(--safe-top);
+    max-height: calc(100dvh - var(--safe-top));
     overflow-y: auto;
     padding: 0 12px 32px;
+  }
+}
+
+/* Touch has the full layout only with columns, where the page itself scrolls
+   above the fixed tab bar. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .full {
+    min-height: calc(100dvh - var(--tabbar-height) - var(--safe-bottom));
+  }
+
+  .full .sideInner {
+    max-height: calc(100dvh - var(--safe-top) - var(--tabbar-height) - var(--safe-bottom));
   }
 }

@@ -187,3 +187,11 @@
   font-size: var(--f-body);
   color: var(--text);
 }
+
+@media not all and (hover: hover) and (pointer: fine) {
+  .actions a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

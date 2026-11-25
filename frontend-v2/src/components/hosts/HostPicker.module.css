@@ -164,7 +164,9 @@
   .scroll {
     padding: 0 20px 12px;
   }
+}
 
+@media (hover: hover) and (pointer: fine) {
   .row {
     min-height: 38px;
   }

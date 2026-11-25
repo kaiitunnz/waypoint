@@ -53,7 +53,7 @@
   width: 100%;
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .button {
     min-height: 40px;
   }

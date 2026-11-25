@@ -64,8 +64,10 @@
   transform: translateX(-50%);
 }
 
-.jump:hover {
-  background: color-mix(in srgb, var(--text) 8%, var(--glass));
+@media (hover: hover) and (pointer: fine) {
+  .jump:hover {
+    background: color-mix(in srgb, var(--text) 8%, var(--glass));
+  }
 }
 
 .jump:active {
@@ -73,10 +75,6 @@
 }
 
 @media (min-width: 900px) {
-  .scroller {
-    padding-top: var(--bar-height);
-  }
-
   .col {
     padding: 0 var(--session-gutter) 10px;
   }

@@ -45,7 +45,7 @@
   color: var(--text-strong);
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .action {
     min-height: 36px;
   }

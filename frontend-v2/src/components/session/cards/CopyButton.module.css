@@ -8,7 +8,7 @@
   color: var(--faint);
 }
 
-@media (max-width: 899.98px) {
+@media not all and (hover: hover) and (pointer: fine) {
   .copy::after {
     content: "";
     position: absolute;
@@ -16,6 +16,8 @@
   }
 }
 
-.copy:hover {
-  color: var(--text-strong);
+@media (hover: hover) and (pointer: fine) {
+  .copy:hover {
+    color: var(--text-strong);
+  }
 }

@@ -1,4 +1,4 @@
-/* Mobile: two full screens, hosts then password. */
+/* One column: two full screens, hosts then password. */
 .screen {
   display: flex;
   flex-direction: column;
@@ -82,13 +82,13 @@
   display: none;
 }
 
-/* Desktop: one card, hosts left and sign-in right. */
+/* Two columns: one card, hosts left and sign-in right. */
 @media (min-width: 900px) {
   .page {
     display: grid;
     place-items: center;
     min-height: 100dvh;
-    padding: 16px max(16px, var(--safe-right)) 16px max(16px, var(--safe-left));
+    padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left));
     background: var(--ground);
   }
 
@@ -96,7 +96,7 @@
     display: flex;
     flex-direction: column;
     width: min(980px, 100%);
-    height: min(700px, calc(100dvh - 32px));
+    height: min(700px, calc(100dvh - max(16px, var(--safe-top)) - max(16px, var(--safe-bottom))));
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--r-modal);

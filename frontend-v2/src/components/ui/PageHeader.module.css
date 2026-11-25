@@ -36,9 +36,20 @@
 
 @media (min-width: 900px) {
   .header {
-    padding: 20px 36px 4px;
+    padding-right: 36px;
+    padding-left: 36px;
   }
+}
 
+/* Every client but a phone. */
+@media (min-width: 900px), (hover: hover) and (pointer: fine) {
+  .header {
+    padding-top: calc(var(--safe-top) + 20px);
+  }
+}
+
+/* A pointer client has the nav rail to go back by. */
+@media (hover: hover) and (pointer: fine) {
   .back {
     display: none;
   }

@@ -34,7 +34,7 @@
   left: calc(50% + 6px);
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .bar {
     display: none;
   }

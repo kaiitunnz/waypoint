@@ -60,8 +60,8 @@ export function CompactRow({
   now,
   agent,
   menu,
-  desktop,
-}: RowProps & { desktop: boolean }) {
+  detailed,
+}: RowProps & { detailed: boolean }) {
   return (
     <ListRow
       href={href(session)}
@@ -71,7 +71,7 @@ export function CompactRow({
       compact
       dimmed={lamp === "exited"}
       trailing={
-        desktop ? (
+        detailed ? (
           <span className={styles.trail}>
             <span className={styles.agent}>{agent}</span>
             <span className={styles.when}>{time(session, now)}</span>

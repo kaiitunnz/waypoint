@@ -6,8 +6,8 @@ import type { SessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
 
+import { PanelButton, type PanelControl } from "./PanelButton";
 import { SessionStatusLine } from "./SessionStatusLine";
 import styles from "./SessionHeader.module.css";
 
@@ -16,34 +16,18 @@ interface SessionHeaderProps {
   standing: SessionStanding | null;
   agent: string;
   onTitle: () => void;
-  railOpen: boolean;
-  onToggleRail: () => void;
-  paneOpen: boolean;
-  onTogglePane: () => void;
+  rail: PanelControl;
+  pane: PanelControl;
   view: ReactNode;
   density: ReactNode;
   overflow: ReactNode;
 }
 
-export function SessionHeader({
-  title,
-  standing,
-  agent,
-  onTitle,
-  railOpen,
-  onToggleRail,
-  paneOpen,
-  onTogglePane,
-  view,
-  density,
-  overflow,
-}: SessionHeaderProps) {
+export function SessionHeader({ title, standing, agent, onTitle, rail, pane, view, density, overflow }: SessionHeaderProps) {
   return (
     <GlassBar>
       <div className={styles.bar}>
-        <IconButton label="Sessions" size="sm" onClick={onToggleRail} aria-pressed={railOpen}>
-          <Icon name="panel-left" size={18} />
-        </IconButton>
+        <PanelButton panel="rail" size="sm" control={rail} />
         <div className={styles.ttl}>
           <button
             type="button"
@@ -59,9 +43,7 @@ export function SessionHeader({
         </div>
         {view}
         {density}
-        <IconButton label="Side pane" size="sm" onClick={onTogglePane} aria-pressed={paneOpen}>
-          <Icon name="panel-right" size={18} />
-        </IconButton>
+        <PanelButton panel="pane" size="sm" control={pane} />
         {overflow}
       </div>
     </GlassBar>

@@ -10,14 +10,13 @@ export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
 
 interface SessionMenuProps {
   session: SessionRecord;
-  // The agent and model, under the title on mobile.
+  // The agent and model, under the title in the touch sheet.
   subtitle: string;
   onAction: (action: SessionAction, session: SessionRecord) => void;
-  size?: "md" | "sm";
   header?: ReactNode;
 }
 
-export function SessionMenu({ session, subtitle, onAction, size, header }: SessionMenuProps) {
+export function SessionMenu({ session, subtitle, onAction, header }: SessionMenuProps) {
   const items: MenuButtonItem[] = [
     { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
     { id: "rename", label: "Rename" },
@@ -31,7 +30,7 @@ export function SessionMenu({ session, subtitle, onAction, size, header }: Sessi
       title={session.title}
       subtitle={subtitle}
       items={items}
-      size={size}
+      size="sm"
       header={header}
       onSelect={(id) => onAction(id as SessionAction, session)}
     />

@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 
-import { useDesktop } from "@/lib/layout";
+import { usePointerUI } from "@/lib/layout";
 
 import { Sheet } from "./Dialog";
 import { Icon } from "./Icon";
@@ -18,7 +18,7 @@ export interface MenuButtonItem {
 interface MenuButtonProps {
   // The spoken name of the button.
   label: string;
-  // The heading of the mobile sheet.
+  // The heading of the touch sheet.
   title: string;
   subtitle?: ReactNode;
   items: MenuButtonItem[];
@@ -29,7 +29,7 @@ interface MenuButtonProps {
 
 // Destructive actions are menu items, never inline buttons.
 export function MenuButton({ label, title, subtitle, items, onSelect, size = "md", header }: MenuButtonProps) {
-  const desktop = useDesktop();
+  const pointer = usePointerUI();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
 
@@ -65,7 +65,7 @@ export function MenuButton({ label, title, subtitle, items, onSelect, size = "md
       >
         <Icon name="more" size={20} />
       </IconButton>
-      {desktop ? (
+      {pointer ? (
         <Popover open={open} onOpenChange={setOpen} triggerRef={trigger} label={label} width={220} align="right">
           {menu}
         </Popover>

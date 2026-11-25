@@ -9,11 +9,11 @@
   color: var(--muted);
 }
 
-.button:hover {
-  color: var(--text-strong);
-}
+@media (hover: hover) and (pointer: fine) {
+  .button:hover {
+    color: var(--text-strong);
+  }
 
-@media (min-width: 900px) {
   .sm {
     width: 36px;
     height: 36px;

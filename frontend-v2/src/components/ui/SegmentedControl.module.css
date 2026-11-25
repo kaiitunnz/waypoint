@@ -30,7 +30,7 @@
   font-weight: 400;
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .segment {
     height: 32px;
   }

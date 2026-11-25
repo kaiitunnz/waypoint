@@ -965,9 +965,14 @@ class SessionRuntime:
         try:
             yield
         finally:
-            after = self.storage.get_session(session_id)
-            if before is not None and after is not None and not before.unread:
-                self._mark_session_read(session_id, after.last_event_at)
+            try:
+                after = self.storage.get_session(session_id)
+                if before is not None and after is not None and not before.unread:
+                    self._mark_session_read(session_id, after.last_event_at)
+            except Exception:
+                log.exception(
+                    "read marker update failed", extra={"session_id": session_id}
+                )
 
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.
@@ -3356,54 +3361,56 @@ class SessionRuntime:
         # subprocess + background tasks. terminate_session is a no-op when
         # the session id is not tracked, so this is safe for clean EXITED
         # paths too. Serialized with terminate and the launch-settings switch.
-        async with self._session_lock(session.id):
-            # Re-read under the lock: a concurrent switch/terminate may have
-            # changed the record since the caller captured it.
-            session = self.get_session(session.id)
-            plugin = self.registry.plugin_for(session)
-            if not plugin.capabilities.supports_reattach_after_exit:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="this session cannot be reattached after exit",
-                )
-            await self._require_live_master(
-                self._find_launch_target(session.launch_target_id)
+        async with self._session_lock(session.id), self._keep_read(session.id):
+            return await self._reattach_locked(session.id)
+
+    async def _reattach_locked(self, session_id: str) -> SessionRecord:
+        # Re-read under the lock: a concurrent switch/terminate may have
+        # changed the record since the caller captured it.
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_reattach_after_exit:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="this session cannot be reattached after exit",
             )
-            await plugin.terminate_session(self, session)
-            await self._cancel_context_usage_source(session.id)
-            # User-initiated retry: bypass any per-target cooldown / circuit
-            # breaker so the click takes effect immediately. Plugins without
-            # this opt-in hook ignore the call.
-            clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
-            if clear_cooldown is not None:
-                clear_cooldown(self, session)
-            async with self._keep_read(session.id):
-                await plugin.restore_session(self, session)
-            # _restore_*_session swallows failures (it tags the session ERROR or
-            # EXITED and emits a system_note instead of raising). Re-read storage
-            # so the caller sees the post-restore status, and translate any
-            # terminal state into a 400 so the frontend surfaces a clear error
-            # rather than silently relaunching into a dead session.
-            refreshed = self.get_session(session.id)
-            if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"failed to reattach session ({refreshed.status})",
-                )
-            # Re-probe after the terminal-status check so a probe failure
-            # never converts a good reattach into a 400. Gated on a profile
-            # being set, same as launch/thread-import/boot-restore — a
-            # no-profile session has nothing to re-verify.
-            if refreshed.account_profile_id is not None:
-                self._schedule_verified_account_probe(
-                    refreshed.id,
-                    refreshed.backend,
-                    refreshed.launch_env,
-                    launch_target=self._find_launch_target(refreshed.launch_target_id),
-                    cwd=refreshed.cwd,
-                )
-            self._start_context_usage_source(refreshed)
-            return refreshed
+        await self._require_live_master(
+            self._find_launch_target(session.launch_target_id)
+        )
+        await plugin.terminate_session(self, session)
+        await self._cancel_context_usage_source(session.id)
+        # User-initiated retry: bypass any per-target cooldown / circuit
+        # breaker so the click takes effect immediately. Plugins without
+        # this opt-in hook ignore the call.
+        clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
+        if clear_cooldown is not None:
+            clear_cooldown(self, session)
+        await plugin.restore_session(self, session)
+        # _restore_*_session swallows failures (it tags the session ERROR or
+        # EXITED and emits a system_note instead of raising). Re-read storage
+        # so the caller sees the post-restore status, and translate any
+        # terminal state into a 400 so the frontend surfaces a clear error
+        # rather than silently relaunching into a dead session.
+        refreshed = self.get_session(session.id)
+        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to reattach session ({refreshed.status})",
+            )
+        # Re-probe after the terminal-status check so a probe failure
+        # never converts a good reattach into a 400. Gated on a profile
+        # being set, same as launch/thread-import/boot-restore — a
+        # no-profile session has nothing to re-verify.
+        if refreshed.account_profile_id is not None:
+            self._schedule_verified_account_probe(
+                refreshed.id,
+                refreshed.backend,
+                refreshed.launch_env,
+                launch_target=self._find_launch_target(refreshed.launch_target_id),
+                cwd=refreshed.cwd,
+            )
+        self._start_context_usage_source(refreshed)
+        return refreshed
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_id)
@@ -3548,7 +3555,7 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="another lifecycle operation is in progress for this session",
             )
-        async with lock:
+        async with lock, self._keep_read(session_id):
             return await self._update_launch_settings_locked(session_id, request)
 
     def _has_durable_conversation(self, session_id: str) -> bool:
@@ -3955,13 +3962,12 @@ class SessionRuntime:
         )
         restored_session = self.get_session(session.id)
         target_plugin = self.registry.resolve(session.backend, target_transport)
-        async with self._keep_read(session.id):
-            if fresh_thread_restarter is not None:
-                await fresh_thread_restarter.restart_unpersisted_session(
-                    self, restored_session
-                )
-            else:
-                await target_plugin.restore_session(self, restored_session)
+        if fresh_thread_restarter is not None:
+            await fresh_thread_restarter.restart_unpersisted_session(
+                self, restored_session
+            )
+        else:
+            await target_plugin.restore_session(self, restored_session)
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —

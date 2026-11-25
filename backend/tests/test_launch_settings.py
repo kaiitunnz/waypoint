@@ -1128,3 +1128,82 @@ async def test_update_rejects_unpersisted_thread_with_conversation_events(
     assert getattr(exc.value, "status_code", None) == 400
     assert "conversation events" in str(getattr(exc.value, "detail", ""))
     assert terminated == []
+
+
+# ── read marker across lifecycle operations ──────────────────────────────────
+
+
+async def _note(runtime: SessionRuntime, session: SessionRecord, text: str) -> None:
+    await runtime._record_system_event(session.id, text)
+
+
+def _plugin_pair(runtime: SessionRuntime, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plugins that record a lifecycle note on terminate and on restore."""
+    plugin = runtime.registry.resolve("claude_code", "claude_cli")
+    target = runtime.registry.resolve("claude_code", "claude_tty")
+
+    async def fake_terminate(_rt: Any, session: SessionRecord) -> None:
+        await _note(runtime, session, "Terminating")
+
+    async def fake_restore(_rt: Any, session: SessionRecord) -> None:
+        await _note(runtime, session, "Restored")
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(target, "restore_session", fake_restore)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+    monkeypatch.setattr(runtime, "_start_context_usage_source", lambda *_: None)
+
+
+async def _unwatched_activity(runtime: SessionRuntime) -> None:
+    await runtime._emit_adapter_event(
+        "s1", EventKind.AGENT_OUTPUT, "hello", {}, SessionStatus.IDLE
+    )
+
+
+@pytest.mark.parametrize("read", [True, False])
+async def test_launch_settings_switch_keeps_the_read_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: bool
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="claude_cli",
+        transport_state={"thread_id": TID},
+    )
+    await _persist_thread(monkeypatch, runtime)
+    _plugin_pair(runtime, monkeypatch)
+    if not read:
+        await _unwatched_activity(runtime)
+
+    await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(transport="claude_tty", restart=True)
+    )
+
+    session = runtime.storage.get_session("s1")
+    assert session is not None
+    assert session.unread is (not read)
+
+
+@pytest.mark.parametrize("read", [True, False])
+async def test_reattach_keeps_the_read_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: bool
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="claude_cli",
+        status=SessionStatus.EXITED,
+        transport_state={"thread_id": TID},
+    )
+    _plugin_pair(runtime, monkeypatch)
+    if not read:
+        await _unwatched_activity(runtime)
+
+    await runtime.reattach("s1")
+
+    session = runtime.storage.get_session("s1")
+    assert session is not None
+    assert session.unread is (not read)

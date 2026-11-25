@@ -382,3 +382,23 @@ async def test_a_restore_that_fails_still_leaves_a_read_session_read(
     session = storage.get_session("s1")
     assert session is not None
     assert not session.unread
+
+
+async def test_a_marker_failure_does_not_mask_the_restore_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, storage = _runtime(tmp_path)
+    storage.create_session(_session(last_event_at=datetime.now(UTC)))
+
+    def broken(*_: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runtime, "_mark_session_read", broken)
+
+    with pytest.raises(RuntimeError, match="restore failed"):
+        async with runtime._keep_read("s1"):
+            await runtime._record_system_event("s1", "Restoring")
+            raise RuntimeError("restore failed")
+
+    async with runtime._keep_read("s1"):
+        pass

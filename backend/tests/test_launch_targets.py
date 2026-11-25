@@ -1,5 +1,7 @@
+import asyncio
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -337,3 +339,38 @@ def test_plugin_configs_validates_against_plugin_schema() -> None:
             # config_overrides is codex-only — claude_code rejects it.
             plugin_configs={"claude_code": {"config_overrides": ["nope"]}},
         )
+
+
+async def test_cancelled_ssh_capture_kills_its_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    killed = asyncio.Event()
+
+    class _HangingProcess:
+        returncode: int | None = None
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            started.set()
+            await asyncio.Event().wait()
+            return b"", b""
+
+        def kill(self) -> None:
+            killed.set()
+
+        async def wait(self) -> int:
+            return -9
+
+    async def spawn(*_args: Any, **_kwargs: Any) -> _HangingProcess:
+        return _HangingProcess()
+
+    monkeypatch.setattr("waypoint.launch_targets.asyncio.create_subprocess_exec", spawn)
+    target = SshLaunchTargetConfig(id="ssh", name="ssh", ssh_destination="host")
+
+    capture = asyncio.create_task(target.ssh_capture("true"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    capture.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await capture
+
+    assert killed.is_set()

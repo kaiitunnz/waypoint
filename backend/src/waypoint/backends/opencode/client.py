@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 import aiohttp
 
-from waypoint.asyncio_tasks import cancel_and_wait
+from waypoint.asyncio_tasks import cancel_and_wait, kill_and_reap
 from waypoint.backends.opencode.connection_config import (
     http_control_timeout,
     with_ssh_keepalive,
@@ -213,12 +213,12 @@ class RemoteOpenCodeClient:
                     proc.communicate(input=input_data), timeout=timeout
                 )
         except TimeoutError:
-            await _kill(proc)
+            await kill_and_reap(proc)
             raise RuntimeError(
                 f"curl exceeded control timeout ({timeout}s): {method} {url}"
             ) from None
         except asyncio.CancelledError:
-            await _kill(proc)
+            await kill_and_reap(proc)
             raise
 
         if proc.returncode != 0:
@@ -340,13 +340,6 @@ class OpenCodeHttpError(RuntimeError):
 
 class OpenCodeNonJsonError(RuntimeError):
     """Raised when a successful OpenCode HTTP response is not JSON."""
-
-
-async def _kill(proc: asyncio.subprocess.Process) -> None:
-    with suppress(ProcessLookupError):
-        proc.kill()
-    with suppress(Exception):
-        await proc.wait()
 
 
 def _split_curl_status(out_text: str) -> tuple[str, int]:

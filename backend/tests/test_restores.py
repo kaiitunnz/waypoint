@@ -600,6 +600,65 @@ async def test_held_sends_follow_an_interrupted_turn(
         await until(lambda: sent == ["held"])
 
 
+async def test_shutdown_delivers_nothing_as_a_cancelled_reconnect_unwinds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    stub_restores(monkeypatch, {})
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", noop)
+    sent = record_dispatches(runtime, monkeypatch)
+    reconnects: list[asyncio.Task[SessionRecord]] = []
+    stop_scheduler = runtime.scheduler.stop
+
+    async def stop_slowly() -> None:
+        # The server gives up on the request while delivery is still stopping.
+        reconnects[0].cancel()
+        await asyncio.sleep(0.2)
+        await stop_scheduler()
+
+    monkeypatch.setattr(runtime.scheduler, "stop", stop_slowly)
+
+    async with started(runtime):
+        await until(lambda: not runtime.restores.is_restoring("s1"))
+        stub_restores(monkeypatch, {"s1": hang})
+        reconnects.append(asyncio.create_task(runtime.reattach("s1")))
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+
+    assert sent == []
+    assert held_texts(Storage(runtime.settings.database_path), "s1") == ["held"]
+
+
+async def test_a_session_deleted_mid_reconnect_starts_no_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", status=SessionStatus.EXITED)
+    torn_down = asyncio.Event()
+    restored: list[str] = []
+
+    async def slow_teardown(*_args: Any) -> None:
+        await torn_down.wait()
+
+    async def record(_runtime: SessionRuntime, session: SessionRecord) -> None:
+        restored.append(session.id)
+
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", slow_teardown)
+    stub_restores(monkeypatch, {"s1": record})
+
+    reconnect = asyncio.create_task(runtime.reattach("s1"))
+    await until(lambda: runtime.restores.holds_sends("s1"))
+    await runtime.delete("s1")
+    torn_down.set()
+
+    with pytest.raises(HTTPException) as gone:
+        await reconnect
+    assert gone.value.status_code == 404
+    await asyncio.sleep(0.05)
+    assert restored == []
+
+
 def record_dispatches(
     runtime: SessionRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> list[str]:
@@ -701,6 +760,7 @@ def add_assistant(
 async def test_assistant_creation_does_not_block_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("waypoint.runtime.ASSISTANT_LAUNCH_STOP_SECONDS", 0.05)
     runtime = make_runtime(tmp_path, **assistant_settings())
     monkeypatch.setattr(runtime, "_create_assistant_session", hang)
 
@@ -788,6 +848,7 @@ async def test_errored_assistant_is_kept_unless_it_runs_in_a_pane(
 async def test_the_thread_being_replaced_takes_no_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("waypoint.runtime.ASSISTANT_LAUNCH_STOP_SECONDS", 0.05)
     runtime = make_runtime(tmp_path, **assistant_settings())
     add_assistant(runtime, status=SessionStatus.EXITED)
     monkeypatch.setattr(runtime, "_create_assistant_session", hang)
@@ -1053,7 +1114,7 @@ async def test_nothing_lands_on_a_failed_plugin(
 
 
 async def test_session_with_no_plugin_answers_without_failing(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
@@ -1071,6 +1132,8 @@ async def test_session_with_no_plugin_answers_without_failing(
         assert clone.value.status_code == 503
         assert await runtime.get_command_completions("s1") == ([], False)
         assert (await runtime.refresh_rate_limit_usage("s1")).id == "s1"
+        runtime.asks._refresh({"s1"})
+        assert "pending-asks derivation failed" not in caplog.text
 
 
 def test_routes_refuse_a_session_with_no_plugin(tmp_path: Path) -> None:

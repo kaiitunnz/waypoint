@@ -228,9 +228,10 @@ STRUCTURED_LOG_FLUSH_EVERY = 16
 # became unavailable.
 _UNAVAILABLE_MARK_KEY = "unavailable_mark"
 ASSISTANT_STARTING_DETAIL = "the assistant is still starting; try again in a moment"
-# How long shutdown lets an assistant launch in a pane finish. The supervisor
-# kills the backend 10s after asking it to stop.
-PANE_LAUNCH_STOP_SECONDS = 5.0
+# How long shutdown lets an assistant launch finish before cancelling it. The
+# supervisor kills the backend 10s after asking it to stop, and draining requests
+# can take 5s of that.
+ASSISTANT_LAUNCH_STOP_SECONDS = 3.0
 # Stable sentinel returned when a launch's working directory does not exist.
 # The frontend matches it (like ``ssh-master-required``) to surface an inline
 # error on the working-directory field instead of the generic banner.
@@ -512,8 +513,6 @@ class SessionRuntime:
         self._oneshot_sweep_task: asyncio.Task[None] | None = None
         self._assistant_bootstrap_task: asyncio.Task[None] | None = None
         self._assistant_creating = False
-        # The bootstrap is launching it in a terminal pane.
-        self._assistant_in_pane = False
         # Plugin id -> why it cannot drive sessions; see run_plugin_hook.
         self.plugin_failures: dict[str, str] = {}
         # Serializes disruptive per-session lifecycle ops (a launch-settings
@@ -917,15 +916,16 @@ class SessionRuntime:
     async def stop(self) -> None:
         # Whatever delivers messages stops first: a cancelled restore hands its
         # session a deliverable status that nothing has restored.
+        await self.held.stop()
         await self.scheduler.stop()
         wake_tasks = list(self._wake_tasks)
         self._wake_tasks.clear()
         await cancel_and_wait(*wake_tasks)
-        await self.held.stop()
-        bootstrap = self._assistant_bootstrap_task
-        if bootstrap and self._assistant_creating and self._assistant_in_pane:
-            # Let the launch finish rather than orphan its agent.
-            await asyncio.wait({bootstrap}, timeout=PANE_LAUNCH_STOP_SECONDS)
+        if self._assistant_creating and self._assistant_bootstrap_task:
+            # A pane launch cancelled midway would orphan its agent.
+            await asyncio.wait(
+                {self._assistant_bootstrap_task}, timeout=ASSISTANT_LAUNCH_STOP_SECONDS
+            )
         await cancel_and_wait(
             *filter(None, (self._assistant_bootstrap_task, self._oneshot_sweep_task))
         )
@@ -2004,8 +2004,6 @@ class SessionRuntime:
         if plugin.capabilities.has_terminal_pane:
             # Cancelling a pane launch midway would orphan its agent.
             driver_timeout = None
-            if asyncio.current_task() is self._assistant_bootstrap_task:
-                self._assistant_in_pane = True
         try:
             async with asyncio.timeout(driver_timeout):
                 session = await plugin.create_session(

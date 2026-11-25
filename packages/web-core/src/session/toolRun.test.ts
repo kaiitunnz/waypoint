@@ -172,6 +172,11 @@ describe("describeCall", () => {
     expect(describeCall(agent)?.mono).toBe(false);
   });
 
+  it("keeps every argument of a tool whose input also carries a path", () => {
+    const [other] = run([call(1, "a", "mcp__fs", { path: "/repo/a.txt", mode: "read" })]);
+    expect(describeCall(other, "/repo")).toMatchObject({ path: null, label: "path: /repo/a.txt\nmode: read" });
+  });
+
   it("reads a Codex command from the item and its output without the echoed command line", () => {
     const started = ev(1, "tool_call", "$ /bin/bash -lc 'npm test'", {
       item_id: "a",

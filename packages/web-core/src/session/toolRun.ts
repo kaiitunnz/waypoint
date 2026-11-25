@@ -304,15 +304,13 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
   const badge = toolBadgeFor(tool);
   const diff = childDiffPreview(child);
   const input = toolInputForEvent(event);
-  // A search's `path` is where it looks, not what it is about: its row shows the pattern.
-  const filePath =
-    categoryOf(tool) === "search"
-      ? null
-      : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const command = tool === "Bash" ? commandForEvent(event) : null;
+  const subject = (command ? command.replace(/\r\n?/g, "\n").trim() : null) ?? argumentLines(tool, input, cwd);
+  // A call whose arguments read as lines keeps them all; a path alone stands for a file tool.
+  const filePath =
+    subject !== null ? null : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
   const preview = previewForToolEvent(event, badge.label);
-  const subject = (command ? command.replace(/\r\n?/g, "\n").trim() : null) ?? argumentLines(tool, input, cwd);
   const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos

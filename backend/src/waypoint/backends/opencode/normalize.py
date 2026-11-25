@@ -401,6 +401,7 @@ def _map_tool_event(
             "tool_name": tool_name,
             "tool_input": tool_input,
             "tool_use_id": call_id,
+            "is_error": False,
             "payload": part,
             "status": SessionStatus.RUNNING,
         }
@@ -423,6 +424,7 @@ def _map_tool_event(
                 "call_id": call_id,
                 "tool_name": tool_name,
                 "tool_use_id": call_id,
+                "is_error": True,
                 "payload": part,
                 "status": SessionStatus.RUNNING,
             },

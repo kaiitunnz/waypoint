@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeNavKey, formatBadgeCount, NAV_DESTINATIONS, sessionHref, showsTabBar } from "./shellNav";
+import { activeNavKey, formatBadgeCount, NAV_DESTINATIONS, sessionFilesHref, sessionHref, showsTabBar } from "./shellNav";
 
 describe("activeNavKey", () => {
   it("maps each route to its destination", () => {
@@ -53,5 +53,11 @@ describe("formatBadgeCount", () => {
     expect(formatBadgeCount(0)).toBeNull();
     expect(formatBadgeCount(5)).toBe("5");
     expect(formatBadgeCount(100)).toBe("99+");
+  });
+});
+
+describe("sessionFilesHref", () => {
+  it("links a session's files route with the path encoded", () => {
+    expect(sessionFilesHref("a b", "~/src/x y.py")).toBe("/session/a%20b/files?path=~%2Fsrc%2Fx%20y.py");
   });
 });

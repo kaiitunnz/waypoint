@@ -31,7 +31,7 @@ export function PlanCard({ plan, ts }: { plan: string; ts: string }) {
       </div>
       {clamped ? (
         <div className={styles.more}>
-          <Disclosure open={all} total={plan.trimEnd().split("\n").length} onToggle={() => setAll(!all)} />
+          <Disclosure open={all} onToggle={() => setAll(!all)} />
         </div>
       ) : null}
     </div>

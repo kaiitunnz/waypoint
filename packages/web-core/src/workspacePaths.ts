@@ -111,7 +111,7 @@ export function relativeToCwd(path: string, cwd: string | null | undefined): str
   const root = cwd?.replace(/\/+$/, "");
   if (!root) return path;
   if (path === root) return ".";
-  return path.startsWith(`${root}/`) ? path.slice(root.length).replace(/^\/+/, "") : path;
+  return path.startsWith(`${root}/`) ? path.slice(root.length).replace(/^\/+/, "") || "." : path;
 }
 
 // Every path inside `cwd` that appears in free text, made relative to it.

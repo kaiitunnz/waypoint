@@ -157,6 +157,7 @@ describe("relativeToCwd", () => {
     expect(relativeToCwd("/repo/backend/src/runtime.py", "/repo")).toBe("backend/src/runtime.py");
     expect(relativeToCwd("/repo/hello.py", "/repo/")).toBe("hello.py");
     expect(relativeToCwd("/repo", "/repo")).toBe(".");
+    expect(relativeToCwd("/repo/", "/repo")).toBe(".");
   });
 
   it("keeps a path outside the working directory", () => {

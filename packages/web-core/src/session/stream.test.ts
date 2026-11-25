@@ -9,6 +9,7 @@ import {
   reconnectDelay,
   streamReducer,
   maxEventId,
+  takeNewer,
   type StreamAction,
   type StreamState,
 } from "./stream";
@@ -52,7 +53,40 @@ describe("maxEventId", () => {
   });
 });
 
+describe("takeNewer", () => {
+  const events = [ev(5, "agent_output", "a"), ev(6, "agent_output", "b"), { ...ev(7, "agent_output", "c"), id: undefined }];
+
+  it("keeps what is past the highest id, and what has no id", () => {
+    expect(takeNewer(events, 5).map((event) => event.sequence)).toEqual([6, 7]);
+    expect(takeNewer(events, 6).map((event) => event.sequence)).toEqual([7]);
+  });
+
+  it("keeps everything while nothing is known", () => {
+    expect(takeNewer(events, null)).toHaveLength(3);
+  });
+
+  it("keeps a repeated delta out of a coalesced item", () => {
+    const page = [ev(5, "agent_output", "A", { item_id: "m" }), ev(6, "agent_output", "B", { item_id: "m" }), ev(7, "agent_output", "C", { item_id: "m" })];
+    const live = takeNewer([ev(6, "agent_output", "B", { item_id: "m" })], maxEventId(page));
+    expect(live).toEqual([]);
+  });
+});
+
 describe("streamReducer", () => {
+  it("keeps a session frame that arrived before the page", () => {
+    const state = run(
+      { type: "session", session: session("socket") },
+      { type: "loaded", session: session("http"), page: page([]) },
+    );
+    expect(state.session?.title).toBe("socket");
+  });
+
+  it("counts each error, even a repeated message", () => {
+    const twice = run({ type: "error", message: "boom" }, { type: "error", message: "boom" });
+    expect(twice.errorCount).toBe(2);
+    expect(streamReducer(twice, { type: "error", message: null }).errorCount).toBe(2);
+  });
+
   it("is not loaded until the tail page arrives, even with the session record", () => {
     const early = run({ type: "session", session: session("a") });
     expect(early.session?.title).toBe("a");

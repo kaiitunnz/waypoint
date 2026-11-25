@@ -75,10 +75,12 @@ export function SessionScreen({ id }: { id: string }) {
   );
 
   // A failed first load fills the page; any later failure is a toast.
-  const loadFailed = !stream.loaded && stream.error !== null;
+  const { error, errorCount } = stream;
+  const loadFailed = !stream.loaded && error !== null;
   useEffect(() => {
-    if (stream.error && !loadFailed) toast({ message: stream.error, tone: "error" });
-  }, [stream.error, loadFailed, toast]);
+    if (error && !loadFailed) toast({ message: error, tone: "error" });
+    // errorCount makes a repeated message a new event.
+  }, [error, errorCount, loadFailed, toast]);
 
   const agent = session ? agentModelLabel(session, catalog) : "";
   useEffect(() => {
@@ -95,7 +97,11 @@ export function SessionScreen({ id }: { id: string }) {
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
   const askState = useMemo(() => ({ evidence, snapshot: pendingQuestions }), [evidence, pendingQuestions]);
   const cwd = session?.cwd ?? "";
-  const context = useMemo(() => ({ host, token, sessionId: id, modelOptions: [], cwd }), [host, token, id, cwd]);
+  const agentName = agent.split(",")[0] || "Agent";
+  const context = useMemo(
+    () => ({ host, token, sessionId: id, modelOptions: [], cwd, agentName }),
+    [host, token, id, cwd, agentName],
+  );
 
   const terminalOnly = session ? liveTerminal(session.transport, catalog) : false;
   const hasPane = session ? hasTerminalPane(session.transport, catalog) : false;

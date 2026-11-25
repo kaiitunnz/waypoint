@@ -25,6 +25,8 @@ export interface StreamState {
   error: string | null;
   // The HTTP status behind `error`, when it came from one.
   errorStatus: number | null;
+  // How many errors have been reported, so a repeated message can be told from a standing one.
+  errorCount: number;
 }
 
 export const INITIAL_STREAM_STATE: StreamState = {
@@ -37,6 +39,7 @@ export const INITIAL_STREAM_STATE: StreamState = {
   connection: "connecting",
   error: null,
   errorStatus: null,
+  errorCount: 0,
 };
 
 export type StreamAction =
@@ -59,6 +62,13 @@ export function maxEventId(events: readonly EventRecord[], from: number | null =
   );
 }
 
+// The events a client has not applied yet, given the highest event id it has: an
+// event carries its id, and a coalesced item keeps its first, so only ids tell
+// a repeated delta from a new one.
+export function takeNewer(events: readonly EventRecord[], latestId: number | null): EventRecord[] {
+  return latestId === null ? [...events] : events.filter((event) => event.id === undefined || event.id > latestId);
+}
+
 function coalesce(events: EventRecord[], into: EventRecord[] = []): EventRecord[] {
   return events.reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), into);
 }
@@ -71,7 +81,8 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
       const sanitized = action.page.events.map(sanitizeEvent);
       return {
         ...state,
-        session: action.session,
+        // A frame the socket delivered first is newer than this snapshot.
+        session: state.session ?? action.session,
         // Live events that beat the page here keep their place.
         events: coalesce(state.events, coalesce(sanitized)),
         hasOlder: action.page.has_more,
@@ -112,6 +123,11 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
     case "connection":
       return { ...state, connection: action.connection };
     case "error":
-      return { ...state, error: action.message, errorStatus: action.message === null ? null : (action.status ?? null) };
+      return {
+        ...state,
+        error: action.message,
+        errorStatus: action.message === null ? null : (action.status ?? null),
+        errorCount: action.message === null ? state.errorCount : state.errorCount + 1,
+      };
   }
 }

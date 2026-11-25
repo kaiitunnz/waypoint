@@ -116,15 +116,15 @@ export function Transcript({
                 ))}
               </div>
               {empty ? (
-                status === "exited" ? (
-                  <EmptyState title="Session exited" detail="No transcript was captured." />
-                ) : hiddenCount > 0 ? (
+                hiddenCount > 0 ? (
                   <div className={styles.empty}>
                     <EmptyState title="Nothing important yet" detail={`${hiddenCount} low-signal event${hiddenCount === 1 ? "" : "s"} hidden`} />
                     <button type="button" className={styles.showAll} onClick={onShowAll}>
                       Show all events
                     </button>
                   </div>
+                ) : status === "exited" ? (
+                  <EmptyState title="Session exited" detail="No transcript was captured." />
                 ) : (
                   <EmptyState title="Waiting for the agent…" />
                 )

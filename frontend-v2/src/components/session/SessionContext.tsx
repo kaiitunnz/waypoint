@@ -13,6 +13,8 @@ export interface SessionContextValue {
   modelOptions: BackendModelOption[];
   // The session's working directory: paths inside it read relative to it.
   cwd: string;
+  // Who the agent's messages are from, for assistive technology.
+  agentName: string;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);

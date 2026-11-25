@@ -3,7 +3,14 @@
 import { startTransition, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { ApiError, connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
-import { INITIAL_STREAM_STATE, maxEventId, reconnectDelay, streamReducer, type StreamState } from "../session/stream";
+import {
+  INITIAL_STREAM_STATE,
+  maxEventId,
+  reconnectDelay,
+  streamReducer,
+  takeNewer,
+  type StreamState,
+} from "../session/stream";
 import { sanitizeEvent } from "../session/transcript";
 import type { EventRecord, PendingQuestionsSnapshot, SessionRecord } from "../types";
 
@@ -34,11 +41,13 @@ export function useSessionStream(
     let attempt = 0;
     let pending: EventRecord[] = [];
     let frame: number | null = null;
-    // The highest event id handed to the reducer, where a catch-up resumes; unknown until the tail page loads.
+    // The highest event id applied: where a catch-up resumes.
     let latestId: number | null = null;
     let loaded = false;
-    // Live events wait while a catch-up is in flight, so a streamed message keeps its order.
-    let catchingUp = 0;
+    let loading = false;
+    // Live events wait until the tail page is in and while a catch-up runs, so each
+    // reaches the reducer once and in order.
+    let holds = 1;
     dispatch({ type: "reset" });
 
     const fail = (error: unknown, fallback: string) => {
@@ -54,47 +63,68 @@ export function useSessionStream(
       });
     };
 
-    Promise.all([fetchSession(host, token, sessionId), fetchEvents(host, token, sessionId)]).then(
-      ([session, page]) => {
-        if (!active) return;
-        loaded = true;
-        latestId = maxEventId(page.events, latestId);
-        dispatch({ type: "loaded", session, page });
-      },
-      (error) => fail(error, "failed to load session"),
-    );
-
     const flush = () => {
       frame = null;
-      // An event at or below the resume point was delivered already.
-      const batch = pending.filter((event) => event.id === undefined || latestId === null || event.id > latestId);
+      const batch = takeNewer(pending, latestId);
       pending = [];
       latestId = maxEventId(batch, latestId);
       if (batch.length > 0) startTransition(() => dispatch({ type: "events", events: batch }));
     };
     const scheduleFlush = () => {
-      if (frame === null && catchingUp === 0) frame = window.requestAnimationFrame(flush);
+      if (frame === null && holds === 0) frame = window.requestAnimationFrame(flush);
+    };
+    const release = () => {
+      holds -= 1;
+      if (active && pending.length > 0) scheduleFlush();
     };
 
-    // The socket sends nothing for the time it was closed or not yet subscribed, so ask for it.
+    // The socket sends nothing for the time before it subscribed or while it was
+    // closed, so ask for what came after the last event applied.
     const catchUp = () => {
-      if (!loaded) return;
-      catchingUp += 1;
+      holds += 1;
       fetchEvents(host, token, sessionId, { afterId: latestId ?? 0 })
         .then(
           (page) => {
-            if (!active || page.events.length === 0) return;
-            const missed = page.events.map(sanitizeEvent);
+            if (!active) return;
+            attempt = 0;
+            const missed = takeNewer(page.events.map(sanitizeEvent), latestId);
+            if (missed.length === 0) return;
             latestId = maxEventId(missed, latestId);
             dispatch({ type: "events", events: missed });
           },
-          (error) => fail(error, "failed to refresh the transcript"),
+          (error) => {
+            if (!active) return;
+            // Held events would move the cursor past the hole: drop them, and let the
+            // reconnect catch up from where the transcript really ends.
+            pending = [];
+            socket?.close();
+            fail(error, "failed to refresh the transcript");
+          },
         )
-        .finally(() => {
-          catchingUp -= 1;
-          if (active && pending.length > 0) scheduleFlush();
-        });
+        .finally(release);
     };
+
+    const load = () => {
+      if (loaded || loading) return;
+      loading = true;
+      Promise.all([fetchSession(host, token, sessionId), fetchEvents(host, token, sessionId)]).then(
+        ([session, page]) => {
+          if (!active) return;
+          loading = false;
+          loaded = true;
+          latestId = maxEventId(page.events, latestId);
+          dispatch({ type: "loaded", session, page });
+          // The socket may have subscribed after the page was read.
+          catchUp();
+          release();
+        },
+        (error) => {
+          loading = false;
+          fail(error, "failed to load session");
+        },
+      );
+    };
+    load();
 
     const connect = () => {
       let questionsHydrated = false;
@@ -125,9 +155,10 @@ export function useSessionStream(
         },
         {
           onOpen: () => {
-            attempt = 0;
             dispatch({ type: "connection", connection: "open" });
-            catchUp();
+            // Before the page loads, its own completion catches up; a load that failed is retried.
+            if (loaded) catchUp();
+            else load();
           },
           onClose: () => {
             if (!active) return;

@@ -11,10 +11,13 @@ import styles from "./SendControl.module.css";
 interface SendControlProps {
   canSend: boolean;
   sending: boolean;
+  // A stopped session that restarts on send: it cannot queue.
+  dormant: boolean;
   onSend: (mode: SendMode) => void;
 }
 
-export function SendControl({ canSend, sending, onSend }: SendControlProps) {
+export function SendControl({ canSend, sending, dormant, onSend }: SendControlProps) {
+  const modes = dormant ? SEND_MODES.filter((mode) => mode.value === "now") : SEND_MODES;
   const { open, close, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
     !canSend,
     () => onSend("now"),
@@ -38,7 +41,7 @@ export function SendControl({ canSend, sending, onSend }: SendControlProps) {
       </button>
       {open ? (
         <div className={styles.menu} role="menu" aria-label="Send options" {...menuProps}>
-          {SEND_MODES.map((mode, index) => (
+          {modes.map((mode, index) => (
             <button
               key={mode.value}
               ref={(node) => {

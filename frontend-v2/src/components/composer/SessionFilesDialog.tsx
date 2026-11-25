@@ -23,6 +23,10 @@ interface SessionFilesDialogProps {
   // Adds a stored file to the draft without uploading it again.
   onReference: (file: SessionAttachment) => void;
   referencedIds: ReadonlySet<string>;
+  // The server no longer has these files.
+  onDeleted: (ids: string[]) => void;
+  // True while a send may still need a file.
+  locked: boolean;
 }
 
 export function SessionFilesDialog({
@@ -33,6 +37,8 @@ export function SessionFilesDialog({
   onClose,
   onReference,
   referencedIds,
+  onDeleted,
+  locked,
 }: SessionFilesDialogProps) {
   const { items, error, confirmingClear, setConfirmingClear, busy, remove, clearAll } = useSessionFiles(
     host,
@@ -41,6 +47,14 @@ export function SessionFilesDialog({
     open,
   );
 
+  async function removeFile(id: string) {
+    if (await remove(id)) onDeleted([id]);
+  }
+  async function removeAll() {
+    const ids = (items ?? []).map((file) => file.id);
+    if (await clearAll()) onDeleted(ids);
+  }
+
   const footer =
     items && items.length > 0 ? (
       confirmingClear ? (
@@ -48,12 +62,12 @@ export function SessionFilesDialog({
           <Button variant="text" onClick={() => setConfirmingClear(false)}>
             Cancel
           </Button>
-          <Button variant="danger" busy={busy} onClick={() => void clearAll()}>
+          <Button variant="danger" busy={busy} disabled={locked} onClick={() => void removeAll()}>
             {busy ? "Deleting…" : "Delete all?"}
           </Button>
         </>
       ) : (
-        <Button variant="danger" onClick={() => setConfirmingClear(true)}>
+        <Button variant="danger" disabled={locked} onClick={() => setConfirmingClear(true)}>
           Delete all
         </Button>
       )
@@ -110,7 +124,7 @@ export function SessionFilesDialog({
               >
                 <Icon name="external" size={18} />
               </a>
-              <IconButton label={`Delete ${file.filename}`} size="sm" onClick={() => void remove(file.id)}>
+              <IconButton label={`Delete ${file.filename}`} size="sm" disabled={locked} onClick={() => void removeFile(file.id)}>
                 <Icon name="trash" size={18} />
               </IconButton>
             </li>

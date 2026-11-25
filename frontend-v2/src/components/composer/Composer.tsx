@@ -92,7 +92,7 @@ export function Composer({
     [toast],
   );
 
-  const { disabled } = composerAvailability(session, catalog);
+  const { disabled, dormant } = composerAvailability(session, catalog);
   const structured = session !== null && fidelityFor(session.transport, catalog) === "structured";
   const attachmentsEnabled = session !== null && supportsAttachments(session.backend, catalog);
 
@@ -166,7 +166,8 @@ export function Composer({
   const dragging = useFileDragVisible();
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing) return;
+    // Safari delivers the Enter that confirms a composition after it ends, as 229.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Tab" && event.shiftKey && tuning.cycleMode()) {
       event.preventDefault();
       return;
@@ -179,7 +180,8 @@ export function Composer({
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!attachmentsEnabled) return;
+    // Office apps put a picture of the selection beside its text: the text wins.
+    if (!attachmentsEnabled || event.clipboardData.getData("text/plain")) return;
     const files = filesFromDataTransfer(event.clipboardData);
     if (files.length === 0) return;
     event.preventDefault();
@@ -218,6 +220,70 @@ export function Composer({
     ...(attachmentsEnabled ? [{ id: "mention", label: "Insert mention", icon: "at" as const, disabled, run: () => insert("@") }] : []),
   ];
 
+  const tray = attachments.hasItems ? (
+    <div key="tray" className={styles.tray}>
+      <AttachmentTray
+        items={attachments.items}
+        onRemove={attachments.remove}
+        onRetry={attachments.retry}
+        onClear={attachments.discardAll}
+        locked={sending}
+      />
+    </div>
+  ) : null;
+  const input = (
+    <textarea
+      key="input"
+      ref={field}
+      className={styles.field}
+      rows={1}
+      value={draft}
+      disabled={disabled}
+      placeholder={`Reply to ${agentName}`}
+      aria-label="Reply"
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={onKeyDown}
+      onPaste={onPaste}
+    />
+  );
+  const plus = (
+    <div key="plus" className={styles.plus}>
+      <PlusMenu actions={actions} />
+    </div>
+  );
+  const tune = (
+    <div key="tune" className={styles.tune}>
+      {session ? (
+        <TuneControl
+          tuning={tuning}
+          triggerRef={tuneTrigger}
+          agentName={agentName}
+          disabled={disabled}
+          focus={focus}
+        />
+      ) : null}
+    </div>
+  );
+  const meta = (
+    <div key="meta" className={styles.meta}>
+      {focus.on ? (
+        <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={tuneTrigger} />
+      ) : null}
+      {tasks ? (
+        <span className={styles.tasks} aria-label={`Tasks: ${tasks.completed} of ${tasks.total} done`} role="img">
+          ☑ {tasks.completed}/{tasks.total}
+        </span>
+      ) : null}
+      <UsageControl session={session} catalog={catalog} onSession={onSession} />
+    </div>
+  );
+  const actionButtons = (
+    <div key="actions" className={styles.actions}>
+      {canInterrupt(session) ? <StopButton stopping={stopping} onStop={() => void stop()} /> : null}
+      <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} />
+    </div>
+  );
+
   return (
     <div ref={root} className={styles.composer}>
       {suggestionsOpen ? (
@@ -244,58 +310,13 @@ export function Composer({
       ) : null}
       {failure ? <SendError failure={failure} onRetry={retry} onOpenSession={openSession} onDismiss={dismiss} /> : null}
       <div className={styles.surface}>
-        {attachments.hasItems ? (
-          <div className={styles.tray}>
-            <AttachmentTray
-              items={attachments.items}
-              onRemove={attachments.remove}
-              onRetry={attachments.retry}
-              onClear={attachments.discardAll}
-            />
-          </div>
-        ) : null}
-        <textarea
-          ref={field}
-          className={styles.field}
-          rows={1}
-          value={draft}
-          disabled={disabled}
-          placeholder={`Reply to ${agentName}`}
-          aria-label="Reply"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-        />
-        <div className={styles.plus}>
-          <PlusMenu actions={actions} />
-        </div>
-        <div className={styles.tune}>
-          {session ? (
-            <TuneControl
-              tuning={tuning}
-              triggerRef={tuneTrigger}
-              agentName={agentName}
-              disabled={disabled}
-              focus={focus}
-            />
-          ) : null}
-        </div>
-        <div className={styles.meta}>
-          {focus.on ? (
-            <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={tuneTrigger} />
-          ) : null}
-          {tasks ? (
-            <span className={styles.tasks} aria-label={`Tasks: ${tasks.completed} of ${tasks.total} done`} role="img">
-              ☑ {tasks.completed}/{tasks.total}
-            </span>
-          ) : null}
-          <UsageControl session={session} catalog={catalog} onSession={onSession} />
-        </div>
-        <div className={styles.actions}>
-          {canInterrupt(session) ? <StopButton stopping={stopping} onStop={() => void stop()} /> : null}
-          <SendControl canSend={canSend} sending={sending} onSend={send} />
-        </div>
+        {pointer
+          ? [tray, input, plus, tune, meta, actionButtons]
+          : [tune, meta, <div key="break" className={styles.break} />, tray, plus, input, actionButtons]}
       </div>
+      <span className={styles.announce} role="status" aria-live="polite">
+        {tuning.announcement}
+      </span>
       {attachmentsEnabled ? (
         <input
           ref={fileInput}
@@ -316,6 +337,8 @@ export function Composer({
           onClose={() => onFilesOpenChange(false)}
           onReference={attachments.referenceExisting}
           referencedIds={attachments.attachedIds}
+          onDeleted={attachments.release}
+          locked={sending}
         />
       ) : null}
       {scheduleOpen ? (

@@ -49,7 +49,6 @@ export function SessionScreen({ id }: { id: string }) {
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
   const { session, events, connection, pendingQuestions } = stream;
-  const optimistic = useOptimisticSends(events);
   const [filesOpen, setFilesOpen] = useState(false);
   // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
@@ -87,6 +86,7 @@ export function SessionScreen({ id }: { id: string }) {
   }, [session, agentName]);
 
   const rendered = useDeferredValue(events);
+  const optimistic = useOptimisticSends(rendered);
   const transcript = useMemo(() => deriveTranscript(rendered, density), [rendered, density]);
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
   const askState = useMemo(() => ({ evidence, snapshot: pendingQuestions }), [evidence, pendingQuestions]);

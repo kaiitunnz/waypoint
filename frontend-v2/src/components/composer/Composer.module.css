@@ -1,5 +1,5 @@
-/* One DOM for both inputs, in the pointer box's order: tray, field, then the row
-   of controls. Touch reorders it into a control row above an input row. */
+/* The component orders the blocks per input: a pointer client's box runs tray,
+   field, controls, and touch runs control row, tray, input row. */
 .composer {
   position: relative;
   /* The top keeps the control row's tap targets inside the footer. */
@@ -14,16 +14,14 @@
   min-width: 0;
 }
 
-.surface::before {
-  order: 3;
+/* Ends touch's control row. */
+.break {
   flex-basis: 100%;
-  content: "";
 }
 
 .tune {
   display: flex;
   flex: 1 1 0;
-  order: 1;
   align-items: center;
   min-width: 0;
   height: 30px;
@@ -34,7 +32,6 @@
 .meta {
   display: flex;
   flex: none;
-  order: 2;
   align-items: center;
   gap: 10px;
   height: 30px;
@@ -43,20 +40,17 @@
 
 .tray {
   flex: 0 0 100%;
-  order: 4;
   min-width: 0;
 }
 
 .plus {
   display: flex;
   flex: none;
-  order: 5;
 }
 
 .field {
   display: block;
   flex: 1 1 0;
-  order: 6;
   min-width: 0;
   min-height: 44px;
   max-height: min(180px, 34dvh);
@@ -89,7 +83,6 @@
 .actions {
   display: flex;
   flex: none;
-  order: 7;
   align-items: flex-end;
   gap: 6px;
 }
@@ -97,6 +90,16 @@
 .tasks {
   font-size: var(--f-meta);
   color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Read out, not shown. */
+.announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -152,18 +155,12 @@
     border-color: color-mix(in srgb, var(--text-strong) 70%, transparent);
   }
 
-  .surface::before {
-    content: none;
-  }
-
   .tray {
-    order: 1;
     padding: 0 6px;
   }
 
   .field {
     flex-basis: 100%;
-    order: 2;
     min-height: 40px;
     max-height: min(240px, 40dvh);
     padding: 10px 8px 6px;
@@ -172,24 +169,17 @@
     background: transparent;
   }
 
-  .plus {
-    order: 3;
-  }
-
   .tune {
-    order: 4;
     height: 32px;
     margin: 0;
   }
 
   .meta {
-    order: 5;
     height: 32px;
     margin: 0 4px 0 0;
   }
 
   .actions {
-    order: 6;
     gap: 4px;
   }
 

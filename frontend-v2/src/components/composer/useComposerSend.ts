@@ -102,7 +102,7 @@ export function useComposerSend({
     const sent = attachments.items.flatMap((item) =>
       item.spec && payload.attachmentIds.includes(item.spec.id) ? [item.spec] : [],
     );
-    let settle: (() => void) | null = null;
+    let settle: ((echoes: boolean) => void) | null = null;
     if (immediate) {
       setDraft(origin.rest);
       resetCompletions();
@@ -121,6 +121,8 @@ export function useComposerSend({
           attachments: payload.attachmentIds.length ? payload.attachmentIds : undefined,
         });
         attachments.release(payload.attachmentIds);
+        // A control command's text lands in the other session, not this one.
+        settle?.(!openSessionId);
         if (openSessionId) onOpenSession(openSessionId);
       } else {
         await createMessageSchedule(host, token, sessionId, payload.text, {
@@ -136,6 +138,7 @@ export function useComposerSend({
         toast({ message: IDLE_QUEUED[payload.mode] });
       }
     } catch (error) {
+      settle?.(false);
       if (isAuthError(error)) {
         handleAuthFailure();
         return;
@@ -159,7 +162,6 @@ export function useComposerSend({
         rest: after.rest,
       });
     } finally {
-      settle?.();
       inFlight.current = false;
       setSending(false);
       // The menu item that queued it is gone, and its focus with it.

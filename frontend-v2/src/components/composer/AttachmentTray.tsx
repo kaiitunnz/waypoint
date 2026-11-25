@@ -14,14 +14,16 @@ interface AttachmentTrayProps {
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
   onClear: () => void;
+  // True while a send holds the files.
+  locked: boolean;
 }
 
-export function AttachmentTray({ items, onRemove, onRetry, onClear }: AttachmentTrayProps) {
+export function AttachmentTray({ items, onRemove, onRetry, onClear, locked }: AttachmentTrayProps) {
   return (
     <div className={styles.tray}>
       <div className={styles.head}>
         <span>{filesSummary(items)}</span>
-        <Button variant="text" size="sm" onClick={onClear}>
+        <Button variant="text" size="sm" disabled={locked} onClick={onClear}>
           Clear all
         </Button>
       </div>
@@ -44,11 +46,11 @@ export function AttachmentTray({ items, onRemove, onRetry, onClear }: Attachment
               </span>
             </span>
             {item.status === "error" ? (
-              <IconButton label={`Retry ${item.name}`} size="sm" onClick={() => onRetry(item.localId)}>
+              <IconButton label={`Retry ${item.name}`} size="sm" disabled={locked} onClick={() => onRetry(item.localId)}>
                 <Icon name="refresh" size={16} />
               </IconButton>
             ) : null}
-            <IconButton label={`Remove ${item.name}`} size="sm" onClick={() => onRemove(item.localId)}>
+            <IconButton label={`Remove ${item.name}`} size="sm" disabled={locked} onClick={() => onRemove(item.localId)}>
               <Icon name="close" size={16} />
             </IconButton>
           </li>

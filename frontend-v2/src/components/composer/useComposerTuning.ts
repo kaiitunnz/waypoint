@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { permissionModesFor, type BackendCatalog } from "@waypoint/web-core/backends";
 import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
@@ -28,11 +28,18 @@ export function useComposerTuning({ host, token, session, catalog, onSession, on
   const [openedBy, setOpenedBy] = useState<"trigger" | "key" | null>(null);
   // The setting waiting on a yes to cut off the running turn.
   const [interrupt, setInterrupt] = useState<{ field: string; answer: (yes: boolean) => void } | null>(null);
+  const unanswered = useRef<((yes: boolean) => void) | null>(null);
+  // The mode Shift+Tab last picked, in words for a screen reader.
+  const [announcement, setAnnouncement] = useState("");
   const models = useSessionModels(host, token, session, handleAuthFailure);
-  const confirmInterrupt = useCallback(
-    (field: string) => new Promise<boolean>((answer) => setInterrupt({ field, answer })),
-    [],
-  );
+  const confirmInterrupt = useCallback((field: string) => {
+    // A newer question replaces an open one, which counts as declined.
+    unanswered.current?.(false);
+    return new Promise<boolean>((answer) => {
+      unanswered.current = answer;
+      setInterrupt({ field, answer });
+    });
+  }, []);
   const actions = useSessionTuning({
     host,
     token,
@@ -76,9 +83,11 @@ export function useComposerTuning({ host, token, session, catalog, onSession, on
       if (next !== null) {
         draft.select("mode", next);
         if (restart.mode) setOpenedBy("key");
+        setAnnouncement(`${input.modeOptions.find((option) => option.id === next)?.label ?? next} mode`);
       }
       return true;
     },
+    announcement,
     interrupt,
     dismissInterrupt: () => {
       interrupt?.answer(false);

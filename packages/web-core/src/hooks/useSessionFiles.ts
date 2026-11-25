@@ -13,8 +13,9 @@ export interface SessionFiles {
   confirmingClear: boolean;
   setConfirmingClear: (confirming: boolean) => void;
   busy: boolean;
-  remove: (id: string) => Promise<void>;
-  clearAll: () => Promise<void>;
+  // Each resolves false when the server did not delete.
+  remove: (id: string) => Promise<boolean>;
+  clearAll: () => Promise<boolean>;
 }
 
 // The session's stored files, loaded each time the view opens.
@@ -46,8 +47,10 @@ export function useSessionFiles(host: string, token: string, sessionId: string, 
       setItems((prev) => (prev ? prev.filter((item) => item.id !== id) : prev));
       try {
         await deleteAttachment(host, token, sessionId, id);
+        return true;
       } catch {
         void load(); // Resync on failure rather than lie about the state.
+        return false;
       }
     },
     [host, token, sessionId, load],
@@ -59,8 +62,10 @@ export function useSessionFiles(host: string, token: string, sessionId: string, 
       await deleteAllAttachments(host, token, sessionId);
       setItems([]);
       setConfirmingClear(false);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete files");
+      return false;
     } finally {
       setBusy(false);
     }

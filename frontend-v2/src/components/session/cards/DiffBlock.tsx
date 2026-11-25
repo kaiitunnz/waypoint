@@ -59,7 +59,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
             if (row.kind === "fold") {
               return (
                 <div key={index} className={styles.fold}>
-                  {row.count} unchanged lines
+                  {row.count === null ? "Unchanged lines" : `${row.count} unchanged ${row.count === 1 ? "line" : "lines"}`}
                 </div>
               );
             }

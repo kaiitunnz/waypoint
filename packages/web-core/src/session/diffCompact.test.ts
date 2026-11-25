@@ -43,6 +43,20 @@ describe("compactDiff", () => {
     expect(kinds(DIFF, 3)).toEqual(["del:old", "add:new", "fold:4", "add:tail"]);
   });
 
+  it("counts the lines between two hunks from their line numbers", () => {
+    const diff = ["@@ -1,3 +1,3 @@", " a", "-b", "+B", " c", "@@ -100,3 +100,3 @@", " x", "-y", "+Y", " z"].join("\n");
+    expect(kinds(diff)).toEqual(["del:b", "add:B", "fold:98", "del:y", "add:Y"]);
+  });
+
+  it("folds a hunk break even when only one line shows on each side", () => {
+    const diff = ["@@ -1,2 +1,2 @@", "-a", "+A", " b", "@@ -9,2 +9,2 @@", " c", "-d", "+D"].join("\n");
+    expect(kinds(diff)).toEqual(["del:a", "add:A", "fold:8", "del:d", "add:D"]);
+  });
+
+  it("leaves the count open when a hunk starts with a deletion and no context", () => {
+    expect(kinds(["@@ -1,1 +1,1 @@", "-a", "+A", "@@ -50,1 +50,0 @@", "-z"].join("\n"))).toEqual(["del:a", "add:A", "fold:null", "del:z"]);
+  });
+
   it("returns nothing for an empty diff", () => {
     expect(kinds("")).toEqual([]);
   });

@@ -37,8 +37,10 @@
   padding-bottom: 24px;
 }
 
-/* Hairlines run the width of the tiles above; the row text keeps the heading's edge. */
+/* Hairlines run the width of the tiles above; the row text keeps the heading's
+   edge. The rows size their detail by this box. */
 .full .inset {
+  container-type: inline-size;
   margin: 0 16px;
 }
 

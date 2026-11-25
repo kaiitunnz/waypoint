@@ -38,23 +38,21 @@
   padding: 4px 16px 0;
 }
 
-/* The full header: one row of title, host, search field and button, where a tight
-   width truncates the host and moves the field to a row of its own. */
+/* The full header: one row of title, host, search field and button. The field
+   keeps 10rem and the host truncates when short of room; under 600px of its own
+   width the field takes a row of its own. */
 .full {
   container-type: inline-size;
   display: grid;
-  grid-template-columns: auto fit-content(12rem) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, max-content) 1fr auto;
   column-gap: 14px;
   row-gap: 8px;
   padding: calc(var(--safe-top) + 20px) 16px 4px;
 }
 
-.full .grow {
-  display: none;
-}
-
 .full .search {
   grid-column: 3;
+  min-width: 10rem;
 }
 
 .full > :last-child {
@@ -65,6 +63,7 @@
   .full .search {
     grid-row: 2;
     grid-column: 1 / -1;
+    min-width: 0;
     max-width: none;
   }
 }

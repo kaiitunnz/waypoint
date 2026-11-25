@@ -68,19 +68,22 @@ export function HomeHeader({
           )}
         </h1>
         <HostSwitcher />
-        {phone ? null : search}
-        <span className={styles.grow} />
         {phone ? (
-          <IconButton
-            label={searchOpen ? "Close search" : "Search sessions"}
-            onClick={() => {
-              if (searchOpen) onQuery("");
-              onSearchOpen(!searchOpen);
-            }}
-          >
-            <Icon name={searchOpen ? "close" : "search"} size={21} />
-          </IconButton>
-        ) : null}
+          <>
+            <span className={styles.grow} />
+            <IconButton
+              label={searchOpen ? "Close search" : "Search sessions"}
+              onClick={() => {
+                if (searchOpen) onQuery("");
+                onSearchOpen(!searchOpen);
+              }}
+            >
+              <Icon name={searchOpen ? "close" : "search"} size={21} />
+            </IconButton>
+          </>
+        ) : (
+          search
+        )}
         <Button variant="primary" onClick={onNew}>
           <Icon name="plus" size={18} strokeWidth={2.2} />
           {phone ? "New" : "New session"}

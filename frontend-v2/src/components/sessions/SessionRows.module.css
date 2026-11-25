@@ -19,6 +19,13 @@
   text-align: right;
 }
 
+/* The agent would crush the title in a narrow list. */
+@container (max-width: 520px) {
+  .agent {
+    display: none;
+  }
+}
+
 .tileItem {
   position: relative;
   min-width: 0;

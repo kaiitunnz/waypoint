@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Field";
+import { Flyout } from "@/components/ui/Flyout";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -19,6 +20,7 @@ import { MenuButton } from "@/components/ui/MenuButton";
 import { Meter } from "@/components/ui/Meter";
 import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { Select } from "@/components/ui/Select";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useToast } from "@/components/ui/Toast";
@@ -37,6 +39,9 @@ export function Gallery() {
   const [confirm, setConfirm] = useState(false);
   const [wide, setWide] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const [flyout, setFlyout] = useState(false);
+  const flyoutTrigger = useRef<HTMLButtonElement>(null);
+  const [effort, setEffort] = useState("high");
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
   const [density, setDensity] = useState("summary");
@@ -202,6 +207,12 @@ export function Gallery() {
         <Field label="Password" htmlFor="g-pass">
           <PasswordInput id="g-pass" defaultValue="hunter2" />
         </Field>
+        <Field label="Effort" htmlFor="g-effort">
+          <Select id="g-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+          </Select>
+        </Field>
       </div>
 
       <SectionHeading title="Overlays" />
@@ -212,6 +223,9 @@ export function Gallery() {
         <Button onClick={() => setConfirm(true)}>Confirm</Button>
         <Button ref={trigger} onClick={() => setPopover((open) => !open)}>
           Popover
+        </Button>
+        <Button ref={flyoutTrigger} onClick={() => setFlyout((open) => !open)}>
+          Flyout
         </Button>
         <Button onClick={() => toast({ message: "Switched to studio" })}>Toast</Button>
         <Button
@@ -307,6 +321,16 @@ export function Gallery() {
           </MenuItem>
         </Menu>
       </Popover>
+      <Flyout
+        open={flyout}
+        onClose={() => setFlyout(false)}
+        triggerRef={flyoutTrigger}
+        title="Focus"
+        side="top"
+        width={280}
+      >
+        <p>A popover above its trigger on a pointer client, a sheet on touch.</p>
+      </Flyout>
     </div>
   );
 }

@@ -54,7 +54,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
-function MarkdownAnchor({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
+function MarkdownAnchor({ href, title, children }: ComponentPropsWithoutRef<"a">) {
   const { sessionId } = useSessionContext();
   if (href && isWorkspacePathHref(href)) {
     return (
@@ -64,7 +64,7 @@ function MarkdownAnchor({ href, children, ...props }: ComponentPropsWithoutRef<"
     );
   }
   return (
-    <a href={href} rel="noreferrer" target="_blank" {...props}>
+    <a href={href} title={title} rel="noreferrer" target="_blank">
       {children}
     </a>
   );

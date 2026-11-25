@@ -17,13 +17,13 @@ interface FoldedTextProps {
   className: string;
 }
 
-// Preformatted text that shows `lines` of itself and opens to the whole of it in place.
 export function FoldedText({ text, lines, keep, className }: FoldedTextProps) {
   const [open, setOpen] = useState(false);
   const folded = useMemo(() => foldLines(text, lines, keep), [text, lines, keep]);
+  const whole = useMemo(() => foldLines(text, Infinity, keep).text, [text, keep]);
   return (
     <>
-      <pre className={cx(className, open && styles.open)}>{open ? text : folded.text}</pre>
+      <pre className={cx(className, open && styles.open)}>{open ? whole : folded.text}</pre>
       {folded.hidden > 0 ? (
         <div className={styles.fold}>
           <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} />

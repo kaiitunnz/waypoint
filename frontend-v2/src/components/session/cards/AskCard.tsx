@@ -2,9 +2,9 @@
 
 import type { EventRecord } from "@waypoint/web-core/types";
 import { askCardState, parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
-import { formatEventTime } from "@waypoint/web-core/session/cardText";
 
 import { useAskState } from "../SessionContext";
+import { EventTime } from "./EventTime";
 import { RunLine } from "./RunLine";
 import styles from "./AskCard.module.css";
 
@@ -21,7 +21,7 @@ export function AskCard({ event }: { event: EventRecord }) {
       trailing={
         <>
           {outcome ? <span className={styles.outcome}>{outcome}</span> : null}
-          <time>{formatEventTime(event.ts)}</time>
+          <EventTime ts={event.ts} />
         </>
       }
     >

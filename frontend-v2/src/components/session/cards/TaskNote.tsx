@@ -4,7 +4,6 @@ import { useState } from "react";
 
 import type { TaskNotificationView } from "@waypoint/web-core/events";
 import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
-import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { TASK_NOTIFICATION_BADGES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
 import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";
 import type { EventRecord } from "@waypoint/web-core/types";
@@ -14,6 +13,7 @@ import { cx } from "@/lib/cx";
 
 import { useSessionContext } from "../SessionContext";
 import { Attachments } from "./Attachments";
+import { EventTime } from "./EventTime";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
 
@@ -59,7 +59,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
       </span>
       <span className={styles.headline}>{headline}</span>
       {lamp ? <span className={cx(styles.status, styles[lamp.tone])}>{lamp.label}</span> : null}
-      <time className={styles.time}>{formatEventTime(event.ts)}</time>
+      <EventTime ts={event.ts} className={styles.time} />
     </>
   );
 

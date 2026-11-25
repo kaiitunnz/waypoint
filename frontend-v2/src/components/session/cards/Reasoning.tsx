@@ -1,8 +1,9 @@
 "use client";
 
-import { formatEventTime, reasoningPreview } from "@waypoint/web-core/session/cardText";
+import { reasoningPreview } from "@waypoint/web-core/session/cardText";
 import type { EventRecord } from "@waypoint/web-core/types";
 
+import { EventTime } from "./EventTime";
 import { Markdown } from "./Markdown";
 import { RunLine } from "./RunLine";
 import styles from "./Reasoning.module.css";
@@ -16,7 +17,7 @@ export function Reasoning({ event }: { event: EventRecord }) {
           Thinking{preview ? <span className={styles.preview}>{preview}</span> : null}
         </>
       }
-      trailing={<time>{formatEventTime(event.ts)}</time>}
+      trailing={<EventTime ts={event.ts} />}
     >
       <div className={styles.text}>
         <Markdown text={event.text} />

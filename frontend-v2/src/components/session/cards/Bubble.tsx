@@ -7,6 +7,7 @@ import { cx } from "@/lib/cx";
 import { Attachments } from "./Attachments";
 import styles from "./Bubble.module.css";
 import { CopyButton } from "./CopyButton";
+import { EventTime } from "./EventTime";
 import { Markdown } from "./Markdown";
 
 interface BubbleProps {
@@ -14,7 +15,7 @@ interface BubbleProps {
   // The first agent bubble of a turn has the sharp origin corner; a user bubble always does.
   first?: boolean;
   text?: string;
-  time: string;
+  ts: string;
   // What the copy button copies, when it differs from `text`.
   copy?: string;
   attachments?: AttachmentSpec[];
@@ -23,7 +24,7 @@ interface BubbleProps {
 
 // A message. The time and copy button sit inside it, on the last line when it
 // fits; otherwise on a row of their own.
-export function Bubble({ tone, first, text, time, copy, attachments = [], children }: BubbleProps) {
+export function Bubble({ tone, first, text, ts, copy, attachments = [], children }: BubbleProps) {
   const spare = attachments.length > 0 || children !== undefined;
   return (
     <div className={cx(styles.bub, tone === "user" && styles.user, first && styles.first)}>
@@ -32,7 +33,7 @@ export function Bubble({ tone, first, text, time, copy, attachments = [], childr
       <Attachments specs={attachments} />
       {spare ? <div className={styles.row} /> : null}
       <span className={styles.meta}>
-        <time>{time}</time>
+        <EventTime ts={ts} />
         {copy !== undefined || text !== undefined ? <CopyButton text={copy ?? text ?? ""} /> : null}
       </span>
     </div>

@@ -1,9 +1,9 @@
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
-import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { Attachments } from "./Attachments";
 import { CopyButton } from "./CopyButton";
+import { EventTime } from "./EventTime";
 import { FoldedText } from "./FoldedText";
 import styles from "./HeuristicCard.module.css";
 
@@ -13,7 +13,7 @@ export function HeuristicCard({ event }: { event: EventRecord }) {
     <div className={styles.card}>
       <div className={styles.head}>
         <span className={styles.kind}>{event.kind.replaceAll("_", " ")}</span>
-        <time className={styles.time}>{formatEventTime(event.ts)}</time>
+        <EventTime ts={event.ts} className={styles.time} />
         <CopyButton text={event.text} />
       </div>
       <FoldedText text={event.text} lines={8} keep="start" className={styles.text} />

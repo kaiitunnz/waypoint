@@ -3,7 +3,7 @@
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
 import { parseTaskNotification, planTextForEvent } from "@waypoint/web-core/events";
 import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
-import { formatEventTime, modelChangeText } from "@waypoint/web-core/session/cardText";
+import { modelChangeText } from "@waypoint/web-core/session/cardText";
 import { summarizeNotificationRun } from "@waypoint/web-core/session/taskNotificationView";
 import { primaryEvent, type LeafItem, type TranscriptItem } from "@waypoint/web-core/session/transcript";
 import type { EventRecord } from "@waypoint/web-core/types";
@@ -49,17 +49,16 @@ function NotificationRun({ items }: { items: LeafItem[] }) {
 
 function Single({ event, first }: { event: EventRecord; first: boolean }) {
   const { full, structured } = useSessionContext();
-  const time = formatEventTime(event.ts);
   if (!structured) return <HeuristicCard event={event} />;
   switch (cardKindOf(event)) {
     case "user_message":
-      return <Bubble tone="user" first={first} text={event.text} time={time} attachments={attachmentSpecsFor(event)} />;
+      return <Bubble tone="user" first={first} text={event.text} ts={event.ts} attachments={attachmentSpecsFor(event)} />;
     case "ask_answer":
-      return <AnswerCard event={event} time={time} first={first} />;
+      return <AnswerCard event={event} ts={event.ts} first={first} />;
     case "agent_message":
-      return <Bubble tone="agent" first={first} text={event.text} time={time} attachments={attachmentSpecsFor(event)} />;
+      return <Bubble tone="agent" first={first} text={event.text} ts={event.ts} attachments={attachmentSpecsFor(event)} />;
     case "status":
-      return <Bubble tone="agent" first={first} text={event.text} time={time} />;
+      return <Bubble tone="agent" first={first} text={event.text} ts={event.ts} />;
     case "reasoning":
       return <Reasoning event={event} />;
     case "ask_question":
@@ -74,7 +73,7 @@ function Single({ event, first }: { event: EventRecord; first: boolean }) {
       return plan ? <PlanCard plan={plan} ts={event.ts} /> : null;
     }
     case "model_switch":
-      return <SystemRule glyph="⇄" text={modelChangeText(event)} time={time} />;
+      return <SystemRule glyph="⇄" text={modelChangeText(event)} ts={event.ts} />;
     case "task_notification": {
       const view = parseTaskNotification(event);
       return view ? <TaskNote view={view} event={event} /> : null;
@@ -82,7 +81,7 @@ function Single({ event, first }: { event: EventRecord; first: boolean }) {
     case "diff_note":
       return <ChangesNote event={event} defaultOpen={full} />;
     case "rule":
-      return <SystemRule text={event.text} time={time} />;
+      return <SystemRule text={event.text} ts={event.ts} />;
     case "heuristic":
       return <HeuristicCard event={event} />;
     case "none":

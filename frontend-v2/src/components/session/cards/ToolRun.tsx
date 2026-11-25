@@ -2,7 +2,6 @@
 
 import { describeStep } from "@waypoint/web-core/activity";
 import { cardKindOf } from "@waypoint/web-core/session/cardKind";
-import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import { itemKey, primaryEvent, type LeafItem } from "@waypoint/web-core/session/transcript";
 
@@ -12,6 +11,7 @@ import { useSessionContext } from "../SessionContext";
 import { CallRow } from "./CallRow";
 import { ChangesNote } from "./ChangesNote";
 import { DiffStat } from "./DiffStat";
+import { EventTime } from "./EventTime";
 import { RunLine } from "./RunLine";
 import styles from "./ToolRun.module.css";
 
@@ -33,7 +33,7 @@ function RunNote({ child }: { child: LeafItem }) {
       return (
         <div className={styles.note}>
           <span className={styles.noteText}>{event.text}</span>
-          <time>{formatEventTime(event.ts)}</time>
+          <EventTime ts={event.ts} />
         </div>
       );
   }

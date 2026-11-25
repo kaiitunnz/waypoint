@@ -2,12 +2,11 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { formatEventTime } from "@waypoint/web-core/session/cardText";
-
 import { cx } from "@/lib/cx";
 
 import { CopyButton } from "./CopyButton";
 import { Disclosure } from "./Disclosure";
+import { EventTime } from "./EventTime";
 import { Markdown } from "./Markdown";
 import styles from "./PlanCard.module.css";
 
@@ -23,7 +22,7 @@ export function PlanCard({ plan, ts }: { plan: string; ts: string }) {
     <div className={styles.card}>
       <div className={styles.head}>
         <span className={styles.title}>Plan</span>
-        <time className={styles.time}>{formatEventTime(ts)}</time>
+        <EventTime ts={ts} className={styles.time} />
         <CopyButton text={plan} label="Copy plan" />
       </div>
       <div ref={body} className={cx(styles.body, !all && styles.clamped)}>

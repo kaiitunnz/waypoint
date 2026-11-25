@@ -1,0 +1,22 @@
+/* Consecutive bubbles of one author sit 3px apart; turns are spaced by the transcript. */
+.group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.user {
+  align-items: flex-end;
+}
+
+/* The route: a 1px line in a 14px gutter, behind the bubbles, seen where runs sit. */
+.routed::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 12px;
+  left: 6px;
+  width: 1px;
+  background: var(--route);
+}

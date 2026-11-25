@@ -1,0 +1,169 @@
+.md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md p {
+  margin: 0;
+}
+
+.md p + p,
+.md p + ul,
+.md p + ol,
+.md ul + p,
+.md ol + p,
+.md p + .codeblock,
+.md .codeblock + p,
+.md p + blockquote,
+.md blockquote + p,
+.md p + .table,
+.md .table + p {
+  margin-top: 6px;
+}
+
+.md ul,
+.md ol {
+  margin: 6px 0 0;
+  padding-left: 17px;
+}
+
+.md ol {
+  padding-left: calc(8px + var(--ol-marker-digits, 1) * 0.62em + 6px);
+}
+
+.md li + li {
+  margin-top: 2px;
+}
+
+.md li > ul,
+.md li > ol {
+  margin-top: 2px;
+}
+
+.md strong {
+  font-weight: 600;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 8px 0 2px;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+}
+
+.md > h1:first-child,
+.md > h2:first-child,
+.md > h3:first-child,
+.md > h4:first-child {
+  margin-top: 0;
+}
+
+.md hr {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.md blockquote {
+  margin: 6px 0 0;
+  padding: 0 0 0 12px;
+  color: var(--muted);
+}
+
+.md :not(pre) > code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  font-family: var(--mono);
+  font-size: var(--f-code);
+}
+
+.md a {
+  color: var(--text-strong);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text) 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+.path {
+  font-family: var(--mono);
+  font-size: var(--f-code);
+}
+
+.md :global(.katex-display) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 6px 0 0;
+}
+
+/* The inline spacer that the bubble's absolutely placed time and copy button sit in. */
+.md :global(.rsv) {
+  display: inline-block;
+  width: 62px;
+  height: 1px;
+}
+
+.md :global(.rsv-row) {
+  height: 16px;
+}
+
+.codeblock {
+  position: relative;
+  margin-top: 6px;
+}
+
+.codeCopy {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 1;
+}
+
+.pre {
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--f-diff);
+  line-height: var(--lh-diff);
+  color: var(--text);
+  white-space: pre;
+}
+
+.pre code {
+  font: inherit;
+}
+
+.table {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+.table table {
+  border-collapse: collapse;
+  font-size: var(--f-meta);
+}
+
+.table th,
+.table td {
+  padding: 3px 10px 3px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--text-strong);
+}

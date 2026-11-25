@@ -1,0 +1,28 @@
+"use client";
+
+import { formatEventTime, reasoningPreview } from "@waypoint/web-core/session/cardText";
+import type { EventRecord } from "@waypoint/web-core/types";
+
+import { Markdown } from "./Markdown";
+import { RunLine } from "./RunLine";
+import styles from "./Reasoning.module.css";
+
+// The model's scratchpad: one line on the route that opens to the full text.
+export function Reasoning({ event }: { event: EventRecord }) {
+  const preview = reasoningPreview(event.text);
+  return (
+    <RunLine
+      defaultOpen={false}
+      phrase={
+        <>
+          Thinking{preview ? <span className={styles.preview}>{preview}</span> : null}
+        </>
+      }
+      trailing={<time>{formatEventTime(event.ts)}</time>}
+    >
+      <div className={styles.text}>
+        <Markdown text={event.text} />
+      </div>
+    </RunLine>
+  );
+}

@@ -1,0 +1,54 @@
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 10px 4px 4px;
+  border-radius: var(--r);
+  background: var(--fill-quiet);
+}
+
+.thumb,
+.tile {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+}
+
+.thumb {
+  object-fit: cover;
+}
+
+.tile {
+  display: grid;
+  place-items: center;
+  background: var(--fill-raised);
+  color: var(--muted);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size {
+  font-size: 12px;
+  color: var(--faint);
+}

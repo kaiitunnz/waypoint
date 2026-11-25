@@ -1,0 +1,37 @@
+.rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 20px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.rule::before,
+.rule::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: 12px;
+  height: 1px;
+  background: var(--line);
+}
+
+.body {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  flex: none;
+}

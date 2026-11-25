@@ -130,6 +130,14 @@ describe("describeCall", () => {
     expect(row?.durationMs).toBe(3000);
   });
 
+  it("leaves out a duration too short to be a measurement", () => {
+    const [item] = run([
+      call(1, "a", "Bash", { command: "ls" }),
+      ev(1, "tool_result", "x", { item_id: "a" }, { ts: "2026-01-01T00:00:01.200Z" }),
+    ]);
+    expect(describeCall(item)?.durationMs).toBeNull();
+  });
+
   it("marks an unanswered call pending and a failed result failed", () => {
     const [pending] = run([call(1, "a", "Bash", { command: "sleep 9" })]);
     expect(describeCall(pending)?.status).toBe("pending");

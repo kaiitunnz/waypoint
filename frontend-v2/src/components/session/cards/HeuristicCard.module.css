@@ -1,0 +1,35 @@
+.card {
+  position: relative;
+  z-index: 1;
+  padding: 6px 10px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.kind {
+  flex: 1 1 auto;
+}
+
+.time {
+  font-size: var(--f-stamp);
+}
+
+.text {
+  max-height: 160px;
+  margin: 2px 0 0;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--f-diff);
+  line-height: var(--lh-diff);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

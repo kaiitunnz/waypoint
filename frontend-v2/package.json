@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@waypoint/web-core": "*",
+    "katex": "^0.19.1",
     "next": "^16.4.6",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

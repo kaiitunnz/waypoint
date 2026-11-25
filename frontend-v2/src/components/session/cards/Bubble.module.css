@@ -1,0 +1,54 @@
+.bub {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  padding: 7px 11px;
+  border-radius: var(--r-bubble);
+  background: var(--bubble);
+  font-size: var(--f-bubble);
+  line-height: var(--lh-bubble);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.user {
+  max-width: 85%;
+  border-top-right-radius: 4px;
+  background: var(--bubble-user);
+}
+
+.first:not(.user) {
+  border-top-left-radius: 4px;
+}
+
+.row {
+  height: 16px;
+}
+
+.meta {
+  position: absolute;
+  right: 9px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--f-stamp);
+  line-height: 14px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.user .meta,
+.user .meta button {
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+}
+
+@media (min-width: 900px) {
+  .bub {
+    padding: 8px 12px;
+  }
+
+  .user {
+    max-width: 78%;
+  }
+}

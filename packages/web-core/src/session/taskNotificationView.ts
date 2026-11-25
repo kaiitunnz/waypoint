@@ -87,3 +87,35 @@ export function flattenWhitespace(text: string): string {
 export function taskNoteHeadline(view: TaskNotificationView): string {
   return view.summary || view.event || "Task notification";
 }
+
+export interface NotificationRunSummary {
+  // "Reports from 2 subagents, 1 background command".
+  phrase: string;
+  glyphs: { glyph: string; count: number }[];
+  count: number;
+}
+
+const NOTIFICATION_NOUNS: Record<TaskNotificationView["kind"], [one: string, many: string]> = {
+  agent: ["subagent", "subagents"],
+  monitor: ["monitor", "monitors"],
+  background_command: ["background command", "background commands"],
+  message: ["message", "messages"],
+  unknown: ["task", "tasks"],
+};
+
+// A run of task notes in plain words, one entry of `kinds` per note.
+export function summarizeNotificationRun(kinds: readonly TaskNotificationView["kind"][]): NotificationRunSummary {
+  const counts = new Map<TaskNotificationView["kind"], number>();
+  for (const kind of kinds) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  const order = Object.keys(NOTIFICATION_NOUNS) as TaskNotificationView["kind"][];
+  const present = order.filter((kind) => counts.has(kind));
+  const parts = present.map((kind) => {
+    const count = counts.get(kind) ?? 0;
+    return `${count} ${NOTIFICATION_NOUNS[kind][count === 1 ? 0 : 1]}`;
+  });
+  return {
+    phrase: parts.length > 0 ? `Reports from ${parts.join(", ")}` : "Reports",
+    glyphs: present.map((kind) => ({ glyph: TASK_NOTIFICATION_BADGES[kind].glyph, count: counts.get(kind) ?? 0 })),
+    count: kinds.length,
+  };
+}

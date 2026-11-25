@@ -1,0 +1,119 @@
+.note {
+  position: relative;
+  z-index: 1;
+  margin-left: 20px;
+  padding: 7px 11px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.head > svg {
+  color: var(--faint);
+}
+
+.glyph {
+  flex: none;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.headline {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.ok {
+  color: var(--done);
+}
+
+.danger {
+  color: var(--error);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.info {
+  color: var(--working);
+}
+
+.time {
+  flex: none;
+  font-size: var(--f-stamp);
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.teaser {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.result {
+  margin: 0;
+  max-height: 220px;
+  padding: 6px 9px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--f-diff);
+  line-height: var(--lh-diff);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.text {
+  color: var(--text);
+}
+
+.caption {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}

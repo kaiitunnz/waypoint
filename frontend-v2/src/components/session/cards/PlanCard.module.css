@@ -1,0 +1,46 @@
+.card {
+  position: relative;
+  z-index: 1;
+  margin-left: 20px;
+  padding: 7px 11px 4px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.time {
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+.body {
+  margin-top: 2px;
+  color: var(--text);
+}
+
+.clamped {
+  max-height: 188px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.more {
+  display: block;
+  height: 32px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--muted);
+}

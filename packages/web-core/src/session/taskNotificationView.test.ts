@@ -5,6 +5,7 @@ import {
   flattenWhitespace,
   formatTaskDuration,
   reportUnavailableText,
+  summarizeNotificationRun,
   taskNoteHeadline,
   taskStatusLamp,
   taskUsageParts,
@@ -80,5 +81,20 @@ describe("taskNoteHeadline and flattenWhitespace", () => {
     expect(taskNoteHeadline(view({ event: "E" }))).toBe("E");
     expect(taskNoteHeadline(view())).toBe("Task notification");
     expect(flattenWhitespace(" a \n b\t")).toBe("a b");
+  });
+});
+
+describe("summarizeNotificationRun", () => {
+  it("counts notes by what reported", () => {
+    expect(summarizeNotificationRun(["agent", "agent", "background_command"])).toEqual({
+      phrase: "Reports from 2 subagents, 1 background command",
+      glyphs: [
+        { glyph: "◇", count: 2 },
+        { glyph: "›_", count: 1 },
+      ],
+      count: 3,
+    });
+    expect(summarizeNotificationRun(["unknown"]).phrase).toBe("Reports from 1 task");
+    expect(summarizeNotificationRun([]).phrase).toBe("Reports");
   });
 });

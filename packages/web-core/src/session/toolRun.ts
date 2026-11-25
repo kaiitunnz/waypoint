@@ -241,10 +241,13 @@ function lastLine(text: string): string | null {
   return lines.length > 0 ? lines[lines.length - 1].slice(0, 200) : null;
 }
 
+// Under half a second the two timestamps say when the events were recorded, not how long the call ran.
+const MIN_DURATION_MS = 500;
+
 function durationBetween(call: EventRecord | null, result: EventRecord | null): number | null {
   if (!call || !result) return null;
   const ms = Date.parse(result.ts) - Date.parse(call.ts);
-  return Number.isFinite(ms) && ms > 0 ? ms : null;
+  return Number.isFinite(ms) && ms >= MIN_DURATION_MS ? ms : null;
 }
 
 // "1.8s", "42s", "2m 4s".

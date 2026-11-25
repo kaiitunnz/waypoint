@@ -42,7 +42,8 @@ function itemSide(item: TranscriptItem): Side {
   }
 }
 
-function itemKey(item: TranscriptItem): string {
+// A stable React key for an entry: it survives later events being appended.
+export function itemKey(item: TranscriptItem): string {
   switch (item.kind) {
     case "single":
       return `${item.event.sequence}-${item.event.id ?? "local"}`;

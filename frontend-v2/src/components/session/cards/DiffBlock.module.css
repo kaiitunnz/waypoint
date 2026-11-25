@@ -1,0 +1,115 @@
+.file {
+  margin: 2px 0 4px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.change {
+  flex: none;
+  color: var(--faint);
+}
+
+.path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  flex: none;
+  font-size: var(--f-code);
+}
+
+.add {
+  color: var(--done);
+}
+
+.del {
+  color: var(--error);
+}
+
+/* Lines never wrap; the block scrolls sideways. */
+.code {
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--f-diff);
+  line-height: var(--lh-diff);
+  color: var(--muted);
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 30px 14px max-content;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 8px;
+  white-space: pre;
+  font-feature-settings: "liga" 0;
+}
+
+.no {
+  padding-right: 6px;
+  color: var(--faint);
+  text-align: right;
+}
+
+.addLine {
+  background: var(--diff-add);
+  color: var(--text-strong);
+}
+
+.delLine {
+  background: var(--diff-del);
+  color: var(--text-strong);
+}
+
+.addSign {
+  color: var(--done);
+}
+
+.delSign {
+  color: var(--error);
+}
+
+.fold {
+  display: block;
+  width: 100%;
+  padding: 1px 10px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: var(--lh-diff);
+  color: var(--faint);
+  text-align: left;
+}
+
+.more {
+  color: var(--muted);
+}
+
+.note {
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+@media (min-width: 900px) {
+  .line {
+    grid-template-columns: 38px 16px max-content;
+  }
+}

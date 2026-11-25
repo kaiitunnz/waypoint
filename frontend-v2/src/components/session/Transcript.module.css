@@ -1,0 +1,91 @@
+.frame {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Content scrolls under the floating bar, so the scroller pads its top by the bar. */
+.scroller {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: calc(var(--safe-top) + var(--bar-height));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* A short transcript sits at the bottom, like a messenger. */
+.col {
+  width: 100%;
+  max-width: 860px;
+  margin: auto auto 0;
+  padding: 0 12px 10px;
+}
+
+.turns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.older {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-bottom: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-align: center;
+}
+
+.older:disabled {
+  color: var(--faint);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+}
+
+.showAll {
+  align-self: flex-start;
+  height: 44px;
+  padding: 0 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.jump {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text-strong);
+  transform: translateX(-50%);
+}
+
+@media (min-width: 900px) {
+  .scroller {
+    padding-top: var(--bar-height);
+  }
+
+  .col {
+    padding: 0 28px 10px;
+  }
+}

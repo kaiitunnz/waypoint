@@ -1,0 +1,53 @@
+.card {
+  position: relative;
+  z-index: 1;
+  margin-left: 20px;
+  padding: 7px 11px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.glyph {
+  color: var(--faint);
+}
+
+.title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.time {
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+.caption {
+  color: var(--muted);
+}
+
+.names {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text);
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}

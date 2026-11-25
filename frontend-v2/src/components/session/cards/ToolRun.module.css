@@ -1,0 +1,23 @@
+.add {
+  color: var(--done);
+}
+
+.del {
+  color: var(--error);
+}
+
+.note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.noteText {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

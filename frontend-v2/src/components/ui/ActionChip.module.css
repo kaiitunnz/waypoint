@@ -14,7 +14,7 @@
   white-space: nowrap;
 }
 
-.chip:hover:not(:disabled) {
+.chip:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--fill-quiet);
 }
 
@@ -22,7 +22,8 @@
   background: var(--fill-raised);
 }
 
-.chip:disabled {
+.chip:disabled,
+.chip[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }

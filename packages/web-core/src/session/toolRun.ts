@@ -194,10 +194,11 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
     const category = categoryOfChild(child);
     if (category === null) continue;
     if (category === "edit") {
-      const path = editedPath(child);
-      if (path) editedFiles.add(path);
-      else unnamedEdits += 1;
       const diff = childDiffPreview(child);
+      const path = editedPath(child);
+      const paths = path ? [path] : (diff?.files.map((file) => file.path).filter(Boolean) ?? []);
+      if (paths.length > 0) for (const name of paths) editedFiles.add(name);
+      else unnamedEdits += 1;
       if (diff) {
         additions += diff.totalAdditions;
         deletions += diff.totalDeletions;

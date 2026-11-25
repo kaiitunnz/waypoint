@@ -85,6 +85,14 @@ describe("summarizeToolRun", () => {
     expect(summary.deletions).toBe(3);
   });
 
+  it("names the files of an edit from its diff when the input carries no path", () => {
+    const files = ["a.py", "b.py", "c.py"].map((path) => ({ path, change_type: "update", diff: "", additions: 1, deletions: 0 }));
+    const multi = { diff_preview: { files, total_additions: 3, total_deletions: 0, phase: "applied" } };
+    const items = run([call(1, "a", "Edit"), result(2, "a", "", multi), call(3, "b", "Edit"), result(4, "b", "", diffMeta(1, 0, "a.py"))]);
+    expect(summarizeToolRun(items).phrase).toBe("Edited 3 files");
+    expect(summarizeToolRun(run([call(1, "a", "Edit"), result(2, "a")])).phrase).toBe("Edited 1 file");
+  });
+
   it("uses singular and plural forms", () => {
     expect(summarizeToolRun(run([call(1, "a", "Grep", { pattern: "p" })])).phrase).toBe("Searched 1 pattern");
     expect(summarizeToolRun(run([call(1, "a", "Skill"), call(2, "b", "Skill")])).phrase).toBe("Used 2 skills");

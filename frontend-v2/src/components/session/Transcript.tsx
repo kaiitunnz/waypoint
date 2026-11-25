@@ -21,6 +21,8 @@ interface TranscriptProps {
   loading: boolean;
   hasOlder: boolean;
   loadingOlder: boolean;
+  // A Load older is under way, or its messages have not rendered yet.
+  olderPending: boolean;
   onLoadOlder: () => void;
   hiddenCount: number;
   onShowAll: () => void;
@@ -34,12 +36,13 @@ export function Transcript({
   loading,
   hasOlder,
   loadingOlder,
+  olderPending,
   onLoadOlder,
   hiddenCount,
   onShowAll,
   override,
 }: TranscriptProps) {
-  const { scroller, content, away, onScroll, loadOlder, jumpToEnd } = useTranscriptScroll(turns, loadingOlder, onLoadOlder);
+  const { scroller, content, away, onScroll, loadOlder, jumpToEnd } = useTranscriptScroll(turns, olderPending, onLoadOlder);
   const working = isWorkingStatus(status);
 
   return (

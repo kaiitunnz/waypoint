@@ -169,7 +169,9 @@
     background: transparent;
   }
 
+  /* Room for a mode's name: a narrow column wraps the row before less. */
   .tune {
+    flex-basis: 96px;
     height: 32px;
     margin: 0;
   }
@@ -179,8 +181,10 @@
     margin: 0 4px 0 0;
   }
 
+  /* Send stays at the right edge when it wraps. */
   .actions {
     gap: 4px;
+    margin-left: auto;
   }
 
   /* A popover pads nothing itself; a sheet does. */

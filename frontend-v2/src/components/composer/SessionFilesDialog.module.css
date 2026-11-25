@@ -3,6 +3,11 @@
   color: var(--muted);
 }
 
+/* Takes the focus when its last row goes: no ring round the whole list. */
+.content:focus-visible {
+  outline: none;
+}
+
 .list {
   margin: 0;
   padding: 0;

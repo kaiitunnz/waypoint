@@ -308,7 +308,7 @@ export function Composer({
           }}
         />
       ) : null}
-      <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} onPick={keepFocus} />
+      <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} keepFocus={keepFocus} />
     </div>
   );
 

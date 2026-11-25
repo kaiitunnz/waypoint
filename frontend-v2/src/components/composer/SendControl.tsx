@@ -14,15 +14,18 @@ interface SendControlProps {
   // A stopped session that restarts on send: it cannot queue.
   dormant: boolean;
   onSend: (mode: SendMode) => void;
-  // A menu item is about to go.
-  onPick: () => void;
+  // The pressed control is about to go or be disabled.
+  keepFocus: () => void;
 }
 
-export function SendControl({ canSend, sending, dormant, onSend, onPick }: SendControlProps) {
+export function SendControl({ canSend, sending, dormant, onSend, keepFocus }: SendControlProps) {
   const modes = dormant ? SEND_MODES.filter((mode) => mode.value === "now") : SEND_MODES;
   const { open, close, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
     !canSend,
-    () => onSend("now"),
+    () => {
+      keepFocus();
+      onSend("now");
+    },
     { dismissOnActivate: true },
   );
   return (
@@ -55,7 +58,7 @@ export function SendControl({ canSend, sending, dormant, onSend, onPick }: SendC
               title={mode.hint}
               disabled={!canSend}
               onClick={() => {
-                onPick();
+                keepFocus();
                 close();
                 onSend(mode.value);
               }}

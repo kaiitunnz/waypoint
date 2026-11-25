@@ -54,7 +54,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
   const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
-  const { count: exitedCount, listed, paging } = useExitedSessions({ query: "", live: exitedLive, enabled: showExited });
+  const { count: exitedCount, listed, paging } = useExitedSessions({ query: "", live: exitedLive, enabled: showExited, remember: true });
   const asks = feed.pendingAsks?.items ?? [];
 
   const row = (session: SessionRecord, section: SwitcherSection) => {

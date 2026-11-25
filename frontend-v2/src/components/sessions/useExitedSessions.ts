@@ -29,14 +29,19 @@ interface ExitedOptions {
   lead?: SessionRecord[];
   // Whether to load the rows; the count is always kept.
   enabled: boolean;
+  // Keep how many pages are shown across remounts of the plain Exited group.
+  remember?: boolean;
 }
+
+// The pages shown, for a list that mounts again on every session switch.
+let remembered = { host: "", limit: EXITED_PAGE_SIZE };
 
 // Exited sessions: the ones the live list carries and the history the server pages,
 // with a count that stays fresh while the rows are not loaded.
-export function useExitedSessions({ query, live, lead, enabled }: ExitedOptions) {
+export function useExitedSessions({ query, live, lead, enabled, remember }: ExitedOptions) {
   const { host, token } = useShellData();
   // A new query starts from the first page again.
-  const [paged, setPaged] = useState({ query, limit: EXITED_PAGE_SIZE });
+  const [paged, setPaged] = useState({ query, limit: remember && remembered.host === host ? remembered.limit : EXITED_PAGE_SIZE });
   if (paged.query !== query) setPaged({ query, limit: EXITED_PAGE_SIZE });
   const limit = paged.query === query ? paged.limit : EXITED_PAGE_SIZE;
   const feed = useSessionsData();
@@ -55,7 +60,10 @@ export function useExitedSessions({ query, live, lead, enabled }: ExitedOptions)
     failed: Boolean(history.error),
     onRetry: history.retry,
     hasMore: listed.items.length < listed.total,
-    onMore: () => setPaged({ query, limit: limit + EXITED_PAGE_SIZE }),
+    onMore: () => {
+      if (remember) remembered = { host, limit: limit + EXITED_PAGE_SIZE };
+      setPaged({ query, limit: limit + EXITED_PAGE_SIZE });
+    },
   };
   return { count: live.length + (counted.total ?? 0), listed, paging };
 }

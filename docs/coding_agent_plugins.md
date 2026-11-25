@@ -313,7 +313,9 @@ async def create_session(
 
 ### Startup and restore
 
-No plugin can keep the backend from starting or serving. Boot restores run
+No registered plugin can keep the backend from starting or serving. An
+entry-point plugin that fails to load is logged and left unregistered, so a
+config that names it is rejected as an unknown backend. Boot restores run
 concurrently in the background, one per session, as do the orphaned one-shot
 sweep and the [assistant bootstrap](personal_assistant.md#lifecycle). Sessions
 on a `password` SSH target with no live connection are left as stored.

@@ -50,7 +50,8 @@ inspection is unaffected.
 
 - The assistant is set up in the background after the backend starts serving.
   Until it finishes, its reset, attach, terminate and reconnect controls return
-  `409` (terminate is accepted while the thread is still being restored).
+  `409` (terminate is accepted while the thread is still being restored). While a
+  replacement thread launches, messages to the previous one return `409` too.
 - On startup the runtime refreshes the assistant workspace asset links, then
   reuses the assistant thread that lives in the managed workspace,
   **regardless of its agent or interface**. The thread is the source of truth,

@@ -107,7 +107,9 @@ export function useSessionStream(
     };
 
     const load = () => {
-      if (loaded || loading) return;
+      if (!active || loaded || loading) return;
+      if (loadRetry !== null) clearTimeout(loadRetry);
+      loadRetry = null;
       loading = true;
       Promise.all([fetchSession(host, token, sessionId), fetchEvents(host, token, sessionId)]).then(
         ([session, page]) => {

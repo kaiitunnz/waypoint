@@ -17,29 +17,32 @@ export function AskCard({ event }: { event: EventRecord }) {
   return (
     <RunLine
       asked={waiting}
-      phrase={
+      phrase={`Asked you${first ? `: ${first}` : ""}`}
+      trailing={
         <>
-          Asked you{first ? `: ${first}` : ""}
           {outcome ? <span className={styles.outcome}>{outcome}</span> : null}
+          <time>{formatEventTime(event.ts)}</time>
         </>
       }
-      trailing={<time>{formatEventTime(event.ts)}</time>}
     >
       <div className={styles.detail}>
-        {questions.map((question, index) => (
-          <div key={index} className={styles.question}>
-            <p className={styles.text}>{question.question}</p>
-            <ul className={styles.options}>
-              {question.options.map((option) => (
-                <li key={option.label}>
-                  <span className={styles.label}>{option.label}</span>
-                  {option.description ? <span className={styles.desc}>{option.description}</span> : null}
-                </li>
-              ))}
-            </ul>
-            {answers[index]?.answer ? <p className={styles.answer}>{answers[index].answer}</p> : null}
-          </div>
-        ))}
+        {questions.map((question, index) => {
+          const answer = answers.find((entry) => entry.question === question.question)?.answer;
+          return (
+            <div key={index} className={styles.question}>
+              <p className={styles.text}>{question.question}</p>
+              <ul className={styles.options}>
+                {question.options.map((option) => (
+                  <li key={option.label}>
+                    <span className={styles.label}>{option.label}</span>
+                    {option.description ? <span className={styles.desc}>{option.description}</span> : null}
+                  </li>
+                ))}
+              </ul>
+              {answer ? <p className={styles.answer}>{answer}</p> : null}
+            </div>
+          );
+        })}
       </div>
     </RunLine>
   );

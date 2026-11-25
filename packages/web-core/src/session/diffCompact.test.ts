@@ -38,18 +38,6 @@ describe("compactDiff", () => {
     expect(kinds("@@ -1,5 +1,5 @@\n-a\n+b\n c\n-d\n+e")).toEqual(["del:a", "add:b", "context:c", "del:d", "add:e"]);
   });
 
-  it("keeps context around the changes when asked", () => {
-    expect(kinds(DIFF, { context: 1 })).toEqual([
-      "context:c4",
-      "del:old",
-      "add:new",
-      "context:c5",
-      "fold:2",
-      "context:c8",
-      "add:tail",
-    ]);
-  });
-
   it("caps the diff lines and counts the rest, folds included", () => {
     expect(kinds(DIFF, { maxLines: 2 })).toEqual(["del:old", "add:new", "more:5"]);
     expect(kinds(DIFF, { maxLines: 3 })).toEqual(["del:old", "add:new", "fold:4", "add:tail"]);

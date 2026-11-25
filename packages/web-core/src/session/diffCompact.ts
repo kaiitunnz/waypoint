@@ -10,42 +10,27 @@ export type CompactDiffRow =
 export interface CompactDiffOptions {
   // At most this many diff lines; folds do not count. Unbounded when omitted.
   maxLines?: number;
-  // Unchanged lines kept on each side of a change.
-  context?: number;
 }
 
 // A diff reduced to its changes: file and hunk headers dropped, unchanged context
 // folded to one line between changes (never around them), the whole capped to
 // `maxLines` lines.
 export function compactDiff(lines: readonly DiffLine[], options: CompactDiffOptions = {}): CompactDiffRow[] {
-  const { maxLines = Infinity, context = 0 } = options;
-  const body = lines.filter((line) => line.kind !== "meta" && line.kind !== "hunk");
-  const changed = body.map((line) => line.kind === "add" || line.kind === "del");
-  const keep = body.map(() => false);
-  changed.forEach((isChange, index) => {
-    if (!isChange) return;
-    for (let at = Math.max(0, index - context); at <= Math.min(body.length - 1, index + context); at += 1) {
-      keep[at] = true;
-    }
-  });
-
+  const { maxLines = Infinity } = options;
   const rows: CompactDiffRow[] = [];
   let pending: DiffLine[] = [];
-  const settle = (between: boolean) => {
-    // Unchanged lines before the first change or after the last are not shown.
-    if (between && pending.length === 1) rows.push({ kind: "line", line: pending[0] });
-    else if (between && pending.length > 1) rows.push({ kind: "fold", count: pending.length });
-    pending = [];
-  };
-  body.forEach((line, index) => {
-    if (keep[index]) {
-      settle(rows.length > 0);
-      rows.push({ kind: "line", line });
-    } else {
+  for (const line of lines) {
+    if (line.kind === "meta" || line.kind === "hunk") continue;
+    if (line.kind !== "add" && line.kind !== "del") {
       pending.push(line);
+      continue;
     }
-  });
-  settle(false);
+    // Unchanged lines before the first change or after the last are not shown.
+    if (rows.length > 0 && pending.length === 1) rows.push({ kind: "line", line: pending[0] });
+    else if (rows.length > 0 && pending.length > 1) rows.push({ kind: "fold", count: pending.length });
+    pending = [];
+    rows.push({ kind: "line", line });
+  }
 
   let shown = 0;
   const cut = rows.findIndex((row) => row.kind === "line" && ++shown > maxLines);

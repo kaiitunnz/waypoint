@@ -18,11 +18,13 @@ export interface StreamState {
   hasOlder: boolean;
   // The lowest raw sequence loaded, where the next older page starts.
   oldestSequence: number | null;
-  // The tail page's latest todo snapshot, for when a todo predates the loaded window.
-  loadedTodo: EventRecord | null;
+  // Whether the tail page has loaded; the session record alone can arrive first, over the socket.
+  loaded: boolean;
   pendingQuestions: PendingQuestionsSnapshot | null;
   connection: ConnectionState;
   error: string | null;
+  // The HTTP status behind `error`, when it came from one.
+  errorStatus: number | null;
 }
 
 export const INITIAL_STREAM_STATE: StreamState = {
@@ -30,10 +32,11 @@ export const INITIAL_STREAM_STATE: StreamState = {
   events: [],
   hasOlder: false,
   oldestSequence: null,
-  loadedTodo: null,
+  loaded: false,
   pendingQuestions: null,
   connection: "connecting",
   error: null,
+  errorStatus: null,
 };
 
 export type StreamAction =
@@ -46,7 +49,15 @@ export type StreamAction =
   // `replace` for a socket's first frame, which restarts the server's revision counter.
   | { type: "pendingQuestions"; snapshot: PendingQuestionsSnapshot; replace: boolean }
   | { type: "connection"; connection: ConnectionState }
-  | { type: "error"; message: string | null };
+  | { type: "error"; message: string | null; status?: number };
+
+// The highest event id in `events` or `from`, whichever is greater: where a reconnect resumes.
+export function maxEventId(events: readonly EventRecord[], from: number | null = null): number | null {
+  return events.reduce<number | null>(
+    (highest, event) => (event.id === undefined || (highest !== null && highest >= event.id) ? highest : event.id),
+    from,
+  );
+}
 
 function coalesce(events: EventRecord[], into: EventRecord[] = []): EventRecord[] {
   return events.reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), into);
@@ -65,11 +76,12 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         events: coalesce(state.events, coalesce(sanitized)),
         hasOlder: action.page.has_more,
         oldestSequence: minRawSequence(sanitized),
-        loadedTodo: action.page.latest_todo ? sanitizeEvent(action.page.latest_todo) : null,
+        loaded: true,
         pendingQuestions: action.page.pending_questions
           ? mergePendingQuestionSnapshot(state.pendingQuestions, action.page.pending_questions, false)
           : state.pendingQuestions,
         error: null,
+        errorStatus: null,
       };
     }
     case "events":
@@ -100,6 +112,6 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
     case "connection":
       return { ...state, connection: action.connection };
     case "error":
-      return { ...state, error: action.message };
+      return { ...state, error: action.message, errorStatus: action.message === null ? null : (action.status ?? null) };
   }
 }

@@ -9,6 +9,7 @@ import {
   toolInputForEvent,
 } from "./toolPresentation";
 import type { TranscriptItem } from "./transcript";
+import { itemKey } from "./turns";
 
 type RunChild = Extract<TranscriptItem, { kind: "single" | "pair" }>;
 
@@ -56,7 +57,18 @@ export function toolNamesOfRun(items: readonly RunChild[]): string[] {
   return names;
 }
 
-type Category = "read" | "search" | "edit" | "bash" | "web" | "agent" | "skill" | "monitor" | "todo" | "other";
+type Category =
+  | "read"
+  | "search"
+  | "edit"
+  | "bash"
+  | "web"
+  | "agent"
+  | "followup"
+  | "skill"
+  | "monitor"
+  | "todo"
+  | "other";
 
 function categoryOf(tool: string | null): Category {
   switch (tool) {
@@ -76,6 +88,10 @@ function categoryOf(tool: string | null): Category {
       return "monitor";
     case "TodoWrite":
       return "todo";
+    // Waiting on or closing a subagent is part of one subagent's life, not another one.
+    case "Wait":
+    case "closeAgent":
+      return "followup";
     default:
       if (isFileEditToolName(tool)) return "edit";
       if (isAgentToolName(tool)) return "agent";
@@ -92,6 +108,7 @@ const PHRASES: Record<Category, (count: number) => string> = {
   bash: (n) => `ran ${plural(n, "command")}`,
   web: (n) => (n === 1 ? "searched the web" : `searched the web ${n} times`),
   agent: (n) => `ran ${plural(n, "subagent")}`,
+  followup: (n) => `followed up on ${plural(n, "subagent")}`,
   skill: (n) => `used ${plural(n, "skill")}`,
   monitor: (n) => `watched ${plural(n, "task")}`,
   todo: () => "updated the task list",
@@ -99,7 +116,19 @@ const PHRASES: Record<Category, (count: number) => string> = {
 };
 
 // Reading order of a run's phrases.
-const PHRASE_ORDER: Category[] = ["read", "search", "edit", "bash", "web", "agent", "skill", "monitor", "todo", "other"];
+const PHRASE_ORDER: Category[] = [
+  "read",
+  "search",
+  "edit",
+  "bash",
+  "web",
+  "agent",
+  "followup",
+  "skill",
+  "monitor",
+  "todo",
+  "other",
+];
 
 // The chips on a collapsed run: a glyph and a count, in a fixed order.
 export interface RunGlyph {
@@ -188,6 +217,8 @@ export function summarizeToolRun(items: readonly RunChild[]): ToolRunSummary {
   }
   const edits = editedFiles.size + unnamedEdits;
   if (edits > 0) counts.set("edit", edits);
+  // The follow-up calls of a subagent the run started are already counted with it.
+  if (counts.has("agent")) counts.delete("followup");
 
   const parts = PHRASE_ORDER.flatMap((category) => {
     const count = counts.get(category);
@@ -200,7 +231,7 @@ export function summarizeToolRun(items: readonly RunChild[]): ToolRunSummary {
     { glyph: "✎", count: edits },
     { glyph: "›_", count: counts.get("bash") ?? 0 },
     { glyph: "☑", count: counts.get("todo") ?? 0 },
-    { glyph: "◇", count: counts.get("agent") ?? 0 },
+    { glyph: "◇", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0) },
     { glyph: "❖", count: counts.get("skill") ?? 0 },
     { glyph: "◉", count: counts.get("monitor") ?? 0 },
     { glyph: "ƒ", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0) },
@@ -270,13 +301,17 @@ export function describeCall(child: RunChild): CallRow | null {
   const tool = todo ? "TodoWrite" : normalizeToolName(readToolName(event));
   const badge = toolBadgeFor(tool);
   const diff = childDiffPreview(child);
-  const filePath = toolFilePath(toolInputForEvent(event)) ?? (isFileEditToolName(tool) ? diff?.files[0]?.path ?? null : null);
   const input = toolInputForEvent(event);
+  // A search's `path` is where it looks, not what it is about: its row shows the pattern.
+  const filePath =
+    categoryOf(tool) === "search"
+      ? null
+      : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const command = tool === "Bash" && typeof input?.command === "string" ? input.command : null;
   const label = filePath ?? (call ? previewForToolEvent(call, badge.label) : result ? previewForToolEvent(result, badge.label) : "");
   const stats = diff && isFileEditToolName(tool) ? diff : null;
   return {
-    key: child.kind === "pair" ? child.pair.itemId : `${child.event.sequence}`,
+    key: child.kind === "pair" ? child.pair.itemId : itemKey(child),
     glyph: badge.glyph,
     tool,
     label: command ? command.replace(/\s+/g, " ").trim() : label,

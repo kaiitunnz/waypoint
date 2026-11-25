@@ -1,48 +1,30 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useReducer, useRef, useState, type Dispatch } from "react";
+import { startTransition, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import { connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
-import {
-  INITIAL_STREAM_STATE,
-  reconnectDelay,
-  streamReducer,
-  type StreamAction,
-  type StreamState,
-} from "../session/stream";
+import { ApiError, connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
+import { INITIAL_STREAM_STATE, maxEventId, reconnectDelay, streamReducer, type StreamState } from "../session/stream";
 import { sanitizeEvent } from "../session/transcript";
-import type { EventRecord, PendingQuestionsSnapshot, SessionEnvelope, SessionRecord } from "../types";
+import type { EventRecord, PendingQuestionsSnapshot, SessionRecord } from "../types";
 
 export interface SessionStream extends StreamState {
-  // True until the session record has loaded.
+  // True until the tail page has loaded or the load has failed.
   loading: boolean;
   loadingOlder: boolean;
   loadOlder: () => void;
-  // For server responses that change the session or the events (a rename, an optimistic send).
-  dispatch: Dispatch<StreamAction>;
-}
-
-interface Options {
-  // Every frame the socket delivers, after the stream has applied the ones it owns.
-  onFrame?: (message: SessionEnvelope) => void;
 }
 
 // One session's record, its events and its socket: the tail page loads first,
 // older pages on request, and live events arrive batched per animation frame.
-// `onAuthFailure` must be stable.
+// A reconnect fetches whatever the socket missed. `onAuthFailure` must be stable.
 export function useSessionStream(
   host: string,
   token: string,
   sessionId: string,
   onAuthFailure: () => void,
-  options: Options = {},
 ): SessionStream {
   const [state, dispatch] = useReducer(streamReducer, INITIAL_STREAM_STATE);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const onFrame = useRef(options.onFrame);
-  useEffect(() => {
-    onFrame.current = options.onFrame;
-  });
 
   useEffect(() => {
     if (!host || !token || !sessionId) return;
@@ -52,6 +34,11 @@ export function useSessionStream(
     let attempt = 0;
     let pending: EventRecord[] = [];
     let frame: number | null = null;
+    // The highest event id handed to the reducer, where a catch-up resumes; unknown until the tail page loads.
+    let latestId: number | null = null;
+    let loaded = false;
+    // Live events wait while a catch-up is in flight, so a streamed message keeps its order.
+    let holding = false;
     dispatch({ type: "reset" });
 
     const fail = (error: unknown, fallback: string) => {
@@ -60,21 +47,53 @@ export function useSessionStream(
         onAuthFailure();
         return;
       }
-      dispatch({ type: "error", message: error instanceof Error ? error.message : fallback });
+      dispatch({
+        type: "error",
+        message: error instanceof Error ? error.message : fallback,
+        status: error instanceof ApiError ? error.status : undefined,
+      });
     };
 
     Promise.all([fetchSession(host, token, sessionId), fetchEvents(host, token, sessionId)]).then(
       ([session, page]) => {
-        if (active) dispatch({ type: "loaded", session, page });
+        if (!active) return;
+        loaded = true;
+        latestId = maxEventId(page.events, latestId);
+        dispatch({ type: "loaded", session, page });
       },
       (error) => fail(error, "failed to load session"),
     );
 
     const flush = () => {
       frame = null;
-      const batch = pending;
+      // An event at or below the resume point was delivered already.
+      const batch = pending.filter((event) => event.id === undefined || latestId === null || event.id > latestId);
       pending = [];
+      latestId = maxEventId(batch, latestId);
       if (batch.length > 0) startTransition(() => dispatch({ type: "events", events: batch }));
+    };
+    const scheduleFlush = () => {
+      if (frame === null && !holding) frame = window.requestAnimationFrame(flush);
+    };
+
+    // The socket sends nothing for the time it was closed or not yet subscribed, so ask for it.
+    const catchUp = () => {
+      if (!loaded) return;
+      holding = true;
+      fetchEvents(host, token, sessionId, { afterId: latestId ?? 0 })
+        .then(
+          (page) => {
+            if (!active || page.events.length === 0) return;
+            const missed = page.events.map(sanitizeEvent);
+            latestId = maxEventId(missed, latestId);
+            dispatch({ type: "events", events: missed });
+          },
+          (error) => fail(error, "failed to refresh the transcript"),
+        )
+        .finally(() => {
+          holding = false;
+          if (active && pending.length > 0) scheduleFlush();
+        });
     };
 
     const connect = () => {
@@ -87,7 +106,7 @@ export function useSessionStream(
         (message) => {
           if (message.type === "event") {
             pending.push(sanitizeEvent(message.payload.event as EventRecord));
-            if (frame === null) frame = window.requestAnimationFrame(flush);
+            scheduleFlush();
           } else if (message.type === "session_state") {
             dispatch({ type: "session", session: message.payload.session as SessionRecord });
           } else if (message.type === "pending_questions") {
@@ -100,7 +119,6 @@ export function useSessionStream(
           } else if (message.type === "auth_revoked") {
             onAuthFailure();
           }
-          onFrame.current?.(message);
         },
         () => {
           if (active) onAuthFailure();
@@ -109,6 +127,7 @@ export function useSessionStream(
           onOpen: () => {
             attempt = 0;
             dispatch({ type: "connection", connection: "open" });
+            catchUp();
           },
           onClose: () => {
             if (!active) return;
@@ -151,5 +170,5 @@ export function useSessionStream(
       });
   }, [host, token, sessionId, hasOlder, oldestSequence, onAuthFailure]);
 
-  return { ...state, loading: state.session === null && state.error === null, loadingOlder, loadOlder, dispatch };
+  return { ...state, loading: !state.loaded && state.error === null, loadingOlder, loadOlder };
 }

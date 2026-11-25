@@ -42,11 +42,12 @@ function itemSide(item: TranscriptItem): Side {
   }
 }
 
-// A stable React key for an entry: it survives later events being appended.
+// A stable React key for an entry: it survives later events being appended and
+// streamed deltas being merged in (a merged event keeps its first id, not its sequence).
 export function itemKey(item: TranscriptItem): string {
   switch (item.kind) {
     case "single":
-      return `${item.event.sequence}-${item.event.id ?? "local"}`;
+      return item.event.id === undefined ? `seq-${item.event.sequence}` : `event-${item.event.id}`;
     case "pair":
       return `pair-${item.pair.itemId}`;
     default: {

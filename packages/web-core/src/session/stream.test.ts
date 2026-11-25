@@ -8,6 +8,7 @@ import {
   RECONNECT_MAX_MS,
   reconnectDelay,
   streamReducer,
+  maxEventId,
   type StreamAction,
   type StreamState,
 } from "./stream";
@@ -39,7 +40,33 @@ describe("reconnectDelay", () => {
   });
 });
 
+describe("maxEventId", () => {
+  it("takes the highest id, ignoring events without one", () => {
+    expect(maxEventId([ev(3, "agent_output"), ev(9, "agent_output"), ev(5, "agent_output")])).toBe(9);
+    expect(maxEventId([{ ...ev(4, "agent_output"), id: undefined }])).toBeNull();
+  });
+
+  it("keeps a higher starting point", () => {
+    expect(maxEventId([ev(3, "agent_output")], 7)).toBe(7);
+    expect(maxEventId([ev(8, "agent_output")], 7)).toBe(8);
+  });
+});
+
 describe("streamReducer", () => {
+  it("is not loaded until the tail page arrives, even with the session record", () => {
+    const early = run({ type: "session", session: session("a") });
+    expect(early.session?.title).toBe("a");
+    expect(early.loaded).toBe(false);
+    expect(streamReducer(early, { type: "loaded", session: session("a"), page: page([]) }).loaded).toBe(true);
+  });
+
+  it("keeps the status of a failed load until a load succeeds", () => {
+    const failed = run({ type: "error", message: "not found", status: 404 });
+    expect(failed.errorStatus).toBe(404);
+    expect(streamReducer(failed, { type: "error", message: null }).errorStatus).toBeNull();
+    expect(streamReducer(failed, { type: "loaded", session: session("a"), page: page([]) }).errorStatus).toBeNull();
+  });
+
   it("loads the tail page, coalescing streamed deltas and stripping ANSI", () => {
     const state = run({
       type: "loaded",
@@ -57,7 +84,7 @@ describe("streamReducer", () => {
     expect(state.events.map((event) => event.text)).toEqual(["Hi there", "red"]);
     expect(state.hasOlder).toBe(true);
     expect(state.oldestSequence).toBe(5);
-    expect(state.loadedTodo?.sequence).toBe(2);
+    expect(state.loaded).toBe(true);
     expect(state.error).toBeNull();
   });
 

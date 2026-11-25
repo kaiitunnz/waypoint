@@ -94,6 +94,24 @@ describe("summarizeToolRun", () => {
     expect(summarizeToolRun(run([call(1, "a", "Mystery")])).phrase).toBe("Used 1 other tool");
   });
 
+  it("counts one subagent once however many calls follow it", () => {
+    const items = run([
+      call(1, "a", "spawnAgent"),
+      call(2, "b", "Wait"),
+      call(3, "c", "closeAgent"),
+    ]);
+    const summary = summarizeToolRun(items);
+    expect(summary.phrase).toBe("Ran 1 subagent");
+    expect(summary.glyphs).toEqual([{ glyph: "◇", count: 1 }]);
+    expect(summary.calls).toBe(3);
+  });
+
+  it("names a run of follow-ups alone", () => {
+    const summary = summarizeToolRun(run([call(1, "a", "Wait"), call(2, "b", "Wait")]));
+    expect(summary.phrase).toBe("Followed up on 2 subagents");
+    expect(summary.glyphs).toEqual([{ glyph: "◇", count: 2 }]);
+  });
+
   it("counts a todo list with no tool name", () => {
     const items = run([ev(1, "tool_result", "", { item_type: "todo_list", item_id: "t" })]);
     expect(summarizeToolRun(items).phrase).toBe("Updated the task list");
@@ -111,6 +129,16 @@ describe("describeCall", () => {
       deletions: 3,
       status: "done",
     });
+  });
+
+  it("describes a search by its pattern, not the directory it looks in", () => {
+    const [grep] = run([call(1, "a", "Grep", { pattern: "needle", path: "src/" }), result(2, "a", "src/a.py:3:needle")]);
+    const row = describeCall(grep);
+    expect(row?.path).toBeNull();
+    expect(row?.mono).toBe(false);
+    expect(row?.label).toContain("needle");
+    const [glob] = run([call(1, "a", "Glob", { pattern: "**/*.py", path: "src/" })]);
+    expect(describeCall(glob)?.label).toContain("**/*.py");
   });
 
   it("describes a command with its last output line and duration", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
-import { buildTranscriptItems } from "./transcript";
+import { buildTranscriptItems, mergeEvents } from "./transcript";
 import { groupTurns, type TranscriptTurn } from "./turns";
 
 const call = (seq: number, id: string, tool = "Bash") => ev(seq, "tool_call", "", { item_id: id, tool_name: tool });
@@ -72,5 +72,12 @@ describe("groupTurns", () => {
     const first = turns([ev(1, "user_input", "a"), ev(2, "agent_output", "b")]);
     const again = turns([ev(1, "user_input", "a"), ev(2, "agent_output", "b"), ev(3, "agent_output", "c")]);
     expect(again.map((turn) => turn.key)).toEqual(first.map((turn) => turn.key));
+  });
+
+  it("keeps the key of a message while its deltas stream in", () => {
+    const delta = (seq: number, text: string) => ev(seq, "agent_output", text, { item_id: "m" });
+    const start = turns([delta(1, "Hi ")]);
+    const streamed = turns(mergeEvents([delta(1, "Hi ")], delta(2, "there")));
+    expect(streamed.map((turn) => turn.key)).toEqual(start.map((turn) => turn.key));
   });
 });

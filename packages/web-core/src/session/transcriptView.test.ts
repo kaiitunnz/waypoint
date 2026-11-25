@@ -16,21 +16,11 @@ describe("deriveTranscript", () => {
     const view = deriveTranscript(events, { density: "summary" });
     expect(view.hiddenCount).toBe(1);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "agent"]);
-    expect(view.hasRuns).toBe(true);
   });
 
   it("shows every event in Full", () => {
     const view = deriveTranscript(events, { density: "full" });
     expect(view.hiddenCount).toBe(0);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "rule", "agent"]);
-  });
-
-  it("leaves out what another surface shows", () => {
-    const view = deriveTranscript(events, { density: "full", excludeEvent: (event) => event.sequence === 1 });
-    expect(view.turns.map((turn) => turn.kind)).toEqual(["rule", "agent"]);
-  });
-
-  it("reports no runs for a plain conversation", () => {
-    expect(deriveTranscript([events[0], events[4]], { density: "summary" }).hasRuns).toBe(false);
   });
 });

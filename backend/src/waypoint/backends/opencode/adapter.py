@@ -346,6 +346,9 @@ class OpenCodeAdapter:
 
     async def _discard_server(self) -> None:
         self._terminate_server_process()
+        with suppress(Exception):
+            await self._await_server_process_exit(timeout=2.0)
+        self._server_process = None
         if self._client is not None:
             client, self._client = self._client, None
             with suppress(Exception):

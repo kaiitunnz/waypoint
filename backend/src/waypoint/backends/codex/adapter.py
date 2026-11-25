@@ -461,11 +461,14 @@ class CodexAppServerAdapter:
 
         factory = client_factory_override or self._client_factory
         client = factory(cwd, approval_handler)
+        starting = asyncio.ensure_future(asyncio.to_thread(client.start))
         try:
-            await asyncio.to_thread(client.start)
+            await asyncio.shield(starting)
             await asyncio.to_thread(client.initialize)
         except BaseException:
-            _close_detached(client)
+            # ``start`` cannot be interrupted, and ``close`` is a no-op until it
+            # has spawned the process.
+            starting.add_done_callback(lambda _: _close_detached(client))
             raise
         state = CodexSessionState(
             session_id=session_id,

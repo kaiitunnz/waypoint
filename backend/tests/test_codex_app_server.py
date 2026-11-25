@@ -2687,6 +2687,37 @@ async def test_interrupted_launch_closes_the_client() -> None:
 
 
 @pytest.mark.asyncio
+async def test_launch_cancelled_mid_start_closes_the_spawned_process() -> None:
+    class SlowStart(StuckCodexClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proceed = threading.Event()
+            self.running = False
+
+        def start(self) -> None:
+            self.entered.set()
+            self.proceed.wait(timeout=10)
+            self.running = True
+
+        def close(self) -> None:
+            # Like the SDK, close has nothing to do before the process exists.
+            if self.running:
+                self.running = False
+                self.released.set()
+
+    client = SlowStart()
+    launch = asyncio.create_task(_adapter_for(client).start_session("sess", "/tmp/w"))
+    await asyncio.to_thread(client.entered.wait, 5)
+    launch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await launch
+
+    client.proceed.set()
+    assert await asyncio.to_thread(client.released.wait, 5)
+    assert not client.running
+
+
+@pytest.mark.asyncio
 async def test_cancelled_resume_releases_its_thread_when_the_executor_is_full() -> None:
     asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
 

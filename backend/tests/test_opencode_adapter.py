@@ -1,4 +1,5 @@
 import asyncio
+import signal
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1012,3 +1013,33 @@ async def test_cancelled_start_discards_the_server(
     assert discarded == ["process", "client"]
     assert adapter._client is None
     assert not adapter._started
+
+
+@pytest.mark.asyncio
+async def test_discarding_a_server_that_ignores_sigterm_kills_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _build_adapter()
+    exited = asyncio.Event()
+    signals: list[int] = []
+
+    class _Process:
+        pid = 4242
+        returncode: int | None = None
+
+        async def wait(self) -> int:
+            await exited.wait()
+            return -signal.SIGKILL
+
+    def killpg(_pid: int, sent: int) -> None:
+        signals.append(sent)
+        if sent == signal.SIGKILL:
+            exited.set()
+
+    monkeypatch.setattr("waypoint.backends.opencode.adapter.os.killpg", killpg)
+    adapter._server_process = cast(Any, _Process())
+
+    await adapter._discard_server()
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert adapter._server_process is None

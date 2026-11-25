@@ -73,18 +73,33 @@ describe("isInlineMenuAcceptKey", () => {
 describe("trapTabFocus", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  // A root with two tab stops; `focused` picks what holds focus.
-  function press(focused: "root" | "first" | "last" | "outside", shiftKey: boolean, rootIsEdge?: boolean) {
+  // A root holding, in document order, a tab stop, a non-stop, the other tab stop
+  // and a trailing non-stop; `focused` picks what holds focus.
+  type Spot = "root" | "first" | "middle" | "last" | "trailing" | "outside";
+  function press(focused: Spot, shiftKey: boolean, fromNonStops?: boolean) {
+    const order: Spot[] = ["root", "first", "middle", "last", "trailing"];
     const moved: string[] = [];
-    const first = { focus: () => moved.push("first") };
-    const last = { focus: () => moved.push("last") };
+    const nodes = new Map(
+      order.map((spot) => [
+        spot,
+        {
+          spot,
+          focus: () => moved.push(spot),
+          compareDocumentPosition: (other: { spot: Spot }) =>
+            order.indexOf(other.spot) < order.indexOf(spot) ? 2 : 4,
+        },
+      ]),
+    );
     const root = {
-      querySelectorAll: () => [first, last],
-      contains: (node: unknown) => node === root || node === first || node === last,
+      ...nodes.get("root")!,
+      querySelectorAll: () => [nodes.get("first")!, nodes.get("last")!],
+      contains: (node: { spot: Spot }) => node.spot !== "outside",
     };
-    vi.stubGlobal("document", { activeElement: { root, first, last, outside: {} }[focused] });
+    const active = focused === "root" ? root : (nodes.get(focused) ?? { spot: "outside" });
+    vi.stubGlobal("document", { activeElement: active });
+    vi.stubGlobal("Node", { DOCUMENT_POSITION_PRECEDING: 2, DOCUMENT_POSITION_FOLLOWING: 4 });
     const event = { ...key({ key: "Tab", shiftKey }), preventDefault: vi.fn() };
-    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { rootIsEdge });
+    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { fromNonStops });
     return moved;
   }
 
@@ -100,10 +115,18 @@ describe("trapTabFocus", () => {
     expect(press("first", false)).toEqual([]);
   });
 
-  it("wraps Shift+Tab from a focused root only when the root is an edge", () => {
+  it("wraps from a non-stop with nothing beyond it, only when asked to", () => {
     expect(press("root", true, true)).toEqual(["last"]);
+    expect(press("trailing", false, true)).toEqual(["first"]);
     expect(press("root", true)).toEqual([]);
+    expect(press("trailing", false)).toEqual([]);
+  });
+
+  it("leaves Tab to the browser from a non-stop with a stop beyond it", () => {
     expect(press("root", false, true)).toEqual([]);
+    expect(press("middle", false, true)).toEqual([]);
+    expect(press("middle", true, true)).toEqual([]);
+    expect(press("trailing", true, true)).toEqual([]);
   });
 });
 

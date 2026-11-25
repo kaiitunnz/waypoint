@@ -77,9 +77,10 @@ export function isInlineMenuAcceptKey(event: KeyboardEventLike): boolean {
 export function trapTabFocus(
   event: globalThis.KeyboardEvent,
   root: HTMLElement | null,
-  // `rootIsEdge` is for a root that takes focus itself: Shift+Tab from it wraps
-  // to the last element instead of leaving the root.
-  options: { preventWhenEmpty?: boolean; rootIsEdge?: boolean; selector?: string } = {},
+  // `fromNonStops` also wraps from a focused element of the root that is not in
+  // the list (the root itself, a roving item) when no element of the list lies
+  // beyond it, instead of letting Tab leave the root.
+  options: { fromNonStops?: boolean; preventWhenEmpty?: boolean; selector?: string } = {},
 ): boolean {
   if (event.key !== "Tab" || !root) {
     return false;
@@ -98,11 +99,16 @@ export function trapTabFocus(
   const last = focusable[focusable.length - 1];
   const active = document.activeElement;
   const outside = !root.contains(active);
-  const onRoot = Boolean(options.rootIsEdge) && active === root;
-  if (event.shiftKey && (active === first || onRoot || outside)) {
+  const ahead = event.shiftKey ? Node.DOCUMENT_POSITION_PRECEDING : Node.DOCUMENT_POSITION_FOLLOWING;
+  const stranded =
+    Boolean(options.fromNonStops) &&
+    active !== null &&
+    !outside &&
+    !Array.from(focusable).some((node) => node === active || active.compareDocumentPosition(node) & ahead);
+  if (event.shiftKey && (active === first || stranded || outside)) {
     event.preventDefault();
     last.focus();
-  } else if (!event.shiftKey && (active === last || outside)) {
+  } else if (!event.shiftKey && (active === last || stranded || outside)) {
     event.preventDefault();
     first.focus();
   }

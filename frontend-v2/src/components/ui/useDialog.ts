@@ -39,7 +39,7 @@ export function useDialog(open: boolean, onClose: () => void, panel: RefObject<H
         close.current();
         return;
       }
-      trapTabFocus(event, panel.current, { preventWhenEmpty: true, rootIsEdge: true, selector: TAB_STOP_SELECTOR });
+      trapTabFocus(event, panel.current, { preventWhenEmpty: true, fromNonStops: true, selector: TAB_STOP_SELECTOR });
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {

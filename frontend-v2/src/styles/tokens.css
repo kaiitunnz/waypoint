@@ -72,6 +72,7 @@
   --bubble: #1a2029;
   --bubble-user: color-mix(in srgb, var(--brass) 17%, var(--bubble));
   --route: color-mix(in srgb, #c9a86a 30%, #343d4b);
+  --route-marker: color-mix(in srgb, var(--brass) 62%, var(--line-strong));
   --diff-add: color-mix(in srgb, var(--done) 13%, transparent);
   --diff-del: color-mix(in srgb, var(--error) 12%, transparent);
   --f-bubble: 15px;

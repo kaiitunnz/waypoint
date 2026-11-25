@@ -94,3 +94,12 @@
     padding: 0 28px 10px;
   }
 }
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  .jump::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+}

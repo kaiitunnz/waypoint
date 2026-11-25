@@ -28,7 +28,7 @@ import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { NewSessionDialog } from "./NewSessionDialog";
 import { SearchResults } from "./SearchResults";
-import { SessionDialogs, type HomeDialog } from "./SessionDialogs";
+import { runSessionAction, SessionDialogs, type HomeDialog } from "./SessionDialogs";
 import { SessionMenu, type SessionAction } from "./SessionMenu";
 import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
 import { useSwitcher } from "./SwitcherProvider";
@@ -102,10 +102,8 @@ export function SessionsHome() {
     [catalog],
   );
 
-  function onAction(action: SessionAction, session: SessionRecord) {
-    if (action === "pin" || action === "unpin") void actions.setPinned(session.id, action === "pin");
-    else setDialog({ kind: action, session });
-  }
+  const onAction = (action: SessionAction, session: SessionRecord) =>
+    runSessionAction(action, session, actions, setDialog);
 
   const menuFor = (session: SessionRecord) => (
     <SessionMenu

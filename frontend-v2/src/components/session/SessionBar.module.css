@@ -21,7 +21,7 @@
   min-width: 17px;
   height: 17px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--f-stamp);
   line-height: 17px;
 }
 
@@ -52,7 +52,7 @@
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--f-stamp);
   line-height: 16px;
   color: var(--muted);
   white-space: nowrap;

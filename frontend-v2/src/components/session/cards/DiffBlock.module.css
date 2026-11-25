@@ -92,24 +92,34 @@
   padding: 1px 10px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   font-family: var(--sans);
-  font-size: 12px;
+  font-size: var(--f-diff);
   line-height: var(--lh-diff);
   color: var(--faint);
   text-align: left;
 }
 
 .more {
+  position: relative;
   color: var(--muted);
 }
 
 .note {
   margin: 2px 0;
-  font-size: 12px;
+  font-size: var(--f-diff);
   color: var(--faint);
 }
 
 @media (min-width: 900px) {
   .line {
     grid-template-columns: 38px 16px max-content;
+  }
+}
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  .more::after {
+    content: "";
+    position: absolute;
+    inset: -13px 0;
   }
 }

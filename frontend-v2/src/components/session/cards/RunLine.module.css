@@ -23,7 +23,7 @@
   width: 9px;
   height: 9px;
   margin-top: -4.5px;
-  border: 1.5px solid color-mix(in srgb, var(--brass) 62%, var(--line-strong));
+  border: 1.5px solid var(--route-marker);
   border-radius: 50%;
   background: var(--plane);
 }
@@ -64,7 +64,7 @@
   display: inline-flex;
   flex: none;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--f-stamp);
   color: var(--faint);
   white-space: nowrap;
 }
@@ -99,5 +99,14 @@
 @media (min-width: 900px) {
   .line {
     height: 26px;
+  }
+}
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  .line::after {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
   }
 }

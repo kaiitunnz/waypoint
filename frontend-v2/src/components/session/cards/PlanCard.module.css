@@ -5,7 +5,7 @@
   padding: 7px 11px 4px;
   border-radius: var(--r);
   background: var(--plane-raised);
-  font-size: 14px;
+  font-size: var(--f-bubble);
   line-height: 19px;
 }
 
@@ -34,13 +34,22 @@
 .clamped {
   max-height: 188px;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
 
 .more {
+  position: relative;
   display: block;
   height: 32px;
   font-size: var(--f-meta);
   font-weight: 600;
   color: var(--muted);
+}
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  .more::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
 }

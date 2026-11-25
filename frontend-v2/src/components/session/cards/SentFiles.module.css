@@ -5,7 +5,7 @@
   padding: 7px 11px;
   border-radius: var(--r);
   background: var(--plane-raised);
-  font-size: 14px;
+  font-size: var(--f-bubble);
   line-height: 19px;
 }
 
@@ -44,10 +44,20 @@
 }
 
 .open {
+  position: relative;
   display: inline-flex;
   align-items: center;
   height: 32px;
   font-size: var(--f-meta);
   font-weight: 600;
   color: var(--text);
+}
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  .open::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
 }

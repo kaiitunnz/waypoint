@@ -40,7 +40,7 @@ export function SessionHeader({
   return (
     <GlassBar>
       <div className={styles.bar}>
-        <IconButton label={railOpen ? "Hide sessions" : "Show sessions"} size="sm" onClick={onToggleRail} aria-pressed={railOpen}>
+        <IconButton label="Sessions" size="sm" onClick={onToggleRail} aria-pressed={railOpen}>
           <Icon name="panel-left" size={18} />
         </IconButton>
         <div className={styles.ttl}>
@@ -60,7 +60,7 @@ export function SessionHeader({
         </div>
         {view}
         {density}
-        <IconButton label={paneOpen ? "Hide side pane" : "Show side pane"} size="sm" onClick={onTogglePane} aria-pressed={paneOpen}>
+        <IconButton label="Side pane" size="sm" onClick={onTogglePane} aria-pressed={paneOpen}>
           <Icon name="panel-right" size={18} />
         </IconButton>
         {overflow}

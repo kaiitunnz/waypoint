@@ -13,7 +13,7 @@ import { deriveTranscript } from "@waypoint/web-core/session/transcriptView";
 import { agentModelLabel, lampWord, sessionLamp, shortModelLabel } from "@waypoint/web-core/sessionPresentation";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
-import { SessionDialogs, type HomeDialog } from "@/components/sessions/SessionDialogs";
+import { runSessionAction, SessionDialogs, type HomeDialog } from "@/components/sessions/SessionDialogs";
 import type { SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -74,9 +74,11 @@ export function SessionScreen({ id }: { id: string }) {
     [actions, router],
   );
 
+  // A failed first load fills the page; any later failure is a toast.
+  const loadFailed = !stream.loaded && stream.error !== null;
   useEffect(() => {
-    if (stream.error) toast({ message: stream.error, tone: "error" });
-  }, [stream.error, toast]);
+    if (stream.error && !loadFailed) toast({ message: stream.error, tone: "error" });
+  }, [stream.error, loadFailed, toast]);
 
   const agent = session ? agentModelLabel(session, catalog) : "";
   useEffect(() => {
@@ -109,17 +111,17 @@ export function SessionScreen({ id }: { id: string }) {
 
   const othersNeedYou = useMemo(() => [...feed.askSessionIds].filter((sessionId) => sessionId !== id).length, [feed.askSessionIds, id]);
 
-  function onAction(action: SessionAction, target: SessionRecord) {
-    if (action === "pin" || action === "unpin") void actions.setPinned(target.id, action === "pin");
-    else setDialog({ kind: action, session: target });
-  }
+  const onAction = (action: SessionAction, target: SessionRecord) => runSessionAction(action, target, actions, setDialog);
 
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={desktop ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
   const overflow = session ? <SessionOverflow session={session} subtitle={agent} density={density} onDensity={setDensity} onAction={onAction} /> : null;
   const title = session?.title ?? "";
 
-  const body = !session && !stream.loading ? (
-    <EmptyState title="Session not found" detail={stream.error ?? undefined} />
+  const body = loadFailed ? (
+    <EmptyState
+      title={stream.errorStatus === 404 ? "Session not found" : "Couldn't load the session"}
+      detail={stream.error ?? undefined}
+    />
   ) : (
     <Transcript
       turns={transcript.turns}

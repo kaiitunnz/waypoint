@@ -13,21 +13,18 @@ export interface RunGlyphCount {
 }
 
 interface RunLineProps {
-  // What the run did, in plain words.
   phrase: ReactNode;
   glyphs?: RunGlyphCount[];
   // Whether the run opens by itself: in Full density.
   defaultOpen: boolean;
-  // Running now.
   live?: boolean;
-  // The ask the agent is waiting on.
   asked?: boolean;
   // Changes the run made: kept whole while the phrase shortens, and in place of the
   // glyph counts on a narrow screen.
   stats?: ReactNode;
   // Right-aligned text where the glyphs go, such as a time.
   trailing?: ReactNode;
-  // Shown when the run is open; a run with nothing to open is a plain line.
+  // A run with nothing to open is a plain line.
   children?: ReactNode;
 }
 

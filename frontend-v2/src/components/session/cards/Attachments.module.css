@@ -49,6 +49,6 @@
 }
 
 .size {
-  font-size: 12px;
+  font-size: var(--f-stamp);
   color: var(--faint);
 }

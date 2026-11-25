@@ -54,22 +54,35 @@ export function CallRow({ row, sources }: CallRowProps) {
       </span>
     );
 
+  const line = (
+    <>
+      <span className={styles.glyph} aria-hidden="true">
+        {row.glyph}
+      </span>
+      {row.path ? (
+        <span className={cx(styles.label, styles.pathLabel)}>
+          <span className={styles.dir}>{row.path.dir}</span>
+          <span className={styles.base}>{row.path.base}</span>
+        </span>
+      ) : (
+        <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{label}</span>
+      )}
+      <span className={styles.status}>{status}</span>
+    </>
+  );
+
   return (
     <>
-      <button type="button" className={styles.call} onClick={() => setWrapped((value) => !value)} aria-expanded={wrapped} title={row.label}>
-        <span className={styles.glyph} aria-hidden="true">
-          {row.glyph}
-        </span>
-        {row.path ? (
-          <span className={cx(styles.label, styles.pathLabel)}>
-            <span className={styles.dir}>{row.path.dir}</span>
-            <span className={styles.base}>{row.path.base}</span>
-          </span>
-        ) : (
-          <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{label}</span>
-        )}
-        <span className={styles.status}>{status}</span>
-      </button>
+      {/* A command or pattern can be long: its row opens to show it whole. */}
+      {row.path || todos ? (
+        <div className={styles.call} title={row.label}>
+          {line}
+        </div>
+      ) : (
+        <button type="button" className={cx(styles.call, styles.tappable)} onClick={() => setWrapped((value) => !value)} aria-expanded={wrapped} title={row.label}>
+          {line}
+        </button>
+      )}
       {todos && todos.length > 0 ? <TodoItems todos={todos} /> : null}
       {row.diff ? <DiffBlock preview={row.diff} /> : null}
       {row.output ? <div className={cx(styles.out, row.status === "failed" && styles.outFailed)}>{row.output}</div> : null}

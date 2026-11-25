@@ -24,7 +24,6 @@ interface TranscriptProps {
   hasOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
-  // Events Summary left out, for the empty state.
   hiddenCount: number;
   onShowAll: () => void;
   // The transcript's own content when it is not a conversation, such as a placeholder.

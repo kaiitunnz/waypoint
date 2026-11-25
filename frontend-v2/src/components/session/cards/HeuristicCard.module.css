@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--f-stamp);
   color: var(--faint);
 }
 

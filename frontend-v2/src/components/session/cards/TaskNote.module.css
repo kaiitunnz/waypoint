@@ -5,11 +5,12 @@
   padding: 7px 11px;
   border-radius: var(--r);
   background: var(--plane-raised);
-  font-size: 14px;
+  font-size: var(--f-bubble);
   line-height: 19px;
 }
 
 .head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -39,7 +40,7 @@
 
 .status {
   flex: none;
-  font-size: 12px;
+  font-size: var(--f-stamp);
   font-weight: 400;
   color: var(--muted);
 }
@@ -102,7 +103,7 @@
 }
 
 .caption {
-  font-size: 12px;
+  font-size: var(--f-stamp);
   color: var(--faint);
 }
 
@@ -113,7 +114,16 @@
 }
 
 .label {
-  font-size: 12px;
+  font-size: var(--f-stamp);
   font-weight: 600;
   color: var(--text);
+}
+
+/* A 44px target around the compact control on touch screens. */
+@media (max-width: 899.98px) {
+  button.head::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
 }

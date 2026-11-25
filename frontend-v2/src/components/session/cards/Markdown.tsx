@@ -74,16 +74,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 function MarkdownAnchor({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
   const { sessionId } = useSessionContext();
-  const fromBareText = props["data-wp-bare" as keyof typeof props] === "true";
   if (href && isWorkspacePathHref(href)) {
-    // A path synthesised from prose that the explorer cannot resolve stays text.
     return (
       <Link href={sessionFilesHref(sessionId, href)} className={styles.path}>
         {children}
       </Link>
     );
   }
-  if (fromBareText) return <span>{children}</span>;
   return (
     <a href={href} rel="noreferrer" target="_blank" {...props}>
       {children}

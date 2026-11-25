@@ -1,18 +1,16 @@
-import { normalizeToolName, parseEvent, readToolName, toolFilePath, type EventDiffPreview } from "../events";
-import { isTodoListEvent } from "../todos";
+import { parseEvent, readToolName, toolFilePath, type EventDiffPreview } from "../events";
+import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from "../todos";
 import type { EventRecord } from "../types";
-import { relativeToCwd, relativizeInText } from "../workspacePaths";
+import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import {
+  collapseWhitespace,
   isAgentToolName,
   isFileEditToolName,
   previewForToolEvent,
   toolBadgeFor,
   toolInputForEvent,
 } from "./toolPresentation";
-import type { TranscriptItem } from "./transcript";
-import { itemKey } from "./turns";
-
-type RunChild = Extract<TranscriptItem, { kind: "single" | "pair" }>;
+import { itemKey, primaryEvent, type LeafItem } from "./transcript";
 
 export interface ToolRunCounts {
   bash: number;
@@ -43,11 +41,10 @@ export function toolRunCounts(toolNames: readonly string[]): ToolRunCounts {
 
 // The tool each call of a run used. Codex's todo event carries no tool name, so
 // every todo list counts as "TodoWrite".
-export function toolNamesOfRun(items: readonly RunChild[]): string[] {
+export function toolNamesOfRun(items: readonly LeafItem[]): string[] {
   const names: string[] = [];
   for (const child of items) {
-    const event = child.kind === "pair" ? (child.pair.call ?? child.pair.result) : child.event;
-    if (!event) continue;
+    const event = primaryEvent(child);
     if (isTodoListEvent(event)) {
       names.push("TodoWrite");
       continue;
@@ -143,29 +140,21 @@ export interface ToolRunSummary {
   glyphs: RunGlyph[];
   additions: number;
   deletions: number;
-  calls: number;
 }
 
-function callEvents(child: RunChild): EventRecord | null {
-  return child.kind === "pair" ? (child.pair.call ?? child.pair.result) : child.event;
-}
-
-function isToolItem(child: RunChild): boolean {
+function isToolItem(child: LeafItem): boolean {
   if (child.kind === "pair") return true;
   return child.event.kind === "tool_call" || child.event.kind === "tool_result";
 }
 
-function categoryOfChild(child: RunChild): Category | null {
-  const event = callEvents(child);
-  if (!event || !isToolItem(child)) {
-    // A todo list event with no tool name is still a todo call.
-    return event && isTodoListEvent(event) ? "todo" : null;
-  }
+function categoryOfChild(child: LeafItem): Category | null {
+  const event = primaryEvent(child);
+  // A todo list event with no tool name is still a todo call.
   if (isTodoListEvent(event)) return "todo";
-  return categoryOf(normalizeToolName(readToolName(event)));
+  return isToolItem(child) ? categoryOf(readToolName(event)) : null;
 }
 
-function editedPath(child: RunChild): string | null {
+function editedPath(child: LeafItem): string | null {
   const events = child.kind === "pair" ? [child.pair.call, child.pair.result] : [child.event];
   for (const event of events) {
     if (!event) continue;
@@ -175,7 +164,7 @@ function editedPath(child: RunChild): string | null {
   return null;
 }
 
-function childDiffPreview(child: RunChild): EventDiffPreview | null {
+function childDiffPreview(child: LeafItem): EventDiffPreview | null {
   if (child.kind === "pair") {
     return (
       (child.pair.result ? parseEvent(child.pair.result).diffPreview : null) ??
@@ -192,17 +181,15 @@ function sentence(parts: string[]): string {
 }
 
 // A run in plain words, plus the counts its collapsed line carries.
-export function summarizeToolRun(items: readonly RunChild[]): ToolRunSummary {
+export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
   const counts = new Map<Category, number>();
   const editedFiles = new Set<string>();
   let unnamedEdits = 0;
   let additions = 0;
   let deletions = 0;
-  let calls = 0;
   for (const child of items) {
     const category = categoryOfChild(child);
     if (category === null) continue;
-    calls += 1;
     if (category === "edit") {
       const path = editedPath(child);
       if (path) editedFiles.add(path);
@@ -238,7 +225,7 @@ export function summarizeToolRun(items: readonly RunChild[]): ToolRunSummary {
     { glyph: "ƒ", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0) },
   ].filter((entry) => entry.count > 0);
 
-  return { phrase: sentence(parts), glyphs, additions, deletions, calls };
+  return { phrase: sentence(parts), glyphs, additions, deletions };
 }
 
 export interface CallRow {
@@ -246,8 +233,10 @@ export interface CallRow {
   glyph: string;
   // The tool's own name: "Bash", "Edit", "Read".
   tool: string | null;
-  // What the call touched: a path, a command, a pattern.
+  // What the call touched: a path, a command, a pattern; a todo list's progress.
   label: string;
+  // A todo list's entries.
+  todos: TodoEntry[] | null;
   // Set for file tools so the directory can be muted; relative to the working directory when inside it.
   path: { dir: string; base: string } | null;
   // The row as the agent gave it, paths unshortened, for a tooltip.
@@ -260,11 +249,6 @@ export interface CallRow {
   // The last meaningful line of a command's output.
   output: string | null;
   diff: EventDiffPreview | null;
-}
-
-export function splitPath(path: string): { dir: string; base: string } {
-  const slash = path.lastIndexOf("/");
-  return slash === -1 ? { dir: "", base: path } : { dir: path.slice(0, slash + 1), base: path.slice(slash + 1) };
 }
 
 function lastLine(text: string): string | null {
@@ -295,13 +279,13 @@ export function formatCallDuration(ms: number): string {
 }
 
 // One compact row of an expanded run.
-export function describeCall(child: RunChild, cwd?: string | null): CallRow | null {
+export function describeCall(child: LeafItem, cwd?: string | null): CallRow | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;
   const event = call ?? result;
-  if (!event || (child.kind === "single" && !isToolItem(child))) return null;
+  if (!event) return null;
   const todo = isTodoListEvent(event);
-  const tool = todo ? "TodoWrite" : normalizeToolName(readToolName(event));
+  const tool = todo ? "TodoWrite" : readToolName(event);
   const badge = toolBadgeFor(tool);
   const diff = childDiffPreview(child);
   const input = toolInputForEvent(event);
@@ -312,15 +296,22 @@ export function describeCall(child: RunChild, cwd?: string | null): CallRow | nu
       : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const command = tool === "Bash" && typeof input?.command === "string" ? input.command : null;
   const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
-  const preview = call ? previewForToolEvent(call, badge.label) : result ? previewForToolEvent(result, badge.label) : "";
-  const label = shownPath ?? relativizeInText(preview, cwd);
-  const commandText = command ? command.replace(/\s+/g, " ").trim() : null;
+  const preview = previewForToolEvent(event, badge.label);
+  const commandText = command ? collapseWhitespace(command) : null;
+  const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
+  const progress = todos ? summarizeTodos(todos) : null;
+  const label = todos
+    ? progress
+      ? `Tasks ${progress.completed} of ${progress.total} done`
+      : "Tasks"
+    : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
   return {
-    key: child.kind === "pair" ? child.pair.itemId : itemKey(child),
+    key: itemKey(child),
     glyph: badge.glyph,
     tool,
     label: commandText ?? label,
+    todos,
     path: shownPath ? splitPath(shownPath) : null,
     title: commandText ?? filePath ?? preview,
     mono: filePath !== null || command !== null,

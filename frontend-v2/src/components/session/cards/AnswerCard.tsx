@@ -1,4 +1,4 @@
-import { askAnswerEntries } from "@waypoint/web-core/session/cardText";
+import { askAnswerEntries } from "@waypoint/web-core/session/askQuestion";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { Bubble } from "./Bubble";

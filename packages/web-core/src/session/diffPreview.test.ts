@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventDiffPreviewFile } from "../events";
-import { cleanDiffPath, diffFilePathLabel, displayChangeType, inferChangeType } from "./diffPreview";
+import { diffFilePathLabel, displayChangeType } from "./diffPreview";
 
 const file = (extra: Partial<EventDiffPreviewFile>): EventDiffPreviewFile => ({
   path: "a.py",
@@ -16,28 +16,20 @@ const file = (extra: Partial<EventDiffPreviewFile>): EventDiffPreviewFile => ({
   ...extra,
 });
 
-describe("inferChangeType", () => {
-  it("reads additions, deletions, moves and updates off the headers", () => {
-    expect(inferChangeType("--- /dev/null\n+++ b/a.py\n+x")).toBe("add");
-    expect(inferChangeType("--- a/a.py\n+++ /dev/null\n-x")).toBe("delete");
-    expect(inferChangeType("--- a/a.py\n+++ b/b.py\n+x")).toBe("move");
-    expect(inferChangeType("--- a/a.py\n+++ b/a.py\n-x\n+y")).toBe("update");
-    expect(inferChangeType("")).toBe("unknown");
-  });
-});
-
 describe("displayChangeType", () => {
   it("trusts the backend, then the diff, then calls it an edit", () => {
     expect(displayChangeType(file({ changeType: "add" }))).toEqual({ className: "add", label: "add" });
     expect(displayChangeType(file({ diff: "--- /dev/null\n+++ b/a\n+x" })).label).toBe("add");
     expect(displayChangeType(file({}))).toEqual({ className: "update", label: "edit" });
   });
-});
 
-describe("cleanDiffPath", () => {
-  it("strips the timestamp and a/ b/ prefixes", () => {
-    expect(cleanDiffPath("a/src/x.py\t2026-01-01")).toBe("src/x.py");
-    expect(cleanDiffPath("src/x.py")).toBe("src/x.py");
+  it("reads additions, deletions, moves and updates off the diff headers", () => {
+    const label = (diff: string) => displayChangeType(file({ diff })).className;
+    expect(label("--- /dev/null\n+++ b/a.py\n+x")).toBe("add");
+    expect(label("--- a/a.py\n+++ /dev/null\n-x")).toBe("delete");
+    expect(label("--- a/a.py\n+++ b/b.py\n+x")).toBe("move");
+    expect(label("--- a/a.py\n+++ b/a.py\n-x\n+y")).toBe("update");
+    expect(label("--- a/a.py\t2026-01-01\n+++ b/a.py\t2026-01-02\n-x\n+y")).toBe("update");
   });
 });
 

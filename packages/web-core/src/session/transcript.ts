@@ -25,6 +25,28 @@ export type TranscriptItem =
   | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
   | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
+export type LeafItem = Extract<TranscriptItem, { kind: "single" | "pair" }>;
+
+// The event that stands for a leaf item: a pair's call, else its result.
+export function primaryEvent(item: LeafItem): EventRecord {
+  return item.kind === "pair" ? (item.pair.call ?? item.pair.result ?? item.event) : item.event;
+}
+
+// A stable React key for an entry: it survives later events being appended and
+// streamed deltas being merged in (a merged event keeps its first id, not its sequence).
+export function itemKey(item: TranscriptItem): string {
+  switch (item.kind) {
+    case "single":
+      return item.event.id === undefined ? `seq-${item.event.sequence}` : `event-${item.event.id}`;
+    case "pair":
+      return `pair-${item.pair.itemId}`;
+    default: {
+      const first = item.items[0];
+      return `${item.kind}-${first ? itemKey(first) : "empty"}`;
+    }
+  }
+}
+
 export function minRawSequence(events: EventRecord[]): number | null {
   let min: number | null = null;
   for (const event of events) {

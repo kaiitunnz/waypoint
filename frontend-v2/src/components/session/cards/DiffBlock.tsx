@@ -6,7 +6,7 @@ import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/
 import { buildPlainDiffLines, DIFF_MARKER, highlightDiffToLines, type DiffLine } from "@waypoint/web-core/highlight";
 import { compactDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
-import { splitPath } from "@waypoint/web-core/session/toolRun";
+import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
 

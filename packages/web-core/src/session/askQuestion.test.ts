@@ -4,6 +4,8 @@ import { ev } from "../test-helpers";
 import type { PendingQuestionsSnapshot } from "../types";
 import {
   EMPTY_ASK_DRAFT,
+  askAnswerEntries,
+  askCardState,
   askFormState,
   askToolUseId,
   indexAskQuestionEvidence,
@@ -263,5 +265,51 @@ describe("serializeAnswers", () => {
     );
     expect(result?.text).toBe('"one"="A", "three"="C"');
     expect(result?.answers.map((a) => a.question)).toEqual(["one", "three"]);
+  });
+});
+
+describe("askAnswerEntries", () => {
+  it("keeps well-formed answers", () => {
+    const event = ev(1, "user_input", "", {
+      answers: [{ question: "Q", answer: "A", notes: "n" }, { question: "Q2" }, { answer: "orphan" }, null],
+    });
+    expect(askAnswerEntries(event)).toEqual([
+      { question: "Q", answer: "A", notes: "n" },
+      { question: "Q2", answer: null, notes: undefined },
+    ]);
+    expect(askAnswerEntries(ev(2, "user_input", "raw"))).toEqual([]);
+  });
+});
+
+describe("askCardState", () => {
+  const ask = ev(1, "tool_call", "", { tool_name: "AskUserQuestion", tool_use_id: "q1", payload: { input: { questions: [{ question: "Q?" }] } } });
+  const answer = ev(2, "user_input", "A", {
+    kind: "ask_user_question_answer",
+    tool_use_id: "q1",
+    answers: [{ question: "Q?", answer: "A" }],
+  });
+  const cancelled = ev(3, "system_note", "x", { kind: "ask_user_question_cancelled", tool_use_id: "q1" });
+  const state = (events: ReturnType<typeof ev>[], snapshot: PendingQuestionsSnapshot | null = null) =>
+    askCardState(ask, indexAskQuestionEvidence(events), snapshot);
+
+  it("waits while nothing has answered it", () => {
+    expect(state([ask])).toMatchObject({ toolUseId: "q1", waiting: true, outcome: null, answers: [] });
+  });
+
+  it("is answered, with the answers", () => {
+    expect(state([ask, answer])).toMatchObject({
+      waiting: false,
+      outcome: "answered",
+      answers: [{ question: "Q?", answer: "A" }],
+    });
+  });
+
+  it("is cancelled", () => {
+    expect(state([ask, cancelled])).toMatchObject({ waiting: false, outcome: "cancelled" });
+  });
+
+  it("is not answered once a snapshot that covers it no longer lists it", () => {
+    const snapshot = { as_of_sequence: 10, revision: 1, questions: [] } as unknown as PendingQuestionsSnapshot;
+    expect(state([ask], snapshot)).toMatchObject({ waiting: false, outcome: "not answered" });
   });
 });

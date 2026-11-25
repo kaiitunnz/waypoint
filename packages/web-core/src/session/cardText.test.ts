@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
-import { askAnswerEntries, isBlankAgentMessage, modelChangeText, reasoningPreview, sendUserFileInput } from "./cardText";
+import { isBlankAgentMessage, modelChangeText, reasoningPreview, sendUserFileInput } from "./cardText";
 
 describe("reasoningPreview", () => {
   it("flattens bold and whitespace", () => {
@@ -28,19 +28,6 @@ describe("sendUserFileInput", () => {
     const event = ev(1, "tool_call", "", { payload: { input: { files: ["/a", "", 3, "/b"], caption: " see " } } });
     expect(sendUserFileInput(event)).toEqual({ files: ["/a", "/b"], caption: " see " });
     expect(sendUserFileInput(ev(2, "tool_call"))).toEqual({ files: [], caption: null });
-  });
-});
-
-describe("askAnswerEntries", () => {
-  it("keeps well-formed answers", () => {
-    const event = ev(1, "user_input", "", {
-      answers: [{ question: "Q", answer: "A", notes: "n" }, { question: "Q2" }, { answer: "orphan" }, null],
-    });
-    expect(askAnswerEntries(event)).toEqual([
-      { question: "Q", answer: "A", notes: "n" },
-      { question: "Q2", answer: null, notes: undefined },
-    ]);
-    expect(askAnswerEntries(ev(2, "user_input", "raw"))).toEqual([]);
   });
 });
 

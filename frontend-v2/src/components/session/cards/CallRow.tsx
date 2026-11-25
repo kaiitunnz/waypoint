@@ -2,22 +2,15 @@
 
 import { useState } from "react";
 
-import { readTodoEntries, summarizeTodos, TODO_MARKER } from "@waypoint/web-core/todos";
+import { TODO_MARKER } from "@waypoint/web-core/todos";
 import { formatCallDuration, type CallRow as CallRowModel } from "@waypoint/web-core/session/toolRun";
 import type { TodoEntry } from "@waypoint/web-core/todos";
-import type { EventRecord } from "@waypoint/web-core/types";
 
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
 import { DiffBlock } from "./DiffBlock";
 import { PathLabel } from "./PathLabel";
-
-interface CallRowProps {
-  row: CallRowModel;
-  // The call's events, for a todo list's entries: the result is read first.
-  sources: (EventRecord | null)[];
-}
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
   return (
@@ -35,11 +28,9 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
 }
 
 // One call of an expanded run: what it touched, what it did, and how it went.
-export function CallRow({ row, sources }: CallRowProps) {
+export function CallRow({ row }: { row: CallRowModel }) {
   const [wrapped, setWrapped] = useState(false);
-  const todos = row.tool === "TodoWrite" ? sources.map(readTodoEntries).find((entries) => entries !== null) ?? null : null;
-  const progress = todos ? summarizeTodos(todos) : null;
-  const label = todos ? (progress ? `Tasks ${progress.completed} of ${progress.total} done` : "Tasks") : row.label;
+  const { todos } = row;
 
   const status =
     row.additions !== null && row.deletions !== null ? (
@@ -63,7 +54,7 @@ export function CallRow({ row, sources }: CallRowProps) {
       {row.path ? (
         <PathLabel dir={row.path.dir} base={row.path.base} className={styles.label} />
       ) : (
-        <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{label}</span>
+        <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{row.label}</span>
       )}
       <span className={styles.status}>{status}</span>
     </>

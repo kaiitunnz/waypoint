@@ -16,7 +16,7 @@ export interface ToolBadge {
   label: string;
 }
 
-export const TOOL_BADGES: Record<string, ToolBadge> = {
+const TOOL_BADGES: Record<string, ToolBadge> = {
   Bash: { glyph: "›_", variant: "bash", label: "Bash" },
   Read: { glyph: "▤", variant: "read", label: "Read" },
   Edit: { glyph: "✎", variant: "edit", label: "Edit" },
@@ -47,11 +47,11 @@ export const TOOL_BADGES: Record<string, ToolBadge> = {
 // MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
 // ``server:tool``); there is an open-ended set of them, so they are badged
 // generically with the readable ``server·tool`` tail as the label.
-export function isPluginToolName(toolName: string): boolean {
+function isPluginToolName(toolName: string): boolean {
   return toolName.includes("__") || toolName.includes(":");
 }
 
-export function prettyPluginName(toolName: string): string {
+function prettyPluginName(toolName: string): string {
   const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
   return stripped.replace(/__/g, "·").replace(/:/g, "·");
 }
@@ -151,7 +151,7 @@ export function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function truncate(value: string, max: number): string {
+function truncate(value: string, max: number): string {
   if (value.length <= max) {
     return value;
   }
@@ -219,7 +219,7 @@ export function previewForToolEvent(event: EventRecord, toolLabel: string): stri
 // A one-line `key: value` preview for tool calls with no dedicated branch above
 // (Skill, ToolSearch, custom MCP tools), so the actual arguments show instead of
 // the bare "{" a line-based fallback would produce for pretty-printed JSON.
-export function summarizeStructuredInput(input: Record<string, unknown>): string {
+function summarizeStructuredInput(input: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(input)) {
     parts.push(`${key}: ${formatStructuredValue(value)}`);
@@ -240,7 +240,7 @@ function formatStructuredValue(value: unknown): string {
   }
 }
 
-export function summarizeToolText(text: string, toolLabel?: string): string {
+function summarizeToolText(text: string, toolLabel?: string): string {
   let lines = text
     .split("\n")
     .map((line) => line.trim())

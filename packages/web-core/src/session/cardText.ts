@@ -42,27 +42,6 @@ export function sendUserFileInput(event: EventRecord): {
   return { files, caption };
 }
 
-export interface AnswerEntry {
-  question: string;
-  answer: string | null;
-  notes?: string;
-}
-
-// The structured answers of an ask-question answer event; empty for events that
-// pre-date the structured payload.
-export function askAnswerEntries(event: EventRecord): AnswerEntry[] {
-  const raw = event.metadata?.answers;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .map((item) => ({
-      question: typeof item.question === "string" ? item.question : "",
-      answer: typeof item.answer === "string" ? item.answer : null,
-      notes: typeof item.notes === "string" ? item.notes : undefined,
-    }))
-    .filter((item) => item.question);
-}
-
 // "Model changed from Opus 4.8 to Sonnet 5.5" or "Switched to Sonnet 5.5".
 export function modelChangeText(event: EventRecord, options: BackendModelOption[] = []): string {
   const current =

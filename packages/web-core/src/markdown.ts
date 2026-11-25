@@ -79,18 +79,14 @@ function lastMeaningful(node: Root | Element): RootContent | ElementContent | nu
 
 function appendReserve(node: Root | Element): boolean {
   const last = lastMeaningful(node);
-  const closesInline = node.type === "element" && INLINE_END_BLOCKS.has(node.tagName);
-  if (last === null) {
-    if (closesInline) (node as Element).children.push(reserveSpan());
-    return closesInline;
+  if (last?.type === "element") {
+    if (OPAQUE_BLOCKS.has(last.tagName)) return false;
+    if (INLINE_END_BLOCKS.has(last.tagName) || NESTING_BLOCKS.has(last.tagName)) return appendReserve(last);
   }
-  if (last.type !== "element" || !(INLINE_END_BLOCKS.has(last.tagName) || NESTING_BLOCKS.has(last.tagName) || OPAQUE_BLOCKS.has(last.tagName))) {
-    // Text or an inline element ends the block.
-    if (closesInline) (node as Element).children.push(reserveSpan());
-    return closesInline;
-  }
-  if (OPAQUE_BLOCKS.has(last.tagName)) return false;
-  return appendReserve(last);
+  // Text or an inline element ends the block.
+  if (node.type !== "element" || !INLINE_END_BLOCKS.has(node.tagName)) return false;
+  node.children.push(reserveSpan());
+  return true;
 }
 
 // Appends an inline spacer to the end of the last text block, so a message

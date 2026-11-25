@@ -64,7 +64,7 @@ export function ToolRun({ items, defaultOpen, working }: ToolRunProps) {
     >
       {calls.map(({ child, row }) =>
         row ? (
-          <CallRow key={row.key} row={row} sources={child.kind === "pair" ? [child.pair.result, child.pair.call] : [child.event]} />
+          <CallRow key={row.key} row={row} />
         ) : (
           <RunNote key={child.kind === "single" ? child.event.sequence : child.pair.itemId} child={child} />
         ),

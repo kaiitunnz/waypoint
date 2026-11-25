@@ -2,7 +2,8 @@ import type { AttachmentPreview } from "../api";
 import { attachmentSpecsFor } from "../attachments";
 import { capturedTexts, inlineAttachmentIds, type TaskNotificationView } from "../events";
 import type { AttachmentSpec, EventRecord } from "../types";
-import { flattenWhitespace, reportUnavailableText, taskNoteHeadline, taskUsageParts } from "./taskNotificationView";
+import { collapseWhitespace } from "./toolPresentation";
+import { reportUnavailableText, taskNoteHeadline, taskUsageParts } from "./taskNotificationView";
 
 export type ReportPreviewState =
   | { status: "loading" }
@@ -61,7 +62,7 @@ export function taskNoteBody(
   // A captured report is often the fuller version of a body the event carries
   // inline, so when it contains that body the duplicate is dropped.
   const supersedes = (body: string | null) =>
-    Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
+    Boolean(body && previewText && collapseWhitespace(previewText).includes(collapseWhitespace(body)));
   const previewIsPartial =
     previewState?.status === "error" ||
     (previewState?.status === "ready" &&

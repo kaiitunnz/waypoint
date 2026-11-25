@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ev, planMetadata } from "../test-helpers";
-import { cardKindOf } from "./cardKind";
+import { cardKindOf, pairCardKindOf } from "./cardKind";
 
 const pairOf = (call: ReturnType<typeof ev> | null, result: ReturnType<typeof ev> | null) => ({
   call,
@@ -32,20 +32,20 @@ describe("cardKindOf", () => {
   it("finds ask-question and send-file tool calls, paired or not", () => {
     const ask = ev(1, "tool_call", "", { tool_name: "AskUserQuestion", payload: { input: askInput } });
     expect(cardKindOf(ask)).toBe("ask_question");
-    expect(cardKindOf(ask, pairOf(ask, null))).toBe("ask_question");
+    expect(pairCardKindOf(pairOf(ask, null))).toBe("ask_question");
     const send = ev(2, "tool_call", "", { tool_name: "SendUserFile", payload: { input: { files: ["/a"] } } });
     expect(cardKindOf(send)).toBe("send_file");
-    expect(cardKindOf(send, pairOf(send, null))).toBe("send_file");
+    expect(pairCardKindOf(pairOf(send, null))).toBe("send_file");
   });
 
   it("finds todo and ordinary tools", () => {
     const todo = ev(1, "tool_call", "", { tool_name: "TodoWrite", payload: { input: { todos: [] } } });
     expect(cardKindOf(todo)).toBe("todo");
-    expect(cardKindOf(todo, pairOf(todo, null))).toBe("todo");
+    expect(pairCardKindOf(pairOf(todo, null))).toBe("todo");
     const bash = ev(2, "tool_call", "", { tool_name: "Bash" });
     expect(cardKindOf(bash)).toBe("tool");
     expect(cardKindOf(ev(3, "tool_result", "out"))).toBe("tool");
-    expect(cardKindOf(bash, pairOf(bash, ev(4, "tool_result", "out")))).toBe("tool");
+    expect(pairCardKindOf(pairOf(bash, ev(4, "tool_result", "out")))).toBe("tool");
   });
 
   it("classifies system notes", () => {

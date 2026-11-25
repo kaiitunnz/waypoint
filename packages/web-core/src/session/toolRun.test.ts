@@ -5,7 +5,6 @@ import { buildTranscriptItems, type TranscriptItem } from "./transcript";
 import {
   describeCall,
   formatCallDuration,
-  splitPath,
   summarizeToolRun,
   toolNamesOfRun,
   toolRunCounts,
@@ -70,7 +69,6 @@ describe("summarizeToolRun", () => {
       { glyph: "▤", count: 5 },
       { glyph: "›_", count: 1 },
     ]);
-    expect(summary.calls).toBe(6);
   });
 
   it("counts edited files once and sums the changes", () => {
@@ -103,7 +101,6 @@ describe("summarizeToolRun", () => {
     const summary = summarizeToolRun(items);
     expect(summary.phrase).toBe("Ran 1 subagent");
     expect(summary.glyphs).toEqual([{ glyph: "◇", count: 1 }]);
-    expect(summary.calls).toBe(3);
   });
 
   it("names a run of follow-ups alone", () => {
@@ -166,6 +163,17 @@ describe("describeCall", () => {
     expect(describeCall(glob)?.label).toContain("**/*.py");
   });
 
+  it("reads a todo list's entries and its progress", () => {
+    const todos = [
+      { content: "a", status: "completed", activeForm: "A" },
+      { content: "b", status: "pending", activeForm: "B" },
+    ];
+    const [item] = run([call(1, "t", "TodoWrite", { todos }), result(2, "t", "ok", { payload: { input: { todos } } })]);
+    const row = describeCall(item);
+    expect(row?.label).toBe("Tasks 1 of 2 done");
+    expect(row?.todos?.map((entry) => entry.text)).toEqual(["a", "b"]);
+  });
+
   it("describes a command with its last output line and duration", () => {
     const [item] = run([
       call(1, "a", "Bash", { command: "uv run  pytest -q" }),
@@ -210,12 +218,5 @@ describe("formatCallDuration", () => {
     expect(formatCallDuration(42_000)).toBe("42s");
     expect(formatCallDuration(124_000)).toBe("2m 4s");
     expect(formatCallDuration(120_000)).toBe("2m");
-  });
-});
-
-describe("splitPath", () => {
-  it("separates the directory from the name", () => {
-    expect(splitPath("backend/src/runtime.py")).toEqual({ dir: "backend/src/", base: "runtime.py" });
-    expect(splitPath("runtime.py")).toEqual({ dir: "", base: "runtime.py" });
   });
 });

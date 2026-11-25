@@ -41,7 +41,7 @@ export function taskStatusLamp(
   return null;
 }
 
-export function formatTaskDuration(ms: number): string {
+function formatTaskDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -77,11 +77,6 @@ export function reportUnavailableText(view: TaskNotificationView): string | null
     default:
       return view.outputUnavailableReason;
   }
-}
-
-// Collapse whitespace so containment survives wrapping and trailing newlines.
-export function flattenWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }
 
 export function taskNoteHeadline(view: TaskNotificationView): string {

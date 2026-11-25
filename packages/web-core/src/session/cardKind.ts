@@ -13,7 +13,7 @@ import { isBlankAgentMessage } from "./cardText";
 import type { ToolPair } from "./transcript";
 
 // Claude Code's tool for handing local files to the human.
-export const SEND_USER_FILE_TOOL = "SendUserFile";
+const SEND_USER_FILE_TOOL = "SendUserFile";
 
 // What a transcript entry renders as. `none` renders nothing.
 export type CardKind =
@@ -34,24 +34,8 @@ export type CardKind =
   | "heuristic"
   | "none";
 
-function toolCardKind(event: EventRecord, todo: boolean): CardKind {
-  if (event.kind === "tool_call") {
-    if (parseAskUserQuestion(event)) return "ask_question";
-    if (readToolName(event) === SEND_USER_FILE_TOOL) return "send_file";
-  }
-  return todo ? "todo" : "tool";
-}
-
-// The one dispatcher from an event, or a paired call and result, to its card.
-// Applies to structured transports; any other transport renders everything as
-// "heuristic".
-export function cardKindOf(event: EventRecord, pair?: ToolPair | null): CardKind {
-  if (pair) {
-    const { call, result } = pair;
-    if (call && parseAskUserQuestion(call)) return "ask_question";
-    if (readToolName(call ?? result ?? event) === SEND_USER_FILE_TOOL) return "send_file";
-    return isTodoToolEvent(call) || isTodoToolEvent(result) ? "todo" : "tool";
-  }
+// The card an event renders as. An unrecognised event kind is "heuristic".
+export function cardKindOf(event: EventRecord): CardKind {
   switch (event.kind) {
     case "user_input":
       return event.metadata?.kind === "ask_user_question_answer" ? "ask_answer" : "user_message";
@@ -59,8 +43,11 @@ export function cardKindOf(event: EventRecord, pair?: ToolPair | null): CardKind
       if (isBlankAgentMessage(event)) return "none";
       return event.metadata?.item_kind === "reasoning" ? "reasoning" : "agent_message";
     case "tool_call":
+      if (parseAskUserQuestion(event)) return "ask_question";
+      if (readToolName(event) === SEND_USER_FILE_TOOL) return "send_file";
+      return isTodoToolEvent(event) ? "todo" : "tool";
     case "tool_result":
-      return toolCardKind(event, isTodoToolEvent(event));
+      return isTodoToolEvent(event) ? "todo" : "tool";
     // The interactive approval card above the composer carries the prompt; the
     // record is the "Approval response sent" note.
     case "approval_request":
@@ -78,4 +65,12 @@ export function cardKindOf(event: EventRecord, pair?: ToolPair | null): CardKind
     default:
       return "heuristic";
   }
+}
+
+// The card a paired tool call and result renders as.
+export function pairCardKindOf({ call, result }: ToolPair): CardKind {
+  if (call && parseAskUserQuestion(call)) return "ask_question";
+  const first = call ?? result;
+  if (first && readToolName(first) === SEND_USER_FILE_TOOL) return "send_file";
+  return isTodoToolEvent(call) || isTodoToolEvent(result) ? "todo" : "tool";
 }

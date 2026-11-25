@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import type { TaskNotificationView } from "@waypoint/web-core/events";
-import { useReportPreview } from "@waypoint/web-core/hooks/useAttachmentPreview";
+import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
 import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { TASK_NOTIFICATION_BADGES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
 import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";

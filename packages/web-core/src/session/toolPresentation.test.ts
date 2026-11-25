@@ -5,10 +5,7 @@ import {
   fallbackDiffPreviewForFileEdit,
   isAgentToolName,
   isFileEditToolName,
-  isPluginToolName,
-  prettyPluginName,
   previewForToolEvent,
-  summarizeToolText,
   toolBadgeFor,
   toolPairAttachments,
 } from "./toolPresentation";
@@ -29,11 +26,9 @@ describe("toolBadgeFor", () => {
   });
 
   it("shortens MCP and plugin tool names", () => {
-    expect(isPluginToolName("mcp__lumid__xp_ask")).toBe(true);
-    expect(isPluginToolName("server:tool")).toBe(true);
-    expect(isPluginToolName("Bash")).toBe(false);
-    expect(prettyPluginName("mcp__lumid__xp_ask")).toBe("lumid·xp_ask");
     expect(toolBadgeFor("mcp__lumid__xp_ask")).toEqual({ glyph: "⧉", variant: "mcp", label: "lumid·xp_ask" });
+    expect(toolBadgeFor("server:tool").variant).toBe("mcp");
+    expect(toolBadgeFor("Bash").variant).not.toBe("mcp");
   });
 
   it("leaves unlisted tools neutral", () => {
@@ -90,21 +85,23 @@ describe("previewForToolEvent", () => {
   });
 });
 
-describe("summarizeToolText", () => {
+describe("previewForToolEvent without structured input", () => {
+  const preview = (text: string, label = "Bash") => previewForToolEvent(ev(1, "tool_result", text, {}), label);
+
   it("drops a leading tool-name line", () => {
-    expect(summarizeToolText("Bash\nls -la", "Bash")).toBe("ls -la");
+    expect(preview("Bash\nls -la")).toBe("ls -la");
   });
 
   it("says so when there is nothing", () => {
-    expect(summarizeToolText("  \n ", "Bash")).toBe("No output");
+    expect(preview("  \n ")).toBe("No output");
   });
 
   it("flattens a JSON body to key: value pairs", () => {
-    expect(summarizeToolText('{\n "a": 1,\n "b": "x"\n}')).toBe("a: 1, b: x");
+    expect(preview('{\n "a": 1,\n "b": "x"\n}')).toBe("a: 1, b: x");
   });
 
   it("truncates a long first line", () => {
-    const text = summarizeToolText("x".repeat(300));
+    const text = preview("x".repeat(300));
     expect(text.endsWith("…")).toBe(true);
     expect(text.length).toBe(160);
   });

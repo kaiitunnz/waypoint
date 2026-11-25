@@ -3,7 +3,7 @@
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
 import { parseEvent, parseTaskNotification, planTextForEvent } from "@waypoint/web-core/events";
 import { parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
-import { cardKindOf } from "@waypoint/web-core/session/cardKind";
+import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
 import { formatEventTime, modelChangeText } from "@waypoint/web-core/session/cardText";
 import { summarizeNotificationRun } from "@waypoint/web-core/session/taskNotificationView";
 import type { TranscriptItem } from "@waypoint/web-core/session/transcript";
@@ -108,7 +108,7 @@ export function ItemView({ item, first, full, live, structured }: ItemViewProps)
       return <NotificationRun items={item.items} full={full} />;
     case "pair": {
       const call = item.pair.call;
-      switch (cardKindOf(call ?? item.pair.result ?? item.event, item.pair)) {
+      switch (pairCardKindOf(item.pair)) {
         case "ask_question":
           return call ? <AskCard event={call} questions={parseAskUserQuestion(call) ?? []} /> : null;
         case "send_file": {

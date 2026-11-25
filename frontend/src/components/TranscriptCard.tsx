@@ -13,7 +13,7 @@ import {
   type BackendCatalog,
 } from "@waypoint/web-core/backends";
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
-import { useReportPreview } from "@waypoint/web-core/hooks/useAttachmentPreview";
+import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
 import { BackendModelOption, EventRecord, SessionTransport } from "@waypoint/web-core/types";
 import {
   parseEvent,
@@ -24,9 +24,8 @@ import {
   type TaskNotificationView,
 } from "@waypoint/web-core/events";
 import { readTodoEntries, summarizeTodos, type TodoEntry } from "@waypoint/web-core/todos";
-import { cardKindOf } from "@waypoint/web-core/session/cardKind";
+import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
 import {
-  askAnswerEntries,
   formatEventTime,
   modelChangeText,
   reasoningPreview,
@@ -56,6 +55,7 @@ import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
 import { AskQuestionForm, useAskQuestionController } from "@/components/AskQuestion";
 import {
+  askAnswerEntries,
   askFormState,
   askToolUseId,
   parseAskUserQuestion,
@@ -608,7 +608,7 @@ function ToolPairCard({
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const { call, result } = pair;
-  const kind = cardKindOf(call ?? result ?? ({} as EventRecord), pair);
+  const kind = pairCardKindOf(pair);
   if (kind === "ask_question" && call) {
     return <AskUserQuestionCard event={call} questions={parseAskUserQuestion(call) ?? []} />;
   }

@@ -1,13 +1,8 @@
 "use client";
 
 import type { EventRecord } from "@waypoint/web-core/types";
-import {
-  askFormState,
-  askToolUseId,
-  resolveAskQuestion,
-  type AskUserQuestion,
-} from "@waypoint/web-core/session/askQuestion";
-import { askAnswerEntries, formatEventTime } from "@waypoint/web-core/session/cardText";
+import { askCardState, type AskUserQuestion } from "@waypoint/web-core/session/askQuestion";
+import { formatEventTime } from "@waypoint/web-core/session/cardText";
 
 import { useAskState } from "../SessionContext";
 import { RunLine } from "./RunLine";
@@ -17,21 +12,8 @@ import styles from "./AskCard.module.css";
 // question, its options and the answer. Answering happens in the dock above the composer.
 export function AskCard({ event, questions }: { event: EventRecord; questions: AskUserQuestion[] }) {
   const { evidence, snapshot } = useAskState();
-  const toolUseId = askToolUseId(event);
-  const resolution = toolUseId ? resolveAskQuestion(toolUseId, evidence) : ({ state: "pending" } as const);
-  const form = askFormState(snapshot, event, resolution);
+  const { toolUseId, waiting, outcome, answers } = askCardState(event, evidence, snapshot);
   const first = questions[0]?.question ?? "";
-  const waiting = resolution.state === "pending" && form !== "gone";
-  const answers = resolution.state === "answered" ? askAnswerEntries(resolution.answerEvent) : [];
-
-  const outcome =
-    resolution.state === "answered"
-      ? "answered"
-      : resolution.state === "cancelled"
-        ? "cancelled"
-        : waiting
-          ? null
-          : "not answered";
 
   return (
     <RunLine

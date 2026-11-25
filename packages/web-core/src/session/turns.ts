@@ -1,5 +1,5 @@
-import type { TranscriptItem } from "./transcript";
-import { cardKindOf, type CardKind } from "./cardKind";
+import { itemKey, type TranscriptItem } from "./transcript";
+import { cardKindOf, pairCardKindOf, type CardKind } from "./cardKind";
 
 // A turn is what the compact transcript spaces and routes together: the human's
 // consecutive messages, the agent's consecutive messages and work, or one rule
@@ -36,24 +36,9 @@ function itemSide(item: TranscriptItem): Side {
     case "single":
       return sideOf(cardKindOf(item.event));
     case "pair":
-      return sideOf(cardKindOf(item.pair.call ?? item.pair.result ?? item.event, item.pair));
+      return sideOf(pairCardKindOf(item.pair));
     default:
       return "agent";
-  }
-}
-
-// A stable React key for an entry: it survives later events being appended and
-// streamed deltas being merged in (a merged event keeps its first id, not its sequence).
-export function itemKey(item: TranscriptItem): string {
-  switch (item.kind) {
-    case "single":
-      return item.event.id === undefined ? `seq-${item.event.sequence}` : `event-${item.event.id}`;
-    case "pair":
-      return `pair-${item.pair.itemId}`;
-    default: {
-      const first = item.items[0];
-      return `${item.kind}-${first ? itemKey(first) : "empty"}`;
-    }
   }
 }
 

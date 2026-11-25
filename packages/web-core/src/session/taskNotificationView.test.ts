@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskNotificationView } from "../events";
 import {
-  flattenWhitespace,
-  formatTaskDuration,
   reportUnavailableText,
   summarizeNotificationRun,
   taskNoteHeadline,
@@ -44,14 +42,6 @@ describe("taskStatusLamp", () => {
   });
 });
 
-describe("formatTaskDuration", () => {
-  it("scales seconds to minutes", () => {
-    expect(formatTaskDuration(4000)).toBe("4s");
-    expect(formatTaskDuration(65_000)).toBe("1m 5s");
-    expect(formatTaskDuration(120_000)).toBe("2m");
-  });
-});
-
 describe("taskUsageParts", () => {
   it("lists tokens, tool uses and duration", () => {
     expect(taskUsageParts({ subagentTokens: 12345, toolUses: 1, durationMs: 65_000 })).toEqual([
@@ -61,6 +51,13 @@ describe("taskUsageParts", () => {
     ]);
     expect(taskUsageParts({ subagentTokens: null, toolUses: 22, durationMs: null })).toEqual(["22 tool uses"]);
     expect(taskUsageParts(null)).toEqual([]);
+  });
+
+  it("scales a duration to seconds and minutes", () => {
+    const duration = (durationMs: number) => taskUsageParts({ subagentTokens: null, toolUses: null, durationMs });
+    expect(duration(4000)).toEqual(["4s"]);
+    expect(duration(65_000)).toEqual(["1m 5s"]);
+    expect(duration(120_000)).toEqual(["2m"]);
   });
 });
 
@@ -75,12 +72,11 @@ describe("reportUnavailableText", () => {
   });
 });
 
-describe("taskNoteHeadline and flattenWhitespace", () => {
+describe("taskNoteHeadline", () => {
   it("prefers the summary, then the event", () => {
     expect(taskNoteHeadline(view({ summary: "S", event: "E" }))).toBe("S");
     expect(taskNoteHeadline(view({ event: "E" }))).toBe("E");
     expect(taskNoteHeadline(view())).toBe("Task notification");
-    expect(flattenWhitespace(" a \n b\t")).toBe("a b");
   });
 });
 

@@ -7,6 +7,7 @@ import {
   relativeToCwd,
   relativizeInText,
   remarkLinkifyPaths,
+  splitPath,
 } from "./workspacePaths";
 
 describe("isWorkspacePathHref", () => {
@@ -185,5 +186,12 @@ describe("relativizeInText", () => {
     expect(relativizeInText("/etc/hosts and /repository/a.py", "/repo")).toBe("/etc/hosts and /repository/a.py");
     expect(relativizeInText("/other/repo/a.py", "/repo")).toBe("/other/repo/a.py");
     expect(relativizeInText("/repo/a.py", "")).toBe("/repo/a.py");
+  });
+});
+
+describe("splitPath", () => {
+  it("separates the directory from the name", () => {
+    expect(splitPath("backend/src/runtime.py")).toEqual({ dir: "backend/src/", base: "runtime.py" });
+    expect(splitPath("runtime.py")).toEqual({ dir: "", base: "runtime.py" });
   });
 });

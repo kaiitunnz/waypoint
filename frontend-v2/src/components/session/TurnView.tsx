@@ -1,6 +1,7 @@
 "use client";
 
-import { itemKey, type TranscriptTurn } from "@waypoint/web-core/session/turns";
+import { itemKey } from "@waypoint/web-core/session/transcript";
+import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
 
 import { cx } from "@/lib/cx";
 

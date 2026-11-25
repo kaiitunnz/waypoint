@@ -23,7 +23,7 @@ export function displayChangeType(file: EventDiffPreviewFile): {
   return { className: "update", label: "edit" };
 }
 
-export function inferChangeType(diff: string): EventDiffPreviewFile["changeType"] {
+function inferChangeType(diff: string): EventDiffPreviewFile["changeType"] {
   const lines = diff.split("\n");
   const oldPath = lines.find((line) => line.startsWith("--- "))?.slice(4).trim();
   const newPath = lines.find((line) => line.startsWith("+++ "))?.slice(4).trim();
@@ -38,7 +38,7 @@ export function inferChangeType(diff: string): EventDiffPreviewFile["changeType"
   return "unknown";
 }
 
-export function cleanDiffPath(path: string): string {
+function cleanDiffPath(path: string): string {
   const withoutTimestamp = path.split("\t", 1)[0];
   return withoutTimestamp.startsWith("a/") || withoutTimestamp.startsWith("b/")
     ? withoutTimestamp.slice(2)

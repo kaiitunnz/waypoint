@@ -337,8 +337,9 @@ A plugin that raises in `setup`, `transport_view` or `register_routes`, and a
 session whose backend or transport no plugin provides, are logged with the
 plugin's name. Their sessions become `error` with a "Session unavailable" note
 saying why, and requests that drive them return `503`; terminate and delete still
-work. A session returns to its earlier status on the first start where its plugin
-works again.
+work. No launch, import, tmux attach or interface switch lands on a failed
+plugin. A session returns to its earlier status on the first start where its
+plugin works again.
 
 A restore without a pane must tolerate cancellation, including calls it offloads
 to a thread, and release the processes it started. No restore may block the event

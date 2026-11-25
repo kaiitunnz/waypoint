@@ -7,8 +7,10 @@ waypoint sessions send <session-id> <text>
 ```
 
 A message sent from another session is held, reported as `"send": "held"` with
-a `held_message_id`, while the target is in Focus or waiting on a dialog (it is
-delivered once the human answers).
+a `held_message_id`, while the target is in Focus, waiting on a dialog (it is
+delivered once the human answers) or being restored after a backend restart (it
+is delivered afterwards; after a failed restore, once the session is
+reconnected).
 
 ## Held messages
 

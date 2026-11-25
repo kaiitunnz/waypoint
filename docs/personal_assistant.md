@@ -63,7 +63,8 @@ inspection is unaffected.
   `error` is replaced, because it cannot relaunch.
 - If no usable thread exists (first boot, or the previous one exited), a fresh
   thread is created from the `waypoint.yaml` defaults. If that launch fails, the
-  previous thread stays the assistant.
+  previous thread stays the assistant. A launch without a terminal pane fails
+  after `session_restore_timeout_seconds`.
 - The assistant cannot be **deleted**, and the generic session terminate/delete
   endpoints reject it (it is a protected singleton).
 

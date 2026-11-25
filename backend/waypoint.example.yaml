@@ -15,8 +15,9 @@ cors_origins: []
 
 # session_restore_timeout_seconds: 90  # how long a session without a terminal
 #                                      #   pane may take to restore (backend
-#                                      #   startup, reconnect) before it is
-#                                      #   marked `error`.
+#                                      #   startup, reconnect), or such an
+#                                      #   assistant to launch at startup,
+#                                      #   before it is marked `error`.
 #                                      #   Env: WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS
 
 # Attachments and task output.

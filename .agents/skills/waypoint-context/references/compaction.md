@@ -27,7 +27,7 @@ A busy target may still have `/compact` queued behind its turn: wait for the tur
   - The phase changed: you decided otherwise, or the target compacted on its own and the watcher re-armed. Compact again only if `status` still shows usage at the first threshold and you still want to.
   - Any other reason: run the same `compact` once the target is idle.
 - **`pair-failed`, `/compact` went out** → read the events as under `pair-stalled`.
-- **`pair-held`** → the target is in Focus or on a dialog, and the messages are queued for its human. Tell the user to release them once its turn has ended, and leave the queue alone.
+- **`pair-held`** → the target is in Focus, on a dialog or being restored, and the messages are queued. Tell the user to release any still queued once its turn has ended, and leave the queue alone.
 - **`pair-stalled`** (the phase stayed `compacting` for 10 minutes with the target idle) → read `waypoint sessions events <sid> --compact --messages 30`.
   - `status` shows `pair_running: true` → the grounding is on its way. Leave it.
   - A `pair-held` earlier in this cycle → its message may still be queued. Tell the user and send nothing.

@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
-import { sessionCoverageLabel, type UsagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import { sessionCoverageLabel, type TokenCount, type UsagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import {
   formatRateLimitWindowReset,
   formatRateLimitWindowTokens,
@@ -26,11 +26,11 @@ function meterTone(tone: UsageTone, calm: MeterTone): MeterTone {
   return tone === "good" ? calm : tone;
 }
 
-function Chips({ items }: { items: [label: string, tokens: number][] }) {
+function Chips({ items }: { items: TokenCount[] }) {
   return (
     <ul className={styles.chips}>
-      {items.map(([label, tokens]) => (
-        <li key={label}>
+      {items.map(({ key, label, tokens }) => (
+        <li key={key}>
           <span>{label}</span>
           <strong>{formatTokens(tokens)}</strong>
         </li>

@@ -39,23 +39,29 @@ export async function runControlCommand({
   if (newArgs !== null) {
     // Cloned server-side so the child inherits the source's private
     // launch_env, which a public SessionRecord cannot carry.
-    const created = await cloneSession(host, token, sessionId);
-    await sendFollowUp(host, token, created.id, newArgs);
+    const created = await withFallback("failed to create session", () => cloneSession(host, token, sessionId));
+    await sendFollowUp(host, token, created.id, newArgs, "failed to create session");
     return created.id;
   }
   const forkArgs = allowFork ? matchControlCommand(text, "fork") : null;
   if (forkArgs !== null) {
-    const forked = await forkSession(host, token, sessionId);
-    await sendFollowUp(host, token, forked.id, forkArgs);
+    const forked = await withFallback("failed to fork session", () => forkSession(host, token, sessionId));
+    await sendFollowUp(host, token, forked.id, forkArgs, "failed to fork session");
     return forked.id;
   }
   return null;
 }
 
-async function sendFollowUp(host: string, token: string, sessionId: string, text: string): Promise<void> {
+async function sendFollowUp(
+  host: string,
+  token: string,
+  sessionId: string,
+  text: string,
+  fallback: string,
+): Promise<void> {
   if (!text) return;
   try {
-    await sendInput(host, token, sessionId, text);
+    await withFallback(fallback, () => sendInput(host, token, sessionId, text));
   } catch (error) {
     if (isAuthError(error)) throw error;
     throw new FollowUpError(error as Error, sessionId);
@@ -93,7 +99,7 @@ export async function deliverInput({
   controlCommands = true,
 }: DeliverOptions): Promise<Delivery> {
   if (composerAvailability(session, catalog).dormant) {
-    await postAction(host, token, sessionId, "reattach");
+    await withFallback("failed to reconnect", () => postAction(host, token, sessionId, "reattach"));
   }
   // A turn carrying attachments is never a control command.
   if (controlCommands && session && !attachments?.length) {
@@ -101,6 +107,16 @@ export async function deliverInput({
     const openSessionId = await runControlCommand({ host, token, sessionId, text, allowFork });
     if (openSessionId !== null) return { openSessionId };
   }
-  await sendInput(host, token, sessionId, text, command, attachments);
+  await withFallback("failed to send input", () => sendInput(host, token, sessionId, text, command, attachments));
   return { openSessionId: null };
+}
+
+// Failures keep their own message and class; anything thrown that is not an
+// Error gets the step's name.
+async function withFallback<T>(message: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(message);
+  }
 }

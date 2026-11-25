@@ -52,6 +52,13 @@ function breakdownLabel(key: string): string {
   }
 }
 
+// One token category: two raw keys can carry the same label.
+export interface TokenCount {
+  key: string;
+  label: string;
+  tokens: number;
+}
+
 export interface UsagePanelModel {
   contextUsage: SessionContextUsage | null;
   tokenUsage: SessionTokenUsage | null;
@@ -65,12 +72,12 @@ export interface UsagePanelModel {
   // The endpoint reported a turn but no prompt or cache tokens.
   contextUnreported: boolean;
   // The last turn's nonzero token categories.
-  contextBreakdown: [label: string, tokens: number][];
+  contextBreakdown: TokenCount[];
   rateLimitSourceLabel: string;
   // The more urgent of context pressure and rate-limit pressure.
   tone: UsageTone;
   // Totals over disjoint categories, labelled.
-  tokenTotals: [label: string, tokens: number][];
+  tokenTotals: TokenCount[];
   hasTokenTotals: boolean;
   // False when nothing is tracked yet and only the coverage line is shown.
   hasTrackedTurns: boolean;
@@ -128,11 +135,12 @@ export function usagePanelModel(session: SessionRecord | null, catalog?: Backend
         : humaniseBackend(rateLimitUsage.source, catalog)
     : "Unavailable";
 
-  const tokenTotals: [string, number][] = tokenUsage
-    ? Object.entries(unifyTokens(tokenUsage.source, tokenUsage.totals ?? {})).map(([key, value]) => [
-        UNIFIED_TOKEN_LABELS[key as keyof typeof UNIFIED_TOKEN_LABELS] ?? key,
-        value,
-      ])
+  const tokenTotals: TokenCount[] = tokenUsage
+    ? Object.entries(unifyTokens(tokenUsage.source, tokenUsage.totals ?? {})).map(([key, tokens]) => ({
+        key,
+        label: UNIFIED_TOKEN_LABELS[key as keyof typeof UNIFIED_TOKEN_LABELS] ?? key,
+        tokens,
+      }))
     : [];
 
   return {
@@ -146,8 +154,8 @@ export function usagePanelModel(session: SessionRecord | null, catalog?: Backend
     contextUnreported,
     contextBreakdown: contextUsage
       ? Object.entries(contextUsage.breakdown ?? {})
-          .filter(([, value]) => value > 0)
-          .map(([key, value]) => [breakdownLabel(key), value])
+          .filter(([, tokens]) => tokens > 0)
+          .map(([key, tokens]) => ({ key, label: breakdownLabel(key), tokens }))
       : [],
     rateLimitSourceLabel,
     tone: worse(contextTone, rateLimitUsageTone(rateLimitUsage)),

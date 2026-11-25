@@ -75,7 +75,7 @@ describe("usagePanelModel", () => {
 
   it("unifies overlapping totals", () => {
     const model = usagePanelModel(session({ session_token_usage: totals() }));
-    expect(Object.fromEntries(model.tokenTotals)).toMatchObject({
+    expect(Object.fromEntries(model.tokenTotals.map((total) => [total.label, total.tokens]))).toMatchObject({
       "Fresh input": 60,
       "Cached input (read)": 40,
       Output: 20,
@@ -93,10 +93,18 @@ describe("usagePanelModel", () => {
       }),
     );
     expect(model.contextBreakdown).toEqual([
-      ["Input", 5],
-      ["Cache write", 2],
-      ["made up tokens", 1],
+      { key: "input_tokens", label: "Input", tokens: 5 },
+      { key: "cache_creation_tokens", label: "Cache write", tokens: 2 },
+      { key: "made_up_tokens", label: "made up tokens", tokens: 1 },
     ]);
+  });
+
+  it("keeps categories that share a label apart by their raw key", () => {
+    const { contextBreakdown } = usagePanelModel(
+      session({ context_usage: context({ breakdown: { reasoning_output_tokens: 1, reasoning_tokens: 2 } }) }),
+    );
+    expect(contextBreakdown.map((entry) => entry.label)).toEqual(["Reasoning", "Reasoning"]);
+    expect(contextBreakdown.map((entry) => entry.key)).toEqual(["reasoning_output_tokens", "reasoning_tokens"]);
   });
 });
 

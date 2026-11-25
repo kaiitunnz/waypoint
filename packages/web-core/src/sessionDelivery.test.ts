@@ -96,6 +96,21 @@ describe("deliverInput", () => {
     expect(failure).toMatchObject({ sessionId: "child", status: 409, message: "agent is not ready" });
   });
 
+  it("names the step when something other than an Error is thrown", async () => {
+    vi.mocked(cloneSession).mockRejectedValueOnce("x");
+    await expect(deliver("/new")).rejects.toThrow("failed to create session");
+    vi.mocked(forkSession).mockRejectedValueOnce("x");
+    await expect(deliver("/fork")).rejects.toThrow("failed to fork session");
+    vi.mocked(sendInput).mockRejectedValueOnce("x");
+    await expect(deliver("/fork go")).rejects.toThrow("failed to fork session");
+    vi.mocked(sendInput).mockRejectedValueOnce("x");
+    await expect(deliver("/new go")).rejects.toThrow("failed to create session");
+    vi.mocked(postAction).mockRejectedValueOnce("x");
+    await expect(deliver("hi", { session: session({ status: "exited" }) })).rejects.toThrow("failed to reconnect");
+    vi.mocked(sendInput).mockRejectedValueOnce("x");
+    await expect(deliver("hi")).rejects.toThrow("failed to send input");
+  });
+
   it("keeps an expired token's error", async () => {
     vi.mocked(sendInput).mockRejectedValueOnce(new AuthError());
     await expect(deliver("/new do it")).rejects.toBeInstanceOf(AuthError);

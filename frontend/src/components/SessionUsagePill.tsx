@@ -330,10 +330,10 @@ export function SessionUsagePill({
                       <div className="usage-chip-group">
                         <p className="usage-chips-caption">Last turn</p>
                         <ul className="usage-chips">
-                          {contextUsageBreakdown.map(([label, value]) => (
-                            <li key={label}>
+                          {contextUsageBreakdown.map(({ key, label, tokens }) => (
+                            <li key={key}>
                               <em>{label}</em>
-                              <strong>{formatTokens(value)}</strong>
+                              <strong>{formatTokens(tokens)}</strong>
                             </li>
                           ))}
                         </ul>
@@ -410,10 +410,10 @@ export function SessionUsagePill({
                         </div>
                         {hasTokenTotals ? (
                           <ul className="usage-chips">
-                            {tokenUsageTotals.map(([label, value]) => (
-                              <li key={label}>
+                            {tokenUsageTotals.map(({ key, label, tokens }) => (
+                              <li key={key}>
                                 <em>{label}</em>
-                                <strong>{formatTokens(value)}</strong>
+                                <strong>{formatTokens(tokens)}</strong>
                               </li>
                             ))}
                           </ul>

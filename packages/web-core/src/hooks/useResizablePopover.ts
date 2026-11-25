@@ -71,7 +71,7 @@ export function useResizablePopover({
   direction,
   onResizing,
 }: ResizablePopoverOptions): ResizablePopover {
-  const [pref, setPref] = useState<PopoverSize>(() => (enabled ? readPopoverSize(storageKey) : {}));
+  const [pref, setPref] = useState<PopoverSize>(() => readPopoverSize(storageKey));
   // What the pointer and key handlers merge into.
   const prefRef = useRef(pref);
   const [rendered, setRendered] = useState<{ width: number; height: number } | null>(null);
@@ -79,11 +79,11 @@ export function useResizablePopover({
 
   // Read again on open, for a size set by another popover with the same key.
   useEffect(() => {
-    if (!open || !enabled) return;
+    if (!open) return;
     const stored = readPopoverSize(storageKey);
     prefRef.current = stored;
     setPref(stored);
-  }, [open, enabled, storageKey]);
+  }, [open, storageKey]);
 
   const apply = useCallback(
     (patch: PopoverSize) => {

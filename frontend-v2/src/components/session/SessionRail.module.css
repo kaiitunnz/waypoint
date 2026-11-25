@@ -12,8 +12,13 @@
   flex: none;
   align-items: center;
   gap: 4px;
-  height: var(--bar-height);
-  padding: 0 8px 0 16px;
+  height: calc(var(--bar-height) + var(--safe-top));
+  padding: var(--safe-top) 8px 0 16px;
+}
+
+/* In a drawer the panel button sits where the header's is. */
+.closable {
+  padding-left: 14px;
 }
 
 .heading {
@@ -27,7 +32,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 16px;
+  padding-bottom: calc(16px + var(--safe-bottom));
 }
 
 .sectionHead {
@@ -62,8 +67,10 @@
   border-radius: var(--r) 0 0 var(--r);
 }
 
-.item:hover {
-  background: var(--fill-quiet);
+@media (hover: hover) and (pointer: fine) {
+  .item:hover {
+    background: var(--fill-quiet);
+  }
 }
 
 /* The open session takes the plane's colour so it joins the conversation like a tab. */
@@ -106,4 +113,10 @@
 .single .name {
   font-weight: 400;
   color: var(--muted);
+}
+
+@media not all and (hover: hover) and (pointer: fine) {
+  .single {
+    min-height: 44px;
+  }
 }

@@ -85,7 +85,7 @@
   padding-right: 44px;
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .input {
     min-height: 38px;
     padding: 0 10px;

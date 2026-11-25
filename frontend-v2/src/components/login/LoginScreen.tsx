@@ -28,7 +28,7 @@ import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Logo } from "@/components/ui/Logo";
 import { signIn } from "@/lib/auth";
-import { useDesktop } from "@/lib/layout";
+import { useMultiColumn, usePointerUI } from "@/lib/layout";
 
 import { HostPicker } from "@/components/hosts/HostPicker";
 import { SignInForm } from "./SignInForm";
@@ -62,7 +62,8 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps) {
-  const desktop = useDesktop();
+  const multiColumn = useMultiColumn();
+  const pointer = usePointerUI();
   const [recents] = useState(readRecentHosts);
   const { snapshot, loading, refresh } = useTailnetSnapshot({ kind: "local" });
   const [query, setQuery] = useState("");
@@ -93,7 +94,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
   // Set only for a finished host and a valid port: the one address Connect signs in to.
   const url = choice && port !== null && isCompleteHost(choice.hostname) ? buildBackendUrl({ ...choice, port }) : null;
   // The only probe: the chosen host and port, once its sign-in form is on screen.
-  const probe = useBackendProbe(desktop || step === "password" ? url : null);
+  const probe = useBackendProbe(multiColumn || step === "password" ? url : null);
 
   const select = (row: HostRow) => {
     const next = choiceFromUrl(row.url, row.name);
@@ -115,11 +116,11 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
     if (address.hostname !== choice?.hostname) setPassword("");
     setChoice({ name: address.hostname, protocol: address.protocol, hostname: address.hostname });
     setPortText(address.portText);
-    if (!desktop) setStep("password");
+    if (!multiColumn) setStep("password");
   };
 
   const changeHost = () => {
-    if (desktop) {
+    if (multiColumn) {
       searchRef.current?.focus();
     } else {
       setStep("hosts");
@@ -151,12 +152,12 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       groups={groups}
       query={query}
       onQueryChange={setQuery}
-      // On mobile a pick moves straight to the password screen, so only desktop shows it.
-      selectedKey={desktop && url ? rowKeyFor(groups, url) : null}
+      // With one column a pick moves straight to the password screen, so only two columns show it.
+      selectedKey={multiColumn && url ? rowKeyFor(groups, url) : null}
       onSelect={select}
       onAddress={typed}
-      liveAddress={desktop}
-      port={desktop ? { text: portText, onChange: setPortText } : undefined}
+      liveAddress={multiColumn}
+      port={multiColumn ? { text: portText, onChange: setPortText } : undefined}
       searchRef={searchRef}
       headingLevel="h2"
     />
@@ -169,7 +170,8 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
       portText={portText}
       portValid={port !== null}
       canConnect={url !== null}
-      autoFocusPassword={!desktop || !addressTyped}
+      // Beside the host list, only a pointer takes the focus unasked: on touch it raises the keyboard.
+      autoFocusPassword={!multiColumn || (pointer && !addressTyped)}
       onPortChange={setPortText}
       onChangeHost={changeHost}
       probe={probe}
@@ -186,7 +188,7 @@ export function LoginScreen({ defaultHost, hostName, notice }: LoginScreenProps)
     </p>
   ) : null;
 
-  if (desktop) {
+  if (multiColumn) {
     return (
       <main className={styles.page}>
         <section className={styles.card} aria-label="Connect to a host">

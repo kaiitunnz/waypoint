@@ -9,31 +9,32 @@ import { Badge } from "@/components/ui/Badge";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { cx } from "@/lib/cx";
 
 import { DecisionAsk } from "./DecisionAsk";
 import { QuestionAsk } from "./QuestionAsk";
 import styles from "./NeedsYouSection.module.css";
 
-const MOBILE_LIMIT = 3;
+const PHONE_LIMIT = 3;
 
 interface NeedsYouSectionProps {
   asks: PendingAsk[];
   // Open inbox items, which have no card here.
   inbox: number;
-  desktop: boolean;
+  phone: boolean;
   agentLabel: (ask: PendingAsk) => string;
   now: number;
 }
 
-export function NeedsYouSection({ asks, inbox, desktop, agentLabel, now }: NeedsYouSectionProps) {
+export function NeedsYouSection({ asks, inbox, phone, agentLabel, now }: NeedsYouSectionProps) {
   const [all, setAll] = useState(false);
   if (asks.length === 0 && inbox === 0) return null;
-  const folded = !desktop && !all && asks.length > MOBILE_LIMIT;
-  const shown = folded ? asks.slice(0, MOBILE_LIMIT) : asks;
+  const folded = phone && !all && asks.length > PHONE_LIMIT;
+  const shown = folded ? asks.slice(0, PHONE_LIMIT) : asks;
 
   return (
-    <section className={styles.section}>
-      <SectionHeading title="Needs you" count={asks.length + inbox} dense={!desktop} />
+    <section className={cx(styles.section, !phone && styles.full)}>
+      <SectionHeading title="Needs you" count={asks.length + inbox} dense={phone} />
       <div className={styles.cards}>
         {shown.map((ask) => {
           const agent = agentLabel(ask);
@@ -47,7 +48,7 @@ export function NeedsYouSection({ asks, inbox, desktop, agentLabel, now }: Needs
       {folded ? (
         <div className={styles.more}>
           <ActionChip icon="chevron-down" onClick={() => setAll(true)}>
-            Show {asks.length - MOBILE_LIMIT} more
+            Show {asks.length - PHONE_LIMIT} more
           </ActionChip>
         </div>
       ) : null}

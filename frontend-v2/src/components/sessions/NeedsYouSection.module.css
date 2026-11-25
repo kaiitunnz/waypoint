@@ -34,19 +34,23 @@
   color: var(--faint);
 }
 
-@media (min-width: 900px) {
-  .inboxWrap {
-    padding: 12px 16px 0;
-  }
+/* The full layout lines the cards up with its tiles. */
+.full .inboxWrap {
+  padding: 12px 16px 0;
+}
 
-  .cards {
+.full .cards {
+  gap: 12px;
+  padding: 0 16px;
+}
+
+.full .more {
+  padding: 4px 16px 0;
+}
+
+@media (min-width: 900px) {
+  .full .cards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    padding: 0 16px;
-  }
-
-  .more {
-    padding: 4px 16px 0;
   }
 }

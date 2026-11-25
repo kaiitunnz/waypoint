@@ -5,6 +5,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cx } from "@/lib/cx";
 
+import { PanelButton } from "./PanelButton";
 import styles from "./SidePane.module.css";
 
 type PaneTab = "overview" | "changes" | "files";
@@ -15,8 +16,9 @@ const TABS: { id: PaneTab; label: string }[] = [
   { id: "files", label: "Files" },
 ];
 
-// The terminal is a main-pane view, never a tab here.
-export function SidePane() {
+// The terminal is a main-pane view, never a tab here. `onClose` is for the pane
+// drawn as a drawer.
+export function SidePane({ onClose }: { onClose?: () => void }) {
   const [tab, setTab] = useState<PaneTab>("overview");
   const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ overview: null, changes: null, files: null });
 
@@ -32,25 +34,32 @@ export function SidePane() {
   };
   return (
     <aside className={styles.pane} aria-label="Session details">
-      <div role="tablist" aria-label="Side pane" className={styles.tabs} onKeyDown={onKeyDown}>
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            ref={(node) => {
-              tabs.current[item.id] = node;
-            }}
-            type="button"
-            role="tab"
-            id={`pane-tab-${item.id}`}
-            aria-selected={item.id === tab}
-            aria-controls={item.id === tab ? "pane-panel" : undefined}
-            tabIndex={item.id === tab ? 0 : -1}
-            className={cx(styles.tab, item.id === tab && styles.on)}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className={styles.top}>
+        <div role="tablist" aria-label="Side pane" className={styles.tabs} onKeyDown={onKeyDown}>
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              ref={(node) => {
+                tabs.current[item.id] = node;
+              }}
+              type="button"
+              role="tab"
+              id={`pane-tab-${item.id}`}
+              aria-selected={item.id === tab}
+              aria-controls={item.id === tab ? "pane-panel" : undefined}
+              tabIndex={item.id === tab ? 0 : -1}
+              className={cx(styles.tab, item.id === tab && styles.on)}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        {onClose ? (
+          <span className={styles.close}>
+            <PanelButton panel="pane" size="sm" control={{ open: true, toggle: onClose }} />
+          </span>
+        ) : null}
       </div>
       <div role="tabpanel" id="pane-panel" tabIndex={0} aria-labelledby={`pane-tab-${tab}`} className={styles.body}>
         <EmptyState title="Not built yet" detail={TABS.find((item) => item.id === tab)?.label} />

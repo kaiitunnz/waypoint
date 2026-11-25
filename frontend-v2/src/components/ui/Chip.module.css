@@ -37,7 +37,7 @@
   background: color-mix(in srgb, var(--text) 8%, var(--plane));
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .chip {
     height: 36px;
   }

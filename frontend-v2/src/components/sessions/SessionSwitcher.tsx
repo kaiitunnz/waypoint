@@ -30,7 +30,7 @@ import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { useShowExited } from "@/lib/show-exited";
-import { useDesktop } from "@/lib/layout";
+import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { PinMark } from "./PinMark";
@@ -54,7 +54,7 @@ function highlighted(title: string, positions: number[]): ReactNode {
 // Exited sessions page in from the server.
 export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const desktop = useDesktop();
+  const pointer = usePointerUI();
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const catalog = useBackendCatalog(host, token, null);
@@ -181,7 +181,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     <Dialog open onClose={onClose} title="Switch session" size="lg" flush>
       <div className={styles.search}>
         <SearchInput
-          data-autofocus={desktop ? "" : undefined}
+          data-autofocus={pointer ? "" : undefined}
           role="combobox"
           aria-expanded="true"
           aria-controls={listId}

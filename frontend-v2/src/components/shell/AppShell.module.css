@@ -15,7 +15,7 @@
   padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom));
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .app {
     display: grid;
     grid-template-columns: var(--rail-width) minmax(0, 1fr);

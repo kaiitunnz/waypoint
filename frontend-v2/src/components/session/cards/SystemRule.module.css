@@ -41,8 +41,10 @@
   text-align: center;
 }
 
-.toggle:hover {
-  color: var(--muted);
+@media (hover: hover) and (pointer: fine) {
+  .toggle:hover {
+    color: var(--muted);
+  }
 }
 
 .toggle:active {

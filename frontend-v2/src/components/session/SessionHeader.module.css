@@ -28,8 +28,10 @@
   color: var(--faint);
 }
 
-.switch:hover {
-  background: var(--fill-quiet);
+@media (hover: hover) and (pointer: fine) {
+  .switch:hover {
+    background: var(--fill-quiet);
+  }
 }
 
 .switch:active {
@@ -67,6 +69,11 @@
     align-items: flex-start;
     justify-content: center;
     gap: 0;
+  }
+
+  /* A column item takes its text's width; cap it, allowing for the -6px side margins. */
+  .switch {
+    max-width: calc(100% + 12px);
   }
 
   .name {

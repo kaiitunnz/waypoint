@@ -17,6 +17,12 @@
   inset: 0 -7px;
 }
 
+/* A toggle beside it covers that reach. */
+.beforeToggle {
+  justify-content: center;
+  min-width: 44px;
+}
+
 .badge {
   min-width: 17px;
   height: 17px;

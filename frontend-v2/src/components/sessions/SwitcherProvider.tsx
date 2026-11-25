@@ -20,7 +20,8 @@ export function useSwitcher(): SwitcherControls {
   return value;
 }
 
-const hasModalDialog = () => document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+// A side drawer is a place to switch from, so the shortcut still answers over it.
+const hasModalDialog = () => document.querySelector('[role="dialog"][aria-modal="true"]:not([data-drawer])') !== null;
 
 // Mounted once for the signed-in app: Cmd/Ctrl+K toggles the switcher from every
 // screen, and a screen's title can open it through `useSwitcher`.

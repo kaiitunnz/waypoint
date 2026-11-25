@@ -20,6 +20,7 @@
     "./hostPicker": "./src/hostPicker.ts",
     "./keyboard": "./src/keyboard.ts",
     "./launchTargets": "./src/launchTargets.ts",
+    "./layoutRules": "./src/layoutRules.ts",
     "./markdown": "./src/markdown.ts",
     "./markdownCode": "./src/markdownCode.ts",
     "./modelDisplay": "./src/modelDisplay.ts",

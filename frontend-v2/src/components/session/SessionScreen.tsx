@@ -5,6 +5,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "rea
 
 import { liveTerminal, hasTerminalPane, fidelityFor, useBackendCatalog } from "@waypoint/web-core/backends";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
+import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
@@ -16,8 +17,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
-import { useDesktop } from "@/lib/layout";
-import { useLocalSetting, usePanelOpen } from "@/lib/local-setting";
+import { useNarrowerThan, usePointerUI } from "@/lib/layout";
+import { useLocalSetting } from "@/lib/local-setting";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { DensityToggle } from "./DensityToggle";
@@ -27,16 +28,16 @@ import { SessionFooter } from "./SessionFooter";
 import { SessionHeader } from "./SessionHeader";
 import { SessionRail } from "./SessionRail";
 import styles from "./SessionScreen.module.css";
+import { SideDrawer } from "./SideDrawer";
 import { SidePane } from "./SidePane";
 import { Transcript } from "./Transcript";
+import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
 
-// The side pane and rail follow the width until the person decides.
-const PANE_QUERY = "(min-width: 1280px)";
-const RAIL_QUERY = "(min-width: 1100px)";
-
 export function SessionScreen({ id }: { id: string }) {
-  const desktop = useDesktop();
+  const pointer = usePointerUI();
+  const panels = useSessionPanels();
+  const [conversation, narrowHeader] = useNarrowerThan(COMPACT_HEADER_WIDTH);
   const router = useRouter();
   const { host, token } = useShellData();
   const feed = useSessionsData();
@@ -48,8 +49,6 @@ export function SessionScreen({ id }: { id: string }) {
 
   const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
   const [view, setView] = useState<SessionView>("chat");
-  const [railOpen, setRailOpen] = usePanelOpen("waypoint-session-rail", RAIL_QUERY);
-  const [paneOpen, setPaneOpen] = usePanelOpen("waypoint-session-pane", PANE_QUERY);
   const goHome = useCallback(() => router.replace("/"), [router]);
   const { onAction, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
 
@@ -92,17 +91,17 @@ export function SessionScreen({ id }: { id: string }) {
   const standing = session ? sessionStanding(session, asking || (pendingQuestions?.questions.length ?? 0) > 0, connection) : null;
   const othersNeedYou = feed.askSessionIds.size - (asking ? 1 : 0);
 
-  const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={desktop ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
+  const fullHeader = pointer && !narrowHeader;
+  const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
+  const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
+  const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
   const overflow = session ? (
-    <SessionMenu
-      session={session}
-      subtitle={agent}
-      size="sm"
-      header={desktop ? null : <DensityToggle variant="segmented" value={density} onChange={setDensity} />}
-      onAction={onAction}
-    />
+    <SessionMenu session={session} subtitle={agent} header={menuDensity} onAction={onAction} />
   ) : null;
   const title = session?.title || "Session";
+  const columns = panels.mode === "columns";
+  const railColumn = columns && panels.rail.open;
+  const paneColumn = columns && panels.pane.open;
 
   const body = loadFailed ? (
     <EmptyState
@@ -126,30 +125,48 @@ export function SessionScreen({ id }: { id: string }) {
   return (
     <SessionContextProvider value={context}>
       <AskStateProvider value={askState}>
-        <div className={cx(styles.screen, railOpen && styles.railOpen, paneOpen && styles.paneOpen)}>
-          {desktop && railOpen ? <SessionRail currentId={id} /> : null}
-          <section className={styles.conv} aria-label="Conversation">
-            {desktop ? (
+        <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
+          {railColumn ? <SessionRail currentId={id} /> : null}
+          <section ref={conversation} className={styles.conv} aria-label="Conversation">
+            {pointer ? (
               <SessionHeader
                 title={title}
                 standing={standing}
                 agent={agent}
                 onTitle={switcher.open}
-                railOpen={railOpen}
-                onToggleRail={() => setRailOpen(!railOpen)}
-                paneOpen={paneOpen}
-                onTogglePane={() => setPaneOpen(!paneOpen)}
+                rail={panels.rail}
+                pane={panels.pane}
                 view={viewSwitch}
-                density={activeView === "chat" ? <DensityToggle variant="text" value={density} onChange={setDensity} /> : null}
+                density={inlineDensity}
                 overflow={overflow}
               />
             ) : (
-              <SessionBar title={title} standing={standing} agent={agent} othersNeedYou={othersNeedYou} onTitle={switcher.open} view={viewSwitch} overflow={overflow} />
+              <SessionBar
+                title={title}
+                standing={standing}
+                agent={agent}
+                othersNeedYou={othersNeedYou}
+                onTitle={switcher.open}
+                rail={columns ? panels.rail : undefined}
+                pane={columns ? panels.pane : undefined}
+                view={viewSwitch}
+                overflow={overflow}
+              />
             )}
             {body}
             <SessionFooter />
           </section>
-          {desktop && paneOpen ? <SidePane /> : null}
+          {paneColumn ? <SidePane /> : null}
+          {panels.drawer === "rail" ? (
+            <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer}>
+              <SessionRail currentId={id} onClose={panels.closeDrawer} onPick={panels.pickFromDrawer} />
+            </SideDrawer>
+          ) : null}
+          {panels.drawer === "pane" ? (
+            <SideDrawer side="right" label="Session details" onClose={panels.closeDrawer}>
+              <SidePane onClose={panels.closeDrawer} />
+            </SideDrawer>
+          ) : null}
         </div>
         {dialogs}
       </AskStateProvider>

@@ -17,7 +17,7 @@ import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
-import { useDesktop } from "@/lib/layout";
+import { usePhoneLayout } from "@/lib/layout";
 import { useShowExited } from "@/lib/show-exited";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
@@ -35,7 +35,7 @@ import { BoardSummaryCard, LimitsReadout, LimitsStrip, ScheduledSummaryList } fr
 import styles from "./SessionsHome.module.css";
 
 export function SessionsHome() {
-  const desktop = useDesktop();
+  const phone = usePhoneLayout();
   const { host, token, needsYou, inboxCount } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
@@ -82,7 +82,6 @@ export function SessionsHome() {
       session={session}
       subtitle={agentFor(session)}
       onAction={onAction}
-      size={desktop ? "sm" : "md"}
     />
   );
   const rowProps = (session: SessionRecord) => {
@@ -100,19 +99,19 @@ export function SessionsHome() {
   const previewGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>
-        <SectionHeading title={title} count={group.length} dense={!desktop} />
-        {desktop ? (
-          <ul className={styles.tiles}>
-            {group.map((session) => (
-              <LiveTile key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
-            ))}
-          </ul>
-        ) : (
+        <SectionHeading title={title} count={group.length} dense={phone} />
+        {phone ? (
           <List>
             {group.map((session) => (
               <LiveRow key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
             ))}
           </List>
+        ) : (
+          <ul className={styles.tiles}>
+            {group.map((session) => (
+              <LiveTile key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
+            ))}
+          </ul>
         )}
       </section>
     ) : null;
@@ -127,19 +126,20 @@ export function SessionsHome() {
         <ResultRow key={session.id} {...rowProps(session)} />
       ))}
       paging={paging}
-      desktop={desktop}
+      phone={phone}
     />
   ) : null;
 
   const sectionsView = searching ? null : (
     <>
-      <NeedsYouSection asks={asks} inbox={inboxCount} desktop={desktop} agentLabel={agentLabel} now={now} />
+      <NeedsYouSection asks={asks} inbox={inboxCount} phone={phone} agentLabel={agentLabel} now={now} />
       {previewGroup("Pinned", sections.pinned)}
       {previewGroup("Live", sections.live)}
       {exitedCount > 0 ? (
         <ExitedGroup
           count={exitedCount}
-          short={!desktop}
+          short={phone}
+          divided={phone}
           open={showExited}
           onToggle={() => setShowExited(!showExited)}
           onDeleteExited={() => openDialog({ kind: "deleteExited" })}
@@ -148,7 +148,7 @@ export function SessionsHome() {
           <div className={styles.inset}>
             <List>
               {listed.items.map((session) => (
-                <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} />
+                <CompactRow key={session.id} {...rowProps(session)} detailed={!phone} />
               ))}
             </List>
           </div>
@@ -173,7 +173,7 @@ export function SessionsHome() {
   const main = (
     <>
       <HomeHeader
-        desktop={desktop}
+        phone={phone}
         query={query}
         onQuery={setQuery}
         searchOpen={searchOpen}
@@ -181,22 +181,22 @@ export function SessionsHome() {
         onNew={() => setNewOpen(true)}
         onTitle={switcher.open}
       />
-      {desktop ? null : <LimitsStrip usage={usage} now={now} />}
+      {phone ? <LimitsStrip usage={usage} now={now} /> : null}
       {results}
       {sectionsView}
-      {desktop || searching ? null : (
+      {phone && !searching ? (
         <div className={styles.summaries}>
           <ScheduledSummaryList summary={scheduled} />
           <BoardSummaryCard summary={board} hideEmpty />
         </div>
-      )}
+      ) : null}
     </>
   );
 
   return (
-    <div className={cx(styles.home, desktop && styles.desktop)}>
-      {desktop ? <div className={styles.main}>{main}</div> : main}
-      {desktop ? (
+    <div className={cx(styles.home, !phone && styles.full)}>
+      <div className={styles.main}>{main}</div>
+      {phone ? null : (
         <aside className={styles.side} aria-label="Limits and summaries">
           <div className={styles.sideInner}>
             <LimitsReadout usage={usage} now={now} />
@@ -204,7 +204,7 @@ export function SessionsHome() {
             <BoardSummaryCard summary={board} />
           </div>
         </aside>
-      ) : null}
+      )}
 
       <NewSessionDialog open={newOpen} onClose={() => setNewOpen(false)} />
       {dialogs}

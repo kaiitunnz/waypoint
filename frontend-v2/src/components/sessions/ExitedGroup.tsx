@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
+import { cx } from "@/lib/cx";
 
 import styles from "./ExitedGroup.module.css";
 import { PagingFooter } from "./PagingFooter";
@@ -14,6 +15,7 @@ interface ExitedGroupProps {
   count: number;
   // Shortens the heading to "3 exited".
   short?: boolean;
+  divided?: boolean;
   open: boolean;
   onToggle: () => void;
   onDeleteExited?: () => void;
@@ -22,9 +24,9 @@ interface ExitedGroupProps {
 }
 
 // "Delete exited" lives in the menu, never as a loud button.
-export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, children, paging }: ExitedGroupProps) {
+export function ExitedGroup({ count, short, divided, open, onToggle, onDeleteExited, children, paging }: ExitedGroupProps) {
   return (
-    <section className={styles.group}>
+    <section className={cx(styles.group, divided && styles.divided)}>
       <div className={styles.line}>
         <button type="button" className={styles.toggle} aria-expanded={open} onClick={onToggle}>
           <StatusLamp state="exited" />

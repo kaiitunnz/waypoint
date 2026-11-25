@@ -1,5 +1,5 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   isComposingKeyEvent,
@@ -71,9 +71,77 @@ describe("isInlineMenuAcceptKey", () => {
 });
 
 describe("trapTabFocus", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A root holding, in document order, a tab stop, a non-stop, the other tab stop
+  // and a trailing non-stop; `focused` picks what holds focus.
+  type Spot = "root" | "first" | "middle" | "last" | "trailing" | "outside";
+  let selector = "";
+  function press(focused: Spot, shiftKey: boolean, tabStopsOnly?: boolean) {
+    const order: Spot[] = ["root", "first", "middle", "last", "trailing"];
+    const moved: string[] = [];
+    const nodes = new Map(
+      order.map((spot) => [
+        spot,
+        {
+          spot,
+          focus: () => moved.push(spot),
+          compareDocumentPosition: (other: { spot: Spot }) =>
+            order.indexOf(other.spot) < order.indexOf(spot) ? 2 : 4,
+        },
+      ]),
+    );
+    const root = {
+      ...nodes.get("root")!,
+      querySelectorAll: (query: string) => {
+        selector = query;
+        return [nodes.get("first")!, nodes.get("last")!];
+      },
+      contains: (node: { spot: Spot }) => node.spot !== "outside",
+    };
+    const active = focused === "root" ? root : (nodes.get(focused) ?? { spot: "outside" });
+    vi.stubGlobal("document", { activeElement: active });
+    vi.stubGlobal("Node", { DOCUMENT_POSITION_PRECEDING: 2, DOCUMENT_POSITION_FOLLOWING: 4 });
+    const event = { ...key({ key: "Tab", shiftKey }), preventDefault: vi.fn() };
+    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { tabStopsOnly });
+    return moved;
+  }
+
   it("does nothing for non-Tab keys or a missing root", () => {
     expect(trapTabFocus(key({ key: "a" }) as unknown as KeyboardEvent, {} as HTMLElement)).toBe(false);
     expect(trapTabFocus(key({ key: "Tab" }) as unknown as KeyboardEvent, null)).toBe(false);
+  });
+
+  it("wraps at either end and pulls focus back from outside", () => {
+    expect(press("last", false)).toEqual(["first"]);
+    expect(press("first", true)).toEqual(["last"]);
+    expect(press("outside", false)).toEqual(["first"]);
+    expect(press("first", false)).toEqual([]);
+  });
+
+  it("leaves a control out of the tab order out of the cycle, only when asked to", () => {
+    press("first", false);
+    expect(selector).toBe(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    press("first", false, true);
+    const parts = selector.split(", ");
+    expect(parts).toHaveLength(6);
+    expect(parts.every((part) => part.endsWith(':not([tabindex="-1"])'))).toBe(true);
+  });
+
+  it("wraps from a non-stop with nothing beyond it, only when asked to", () => {
+    expect(press("root", true, true)).toEqual(["last"]);
+    expect(press("trailing", false, true)).toEqual(["first"]);
+    expect(press("root", true)).toEqual([]);
+    expect(press("trailing", false)).toEqual([]);
+  });
+
+  it("leaves Tab to the browser from a non-stop with a stop beyond it", () => {
+    expect(press("root", false, true)).toEqual([]);
+    expect(press("middle", false, true)).toEqual([]);
+    expect(press("middle", true, true)).toEqual([]);
+    expect(press("trailing", true, true)).toEqual([]);
   });
 });
 

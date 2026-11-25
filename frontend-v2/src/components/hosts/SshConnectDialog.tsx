@@ -5,9 +5,8 @@ import { useState, type FormEvent } from "react";
 import type { SshConnectOutcome } from "@waypoint/web-core/hooks/useLaunchTargets";
 
 import { Button } from "@/components/ui/Button";
-import { Modal, Sheet } from "@/components/ui/Dialog";
+import { Dialog } from "@/components/ui/Dialog";
 import { Field, PasswordInput } from "@/components/ui/Field";
-import { useDesktop } from "@/lib/layout";
 
 import styles from "./SshConnectDialog.module.css";
 
@@ -20,7 +19,6 @@ interface SshConnectDialogProps {
 // Asks for a password-auth target's SSH password. It lives in this component's
 // state only and is gone when it closes.
 export function SshConnectDialog({ targetName, onConnect, onClose }: SshConnectDialogProps) {
-  const desktop = useDesktop();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -70,14 +68,9 @@ export function SshConnectDialog({ targetName, onConnect, onClose }: SshConnectD
       </Button>
     </>
   );
-  const title = `Connect to ${targetName}`;
-  return desktop ? (
-    <Modal open title={title} onClose={onClose} footer={footer}>
+  return (
+    <Dialog open title={`Connect to ${targetName}`} onClose={onClose} footer={footer}>
       {body}
-    </Modal>
-  ) : (
-    <Sheet open title={title} onClose={onClose} footer={footer}>
-      {body}
-    </Sheet>
+    </Dialog>
   );
 }

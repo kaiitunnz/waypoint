@@ -6,7 +6,13 @@ import { permissionModesFor, type BackendCatalog } from "@waypoint/web-core/back
 import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
 import { useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
 import { useTuningDraft } from "@waypoint/web-core/hooks/useTuningDraft";
-import { nextModeId, restartFields, tuningOptions, type TuningInput } from "@waypoint/web-core/session/tuning";
+import {
+  currentPicks,
+  nextModeId,
+  restartFields,
+  tuningOptions,
+  type TuningInput,
+} from "@waypoint/web-core/session/tuning";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { handleAuthFailure } from "@/lib/auth";
@@ -83,7 +89,9 @@ export function useComposerTuning({ host, token, session, catalog, onSession, on
       if (next !== null) {
         draft.select("mode", next);
         if (restart.mode) setOpenedBy("key");
-        setAnnouncement(`${input.modeOptions.find((option) => option.id === next)?.label ?? next} mode`);
+        const label = input.modeOptions.find((option) => option.id === next)?.label ?? next;
+        const staged = restart.mode && next !== currentPicks(input).mode;
+        setAnnouncement(staged ? `${label} mode, not applied until restart` : `${label} mode`);
       }
       return true;
     },

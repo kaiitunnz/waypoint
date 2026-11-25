@@ -21,7 +21,13 @@ import { cx } from "@/lib/cx";
 import { HighlightedText } from "./HighlightedText";
 import styles from "./SuggestionMenu.module.css";
 
+// The field points at the highlighted row by this id.
+export function suggestionId(menuId: string, index: number): string {
+  return `${menuId}-${index}`;
+}
+
 interface MenuProps {
+  id: string;
   activeIndex: number;
   itemRefs: RefObject<Array<HTMLButtonElement | null>>;
   onApply: (index: number) => void;
@@ -29,11 +35,12 @@ interface MenuProps {
 }
 
 // Rows keep the focus in the field, so they act on mouse down.
-function rowProps(index: number, { activeIndex, itemRefs, onApply, onHover }: MenuProps) {
+function rowProps(index: number, { id, activeIndex, itemRefs, onApply, onHover }: MenuProps) {
   return {
     ref: (node: HTMLButtonElement | null) => {
       itemRefs.current[index] = node;
     },
+    id: suggestionId(id, index),
     type: "button" as const,
     role: "option",
     "aria-selected": index === activeIndex,
@@ -52,7 +59,7 @@ interface CommandMenuProps extends MenuProps {
 
 export function CommandMenu({ suggestions, listRef, ...menu }: CommandMenuProps) {
   return (
-    <ul className={styles.menu} role="listbox" aria-label="Completions" ref={listRef}>
+    <ul id={menu.id} className={styles.menu} role="listbox" aria-label="Completions" ref={listRef}>
       {suggestions.map((entry, index) => {
         const hint = rowHint(entry);
         const description = rowDescription(entry);
@@ -98,7 +105,7 @@ export function MentionMenu({ host, token, sessionId, mentions, ...menu }: Menti
   }, [activeIndex, itemRefs]);
 
   return (
-    <ul className={styles.menu} role="listbox" aria-label="Session files">
+    <ul id={menu.id} className={styles.menu} role="listbox" aria-label="Session files">
       {mentions.map(({ file, positions }, index) => (
         <li key={file.id} role="presentation">
           <button {...rowProps(index, menu)} className={cx(styles.row, styles.file, index === menu.activeIndex && styles.active)}>

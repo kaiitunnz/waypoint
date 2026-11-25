@@ -9,7 +9,8 @@ import styles from "./Composer.module.css";
 
 interface FocusPillProps {
   busy: boolean;
-  onTurnOff: () => Promise<void>;
+  // Resolves false when Focus stayed on.
+  onTurnOff: () => Promise<boolean>;
   // Takes the focus once the pill is gone.
   returnFocusRef: RefObject<HTMLElement | null>;
 }
@@ -19,7 +20,7 @@ export function FocusPill({ busy, onTurnOff, returnFocusRef }: FocusPillProps) {
   const trigger = useRef<HTMLButtonElement>(null);
 
   async function turnOff() {
-    await onTurnOff();
+    if (!(await onTurnOff())) return;
     setOpen(false);
     // Deferred past the removal that drops the focus to the page.
     window.setTimeout(() => {

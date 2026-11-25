@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import {
   useCallback,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -20,7 +21,7 @@ import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { canInterrupt, composerAvailability } from "@waypoint/web-core/session/send";
+import { canInterrupt, composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 
@@ -37,7 +38,7 @@ import { ScheduleMessageDialog } from "./ScheduleMessageDialog";
 import { SendControl, StopButton } from "./SendControl";
 import { SendError } from "./SendError";
 import { SessionFilesDialog } from "./SessionFilesDialog";
-import { CommandMenu, MentionMenu } from "./SuggestionMenu";
+import { CommandMenu, MentionMenu, suggestionId } from "./SuggestionMenu";
 import { TuneControl } from "./TuneControl";
 import { UsageControl } from "./UsageControl";
 import { useComposerSend } from "./useComposerSend";
@@ -84,6 +85,7 @@ export function Composer({
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const tuneTrigger = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
   const reportError = useCallback(
     (message: string) => {
@@ -138,7 +140,11 @@ export function Composer({
   });
 
   const openSession = useCallback((id: string) => router.push(`/session/${id}`), [router]);
-  const focusField = useCallback(() => field.current?.focus(), []);
+  // For a control about to remove itself: its focus goes to the field. A tap
+  // that never focused the control moves nothing.
+  const keepFocus = useCallback(() => {
+    if (root.current?.contains(document.activeElement)) field.current?.focus();
+  }, []);
   const { canSend, sending, stopping, failure, send, retry, dismiss, stop } = useComposerSend({
     host,
     token,
@@ -152,7 +158,6 @@ export function Composer({
     resetCompletions,
     onPending,
     onOpenSession: openSession,
-    onQueueSettled: focusField,
   });
 
   const tuning = useComposerTuning({ host, token, session, catalog, onSession, onError: reportError });
@@ -220,6 +225,9 @@ export function Composer({
     ...(attachmentsEnabled ? [{ id: "mention", label: "Insert mention", icon: "at" as const, disabled, run: () => insert("@") }] : []),
   ];
 
+  // Where the highlight is while a menu is open: the keys act on it from the field.
+  const highlighted = mentionsOpen ? mentionIndex : suggestionsOpen ? activeIndex : null;
+
   const tray = attachments.hasItems ? (
     <div key="tray" className={styles.tray}>
       <AttachmentTray
@@ -241,6 +249,8 @@ export function Composer({
       disabled={disabled}
       placeholder={`Reply to ${agentName}`}
       aria-label="Reply"
+      aria-controls={highlighted === null ? undefined : menuId}
+      aria-activedescendant={highlighted === null ? undefined : suggestionId(menuId, highlighted)}
       onChange={(event) => setDraft(event.target.value)}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
@@ -280,7 +290,7 @@ export function Composer({
   const actionButtons = (
     <div key="actions" className={styles.actions}>
       {canInterrupt(session) ? <StopButton stopping={stopping} onStop={() => void stop()} /> : null}
-      <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} />
+      <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} onPick={keepFocus} />
     </div>
   );
 
@@ -288,6 +298,7 @@ export function Composer({
     <div ref={root} className={styles.composer}>
       {suggestionsOpen ? (
         <CommandMenu
+          id={menuId}
           suggestions={suggestions}
           listRef={listRef}
           activeIndex={activeIndex}
@@ -298,6 +309,7 @@ export function Composer({
       ) : null}
       {mentionsOpen ? (
         <MentionMenu
+          id={menuId}
           host={host}
           token={token}
           sessionId={sessionId}
@@ -308,7 +320,20 @@ export function Composer({
           onHover={setMentionIndex}
         />
       ) : null}
-      {failure ? <SendError failure={failure} onRetry={retry} onOpenSession={openSession} onDismiss={dismiss} /> : null}
+      {failure ? (
+        <SendError
+          failure={failure}
+          onRetry={() => {
+            keepFocus();
+            retry();
+          }}
+          onOpenSession={openSession}
+          onDismiss={() => {
+            keepFocus();
+            dismiss();
+          }}
+        />
+      ) : null}
       <div className={styles.surface}>
         {pointer
           ? [tray, input, plus, tune, meta, actionButtons]
@@ -347,6 +372,7 @@ export function Composer({
           token={token}
           sessionId={sessionId}
           initialText={draft}
+          canQueue={!isExitedSession(session)}
           onClose={() => setScheduleOpen(false)}
         />
       ) : null}

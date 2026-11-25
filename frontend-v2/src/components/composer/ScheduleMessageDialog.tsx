@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { createMessageSchedule, isAuthError } from "@waypoint/web-core/api";
 import { defaultRecurrenceState, type RecurrenceState, type TimingMode } from "@waypoint/web-core/recurrence";
@@ -31,15 +31,25 @@ interface ScheduleMessageDialogProps {
   token: string;
   sessionId: string;
   initialText: string;
+  // False on a stopped session, which cannot queue an idle message.
+  canQueue: boolean;
   onClose: () => void;
 }
 
-export function ScheduleMessageDialog({ host, token, sessionId, initialText, onClose }: ScheduleMessageDialogProps) {
+export function ScheduleMessageDialog({
+  host,
+  token,
+  sessionId,
+  initialText,
+  canQueue,
+  onClose,
+}: ScheduleMessageDialogProps) {
   const id = useId();
   const pointer = usePointerUI();
   const { toast } = useToast();
   const [text, setText] = useState(initialText);
-  const [trigger, setTrigger] = useState<ScheduleTrigger>("time");
+  const [chosen, setTrigger] = useState<ScheduleTrigger>("time");
+  const trigger = canQueue ? chosen : "time";
   const [idleBatch, setIdleBatch] = useState<IdleBatchMode>("next_cycle");
   const [timing, setTiming] = useState<OneTimeTiming>("delay");
   const [delay, setDelay] = useState("15");
@@ -50,6 +60,14 @@ export function ScheduleMessageDialog({ host, token, sessionId, initialText, onC
   const [recurrenceValid, setRecurrenceValid] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // False once the dialog has closed, which a request in flight can outlive.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
   const preview = schedulePreview(timing, delay, at);
   const idle = IDLE_SEND_MODES.find((mode) => mode.value === idleBatch);
   const blocked = !text.trim() || (trigger === "time" && timingMode === "repeat" && !recurrenceValid);
@@ -83,13 +101,15 @@ export function ScheduleMessageDialog({ host, token, sessionId, initialText, onC
               ? "Recurring message scheduled"
               : `Message scheduled for ${preview?.absolute ?? "later"}`,
       });
-      onClose();
+      if (shown.current) onClose();
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
         return;
       }
-      setError(err instanceof Error ? err.message : "failed to schedule message");
+      const message = err instanceof Error ? err.message : "failed to schedule message";
+      if (shown.current) setError(message);
+      else toast({ message, tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -124,18 +144,20 @@ export function ScheduleMessageDialog({ host, token, sessionId, initialText, onC
             onChange={(event) => setText(event.target.value)}
           />
         </Field>
-        <div className={styles.row}>
-          <span className={styles.label}>Trigger</span>
-          <SegmentedControl
-            label="Trigger"
-            value={trigger}
-            onChange={setTrigger}
-            segments={[
-              { value: "time", label: "Timed" },
-              { value: "idle", label: "When idle" },
-            ]}
-          />
-        </div>
+        {canQueue ? (
+          <div className={styles.row}>
+            <span className={styles.label}>Trigger</span>
+            <SegmentedControl
+              label="Trigger"
+              value={trigger}
+              onChange={setTrigger}
+              segments={[
+                { value: "time", label: "Timed" },
+                { value: "idle", label: "When idle" },
+              ]}
+            />
+          </div>
+        ) : null}
         {trigger === "idle" ? (
           <div className={styles.idle}>
             <SegmentedControl

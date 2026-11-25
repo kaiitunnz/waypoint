@@ -19,10 +19,12 @@ export function SendError({ failure, onRetry, onOpenSession, onDismiss }: SendEr
   const opened = failure.openSessionId;
   return (
     <div className={cx(styles.notice, failure.status === 409 && styles.busy)} role="alert">
-      <span className={styles.glyph}>
-        <Icon name="alert" size={16} />
-      </span>
-      <p className={styles.message}>{failure.message}</p>
+      <div className={styles.text}>
+        <span className={styles.glyph}>
+          <Icon name="alert" size={16} />
+        </span>
+        <p className={styles.message}>{failure.message}</p>
+      </div>
       {opened ? (
         <ActionChip icon="chevron-right" onClick={() => onOpenSession(opened)}>
           Open session

@@ -48,8 +48,6 @@ interface Options {
   resetCompletions: () => void;
   onPending: OptimisticSends["add"];
   onOpenSession: (sessionId: string) => void;
-  // A queued send has ended, however it went.
-  onQueueSettled: () => void;
 }
 
 const IDLE_QUEUED: Record<Exclude<SendMode, "now">, string> = {
@@ -70,7 +68,6 @@ export function useComposerSend({
   resetCompletions,
   onPending,
   onOpenSession,
-  onQueueSettled,
 }: Options) {
   const { toast } = useToast();
   const reportFailure = useFailureToast();
@@ -164,8 +161,6 @@ export function useComposerSend({
     } finally {
       inFlight.current = false;
       setSending(false);
-      // The menu item that queued it is gone, and its focus with it.
-      if (!immediate) onQueueSettled();
     }
   }
 

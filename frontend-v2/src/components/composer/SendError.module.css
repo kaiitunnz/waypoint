@@ -14,8 +14,21 @@
   background: color-mix(in srgb, var(--warn) 9%, var(--plane));
 }
 
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* One message line tall, from the message's top padding. */
 .glyph {
   display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  margin-top: 6px;
   color: var(--error);
 }
 
@@ -24,7 +37,6 @@
 }
 
 .message {
-  flex: 1 1 auto;
   min-width: 0;
   padding: 6px 0;
   line-height: 20px;

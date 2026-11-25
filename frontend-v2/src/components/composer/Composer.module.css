@@ -183,6 +183,11 @@
     gap: 4px;
   }
 
+  /* A popover pads nothing itself; a sheet does. */
+  .focusPanel {
+    padding: 14px;
+  }
+
   .plus,
   .tune,
   .meta,

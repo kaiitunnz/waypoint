@@ -104,3 +104,9 @@
 .meter {
   width: 240px;
 }
+
+@media (hover: hover) and (pointer: fine) {
+  .flyoutDemo {
+    padding: 14px;
+  }
+}

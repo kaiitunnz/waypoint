@@ -338,7 +338,7 @@ export function Gallery() {
         width={280}
         resizeKey="waypoint.gallery-popover-size"
       >
-        <p>A resizable popover above its trigger on a pointer client, a sheet on touch.</p>
+        <p className={styles.flyoutDemo}>A resizable popover above its trigger on a pointer client, a sheet on touch.</p>
       </Flyout>
     </div>
   );

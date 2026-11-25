@@ -42,8 +42,8 @@ class RestoreCoordinator:
         self._runtime = runtime
         self._timeout = timeout_seconds
         self._restoring: dict[str, _Restore] = {}
-        # Sessions a reattach is bringing back, from before its restore begins.
-        self._reattaching: set[str] = set()
+        # Sessions whose process is being replaced, from before the old one goes.
+        self._restarting: set[str] = set()
         # Sessions being closed, which take no new restore.
         self._closing: Counter[str] = Counter()
 
@@ -52,28 +52,32 @@ class RestoreCoordinator:
 
     def holds_sends(self, session_id: str) -> bool:
         """Whether sends queue for the session: it is restoring or about to."""
-        return self.is_restoring(session_id) or session_id in self._reattaching
+        return self.is_restoring(session_id) or session_id in self._restarting
+
+    def is_closing(self, session_id: str) -> bool:
+        return session_id in self._closing
 
     @contextmanager
-    def reattaching(self, session: SessionRecord) -> Iterator[None]:
-        """Queue sends for the whole of a reattach, which tears the old process
-        down before its restore begins. The caller holds the session lock."""
+    def restarting(self, session: SessionRecord) -> Iterator[None]:
+        """Queue sends for the whole of a reattach or settings change, which
+        tears the old process down before its restore begins. The caller holds
+        the session lock."""
         if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
             yield
             return
-        self._reattaching.add(session.id)
+        self._restarting.add(session.id)
         try:
             yield
         finally:
-            self._reattaching.discard(session.id)
+            self._restarting.discard(session.id)
 
     @asynccontextmanager
     async def closing(self, session_id: str) -> AsyncIterator[None]:
         """Keep restores off a session while the block closes it.
 
         The restore in flight is stopped and any other is refused. A stopped one
-        leaves the session ``starting``, which holds sends back, so the block
-        records the final status."""
+        leaves the session ``starting`` and counts as restoring until the block
+        ends, so the block records the final status."""
         self._closing[session_id] += 1
         try:
             if entry := self._restoring.get(session_id):
@@ -84,6 +88,8 @@ class RestoreCoordinator:
             self._closing[session_id] -= 1
             if not self._closing[session_id]:
                 del self._closing[session_id]
+                # Any entry left is a restore this close stopped.
+                self._restoring.pop(session_id, None)
 
     def require_restored(self, session_id: str) -> None:
         if self.is_restoring(session_id):
@@ -172,7 +178,9 @@ class RestoreCoordinator:
                 self._write_back(previous)
             raise
         finally:
-            self._restoring.pop(session.id, None)
+            # A close keeps the entry until it has recorded the final status.
+            if not entry.superseded:
+                self._restoring.pop(session.id, None)
             entry.settled.set()
 
     def _write_back(self, previous: SessionRecord) -> None:

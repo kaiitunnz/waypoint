@@ -326,7 +326,8 @@ What happens during a restore depends on the driver's `has_terminal_pane`:
   `starting` and the restore is bounded by `session_restore_timeout_seconds`
   (default 90). Requests that drive the agent return `409`. Agent sends,
   scheduled messages and wakes are held and delivered once the session can take
-  them. Terminate and delete cancel the restore.
+  them; a reconnect or settings change holds them from before it tears the old
+  process down. Terminate and delete cancel the restore.
 - **Terminal pane** (tmux, `claude_tty`). The pane is live, so the session keeps
   its status and the restore is not bounded or cancelled.
 

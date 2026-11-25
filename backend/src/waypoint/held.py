@@ -227,7 +227,7 @@ class HeldQueue:
         if (
             session.focus
             or session.status in _UNDELIVERABLE
-            or self._runtime.restores.holds_sends(session_id)
+            or self._paused(session_id)
         ):
             return
         transport = self._runtime.transport_for(session)
@@ -236,11 +236,12 @@ class HeldQueue:
                 if held.hold_reason is HeldReason.FOCUS:
                     continue
                 current = self._runtime.storage.get_session(session_id)
-                if current is None or current.focus:
+                # A restart or close can begin while an earlier item goes out.
+                if current is None or current.focus or self._paused(session_id):
                     break
                 session = current
-                if held.hold_reason is HeldReason.IDLE and not (
-                    self._runtime.wake_eligible(session)
+                if held.hold_reason is HeldReason.IDLE and not self._ready_for(
+                    held, session
                 ):
                     continue
                 if transport.has_pending_approval(session):
@@ -265,6 +266,21 @@ class HeldQueue:
             for held in self._runtime.storage.list_held_messages(session_id)
         ):
             self._auto_held.discard(session_id)
+
+    def _paused(self, session_id: str) -> bool:
+        restores = self._runtime.restores
+        return restores.holds_sends(session_id) or restores.is_closing(session_id)
+
+    def _ready_for(self, held: HeldMessageRecord, session: SessionRecord) -> bool:
+        """Whether an ``idle``-held item may go out."""
+        # A send queued behind a restore also follows an interrupted turn, as a
+        # fresh send would. A wake waits for the session to be at rest.
+        if (
+            held.origin is not HeldMessageOrigin.WAKE
+            and session.status is SessionStatus.INTERRUPTED
+        ):
+            return True
+        return self._runtime.wake_eligible(session)
 
     def _retry_later(self, session_id: str) -> None:
         if self._stopped or session_id in self._retries:

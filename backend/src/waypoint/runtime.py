@@ -228,6 +228,9 @@ STRUCTURED_LOG_FLUSH_EVERY = 16
 # became unavailable.
 _UNAVAILABLE_MARK_KEY = "unavailable_mark"
 ASSISTANT_STARTING_DETAIL = "the assistant is still starting; try again in a moment"
+# How long shutdown lets an assistant launch in a pane finish. The supervisor
+# kills the backend 10s after asking it to stop.
+PANE_LAUNCH_STOP_SECONDS = 5.0
 # Stable sentinel returned when a launch's working directory does not exist.
 # The frontend matches it (like ``ssh-master-required``) to surface an inline
 # error on the working-directory field instead of the generic banner.
@@ -509,6 +512,8 @@ class SessionRuntime:
         self._oneshot_sweep_task: asyncio.Task[None] | None = None
         self._assistant_bootstrap_task: asyncio.Task[None] | None = None
         self._assistant_creating = False
+        # The bootstrap is launching it in a terminal pane.
+        self._assistant_in_pane = False
         # Plugin id -> why it cannot drive sessions; see run_plugin_hook.
         self.plugin_failures: dict[str, str] = {}
         # Serializes disruptive per-session lifecycle ops (a launch-settings
@@ -917,6 +922,10 @@ class SessionRuntime:
         self._wake_tasks.clear()
         await cancel_and_wait(*wake_tasks)
         await self.held.stop()
+        bootstrap = self._assistant_bootstrap_task
+        if bootstrap and self._assistant_creating and self._assistant_in_pane:
+            # Let the launch finish rather than orphan its agent.
+            await asyncio.wait({bootstrap}, timeout=PANE_LAUNCH_STOP_SECONDS)
         await cancel_and_wait(
             *filter(None, (self._assistant_bootstrap_task, self._oneshot_sweep_task))
         )
@@ -1995,6 +2004,8 @@ class SessionRuntime:
         if plugin.capabilities.has_terminal_pane:
             # Cancelling a pane launch midway would orphan its agent.
             driver_timeout = None
+            if asyncio.current_task() is self._assistant_bootstrap_task:
+                self._assistant_in_pane = True
         try:
             async with asyncio.timeout(driver_timeout):
                 session = await plugin.create_session(
@@ -3615,13 +3626,14 @@ class SessionRuntime:
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
         self.require_drivable(session.id)
-        # Serialized with terminate and the launch-settings switch.
-        async with self._session_lock(session.id), self._keep_read(session.id):
-            with self.restores.reattaching(self.get_session(session.id)):
-                reattached = await self._reattach_locked(session.id)
-        # Items held while the session could not take them.
-        self.held.drain({reattached.id})
-        return reattached
+        try:
+            # Serialized with terminate and the launch-settings switch.
+            async with self._session_lock(session.id), self._keep_read(session.id):
+                with self.restores.restarting(self.get_session(session.id)):
+                    return await self._reattach_locked(session.id)
+        finally:
+            # Items held while the session could not take them.
+            self.held.drain({session.id})
 
     async def _reattach_locked(self, session_id: str) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
@@ -3829,8 +3841,13 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="another lifecycle operation is in progress for this session",
             )
-        async with lock, self._keep_read(session_id):
-            await self._update_launch_settings_locked(session_id, request)
+        try:
+            async with lock, self._keep_read(session_id):
+                with self.restores.restarting(self.get_session(session_id)):
+                    await self._update_launch_settings_locked(session_id, request)
+        finally:
+            # Sends queued while the session restarted.
+            self.held.drain({session_id})
         await self.broadcast_session_list()
         return self.get_session(session_id)
 

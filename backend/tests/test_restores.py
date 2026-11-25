@@ -16,6 +16,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from waypoint.api import create_app
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.backends import get_registry
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import PreparedInput, SessionRuntime
@@ -340,13 +341,18 @@ async def test_nothing_is_delivered_while_a_terminate_closes_a_restoring_session
         await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
         terminate = asyncio.create_task(runtime.terminate("s1"))
         await closing.wait()
+        with pytest.raises(HTTPException) as refused:
+            await runtime.handle_input("s1", SessionInputRequest(text="typed"))
+        assert refused.value.status_code == 409
+        await runtime.held.deliver("s1", peer_send("late"), HeldMessageOrigin.AGENT)
         # Longer than the broadcast debounce, which is what releases held sends.
         await asyncio.sleep(0.4)
         assert sent == []
         close.set()
         await terminate
+        assert not runtime.restores.is_restoring("s1")
         assert stored(runtime, "s1").status == SessionStatus.EXITED
-        assert held_texts(runtime.storage, "s1") == ["held"]
+        assert held_texts(runtime.storage, "s1") == ["held", "late"]
 
 
 async def test_nothing_is_delivered_while_shutdown_cancels_restores(
@@ -411,8 +417,10 @@ async def test_a_restore_that_ignores_a_terminate_records_nothing(
     async with started(runtime):
         try:
             await entered.wait()
+            restore = runtime._restore_tasks["s1"]
             await runtime.terminate("s1")
-            await until(lambda: not runtime.restores.is_restoring("s1"))
+            await asyncio.wait({restore}, timeout=2)
+            assert restore.done()
             assert stored(runtime, "s1").status == SessionStatus.EXITED
             assert "Could not restore" not in notes(runtime, "s1")
         finally:
@@ -508,6 +516,88 @@ async def test_terminate_cancels_a_settings_switch_restore(
         await switch
     assert cancelled.value.status_code == 409
     assert stored(runtime, "s1").status == SessionStatus.EXITED
+
+
+async def test_a_settings_change_holds_sends_until_the_restart_is_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    torn_down = asyncio.Event()
+
+    async def teardown(_runtime: SessionRuntime, session: SessionRecord) -> None:
+        # The interrupted turn closes while the old process goes away.
+        await runtime._record_system_event(
+            session.id, "Turn closed", status=SessionStatus.IDLE
+        )
+        await torn_down.wait()
+
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", teardown)
+    stub_restores(monkeypatch, {})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: not runtime.restores.is_restoring("s1"))
+        switch = asyncio.create_task(
+            runtime.update_launch_settings(
+                "s1", LaunchSettingsUpdateRequest(args=["--verbose"], restart=True)
+            )
+        )
+        await until(lambda: runtime.restores.holds_sends("s1"))
+        await runtime.held.deliver("s1", peer_send("queued"), HeldMessageOrigin.AGENT)
+        await asyncio.sleep(0.4)
+        assert sent == []
+        torn_down.set()
+        await switch
+        await until(lambda: sent == ["queued"])
+
+
+async def test_a_restart_stops_a_delivery_already_under_way(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    release = asyncio.Event()
+    stub_restores(monkeypatch, {"s1": gated_restore(release)})
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", hang)
+    sent: list[str] = []
+    reattaches: list[asyncio.Task[SessionRecord]] = []
+
+    async def dispatch(prepared: PreparedInput) -> SessionRecord:
+        sent.append(prepared.request.text)
+        reattaches.append(asyncio.create_task(runtime.reattach("s1")))
+        await until(lambda: runtime.restores.holds_sends("s1"))
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", dispatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        for text in ("one", "two"):
+            await runtime.held.deliver("s1", peer_send(text), HeldMessageOrigin.AGENT)
+        release.set()
+        await until(lambda: sent == ["one"])
+        await asyncio.sleep(0.4)
+
+        assert sent == ["one"]
+        assert held_texts(runtime.storage, "s1") == ["two"]
+        await cancel_and_wait(*reattaches)
+
+
+async def test_held_sends_follow_an_interrupted_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", status=SessionStatus.INTERRUPTED)
+    release = asyncio.Event()
+    stub_restores(monkeypatch, {"s1": gated_restore(release, noop)})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+        release.set()
+        await until(lambda: sent == ["held"])
 
 
 def record_dispatches(
@@ -711,6 +801,36 @@ async def test_the_thread_being_replaced_takes_no_message(
         assert refused.value.status_code == 409
         assert "still starting" in refused.value.detail
         assert sent == []
+
+
+async def test_shutdown_lets_a_pane_assistant_launch_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(
+        tmp_path, assistant=AssistantConfig(backend="codex", transport="tmux")
+    )
+    launching = asyncio.Event()
+
+    async def create(
+        _runtime: SessionRuntime, request: Any, *, session_id: str, **_kwargs: Any
+    ) -> SessionRecord:
+        launching.set()
+        await asyncio.sleep(0.2)
+        return add_session(runtime, session_id, transport="tmux", cwd=request.cwd)
+
+    monkeypatch.setattr(get_registry().for_transport("tmux"), "create_session", create)
+    monkeypatch.setattr(
+        get_registry().get("codex"),
+        "validate_new_session_selection",
+        None,
+        raising=False,
+    )
+
+    async with started(runtime):
+        await launching.wait()
+
+    [session] = Storage(runtime.settings.database_path).list_sessions()
+    assert session.source == SessionSource.ASSISTANT
 
 
 async def test_failed_assistant_creation_keeps_the_previous_one(

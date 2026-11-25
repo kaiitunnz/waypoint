@@ -14,6 +14,10 @@ Also mirrors `assets/icons/waypoint.svg` and `assets/icons/waypoint-light.svg`
 to `frontend/public/` so the in-app brand mark stays in sync with the canonical
 artwork across themes.
 
+Writes the v2 app's icons (`frontend-v2/`) from the same sources with a red
+PREVIEW badge, or a red dot on favicons too small for text, so an installed v2
+is told apart from v1. The badge text needs a bold sans TrueType font.
+
 Usage:
     scripts/generate_icons.py
     scripts/generate_icons.py --source path/to/1024.png
@@ -28,7 +32,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = (
@@ -47,6 +51,22 @@ FAVICON_SVG_TARGET = PUBLIC_DIR / "favicon.svg"
 FAVICON_ICO_TARGET = PUBLIC_DIR / "favicon.ico"
 APP_FAVICON_ICO_TARGET = APP_DIR / "favicon.ico"
 SHARP_MODULE = REPO_ROOT / "node_modules" / "sharp"
+
+V2_PUBLIC_DIR = REPO_ROOT / "frontend-v2" / "public"
+V2_APP_DIR = REPO_ROOT / "frontend-v2" / "src" / "app"
+V2_FAVICON_SVG_TARGET = V2_PUBLIC_DIR / "favicon.svg"
+V2_FAVICON_ICO_TARGET = V2_APP_DIR / "favicon.ico"
+PREVIEW_RED = (229, 72, 77, 255)
+PREVIEW_RED_HEX = "#e5484d"
+PREVIEW_TEXT = "PREVIEW"
+PREVIEW_FONTS = (
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    Path("/Library/Fonts/Arial Bold.ttf"),
+)
+# Supersampling factor for the badge, since Pillow's shapes aren't antialiased.
+BADGE_SCALE = 4
 
 # Matches `background_color` / `theme_color` in frontend/src/app/manifest.ts.
 MASKABLE_BG = (6, 8, 11, 255)
@@ -76,6 +96,15 @@ FAVICON_PNG_TARGETS: tuple[Target, ...] = (
     Target(APP_DIR / "icon.png", 64),
 )
 
+V2_APP_ICON_TARGETS: tuple[Target, ...] = (
+    Target(V2_PUBLIC_DIR / "icons" / "icon-192.png", 192),
+    Target(V2_PUBLIC_DIR / "icons" / "icon-512.png", 512),
+    Target(V2_PUBLIC_DIR / "icons" / "icon-512-maskable.png", 512, maskable=True),
+    Target(V2_APP_DIR / "apple-icon.png", 180),
+)
+
+V2_FAVICON_PNG_TARGETS: tuple[Target, ...] = (Target(V2_APP_DIR / "icon.png", 64),)
+
 
 def render(source: Image.Image, target: Target) -> Image.Image:
     if not target.maskable:
@@ -86,6 +115,77 @@ def render(source: Image.Image, target: Target) -> Image.Image:
     offset = ((target.size - inner) // 2, (target.size - inner) // 2)
     canvas.alpha_composite(icon, offset)
     return canvas
+
+
+def badge_font(size: int) -> ImageFont.FreeTypeFont:
+    for path in PREVIEW_FONTS:
+        if path.is_file():
+            return ImageFont.truetype(str(path), size)
+    raise RuntimeError("no bold sans font found for the PREVIEW badge")
+
+
+def with_preview_badge(image: Image.Image, *, maskable: bool) -> Image.Image:
+    """A red PREVIEW pill across the bottom, inside the maskable safe circle
+    when the icon is maskable."""
+    size = image.size[0] * BADGE_SCALE
+    width = size * (0.50 if maskable else 0.72)
+    height = size * (0.12 if maskable else 0.17)
+    bottom = size * (0.80 if maskable else 0.92)
+    left = (size - width) / 2
+    box = (left, bottom - height, left + width, bottom)
+    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.rounded_rectangle(box, radius=height / 2, fill=PREVIEW_RED)
+    draw.text(
+        ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2),
+        PREVIEW_TEXT,
+        font=badge_font(round(height * 0.58)),
+        fill=(255, 255, 255, 255),
+        anchor="mm",
+    )
+    badged = image.copy()
+    badged.alpha_composite(layer.resize(image.size, Image.LANCZOS))
+    return badged
+
+
+def with_preview_dot(image: Image.Image) -> Image.Image:
+    """A red dot in the bottom-right corner, ringed in the brand background."""
+    size = image.size[0] * BADGE_SCALE
+    radius = size * 0.20
+    ring = size * 0.05
+    center = size - radius - ring
+    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    outer = radius + ring
+    draw.ellipse(
+        (center - outer, center - outer, center + outer, center + outer),
+        fill=MASKABLE_BG,
+    )
+    draw.ellipse(
+        (center - radius, center - radius, center + radius, center + radius),
+        fill=PREVIEW_RED,
+    )
+    badged = image.copy()
+    badged.alpha_composite(layer.resize(image.size, Image.LANCZOS))
+    return badged
+
+
+def svg_with_preview_dot(svg: bytes) -> bytes:
+    """The favicon SVG with the same corner dot, sized to its viewBox."""
+    text = svg.decode("utf-8")
+    view_box = text.split('viewBox="', 1)[1].split('"', 1)[0].split()
+    size = float(view_box[2])
+    radius = size * 0.20
+    ring = size * 0.05
+    center = size - radius - ring
+    dot = (
+        f'<circle cx="{center:g}" cy="{center:g}" r="{radius + ring:g}" '
+        f'fill="rgb{MASKABLE_BG[:3]}"/>'
+        f'<circle cx="{center:g}" cy="{center:g}" r="{radius:g}" '
+        f'fill="{PREVIEW_RED_HEX}"/>\n'
+    )
+    head, _, tail = text.rpartition("</svg>")
+    return f"{head}{dot}</svg>{tail}".encode()
 
 
 def png_bytes(image: Image.Image) -> bytes:
@@ -243,6 +343,41 @@ def main() -> int:
             drift.append(SVG_TARGET)
     else:
         print(f"warning: svg source not found: {SVG_SOURCE}", file=sys.stderr)
+
+    for target in V2_APP_ICON_TARGETS:
+        rendered = png_bytes(
+            with_preview_badge(render(app_source, target), maskable=target.maskable)
+        )
+        if sync_bytes(
+            target.path,
+            rendered,
+            label=f"v2 {target.size}x{target.size}",
+            check=args.check,
+        ):
+            drift.append(target.path)
+    for target in V2_FAVICON_PNG_TARGETS:
+        rendered = png_bytes(with_preview_dot(render(favicon_source, target)))
+        if sync_bytes(
+            target.path,
+            rendered,
+            label=f"v2 {target.size}x{target.size}",
+            check=args.check,
+        ):
+            drift.append(target.path)
+    if sync_bytes(
+        V2_FAVICON_ICO_TARGET,
+        ico_bytes(with_preview_dot(favicon_source)),
+        label="v2 ico",
+        check=args.check,
+    ):
+        drift.append(V2_FAVICON_ICO_TARGET)
+    if sync_bytes(
+        V2_FAVICON_SVG_TARGET,
+        svg_with_preview_dot(favicon_svg_bytes),
+        label="v2 svg",
+        check=args.check,
+    ):
+        drift.append(V2_FAVICON_SVG_TARGET)
 
     if args.check and drift:
         print(

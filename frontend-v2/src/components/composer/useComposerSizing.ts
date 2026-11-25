@@ -20,18 +20,20 @@ export function useComposerSizing(
 
   useEffect(() => {
     const node = root.current;
-    if (!node) return;
+    const input = field.current;
+    if (!node || !input) return;
     const page = document.documentElement;
-    let width = node.offsetWidth;
+    let width = input.offsetWidth;
     const observer = new ResizeObserver(() => {
-      // A change of width rewraps the text.
-      if (node.offsetWidth !== width) {
-        width = node.offsetWidth;
-        fit(field.current);
+      // A change of width rewraps the text: the window's, or Stop taking room.
+      if (input.offsetWidth !== width) {
+        width = input.offsetWidth;
+        fit(input);
       }
       page.style.setProperty("--composer-height", `${node.offsetHeight}px`);
     });
     observer.observe(node);
+    observer.observe(input);
     return () => {
       observer.disconnect();
       page.style.removeProperty("--composer-height");

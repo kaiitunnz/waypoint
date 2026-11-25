@@ -94,13 +94,21 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  /* The composer's side padding, which it drops from 900px. */
   .menu {
-    right: 0;
-    left: 0;
+    right: 12px;
+    left: 12px;
   }
 
   .row {
     min-height: 34px;
     padding: 6px 10px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 900px) {
+  .menu {
+    right: 0;
+    left: 0;
   }
 }

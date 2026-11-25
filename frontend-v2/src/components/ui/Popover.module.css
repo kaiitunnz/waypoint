@@ -56,7 +56,7 @@
     min-height: 36px;
   }
 
-  .item:hover {
+  .item:hover:not(:disabled) {
     background: var(--fill-quiet);
   }
 }

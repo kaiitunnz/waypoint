@@ -74,7 +74,8 @@ export function useComposerSend({
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failure, setFailure] = useState<SendFailure | null>(null);
-  const ids = attachments.readyIds.join(",");
+  // The tray's files, uploaded or not: adding or removing one dismisses a failure.
+  const ids = attachments.items.map((item) => item.localId).join(",");
   // One send at a time, whatever starts it.
   const inFlight = useRef(false);
   const latest = useRef({ draft, ids });

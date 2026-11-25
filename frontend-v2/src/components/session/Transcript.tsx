@@ -7,6 +7,7 @@ import type { SessionStatus } from "@waypoint/web-core/types";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Icon } from "@/components/ui/Icon";
+import { cx } from "@/lib/cx";
 
 import styles from "./Transcript.module.css";
 import { TurnView } from "./TurnView";
@@ -102,7 +103,7 @@ export function Transcript({
   return (
     <div className={styles.frame}>
       <div ref={scroller} className={styles.scroller} onScroll={measure}>
-        <div ref={content} className={styles.col}>
+        <div ref={content} className={cx(styles.col, Boolean(override) && styles.top)}>
           {override ?? (
             <>
               {hasOlder ? (

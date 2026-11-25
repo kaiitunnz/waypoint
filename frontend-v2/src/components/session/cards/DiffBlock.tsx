@@ -13,7 +13,7 @@ import styles from "./DiffBlock.module.css";
 import highlight from "./Highlight.module.css";
 import { Tokens } from "./Tokens";
 
-const COMPACT_ROWS = 6;
+const COMPACT_LINES = 6;
 
 function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader: boolean }) {
   const plain = useMemo(() => buildPlainDiffLines(file.diff), [file.diff]);
@@ -32,7 +32,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
     };
   }, [file.diff, file.path]);
 
-  const rows = useMemo(() => compactDiff(lines, { maxRows: all ? Infinity : COMPACT_ROWS }), [lines, all]);
+  const rows = useMemo(() => compactDiff(lines, { maxLines: all ? Infinity : COMPACT_LINES }), [lines, all]);
   const change = displayChangeType(file);
 
   return (

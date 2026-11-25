@@ -14,8 +14,8 @@ import { DiffBlock } from "./DiffBlock";
 
 interface CallRowProps {
   row: CallRowModel;
-  // The call's result, else its call, for a todo list's entries.
-  source: EventRecord | null;
+  // The call's events, for a todo list's entries: the result is read first.
+  sources: (EventRecord | null)[];
 }
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
@@ -34,9 +34,9 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
 }
 
 // One call of an expanded run: what it touched, what it did, and how it went.
-export function CallRow({ row, source }: CallRowProps) {
+export function CallRow({ row, sources }: CallRowProps) {
   const [wrapped, setWrapped] = useState(false);
-  const todos = row.tool === "TodoWrite" ? readTodoEntries(source) : null;
+  const todos = row.tool === "TodoWrite" ? sources.map(readTodoEntries).find((entries) => entries !== null) ?? null : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos ? (progress ? `Tasks ${progress.completed} of ${progress.total} done` : "Tasks") : row.label;
 
@@ -61,7 +61,7 @@ export function CallRow({ row, source }: CallRowProps) {
           {row.glyph}
         </span>
         {row.path ? (
-          <span className={cx(styles.label, styles.mono)}>
+          <span className={cx(styles.label, styles.pathLabel)}>
             <span className={styles.dir}>{row.path.dir}</span>
             <span className={styles.base}>{row.path.base}</span>
           </span>

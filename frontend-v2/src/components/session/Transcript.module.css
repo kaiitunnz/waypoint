@@ -26,6 +26,11 @@
   padding: 0 12px 10px;
 }
 
+/* A placeholder reads from the top. */
+.top {
+  margin-top: 0;
+}
+
 .turns {
   display: flex;
   flex-direction: column;

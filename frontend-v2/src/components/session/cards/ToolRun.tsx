@@ -1,12 +1,14 @@
 "use client";
 
 import { describeStep } from "@waypoint/web-core/activity";
+import { parseEvent } from "@waypoint/web-core/events";
 import { cardKindOf } from "@waypoint/web-core/session/cardKind";
 import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import type { TranscriptItem } from "@waypoint/web-core/session/transcript";
 
 import { CallRow } from "./CallRow";
+import { ChangesNote } from "./ChangesNote";
 import { RunLine } from "./RunLine";
 import styles from "./ToolRun.module.css";
 
@@ -19,9 +21,15 @@ interface ToolRunProps {
   working: boolean;
 }
 
-// A quiet note that came in with the run: attached, resumed, a compaction.
+// A note that came in with the run: attached, resumed, a compaction, or a set of changes.
 function RunNote({ child }: { child: RunChild }) {
-  if (child.kind !== "single" || cardKindOf(child.event) === "none") return null;
+  if (child.kind !== "single") return null;
+  const kind = cardKindOf(child.event);
+  if (kind === "none") return null;
+  if (kind === "diff_note") {
+    const preview = parseEvent(child.event).diffPreview;
+    if (preview) return <ChangesNote event={child.event} preview={preview} defaultOpen={false} />;
+  }
   return (
     <div className={styles.note} title={child.event.text}>
       <span className={styles.noteText}>{child.event.text}</span>
@@ -54,7 +62,7 @@ export function ToolRun({ items, defaultOpen, working }: ToolRunProps) {
     >
       {calls.map(({ child, row }) =>
         row ? (
-          <CallRow key={row.key} row={row} source={child.kind === "pair" ? (child.pair.result ?? child.pair.call) : child.event} />
+          <CallRow key={row.key} row={row} sources={child.kind === "pair" ? [child.pair.result, child.pair.call] : [child.event]} />
         ) : (
           <RunNote key={child.kind === "single" ? child.event.sequence : child.pair.itemId} child={child} />
         ),

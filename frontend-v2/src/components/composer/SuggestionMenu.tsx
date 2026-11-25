@@ -1,4 +1,6 @@
-import { Fragment, type RefObject } from "react";
+"use client";
+
+import { Fragment, useEffect, type RefObject } from "react";
 
 import { attachmentUrl } from "@waypoint/web-core/api";
 import { formatFileSize, typeTag } from "@waypoint/web-core/attachments";
@@ -90,6 +92,11 @@ interface MentionMenuProps extends MenuProps {
 }
 
 export function MentionMenu({ host, token, sessionId, mentions, ...menu }: MentionMenuProps) {
+  const { activeIndex, itemRefs } = menu;
+  useEffect(() => {
+    itemRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, itemRefs]);
+
   return (
     <ul className={styles.menu} role="listbox" aria-label="Session files">
       {mentions.map(({ file, positions }, index) => (

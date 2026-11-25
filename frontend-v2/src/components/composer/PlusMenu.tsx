@@ -55,6 +55,8 @@ export function PlusMenu({ actions }: { actions: PlusAction[] }) {
               onSelect={() => {
                 // Closed first, so the closing sheet cannot take the focus back.
                 flushSync(() => setOpen(false));
+                // The popover took the focus with it.
+                if (pointer) trigger.current?.focus();
                 action.run();
               }}
             >

@@ -9,7 +9,7 @@ const FOLLOW_PX = 160;
 
 // The transcript's scrolling: it follows the end while you are there, keeps its place
 // when older messages load above, and says when you are away from the end.
-export function useTranscriptScroll(turns: TranscriptTurn[], onLoadOlder: () => void) {
+export function useTranscriptScroll(turns: TranscriptTurn[], loadingOlder: boolean, onLoadOlder: () => void) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -38,6 +38,11 @@ export function useTranscriptScroll(turns: TranscriptTurn[], onLoadOlder: () => 
     }
     firstKey.current = head;
   }, [turns]);
+
+  // A load that ends without a new first turn (it failed, or its messages are hidden) leaves no place to keep.
+  useLayoutEffect(() => {
+    if (!loadingOlder) anchor.current = null;
+  }, [loadingOlder]);
 
   // Content that grows after layout (markdown, math, images, a run opening) keeps the end in view.
   useEffect(() => {

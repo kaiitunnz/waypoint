@@ -39,7 +39,7 @@ export function Transcript({
   onShowAll,
   override,
 }: TranscriptProps) {
-  const { scroller, content, away, onScroll, loadOlder, jumpToEnd } = useTranscriptScroll(turns, onLoadOlder);
+  const { scroller, content, away, onScroll, loadOlder, jumpToEnd } = useTranscriptScroll(turns, loadingOlder, onLoadOlder);
   const working = isWorkingStatus(status);
 
   return (

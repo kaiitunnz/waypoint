@@ -16,7 +16,13 @@ export function PlanCard({ plan, ts }: { plan: string; ts: string }) {
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = body.current;
-    if (el && !all) setClamped(el.scrollHeight > el.clientHeight);
+    if (!el || all) return;
+    const measure = () => setClamped(el.scrollHeight > el.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [plan, all]);
   return (
     <div className={styles.card}>

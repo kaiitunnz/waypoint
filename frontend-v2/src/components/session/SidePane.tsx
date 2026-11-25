@@ -21,6 +21,7 @@ export function SidePane() {
   const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ overview: null, changes: null, files: null });
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const index = TABS.findIndex((item) => item.id === tab);
     const next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: TABS.length - 1 }[event.key];
     if (next === undefined) return;

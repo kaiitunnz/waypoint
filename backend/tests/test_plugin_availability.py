@@ -1,5 +1,6 @@
 """A plugin that fails to wire, or is not loaded, leaves its sessions unavailable."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,14 +17,19 @@ from restore_harness import (
     add_session,
     assert_refused,
     assistant_settings,
+    gated_restore,
+    held_texts,
     make_runtime,
     noop,
     notes,
+    peer_send,
     raising,
+    raising_async,
     set_column,
     started,
     stored,
     stub_restores,
+    until,
 )
 from waypoint.api import create_app
 from waypoint.backends import get_registry
@@ -31,6 +37,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     EventKind,
+    HeldMessageOrigin,
     SessionAttachRequest,
     SessionCreateRequest,
     SessionInputRequest,
@@ -244,6 +251,30 @@ async def test_nothing_lands_on_a_failed_plugin(
         ),
     ):
         await assert_refused(request, 503, "backend plugin tmux")
+
+
+async def test_a_failed_plugin_refuses_a_send_behind_held_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    release = asyncio.Event()
+    failing = gated_restore(release, raising_async("down"))
+    stub_restores(monkeypatch, {"s1": failing})
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+        release.set()
+        await until(lambda: stored(runtime, "s1").status == SessionStatus.ERROR)
+        runtime.availability.failures["codex"] = "failed in setup: bad wiring"
+
+        await assert_refused(
+            runtime.held.deliver("s1", peer_send("late"), HeldMessageOrigin.AGENT),
+            503,
+            "bad wiring",
+        )
+        assert held_texts(runtime.storage, "s1") == ["held"]
 
 
 async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> None:

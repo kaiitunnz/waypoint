@@ -88,6 +88,9 @@ class HeldQueue:
                     return await self._hold(
                         session_id, request, origin, HeldReason.FOCUS
                     )
+                if not wake:
+                    # An unavailable session queues no send either.
+                    self._runtime.availability.require(session)
                 queued = self._queued_behind_restore(session)
                 if not queued and self._deliverable_now(session, wake):
                     with suppress(InputBlockedError):
@@ -276,13 +279,16 @@ class HeldQueue:
 
     def _ready_for(self, held: HeldMessageRecord, session: SessionRecord) -> bool:
         """Whether a message waiting on the session's state may go out."""
-        # A send queued behind a restore follows an interrupted turn too, as a
-        # fresh send would.
-        if (
-            held.hold_reason is HeldReason.RESTORE
-            and session.status is SessionStatus.INTERRUPTED
-        ):
-            return True
+        if held.hold_reason is HeldReason.RESTORE:
+            # A send queued behind a restore follows an interrupted turn, as a
+            # fresh send would. A pane, after an interface switch, takes input
+            # at any time.
+            driver = self._runtime.registry.plugin_for(session)
+            if (
+                session.status is SessionStatus.INTERRUPTED
+                or driver.capabilities.has_terminal_pane
+            ):
+                return True
         return self._runtime.wake_eligible(session)
 
     def _retry_later(self, session_id: str) -> None:

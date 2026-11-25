@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -39,6 +40,7 @@ from waypoint.runtime import PreparedInput, SessionRuntime
 from waypoint.schemas import (
     HeldMessageOrigin,
     HeldReason,
+    LaunchSettingsUpdateRequest,
     SessionInputRequest,
     SessionRecord,
     SessionStatus,
@@ -525,6 +527,52 @@ async def test_a_settings_change_holds_sends_until_the_restart_is_over(
         torn_down.set()
         await request
         await until(lambda: sent == ["queued"])
+
+
+async def test_sends_held_through_a_switch_to_a_pane_all_go_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    runtime.storage.update_session("s1", transport_state={"thread_id": str(uuid4())})
+    torn_down = asyncio.Event()
+
+    async def teardown(*_args: Any) -> None:
+        await torn_down.wait()
+
+    async def persisted(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(get_registry().get("codex"), "conversation_exists", persisted)
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", teardown)
+    stub_restores(monkeypatch, {})
+    sent: list[str] = []
+
+    async def dispatch(prepared: PreparedInput) -> SessionRecord:
+        sent.append(prepared.request.text)
+        # A pane reads busy once it takes input.
+        return runtime.storage.update_session("s1", status=SessionStatus.RUNNING)
+
+    async def unblocked(*_args: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(runtime, "dispatch_input", dispatch)
+    pane = runtime.transport_for(add_session(runtime, "pane", transport="tmux"))
+    monkeypatch.setattr(pane, "input_blocked", unblocked)
+
+    async with started(runtime):
+        await until(lambda: not runtime.restores.is_restoring("s1"))
+        request = asyncio.create_task(
+            runtime.update_launch_settings(
+                "s1", LaunchSettingsUpdateRequest(transport="tmux", restart=True)
+            )
+        )
+        await until(lambda: runtime.restores.holds_sends("s1"))
+        for text in ("one", "two"):
+            await runtime.held.deliver("s1", peer_send(text), HeldMessageOrigin.AGENT)
+        torn_down.set()
+        await request
+        await until(lambda: sent == ["one", "two"])
 
 
 async def test_a_restart_stops_a_delivery_already_under_way(

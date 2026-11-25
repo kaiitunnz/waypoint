@@ -3490,11 +3490,8 @@ class SessionRuntime:
         failure = await self.restores.run(session, plugin.restore_session)
         if isinstance(failure, HTTPException):
             raise failure
-        # _restore_*_session swallows failures (it tags the session ERROR or
-        # EXITED and emits a system_note instead of raising). Re-read storage
-        # so the caller sees the post-restore status, and translate any
-        # terminal state into a 400 so the frontend surfaces a clear error
-        # rather than silently relaunching into a dead session.
+        # A restore may report its failure only through the session's status, so
+        # a terminal one becomes a 400 and the frontend surfaces an error.
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             raise HTTPException(

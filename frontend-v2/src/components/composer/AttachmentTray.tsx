@@ -2,6 +2,7 @@ import { filesSummary, formatFileSize, typeTag } from "@waypoint/web-core/attach
 import type { PendingAttachment } from "@waypoint/web-core/hooks/useAttachments";
 
 import { Button } from "@/components/ui/Button";
+import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/lib/cx";
@@ -31,15 +32,7 @@ export function AttachmentTray({ items, onRemove, onRetry, onClear }: Attachment
             className={cx(styles.chip, item.status === "error" && styles.failed)}
             title={item.error ?? (item.referenced ? `${item.name} (linked)` : item.name)}
           >
-            {item.isImage && item.previewUrl ? (
-              // A blob or token-query URL: next/image cannot optimise it.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img className={styles.thumb} src={item.previewUrl} alt="" />
-            ) : (
-              <span className={styles.tile}>
-                <Icon name="file" size={16} />
-              </span>
-            )}
+            <FileThumb className={styles.thumb} src={item.isImage ? (item.previewUrl ?? null) : null} />
             <span className={styles.text}>
               <span className={styles.name}>{item.name}</span>
               <span className={styles.meta}>

@@ -66,11 +66,13 @@ import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { useHoldMenu } from "@waypoint/web-core/hooks/useHoldMenu";
 import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
-import { interruptPrompt, useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
+import { useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
 import { useTuningDraft } from "@waypoint/web-core/hooks/useTuningDraft";
-import { canFork, composerAvailability, deliverInput, isExitedSession, runControlCommand } from "@waypoint/web-core/session/send";
+import { canFork, composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
+import { deliverInput, runControlCommand } from "@waypoint/web-core/sessionDelivery";
 import { SEND_MODES, type SendMode } from "@waypoint/web-core/session/sendModes";
 import {
+  interruptPrompt,
   nextModeId,
   pendingRestartLabel,
   restartFields,
@@ -2831,8 +2833,6 @@ const ReplyComposer = memo(function ReplyComposer({
     }
   }
 
-  // ↑ marks the immediate send, ◷ the idle-triggered ones; the batch nuance is
-  // in each row's tooltip.
   function runSendMode(mode: SendMode) {
     if (mode === "now") void handleSend();
     else void handleIdleSend(mode);
@@ -2912,7 +2912,7 @@ const ReplyComposer = memo(function ReplyComposer({
     permissionMode,
   };
   const options = tuningOptions(tuningInput);
-  const { modelEntries, effortOptions, hasModelPicker, hasEffortPicker } = options;
+  const { modelEntries, effortOptions, customEffort, hasModelPicker, hasEffortPicker } = options;
   const tuning = useTuningDraft(
     tuningInput,
     restart,
@@ -3245,9 +3245,7 @@ const ReplyComposer = memo(function ReplyComposer({
                         {effortLabel(option)}
                       </option>
                     ))}
-                    {currentEffort && !effortOptions.includes(currentEffort) ? (
-                      <option value={currentEffort}>{currentEffort}</option>
-                    ) : null}
+                    {customEffort ? <option value={customEffort}>{customEffort}</option> : null}
                   </select>
                 </label>
               ) : null}

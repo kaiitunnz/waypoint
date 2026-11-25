@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionContextUsage, SessionRecord, SessionRateLimitUsage, SessionTokenUsage } from "../types";
-import { sessionCoverageLabel, usagePanelModel } from "./usagePanel";
+import { sessionCoverageLabel, USAGE_POPOVER_SIZE_KEY, usagePanelModel } from "./usagePanel";
 
 const context = (patch: Partial<SessionContextUsage> = {}): SessionContextUsage => ({
   used_tokens: 620_000,
@@ -97,6 +97,12 @@ describe("usagePanelModel", () => {
       ["Cache write", 2],
       ["made up tokens", 1],
     ]);
+  });
+});
+
+describe("USAGE_POPOVER_SIZE_KEY", () => {
+  it("keeps the key sizes are already stored under", () => {
+    expect(USAGE_POPOVER_SIZE_KEY).toBe("waypoint.usage-popover-size.v1");
   });
 });
 

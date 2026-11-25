@@ -15,23 +15,8 @@
   background: var(--fill-quiet);
 }
 
-.thumb,
-.tile {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-sm);
-}
-
 .thumb {
-  object-fit: cover;
-}
-
-.tile {
-  display: grid;
-  place-items: center;
-  background: var(--fill-raised);
-  color: var(--muted);
+  --thumb-fill: var(--fill-raised);
 }
 
 .text {

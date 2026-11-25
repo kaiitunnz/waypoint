@@ -5,14 +5,18 @@ import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
-import { sessionCoverageLabel, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import {
+  sessionCoverageLabel,
+  USAGE_POPOVER_SIZE_KEY,
+  usagePanelModel,
+} from "@waypoint/web-core/session/usagePanel";
 import type { SessionRecord } from "@waypoint/web-core/types";
 import { formatRelativeTime, formatTokens } from "@waypoint/web-core/usage";
 import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
 import { useResizablePopover } from "@waypoint/web-core/hooks/useResizablePopover";
-import { USAGE_POPOVER_SIZE_KEY, type ResizeAxis } from "@waypoint/web-core/popoverSize";
+import type { ResizeAxis } from "@waypoint/web-core/popoverSize";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 

@@ -13,7 +13,7 @@ import {
 } from "@waypoint/web-core/composer-completions";
 import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions";
 
-import { Icon } from "@/components/ui/Icon";
+import { FileThumb } from "@/components/ui/FileThumb";
 import { cx } from "@/lib/cx";
 
 import { HighlightedText } from "./HighlightedText";
@@ -95,15 +95,10 @@ export function MentionMenu({ host, token, sessionId, mentions, ...menu }: Menti
       {mentions.map(({ file, positions }, index) => (
         <li key={file.id} role="presentation">
           <button {...rowProps(index, menu)} className={cx(styles.row, styles.file, index === menu.activeIndex && styles.active)}>
-            {file.kind === "image" ? (
-              // A token-query serve URL: next/image cannot optimise it.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img className={styles.thumb} src={attachmentUrl(host, token, sessionId, file.id)} alt="" loading="lazy" />
-            ) : (
-              <span className={styles.tile}>
-                <Icon name="file" size={16} />
-              </span>
-            )}
+            <FileThumb
+              className={styles.thumb}
+              src={file.kind === "image" ? attachmentUrl(host, token, sessionId, file.id) : null}
+            />
             <span className={styles.fileText}>
               <span className={styles.name}>
                 <HighlightedText text={file.filename} positions={positions} />

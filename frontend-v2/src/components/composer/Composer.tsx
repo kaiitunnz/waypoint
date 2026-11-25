@@ -3,8 +3,6 @@
 import { useRouter } from "next/navigation";
 import {
   useCallback,
-  useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,7 +12,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { setSessionFocus } from "@waypoint/web-core/api";
 import { fidelityFor, supportsAttachments, type BackendCatalog } from "@waypoint/web-core/backends";
 import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
@@ -30,7 +27,6 @@ import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 import { useToast } from "@/components/ui/Toast";
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
-import { useFailureToast } from "@/lib/useFailureToast";
 
 import { AttachmentTray } from "./AttachmentTray";
 import styles from "./Composer.module.css";
@@ -45,7 +41,9 @@ import { CommandMenu, MentionMenu } from "./SuggestionMenu";
 import { TuneControl } from "./TuneControl";
 import { UsageControl } from "./UsageControl";
 import { useComposerSend } from "./useComposerSend";
+import { useComposerSizing } from "./useComposerSizing";
 import { useComposerTuning } from "./useComposerTuning";
+import { useSessionFocus } from "./useSessionFocus";
 
 interface ComposerProps {
   sessionId: string;
@@ -82,7 +80,6 @@ export function Composer({
   const pointer = usePointerUI();
   const [draft, setDraft] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [focusBusy, setFocusBusy] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -94,7 +91,6 @@ export function Composer({
     },
     [toast],
   );
-  const reportFailure = useFailureToast();
 
   const { disabled } = composerAvailability(session, catalog);
   const structured = session !== null && fidelityFor(session.transport, catalog) === "structured";
@@ -164,47 +160,8 @@ export function Composer({
   const todo = useMemo(() => currentTodoEvent(events, latestTodo), [events, latestTodo]);
   const tasks = useMemo(() => summarizeTodos(readTodoEntries(todo)), [todo]);
 
-  const setFocus = useCallback(
-    async (enabled: boolean) => {
-      setFocusBusy(true);
-      try {
-        onSession(await setSessionFocus(host, token, sessionId, enabled));
-      } catch (error) {
-        reportFailure(error, enabled ? "failed to turn on Focus" : "failed to turn off Focus");
-      } finally {
-        setFocusBusy(false);
-      }
-    },
-    [host, token, sessionId, onSession, reportFailure],
-  );
-
-  const grow = useCallback(() => {
-    const node = field.current;
-    if (!node) return;
-    node.style.height = "auto";
-    node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
-  }, []);
-  useLayoutEffect(grow, [grow, draft, pointer]);
-
-  // Toasts sit above the composer, and a change of width rewraps the text.
-  useEffect(() => {
-    const node = root.current;
-    if (!node) return;
-    const page = document.documentElement;
-    let width = node.offsetWidth;
-    const observer = new ResizeObserver(() => {
-      if (node.offsetWidth !== width) {
-        width = node.offsetWidth;
-        grow();
-      }
-      page.style.setProperty("--composer-height", `${node.offsetHeight}px`);
-    });
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      page.style.removeProperty("--composer-height");
-    };
-  }, [grow]);
+  const focus = useSessionFocus({ host, token, sessionId, session, onSession });
+  useComposerSizing(root, field, draft, pointer);
 
   const dragging = useFileDragVisible();
 
@@ -319,15 +276,13 @@ export function Composer({
               triggerRef={tuneTrigger}
               agentName={agentName}
               disabled={disabled}
-              focus={Boolean(session.focus)}
-              focusBusy={focusBusy}
-              onFocusChange={(enabled) => void setFocus(enabled)}
+              focus={focus}
             />
           ) : null}
         </div>
         <div className={styles.meta}>
-          {session?.focus ? (
-            <FocusPill busy={focusBusy} onTurnOff={() => setFocus(false)} returnFocusRef={tuneTrigger} />
+          {focus.on ? (
+            <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={tuneTrigger} />
           ) : null}
           {tasks ? (
             <span className={styles.tasks} aria-label={`Tasks: ${tasks.completed} of ${tasks.total} done`} role="img">

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, PasswordInput, SearchInput, TextArea, TextInput } from "@/components/ui/Field";
+import { FileThumb } from "@/components/ui/FileThumb";
 import { Flyout } from "@/components/ui/Flyout";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
@@ -195,6 +196,12 @@ export function Gallery() {
         />
         <ListRow lamp="exited" title="597 exited" titleFont="sans" compact dimmed selected trailing="" />
       </List>
+
+      <SectionHeading title="File thumbnails" dense />
+      <div className={styles.row}>
+        <FileThumb src="/favicon.svg" />
+        <FileThumb src={null} />
+      </div>
 
       <SectionHeading title="Fields" dense />
       <div className={styles.fields}>

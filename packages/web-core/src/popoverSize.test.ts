@@ -6,7 +6,6 @@ import {
   parsePopoverSize,
   readPopoverSize,
   resizedDimension,
-  USAGE_POPOVER_SIZE_KEY,
   writePopoverSize,
 } from "./popoverSize";
 
@@ -40,10 +39,6 @@ describe("parsePopoverSize", () => {
 });
 
 describe("stored popover size", () => {
-  it("keeps the usage popover's storage key", () => {
-    expect(USAGE_POPOVER_SIZE_KEY).toBe("waypoint.usage-popover-size.v1");
-  });
-
   it("round-trips a size and drops the entry once no axis is set", () => {
     const values = stubStorage();
     writePopoverSize("k", { width: 500 });

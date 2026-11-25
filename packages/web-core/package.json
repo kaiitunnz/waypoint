@@ -32,6 +32,7 @@
     "./scheduleTime": "./src/scheduleTime.ts",
     "./search": "./src/search.ts",
     "./sessionActions": "./src/sessionActions.ts",
+    "./sessionDelivery": "./src/sessionDelivery.ts",
     "./sessionHistory": "./src/sessionHistory.ts",
     "./sessionPresentation": "./src/sessionPresentation.ts",
     "./sessionSections": "./src/sessionSections.ts",

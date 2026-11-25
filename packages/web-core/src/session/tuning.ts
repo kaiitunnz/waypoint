@@ -19,6 +19,8 @@ export interface TuningOptions {
   // The model choices, led by the session's own model when the list lacks it.
   modelEntries: BackendModelOption[];
   effortOptions: string[];
+  // The session's effort when the options lack it, offered beside them.
+  customEffort: string | null;
   hasModelPicker: boolean;
   hasEffortPicker: boolean;
 }
@@ -40,6 +42,7 @@ export function tuningOptions(input: TuningInput): TuningOptions {
   return {
     modelEntries,
     effortOptions,
+    customEffort: currentEffort && !effortOptions.includes(currentEffort) ? currentEffort : null,
     hasModelPicker: modelOptions.length > 0 || currentModel !== null,
     hasEffortPicker: effortOptions.length > 0 || currentEffort !== null,
   };
@@ -88,6 +91,10 @@ export function restartFields(session: SessionRecord | null, catalog: BackendCat
 export function changeInterruptsTurn(session: SessionRecord, catalog: BackendCatalog): boolean {
   const interrupts = catalog.byId(session.backend)?.capabilities.settings_change_interrupts_turn;
   return Boolean(interrupts) && (session.status === "running" || session.status === "waiting_input");
+}
+
+export function interruptPrompt(field: string): string {
+  return `Changing the ${field} restarts this session and interrupts the current turn. Continue?`;
 }
 
 // Picks waiting for a restart; null where nothing is picked.

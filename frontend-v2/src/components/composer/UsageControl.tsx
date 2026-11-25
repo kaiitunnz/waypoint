@@ -4,8 +4,7 @@ import { useRef, useState } from "react";
 
 import { refreshSessionRateLimitUsage } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { USAGE_POPOVER_SIZE_KEY } from "@waypoint/web-core/popoverSize";
-import { usagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import { USAGE_POPOVER_SIZE_KEY, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Flyout } from "@/components/ui/Flyout";

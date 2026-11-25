@@ -71,23 +71,8 @@
   align-items: center;
 }
 
-.thumb,
-.tile {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-sm);
-}
-
 .thumb {
-  object-fit: cover;
-}
-
-.tile {
-  display: inline-grid;
-  place-items: center;
-  background: var(--fill-quiet);
-  color: var(--muted);
+  --thumb-size: 32px;
 }
 
 .fileText {

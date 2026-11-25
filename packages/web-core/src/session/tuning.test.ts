@@ -48,6 +48,12 @@ describe("tuningOptions", () => {
     expect(tuningOptions(input({ defaultModelId: null })).effortOptions).toEqual(["low", "high"]);
   });
 
+  it("names a current effort the options lack", () => {
+    expect(tuningOptions(input({ currentEffort: "high" })).customEffort).toBeNull();
+    expect(tuningOptions(input({ currentEffort: "turbo" })).customEffort).toBe("turbo");
+    expect(tuningOptions(input()).customEffort).toBeNull();
+  });
+
   it("lists a model the catalogue lacks", () => {
     const options = tuningOptions(input({ currentModel: "claude-x" }));
     expect(options.modelEntries[0]).toMatchObject({ id: "claude-x", label: "Custom · claude-x" });

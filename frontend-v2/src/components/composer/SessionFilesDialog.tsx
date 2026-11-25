@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 
@@ -79,15 +80,7 @@ export function SessionFilesDialog({
           const added = referencedIds.has(file.id);
           return (
             <li key={file.id} className={styles.row}>
-              {file.kind === "image" ? (
-                // A token-query serve URL: next/image cannot optimise it.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img className={styles.thumb} src={url} alt="" loading="lazy" />
-              ) : (
-                <span className={styles.tile}>
-                  <Icon name="file" size={18} />
-                </span>
-              )}
+              <FileThumb className={styles.thumb} src={file.kind === "image" ? url : null} />
               <span className={styles.text}>
                 <span className={styles.name} title={file.filename}>
                   {file.filename}

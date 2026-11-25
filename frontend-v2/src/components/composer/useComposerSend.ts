@@ -6,13 +6,9 @@ import { ApiError, createMessageSchedule, isAuthError, postAction } from "@waypo
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import type { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
-import {
-  composerAvailability,
-  deliverInput,
-  draftAfterFailedSend,
-  FollowUpError,
-} from "@waypoint/web-core/session/send";
+import { composerAvailability, draftAfterFailedSend } from "@waypoint/web-core/session/send";
 import type { SendMode } from "@waypoint/web-core/session/sendModes";
+import { deliverInput, FollowUpError } from "@waypoint/web-core/sessionDelivery";
 import type { SessionCommandInvocation, SessionRecord } from "@waypoint/web-core/types";
 
 import { useToast } from "@/components/ui/Toast";

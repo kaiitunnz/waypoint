@@ -3,6 +3,9 @@ import { UNIFIED_TOKEN_LABELS, unifyTokens } from "../tokens";
 import type { SessionContextUsage, SessionRecord, SessionTokenUsage } from "../types";
 import { clampPercent, formatRelativeTime, formatTokens, rateLimitUsageTone, usageTone, type UsageTone } from "../usage";
 
+// Versioned so a future shape change can coexist with an old saved value.
+export const USAGE_POPOVER_SIZE_KEY = "waypoint.usage-popover-size.v1";
+
 function contextUsagePercent(usage: SessionContextUsage): number | null {
   const windowTokens = usage.context_window_tokens;
   if (!windowTokens || windowTokens <= 0) {

@@ -77,11 +77,7 @@ export function useAttachments({
     const flush = () => {
       const { host: h, token: t, sessionId: s } = credsRef.current;
       for (const id of orphanRef.current) {
-        void fetch(`${h}/api/sessions/${s}/attachments/${id}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${t}` },
-          keepalive: true,
-        }).catch(() => {});
+        void deleteAttachment(h, t, s, id, { keepalive: true }).catch(() => {});
       }
       orphanRef.current = [];
     };

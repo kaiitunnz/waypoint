@@ -2,9 +2,8 @@
 
 import { useId, type RefObject } from "react";
 
-import { interruptPrompt } from "@waypoint/web-core/hooks/useSessionTuning";
 import { effortLabel } from "@waypoint/web-core/modelDisplay";
-import { pendingRestartLabel, tuningSummary } from "@waypoint/web-core/session/tuning";
+import { interruptPrompt, pendingRestartLabel, tuningSummary } from "@waypoint/web-core/session/tuning";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -15,29 +14,20 @@ import { Toggle } from "@/components/ui/Toggle";
 
 import styles from "./TuneControl.module.css";
 import type { ComposerTuning } from "./useComposerTuning";
+import type { SessionFocus } from "./useSessionFocus";
 
 interface TuneControlProps {
   tuning: ComposerTuning;
   triggerRef: RefObject<HTMLButtonElement | null>;
   agentName: string;
   disabled: boolean;
-  focus: boolean;
-  focusBusy: boolean;
-  onFocusChange: (enabled: boolean) => void;
+  focus: SessionFocus;
 }
 
-export function TuneControl({
-  tuning,
-  triggerRef,
-  agentName,
-  disabled,
-  focus,
-  focusBusy,
-  onFocusChange,
-}: TuneControlProps) {
+export function TuneControl({ tuning, triggerRef, agentName, disabled, focus }: TuneControlProps) {
   const id = useId();
   const { input, options, draft, busy, defaultEffort, open, interrupt } = tuning;
-  const { modeOptions, currentEffort, defaultModelLabel } = input;
+  const { modeOptions, defaultModelLabel } = input;
   const summary = tuningSummary(input, options);
   const parts = summary.length > 0 ? summary : ["Settings"];
   const restartBusy = busy.mode || busy.model || busy.effort;
@@ -128,9 +118,7 @@ export function TuneControl({
                     {effortLabel(option)}
                   </option>
                 ))}
-                {currentEffort && !options.effortOptions.includes(currentEffort) ? (
-                  <option value={currentEffort}>{currentEffort}</option>
-                ) : null}
+                {options.customEffort ? <option value={options.customEffort}>{options.customEffort}</option> : null}
               </Select>
             </label>
           ) : null}
@@ -139,7 +127,7 @@ export function TuneControl({
               <span>Focus</span>
               <span className={styles.label}>Hold incoming messages</span>
             </span>
-            <Toggle checked={focus} label="Focus" disabled={focusBusy} onChange={onFocusChange} />
+            <Toggle checked={focus.on} label="Focus" disabled={focus.busy} onChange={(enabled) => void focus.set(enabled)} />
           </div>
           {draft.hasPending ? (
             <div className={styles.restart}>

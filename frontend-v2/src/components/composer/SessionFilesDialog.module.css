@@ -20,24 +20,9 @@
   border-top: 1px solid var(--line);
 }
 
-.thumb,
-.tile {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  margin-right: 8px;
-  border-radius: var(--r-sm);
-}
-
 .thumb {
-  object-fit: cover;
-}
-
-.tile {
-  display: inline-grid;
-  place-items: center;
-  background: var(--fill-quiet);
-  color: var(--muted);
+  --thumb-size: 40px;
+  margin-right: 8px;
 }
 
 .text {

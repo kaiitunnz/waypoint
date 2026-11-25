@@ -39,7 +39,7 @@ export interface PopoverBounds {
 }
 
 export interface PopoverAnchor {
-  // Fixed-position style for a ``dropdown`` placement; null for ``composer``
+  // Fixed-position style for the ``dropdown`` and ``rise`` placements; null for ``composer``
   // (CSS owns its anchor) and whenever the popover is closed or deferred to a
   // mobile media query.
   style: CSSProperties | null;
@@ -55,12 +55,12 @@ const MIN_WIDTH = 320;
 const MIN_HEIGHT = 240;
 
 // Fixed-viewport coordinates and growth bounds for a popover anchored to a
-// trigger. The dropdown placement positions the panel ``fixed`` just below the
-// trigger and pins it to the trigger's left or right edge; the composer
-// placement leaves positioning to CSS and only reports bounds. Both compute
-// available space from the visual viewport so the panel never runs past a
-// screen edge, and both re-measure while open so the panel tracks scroll,
-// resize, and visual-viewport pan/zoom.
+// trigger. The dropdown and rise placements position the panel ``fixed`` just
+// below or above the trigger and pin it to the trigger's left or right edge;
+// the composer placement leaves positioning to CSS and only reports bounds. All
+// compute available space from the visual viewport so the panel never runs past
+// a screen edge, and re-measure while open so the panel tracks scroll, resize,
+// and visual-viewport pan/zoom.
 export function usePopoverAnchor(
   triggerRef: RefObject<HTMLElement | null>,
   open: boolean,

@@ -1,6 +1,3 @@
-// Versioned so a future shape change can coexist with an old saved value.
-export const USAGE_POPOVER_SIZE_KEY = "waypoint.usage-popover-size.v1";
-
 // Pixel steps for keyboard resize; Shift takes the larger stride.
 const KEY_STEP = 24;
 const KEY_STEP_LARGE = 72;

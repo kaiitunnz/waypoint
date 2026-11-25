@@ -36,23 +36,8 @@
   border-color: color-mix(in srgb, var(--error) 60%, transparent);
 }
 
-.thumb,
-.tile {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--r-sm);
-}
-
 .thumb {
-  object-fit: cover;
-}
-
-.tile {
-  display: inline-grid;
-  place-items: center;
-  background: var(--fill-quiet);
-  color: var(--muted);
+  --thumb-size: 34px;
 }
 
 .text {

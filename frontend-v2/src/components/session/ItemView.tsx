@@ -19,7 +19,8 @@ import { RunLine } from "./cards/RunLine";
 import { SentFiles } from "./cards/SentFiles";
 import { SystemRule } from "./cards/SystemRule";
 import { TaskNote } from "./cards/TaskNote";
-import { RunNote, ToolRun } from "./cards/ToolRun";
+import { RunNote } from "./cards/RunNote";
+import { ToolRun } from "./cards/ToolRun";
 import { useSessionContext } from "./SessionContext";
 
 interface ItemViewProps {

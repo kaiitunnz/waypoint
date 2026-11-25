@@ -1,7 +1,6 @@
 "use client";
 
 import { describeStep } from "@waypoint/web-core/activity";
-import { cardKindOf } from "@waypoint/web-core/session/cardKind";
 import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import { itemKey, primaryEvent, type LeafItem } from "@waypoint/web-core/session/transcript";
 
@@ -9,34 +8,13 @@ import { StepText } from "@/components/sessions/StepText";
 
 import { useSessionContext } from "../SessionContext";
 import { CallRow } from "./CallRow";
-import { ChangesNote } from "./ChangesNote";
 import { DiffStat } from "./DiffStat";
-import { EventTime } from "./EventTime";
 import { RunLine } from "./RunLine";
-import styles from "./ToolRun.module.css";
+import { RunNote } from "./RunNote";
 
 interface ToolRunProps {
   items: LeafItem[];
   working: boolean;
-}
-
-// A note that came in with the run: attached, resumed, a compaction, or a set of changes.
-export function RunNote({ child }: { child: LeafItem }) {
-  if (child.kind !== "single") return null;
-  const { event } = child;
-  switch (cardKindOf(event)) {
-    case "none":
-      return null;
-    case "diff_note":
-      return <ChangesNote event={event} />;
-    default:
-      return (
-        <div className={styles.note}>
-          <span className={styles.noteText}>{event.text}</span>
-          <EventTime ts={event.ts} />
-        </div>
-      );
-  }
 }
 
 export function ToolRun({ items, working }: ToolRunProps) {

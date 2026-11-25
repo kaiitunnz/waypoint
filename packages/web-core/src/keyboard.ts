@@ -101,7 +101,6 @@ export function trapTabFocus(
   const last = focusable[focusable.length - 1];
   const active = document.activeElement;
   const ahead = event.shiftKey ? Node.DOCUMENT_POSITION_PRECEDING : Node.DOCUMENT_POSITION_FOLLOWING;
-  // Tab from here would leave the root.
   const escaping =
     !root.contains(active) ||
     (options.tabStopsOnly === true &&

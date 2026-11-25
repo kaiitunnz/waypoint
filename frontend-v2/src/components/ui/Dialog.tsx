@@ -109,7 +109,6 @@ export function Modal(props: DialogProps) {
   return <Surface {...props} variant="modal" />;
 }
 
-// A modal for a pointer, a sheet for touch.
 export function Dialog(props: DialogProps) {
   const pointer = usePointerUI();
   return pointer ? <Modal {...props} /> : <Sheet {...props} />;

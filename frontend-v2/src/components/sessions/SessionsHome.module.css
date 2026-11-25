@@ -23,8 +23,7 @@
   list-style: none;
 }
 
-/* The full layout (every client but a phone): the sessions, with the readouts
-   beside them where there is room and under them otherwise. */
+/* The full layout: every client but a phone. */
 .full {
   padding-bottom: 0;
 }

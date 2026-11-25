@@ -42,7 +42,6 @@ export function useSessionPanels() {
     pane: control("pane", paneColumn),
     drawer,
     closeDrawer: () => setDrawer(null),
-    // Closes the drawer a session was picked in; another session's screen focuses the same toggle.
     pickFromDrawer: (anotherSession: boolean) => {
       if (anotherSession) refocus = drawer;
       setDrawer(null);

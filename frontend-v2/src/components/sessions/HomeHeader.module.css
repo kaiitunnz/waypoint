@@ -29,18 +29,14 @@
 }
 
 .search {
-  flex: 1 1 280px;
   max-width: 420px;
-  min-width: 0;
 }
 
 .searchRow {
   padding: 4px 16px 0;
 }
 
-/* The full header: one row of title, host, search field and button. The field
-   keeps 10rem and the host truncates when short of room; under 600px of its own
-   width the field takes a row of its own. */
+/* The field keeps 10rem, so the host name is what truncates. */
 .full {
   container-type: inline-size;
   display: grid;

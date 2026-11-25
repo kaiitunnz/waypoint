@@ -13,7 +13,6 @@ const PANELS: Record<SidePanel, { label: string; icon: IconName }> = {
   pane: { label: "Side pane", icon: "panel-right" },
 };
 
-// Selects a panel's toggle, to send focus back to it.
 export const panelToggle = (panel: SidePanel) => `[data-panel-toggle="${panel}"]`;
 
 interface PanelButtonProps {

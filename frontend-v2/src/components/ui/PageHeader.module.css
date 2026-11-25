@@ -41,7 +41,7 @@
   }
 }
 
-/* The full header's top spacing, for a pointer at any width or any client with columns. */
+/* Every client but a phone. */
 @media (min-width: 900px), (hover: hover) and (pointer: fine) {
   .header {
     padding-top: calc(var(--safe-top) + 20px);

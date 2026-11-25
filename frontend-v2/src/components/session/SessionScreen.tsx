@@ -93,7 +93,6 @@ export function SessionScreen({ id }: { id: string }) {
 
   const fullHeader = pointer && !narrowHeader;
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
-  // A full header shows the chat's density; a compact one keeps it in the menu, as touch always does.
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
   const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
   const overflow = session ? (

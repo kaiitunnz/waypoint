@@ -30,6 +30,7 @@ export function SwitcherProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (event.repeat || event.defaultPrevented) return;
       if (!isSwitcherShortcut(event) || ownsShortcutKeys(event.target)) return;
       if (!open && hasModalDialog()) return;
       event.preventDefault();

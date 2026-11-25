@@ -85,7 +85,7 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
           <span className={styles.meta}>{prompts.length} questions</span>
         </div>
       )}
-      <AskStatus availability={ask.availability} phase={phase} />
+      {open ? null : <AskStatus availability={ask.availability} phase={phase} />}
       {single ? null : (
         <Dialog
           open={open}

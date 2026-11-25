@@ -22,6 +22,11 @@ updates:
       # vitest 4 crashes npm 10's resolver and vitest 5 needs Node 22 (CI runs 20).
       - dependency-name: vitest
         update-types: ["version-update:semver-major"]
+      # typescript-eslint doesn't support TypeScript 7, and eslint-plugin-react/import/jsx-a11y don't support ESLint 10.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "build"
 

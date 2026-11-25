@@ -53,3 +53,12 @@ export function modelChangeText(event: EventRecord, options: BackendModelOption[
     ? `Model changed from ${modelLabelFor(previous, options)} to ${currentLabel}`
     : `Switched to ${currentLabel}`;
 }
+
+// "42s", "2m 4s".
+export function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+}

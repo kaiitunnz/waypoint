@@ -172,6 +172,19 @@ describe("describeCall", () => {
     expect(describeCall(agent)?.mono).toBe(false);
   });
 
+  it("shows no command block for a blank command", () => {
+    const [bash] = run([call(1, "a", "Bash", { command: "  \n " })]);
+    expect(describeCall(bash)?.mono).toBe(false);
+  });
+
+  it("carries the attachments of a call or its result", () => {
+    const spec = { id: "img", filename: "a.png", kind: "image", size: 10 };
+    const [pair] = run([call(1, "a", "mcp__draw", { prompt: "a cat" }), result(2, "a", "", { attachments: [spec] })]);
+    expect(describeCall(pair)?.attachments).toEqual([spec]);
+    const [single] = run([ev(1, "tool_call", "", { item_id: "b", tool_name: "mcp__draw", payload: { input: {} }, attachments: [spec] })]);
+    expect(describeCall(single)?.attachments).toEqual([spec]);
+  });
+
   it("keeps every argument of a tool whose input also carries a path", () => {
     const [other] = run([call(1, "a", "mcp__fs", { path: "/repo/a.txt", mode: "read" })]);
     expect(describeCall(other, "/repo")).toMatchObject({ path: null, label: "path: /repo/a.txt\nmode: read" });
@@ -260,5 +273,10 @@ describe("formatCallDuration", () => {
     expect(formatCallDuration(42_000)).toBe("42s");
     expect(formatCallDuration(124_000)).toBe("2m 4s");
     expect(formatCallDuration(120_000)).toBe("2m");
+  });
+
+  it("does not round a near-ten-second call up to 10.0s", () => {
+    expect(formatCallDuration(9_949)).toBe("9.9s");
+    expect(formatCallDuration(9_999)).toBe("10s");
   });
 });

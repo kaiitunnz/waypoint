@@ -1,7 +1,9 @@
+import { attachmentSpecsFor } from "../attachments";
 import { parseEvent, readToolName, toolFilePath, type EventDiffPreview } from "../events";
 import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from "../todos";
-import type { EventRecord } from "../types";
+import type { AttachmentSpec, EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
+import { formatDuration } from "./cardText";
 import {
   commandForEvent,
   commandOutputForEvent,
@@ -10,6 +12,7 @@ import {
   previewForToolEvent,
   toolBadgeFor,
   toolInputForEvent,
+  toolPairAttachments,
 } from "./toolPresentation";
 import { itemKey, primaryEvent, type LeafItem } from "./transcript";
 
@@ -114,7 +117,6 @@ const PHRASES: Record<Category, (count: number) => string> = {
   other: (n) => `used ${plural(n, "other tool")}`,
 };
 
-// Reading order of a run's phrases.
 const PHRASE_ORDER: Category[] = [
   "read",
   "search",
@@ -234,7 +236,6 @@ export interface CallRow {
   glyph: string;
   // What the call touched: a path, a command, a pattern; a todo list's progress.
   label: string;
-  // A todo list's entries.
   todos: TodoEntry[] | null;
   // Set for file tools so the directory can be muted; relative to the working directory when inside it.
   path: { dir: string; base: string } | null;
@@ -247,6 +248,7 @@ export interface CallRow {
   durationMs: number | null;
   output: string | null;
   diff: EventDiffPreview | null;
+  attachments: AttachmentSpec[];
 }
 
 // The output without the blank lines around it and with `\n` line ends.
@@ -265,12 +267,7 @@ function durationBetween(call: EventRecord | null, result: EventRecord | null): 
 
 // "1.8s", "42s", "2m 4s".
 export function formatCallDuration(ms: number): string {
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  return ms < 9_950 ? `${(ms / 1000).toFixed(1)}s` : formatDuration(ms);
 }
 
 // A call's arguments as the lines a person would read: a query and where it looks, a URL,
@@ -305,7 +302,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
   const diff = childDiffPreview(child);
   const input = toolInputForEvent(event);
   const command = tool === "Bash" ? commandForEvent(event) : null;
-  const subject = (command ? command.replace(/\r\n?/g, "\n").trim() : null) ?? argumentLines(tool, input, cwd);
+  const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, input, cwd);
   // A call whose arguments read as lines keeps them all; a path alone stands for a file tool.
   const filePath =
     subject !== null ? null : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
@@ -333,5 +330,6 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
     durationMs: durationBetween(call, result),
     output: tool === "Bash" && result ? cleanOutput(commandOutputForEvent(result)) : null,
     diff,
+    attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),
   };
 }

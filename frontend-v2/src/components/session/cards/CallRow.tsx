@@ -13,6 +13,7 @@ import { Disclosure } from "./Disclosure";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
 import { FoldedText } from "./FoldedText";
+import { Attachments } from "./Attachments";
 import { PathLabel } from "./PathLabel";
 
 const COMMAND_LINES = 6;
@@ -97,6 +98,11 @@ export function CallRow({ row }: { row: CallRowModel }) {
       {row.output ? (
         <div className={styles.inset}>
           <FoldedText text={row.output} lines={OUTPUT_LINES} keep="end" className={styles.out} />
+        </div>
+      ) : null}
+      {row.attachments.length > 0 ? (
+        <div className={styles.inset}>
+          <Attachments specs={row.attachments} />
         </div>
       ) : null}
     </div>

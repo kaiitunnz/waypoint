@@ -1,4 +1,5 @@
 import type { TaskNotificationView } from "../events";
+import { formatDuration } from "./cardText";
 
 export interface TaskNotificationBadge {
   glyph: string;
@@ -41,14 +42,6 @@ export function taskStatusLamp(
   return null;
 }
 
-function formatTaskDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
-}
-
 export function taskUsageParts(usage: TaskNotificationView["usage"]): string[] {
   if (!usage) return [];
   const parts: string[] = [];
@@ -59,7 +52,7 @@ export function taskUsageParts(usage: TaskNotificationView["usage"]): string[] {
     parts.push(`${usage.toolUses} tool ${usage.toolUses === 1 ? "use" : "uses"}`);
   }
   if (usage.durationMs != null) {
-    parts.push(formatTaskDuration(usage.durationMs));
+    parts.push(formatDuration(usage.durationMs));
   }
   return parts;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
-import { isBlankAgentMessage, modelChangeText, reasoningPreview, sendUserFileInput } from "./cardText";
+import { formatDuration, isBlankAgentMessage, modelChangeText, reasoningPreview, sendUserFileInput } from "./cardText";
 
 describe("reasoningPreview", () => {
   it("flattens bold and whitespace", () => {
@@ -36,5 +36,13 @@ describe("modelChangeText", () => {
     const change = ev(1, "system_note", "", { previous_model: "a", current_model: "b" });
     expect(modelChangeText(change)).toBe("Model changed from a to b");
     expect(modelChangeText(ev(2, "system_note", "", { current_model: "b" }))).toBe("Switched to b");
+  });
+});
+
+describe("formatDuration", () => {
+  it("reads in seconds, then minutes", () => {
+    expect(formatDuration(42_400)).toBe("42s");
+    expect(formatDuration(124_000)).toBe("2m 4s");
+    expect(formatDuration(120_000)).toBe("2m");
   });
 });

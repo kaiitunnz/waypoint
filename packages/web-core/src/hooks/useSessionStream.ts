@@ -38,7 +38,7 @@ export function useSessionStream(
     let latestId: number | null = null;
     let loaded = false;
     // Live events wait while a catch-up is in flight, so a streamed message keeps its order.
-    let holding = false;
+    let catchingUp = 0;
     dispatch({ type: "reset" });
 
     const fail = (error: unknown, fallback: string) => {
@@ -73,13 +73,13 @@ export function useSessionStream(
       if (batch.length > 0) startTransition(() => dispatch({ type: "events", events: batch }));
     };
     const scheduleFlush = () => {
-      if (frame === null && !holding) frame = window.requestAnimationFrame(flush);
+      if (frame === null && catchingUp === 0) frame = window.requestAnimationFrame(flush);
     };
 
     // The socket sends nothing for the time it was closed or not yet subscribed, so ask for it.
     const catchUp = () => {
       if (!loaded) return;
-      holding = true;
+      catchingUp += 1;
       fetchEvents(host, token, sessionId, { afterId: latestId ?? 0 })
         .then(
           (page) => {
@@ -91,7 +91,7 @@ export function useSessionStream(
           (error) => fail(error, "failed to refresh the transcript"),
         )
         .finally(() => {
-          holding = false;
+          catchingUp -= 1;
           if (active && pending.length > 0) scheduleFlush();
         });
     };

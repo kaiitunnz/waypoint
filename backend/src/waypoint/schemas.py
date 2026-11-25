@@ -471,9 +471,8 @@ class SessionRecord(BaseModel):
     raw_log_path: str
     structured_log_path: str
     pinned_at: datetime | None = None
-    # Activity at or before this instant has been seen by the human; the session
-    # is unread while ``last_event_at > read_at``. Held open by session presence
-    # (see ``Runtime.register_presence``); ``None`` reads as read.
+    # Unread while ``last_event_at > read_at``; ``None`` reads as read
+    # (docs/session_read_marker.md).
     read_at: datetime | None = None
     # The session that spawned this one, if any. Set when a session is created
     # by an agent running inside another session (the CLI stamps it from
@@ -541,6 +540,10 @@ class SessionRecord(BaseModel):
     usage_limit_source: UsageLimitSource = "plugin"
     usage_provider_id: str | None = None
     usage_provider_account_key: str | None = None
+
+    @property
+    def unread(self) -> bool:
+        return self.read_at is not None and self.last_event_at > self.read_at
 
 
 class EventRecord(BaseModel):

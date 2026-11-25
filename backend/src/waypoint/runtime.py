@@ -918,7 +918,7 @@ class SessionRuntime:
             )
         return session
 
-    def mark_session_read(self, session_id: str, at: datetime) -> None:
+    def _mark_session_read(self, session_id: str, at: datetime) -> None:
         """Advance the session's read marker; broadcast only when it flips the
         session from unread to read."""
         if self.storage.mark_session_read(session_id, at):
@@ -939,42 +939,35 @@ class SessionRuntime:
         """A viewer opened or renewed its lease: everything so far counts as seen."""
         session = self.get_session(session_id)
         self.session_presence.touch(session_id, viewer_id)
-        self.mark_session_read(session_id, session.last_event_at)
+        self._mark_session_read(session_id, session.last_event_at)
 
     def release_presence(self, session_id: str, viewer_id: str) -> None:
         """A viewer left: the session was read up to now."""
         session = self.get_session(session_id)
         self.session_presence.release(session_id, viewer_id)
-        self.mark_session_read(
+        self._mark_session_read(
             session_id, max(datetime.now(UTC), session.last_event_at)
         )
 
     def _launched_read(self, session: SessionRecord) -> SessionRecord:
-        """Count what launching recorded as seen: the notes a start writes are not
-        activity, so a new session stays read until the agent produces some."""
+        """Launch notes are not activity: the new session starts read."""
         stored = self.storage.get_session(session.id)
         if stored is None:
             return session
-        self.mark_session_read(session.id, stored.last_event_at)
+        self._mark_session_read(session.id, stored.last_event_at)
         return self.storage.get_session(session.id) or stored
 
     @asynccontextmanager
     async def _keep_read(self, session_id: str) -> AsyncIterator[None]:
-        """Restoring a session records lifecycle notes that are not activity: a
-        session that was read stays read, one with unseen activity stays unread."""
+        """Restore notes are not activity: a read session stays read, an unread
+        one stays unread."""
         before = self.storage.get_session(session_id)
         try:
             yield
         finally:
             after = self.storage.get_session(session_id)
-            if (
-                before is not None
-                and after is not None
-                and not (
-                    before.read_at is not None and before.last_event_at > before.read_at
-                )
-            ):
-                self.mark_session_read(session_id, after.last_event_at)
+            if before is not None and after is not None and not before.unread:
+                self._mark_session_read(session_id, after.last_event_at)
 
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.

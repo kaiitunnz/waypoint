@@ -40,10 +40,6 @@ def _session(session_id: str = "s1", last_event_at: datetime = START) -> Session
     )
 
 
-def _unread(session: SessionRecord) -> bool:
-    return session.read_at is not None and session.last_event_at > session.read_at
-
-
 def _runtime(tmp_path: Path) -> tuple[SessionRuntime, Storage]:
     settings = Settings(data_dir=tmp_path / "data")
     storage = Storage(settings.database_path)
@@ -63,7 +59,7 @@ def test_new_session_starts_read(tmp_path: Path) -> None:
     stored = storage.get_session("s1")
     assert stored is not None
     assert stored.read_at == START
-    assert not _unread(stored)
+    assert not stored.unread
 
 
 def test_existing_rows_start_read(tmp_path: Path) -> None:
@@ -93,13 +89,13 @@ def test_mark_read_only_advances_and_reports_the_flip(tmp_path: Path) -> None:
     assert storage.mark_session_read("s1", START + timedelta(minutes=1)) is False
     session = storage.get_session("s1")
     assert session is not None
-    assert _unread(session)
+    assert session.unread
 
     assert storage.mark_session_read("s1", later) is True
     session = storage.get_session("s1")
     assert session is not None
     assert session.read_at == later
-    assert not _unread(session)
+    assert not session.unread
 
     # Never moves back, and reading does not touch updated_at.
     assert storage.mark_session_read("s1", START) is False
@@ -120,7 +116,7 @@ async def test_activity_nobody_watched_is_unread(tmp_path: Path) -> None:
     await _activity(runtime, "s1")
     session = storage.get_session("s1")
     assert session is not None
-    assert _unread(session)
+    assert session.unread
 
 
 async def test_activity_while_viewed_is_read(tmp_path: Path) -> None:
@@ -130,7 +126,7 @@ async def test_activity_while_viewed_is_read(tmp_path: Path) -> None:
     await _activity(runtime, "s1")
     session = storage.get_session("s1")
     assert session is not None
-    assert not _unread(session)
+    assert not session.unread
     assert session.read_at == session.last_event_at
 
 
@@ -145,7 +141,7 @@ async def test_register_marks_unread_session_read_and_broadcasts(
     runtime.register_presence("s1", "viewer-1")
     session = storage.get_session("s1")
     assert session is not None
-    assert not _unread(session)
+    assert not session.unread
     assert "s1" in runtime._dirty_session_states
 
     # A renewal with nothing new changes nothing and broadcasts nothing.
@@ -168,12 +164,12 @@ async def test_release_sets_marker_to_now_and_later_activity_is_unread(
     assert released is not None
     assert released.read_at is not None
     assert released.read_at >= before
-    assert not _unread(released)
+    assert not released.unread
 
     await _activity(runtime, "s1")
     unwatched = storage.get_session("s1")
     assert unwatched is not None
-    assert _unread(unwatched)
+    assert unwatched.unread
 
 
 async def test_marker_follows_until_the_last_viewer_leaves(tmp_path: Path) -> None:
@@ -185,13 +181,13 @@ async def test_marker_follows_until_the_last_viewer_leaves(tmp_path: Path) -> No
     await _activity(runtime, "s1")
     session = storage.get_session("s1")
     assert session is not None
-    assert not _unread(session)
+    assert not session.unread
 
     runtime.release_presence("s1", "desk")
     await _activity(runtime, "s1")
     session = storage.get_session("s1")
     assert session is not None
-    assert _unread(session)
+    assert session.unread
 
 
 def test_presence_on_unknown_session_is_404(tmp_path: Path) -> None:
@@ -245,7 +241,7 @@ async def test_content_bump_on_heuristic_transport_follows_presence(
     runtime._follow_presence("s1", later)
     session = storage.get_session("s1")
     assert session is not None
-    assert not _unread(session)
+    assert not session.unread
 
     runtime.release_presence("s1", "viewer-1")
     after = datetime.now(UTC)
@@ -253,7 +249,7 @@ async def test_content_bump_on_heuristic_transport_follows_presence(
     runtime._follow_presence("s1", after)
     session = storage.get_session("s1")
     assert session is not None
-    assert _unread(session)
+    assert session.unread
 
 
 class _RestoringPlugin:
@@ -282,12 +278,12 @@ async def test_restoring_a_read_session_keeps_it_read(
     restored = storage.get_session("s1")
     assert restored is not None
     assert restored.last_event_at > session.last_event_at
-    assert not _unread(restored)
+    assert not restored.unread
 
     await _activity(runtime, "s1")
     unwatched = storage.get_session("s1")
     assert unwatched is not None
-    assert _unread(unwatched)
+    assert unwatched.unread
 
 
 async def test_restoring_an_unread_session_leaves_it_unread(
@@ -299,13 +295,13 @@ async def test_restoring_an_unread_session_leaves_it_unread(
     await _activity(runtime, "s1")
     unread = storage.get_session("s1")
     assert unread is not None
-    assert _unread(unread)
+    assert unread.unread
 
     await runtime._restore_session_and_warm_completions(_RestoringPlugin(), unread)
 
     restored = storage.get_session("s1")
     assert restored is not None
-    assert _unread(restored)
+    assert restored.unread
     assert restored.read_at == unread.read_at
 
 
@@ -317,15 +313,15 @@ async def test_launched_session_counts_as_read_until_the_agent_acts(
     await runtime._record_system_event("s1", "Started the session")
     noted = storage.get_session("s1")
     assert noted is not None
-    assert _unread(noted)
+    assert noted.unread
 
     launched = runtime._launched_read(noted)
-    assert not _unread(launched)
+    assert not launched.unread
 
     await _activity(runtime, "s1")
     acted = storage.get_session("s1")
     assert acted is not None
-    assert _unread(acted)
+    assert acted.unread
 
 
 async def test_attached_session_starts_read(
@@ -361,15 +357,15 @@ async def test_attached_session_starts_read(
     )
 
     assert attached.read_at is not None
-    assert not _unread(attached)
+    assert not attached.unread
     stored = storage.get_session(attached.id)
     assert stored is not None
-    assert not _unread(stored)
+    assert not stored.unread
 
     await _activity(runtime, attached.id)
     acted = storage.get_session(attached.id)
     assert acted is not None
-    assert _unread(acted)
+    assert acted.unread
 
 
 async def test_a_restore_that_fails_still_leaves_a_read_session_read(
@@ -385,4 +381,4 @@ async def test_a_restore_that_fails_still_leaves_a_read_session_read(
 
     session = storage.get_session("s1")
     assert session is not None
-    assert not _unread(session)
+    assert not session.unread

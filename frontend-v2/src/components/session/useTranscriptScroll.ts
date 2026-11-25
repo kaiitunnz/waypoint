@@ -50,7 +50,7 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
     remember();
   }, [remember]);
 
-  // New content: keep the turn in view where it was, else follow the end.
+  // New content: follow the end, else keep the turn in view where it was.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -59,7 +59,8 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
     if (following.current) {
       el.scrollTop = el.scrollHeight;
     } else if (before?.turn?.isConnected) {
-      el.scrollTop += before.turn.getBoundingClientRect().top - el.getBoundingClientRect().top - before.offset;
+      const shift = before.turn.getBoundingClientRect().top - el.getBoundingClientRect().top - before.offset;
+      if (shift !== 0) el.scrollTop += shift;
     } else if (before && firstKey.current !== null && head !== firstKey.current) {
       el.scrollTop = before.top + (el.scrollHeight - before.height);
     }

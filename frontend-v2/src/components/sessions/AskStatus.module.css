@@ -1,0 +1,10 @@
+.note,
+.error {
+  margin-top: 8px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}

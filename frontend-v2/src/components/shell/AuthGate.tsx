@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { LoginScreen } from "@/components/login/LoginScreen";
+import { SwitcherProvider } from "@/components/sessions/SwitcherProvider";
 import { useAuth } from "@/lib/auth";
 import { ShellDataProvider } from "@/lib/shell-data";
 
@@ -21,7 +22,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
   return (
     <ShellDataProvider host={auth.host} token={auth.token}>
-      <AppShell>{children}</AppShell>
+      <SwitcherProvider>
+        <AppShell>{children}</AppShell>
+      </SwitcherProvider>
     </ShellDataProvider>
   );
 }

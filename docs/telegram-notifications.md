@@ -111,6 +111,9 @@ notifiable again within about 45 seconds. Opening the same session on two
 devices keeps it silent until you leave the last one. To always be notified,
 keep the session page closed.
 
+Presence also moves the session's read marker; see
+[`session_read_marker.md`](session_read_marker.md).
+
 ## `public_base_url`
 
 The operator-controlled origin the deep links are built from. It is **required**

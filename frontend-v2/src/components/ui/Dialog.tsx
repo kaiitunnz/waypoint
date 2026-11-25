@@ -4,6 +4,7 @@ import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
+import { useDesktop } from "@/lib/layout";
 
 import { Icon } from "./Icon";
 import { IconButton } from "./IconButton";
@@ -14,10 +15,13 @@ interface DialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
+  // Modal only.
+  size?: "md" | "lg";
 }
 
 // Opaque with a scrim: dialogs carry text, so they are never glass.
@@ -25,9 +29,11 @@ function Surface({
   open,
   onClose,
   title,
+  subtitle,
   children,
   footer,
   flush,
+  size = "md",
   variant,
 }: DialogProps & { variant: "sheet" | "modal" }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -64,7 +70,7 @@ function Surface({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={isSheet ? styles.sheet : styles.modal}
+        className={isSheet ? styles.sheet : cx(styles.modal, size === "lg" && styles.modalLg)}
         style={drag ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
       >
         {isSheet ? (
@@ -79,7 +85,10 @@ function Surface({
           </div>
         ) : null}
         <div className={styles.head}>
-          <h2 className={styles.title}>{title}</h2>
+          <div className={styles.heading}>
+            <h2 className={styles.title}>{title}</h2>
+            {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+          </div>
           <IconButton label="Close" size="sm" onClick={onClose}>
             <Icon name="close" size={18} />
           </IconButton>
@@ -98,4 +107,10 @@ export function Sheet(props: DialogProps) {
 
 export function Modal(props: DialogProps) {
   return <Surface {...props} variant="modal" />;
+}
+
+// A modal on desktop, a sheet on mobile.
+export function Dialog(props: DialogProps) {
+  const desktop = useDesktop();
+  return desktop ? <Modal {...props} /> : <Sheet {...props} />;
 }

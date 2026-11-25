@@ -16,12 +16,13 @@ interface PopoverProps {
   triggerRef: RefObject<HTMLElement | null>;
   label: string;
   width?: number;
+  align?: "left" | "right";
   children: ReactNode;
 }
 
-export function Popover({ open, onOpenChange, triggerRef, label, width = 360, children }: PopoverProps) {
+export function Popover({ open, onOpenChange, triggerRef, label, width = 360, align = "left", children }: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
-  const anchor = usePopoverAnchor(triggerRef, open, "left", { gap: 8 });
+  const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 });
   usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
   const placed = open && anchor.style !== null;
   // The panel is portaled to the end of the page, so focus moves into it for the keyboard.

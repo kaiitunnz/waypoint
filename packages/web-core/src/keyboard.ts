@@ -13,8 +13,29 @@ type KeyboardEventLike = Pick<
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// A terminal reads Ctrl+K as readline's kill-line and a contenteditable region
+// keeps its own editing keys; a page-wide shortcut leaves keys from either alone.
+const KEY_OWNER_SELECTOR = '.xterm, [contenteditable]:not([contenteditable="false"])';
+
+export function ownsShortcutKeys(target: EventTarget | null): boolean {
+  const element = target as { closest?: (selector: string) => unknown } | null;
+  return typeof element?.closest === "function" && element.closest(KEY_OWNER_SELECTOR) !== null;
+}
+
 export function isComposingKeyEvent(event: KeyboardEventLike): boolean {
   return event.isComposing === true || event.nativeEvent?.isComposing === true;
+}
+
+export function isSwitcherShortcut(
+  event: KeyboardEventLike & Pick<globalThis.KeyboardEvent, "altKey">,
+): boolean {
+  return (
+    !isComposingKeyEvent(event) &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === "k"
+  );
 }
 
 export function isModifiedEnterShortcut(

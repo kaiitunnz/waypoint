@@ -6,13 +6,20 @@ import {
   formatRateLimitWindowReset,
   formatRateLimitWindowResetShort,
   formatRelativeTime,
-  rateLimitUsageTone,
   rateLimitWindowPercent,
   usageTone,
-  type UsageTone,
 } from "@waypoint/web-core/usage";
-import { isRecurring } from "@waypoint/web-core/recurrence";
-import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
+import {
+  bucketPeak,
+  bucketSourceLabel,
+  findUsageWindow,
+  orderBucketsWorstFirst,
+  overallUsageTone,
+  summarizeChannels,
+  summarizeScheduled,
+  unresolvedProviderHealth,
+} from "@waypoint/web-core/usageSummary";
+import type { BackendCatalog } from "@waypoint/web-core/backends";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -78,77 +85,6 @@ export function InstrumentRail({
 
 /* ── Telemetry ── */
 
-function findWindow(
-  bucket: { snapshot: { windows: UsageWindow[] } },
-  kind: "5h" | "weekly",
-): UsageWindow | null {
-  for (const window of bucket.snapshot.windows) {
-    const label = (window.label || "").toLowerCase();
-    if (kind === "5h" && (label.includes("5h") || window.window_minutes === 300)) {
-      return window;
-    }
-    if (
-      kind === "weekly" &&
-      (label.includes("week") ||
-        label.includes("7d") ||
-        window.window_minutes === 7 * 24 * 60)
-    ) {
-      return window;
-    }
-  }
-  return null;
-}
-
-function bucketPeak(bucket: { snapshot: { windows: UsageWindow[] } }): number {
-  return Math.max(
-    0,
-    ...bucket.snapshot.windows.map((w) => rateLimitWindowPercent(w) ?? 0),
-  );
-}
-
-// Source label for an account row: the agent name for a session bucket, the
-// provider label for a configured-provider bucket (with a stale hint).
-function sourceLabel(
-  bucket: UsageDashboardBucket,
-  catalog: BackendCatalog | null,
-): string {
-  if (bucket.origin === "provider") {
-    return bucket.health.stale
-      ? `${bucket.provider_label} · stale`
-      : bucket.provider_label;
-  }
-  return humaniseBackend(bucket.backend, catalog ?? undefined);
-}
-
-// A provider whose latest refresh resolved no account bucket but reported a
-// coarse error surfaces as a compact health line so missing_token /
-// identity_failed states are visible without a card.
-const PROVIDER_ERROR_LABELS: Record<string, { text: string; danger: boolean }> = {
-  missing_token: { text: "token missing", danger: true },
-  identity_failed: { text: "identity failed", danger: true },
-  network: { text: "unreachable", danger: true },
-  unknown: { text: "error", danger: true },
-  permission_denied: { text: "permission denied", danger: false },
-  usage_unavailable: { text: "usage unavailable", danger: false },
-  no_matching_usage: { text: "no usage", danger: false },
-};
-
-function providerHealthLine(
-  status: ProviderUsageStatus,
-): { text: string; danger: boolean } | null {
-  const errors = Object.entries(status.error_counts).filter(([, n]) => n > 0);
-  if (errors.length === 0) return null;
-  // Worst error first: a hard failure (danger) outranks a soft one.
-  errors.sort(
-    (a, b) =>
-      Number(PROVIDER_ERROR_LABELS[b[0]]?.danger ?? true) -
-      Number(PROVIDER_ERROR_LABELS[a[0]]?.danger ?? true),
-  );
-  const [code] = errors[0];
-  const entry = PROVIDER_ERROR_LABELS[code] ?? { text: "error", danger: true };
-  return { text: `${status.provider_label} · ${entry.text}`, danger: entry.danger };
-}
-
 function TelemetryTile({
   buckets,
   providers,
@@ -164,17 +100,7 @@ function TelemetryTile({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  // Provider health lines for providers that resolved no bucket but reported an
-  // error — so a configured Lumid provider is visible even with no card.
-  const bucketProviderIds = new Set(
-    (buckets ?? [])
-      .filter((b) => b.origin === "provider")
-      .map((b) => b.provider_id),
-  );
-  const providerHealth = providers
-    .filter((p) => !bucketProviderIds.has(p.provider_id))
-    .map((p) => providerHealthLine(p))
-    .filter((line): line is { text: string; danger: boolean } => line !== null);
+  const providerHealth = unresolvedProviderHealth(buckets ?? [], providers);
 
   // Degrade to a plain link only when there is no usage data at all: no account
   // buckets and no provider health worth showing. Lamp keyed off the master
@@ -199,20 +125,7 @@ function TelemetryTile({
   }
 
   const accounts = buckets ?? [];
-  let tone: UsageTone = "good";
-  for (const bucket of accounts) {
-    const t = rateLimitUsageTone(bucket.snapshot);
-    if (t === "danger") {
-      tone = "danger";
-      break;
-    }
-    if (t === "warn") tone = "warn";
-  }
-  // A hard provider failure (danger) escalates the tile lamp even with no card.
-  if (providerHealth.some((h) => h.danger)) tone = "danger";
-  else if (tone !== "danger" && providerHealth.length > 0) {
-    tone = tone === "good" ? "warn" : tone;
-  }
+  const tone = overallUsageTone(accounts, providerHealth);
   const lampTone = tone === "good" ? "ok" : tone === "warn" ? "warn" : "danger";
   const lampText =
     tone === "good"
@@ -221,8 +134,7 @@ function TelemetryTile({
         ? "Approaching limit"
         : "Quota critical";
 
-  // Worst-first so the account nearest its limit reads first at a glance.
-  const ordered = [...accounts].sort((a, b) => bucketPeak(b) - bucketPeak(a));
+  const ordered = orderBucketsWorstFirst(accounts);
   const headline =
     accounts.length > 0
       ? `${accounts.length} account${accounts.length === 1 ? "" : "s"}`
@@ -263,12 +175,12 @@ function TelemetryTile({
                 <span className="inst-account-name" title={bucket.account_label}>
                   {bucket.account_label}
                 </span>
-                <span className="inst-account-src" title={sourceLabel(bucket, catalog)}>
-                  {sourceLabel(bucket, catalog)}
+                <span className="inst-account-src" title={bucketSourceLabel(bucket, catalog)}>
+                  {bucketSourceLabel(bucket, catalog)}
                 </span>
               </span>
-              <UsageWindowMeter label="5h" window={findWindow(bucket, "5h")} />
-              <UsageWindowMeter label="wk" window={findWindow(bucket, "weekly")} />
+              <UsageWindowMeter label="5h" window={findUsageWindow(bucket, "5h")} />
+              <UsageWindowMeter label="wk" window={findUsageWindow(bucket, "weekly")} />
             </li>
           ))}
         </ul>
@@ -357,14 +269,7 @@ function UsageWindowMeter({
 /* ── Board ── */
 
 function BoardTile({ channels }: { channels: BoardChannel[] }) {
-  const totalPosts = channels.reduce((sum, c) => sum + c.entry_count, 0);
-  const lastActivity = channels
-    .map((c) => c.last_created_at)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
-  // The API returns channels most-recently-active first.
-  const topChannels = channels.slice(0, 3);
+  const { posts: totalPosts, lastActivity, top: topChannels } = summarizeChannels(channels);
 
   if (channels.length === 0) {
     return (
@@ -421,29 +326,6 @@ function BoardTile({ channels }: { channels: BoardChannel[] }) {
 
 /* ── Scheduled ── */
 
-interface ScheduledItem {
-  key: string;
-  kind: "launch" | "message";
-  when: number | null;
-  whenLabel: string;
-  target: string;
-  preview: string;
-  recurring: boolean;
-}
-
-function formatShortWhen(iso: string | null | undefined): string {
-  if (!iso) return "queued";
-  const target = Date.parse(iso);
-  if (!Number.isFinite(target)) return "queued";
-  const delta = target - Date.now();
-  if (delta <= 0) return "due";
-  const mins = Math.round(delta / 60000);
-  if (mins < 60) return `in ${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `in ${hours}h`;
-  return `in ${Math.floor(hours / 24)}d`;
-}
-
 function ScheduledTile({
   schedules,
   messageSchedules,
@@ -455,9 +337,12 @@ function ScheduledTile({
   sessions: SessionRecord[];
   onOpen: () => void;
 }) {
-  const pendingSessions = schedules.filter((s) => s.status === "pending");
-  const pendingMessages = messageSchedules.filter((m) => m.status === "pending");
-  const queued = pendingSessions.length + pendingMessages.length;
+  const titleById = new Map(sessions.map((session) => [session.id, session.title]));
+  const { queued, items: shown, overflow } = summarizeScheduled(
+    schedules,
+    messageSchedules,
+    titleById,
+  );
 
   if (queued === 0) {
     return (
@@ -474,31 +359,6 @@ function ScheduledTile({
       </button>
     );
   }
-
-  const titleById = new Map(sessions.map((s) => [s.id, s.title]));
-  const items: ScheduledItem[] = [
-    ...pendingSessions.map((s) => ({
-      key: `launch:${s.id}`,
-      kind: "launch" as const,
-      when: Date.parse(s.scheduled_at),
-      whenLabel: formatShortWhen(s.scheduled_at),
-      target: s.title?.trim() || `${s.backend} session`,
-      preview: s.initial_prompt?.trim() || s.cwd,
-      recurring: isRecurring(s),
-    })),
-    ...pendingMessages.map((m) => ({
-      key: `message:${m.id}`,
-      kind: "message" as const,
-      when: m.scheduled_at ? Date.parse(m.scheduled_at) : null,
-      whenLabel: formatShortWhen(m.scheduled_at),
-      target: titleById.get(m.session_id)?.trim() || "session",
-      preview: m.text?.trim() || "",
-      recurring: isRecurring(m),
-    })),
-  ].sort((a, b) => (a.when ?? Infinity) - (b.when ?? Infinity));
-
-  const shown = items.slice(0, 3);
-  const overflow = queued - shown.length;
 
   return (
     <button type="button" className="inst" onClick={onOpen}>

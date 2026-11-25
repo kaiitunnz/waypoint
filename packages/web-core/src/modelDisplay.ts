@@ -21,7 +21,7 @@ export function effortLabel(value: string): string {
 
 // Family ids as they appear in a concrete claude-<family>-<version> id,
 // title-cased for display (e.g. "opus" -> "Opus").
-const CLAUDE_MODEL_FAMILY_LABELS: Record<string, string> = {
+export const CLAUDE_MODEL_FAMILY_LABELS: Record<string, string> = {
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",

@@ -1,0 +1,28 @@
+.meter {
+  display: block;
+  flex: none;
+  width: 44px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--working);
+}
+
+.calm > i {
+  background: var(--muted);
+}
+
+.warn > i {
+  background: var(--warn);
+}
+
+.danger > i {
+  background: var(--error);
+}

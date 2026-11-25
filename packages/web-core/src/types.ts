@@ -200,6 +200,8 @@ export interface SessionRecord {
   raw_log_path: string;
   structured_log_path: string;
   pinned_at?: string | null;
+  // Unread while last_event_at is later; absent or null reads as read.
+  read_at?: string | null;
   focus?: boolean;
   // waiting_input because a finished turn left a question open, with nothing
   // parking the turn: safe to message.

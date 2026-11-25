@@ -1,3 +1,5 @@
+export const sessionHref = (id: string) => `/session/${encodeURIComponent(id)}`;
+
 export type NavKey = "sessions" | "needs-you" | "assistant" | "board" | "usage";
 
 export interface NavDestination {

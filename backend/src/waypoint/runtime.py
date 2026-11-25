@@ -13,6 +13,7 @@ import subprocess
 import uuid
 from collections import defaultdict
 from collections.abc import (
+    AsyncIterator,
     Awaitable,
     Callable,
     Iterable,
@@ -20,7 +21,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -916,6 +917,62 @@ class SessionRuntime:
                 status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
             )
         return session
+
+    def _mark_session_read(self, session_id: str, at: datetime) -> None:
+        """Advance the session's read marker; broadcast only when it flips the
+        session from unread to read."""
+        if self.storage.mark_session_read(session_id, at):
+            self._publish_session_state(session_id)
+
+    def _follow_presence(self, session_id: str, at: datetime) -> None:
+        """While a viewer holds presence, new activity counts as seen."""
+        if not self.session_presence.is_active(session_id):
+            return
+        try:
+            self.storage.mark_session_read(session_id, at)
+        except Exception:
+            # The marker is an add-on: its failure must not skip the idle wake or
+            # auto-approval that follow an event.
+            log.exception("read marker update failed", extra={"session_id": session_id})
+
+    def register_presence(self, session_id: str, viewer_id: str) -> None:
+        """A viewer opened or renewed its lease: everything so far counts as seen."""
+        session = self.get_session(session_id)
+        self.session_presence.touch(session_id, viewer_id)
+        self._mark_session_read(session_id, session.last_event_at)
+
+    def release_presence(self, session_id: str, viewer_id: str) -> None:
+        """A viewer left: the session was read up to now."""
+        session = self.get_session(session_id)
+        self.session_presence.release(session_id, viewer_id)
+        self._mark_session_read(
+            session_id, max(datetime.now(UTC), session.last_event_at)
+        )
+
+    def _launched_read(self, session: SessionRecord) -> SessionRecord:
+        """Launch notes are not activity: the new session starts read."""
+        stored = self.storage.get_session(session.id)
+        if stored is None:
+            return session
+        self._mark_session_read(session.id, stored.last_event_at)
+        return self.storage.get_session(session.id) or stored
+
+    @asynccontextmanager
+    async def _keep_read(self, session_id: str) -> AsyncIterator[None]:
+        """Restore notes are not activity: a read session stays read, an unread
+        one stays unread."""
+        before = self.storage.get_session(session_id)
+        try:
+            yield
+        finally:
+            try:
+                after = self.storage.get_session(session_id)
+                if before is not None and after is not None and not before.unread:
+                    self._mark_session_read(session_id, after.last_event_at)
+            except Exception:
+                log.exception(
+                    "read marker update failed", extra={"session_id": session_id}
+                )
 
     def _validate_supported_transport(self, backend: str, transport: str) -> None:
         """Reject a transport the named agent does not declare support for.
@@ -1830,7 +1887,7 @@ class SessionRuntime:
         session = await self._apply_usage_selection(session, usage_selection)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
-        return session
+        return self._launched_read(session)
 
     async def _apply_usage_selection(
         self, session: SessionRecord, selection: UsageSelection
@@ -2467,7 +2524,7 @@ class SessionRuntime:
                 launch_target=launch_target,
                 cwd=session.cwd,
             )
-        return session
+        return self._launched_read(session)
 
     async def attach_assistant(
         self,
@@ -2591,6 +2648,7 @@ class SessionRuntime:
             structured_log=structured_log,
         )
         new_session = await self._apply_usage_selection(new_session, usage_selection)
+        new_session = self._launched_read(new_session)
         await self.broadcast_session_list()
         return new_session
 
@@ -2639,6 +2697,7 @@ class SessionRuntime:
         )
         new_session = self._stamp_owner(new_session, overrides)
         new_session = await self._apply_usage_selection(new_session, usage_selection)
+        new_session = self._launched_read(new_session)
         self._warm_command_completions(new_session)
         await self.broadcast_session_list()
         return new_session
@@ -2761,7 +2820,7 @@ class SessionRuntime:
             session.id, f"Attached to tmux target {request.tmux_target}"
         )
         self._ensure_monitor(session.id)
-        return self.get_session(session.id)
+        return self._launched_read(session)
 
     async def handle_input(
         self, session_id: str, request: SessionInputRequest
@@ -2924,7 +2983,8 @@ class SessionRuntime:
     async def _restore_session_and_warm_completions(
         self, plugin: Any, session: SessionRecord
     ) -> None:
-        await plugin.restore_session(self, session)
+        async with self._keep_read(session.id):
+            await plugin.restore_session(self, session)
         refreshed = self.storage.get_session(session.id)
         if refreshed is not None:
             # Deliver items a dialog held before the restart, now that the
@@ -3294,60 +3354,64 @@ class SessionRuntime:
         )
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
+        # Serialized with terminate and the launch-settings switch.
+        async with self._session_lock(session.id), self._keep_read(session.id):
+            return await self._reattach_locked(session.id)
+
+    async def _reattach_locked(self, session_id: str) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
         # still be in `_sessions` — the stream/process watchers emit the
         # error event but do not pop the slot. Tear it down explicitly here
         # so `_spawn` does not overwrite a live state and orphan its
         # subprocess + background tasks. terminate_session is a no-op when
         # the session id is not tracked, so this is safe for clean EXITED
-        # paths too. Serialized with terminate and the launch-settings switch.
-        async with self._session_lock(session.id):
-            # Re-read under the lock: a concurrent switch/terminate may have
-            # changed the record since the caller captured it.
-            session = self.get_session(session.id)
-            plugin = self.registry.plugin_for(session)
-            if not plugin.capabilities.supports_reattach_after_exit:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="this session cannot be reattached after exit",
-                )
-            await self._require_live_master(
-                self._find_launch_target(session.launch_target_id)
+        # paths too.
+        # Re-read under the lock: a concurrent switch/terminate may have
+        # changed the record since the caller captured it.
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_reattach_after_exit:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="this session cannot be reattached after exit",
             )
-            await plugin.terminate_session(self, session)
-            await self._cancel_context_usage_source(session.id)
-            # User-initiated retry: bypass any per-target cooldown / circuit
-            # breaker so the click takes effect immediately. Plugins without
-            # this opt-in hook ignore the call.
-            clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
-            if clear_cooldown is not None:
-                clear_cooldown(self, session)
-            await plugin.restore_session(self, session)
-            # _restore_*_session swallows failures (it tags the session ERROR or
-            # EXITED and emits a system_note instead of raising). Re-read storage
-            # so the caller sees the post-restore status, and translate any
-            # terminal state into a 400 so the frontend surfaces a clear error
-            # rather than silently relaunching into a dead session.
-            refreshed = self.get_session(session.id)
-            if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"failed to reattach session ({refreshed.status})",
-                )
-            # Re-probe after the terminal-status check so a probe failure
-            # never converts a good reattach into a 400. Gated on a profile
-            # being set, same as launch/thread-import/boot-restore — a
-            # no-profile session has nothing to re-verify.
-            if refreshed.account_profile_id is not None:
-                self._schedule_verified_account_probe(
-                    refreshed.id,
-                    refreshed.backend,
-                    refreshed.launch_env,
-                    launch_target=self._find_launch_target(refreshed.launch_target_id),
-                    cwd=refreshed.cwd,
-                )
-            self._start_context_usage_source(refreshed)
-            return refreshed
+        await self._require_live_master(
+            self._find_launch_target(session.launch_target_id)
+        )
+        await plugin.terminate_session(self, session)
+        await self._cancel_context_usage_source(session.id)
+        # User-initiated retry: bypass any per-target cooldown / circuit
+        # breaker so the click takes effect immediately. Plugins without
+        # this opt-in hook ignore the call.
+        clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
+        if clear_cooldown is not None:
+            clear_cooldown(self, session)
+        await plugin.restore_session(self, session)
+        # _restore_*_session swallows failures (it tags the session ERROR or
+        # EXITED and emits a system_note instead of raising). Re-read storage
+        # so the caller sees the post-restore status, and translate any
+        # terminal state into a 400 so the frontend surfaces a clear error
+        # rather than silently relaunching into a dead session.
+        refreshed = self.get_session(session.id)
+        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to reattach session ({refreshed.status})",
+            )
+        # Re-probe after the terminal-status check so a probe failure
+        # never converts a good reattach into a 400. Gated on a profile
+        # being set, same as launch/thread-import/boot-restore — a
+        # no-profile session has nothing to re-verify.
+        if refreshed.account_profile_id is not None:
+            self._schedule_verified_account_probe(
+                refreshed.id,
+                refreshed.backend,
+                refreshed.launch_env,
+                launch_target=self._find_launch_target(refreshed.launch_target_id),
+                cwd=refreshed.cwd,
+            )
+        self._start_context_usage_source(refreshed)
+        return refreshed
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_id)
@@ -3492,8 +3556,10 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="another lifecycle operation is in progress for this session",
             )
-        async with lock:
-            return await self._update_launch_settings_locked(session_id, request)
+        async with lock, self._keep_read(session_id):
+            await self._update_launch_settings_locked(session_id, request)
+        await self.broadcast_session_list()
+        return self.get_session(session_id)
 
     def _has_durable_conversation(self, session_id: str) -> bool:
         """Whether a fresh native thread could discard visible conversation context."""
@@ -3504,7 +3570,7 @@ class SessionRuntime:
 
     async def _update_launch_settings_locked(
         self, session_id: str, request: LaunchSettingsUpdateRequest
-    ) -> SessionRecord:
+    ) -> None:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         agent_plugin = self.registry.get(session.backend)
@@ -3941,8 +4007,6 @@ class SessionRuntime:
                 "Pending approval was cancelled by the interface change; "
                 "re-run the request on the new interface if needed",
             )
-        await self.broadcast_session_list()
-        return self.get_session(session.id)
 
     def delete_exited_sessions(self) -> int:
         """Start a background sweep deleting every exited session.
@@ -4635,7 +4699,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="permission mode is required",
             )
-        await plugin.apply_permission_mode(self, session, validated)
+        async with self._keep_read(session_id):
+            await plugin.apply_permission_mode(self, session, validated)
         updated = self.storage.update_session(session_id, permission_mode=validated)
         await self.broadcast_session_list()
         self.asks.mark_dirty(session_id)
@@ -4688,7 +4753,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"model selection is not supported for {session.backend}",
             )
-        await plugin.apply_model(self, session, cleaned)
+        async with self._keep_read(session_id):
+            await plugin.apply_model(self, session, cleaned)
         self.storage.update_session(session_id, model=cleaned)
         # Refresh the window immediately for restart-style transports (claude_tty
         # tails from EOF and won't otherwise update until the next turn). A no-op
@@ -4719,18 +4785,19 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"effort selection is not supported for {session.backend}",
             )
-        announce = await plugin.apply_effort(self, session, cleaned)
-        # Restart-style swaps short-circuit when the value is unchanged
-        # (apply_effort returns False); skip the storage write/broadcast
-        # in that case so we don't churn for nothing.
-        if not announce and not caps.supports_set_effort_inline:
-            return session
-        if announce:
-            await self._record_system_event(
-                session_id,
-                plugin.effort_swap_message(cleaned),
-                status=SessionStatus.IDLE,
-            )
+        async with self._keep_read(session_id):
+            announce = await plugin.apply_effort(self, session, cleaned)
+            # Restart-style swaps short-circuit when the value is unchanged
+            # (apply_effort returns False); skip the storage write/broadcast
+            # in that case so we don't churn for nothing.
+            if not announce and not caps.supports_set_effort_inline:
+                return session
+            if announce:
+                await self._record_system_event(
+                    session_id,
+                    plugin.effort_swap_message(cleaned),
+                    status=SessionStatus.IDLE,
+                )
         updated = self.storage.update_session(session_id, effort=cleaned)
         await self.broadcast_session_list()
         return updated
@@ -5315,6 +5382,7 @@ class SessionRuntime:
         self._derive_telemetry_from_event(event)
         self.questions.note_event(event)
         self.asks.note_event(event)
+        self._follow_presence(event.session_id, event.ts)
         self._publish_session_state(event.session_id)
         # Backend-neutral idle wake: the just-persisted event's canonical status
         # already updated the session record (see Storage._insert_event), so a
@@ -6351,6 +6419,7 @@ class SessionRuntime:
                 last_event_at=normalized.events[-1].ts,
                 status=normalized.status,
             )
+            self._follow_presence(session_id, normalized.events[-1].ts)
             self._publish_session_state(session_id)
 
     async def _refresh_state(self, session_id: str) -> None:

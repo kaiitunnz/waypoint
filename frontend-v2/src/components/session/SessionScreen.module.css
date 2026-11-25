@@ -1,0 +1,50 @@
+.screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-width: 0;
+  background: var(--plane);
+}
+
+.conv {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--plane);
+}
+
+@media (min-width: 900px) {
+  .screen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    background: var(--ground);
+  }
+
+  .railOpen {
+    grid-template-columns: 272px minmax(0, 1fr);
+  }
+
+  .paneOpen {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .railOpen.paneOpen {
+    grid-template-columns: 272px minmax(0, 1fr) 340px;
+  }
+
+  .rail,
+  .pane {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .rail > *,
+  .pane > * {
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,34 @@
+.toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--f-meta);
+}
+
+.option {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--faint);
+}
+
+.on {
+  background: var(--fill-quiet);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.menuRow {
+  display: flex;
+  padding: 8px 16px 4px;
+}
+
+.menuRow > * {
+  flex: 1 1 auto;
+}
+
+.menuRow button {
+  flex: 1 1 0;
+  justify-content: center;
+}

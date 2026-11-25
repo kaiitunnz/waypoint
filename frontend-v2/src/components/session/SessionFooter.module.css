@@ -1,0 +1,16 @@
+.foot {
+  flex: none;
+  padding-bottom: var(--safe-bottom);
+}
+
+.col {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+@media (min-width: 900px) {
+  .col {
+    padding: 0 28px;
+  }
+}

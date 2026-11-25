@@ -1,0 +1,65 @@
+.back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  height: 44px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--r);
+  color: var(--muted);
+}
+
+.badge {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.title {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: var(--r);
+}
+
+.name {
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.needs {
+  color: var(--brass-text);
+}
+
+.agent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

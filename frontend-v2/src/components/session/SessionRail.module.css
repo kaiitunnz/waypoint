@@ -1,0 +1,143 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+.top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: var(--bar-height);
+  padding: 0 8px 0 16px;
+}
+
+.heading {
+  margin-right: auto;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  color: var(--text-strong);
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 14px 16px 4px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.count {
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The open session takes the plane's colour so it joins the conversation like a tab. */
+.item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 46px;
+  margin-left: 8px;
+  padding: 6px 14px;
+  border-radius: var(--r) 0 0 var(--r);
+}
+
+.item:hover {
+  background: var(--fill-quiet);
+}
+
+.on,
+.on:hover {
+  background: var(--plane);
+}
+
+.name {
+  overflow: hidden;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.on .name {
+  color: var(--text-strong);
+}
+
+.time {
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+.sub {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact {
+  min-height: 36px;
+}
+
+.compact .name {
+  font-weight: 400;
+}
+
+.pinned::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 12px;
+  border-style: solid;
+  border-width: 0 8px 8px 0;
+  border-color: transparent var(--brass) transparent transparent;
+}
+
+.pinned .time {
+  margin-right: 10px;
+}
+
+.exited {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  margin: 6px 0 0 8px;
+  padding: 0 14px;
+  border-radius: var(--r) 0 0 var(--r);
+  font-size: 14.5px;
+  color: var(--muted);
+}
+
+.exited:hover {
+  background: var(--fill-quiet);
+}
+
+.exitedLabel {
+  flex: 1 1 auto;
+}

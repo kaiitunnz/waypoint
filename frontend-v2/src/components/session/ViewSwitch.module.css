@@ -1,0 +1,33 @@
+.group {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.tab {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--faint);
+}
+
+.on {
+  background: var(--fill-raised);
+  color: var(--text-strong);
+}
+
+.text .tab {
+  width: auto;
+  height: 30px;
+  padding: 0 12px;
+  font-size: var(--f-meta);
+}
+
+.text .on {
+  font-weight: 600;
+}

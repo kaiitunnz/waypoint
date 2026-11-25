@@ -68,11 +68,11 @@
 }
 
 .addSign {
-  color: var(--done);
+  color: color-mix(in srgb, var(--done) 85%, var(--text-strong));
 }
 
 .delSign {
-  color: var(--error);
+  color: color-mix(in srgb, var(--error) 85%, var(--text-strong));
 }
 
 .fold {

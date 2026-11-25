@@ -40,7 +40,7 @@
 
 .user .meta,
 .user .meta button {
-  color: color-mix(in srgb, var(--text) 62%, transparent);
+  color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
 @media (min-width: 900px) {

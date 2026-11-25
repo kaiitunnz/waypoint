@@ -105,17 +105,25 @@ class HeldQueue:
                 else:
                     reason = HeldReason.RESTORE if queued else HeldReason.DIALOG
                 record = await self._hold(session_id, request, origin, reason)
+                if queued and not wake and session.status is SessionStatus.EXITED:
+                    # Under the send lock, so only one send reopens it.
+                    await self._reopen(session_id)
         self._auto_held.add(session_id)
         self.kick(session_id)
         return record
 
+    async def _reopen(self, session_id: str) -> None:
+        """Reopen an exited session for a send queued behind what it still holds."""
+        try:
+            await self._runtime.reattach(session_id)
+        except HTTPException as exc:
+            # The send stays held for the next reconnect.
+            log.warning("could not reopen session %s: %s", session_id, exc.detail)
+
     def _queued_behind_restore(self, session: SessionRecord) -> bool:
         """Whether a send waits for a restore, or behind sends still held from
-        one. A send reopens an exited session, so nothing queues behind what it
-        left held."""
-        if self._runtime.restores.holds_sends(session.id):
-            return True
-        return session.status is not SessionStatus.EXITED and (
+        one."""
+        return self._runtime.restores.holds_sends(session.id) or (
             self._runtime.storage.has_held_messages(session.id, HeldReason.RESTORE)
         )
 
@@ -236,7 +244,6 @@ class HeldQueue:
             or self._runtime.restores.pauses_delivery(session_id)
         ):
             return
-        transport = self._runtime.transport_for(session)
         async with self._send_locks[session_id]:
             for held in self._runtime.storage.list_held_messages(session_id):
                 if held.hold_reason is HeldReason.FOCUS:
@@ -254,9 +261,16 @@ class HeldQueue:
                     held, session
                 ):
                     continue
+                # Per item: an interface switch can change it between two.
+                transport = self._runtime.transport_for(session)
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
-                if await transport.input_blocked(session):
+                if await transport.input_blocked(session) or (
+                    # A send into a booting pane is lost, so it waits however
+                    # long the boot takes.
+                    held.hold_reason is HeldReason.RESTORE
+                    and not await transport.ready_for_input(session)
+                ):
                     self._retry_later(session_id)
                     break
                 record = self._runtime.storage.take_held_message(held.id)
@@ -282,7 +296,7 @@ class HeldQueue:
         if held.hold_reason is HeldReason.RESTORE:
             # A send queued behind a restore follows an interrupted turn, as a
             # fresh send would. A pane, after an interface switch, takes input
-            # at any time.
+            # mid-turn.
             driver = self._runtime.registry.plugin_for(session)
             if (
                 session.status is SessionStatus.INTERRUPTED
@@ -331,7 +345,11 @@ class HeldQueue:
                 self._put_back(record)
                 raise
             except Exception:
-                self._unpin(record)
+                if self._runtime.restores.pauses_delivery(record.session_id):
+                    # A restart or close took the process mid-send.
+                    self._put_back(record)
+                else:
+                    self._unpin(record)
                 raise
             self._unpin(record)
         finally:

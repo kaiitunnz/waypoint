@@ -2435,7 +2435,8 @@ class SessionRuntime:
         Because boot reuses whatever thread is live, the chosen backend persists
         across redeploys.
         """
-        self.assistant_boot.require_done()
+        # Reset is the way out of a restore that never ends.
+        await self.assistant_boot.cancel_waiting()
         target_backend = self.settings.assistant_backend()
         if target_backend is None:
             raise HTTPException(
@@ -2652,7 +2653,7 @@ class SessionRuntime:
         Unlike clearing context, the native thread and transcript are kept so
         ``reattach_assistant`` can resume the same conversation.
         """
-        await self.assistant_boot.cancel_for_terminate()
+        await self.assistant_boot.cancel_waiting()
         session_id = self.assistant_session_id
         if session_id is None:
             raise HTTPException(
@@ -3458,7 +3459,7 @@ class SessionRuntime:
         try:
             # Serialized with terminate, reattach and the launch-settings switch.
             async with self._session_lock(session_id), self._keep_read(session_id):
-                with self.restores.restarting(self.get_session(session_id)):
+                async with self.restores.restarting(self.get_session(session_id)):
                     yield
         finally:
             # Release what queued meanwhile.

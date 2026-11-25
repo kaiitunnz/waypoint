@@ -6,8 +6,8 @@ pane relaunch midway orphans its agent."""
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -55,8 +55,9 @@ class RestoreCoordinator:
         self._boot_tasks: dict[str, asyncio.Task[None]] = {}
         # Bounded restores in flight, and ones a close stopped until it ends.
         self._restoring: dict[str, _Restore] = {}
-        # Sessions whose process is being replaced, from before the old one goes.
-        self._restarting: set[str] = set()
+        # Sessions whose process is being replaced, from before the old one
+        # goes, each with the deadline on getting to its restore.
+        self._restarting: dict[str, asyncio.Timeout] = {}
         # Sessions being closed, which take no new restore.
         self._closing: Counter[str] = Counter()
 
@@ -85,18 +86,30 @@ class RestoreCoordinator:
                 status_code=status.HTTP_409_CONFLICT, detail=RESTORING_DETAIL
             )
 
-    @contextmanager
-    def restarting(self, session: SessionRecord) -> Iterator[None]:
+    @asynccontextmanager
+    async def restarting(self, session: SessionRecord) -> AsyncIterator[None]:
         """Queue sends from before a reattach or settings change tears the old
-        process down. The caller holds the session lock."""
+        process down, and bound what precedes its restore. The caller holds the
+        session lock."""
         if not self._is_bounded(session):
             yield
             return
-        self._restarting.add(session.id)
+        deadline = asyncio.timeout(self._timeout)
         try:
-            yield
+            async with deadline:
+                self._restarting[session.id] = deadline
+                yield
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            failure = TimeoutError(f"timed out after {self._timeout:g}s")
+            log.error("restart of session %s %s", session.id, failure)
+            await self._note_failure(session.id, failure, SessionStatus.ERROR)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(failure)
+            ) from None
         finally:
-            self._restarting.discard(session.id)
+            self._restarting.pop(session.id, None)
 
     @asynccontextmanager
     async def closing(self, session_id: str) -> AsyncIterator[None]:
@@ -129,6 +142,9 @@ class RestoreCoordinator:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
             )
+        if deadline := self._restarting.get(session.id):
+            # The restore has its own bound.
+            deadline.reschedule(None)
         if self._is_bounded(session):
             return await self._run_bounded(session, restore)
         try:

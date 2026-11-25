@@ -448,7 +448,7 @@ async def test_held_sends_survive_a_failed_restore_and_keep_their_order(
         await until(lambda: sent == ["first", "second"])
 
 
-async def test_a_send_reopens_a_session_closed_mid_restore(
+async def test_a_send_reopens_a_closed_session_behind_what_it_holds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = make_runtime(tmp_path)
@@ -463,7 +463,38 @@ async def test_a_send_reopens_a_session_closed_mid_restore(
         stub_restores(monkeypatch, {})
         await runtime.held.deliver("s1", peer_send("new"), HeldMessageOrigin.AGENT)
 
-        assert sent[:1] == ["new"]
+        await until(lambda: sent == ["old", "new"])
+        assert stored(runtime, "s1").status == SessionStatus.IDLE
+
+
+async def test_concurrent_sends_to_a_closed_session_reopen_it_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    restores: list[str] = []
+
+    async def restore(runtime: SessionRuntime, session: SessionRecord) -> None:
+        restores.append(session.id)
+        await restore_idle(runtime, session)
+
+    stub_restores(monkeypatch, {"s1": hang})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("old"), HeldMessageOrigin.AGENT)
+        await runtime.terminate("s1")
+        stub_restores(monkeypatch, {"s1": restore})
+        await asyncio.gather(
+            *(
+                runtime.held.deliver("s1", peer_send(text), HeldMessageOrigin.AGENT)
+                for text in ("one", "two")
+            )
+        )
+
+        await until(lambda: sent == ["old", "one", "two"])
+        assert restores == ["s1"]
 
 
 async def test_sends_behind_a_reopening_send_are_held_not_made_to_wait(
@@ -529,10 +560,11 @@ async def test_a_settings_change_holds_sends_until_the_restart_is_over(
         await until(lambda: sent == ["queued"])
 
 
-async def test_sends_held_through_a_switch_to_a_pane_all_go_out(
+async def test_sends_held_through_a_switch_to_a_pane_wait_for_its_input_box(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = make_runtime(tmp_path)
+    monkeypatch.setattr("waypoint.held.DEFER_RETRY_SECONDS", 0.05)
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.5)
     add_session(runtime, "s1")
     runtime.storage.update_session("s1", transport_state={"thread_id": str(uuid4())})
     torn_down = asyncio.Event()
@@ -556,9 +588,15 @@ async def test_sends_held_through_a_switch_to_a_pane_all_go_out(
     async def unblocked(*_args: Any) -> bool:
         return False
 
+    booted = asyncio.Event()
+
+    async def ready(*_args: Any) -> bool:
+        return booted.is_set()
+
     monkeypatch.setattr(runtime, "dispatch_input", dispatch)
     pane = runtime.transport_for(add_session(runtime, "pane", transport="tmux"))
     monkeypatch.setattr(pane, "input_blocked", unblocked)
+    monkeypatch.setattr(pane, "ready_for_input", ready)
 
     async with started(runtime):
         await until(lambda: not runtime.restores.is_restoring("s1"))
@@ -572,7 +610,79 @@ async def test_sends_held_through_a_switch_to_a_pane_all_go_out(
             await runtime.held.deliver("s1", peer_send(text), HeldMessageOrigin.AGENT)
         torn_down.set()
         await request
+        # Longer than the restore timeout: a booting pane is never typed into.
+        await asyncio.sleep(0.8)
+        assert sent == []
+        assert held_texts(runtime.storage, "s1") == ["one", "two"]
+        booted.set()
         await until(lambda: sent == ["one", "two"])
+
+
+async def test_a_send_that_fails_as_a_restart_begins_stays_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    release = asyncio.Event()
+    torn_down = asyncio.Event()
+    stub_restores(monkeypatch, {"s1": gated_restore(release)})
+
+    async def teardown(*_args: Any) -> None:
+        await torn_down.wait()
+
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", teardown)
+    sent: list[str] = []
+    requests: list[asyncio.Task[SessionRecord]] = []
+
+    async def dispatch(prepared: PreparedInput) -> SessionRecord:
+        if not requests:
+            requests.append(asyncio.create_task(runtime.reattach("s1")))
+            await until(lambda: runtime.restores.holds_sends("s1"))
+            raise RuntimeError("the process is gone")
+        sent.append(prepared.request.text)
+        return prepared.session
+
+    monkeypatch.setattr(runtime, "dispatch_input", dispatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("one"), HeldMessageOrigin.AGENT)
+        release.set()
+        await until(lambda: requests != [])
+        await asyncio.sleep(0.05)
+        assert held_texts(runtime.storage, "s1") == ["one"]
+
+        torn_down.set()
+        await requests[0]
+        await until(lambda: sent == ["one"])
+
+
+@pytest.mark.parametrize("restart", [reconnect, change_settings])
+async def test_a_hung_teardown_is_bounded_and_keeps_held_sends(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restart: Callable[[SessionRuntime], Awaitable[SessionRecord]],
+) -> None:
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.3)
+    add_session(runtime, "s1")
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", hang)
+    stub_restores(monkeypatch, {})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: not runtime.restores.is_restoring("s1"))
+        request = asyncio.ensure_future(restart(runtime))
+        await until(lambda: runtime.restores.holds_sends("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+        async with asyncio.timeout(5):
+            await assert_refused(request, 504, "timed out")
+
+        await asyncio.sleep(RELEASE_SETTLE_SECONDS)
+        assert not runtime.restores.holds_sends("s1")
+        assert stored(runtime, "s1").status == SessionStatus.ERROR
+        assert "timed out after 0.3s" in notes(runtime, "s1")
+        assert sent == []
+        assert held_texts(runtime.storage, "s1") == ["held"]
 
 
 async def test_a_restart_stops_a_delivery_already_under_way(

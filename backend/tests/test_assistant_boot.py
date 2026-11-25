@@ -14,6 +14,7 @@ from restore_harness import (
     gated_restore,
     hang,
     make_runtime,
+    noop,
     raising_async,
     record_dispatches,
     started,
@@ -22,6 +23,7 @@ from restore_harness import (
     stub_restores,
     until,
 )
+from waypoint.backends import get_registry
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     SessionCreateRequest,
@@ -142,6 +144,21 @@ async def test_errored_assistant_is_kept_unless_it_runs_in_a_pane(
     await runtime._ensure_assistant_session()
 
     assert runtime.assistant_session_id == ("fresh" if replaced else "assistant")
+
+
+async def test_reset_gets_past_a_hung_pane_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, **assistant_settings())
+    add_assistant(runtime, transport="tmux")
+    stub_restores(monkeypatch, {"assistant": hang})
+    stub_assistant_creation(runtime, monkeypatch)
+    monkeypatch.setattr(get_registry().for_transport("tmux"), "terminate_session", noop)
+
+    async with started(runtime):
+        await assert_refused(runtime.reattach_assistant(), 409, "still starting")
+        summary = await runtime.reset_assistant()
+        assert summary.session_id == "fresh"
 
 
 async def test_the_thread_being_replaced_takes_no_message(

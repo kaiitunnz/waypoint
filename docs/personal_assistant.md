@@ -48,9 +48,9 @@ inspection is unaffected.
 
 ## Lifecycle
 
-- The assistant is set up in the background. Until that finishes, reset, attach
-  and reconnect return `409`, and so does terminate once a new thread is
-  launching. Messages to a thread being replaced return `409`.
+- The assistant is set up in the background. Until that finishes, attach and
+  reconnect return `409`. Once a new thread is launching, so do reset and
+  terminate, and messages to the thread being replaced.
 - On startup the runtime refreshes the assistant workspace asset links, then
   reuses the assistant thread that lives in the managed workspace,
   **regardless of its agent or interface**. The thread is the source of truth,

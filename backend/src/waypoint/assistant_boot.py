@@ -51,9 +51,9 @@ class AssistantBoot:
         if self._launching and session_id == self._runtime.assistant_session_id:
             raise _starting()
 
-    async def cancel_for_terminate(self) -> None:
+    async def cancel_waiting(self) -> None:
         """Stop a setup still waiting on a restore, so it cannot replace the
-        thread being terminated. A launch in flight refuses the terminate."""
+        thread under a terminate or reset. A launch in flight refuses them."""
         if self._launching:
             raise _starting()
         if self._task is not None:

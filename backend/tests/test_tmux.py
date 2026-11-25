@@ -688,6 +688,18 @@ def test_send_input_waits_for_ready_before_pasting() -> None:
     assert captures_before_paste == 3  # two BOOTING frames, then ready
 
 
+def test_ready_for_input_follows_the_composer() -> None:
+    transport, _ = _transport_with(_AgentConfirmer(), boot_frames=1)
+    assert not asyncio.run(transport.ready_for_input(_session("codex")))
+    assert asyncio.run(transport.ready_for_input(_session("codex")))
+
+
+def test_ready_for_input_without_pane_hooks() -> None:
+    transport, adapter = _transport_with(_PlainAgent())
+    assert asyncio.run(transport.ready_for_input(_session("opencode")))
+    assert adapter.calls == []
+
+
 def test_await_pane_ready_is_bounded_when_never_ready() -> None:
     # A pane that never draws its composer must not block the request forever.
     transport, adapter = _transport_with(_AgentConfirmer(), boot_frames=99)

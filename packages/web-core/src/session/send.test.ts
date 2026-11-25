@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, AuthError, cloneSession, forkSession, postAction, sendInput } from "../api";
 import { buildCatalog } from "../backends";
 import type { BackendDescriptor, SessionRecord } from "../types";
-import { canFork, canInterrupt, composerAvailability, deliverInput, FollowUpError } from "./send";
+import {
+  canFork,
+  canInterrupt,
+  composerAvailability,
+  deliverInput,
+  draftAfterFailedSend,
+  FollowUpError,
+} from "./send";
 
 vi.mock("../api", async (original) => ({
   ...(await original<typeof import("../api")>()),
@@ -128,5 +135,39 @@ describe("deliverInput", () => {
   it("keeps an expired token's error", async () => {
     vi.mocked(sendInput).mockRejectedValueOnce(new AuthError());
     await expect(deliver("/new do it")).rejects.toBeInstanceOf(AuthError);
+  });
+});
+
+describe("draftAfterFailedSend", () => {
+  const immediate = { immediate: true, sent: "hello", before: " hello ", kept: "" };
+
+  it("puts an untouched field back as it was, and a retry empties it", () => {
+    expect(draftAfterFailedSend({ ...immediate, current: "" })).toEqual({ draft: " hello ", rest: "" });
+  });
+
+  it("keeps what was typed since after the message, and a retry leaves it", () => {
+    expect(draftAfterFailedSend({ ...immediate, current: "next" })).toEqual({ draft: "hello\nnext", rest: "next" });
+  });
+
+  it("adds no blank line for files sent without text", () => {
+    expect(draftAfterFailedSend({ ...immediate, sent: "", before: "", current: "next" })).toEqual({
+      draft: "next",
+      rest: "next",
+    });
+  });
+
+  it("leaves the field of a queued send alone", () => {
+    const queued = { immediate: false, sent: "hello", before: "hello", kept: "" };
+    expect(draftAfterFailedSend({ ...queued, current: "hello" })).toEqual({ draft: "hello", rest: "" });
+    expect(draftAfterFailedSend({ ...queued, current: "hello again" })).toEqual({
+      draft: "hello again",
+      rest: "hello again",
+    });
+  });
+
+  it("restores a retried message that was left in the field", () => {
+    // A retry starts from the restored field and keeps only what followed it.
+    const retried = { immediate: true, sent: "hello", before: "hello\nnext", kept: "next" };
+    expect(draftAfterFailedSend({ ...retried, current: "next" })).toEqual({ draft: "hello\nnext", rest: "next" });
   });
 });

@@ -6,7 +6,13 @@ import { ApiError, createMessageSchedule, isAuthError, postAction } from "@waypo
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import type { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
-import { canFork, composerAvailability, deliverInput, FollowUpError } from "@waypoint/web-core/session/send";
+import {
+  canFork,
+  composerAvailability,
+  deliverInput,
+  draftAfterFailedSend,
+  FollowUpError,
+} from "@waypoint/web-core/session/send";
 import type { SendMode } from "@waypoint/web-core/session/sendModes";
 import type { SessionCommandInvocation, SessionRecord } from "@waypoint/web-core/types";
 
@@ -47,6 +53,8 @@ interface Options {
   resetCompletions: () => void;
   onPending: OptimisticSends["add"];
   onOpenSession: (sessionId: string) => void;
+  // A queued send has ended, however it went.
+  onQueued: () => void;
 }
 
 const IDLE_QUEUED: Record<Exclude<SendMode, "now">, string> = {
@@ -67,6 +75,7 @@ export function useComposerSend({
   resetCompletions,
   onPending,
   onOpenSession,
+  onQueued,
 }: Options) {
   const { toast } = useToast();
   const [sending, setSending] = useState(false);
@@ -137,24 +146,30 @@ export function useComposerSend({
         handleAuthFailure();
         return;
       }
-      // The message goes back in the field, ahead of anything typed since.
       const current = latest.current.draft;
-      const untouched = current === (immediate ? origin.rest : origin.draft);
-      const restored = !immediate ? current : untouched ? origin.draft : `${payload.text}\n${current}`;
-      if (restored !== current) setDraft(restored);
+      const after = draftAfterFailedSend({
+        immediate,
+        sent: payload.text,
+        current,
+        before: origin.draft,
+        kept: origin.rest,
+      });
+      if (after.draft !== current) setDraft(after.draft);
       setFailure({
         message: error instanceof Error ? error.message : "failed to send input",
         status: error instanceof ApiError || error instanceof FollowUpError ? error.status : undefined,
         openSessionId: error instanceof FollowUpError ? error.sessionId : undefined,
         payload,
-        draft: restored,
+        draft: after.draft,
         ids: latest.current.ids,
-        rest: untouched ? origin.rest : current,
+        rest: after.rest,
       });
     } finally {
       settle?.();
       inFlight.current = false;
       setSending(false);
+      // The menu item that queued it is gone, and its focus with it.
+      if (!immediate) onQueued();
     }
   }
 

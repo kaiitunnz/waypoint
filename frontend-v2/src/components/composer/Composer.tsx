@@ -98,6 +98,8 @@ export function Composer({
   const [draft, setDraft] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
+  // Opened by Shift+Tab, which keeps cycling from the field.
+  const [tuneFromKey, setTuneFromKey] = useState(false);
   const [focusBusy, setFocusBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // The setting waiting on a yes to cut off the running turn.
@@ -167,6 +169,7 @@ export function Composer({
   });
 
   const openSession = useCallback((id: string) => router.push(`/session/${id}`), [router]);
+  const focusField = useCallback(() => field.current?.focus(), []);
   const { canSend, sending, stopping, failure, send, retry, dismiss, stop } = useComposerSend({
     host,
     token,
@@ -180,6 +183,7 @@ export function Composer({
     resetCompletions,
     onPending,
     onOpenSession: openSession,
+    onQueued: focusField,
   });
 
   const models = useSessionModels(host, token, session, handleAuthFailure);
@@ -283,7 +287,10 @@ export function Composer({
       const next = tuningActions.busy.mode ? null : nextModeId(modeOptions, tuning.shown.mode);
       if (next !== null) {
         tuning.select("mode", next);
-        if (restart.mode) setTuneOpen(true);
+        if (restart.mode) {
+          setTuneFromKey(true);
+          setTuneOpen(true);
+        }
       }
       return;
     }
@@ -390,7 +397,11 @@ export function Composer({
           {session ? (
             <TuneControl
               open={tuneOpen}
-              onOpenChange={setTuneOpen}
+              onOpenChange={(open) => {
+                setTuneOpen(open);
+                if (!open) setTuneFromKey(false);
+              }}
+              autoFocus={!tuneFromKey}
               triggerRef={tuneTrigger}
               agentName={agentName}
               summary={tuningSummary(tuningInput, options)}

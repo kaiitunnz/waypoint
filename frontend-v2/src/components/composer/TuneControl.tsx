@@ -20,6 +20,8 @@ import styles from "./TuneControl.module.css";
 export interface TuneProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // False leaves the focus in the field when the popover opens.
+  autoFocus: boolean;
   triggerRef: RefObject<HTMLButtonElement | null>;
   agentName: string;
   summary: string[];
@@ -42,6 +44,7 @@ export interface TuneProps {
 export function TuneControl({
   open,
   onOpenChange,
+  autoFocus,
   triggerRef,
   agentName,
   summary,
@@ -93,6 +96,7 @@ export function TuneControl({
         onClose={() => onOpenChange(false)}
         triggerRef={triggerRef}
         title="Mode and model"
+        autoFocus={autoFocus}
         width={320}
         side="top"
       >

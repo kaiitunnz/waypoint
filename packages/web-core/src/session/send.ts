@@ -38,6 +38,29 @@ export function canFork(session: SessionRecord | null, catalog: BackendCatalog):
   return Boolean(session && supportsFork(session.backend, catalog) && !liveTerminal(session.transport, catalog));
 }
 
+// The field after a send that did not go. An immediate send emptied it to `kept`
+// when it started, so the message goes back ahead of anything typed since; a
+// queued one left it alone. `rest` is what a successful retry leaves behind.
+export function draftAfterFailedSend({
+  immediate,
+  sent,
+  current,
+  before,
+  kept,
+}: {
+  immediate: boolean;
+  // The text that was sent; empty for files alone.
+  sent: string;
+  current: string;
+  before: string;
+  kept: string;
+}): { draft: string; rest: string } {
+  const untouched = current === (immediate ? kept : before);
+  let draft = current;
+  if (immediate) draft = untouched ? before : [sent, current].filter(Boolean).join("\n");
+  return { draft, rest: untouched ? kept : current };
+}
+
 // A control command created its session, and sending its arguments there failed:
 // trying again would create another.
 export class FollowUpError extends Error {

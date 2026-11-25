@@ -19,6 +19,8 @@ interface FlyoutProps {
   side?: "bottom" | "top";
   // Lets a pointer client resize the popover; a sheet has one size.
   resizeKey?: string;
+  // False keeps the focus out of the popover. A sheet is modal and always takes it.
+  autoFocus?: boolean;
   // No padding around the sheet's body, for lists and menus.
   flush?: boolean;
   children: ReactNode;
@@ -35,6 +37,7 @@ export function Flyout({
   align,
   side,
   resizeKey,
+  autoFocus,
   flush,
   children,
 }: FlyoutProps) {
@@ -51,6 +54,7 @@ export function Flyout({
       align={align}
       side={side}
       resizeKey={resizeKey}
+      autoFocus={autoFocus}
     >
       {children}
     </Popover>

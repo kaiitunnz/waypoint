@@ -23,6 +23,8 @@ interface PopoverProps {
   side?: "bottom" | "top";
   // The storage key that lets a person resize the panel and keeps their size.
   resizeKey?: string;
+  // False leaves the focus where it is, for a panel a field's key opened.
+  autoFocus?: boolean;
   children: ReactNode;
 }
 
@@ -35,6 +37,7 @@ export function Popover({
   align = "left",
   side = "bottom",
   resizeKey,
+  autoFocus = true,
   children,
 }: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
@@ -56,8 +59,8 @@ export function Popover({
   });
   // The panel is portaled to the end of the page, so focus moves into it for the keyboard.
   useEffect(() => {
-    if (placed) panel.current?.focus({ preventScroll: true });
-  }, [placed]);
+    if (placed && autoFocus) panel.current?.focus({ preventScroll: true });
+  }, [placed, autoFocus]);
 
   if (!open || typeof document === "undefined" || !anchor.style) {
     return null;

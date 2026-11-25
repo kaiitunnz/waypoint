@@ -975,10 +975,10 @@ async def test_incompatible_server_fails_at_once(handler: Any, detail: str) -> N
         adapter._client = client
         try:
             async with asyncio.timeout(5):
-                with pytest.raises(OpenCodeError, match="incompatible OpenCode server"):
+                with pytest.raises(
+                    OpenCodeError, match=f"incompatible OpenCode server: .*{detail}"
+                ):
                     await adapter._wait_for_server()
-            with pytest.raises(OpenCodeError, match=detail):
-                await adapter._wait_for_server()
         finally:
             await client.close()
 

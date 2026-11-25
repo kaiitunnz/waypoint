@@ -54,7 +54,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
 
   const header = (
     <>
-      <span className={styles.glyph} aria-hidden="true">
+      <span className={styles.glyph} role="img" aria-label={badge.label}>
         {badge.glyph}
       </span>
       <span className={styles.headline}>{headline}</span>

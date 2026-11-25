@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -277,7 +278,16 @@ async def test_a_failed_plugin_refuses_a_send_behind_held_ones(
         assert held_texts(runtime.storage, "s1") == ["held"]
 
 
-async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> None:
+def fail_codex(runtime: SessionRuntime, _session_id: str) -> None:
+    runtime.availability.failures["codex"] = "failed in setup: bad wiring"
+
+
+@pytest.mark.parametrize("lose_driver", [fail_codex, orphan])
+async def test_questions_with_no_driver_stay_in_the_feed(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    lose_driver: Callable[[SessionRuntime, str], None],
+) -> None:
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
     await runtime._emit_adapter_event(
@@ -295,7 +305,7 @@ async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> 
         },
         SessionStatus.WAITING_INPUT,
     )
-    runtime.availability.failures["codex"] = "failed in setup: bad wiring"
+    lose_driver(runtime, "s1")
 
     [ask] = (await runtime.asks.snapshot()).items
 
@@ -303,3 +313,4 @@ async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> 
         "s1",
         "unavailable",
     )
+    assert "pending-asks derivation failed" not in caplog.text

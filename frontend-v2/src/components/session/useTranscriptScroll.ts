@@ -57,11 +57,11 @@ export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boole
   }, []);
 
   const loadOlder = useCallback(() => {
-    if (olderPending) return;
+    if (anchor.current) return;
     const el = scroller.current;
     if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
     onLoadOlder();
-  }, [olderPending, onLoadOlder]);
+  }, [onLoadOlder]);
 
   const jumpToEnd = useCallback(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

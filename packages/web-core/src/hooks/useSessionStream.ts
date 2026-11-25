@@ -65,6 +65,7 @@ export function useSessionStream(
 
     const flush = () => {
       frame = null;
+      if (holds > 0) return;
       const batch = takeNewer(pending, latestId);
       pending = [];
       latestId = maxEventId(batch, latestId);

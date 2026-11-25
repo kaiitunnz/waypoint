@@ -87,7 +87,8 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
 
   const exitedTotal = showExited ? history.total : counted.total;
   const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (exitedTotal ?? 0);
-  const exitedBusy = showExited ? history.pending || history.loading : counted.pending || counted.loading;
+  // The heading stays until the count is known to be zero, so the toggle is never unmounted under the focus.
+  const exitedUnknown = exitedTotal === null && !(showExited ? history.error : counted.error);
 
   const selected = Math.min(active, Math.max(0, entries.length - 1));
   useEffect(() => {
@@ -158,7 +159,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
 
   // Exited sessions sit under their own heading, which also hides and shows them.
   const exitedHeading =
-    exitedCount > 0 || exitedBusy ? (
+    exitedCount > 0 || exitedUnknown ? (
       <li role="presentation">
         <button
           type="button"
@@ -198,9 +199,9 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
         {listed.map((entry, index) => renderEntry(entry, index))}
         {exitedHeading}
         {exited.map((entry, index) => renderEntry(entry, listed.length + index))}
-        {entries.length === 0 && !exitedHeading ? (
+        {entries.length === 0 && (exitedUnknown || exitedCount === 0) ? (
           <li role="presentation" className={styles.empty}>
-            {exitedBusy ? "Searching…" : "No matching sessions"}
+            {exitedUnknown ? "Searching…" : "No matching sessions"}
           </li>
         ) : null}
         {history.hasMore ? (

@@ -34,9 +34,19 @@ export interface HoldMenu {
   menuProps: { onKeyDown: (event: KeyboardEvent) => void };
 }
 
+export interface HoldMenuOptions {
+  // A tap also drops a pending hover and closes the menu, so it does not appear
+  // after the person has already acted.
+  dismissOnActivate?: boolean;
+}
+
 // A button that acts on a tap and offers a menu on hover (mouse), a held touch,
 // ArrowDown or Space.
-export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu {
+export function useHoldMenu(
+  disabled: boolean,
+  onActivate: () => void,
+  { dismissOnActivate = false }: HoldMenuOptions = {},
+): HoldMenu {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -100,6 +110,10 @@ export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu
         if (longPressed.current) {
           longPressed.current = false;
           return;
+        }
+        if (dismissOnActivate) {
+          clearTimer();
+          setOpen(false);
         }
         onActivate();
       },

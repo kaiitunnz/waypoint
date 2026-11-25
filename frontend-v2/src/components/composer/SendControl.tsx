@@ -20,6 +20,7 @@ export function SendControl({ canSend, sending, onSend }: SendControlProps) {
   const { open, close, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
     !canSend,
     () => onSend("now"),
+    { dismissOnActivate: true },
   );
   return (
     <div ref={wrapRef} className={styles.wrap} {...wrapProps}>

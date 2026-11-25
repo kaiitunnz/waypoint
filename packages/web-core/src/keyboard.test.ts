@@ -1,5 +1,5 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   isComposingKeyEvent,
@@ -71,9 +71,39 @@ describe("isInlineMenuAcceptKey", () => {
 });
 
 describe("trapTabFocus", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A root with two tab stops; `focused` picks what holds focus.
+  function press(focused: "root" | "first" | "last" | "outside", shiftKey: boolean, rootIsEdge?: boolean) {
+    const moved: string[] = [];
+    const first = { focus: () => moved.push("first") };
+    const last = { focus: () => moved.push("last") };
+    const root = {
+      querySelectorAll: () => [first, last],
+      contains: (node: unknown) => node === root || node === first || node === last,
+    };
+    vi.stubGlobal("document", { activeElement: { root, first, last, outside: {} }[focused] });
+    const event = { ...key({ key: "Tab", shiftKey }), preventDefault: vi.fn() };
+    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { rootIsEdge });
+    return moved;
+  }
+
   it("does nothing for non-Tab keys or a missing root", () => {
     expect(trapTabFocus(key({ key: "a" }) as unknown as KeyboardEvent, {} as HTMLElement)).toBe(false);
     expect(trapTabFocus(key({ key: "Tab" }) as unknown as KeyboardEvent, null)).toBe(false);
+  });
+
+  it("wraps at either end and pulls focus back from outside", () => {
+    expect(press("last", false)).toEqual(["first"]);
+    expect(press("first", true)).toEqual(["last"]);
+    expect(press("outside", false)).toEqual(["first"]);
+    expect(press("first", false)).toEqual([]);
+  });
+
+  it("wraps Shift+Tab from a focused root only when the root is an edge", () => {
+    expect(press("root", true, true)).toEqual(["last"]);
+    expect(press("root", true)).toEqual([]);
+    expect(press("root", false, true)).toEqual([]);
   });
 });
 

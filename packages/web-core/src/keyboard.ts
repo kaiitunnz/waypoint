@@ -13,6 +13,19 @@ type KeyboardEventLike = Pick<
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// The focusable elements Tab actually stops on: a roving tab list or a listbox
+// keeps its other items out of the order with tabindex="-1".
+export const TAB_STOP_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]",
+]
+  .map((selector) => `${selector}:not([tabindex="-1"])`)
+  .join(", ");
+
 // A terminal reads Ctrl+K as readline's kill-line and a contenteditable region
 // keeps its own editing keys; a page-wide shortcut leaves keys from either alone.
 const KEY_OWNER_SELECTOR = '.xterm, [contenteditable]:not([contenteditable="false"])';
@@ -64,7 +77,9 @@ export function isInlineMenuAcceptKey(event: KeyboardEventLike): boolean {
 export function trapTabFocus(
   event: globalThis.KeyboardEvent,
   root: HTMLElement | null,
-  options: { preventWhenEmpty?: boolean; selector?: string } = {},
+  // `rootIsEdge` is for a root that takes focus itself: Shift+Tab from it wraps
+  // to the last element instead of leaving the root.
+  options: { preventWhenEmpty?: boolean; rootIsEdge?: boolean; selector?: string } = {},
 ): boolean {
   if (event.key !== "Tab" || !root) {
     return false;
@@ -82,10 +97,12 @@ export function trapTabFocus(
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
   const active = document.activeElement;
-  if (event.shiftKey && (active === first || !root.contains(active))) {
+  const outside = !root.contains(active);
+  const onRoot = Boolean(options.rootIsEdge) && active === root;
+  if (event.shiftKey && (active === first || onRoot || outside)) {
     event.preventDefault();
     last.focus();
-  } else if (!event.shiftKey && (active === last || !root.contains(active))) {
+  } else if (!event.shiftKey && (active === last || outside)) {
     event.preventDefault();
     first.focus();
   }

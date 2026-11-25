@@ -81,7 +81,7 @@
   --f-diff: 12px;
   --lh-diff: 17px;
   --r-bubble: 14px;
-  --hl-comment: #6f7a8c;
+  --hl-comment: #868f9e;
   --hl-keyword: #cf98b1;
   --hl-string: #9cc7a6;
   --hl-number: #d9a86a;
@@ -89,7 +89,7 @@
   --hl-type: #7fbac0;
   --hl-attr: #bca7d4;
   --hl-variable: #d7dde6;
-  --hl-meta: #7f8a9c;
+  --hl-meta: #848fa0;
   --hl-symbol: #8fb3d6;
   --hl-punct: #97a2b3;
 
@@ -146,17 +146,17 @@ html[data-theme="light"] {
 
   --bubble: #efede8;
   --route: color-mix(in srgb, #b8820e 34%, #cbc6ba);
-  --hl-comment: #74694f;
+  --hl-comment: #685e47;
   --hl-keyword: #9c3f6e;
-  --hl-string: #2a7347;
+  --hl-string: #276c43;
   --hl-number: #8a5410;
-  --hl-function: #2f6f9e;
-  --hl-type: #1a727a;
+  --hl-function: #2a648e;
+  --hl-type: #186b73;
   --hl-attr: #6b4fa0;
   --hl-variable: #2a261f;
-  --hl-meta: #6f634e;
-  --hl-symbol: #2f6f9e;
-  --hl-punct: #6e6356;
+  --hl-meta: #6b5f4b;
+  --hl-symbol: #2a648e;
+  --hl-punct: #6a5f53;
 }
 
 @media (min-width: 900px) {

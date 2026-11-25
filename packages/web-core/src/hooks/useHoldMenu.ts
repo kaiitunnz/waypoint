@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type RefObject,
 } from "react";
@@ -25,7 +26,7 @@ export interface HoldMenu {
     onPointerLeave: (event: PointerEvent) => void;
   };
   triggerProps: {
-    onClick: () => void;
+    onClick: (event: MouseEvent) => void;
     onPointerDown: (event: PointerEvent) => void;
     onPointerUp: (event: PointerEvent) => void;
     onPointerCancel: (event: PointerEvent) => void;
@@ -35,8 +36,8 @@ export interface HoldMenu {
 }
 
 export interface HoldMenuOptions {
-  // A tap also drops a pending hover and closes the menu, so it does not appear
-  // after the person has already acted.
+  // A tap also closes the menu and disarms the hover until the mouse leaves, so
+  // it does not appear after the person has already acted.
   dismissOnActivate?: boolean;
 }
 
@@ -53,6 +54,8 @@ export function useHoldMenu(
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const timer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  // Disabling and enabling a trigger under the mouse fires another pointerenter.
+  const hoverSpent = useRef(false);
 
   const clearTimer = useCallback(() => {
     if (timer.current !== null) {
@@ -94,24 +97,27 @@ export function useHoldMenu(
     wrapRef,
     wrapProps: {
       onPointerEnter: (event) => {
-        if (event.pointerType !== "mouse" || disabled) return;
+        if (event.pointerType !== "mouse" || disabled || hoverSpent.current) return;
         clearTimer();
         timer.current = window.setTimeout(() => openMenu(false), HOLD_MS);
       },
       onPointerLeave: (event) => {
         if (event.pointerType !== "mouse") return;
+        hoverSpent.current = false;
         clearTimer();
         setOpen(false);
       },
     },
     triggerProps: {
-      onClick: () => {
+      onClick: (event) => {
         // The click that ends a long press only opened the menu.
         if (longPressed.current) {
           longPressed.current = false;
           return;
         }
         if (dismissOnActivate) {
+          // `detail` is 0 for a keyboard click, which has no mouse to disarm.
+          hoverSpent.current = event.detail > 0;
           clearTimer();
           setOpen(false);
         }

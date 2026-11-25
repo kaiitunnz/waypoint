@@ -7,8 +7,9 @@ midway (it would orphan the agent), so those restores run to completion."""
 
 import asyncio
 import logging
-from collections.abc import Coroutine
-from contextlib import suppress
+from collections import Counter
+from collections.abc import AsyncIterator, Coroutine, Iterator
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -41,9 +42,48 @@ class RestoreCoordinator:
         self._runtime = runtime
         self._timeout = timeout_seconds
         self._restoring: dict[str, _Restore] = {}
+        # Sessions a reattach is bringing back, from before its restore begins.
+        self._reattaching: set[str] = set()
+        # Sessions being closed, which take no new restore.
+        self._closing: Counter[str] = Counter()
 
     def is_restoring(self, session_id: str) -> bool:
         return session_id in self._restoring
+
+    def holds_sends(self, session_id: str) -> bool:
+        """Whether sends queue for the session: it is restoring or about to."""
+        return self.is_restoring(session_id) or session_id in self._reattaching
+
+    @contextmanager
+    def reattaching(self, session: SessionRecord) -> Iterator[None]:
+        """Queue sends for the whole of a reattach, which tears the old process
+        down before its restore begins. The caller holds the session lock."""
+        if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
+            yield
+            return
+        self._reattaching.add(session.id)
+        try:
+            yield
+        finally:
+            self._reattaching.discard(session.id)
+
+    @asynccontextmanager
+    async def closing(self, session_id: str) -> AsyncIterator[None]:
+        """Keep restores off a session while the block closes it.
+
+        The restore in flight is stopped and any other is refused. A stopped one
+        leaves the session ``starting``, which holds sends back, so the block
+        records the final status."""
+        self._closing[session_id] += 1
+        try:
+            if entry := self._restoring.get(session_id):
+                entry.superseded = True
+                await _stop(entry)
+            yield
+        finally:
+            self._closing[session_id] -= 1
+            if not self._closing[session_id]:
+                del self._closing[session_id]
 
     def require_restored(self, session_id: str) -> None:
         if self.is_restoring(session_id):
@@ -70,6 +110,9 @@ class RestoreCoordinator:
 
         ``session`` is the record as read before any status write, which is also
         what ``restore`` must have been given."""
+        if session.id in self._closing:
+            restore.close()
+            return asyncio.CancelledError()
         if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
             try:
                 await restore
@@ -81,15 +124,6 @@ class RestoreCoordinator:
                 return exc
             return None
         return await self._run_bounded(session, restore)
-
-    async def cancel(self, session_id: str) -> None:
-        """Stop an in-flight restore of a session that is being closed.
-
-        The session keeps its ``starting`` status, which holds sends back, until
-        the caller records the final one."""
-        if entry := self._restoring.get(session_id):
-            entry.superseded = True
-            await _stop(entry)
 
     async def stop(self) -> None:
         """Stop every restore for shutdown, giving each session its status back."""

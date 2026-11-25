@@ -17,11 +17,13 @@ from starlette.websockets import WebSocketDisconnect
 
 from waypoint.api import create_app
 from waypoint.backends import get_registry
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import PreparedInput, SessionRuntime
 from waypoint.schemas import (
     EventKind,
     HeldMessageOrigin,
     HeldReason,
+    LaunchSettingsUpdateRequest,
     SessionAttachRequest,
     SessionCreateRequest,
     SessionInputRequest,
@@ -417,6 +419,97 @@ async def test_a_restore_that_ignores_a_terminate_records_nothing(
             release.set()
 
 
+async def test_sends_behind_a_reopening_send_are_held_not_made_to_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", status=SessionStatus.ERROR)
+    torn_down = asyncio.Event()
+    restores: list[str] = []
+
+    async def slow_teardown(*_args: Any) -> None:
+        await torn_down.wait()
+
+    async def fail(_runtime: SessionRuntime, session: SessionRecord) -> None:
+        restores.append(session.id)
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", slow_teardown)
+    stub_restores(monkeypatch, {"s1": fail})
+    record_dispatches(runtime, monkeypatch)
+
+    first = asyncio.create_task(
+        runtime.held.deliver("s1", peer_send("first"), HeldMessageOrigin.AGENT)
+    )
+    await until(lambda: runtime.restores.holds_sends("s1"))
+    async with asyncio.timeout(2):
+        await runtime.held.deliver("s1", peer_send("second"), HeldMessageOrigin.AGENT)
+    torn_down.set()
+
+    with pytest.raises(HTTPException):
+        await first
+    assert restores == ["s1"]
+    assert held_texts(runtime.storage, "s1") == ["second"]
+
+
+async def test_terminate_refuses_restores_that_have_not_begun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", status=SessionStatus.ERROR)
+    torn_down = asyncio.Event()
+    restores: list[str] = []
+
+    async def slow_teardown(*_args: Any) -> None:
+        await torn_down.wait()
+
+    async def hang_restore(_runtime: SessionRuntime, session: SessionRecord) -> None:
+        restores.append(session.id)
+        await hang()
+
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", slow_teardown)
+    stub_restores(monkeypatch, {"s1": hang_restore})
+
+    # One tearing the old process down and one queued behind it.
+    reattaches = [asyncio.create_task(runtime.reattach("s1")) for _ in range(2)]
+    await until(lambda: runtime.restores.holds_sends("s1"))
+    terminate = asyncio.create_task(runtime.terminate("s1"))
+    await asyncio.sleep(0.05)
+    torn_down.set()
+    async with asyncio.timeout(2):
+        await terminate
+
+    for reattach in reattaches:
+        with pytest.raises(HTTPException) as refused:
+            await reattach
+        assert refused.value.status_code == 409
+    assert restores == []
+    assert stored(runtime, "s1").status == SessionStatus.EXITED
+
+
+async def test_terminate_cancels_a_settings_switch_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", noop)
+    stub_restores(monkeypatch, {"s1": hang})
+
+    switch = asyncio.create_task(
+        runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(args=["--verbose"], restart=True)
+        )
+    )
+    await until(lambda: runtime.restores.is_restoring("s1"))
+    async with asyncio.timeout(2):
+        await runtime.terminate("s1")
+
+    with pytest.raises(HTTPException) as cancelled:
+        await switch
+    assert cancelled.value.status_code == 409
+    assert stored(runtime, "s1").status == SessionStatus.EXITED
+
+
 def record_dispatches(
     runtime: SessionRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> list[str]:
@@ -602,6 +695,24 @@ async def test_errored_assistant_is_kept_unless_it_runs_in_a_pane(
     assert runtime.assistant_session_id == ("fresh" if replaced else "assistant")
 
 
+async def test_the_thread_being_replaced_takes_no_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, **assistant_settings())
+    add_assistant(runtime, status=SessionStatus.EXITED)
+    monkeypatch.setattr(runtime, "_create_assistant_session", hang)
+    stub_restores(monkeypatch, {})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime._assistant_creating)
+        with pytest.raises(HTTPException) as refused:
+            await runtime.handle_input("assistant", SessionInputRequest(text="hi"))
+        assert refused.value.status_code == 409
+        assert "still starting" in refused.value.detail
+        assert sent == []
+
+
 async def test_failed_assistant_creation_keeps_the_previous_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -755,6 +866,41 @@ async def test_unavailable_session_is_noted_once_and_stays_read(
     async with started(again):
         assert notes(again, "s1").count("Session unavailable") == 1
         assert not stored(again, "s1").unread
+
+
+async def test_failed_plugin_shows_on_a_session_awaiting_its_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(*_args: Any) -> None:
+        raise RuntimeError("bad wiring")
+
+    monkeypatch.setattr(get_registry().get("codex"), "setup", explode)
+    runtime = make_runtime(
+        tmp_path,
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="pw",
+                name="pw",
+                ssh_destination="host",
+                ssh_auth="password",
+                ssh_args=[
+                    "-oControlMaster=auto",
+                    "-oControlPath=/tmp/wp-%C",
+                    "-oControlPersist=60",
+                ],
+            )
+        ],
+    )
+    monkeypatch.setattr(runtime.ssh_master, "disconnect_all", noop)
+    add_session(runtime, "s1")
+    runtime.storage.connection.execute(
+        "UPDATE sessions SET launch_target_id = 'pw' WHERE id = 's1'"
+    )
+    runtime.storage.connection.commit()
+
+    async with started(runtime):
+        assert stored(runtime, "s1").status == SessionStatus.ERROR
+        assert "Session unavailable" in notes(runtime, "s1")
 
 
 async def test_nothing_lands_on_a_failed_plugin(

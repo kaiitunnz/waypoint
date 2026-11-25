@@ -8,7 +8,7 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -76,7 +76,14 @@ class HeldQueue:
         if self._runtime.get_session(session_id).focus:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
-        async with self._send_locks[session_id]:
+        # A send that reopens the session keeps the send lock through the
+        # restore, so the sends behind it are held without waiting for the lock.
+        lock = (
+            nullcontext()
+            if self._runtime.restores.holds_sends(session_id)
+            else self._send_locks[session_id]
+        )
+        async with lock:
             session = self._runtime.get_session(session_id)
             if session.focus:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
@@ -94,11 +101,11 @@ class HeldQueue:
         return record
 
     def _awaits_restore(self, session: SessionRecord) -> bool:
-        """Whether a send must queue: the session is restoring, or sends held
-        while it was are still waiting. Only those are ``idle``-held without
+        """Whether a send must queue: the session is restoring or about to, or
+        sends held while it was are still waiting. Only those are ``idle``-held without
         being wakes. A send reopens an exited session, so nothing queues behind
         what such a session left held."""
-        if self._runtime.restores.is_restoring(session.id):
+        if self._runtime.restores.holds_sends(session.id):
             return True
         return session.status is not SessionStatus.EXITED and any(
             held.hold_reason is HeldReason.IDLE
@@ -220,7 +227,7 @@ class HeldQueue:
         if (
             session.focus
             or session.status in _UNDELIVERABLE
-            or self._runtime.restores.is_restoring(session_id)
+            or self._runtime.restores.holds_sends(session_id)
         ):
             return
         transport = self._runtime.transport_for(session)

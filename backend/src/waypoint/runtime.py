@@ -708,6 +708,12 @@ class SessionRuntime:
     def require_drivable(self, session_id: str) -> None:
         """Refuse an operation that drives the agent while nothing can take it."""
         self.require_available(self.get_session(session_id))
+        if self._assistant_creating and session_id == self.assistant_session_id:
+            # Its replacement is launching, so nothing may revive this thread.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ASSISTANT_STARTING_DETAIL,
+            )
         self.restores.require_restored(session_id)
 
     async def _mark_session_unavailable(
@@ -795,6 +801,10 @@ class SessionRuntime:
             # A one-shot has no state worth resuming; the sweep below reaps it.
             if session.source == SessionSource.TELEMETRY:
                 continue
+            if reason := self.plugin_unavailable_reason(session, log_missing=True):
+                await self._mark_session_unavailable(session, reason)
+                continue
+            session = self._clear_unavailable_mark(session)
             # A password-auth target has no live ControlMaster at boot, so a
             # restore would block on an unanswerable password prompt. Leave the
             # session in its stored state for the user to reconnect (prompting
@@ -806,10 +816,6 @@ class SessionRuntime:
                 and not self.ssh_master.is_connected_cached(launch_target)
             ):
                 continue
-            if reason := self.plugin_unavailable_reason(session, log_missing=True):
-                await self._mark_session_unavailable(session, reason)
-                continue
-            session = self._clear_unavailable_mark(session)
             plugin = self.registry.plugin_for(session)
             task = asyncio.create_task(
                 self._restore_session_and_warm_completions(plugin, session),
@@ -2818,14 +2824,14 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="the assistant is disabled",
             )
-        await self.restores.cancel(session_id)
-        session = self.get_session(session_id)
-        if session.status != SessionStatus.EXITED:
-            await self._terminate_agent(session)
-            await self._record_system_event(
-                session.id, "Assistant terminated", status=SessionStatus.EXITED
-            )
-            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+        async with self.restores.closing(session_id), self._session_lock(session_id):
+            session = self.get_session(session_id)
+            if session.status != SessionStatus.EXITED:
+                await self._terminate_agent(session)
+                await self._record_system_event(
+                    session.id, "Assistant terminated", status=SessionStatus.EXITED
+                )
+                self.storage.update_session(session.id, status=SessionStatus.EXITED)
         return self._require_assistant_summary()
 
     async def reattach_assistant(self) -> AssistantSummary:
@@ -3405,11 +3411,10 @@ class SessionRuntime:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="the assistant session cannot be terminated",
             )
-        # A reattach or switch holds the session lock while it restores.
-        await self.restores.cancel(session_id)
         # Serialized with the launch-settings switch and reattach so a terminate
         # can't interleave their terminate→restore window on the same session.
-        async with self._session_lock(session_id):
+        # Either holds the lock while it restores, so restores are stopped first.
+        async with self.restores.closing(session_id), self._session_lock(session_id):
             session = self.get_session(session_id)
             if session.status == SessionStatus.EXITED:
                 return session
@@ -3612,7 +3617,8 @@ class SessionRuntime:
         self.require_drivable(session.id)
         # Serialized with terminate and the launch-settings switch.
         async with self._session_lock(session.id), self._keep_read(session.id):
-            reattached = await self._reattach_locked(session.id)
+            with self.restores.reattaching(self.get_session(session.id)):
+                reattached = await self._reattach_locked(session.id)
         # Items held while the session could not take them.
         self.held.drain({reattached.id})
         return reattached

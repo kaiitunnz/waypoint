@@ -35,7 +35,7 @@ dev = [
   "ruff>=0.17.6",
   "types-croniter>=6.2.4.20261006",
   "types-PyYAML>=6.0.0",
-  "types-regex>=2026.11.9.20261110",
+  "types-regex>=2026.11.19.20261119",
 ]
 
 [project.scripts]

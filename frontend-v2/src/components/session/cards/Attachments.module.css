@@ -50,5 +50,5 @@
 
 .size {
   font-size: var(--f-stamp);
-  color: var(--faint);
+  color: color-mix(in srgb, var(--text) 72%, transparent);
 }

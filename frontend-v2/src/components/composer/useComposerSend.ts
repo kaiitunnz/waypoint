@@ -14,6 +14,7 @@ import type { SessionCommandInvocation, SessionRecord } from "@waypoint/web-core
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { useFailureToast } from "@/lib/useFailureToast";
+import { useMountedRef } from "@/lib/useMountedRef";
 
 interface Payload {
   mode: SendMode;
@@ -71,6 +72,7 @@ export function useComposerSend({
 }: Options) {
   const { toast } = useToast();
   const reportFailure = useFailureToast();
+  const mounted = useMountedRef();
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -141,6 +143,12 @@ export function useComposerSend({
         handleAuthFailure();
         return;
       }
+      const message = error instanceof Error ? error.message : "failed to send input";
+      if (!mounted.current) {
+        // The person has left this session: name it.
+        toast({ message: `Not sent to ${session?.title ?? "the session"}: ${message}`, tone: "error" });
+        return;
+      }
       const current = latest.current.draft;
       const after = draftAfterFailedSend({
         immediate,
@@ -151,7 +159,7 @@ export function useComposerSend({
       });
       if (after.draft !== current) setDraft(after.draft);
       setFailure({
-        message: error instanceof Error ? error.message : "failed to send input",
+        message,
         status: error instanceof ApiError || error instanceof FollowUpError ? error.status : undefined,
         openSessionId: error instanceof FollowUpError ? error.sessionId : undefined,
         payload,

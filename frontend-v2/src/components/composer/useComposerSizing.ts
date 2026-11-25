@@ -2,10 +2,14 @@
 
 import { useEffect, useLayoutEffect, type RefObject } from "react";
 
-function fit(field: HTMLTextAreaElement | null) {
-  if (!field) return;
+// The field shrinks for a moment to be measured. The composer holds its height
+// meanwhile, so a transcript at its end is not scrolled off it.
+function fit(composer: HTMLElement | null, field: HTMLTextAreaElement | null) {
+  if (!composer || !field) return;
+  composer.style.minHeight = `${composer.offsetHeight}px`;
   field.style.height = "auto";
   field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+  composer.style.minHeight = "";
 }
 
 // Grows the field with its text, and publishes the composer's height as
@@ -16,7 +20,7 @@ export function useComposerSizing(
   draft: string,
   pointer: boolean,
 ): void {
-  useLayoutEffect(() => fit(field.current), [field, draft, pointer]);
+  useLayoutEffect(() => fit(root.current, field.current), [root, field, draft, pointer]);
 
   useEffect(() => {
     const node = root.current;
@@ -28,7 +32,7 @@ export function useComposerSizing(
       // A change of width rewraps the text: the window's, or Stop taking room.
       if (input.offsetWidth !== width) {
         width = input.offsetWidth;
-        fit(input);
+        fit(node, input);
       }
       page.style.setProperty("--composer-height", `${node.offsetHeight}px`);
     });

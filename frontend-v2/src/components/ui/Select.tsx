@@ -1,19 +1,15 @@
-import type { Ref, SelectHTMLAttributes } from "react";
+import type { SelectHTMLAttributes } from "react";
 
 import { cx } from "@/lib/cx";
 
 import { Icon } from "./Icon";
 import styles from "./Field.module.css";
 
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  ref?: Ref<HTMLSelectElement>;
-}
-
 // A native select: touch clients get the system picker.
-export function Select({ className, children, ref, ...rest }: SelectProps) {
+export function Select({ children, ...rest }: Omit<SelectHTMLAttributes<HTMLSelectElement>, "className">) {
   return (
-    <span className={cx(styles.wrap, className)}>
-      <select {...rest} ref={ref} className={cx(styles.input, styles.select)}>
+    <span className={styles.wrap}>
+      <select {...rest} className={cx(styles.input, styles.select)}>
         {children}
       </select>
       <span className={styles.caret} aria-hidden="true">

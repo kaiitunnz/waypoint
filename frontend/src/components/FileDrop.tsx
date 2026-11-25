@@ -129,7 +129,7 @@ export function FileDropZone({
   children: ReactNode;
 }) {
   const [target, setTarget] = useState<FileDropTarget | null>(null);
-  const [visible] = useFileDragVisible();
+  const visible = useFileDragVisible();
   const [box, setBox] = useState<OverlayBox | null>(null);
 
   useLayoutEffect(() => {

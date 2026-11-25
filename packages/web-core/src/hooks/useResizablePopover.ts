@@ -34,6 +34,8 @@ interface ResizablePopoverOptions {
   bodyRef: RefObject<HTMLElement | null>;
   defaultWidth: number;
   direction: ResizeDirection;
+  // The axis a pointer is dragging, then null. Must be stable.
+  onResizing?: (axis: ResizeAxis | null) => void;
 }
 
 export interface PopoverSizeStyle {
@@ -67,13 +69,11 @@ export function useResizablePopover({
   bodyRef,
   defaultWidth,
   direction,
+  onResizing,
 }: ResizablePopoverOptions): ResizablePopover {
   const [pref, setPref] = useState<PopoverSize>(() => (enabled ? readPopoverSize(storageKey) : {}));
   // What the pointer and key handlers merge into.
   const prefRef = useRef(pref);
-  useEffect(() => {
-    prefRef.current = pref;
-  }, [pref]);
   const [rendered, setRendered] = useState<{ width: number; height: number } | null>(null);
   const { width: widthDirection, height: heightDirection } = direction;
 
@@ -137,8 +137,7 @@ export function useResizablePopover({
       const start = axis === "width" ? event.clientX : event.clientY;
       const startSize = axis === "width" ? panel.offsetWidth : panel.offsetHeight;
       const sign = axis === "width" ? widthDirection : heightDirection;
-      const bodyClass = axis === "width" ? "usage-resizing-x" : "usage-resizing-y";
-      document.body.classList.add(bodyClass);
+      onResizing?.(axis);
       // Taken once, so the detent holds still for the whole drag.
       const target = fallback(axis);
       const onMove = (move: PointerEvent) => {
@@ -148,12 +147,12 @@ export function useResizablePopover({
       const onUp = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
-        document.body.classList.remove(bodyClass);
+        onResizing?.(null);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [bounds, panelRef, widthDirection, heightDirection, fallback, resize],
+    [bounds, panelRef, widthDirection, heightDirection, fallback, resize, onResizing],
   );
 
   const onResizeKey = useCallback(

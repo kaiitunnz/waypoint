@@ -5,21 +5,6 @@
   min-width: 0;
 }
 
-.text {
-  display: block;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--field-line);
-  border-radius: var(--r);
-  background: var(--field);
-  color: var(--text-strong);
-  font: inherit;
-  /* 16px or more: iOS zooms the page when a smaller field takes focus. */
-  font-size: var(--f-body);
-  line-height: 1.4;
-  resize: vertical;
-}
-
 .row {
   display: flex;
   flex-wrap: wrap;

@@ -16,6 +16,7 @@ interface SessionMenuActions {
   // A menu's choice: pinning acts at once, the rest open their dialog.
   onAction: (action: SessionAction, session: SessionRecord) => void;
   openDialog: (dialog: HomeDialog) => void;
+  reattach: (sessionId: string) => Promise<void>;
   // Render once, beside the menus.
   dialogs: ReactNode;
 }
@@ -52,6 +53,7 @@ export function useSessionMenuActions({ onRemoved, onUpdated }: SessionMenuOptio
   return {
     onAction,
     openDialog: setDialog,
+    reattach: actions.reattach,
     dialogs: <SessionDialogs dialog={dialog} actions={confirmed} onClose={() => setDialog(null)} />,
   };
 }

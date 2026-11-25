@@ -9,13 +9,12 @@ import type { SessionRecord } from "../types";
 
 const FIELD_NAMES: Record<TuningField, string> = { mode: "permission mode", model: "model", effort: "effort" };
 
-// The question to put to the person before a change cuts off the running turn.
 export function interruptPrompt(field: string): string {
   return `Changing the ${field} restarts this session and interrupts the current turn. Continue?`;
 }
 
 // `onSession`, `onError`, `onAuthFailure` and `confirmInterrupt` must be stable:
-// the returned changes keep their identity until the session does.
+// the returned changes keep their identity until the session changes.
 export interface SessionTuningOptions {
   host: string;
   token: string;

@@ -15,8 +15,7 @@ export interface RecurrencePreview {
   previewing: boolean;
 }
 
-// The debounced server preview of a recurrence. `onValidChange` (stable)
-// reports whether it previews cleanly, always true for a one-time send.
+// `onValidChange` must be stable. A one-time send always counts as valid.
 export function useRecurrencePreview(
   host: string,
   token: string,

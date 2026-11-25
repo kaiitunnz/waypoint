@@ -1,14 +1,9 @@
-/**
- * What the session's usage panel shows: rate limits, the current context window
- * and the tracked session total.
- */
-
 import { humaniseBackend, type BackendCatalog } from "../backends";
 import { UNIFIED_TOKEN_LABELS, unifyTokens } from "../tokens";
 import type { SessionContextUsage, SessionRecord, SessionTokenUsage } from "../types";
 import { clampPercent, formatRelativeTime, formatTokens, rateLimitUsageTone, usageTone, type UsageTone } from "../usage";
 
-export function contextUsagePercent(usage: SessionContextUsage): number | null {
+function contextUsagePercent(usage: SessionContextUsage): number | null {
   const windowTokens = usage.context_window_tokens;
   if (!windowTokens || windowTokens <= 0) {
     return null;
@@ -22,7 +17,7 @@ export function contextUsagePercent(usage: SessionContextUsage): number | null {
   return Math.round((usage.used_tokens / windowTokens) * 100);
 }
 
-export function coverageLabel(usage: SessionTokenUsage): string {
+export function sessionCoverageLabel(usage: SessionTokenUsage): string {
   switch (usage.coverage) {
     case "entire_waypoint_session":
       return "Entire Waypoint session";
@@ -33,7 +28,7 @@ export function coverageLabel(usage: SessionTokenUsage): string {
   }
 }
 
-export function tokenCategoryLabel(key: string): string {
+function breakdownLabel(key: string): string {
   switch (key) {
     case "input_tokens":
       return "Input";
@@ -76,8 +71,8 @@ export interface UsagePanelModel {
   hasTokenTotals: boolean;
   // False when nothing is tracked yet and only the coverage line is shown.
   hasTrackedTurns: boolean;
-  contextSummary: string | null;
-  rateLimitSummary: string | null;
+  // The context and rate limits in words, for the control that opens the panel.
+  summary: string[];
 }
 
 function worse(a: UsageTone, b: UsageTone): UsageTone {
@@ -91,11 +86,11 @@ export function usagePanelModel(session: SessionRecord | null, catalog?: Backend
   const tokenUsage = session?.session_token_usage ?? null;
   const rateLimitUsage = session?.rate_limit_usage ?? null;
 
-  const contextPercent = clampPercent(contextUsage ? contextUsagePercent(contextUsage) : null);
-  const contextTone = usageTone(contextUsage ? contextUsagePercent(contextUsage) : null);
-  const rateLimitTone = rateLimitUsageTone(rateLimitUsage);
-  const window = contextUsage?.context_window_tokens;
-  const contextWindowTokens = typeof window === "number" && window > 0 ? window : null;
+  const percent = contextUsage ? contextUsagePercent(contextUsage) : null;
+  const contextPercent = clampPercent(percent);
+  const contextTone = usageTone(percent);
+  const windowTokens = contextUsage?.context_window_tokens ?? 0;
+  const contextWindowTokens = windowTokens > 0 ? windowTokens : null;
   const contextUnreported = contextUsage !== null && contextUsage.used_tokens <= 0;
 
   const contextSummary = contextUsage
@@ -149,19 +144,16 @@ export function usagePanelModel(session: SessionRecord | null, catalog?: Backend
     contextBreakdown: contextUsage
       ? Object.entries(contextUsage.breakdown ?? {})
           .filter(([, value]) => value > 0)
-          .map(([key, value]) => [tokenCategoryLabel(key), value])
+          .map(([key, value]) => [breakdownLabel(key), value])
       : [],
     rateLimitSourceLabel,
-    tone:
-      contextUsage === null
-        ? rateLimitTone
-        : rateLimitUsage === null
-          ? contextTone
-          : worse(contextTone, rateLimitTone),
+    tone: worse(contextTone, rateLimitUsageTone(rateLimitUsage)),
     tokenTotals,
     hasTokenTotals: tokenUsage !== null && Object.keys(tokenUsage.totals ?? {}).length > 0,
     hasTrackedTurns: tokenUsage !== null && tokenUsage.tracked_turns > 0,
-    contextSummary,
-    rateLimitSummary,
+    summary: [
+      contextSummary ? `Current context ${contextSummary}` : null,
+      rateLimitSummary ? `Rate limits ${rateLimitSummary}` : null,
+    ].filter((part) => part !== null),
   };
 }

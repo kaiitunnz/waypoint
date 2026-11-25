@@ -19,7 +19,7 @@ interface PopoverProps {
   label: string;
   width?: number;
   align?: "left" | "right";
-  // `top` for a trigger near the bottom edge, such as the composer's.
+  // `top` for a trigger near the bottom edge.
   side?: "bottom" | "top";
   // The storage key that lets a person resize the panel and keeps their size.
   resizeKey?: string;

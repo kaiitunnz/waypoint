@@ -16,7 +16,6 @@ interface AttachmentTrayProps {
 }
 
 export function AttachmentTray({ items, onRemove, onRetry, onClear }: AttachmentTrayProps) {
-  if (items.length === 0) return null;
   return (
     <div className={styles.tray}>
       <div className={styles.head}>

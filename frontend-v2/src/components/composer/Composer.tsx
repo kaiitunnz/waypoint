@@ -14,39 +14,23 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { isAuthError, refreshSessionRateLimitUsage, setSessionFocus } from "@waypoint/web-core/api";
-import {
-  fidelityFor,
-  permissionModesFor,
-  supportsAttachments,
-  type BackendCatalog,
-} from "@waypoint/web-core/backends";
+import { setSessionFocus } from "@waypoint/web-core/api";
+import { fidelityFor, supportsAttachments, type BackendCatalog } from "@waypoint/web-core/backends";
 import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
-import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
-import { interruptPrompt, useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
-import { useTuningDraft } from "@waypoint/web-core/hooks/useTuningDraft";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { canInterrupt, composerAvailability } from "@waypoint/web-core/session/send";
-import {
-  nextModeId,
-  pendingRestartLabel,
-  restartFields,
-  tuningOptions,
-  tuningSummary,
-} from "@waypoint/web-core/session/tuning";
 import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { AttachmentTray } from "./AttachmentTray";
 import styles from "./Composer.module.css";
@@ -61,10 +45,11 @@ import { CommandMenu, MentionMenu } from "./SuggestionMenu";
 import { TuneControl } from "./TuneControl";
 import { UsageControl } from "./UsageControl";
 import { useComposerSend } from "./useComposerSend";
+import { useComposerTuning } from "./useComposerTuning";
 
 interface ComposerProps {
   sessionId: string;
-  // Null while the session loads; the field is disabled until then.
+  // Null while the session loads.
   session: SessionRecord | null;
   catalog: BackendCatalog;
   agentName: string;
@@ -97,13 +82,7 @@ export function Composer({
   const pointer = usePointerUI();
   const [draft, setDraft] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [tuneOpen, setTuneOpen] = useState(false);
-  // Opened by Shift+Tab, which keeps cycling from the field.
-  const [tuneFromKey, setTuneFromKey] = useState(false);
   const [focusBusy, setFocusBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  // The setting waiting on a yes to cut off the running turn.
-  const [interrupting, setInterrupting] = useState<{ field: string; answer: (yes: boolean) => void } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -115,13 +94,7 @@ export function Composer({
     },
     [toast],
   );
-  const fail = useCallback(
-    (error: unknown, fallback: string) => {
-      if (isAuthError(error)) handleAuthFailure();
-      else reportError(error instanceof Error ? error.message : fallback);
-    },
-    [reportError],
-  );
+  const reportFailure = useFailureToast();
 
   const { disabled } = composerAvailability(session, catalog);
   const structured = session !== null && fidelityFor(session.transport, catalog) === "structured";
@@ -183,42 +156,10 @@ export function Composer({
     resetCompletions,
     onPending,
     onOpenSession: openSession,
-    onQueued: focusField,
+    onQueueSettled: focusField,
   });
 
-  const models = useSessionModels(host, token, session, handleAuthFailure);
-  const confirmInterrupt = useCallback(
-    (name: string) => new Promise<boolean>((answer) => setInterrupting({ field: name, answer })),
-    [],
-  );
-  const tuningActions = useSessionTuning({
-    host,
-    token,
-    session,
-    catalog,
-    onSession,
-    onError: reportError,
-    onAuthFailure: handleAuthFailure,
-    confirmInterrupt,
-  });
-  const modeOptions = session ? permissionModesFor(session.backend, catalog) : [];
-  const tuningInput = {
-    modeOptions,
-    modelOptions: models.modelOptions,
-    effortLevels: models.effortLevels,
-    defaultModelId: models.defaultModelId,
-    defaultModelLabel: models.defaultModelLabel,
-    currentModel: session?.model ?? null,
-    currentEffort: session?.effort ?? null,
-    permissionMode: session?.permission_mode ?? null,
-  };
-  const options = tuningOptions(tuningInput);
-  const restart = restartFields(session, catalog);
-  const tuning = useTuningDraft(tuningInput, restart, {
-    mode: tuningActions.changeMode,
-    model: tuningActions.changeModel,
-    effort: tuningActions.changeEffort,
-  });
+  const tuning = useComposerTuning({ host, token, session, catalog, onSession, onError: reportError });
 
   const todo = useMemo(() => currentTodoEvent(events, latestTodo), [events, latestTodo]);
   const tasks = useMemo(() => summarizeTodos(readTodoEntries(todo)), [todo]);
@@ -229,27 +170,14 @@ export function Composer({
       try {
         onSession(await setSessionFocus(host, token, sessionId, enabled));
       } catch (error) {
-        fail(error, enabled ? "failed to turn on Focus" : "failed to turn off Focus");
+        reportFailure(error, enabled ? "failed to turn on Focus" : "failed to turn off Focus");
       } finally {
         setFocusBusy(false);
       }
     },
-    [host, token, sessionId, onSession, fail],
+    [host, token, sessionId, onSession, reportFailure],
   );
 
-  async function refreshUsage() {
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      onSession(await refreshSessionRateLimitUsage(host, token, sessionId));
-    } catch (error) {
-      fail(error, "failed to refresh rate-limit usage");
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
-  // The field grows with its text, up to the stylesheet's maximum.
   const grow = useCallback(() => {
     const node = field.current;
     if (!node) return;
@@ -278,20 +206,12 @@ export function Composer({
     };
   }, [grow]);
 
-  const [dragging, endDrag] = useFileDragVisible();
+  const dragging = useFileDragVisible();
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
-    if (event.key === "Tab" && event.shiftKey && modeOptions.length > 0) {
+    if (event.key === "Tab" && event.shiftKey && tuning.cycleMode()) {
       event.preventDefault();
-      const next = tuningActions.busy.mode ? null : nextModeId(modeOptions, tuning.shown.mode);
-      if (next !== null) {
-        tuning.select("mode", next);
-        if (restart.mode) {
-          setTuneFromKey(true);
-          setTuneOpen(true);
-        }
-      }
       return;
     }
     if (handleMentionKey(event)) return;
@@ -304,7 +224,6 @@ export function Composer({
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     if (!attachmentsEnabled) return;
     const files = filesFromDataTransfer(event.clipboardData);
-    // Pasted files become attachments; plain text falls through to the field.
     if (files.length === 0) return;
     event.preventDefault();
     attachments.addFiles(files);
@@ -396,24 +315,10 @@ export function Composer({
         <div className={styles.tune}>
           {session ? (
             <TuneControl
-              open={tuneOpen}
-              onOpenChange={(open) => {
-                setTuneOpen(open);
-                if (!open) setTuneFromKey(false);
-              }}
-              autoFocus={!tuneFromKey}
+              tuning={tuning}
               triggerRef={tuneTrigger}
               agentName={agentName}
-              summary={tuningSummary(tuningInput, options)}
-              modeOptions={modeOptions}
-              options={options}
-              draft={tuning}
-              restartLabel={pendingRestartLabel(tuning, modeOptions, options.modelEntries)}
-              busy={tuningActions.busy}
               disabled={disabled}
-              currentEffort={session.effort ?? null}
-              defaultModelLabel={models.defaultModelLabel}
-              defaultEffort={models.defaultEffort}
               focus={Boolean(session.focus)}
               focusBusy={focusBusy}
               onFocusChange={(enabled) => void setFocus(enabled)}
@@ -429,7 +334,7 @@ export function Composer({
               ☑ {tasks.completed}/{tasks.total}
             </span>
           ) : null}
-          <UsageControl session={session} catalog={catalog} onRefresh={() => void refreshUsage()} refreshing={refreshing} />
+          <UsageControl session={session} catalog={catalog} onSession={onSession} />
         </div>
         <div className={styles.actions}>
           {canInterrupt(session) ? <StopButton stopping={stopping} onStop={() => void stop()} /> : null}
@@ -467,17 +372,6 @@ export function Composer({
           onClose={() => setScheduleOpen(false)}
         />
       ) : null}
-      <ConfirmDialog
-        open={interrupting !== null}
-        title="Interrupt the current turn?"
-        detail={interrupting ? interruptPrompt(interrupting.field) : ""}
-        confirmLabel="Continue"
-        onConfirm={() => interrupting?.answer(true)}
-        onClose={() => {
-          interrupting?.answer(false);
-          setInterrupting(null);
-        }}
-      />
       {dragging && dropRoot
         ? createPortal(
             <DropOverlay
@@ -486,7 +380,6 @@ export function Composer({
               }
               sessionTitle={session?.title ?? "this session"}
               onFiles={attachments.addFiles}
-              onDone={endDrag}
             />,
             dropRoot,
           )

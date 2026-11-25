@@ -1,4 +1,5 @@
 .trigger {
+  composes: hit from "../../styles/hit.module.css";
   position: relative;
   display: inline-flex;
   align-items: center;

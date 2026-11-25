@@ -25,7 +25,6 @@
   cursor: default;
 }
 
-/* Send is the composer's one primary action. */
 .ready {
   background: var(--action);
   color: var(--on-action);

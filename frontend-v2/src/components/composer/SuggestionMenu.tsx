@@ -63,7 +63,7 @@ export function CommandMenu({ suggestions, listRef, ...menu }: CommandMenuProps)
               </li>
             ) : null}
             <li role="presentation">
-              <button {...rowProps(index, { ...menu })} className={cx(styles.row, index === menu.activeIndex && styles.active)}>
+              <button {...rowProps(index, menu)} className={cx(styles.row, index === menu.activeIndex && styles.active)}>
                 <span className={cx(styles.name, "mono")}>
                   <HighlightedText text={rowLabel(entry)} positions={entry.positions} path={entry.type === "workspace_path"} />
                   {hint ? <span className={styles.hint}> {hint}</span> : null}
@@ -94,7 +94,7 @@ export function MentionMenu({ host, token, sessionId, mentions, ...menu }: Menti
     <ul className={styles.menu} role="listbox" aria-label="Session files">
       {mentions.map(({ file, positions }, index) => (
         <li key={file.id} role="presentation">
-          <button {...rowProps(index, { ...menu })} className={cx(styles.row, styles.file, index === menu.activeIndex && styles.active)}>
+          <button {...rowProps(index, menu)} className={cx(styles.row, styles.file, index === menu.activeIndex && styles.active)}>
             {file.kind === "image" ? (
               // A token-query serve URL: next/image cannot optimise it.
               // eslint-disable-next-line @next/next/no-img-element

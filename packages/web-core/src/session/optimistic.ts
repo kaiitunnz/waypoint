@@ -1,5 +1,3 @@
-// Matching a message shown while it sends with the transcript event that echoes it.
-
 import type { EventRecord } from "../types";
 import { maxEventId } from "./stream";
 

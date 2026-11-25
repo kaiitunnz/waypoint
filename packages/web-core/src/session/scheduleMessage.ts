@@ -1,12 +1,7 @@
-/**
- * The schedule-message form: its choices, preview and request options.
- */
-
 import type { createMessageSchedule } from "../api";
 import { cronFromState, type RecurrenceState, type TimingMode } from "../recurrence";
 import type { IdleBatchMode } from "./sendModes";
 
-// A one-time send happens after a delay or at a local time.
 export type OneTimeTiming = "delay" | "datetime";
 export type ScheduleTrigger = "time" | "idle";
 

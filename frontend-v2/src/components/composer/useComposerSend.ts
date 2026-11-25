@@ -7,7 +7,6 @@ import type { BackendCatalog } from "@waypoint/web-core/backends";
 import type { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import {
-  canFork,
   composerAvailability,
   deliverInput,
   draftAfterFailedSend,
@@ -18,6 +17,7 @@ import type { SessionCommandInvocation, SessionRecord } from "@waypoint/web-core
 
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 interface Payload {
   mode: SendMode;
@@ -28,7 +28,6 @@ interface Payload {
 
 export interface SendFailure {
   message: string;
-  // The HTTP status behind it, when it came from one.
   status?: number;
   // A control command's new session, whose follow-up send failed.
   openSessionId?: string;
@@ -54,7 +53,7 @@ interface Options {
   onPending: OptimisticSends["add"];
   onOpenSession: (sessionId: string) => void;
   // A queued send has ended, however it went.
-  onQueued: () => void;
+  onQueueSettled: () => void;
 }
 
 const IDLE_QUEUED: Record<Exclude<SendMode, "now">, string> = {
@@ -75,9 +74,10 @@ export function useComposerSend({
   resetCompletions,
   onPending,
   onOpenSession,
-  onQueued,
+  onQueueSettled,
 }: Options) {
   const { toast } = useToast();
+  const reportFailure = useFailureToast();
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -123,8 +123,6 @@ export function useComposerSend({
           text: payload.text,
           command: payload.command,
           attachments: payload.attachmentIds.length ? payload.attachmentIds : undefined,
-          allowFork: canFork(session, catalog),
-          reattachFirst: true,
         });
         attachments.release(payload.attachmentIds);
         if (openSessionId) onOpenSession(openSessionId);
@@ -169,7 +167,7 @@ export function useComposerSend({
       inFlight.current = false;
       setSending(false);
       // The menu item that queued it is gone, and its focus with it.
-      if (!immediate) onQueued();
+      if (!immediate) onQueueSettled();
     }
   }
 
@@ -196,11 +194,7 @@ export function useComposerSend({
       try {
         await postAction(host, token, sessionId, "interrupt");
       } catch (error) {
-        if (isAuthError(error)) {
-          handleAuthFailure();
-          return;
-        }
-        toast({ message: error instanceof Error ? error.message : "failed to interrupt", tone: "error" });
+        reportFailure(error, "failed to interrupt");
       } finally {
         setStopping(false);
       }

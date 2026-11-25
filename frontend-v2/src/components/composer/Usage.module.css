@@ -1,4 +1,5 @@
 .ring {
+  composes: hit from "../../styles/hit.module.css";
   position: relative;
   display: inline-flex;
   flex: none;
@@ -107,10 +108,6 @@
 
 .percent.danger {
   color: var(--error);
-}
-
-.percent.good {
-  color: var(--text-strong);
 }
 
 .panel .meter {

@@ -1,8 +1,3 @@
-/**
- * Sending from a session: what the composer may do in the session's state, and
- * how a turn reaches the agent.
- */
-
 import { ApiError, cloneSession, forkSession, isAuthError, postAction, sendInput } from "../api";
 import { liveTerminal, supportsFork, supportsReattachAfterExit, type BackendCatalog } from "../backends";
 import { matchControlCommand } from "../composer-completions";
@@ -80,8 +75,7 @@ export interface ControlCommandOptions {
   token: string;
   sessionId: string;
   text: string;
-  allowNew?: boolean;
-  allowFork?: boolean;
+  allowFork: boolean;
 }
 
 // ``/new`` and ``/fork`` are handled by the client, not forwarded to the agent.
@@ -91,20 +85,19 @@ export async function runControlCommand({
   token,
   sessionId,
   text,
-  allowNew = true,
-  allowFork = true,
+  allowFork,
 }: ControlCommandOptions): Promise<string | null> {
-  const newArgs = allowNew ? matchControlCommand(text, "new") : null;
+  const newArgs = matchControlCommand(text, "new");
   if (newArgs !== null) {
     // Cloned server-side so the child inherits the source's private
     // launch_env, which a public SessionRecord cannot carry.
-    const created = await withFallback("failed to create session", () => cloneSession(host, token, sessionId));
+    const created = await cloneSession(host, token, sessionId);
     await sendFollowUp(host, token, created.id, newArgs);
     return created.id;
   }
   const forkArgs = allowFork ? matchControlCommand(text, "fork") : null;
   if (forkArgs !== null) {
-    const forked = await withFallback("failed to fork session", () => forkSession(host, token, sessionId));
+    const forked = await forkSession(host, token, sessionId);
     await sendFollowUp(host, token, forked.id, forkArgs);
     return forked.id;
   }
@@ -114,20 +107,24 @@ export async function runControlCommand({
 async function sendFollowUp(host: string, token: string, sessionId: string, text: string): Promise<void> {
   if (!text) return;
   try {
-    await withFallback("failed to send input", () => sendInput(host, token, sessionId, text));
+    await sendInput(host, token, sessionId, text);
   } catch (error) {
     if (isAuthError(error)) throw error;
     throw new FollowUpError(error as Error, sessionId);
   }
 }
 
-export interface DeliverOptions extends ControlCommandOptions {
+export interface DeliverOptions {
+  host: string;
+  token: string;
+  sessionId: string;
   session: SessionRecord | null;
   catalog: BackendCatalog;
+  text: string;
   command?: SessionCommandInvocation;
   attachments?: string[];
-  // Restart a stopped session before sending, where its agent can.
-  reattachFirst?: boolean;
+  // False sends ``/new`` and ``/fork`` to the agent as text.
+  controlCommands?: boolean;
 }
 
 export interface Delivery {
@@ -135,26 +132,27 @@ export interface Delivery {
   openSessionId: string | null;
 }
 
-export async function deliverInput(options: DeliverOptions): Promise<Delivery> {
-  const { host, token, sessionId, session, catalog, text, command, attachments } = options;
-  if (options.reattachFirst && session && composerAvailability(session, catalog).dormant) {
-    await withFallback("failed to reconnect", () => postAction(host, token, sessionId, "reattach"));
+// Sends a turn, first restarting a stopped session whose agent can.
+export async function deliverInput({
+  host,
+  token,
+  sessionId,
+  session,
+  catalog,
+  text,
+  command,
+  attachments,
+  controlCommands = true,
+}: DeliverOptions): Promise<Delivery> {
+  if (composerAvailability(session, catalog).dormant) {
+    await postAction(host, token, sessionId, "reattach");
   }
   // A turn carrying attachments is never a control command.
-  if (!attachments?.length && session) {
-    const opened = await runControlCommand(options);
-    if (opened !== null) return { openSessionId: opened };
+  if (controlCommands && session && !attachments?.length) {
+    const allowFork = canFork(session, catalog);
+    const openSessionId = await runControlCommand({ host, token, sessionId, text, allowFork });
+    if (openSessionId !== null) return { openSessionId };
   }
-  await withFallback("failed to send input", () => sendInput(host, token, sessionId, text, command, attachments));
+  await sendInput(host, token, sessionId, text, command, attachments);
   return { openSessionId: null };
-}
-
-// Failures keep their own message and class; anything thrown that is not an
-// Error gets the step's name.
-async function withFallback<T>(message: string, run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(message);
-  }
 }

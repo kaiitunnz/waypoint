@@ -101,6 +101,12 @@
   }
 }
 
+.input.area {
+  padding: 10px 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .input.select {
   appearance: none;
   padding-right: 34px;

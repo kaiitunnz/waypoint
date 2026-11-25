@@ -40,13 +40,11 @@ export function useAttachments({
   pin = false,
 }: UseAttachmentsArgs) {
   const [items, setItems] = useState<PendingAttachment[]>([]);
-  // Object URLs created for image previews, revoked on removal/unmount.
   const urlsRef = useRef<Set<string>>(new Set());
   // Source File kept per localId so a failed upload can be retried.
   const filesRef = useRef<Map<string, File>>(new Map());
-  // Unsent, non-referenced uploaded blob ids — the orphans to free if the user
-  // leaves before sending. Kept in a ref so the unmount/pagehide handler sees
-  // the latest set without re-subscribing.
+  // Unsent uploads, to free if the page goes first. A ref, so the handler below
+  // reads the latest without re-subscribing.
   const orphanRef = useRef<string[]>([]);
   const credsRef = useRef({ host, token, sessionId });
 
@@ -72,11 +70,9 @@ export function useAttachments({
       .map((item) => (item.spec as AttachmentSpec).id);
   }, [items, host, token, sessionId]);
 
-  // Eager uploads leak a server blob if the page closes before send. Free the
-  // unsent ones on unmount (SPA navigation / view switch) and on page hide
-  // (hard close) with keepalive so the request survives teardown; a sent turn
-  // clears the tray first, so its blobs are never in `orphanRef`. The server's
-  // TTL sweep is the backstop for crashes / offline.
+  // Eager uploads leak a server blob if the page closes before send, so unsent
+  // ones are freed on unmount and on page hide, with keepalive to survive the
+  // teardown. The server's TTL sweep covers crashes and being offline.
   useEffect(() => {
     const flush = () => {
       const { host: h, token: t, sessionId: s } = credsRef.current;
@@ -168,9 +164,8 @@ export function useAttachments({
     [startUpload],
   );
 
-  // Add a file the session already stores as a referenced attachment — no
-  // upload. Its id rides on send like any other; the image preview points at
-  // the server's serve endpoint (a plain URL, never an object URL to revoke).
+  // A file the session already stores: nothing uploads, and its preview is a
+  // server URL, not an object URL to revoke.
   const referenceExisting = useCallback(
     (spec: AttachmentSpec) => {
       setItems((prev) => {
@@ -196,9 +191,8 @@ export function useAttachments({
     [host, token, sessionId],
   );
 
-  // Free the server blob for a removed eager upload so it doesn't orphan;
-  // best-effort. A *referenced* item is just a pointer to a file the session
-  // already owns, so removing it must never delete that shared blob.
+  // Best-effort. A referenced item points at a file the session owns, so its
+  // blob is never deleted.
   const discardServerSide = useCallback(
     (item: PendingAttachment) => {
       if (item.spec && !item.referenced) {
@@ -225,8 +219,7 @@ export function useAttachments({
     [revoke, discardServerSide],
   );
 
-  // Reset the tray WITHOUT touching the server — used after a successful send,
-  // where the blobs now belong to the sent message and must survive.
+  // Empties the tray but keeps the server blobs, which belong to a sent message.
   const clear = useCallback(() => {
     setItems((prev) => {
       for (const item of prev) revoke(item.previewUrl);
@@ -241,7 +234,10 @@ export function useAttachments({
       setItems((prev) =>
         prev.filter((item) => {
           const sent = item.spec !== undefined && ids.includes(item.spec.id);
-          if (sent) revoke(item.previewUrl);
+          if (sent) {
+            revoke(item.previewUrl);
+            filesRef.current.delete(item.localId);
+          }
           return !sent;
         }),
       );
@@ -249,8 +245,7 @@ export function useAttachments({
     [revoke],
   );
 
-  // Discard every pending attachment AND free its server blob — the explicit
-  // "Clear all" control, only ever used before the message is sent.
+  // Frees the server blobs too: only for files that were never sent.
   const discardAll = useCallback(() => {
     setItems((prev) => {
       for (const item of prev) {
@@ -265,8 +260,6 @@ export function useAttachments({
   const readyIds = items
     .filter((item) => item.status === "done" && item.spec)
     .map((item) => (item.spec as AttachmentSpec).id);
-  // Every session-file id currently in the tray, so a picker can mark files
-  // that are already added.
   const attachedIds = new Set(
     items.flatMap((item) => (item.spec ? [item.spec.id] : [])),
   );

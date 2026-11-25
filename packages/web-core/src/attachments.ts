@@ -27,7 +27,7 @@ export function typeTag(filename: string, isImage: boolean): string {
   return isImage ? "IMAGE" : "FILE";
 }
 
-// "2 files · 1.4 MB": a set of files in a header.
+// A set of files in words, e.g. "2 files · 1.4 MB".
 export function filesSummary(files: ReadonlyArray<{ size: number }>): string {
   const total = files.reduce((sum, file) => sum + file.size, 0);
   return `${files.length} file${files.length === 1 ? "" : "s"} · ${formatFileSize(total)}`;

@@ -1,4 +1,3 @@
-/* A seam changes one dimension; its line shows on hover, focus and drag. */
 .seam {
   position: absolute;
   z-index: 1;

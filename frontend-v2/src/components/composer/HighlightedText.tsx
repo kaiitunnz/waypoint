@@ -21,7 +21,6 @@ function breakable(value: string): ReactNode {
 
 interface HighlightedTextProps {
   text: string;
-  // The matched character indices.
   positions: ReadonlyArray<number>;
   path?: boolean;
 }

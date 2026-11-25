@@ -1,4 +1,3 @@
-/* Floats over the transcript, above the composer; the field keeps the focus. */
 .menu {
   position: absolute;
   z-index: var(--z-overlay);

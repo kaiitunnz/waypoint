@@ -18,7 +18,7 @@ import { RecurrenceFields } from "@/components/schedule/RecurrenceFields";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, TextInput } from "@/components/ui/Field";
+import { Field, TextArea, TextInput } from "@/components/ui/Field";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
@@ -30,7 +30,6 @@ interface ScheduleMessageDialogProps {
   host: string;
   token: string;
   sessionId: string;
-  // What the composer held when the dialog opened.
   initialText: string;
   onClose: () => void;
 }
@@ -117,9 +116,8 @@ export function ScheduleMessageDialog({ host, token, sessionId, initialText, onC
     >
       <div className={styles.form}>
         <Field label="Message" htmlFor={`${id}-text`}>
-          <textarea
+          <TextArea
             id={`${id}-text`}
-            className={styles.text}
             rows={3}
             value={text}
             data-autofocus=""

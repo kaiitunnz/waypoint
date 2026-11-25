@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionContextUsage, SessionRecord, SessionRateLimitUsage, SessionTokenUsage } from "../types";
-import { contextUsagePercent, coverageLabel, tokenCategoryLabel, usagePanelModel } from "./usagePanel";
+import { sessionCoverageLabel, usagePanelModel } from "./usagePanel";
 
 const context = (patch: Partial<SessionContextUsage> = {}): SessionContextUsage => ({
   used_tokens: 620_000,
@@ -31,15 +31,16 @@ const totals = (patch: Partial<SessionTokenUsage> = {}): SessionTokenUsage => ({
 
 const session = (patch: Partial<SessionRecord>) => patch as SessionRecord;
 
-describe("contextUsagePercent", () => {
-  it("is unknown without a window or without reported use", () => {
-    expect(contextUsagePercent(context())).toBe(62);
-    expect(contextUsagePercent(context({ context_window_tokens: null }))).toBeNull();
-    expect(contextUsagePercent(context({ used_tokens: 0 }))).toBeNull();
-  });
-});
-
 describe("usagePanelModel", () => {
+  const percent = (patch: Parameters<typeof context>[0]) =>
+    usagePanelModel(session({ context_usage: context(patch) })).contextPercent;
+
+  it("knows no context fill without a window or without reported use", () => {
+    expect(percent({})).toBe(62);
+    expect(percent({ context_window_tokens: null })).toBeNull();
+    expect(percent({ used_tokens: 0 })).toBeNull();
+  });
+
   it("has nothing to show for a session without usage", () => {
     expect(usagePanelModel(session({})).hasUsage).toBe(false);
     expect(usagePanelModel(null).hasUsage).toBe(false);
@@ -57,7 +58,7 @@ describe("usagePanelModel", () => {
     const model = usagePanelModel(session({ context_usage: context({ used_tokens: 0 }) }));
     expect(model.contextUnreported).toBe(true);
     expect(model.contextPercent).toBeNull();
-    expect(model.contextSummary).toBe("1,000,000 window · usage not reported");
+    expect(model.summary).toEqual(["Current context 1,000,000 window · usage not reported"]);
   });
 
   it("names a provider source and its unavailability", () => {
@@ -83,19 +84,25 @@ describe("usagePanelModel", () => {
     expect(model.hasTrackedTurns).toBe(true);
   });
 
-  it("drops zero categories from the last turn", () => {
+  it("labels the last turn's categories and drops the empty ones", () => {
     const model = usagePanelModel(
-      session({ context_usage: context({ breakdown: { input_tokens: 5, output_tokens: 0 } }) }),
+      session({
+        context_usage: context({
+          breakdown: { input_tokens: 5, output_tokens: 0, cache_creation_tokens: 2, made_up_tokens: 1 },
+        }),
+      }),
     );
-    expect(model.contextBreakdown).toEqual([["Input", 5]]);
+    expect(model.contextBreakdown).toEqual([
+      ["Input", 5],
+      ["Cache write", 2],
+      ["made up tokens", 1],
+    ]);
   });
 });
 
-describe("labels", () => {
-  it("names coverage and categories", () => {
-    expect(coverageLabel(totals())).toBe("Entire Waypoint session");
-    expect(coverageLabel(totals({ coverage: "partial" }))).toBe("Partial coverage");
-    expect(tokenCategoryLabel("cache_creation_tokens")).toBe("Cache write");
-    expect(tokenCategoryLabel("made_up_tokens")).toBe("made up tokens");
+describe("sessionCoverageLabel", () => {
+  it("names the coverage", () => {
+    expect(sessionCoverageLabel(totals())).toBe("Entire Waypoint session");
+    expect(sessionCoverageLabel(totals({ coverage: "partial" }))).toBe("Partial coverage");
   });
 });

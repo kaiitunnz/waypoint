@@ -11,11 +11,9 @@ interface DropOverlayProps {
   blocked: string | null;
   sessionTitle: string;
   onFiles: (files: File[]) => void;
-  onDone: () => void;
 }
 
-// Covers the conversation while a file is dragged over the page.
-export function DropOverlay({ blocked, sessionTitle, onFiles, onDone }: DropOverlayProps) {
+export function DropOverlay({ blocked, sessionTitle, onFiles }: DropOverlayProps) {
   return (
     <div
       className={cx(styles.overlay, blocked !== null && styles.blocked)}
@@ -25,7 +23,6 @@ export function DropOverlay({ blocked, sessionTitle, onFiles, onDone }: DropOver
       }}
       onDrop={(event) => {
         event.preventDefault();
-        onDone();
         if (blocked !== null) return;
         const files = filesFromDataTransfer(event.dataTransfer);
         if (files.length) onFiles(files);

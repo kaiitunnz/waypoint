@@ -2,71 +2,48 @@
 
 import { useId, type RefObject } from "react";
 
-import type { TuningDraftControls } from "@waypoint/web-core/hooks/useTuningDraft";
+import { interruptPrompt } from "@waypoint/web-core/hooks/useSessionTuning";
 import { effortLabel } from "@waypoint/web-core/modelDisplay";
-import type { TuningOptions } from "@waypoint/web-core/session/tuning";
-import type { BackendPermissionMode } from "@waypoint/web-core/types";
+import { pendingRestartLabel, tuningSummary } from "@waypoint/web-core/session/tuning";
 
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Flyout } from "@/components/ui/Flyout";
 import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { Toggle } from "@/components/ui/Toggle";
-import { cx } from "@/lib/cx";
 
-import hit from "@/styles/hit.module.css";
 import styles from "./TuneControl.module.css";
+import type { ComposerTuning } from "./useComposerTuning";
 
-export interface TuneProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  // False leaves the focus in the field when the popover opens.
-  autoFocus: boolean;
+interface TuneControlProps {
+  tuning: ComposerTuning;
   triggerRef: RefObject<HTMLButtonElement | null>;
   agentName: string;
-  summary: string[];
-  modeOptions: readonly BackendPermissionMode[];
-  options: TuningOptions;
-  draft: TuningDraftControls;
-  restartLabel: string;
-  busy: { mode: boolean; model: boolean; effort: boolean };
   disabled: boolean;
-  currentEffort: string | null;
-  defaultModelLabel: string | null;
-  defaultEffort: string | null;
   focus: boolean;
   focusBusy: boolean;
   onFocusChange: (enabled: boolean) => void;
 }
 
-// The mode, model and effort control: its summary in the composer, and the
-// settings it opens.
 export function TuneControl({
-  open,
-  onOpenChange,
-  autoFocus,
+  tuning,
   triggerRef,
   agentName,
-  summary,
-  modeOptions,
-  options,
-  draft,
-  restartLabel,
-  busy,
   disabled,
-  currentEffort,
-  defaultModelLabel,
-  defaultEffort,
   focus,
   focusBusy,
   onFocusChange,
-}: TuneProps) {
+}: TuneControlProps) {
   const id = useId();
+  const { input, options, draft, busy, defaultEffort, open, interrupt } = tuning;
+  const { modeOptions, currentEffort, defaultModelLabel } = input;
+  const summary = tuningSummary(input, options);
   const parts = summary.length > 0 ? summary : ["Settings"];
   const restartBusy = busy.mode || busy.model || busy.effort;
 
   async function applyRestart() {
-    onOpenChange(false);
+    tuning.setOpen(false);
     await draft.applyRestart();
   }
 
@@ -75,11 +52,11 @@ export function TuneControl({
       <button
         ref={triggerRef}
         type="button"
-        className={cx(styles.trigger, hit.hit)}
+        className={styles.trigger}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Mode and model: ${parts.join(", ")}${draft.hasPending ? ". A change waits to be applied" : ""}`}
-        onClick={() => onOpenChange(!open)}
+        onClick={() => tuning.setOpen(!open)}
       >
         <span className={styles.parts} aria-hidden="true">
           {parts.map((part, index) => (
@@ -93,10 +70,10 @@ export function TuneControl({
       </button>
       <Flyout
         open={open}
-        onClose={() => onOpenChange(false)}
+        onClose={() => tuning.setOpen(false)}
         triggerRef={triggerRef}
         title="Mode and model"
-        autoFocus={autoFocus}
+        autoFocus={tuning.takesFocus}
         width={320}
         side="top"
       >
@@ -162,13 +139,13 @@ export function TuneControl({
               <span>Focus</span>
               <span className={styles.label}>Hold incoming messages</span>
             </span>
-            <Toggle checked={focus} label="Focus" onChange={focusBusy ? () => {} : onFocusChange} />
+            <Toggle checked={focus} label="Focus" disabled={focusBusy} onChange={onFocusChange} />
           </div>
           {draft.hasPending ? (
             <div className={styles.restart}>
               <p>
-                Restart {agentName} with <strong>{restartLabel}</strong>? The current turn is interrupted and the session
-                resumes with the new settings.
+                Restart {agentName} with <strong>{pendingRestartLabel(draft, modeOptions, options.modelEntries)}</strong>?
+                The current turn is interrupted and the session resumes with the new settings.
               </p>
               <Button variant="primary" size="sm" busy={restartBusy} onClick={() => void applyRestart()}>
                 {restartBusy ? "Restarting…" : "Apply restart"}
@@ -177,6 +154,14 @@ export function TuneControl({
           ) : null}
         </div>
       </Flyout>
+      <ConfirmDialog
+        open={interrupt !== null}
+        title="Interrupt the current turn?"
+        detail={interrupt ? interruptPrompt(interrupt.field) : ""}
+        confirmLabel="Continue"
+        onConfirm={() => interrupt?.answer(true)}
+        onClose={tuning.dismissInterrupt}
+      />
     </>
   );
 }

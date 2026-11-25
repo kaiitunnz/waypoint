@@ -74,6 +74,7 @@ import {
   nextModeId,
   pendingRestartLabel,
   restartFields,
+  type RestartFields,
   tuningOptions,
   tuningSummary,
 } from "@waypoint/web-core/session/tuning";
@@ -936,82 +937,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     return () => observer.disconnect();
   }, [view, scrollToBottom]);
 
-  // Waypoint-level slash commands (``/new``, ``/fork``) are intercepted on
-  // the frontend rather than forwarded to the backend — they're the only
-  // ``frontend_control`` completions in the system. Both composers route
-  // through here so terminal sessions get the same behaviour as chat ones.
-  // Returns ``"handled"`` / ``"error"`` when the text was a control command,
-  // or ``null`` when the caller should fall through to its normal send path.
-  // ``allowFork`` reflects the agent's fork capability (and the launchpad guard).
-  const runFrontendControlCommand = useCallback(
-    async (
-      text: string,
-      opts?: { allowFork?: boolean; allowNew?: boolean },
-    ): Promise<"handled" | "error" | null> => {
-      if (!session) return null;
-      try {
-        const opened = await runControlCommand({
-          host,
-          token,
-          sessionId,
-          text,
-          allowNew: opts?.allowNew,
-          allowFork: opts?.allowFork,
-        });
-        if (opened === null) return null;
-        router.push(`/session/${opened}`);
-        return "handled";
-      } catch (e) {
-        if (isAuthError(e)) {
-          handleAuthFailure();
-          return "error";
-        }
-        setError(e instanceof Error ? e.message : "failed to create session");
-        return "error";
-      }
-    },
-    [session, host, token, sessionId, router, handleAuthFailure],
-  );
-
-  // The persistent assistant additionally suppresses /fork (forking would spawn
-  // a stray managed session off the launchpad).
-  const forkAllowed = canFork(session, catalog);
-
-  const submitInput = useCallback(async (
-    text: string,
-    command?: SessionCommandInvocation,
-    attachments?: string[],
-  ) => {
-    if (!text.trim() && !attachments?.length) {
-      return false;
-    }
-
-    // The persistent assistant isn't a launchpad — `/new` and `/fork` would
-    // spawn stray managed sessions, so let them flow to the agent as text.
-    // Attachment-bearing turns are never control commands, so skip the check.
-    if (!attachments?.length) {
-      const handled = await runFrontendControlCommand(text, {
-        allowFork: forkAllowed && !assistant,
-        allowNew: !assistant,
-      });
-      if (handled !== null) {
-        return handled === "handled";
-      }
-    }
-
-    try {
-      await sendInput(host, token, sessionId, text, command, attachments);
-      return true;
-    } catch (sendError) {
-      if (isAuthError(sendError)) {
-        handleAuthFailure();
-        return false;
-      }
-      setError(sendError instanceof Error ? sendError.message : "failed to send input");
-      return false;
-    }
-  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant, forkAllowed]);
-
   const onSendWithOptimistic = useCallback(
     async (
       text: string,
@@ -1023,8 +948,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const ts = new Date().toISOString();
       setOptimisticMessages((prev) => [...prev, { tempId, text, ts }]);
       try {
-        // Sending a message to an exited session restarts it: the placeholder
-        // "Session has exited — send a message to reattach…" promises this UX.
         // The persistent assistant isn't a launchpad, so `/new` and `/fork`
         // flow to it as text.
         const { openSessionId } = await deliverInput({
@@ -1036,9 +959,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           text,
           command,
           attachments,
-          allowNew: !assistant,
-          allowFork: forkAllowed && !assistant,
-          reattachFirst: true,
+          controlCommands: !assistant,
         });
         if (openSessionId) router.push(`/session/${openSessionId}`);
         return true;
@@ -1060,7 +981,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       token,
       sessionId,
       assistant,
-      forkAllowed,
       router,
       handleAuthFailure,
     ],
@@ -1629,25 +1549,41 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // here as a Waypoint control command instead of being typed into the
   // wrapped CLI; ``/fork`` follows the agent's fork capability.
   const handleTerminalSubmit = useCallback(async (text: string): Promise<TerminalSubmitResult> => {
-    const handled = await runFrontendControlCommand(text, { allowFork: forkAllowed });
-    if (handled !== null) {
-      return handled === "handled" ? "ok" : "command-error";
+    if (session) {
+      try {
+        const allowFork = canFork(session, catalog);
+        const opened = await runControlCommand({ host, token, sessionId, text, allowFork });
+        if (opened !== null) {
+          router.push(`/session/${opened}`);
+          return "ok";
+        }
+      } catch (e) {
+        if (isAuthError(e)) handleAuthFailure();
+        else setError(e instanceof Error ? e.message : "failed to create session");
+        return "command-error";
+      }
     }
     const socket = terminalSocketRef.current;
     if (socket?.readyState !== WebSocket.OPEN) return "socket-closed";
     socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
     return "ok";
-  }, [runFrontendControlCommand, forkAllowed]);
+  }, [session, catalog, host, token, sessionId, router, handleAuthFailure]);
 
   // Attachment-bearing terminal submits go over HTTP, not the terminal WS:
   // handle_input routes them through the tmux transport, which appends the
   // host file paths to the message so the wrapped CLI can read them.
   const handleTerminalSubmitWithAttachments = useCallback(
     async (text: string, attachmentIds: string[]): Promise<TerminalSubmitResult> => {
-      const sent = await submitInput(text, undefined, attachmentIds);
-      return sent ? "ok" : "command-error";
+      try {
+        await sendInput(host, token, sessionId, text, undefined, attachmentIds);
+        return "ok";
+      } catch (e) {
+        if (isAuthError(e)) handleAuthFailure();
+        else setError(e instanceof Error ? e.message : "failed to send input");
+        return "command-error";
+      }
     },
-    [submitInput],
+    [host, token, sessionId, handleAuthFailure],
   );
 
   const requestPaste = useCallback(async () => {
@@ -2466,9 +2402,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
-          modeRequiresConfirm={restartFields(session, catalog).mode}
-          modelRequiresConfirm={restartFields(session, catalog).model}
-          effortRequiresConfirm={restartFields(session, catalog).effort}
+          restart={restartFields(session, catalog)}
           hasToolRuns={hasToolRuns}
           toolRunsExpanded={toolRunsExpanded}
           onToggleToolRuns={() => {
@@ -2573,15 +2507,9 @@ interface ReplyComposerProps {
   permissionMode: string | null;
   transport: SessionTransport | null;
   catalog: BackendCatalog;
-  // Set when the transport applies the change by restarting (claude_tty); the
-  // pick stages behind the restart pill.
-  modeRequiresConfirm: boolean;
-  modelRequiresConfirm: boolean;
-  // True when the backend's effort swap requires a session restart
-  // (Claude respawns the CLI). Drives the "confirm before applying"
-  // UX so the user knows the session will restart, vs. Codex which
-  // applies inline.
-  effortRequiresConfirm: boolean;
+  // Which changes the session applies by restarting; those picks stage behind
+  // the restart pill.
+  restart: RestartFields;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string, confirmed?: boolean) => void | Promise<void>;
@@ -2640,9 +2568,7 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   catalog,
-  modeRequiresConfirm,
-  modelRequiresConfirm,
-  effortRequiresConfirm,
+  restart,
   hasToolRuns,
   toolRunsExpanded,
   onToggleToolRuns,
@@ -2919,7 +2845,6 @@ const ReplyComposer = memo(function ReplyComposer({
     attachments.uploading ||
     (!draft.trim() && attachments.readyIds.length === 0);
 
-  // The delayed-hover / long-press menu: Send now or an idle delivery.
   const {
     open: sendMenuOpen,
     close: closeSendMenu,
@@ -2956,7 +2881,7 @@ const ReplyComposer = memo(function ReplyComposer({
       const next = modeBusy ? null : nextModeId(permissionModeOptions, tuning.shown.mode);
       if (next !== null) {
         tuning.select("mode", next);
-        if (modeRequiresConfirm) setTuneOpen(true);
+        if (restart.mode) setTuneOpen(true);
       }
       return;
     }
@@ -2990,7 +2915,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const { modelEntries, effortOptions, hasModelPicker, hasEffortPicker } = options;
   const tuning = useTuningDraft(
     tuningInput,
-    { mode: modeRequiresConfirm, model: modelRequiresConfirm, effort: effortRequiresConfirm },
+    restart,
     { mode: onModeChange, model: onModelChange, effort: onEffortChange },
   );
   const restartLabel = pendingRestartLabel(tuning, modeOptions, modelEntries);
@@ -3111,9 +3036,7 @@ const ReplyComposer = memo(function ReplyComposer({
       setAssistantBusy(false);
     }
   };
-  const assistantExited = Boolean(
-    session && (session.status === "exited" || session.status === "error"),
-  );
+  const assistantExited = isExitedSession(session);
   const tuneSummary = tuningSummary(tuningInput, options).join(" · ") || "Settings";
 
   return (

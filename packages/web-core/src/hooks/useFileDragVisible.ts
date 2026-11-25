@@ -8,8 +8,7 @@ import { isExternalFileDrag } from "../fileDrop";
 // so this much silence means it ended without a leave the counter saw.
 const SILENCE_MS = 1000;
 
-// Whether an external file drag is over the page. `hide` ends it early.
-export function useFileDragVisible(): [boolean, () => void] {
+export function useFileDragVisible(): boolean {
   const [visible, setVisible] = useState(false);
   // Enter and leave bubble from every child the cursor crosses.
   const depth = useRef(0);
@@ -55,5 +54,5 @@ export function useFileDragVisible(): [boolean, () => void] {
     };
   }, [hide]);
 
-  return [visible, hide];
+  return visible;
 }

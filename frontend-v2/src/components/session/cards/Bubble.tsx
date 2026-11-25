@@ -19,7 +19,6 @@ interface BubbleProps {
   // What the copy button copies, when it differs from `text`.
   copy?: string;
   attachments?: AttachmentSpec[];
-  // Still on its way: drawn faded, with nothing to copy yet.
   pending?: boolean;
   children?: ReactNode;
 }

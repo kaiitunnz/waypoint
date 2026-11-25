@@ -11,8 +11,9 @@ interface FlyoutProps {
   open: boolean;
   onClose: () => void;
   triggerRef: RefObject<HTMLElement | null>;
-  // The sheet's heading and the popover's spoken name.
+  // The sheet's heading, and the popover's spoken name unless `label` is given.
   title: string;
+  label?: string;
   subtitle?: ReactNode;
   width?: number;
   align?: "left" | "right";
@@ -32,6 +33,7 @@ export function Flyout({
   onClose,
   triggerRef,
   title,
+  label,
   subtitle,
   width,
   align,
@@ -49,7 +51,7 @@ export function Flyout({
         if (!next) onClose();
       }}
       triggerRef={triggerRef}
-      label={title}
+      label={label ?? title}
       width={width}
       align={align}
       side={side}

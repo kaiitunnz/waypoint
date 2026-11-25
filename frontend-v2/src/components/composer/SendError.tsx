@@ -13,8 +13,8 @@ interface SendErrorProps {
   onDismiss: () => void;
 }
 
-// A message that did not go, with the server's reason. A 409 is a state that
-// passes (a session still being restored), so it reads as a warning.
+// A 409 is a passing state (a session still being restored), so it reads as a
+// warning.
 export function SendError({ failure, onRetry, onOpenSession, onDismiss }: SendErrorProps) {
   const opened = failure.openSessionId;
   return (

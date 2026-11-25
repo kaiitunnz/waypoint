@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import {
+  currentPicks,
   NO_STAGED_PICKS,
   tuningDraft,
   type RestartFields,
@@ -36,11 +37,7 @@ export function useTuningDraft(
         void changes[field](value);
         return;
       }
-      const current = {
-        mode: input.permissionMode ?? "default",
-        model: input.currentModel ?? "",
-        effort: input.currentEffort ?? "",
-      }[field];
+      const current = currentPicks(input)[field];
       setStaged((picks) => ({ ...picks, [field]: value === current ? null : value }));
     },
     applyRestart: async () => {

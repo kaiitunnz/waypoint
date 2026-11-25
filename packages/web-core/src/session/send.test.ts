@@ -89,10 +89,11 @@ describe("deliverInput", () => {
     expect(sendInput).toHaveBeenCalledWith("h", "t", "child", "do it");
   });
 
-  it("forks only when allowed", async () => {
+  it("forks only where the session can", async () => {
     await expect(deliver("/fork")).resolves.toEqual({ openSessionId: "fork" });
     expect(sendInput).not.toHaveBeenCalled();
-    await expect(deliver("/fork", { allowFork: false })).resolves.toEqual({ openSessionId: null });
+    const terminal = session({ transport: "tmux" });
+    await expect(deliver("/fork", { session: terminal })).resolves.toEqual({ openSessionId: null });
     expect(sendInput).toHaveBeenCalledWith("h", "t", "s1", "/fork", undefined, undefined);
   });
 
@@ -103,8 +104,8 @@ describe("deliverInput", () => {
     expect(forkSession).not.toHaveBeenCalled();
   });
 
-  it("restarts a stopped session first when asked", async () => {
-    await deliver("hi", { session: session({ status: "exited" }), reattachFirst: true });
+  it("restarts a stopped session first", async () => {
+    await deliver("hi", { session: session({ status: "exited" }) });
     expect(postAction).toHaveBeenCalledWith("h", "t", "s1", "reattach");
     expect(vi.mocked(postAction).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(sendInput).mock.invocationCallOrder[0],
@@ -113,16 +114,17 @@ describe("deliverInput", () => {
 
   it("keeps the server's error and does not send after a failed restart", async () => {
     vi.mocked(postAction).mockRejectedValueOnce(new ApiError("session is still being restored", 409));
-    await expect(
-      deliver("hi", { session: session({ status: "exited" }), reattachFirst: true }),
-    ).rejects.toMatchObject({ message: "session is still being restored", status: 409 });
+    await expect(deliver("hi", { session: session({ status: "exited" }) })).rejects.toMatchObject({ message: "session is still being restored", status: 409 });
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it("sends both commands as text where neither is allowed", async () => {
-    await deliver("/new x", { allowNew: false, allowFork: false });
+  it("sends both commands as text where control commands are off", async () => {
+    await deliver("/new x", { controlCommands: false });
+    await deliver("/fork x", { controlCommands: false });
     expect(cloneSession).not.toHaveBeenCalled();
+    expect(forkSession).not.toHaveBeenCalled();
     expect(sendInput).toHaveBeenCalledWith("h", "t", "s1", "/new x", undefined, undefined);
+    expect(sendInput).toHaveBeenCalledWith("h", "t", "s1", "/fork x", undefined, undefined);
   });
 
   it("names the created session when the follow-up send fails", async () => {

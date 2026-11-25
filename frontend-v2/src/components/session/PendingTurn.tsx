@@ -5,7 +5,6 @@ import { cx } from "@/lib/cx";
 import { Bubble } from "./cards/Bubble";
 import styles from "./TurnView.module.css";
 
-// The human's messages while they send.
 export function PendingTurn({ messages }: { messages: PendingSend[] }) {
   return (
     <div role="group" aria-label="You, sending" className={cx(styles.group, styles.user, styles.pendingTurn)}>

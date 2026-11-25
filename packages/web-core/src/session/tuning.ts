@@ -1,7 +1,3 @@
-/**
- * Permission mode, model and effort as the composer offers them.
- */
-
 import { type BackendCatalog } from "../backends";
 import { effortLabel } from "../modelDisplay";
 import type { BackendModelOption, BackendPermissionMode, SessionRecord } from "../types";
@@ -49,7 +45,7 @@ export function tuningOptions(input: TuningInput): TuningOptions {
   };
 }
 
-// The words of the control that opens the tuning: mode, model and effort.
+// The mode, model and effort in words.
 export function tuningSummary(input: TuningInput, options: TuningOptions): string[] {
   const parts: string[] = [];
   if (input.modeOptions.length > 0) {
@@ -69,7 +65,6 @@ export function tuningSummary(input: TuningInput, options: TuningOptions): strin
   return parts;
 }
 
-// The mode after the shown one, wrapping.
 export function nextModeId(modeOptions: readonly BackendPermissionMode[], shown: string): string | null {
   if (modeOptions.length === 0) return null;
   const index = modeOptions.findIndex((option) => option.id === shown);
@@ -90,7 +85,6 @@ export function restartFields(session: SessionRecord | null, catalog: BackendCat
   };
 }
 
-// Whether changing a setting now would cut off the running turn.
 export function changeInterruptsTurn(session: SessionRecord, catalog: BackendCatalog): boolean {
   const interrupts = catalog.byId(session.backend)?.capabilities.settings_change_interrupts_turn;
   return Boolean(interrupts) && (session.status === "running" || session.status === "waiting_input");
@@ -113,12 +107,17 @@ export interface TuningDraft {
   hasPending: boolean;
 }
 
-export function tuningDraft(input: TuningInput, staged: StagedPicks, restart: RestartFields): TuningDraft {
-  const current = {
+// The session's own values, as the controls show them.
+export function currentPicks(input: TuningInput): Record<TuningField, string> {
+  return {
     mode: input.permissionMode ?? "default",
     model: input.currentModel ?? "",
     effort: input.currentEffort ?? "",
   };
+}
+
+export function tuningDraft(input: TuningInput, staged: StagedPicks, restart: RestartFields): TuningDraft {
+  const current = currentPicks(input);
   const shown = { ...current };
   const pending: StagedPicks = { ...NO_STAGED_PICKS };
   for (const field of ["mode", "model", "effort"] as const) {

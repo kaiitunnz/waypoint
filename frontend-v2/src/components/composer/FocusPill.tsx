@@ -4,9 +4,7 @@ import { useRef, useState, type RefObject } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Flyout } from "@/components/ui/Flyout";
-import { cx } from "@/lib/cx";
 
-import hit from "@/styles/hit.module.css";
 import styles from "./Composer.module.css";
 
 interface FocusPillProps {
@@ -16,7 +14,6 @@ interface FocusPillProps {
   returnFocusRef: RefObject<HTMLElement | null>;
 }
 
-// Shown while Focus holds incoming messages.
 export function FocusPill({ busy, onTurnOff, returnFocusRef }: FocusPillProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -35,7 +32,7 @@ export function FocusPill({ busy, onTurnOff, returnFocusRef }: FocusPillProps) {
       <button
         ref={trigger}
         type="button"
-        className={cx(styles.focusPill, hit.hit)}
+        className={styles.focusPill}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Focus is on"

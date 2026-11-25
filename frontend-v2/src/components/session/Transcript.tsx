@@ -26,7 +26,6 @@ interface TranscriptProps {
   onLoadOlder: () => void;
   hiddenCount: number;
   onShowAll: () => void;
-  // The human's messages still on their way.
   pending: PendingSend[];
   // The transcript's own content when it is not a conversation, such as a placeholder.
   override?: ReactNode;

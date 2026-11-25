@@ -14,8 +14,6 @@ interface SendControlProps {
   onSend: (mode: SendMode) => void;
 }
 
-// A tap sends now; a hover, a long press, ArrowDown or Space offers the idle
-// deliveries.
 export function SendControl({ canSend, sending, onSend }: SendControlProps) {
   const { open, close, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
     !canSend,

@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
-import { coverageLabel, type UsagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import { sessionCoverageLabel, type UsagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import {
   formatRateLimitWindowReset,
   formatRateLimitWindowTokens,
@@ -49,6 +49,7 @@ interface UsagePanelProps {
 export function UsagePanel({ model, catalog, onRefresh, refreshing }: UsagePanelProps) {
   const [explained, setExplained] = useState(false);
   const { contextUsage, tokenUsage, rateLimitUsage } = model;
+  const windowSize = model.contextWindowTokens !== null ? formatTokens(model.contextWindowTokens) : "—";
 
   return (
     <div className={styles.panel}>
@@ -122,8 +123,8 @@ export function UsagePanel({ model, catalog, onRefresh, refreshing }: UsagePanel
           <p className={styles.line}>
             <span>
               {model.contextUnreported
-                ? `${model.contextWindowTokens !== null ? formatTokens(model.contextWindowTokens) : "—"} token window`
-                : `${formatTokens(contextUsage.used_tokens)} of ${model.contextWindowTokens !== null ? formatTokens(model.contextWindowTokens) : "—"} tokens`}
+                ? `${windowSize} token window`
+                : `${formatTokens(contextUsage.used_tokens)} of ${windowSize} tokens`}
             </span>
             <strong className={cx(styles.percent, styles[model.contextTone])}>
               {model.contextPercent !== null ? `${model.contextPercent}%` : "—"}
@@ -182,7 +183,7 @@ export function UsagePanel({ model, catalog, onRefresh, refreshing }: UsagePanel
             </>
           ) : null}
           <p className={cx(styles.muted, tokenUsage.coverage !== "entire_waypoint_session" && styles.partial)}>
-            {coverageLabel(tokenUsage)}
+            {sessionCoverageLabel(tokenUsage)}
           </p>
         </section>
       ) : null}

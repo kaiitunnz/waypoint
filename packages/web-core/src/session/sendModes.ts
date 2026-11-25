@@ -1,5 +1,3 @@
-// The ways a composed message can leave the composer. The two idle modes are
-// also the schedule-message modal's "When idle" choices.
 export type IdleBatchMode = "with_previous" | "next_cycle";
 
 export interface IdleSendMode {

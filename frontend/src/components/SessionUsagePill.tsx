@@ -5,14 +5,14 @@ import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
-import { coverageLabel, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import { sessionCoverageLabel, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import type { SessionRecord } from "@waypoint/web-core/types";
 import { formatRelativeTime, formatTokens } from "@waypoint/web-core/usage";
 import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
 import { useResizablePopover } from "@waypoint/web-core/hooks/useResizablePopover";
-import { USAGE_POPOVER_SIZE_KEY } from "@waypoint/web-core/popoverSize";
+import { USAGE_POPOVER_SIZE_KEY, type ResizeAxis } from "@waypoint/web-core/popoverSize";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -22,6 +22,12 @@ type Connection = "idle" | "connecting" | "open" | "reconnecting";
 const DESKTOP_MIN_WIDTH = 541;
 // The 440px CSS default width, which a resize snaps back to.
 const DEFAULT_PANEL_WIDTH = 440;
+
+// globals.css holds the resize cursor and the seam highlight on these.
+function markResizing(axis: ResizeAxis | null) {
+  document.body.classList.toggle("usage-resizing-x", axis === "width");
+  document.body.classList.toggle("usage-resizing-y", axis === "height");
+}
 
 interface SessionUsagePillProps {
   session: SessionRecord | null;
@@ -92,6 +98,7 @@ export function SessionUsagePill({
     bodyRef,
     defaultWidth: DEFAULT_PANEL_WIDTH,
     direction: { width: grow, height: grow },
+    onResizing: markResizing,
   });
 
   const resetSize = () => {
@@ -125,15 +132,9 @@ export function SessionUsagePill({
     tokenTotals: tokenUsageTotals,
     hasTokenTotals,
     hasTrackedTurns: tokenUsageHasTotals,
-    contextSummary: contextUsageSummary,
-    rateLimitSummary: rateLimitUsageSummary,
+    summary,
   } = usagePanelModel(session, catalog);
-  const usagePopoverTitle = [
-    contextUsageSummary ? `Current context ${contextUsageSummary}` : null,
-    rateLimitUsageSummary ? `Rate limits ${rateLimitUsageSummary}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const usagePopoverTitle = summary.join(" · ");
 
   if (!showUsagePopover) {
     return (
@@ -423,7 +424,7 @@ export function SessionUsagePill({
                       }`}
                     >
                       <span aria-hidden className="usage-coverage-dot" />
-                      {coverageLabel(tokenUsage)}
+                      {sessionCoverageLabel(tokenUsage)}
                     </p>
                   </section>
                 ) : null}

@@ -2,12 +2,10 @@
 
 import { useRef, useState, type ReactNode } from "react";
 
-import { usePointerUI } from "@/lib/layout";
-
-import { Sheet } from "./Dialog";
+import { Flyout } from "./Flyout";
 import { Icon } from "./Icon";
 import { IconButton } from "./IconButton";
-import { Menu, MenuItem, Popover } from "./Popover";
+import { Menu, MenuItem } from "./Popover";
 
 export interface MenuButtonItem {
   id: string;
@@ -29,29 +27,8 @@ interface MenuButtonProps {
 
 // Destructive actions are menu items, never inline buttons.
 export function MenuButton({ label, title, subtitle, items, onSelect, size = "md", header }: MenuButtonProps) {
-  const pointer = usePointerUI();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-
-  const menu = (
-    <>
-      {header}
-      <Menu label={label}>
-        {items.map((item) => (
-          <MenuItem
-            key={item.id}
-            tone={item.tone}
-            onSelect={() => {
-              setOpen(false);
-              onSelect(item.id);
-            }}
-          >
-            {item.label}
-          </MenuItem>
-        ))}
-      </Menu>
-    </>
-  );
 
   return (
     <>
@@ -65,15 +42,33 @@ export function MenuButton({ label, title, subtitle, items, onSelect, size = "md
       >
         <Icon name="more" size={20} />
       </IconButton>
-      {pointer ? (
-        <Popover open={open} onOpenChange={setOpen} triggerRef={trigger} label={label} width={220} align="right">
-          {menu}
-        </Popover>
-      ) : (
-        <Sheet open={open} onClose={() => setOpen(false)} title={title} subtitle={subtitle} flush>
-          {menu}
-        </Sheet>
-      )}
+      <Flyout
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={trigger}
+        title={title}
+        label={label}
+        subtitle={subtitle}
+        width={220}
+        align="right"
+        flush
+      >
+        {header}
+        <Menu label={label}>
+          {items.map((item) => (
+            <MenuItem
+              key={item.id}
+              tone={item.tone}
+              onSelect={() => {
+                setOpen(false);
+                onSelect(item.id);
+              }}
+            >
+              {item.label}
+            </MenuItem>
+          ))}
+        </Menu>
+      </Flyout>
     </>
   );
 }

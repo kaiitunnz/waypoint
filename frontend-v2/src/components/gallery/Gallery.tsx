@@ -2,14 +2,14 @@
 
 import { useRef, useState } from "react";
 
-import { ActionChip, ActionChipLink } from "@/components/ui/ActionChip";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Field";
+import { Field, PasswordInput, SearchInput, TextArea, TextInput } from "@/components/ui/Field";
 import { Flyout } from "@/components/ui/Flyout";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
@@ -138,9 +138,6 @@ export function Gallery() {
         <ActionChip icon="refresh" disabled>
           Retry
         </ActionChip>
-        <ActionChipLink href="/gallery" icon="chevron-right">
-          Open files
-        </ActionChipLink>
         <span>
           Running <InlineCode>npm run lint</InlineCode>
         </span>
@@ -149,6 +146,7 @@ export function Gallery() {
       <SectionHeading title="Toggle, lamps, badges" />
       <div className={styles.row}>
         <Toggle checked={on} onChange={setOn} label="Focus" />
+        <Toggle checked={false} onChange={setOn} label="Focus, saving" disabled />
         {LAMPS.map((state) => (
           <span key={state} className={styles.lamp}>
             <StatusLamp state={state} />
@@ -212,6 +210,9 @@ export function Gallery() {
             <option value="low">Low</option>
             <option value="high">High</option>
           </Select>
+        </Field>
+        <Field label="Message" htmlFor="g-message">
+          <TextArea id="g-message" rows={3} defaultValue="Run the tests again." />
         </Field>
       </div>
 

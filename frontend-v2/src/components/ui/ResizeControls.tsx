@@ -21,8 +21,6 @@ interface ResizeControlsProps {
   onReset: () => void;
 }
 
-// A seam on each free edge of a resizable popover, and a reset in the corner
-// where they meet.
 export function ResizeControls({ direction, bounds, rendered, custom, onStart, onKey, onReset }: ResizeControlsProps) {
   const widthSeam = useRef<HTMLDivElement>(null);
   const edgeX = direction.width < 0 ? styles.left : styles.right;

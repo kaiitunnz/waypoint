@@ -1,8 +1,3 @@
-/**
- * The size a person gives a resizable popover: what is stored, and how a drag or
- * a key press changes it.
- */
-
 // Versioned so a future shape change can coexist with an old saved value.
 export const USAGE_POPOVER_SIZE_KEY = "waypoint.usage-popover-size.v1";
 

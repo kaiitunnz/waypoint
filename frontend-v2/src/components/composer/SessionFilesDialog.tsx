@@ -19,7 +19,7 @@ interface SessionFilesDialogProps {
   sessionId: string;
   open: boolean;
   onClose: () => void;
-  // Adds a stored file to the message being written, without uploading it again.
+  // Adds a stored file to the draft without uploading it again.
   onReference: (file: SessionAttachment) => void;
   referencedIds: ReadonlySet<string>;
 }

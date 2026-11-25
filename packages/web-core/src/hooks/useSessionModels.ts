@@ -21,8 +21,7 @@ const NO_MODELS: SessionModels = {
   defaultEffort: null,
 };
 
-// The models the session's agent offers for its launch target and account
-// profile. `onAuthFailure` must be stable.
+// `onAuthFailure` must be stable.
 export function useSessionModels(
   host: string,
   token: string,

@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 
-import { postAction, isAuthError } from "@waypoint/web-core/api";
 import { liveTerminal, hasTerminalPane, fidelityFor, supportsAttachments, useBackendCatalog } from "@waypoint/web-core/backends";
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
@@ -52,7 +51,7 @@ export function SessionScreen({ id }: { id: string }) {
   const { session, events, connection, pendingQuestions } = stream;
   const optimistic = useOptimisticSends(events);
   const [filesOpen, setFilesOpen] = useState(false);
-  // Where the composer shows a file being dragged over the conversation.
+  // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
 
   const conversationRef = useCallback(
@@ -66,7 +65,7 @@ export function SessionScreen({ id }: { id: string }) {
   const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
   const [view, setView] = useState<SessionView>("chat");
   const goHome = useCallback(() => router.replace("/"), [router]);
-  const { onAction, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
+  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
 
   // A failed first load fills the page; any later failure is a toast.
   const { error, errorCount } = stream;
@@ -115,22 +114,12 @@ export function SessionScreen({ id }: { id: string }) {
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
   const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
-  const dormant = session ? composerAvailability(session, catalog).dormant : false;
   const sessionActions = [
-    { id: "refresh", label: "Refresh" },
-    ...(dormant ? [{ id: "reconnect", label: "Reconnect session" }] : []),
+    { id: "refresh", label: "Refresh", run: () => window.location.reload() },
+    ...(composerAvailability(session, catalog).dormant
+      ? [{ id: "reconnect", label: "Reconnect session", run: () => void reattach(id) }]
+      : []),
   ];
-  const reconnect = useCallback(async () => {
-    try {
-      await postAction(host, token, id, "reattach");
-    } catch (reconnectError) {
-      if (isAuthError(reconnectError)) {
-        handleAuthFailure();
-        return;
-      }
-      toast({ message: reconnectError instanceof Error ? reconnectError.message : "failed to reconnect", tone: "error" });
-    }
-  }, [host, token, id, toast]);
   const overflow = session ? (
     <SessionMenu
       session={session}
@@ -138,10 +127,6 @@ export function SessionScreen({ id }: { id: string }) {
       header={menuDensity}
       onAction={onAction}
       extra={sessionActions}
-      onExtra={(action) => {
-        if (action === "reconnect") void reconnect();
-        else window.location.reload();
-      }}
     />
   ) : null;
   const title = session?.title || "Session";

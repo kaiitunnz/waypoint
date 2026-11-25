@@ -91,17 +91,18 @@ export function SessionScreen({ id }: { id: string }) {
   const standing = session ? sessionStanding(session, asking || (pendingQuestions?.questions.length ?? 0) > 0, connection) : null;
   const othersNeedYou = feed.askSessionIds.size - (asking ? 1 : 0);
 
-  // The header has its full controls only for a pointer with the width for them.
   const fullHeader = pointer && !narrowHeader;
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
-  // Density sits in the full header while there is a chat to apply it to, and otherwise in the menu.
+  // A full header shows the chat's density; a compact one keeps it in the menu, as touch always does.
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
   const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
   const overflow = session ? (
-    <SessionMenu session={session} subtitle={agent} size="sm" header={menuDensity} onAction={onAction} />
+    <SessionMenu session={session} subtitle={agent} header={menuDensity} onAction={onAction} />
   ) : null;
   const title = session?.title || "Session";
   const columns = panels.mode === "columns";
+  const railColumn = columns && panels.rail.open;
+  const paneColumn = columns && panels.pane.open;
 
   const body = loadFailed ? (
     <EmptyState
@@ -125,8 +126,8 @@ export function SessionScreen({ id }: { id: string }) {
   return (
     <SessionContextProvider value={context}>
       <AskStateProvider value={askState}>
-        <div className={cx(styles.screen, columns && panels.rail.open && styles.railOpen, columns && panels.pane.open && styles.paneOpen)}>
-          {columns && panels.rail.open ? <SessionRail currentId={id} /> : null}
+        <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
+          {railColumn ? <SessionRail currentId={id} /> : null}
           <section ref={conversation} className={styles.conv} aria-label="Conversation">
             {pointer ? (
               <SessionHeader
@@ -156,14 +157,14 @@ export function SessionScreen({ id }: { id: string }) {
             {body}
             <SessionFooter />
           </section>
-          {columns && panels.pane.open ? <SidePane /> : null}
-          {panels.mode === "drawers" && panels.rail.open ? (
-            <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer} onFollow={panels.followFromDrawer}>
-              <SessionRail currentId={id} onClose={panels.closeDrawer} />
+          {paneColumn ? <SidePane /> : null}
+          {panels.drawer === "rail" ? (
+            <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer}>
+              <SessionRail currentId={id} onClose={panels.closeDrawer} onPick={panels.pickFromDrawer} />
             </SideDrawer>
           ) : null}
-          {panels.mode === "drawers" && panels.pane.open ? (
-            <SideDrawer side="right" label="Session details" onClose={panels.closeDrawer} onFollow={panels.followFromDrawer}>
+          {panels.drawer === "pane" ? (
+            <SideDrawer side="right" label="Session details" onClose={panels.closeDrawer}>
               <SidePane onClose={panels.closeDrawer} />
             </SideDrawer>
           ) : null}

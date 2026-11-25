@@ -13,7 +13,7 @@ const PANELS: Record<SidePanel, { label: string; icon: IconName }> = {
   pane: { label: "Side pane", icon: "panel-right" },
 };
 
-// The header's button for a panel, where focus can be sent back to it.
+// Selects a panel's toggle, to send focus back to it.
 export const panelToggle = (panel: SidePanel) => `[data-panel-toggle="${panel}"]`;
 
 interface PanelButtonProps {
@@ -22,7 +22,6 @@ interface PanelButtonProps {
   size?: "md" | "sm";
 }
 
-// Shows or hides a side panel, from the session header and from the drawer itself.
 export function PanelButton({ panel, control, size }: PanelButtonProps) {
   const { label, icon } = PANELS[panel];
   return (

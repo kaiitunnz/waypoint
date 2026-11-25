@@ -30,8 +30,14 @@ const SECTIONS: SwitcherSection[] = ["needs", "pinned", "live"];
 // The rail mounts again on every session switch; this is where it was scrolled to.
 let scrollTop = 0;
 
-// `onClose` is for the rail drawn as a drawer.
-export function SessionRail({ currentId, onClose }: { currentId: string; onClose?: () => void }) {
+interface SessionRailProps {
+  currentId: string;
+  // For the rail drawn as a drawer: closing it, and a session picked in it.
+  onClose?: () => void;
+  onPick?: (anotherSession: boolean) => void;
+}
+
+export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
@@ -68,6 +74,7 @@ export function SessionRail({ currentId, onClose }: { currentId: string; onClose
       <li key={session.id}>
         <Link
           href={sessionHref(session.id)}
+          onNavigate={onPick && (() => onPick(session.id !== currentId))}
           aria-current={session.id === currentId ? "page" : undefined}
           className={cx(styles.item, session.id === currentId && styles.on, single && styles.single)}
         >

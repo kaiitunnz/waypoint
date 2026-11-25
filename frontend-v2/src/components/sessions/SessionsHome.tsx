@@ -82,7 +82,6 @@ export function SessionsHome() {
       session={session}
       subtitle={agentFor(session)}
       onAction={onAction}
-      size="sm"
     />
   );
   const rowProps = (session: SessionRecord) => {

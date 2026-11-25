@@ -19,8 +19,8 @@ export function useSessionPanels() {
   const pointer = usePointerUI();
   const multiColumn = useMultiColumn();
   const mode = sidePanelMode(pointer, multiColumn);
-  const [railColumn, setRailColumn] = usePanelOpen("waypoint-session-rail", RAIL_AUTO_QUERY);
-  const [paneColumn, setPaneColumn] = usePanelOpen("waypoint-session-pane", PANE_AUTO_QUERY);
+  const railColumn = usePanelOpen("waypoint-session-rail", RAIL_AUTO_QUERY);
+  const paneColumn = usePanelOpen("waypoint-session-pane", PANE_AUTO_QUERY);
   const [drawer, setDrawer] = useState<SidePanel | null>(null);
   // A window widened past the drawers must not bring one back when narrowed again.
   if (drawer !== null && mode !== "drawers") setDrawer(null);
@@ -31,24 +31,20 @@ export function useSessionPanels() {
     refocus = null;
   }, []);
 
-  const columns = mode === "columns";
-  const rail: PanelControl = {
-    open: columns ? railColumn : drawer === "rail",
-    toggle: () => (columns ? setRailColumn(!railColumn) : setDrawer(drawer === "rail" ? null : "rail")),
-  };
-  const pane: PanelControl = {
-    open: columns ? paneColumn : drawer === "pane",
-    toggle: () => (columns ? setPaneColumn(!paneColumn) : setDrawer(drawer === "pane" ? null : "pane")),
-  };
+  const control = (panel: SidePanel, [columnOpen, setColumnOpen]: ReturnType<typeof usePanelOpen>): PanelControl =>
+    mode === "columns"
+      ? { open: columnOpen, toggle: () => setColumnOpen(!columnOpen) }
+      : { open: drawer === panel, toggle: () => setDrawer(drawer === panel ? null : panel) };
 
   return {
     mode,
-    rail,
-    pane,
+    rail: control("rail", railColumn),
+    pane: control("pane", paneColumn),
+    drawer,
     closeDrawer: () => setDrawer(null),
-    // A link followed from a drawer closes it, and leads focus to the same toggle there.
-    followFromDrawer: (href: string) => {
-      if (href !== window.location.pathname) refocus = drawer;
+    // Closes the drawer a session was picked in; another session's screen focuses the same toggle.
+    pickFromDrawer: (anotherSession: boolean) => {
+      if (anotherSession) refocus = drawer;
       setDrawer(null);
     },
   };

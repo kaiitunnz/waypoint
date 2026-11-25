@@ -26,7 +26,7 @@ interface SessionBarProps {
   overflow: ReactNode;
 }
 
-// The touch header: there is no nav rail, so it holds the way back.
+// Touch has no nav rail, so this header holds the way back.
 export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, rail, pane, view, overflow }: SessionBarProps) {
   return (
     <GlassBar>

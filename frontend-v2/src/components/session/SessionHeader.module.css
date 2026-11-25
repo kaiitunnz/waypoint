@@ -71,7 +71,7 @@
     gap: 0;
   }
 
-  /* Stacked, the title button would take its text's width; its margins give it 12px more. */
+  /* A column item takes its text's width; cap it, allowing for the -6px side margins. */
   .switch {
     max-width: calc(100% + 12px);
   }

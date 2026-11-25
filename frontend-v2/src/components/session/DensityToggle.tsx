@@ -14,7 +14,6 @@ const SEGMENTS: { value: TranscriptDensity; label: string }[] = [
 interface DensityToggleProps {
   value: TranscriptDensity;
   onChange: (value: TranscriptDensity) => void;
-  // Inline in the header, or a full-width row in the overflow menu.
   variant: "inline" | "menu";
 }
 

@@ -23,7 +23,6 @@ interface SessionHeaderProps {
   overflow: ReactNode;
 }
 
-// The pointer header.
 export function SessionHeader({ title, standing, agent, onTitle, rail, pane, view, density, overflow }: SessionHeaderProps) {
   return (
     <GlassBar>

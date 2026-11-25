@@ -4,6 +4,12 @@
   gap: 16px;
 }
 
+.pinned {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .agent {
   color: var(--faint);
 }

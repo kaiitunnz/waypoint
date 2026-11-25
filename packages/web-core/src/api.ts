@@ -329,9 +329,13 @@ export async function fetchEvents(
   host: string,
   token: string,
   sessionId: string,
-  options: { messages?: number; beforeSequence?: number; signal?: AbortSignal } = {},
+  options: { messages?: number; beforeSequence?: number; afterId?: number; signal?: AbortSignal } = {},
 ): Promise<EventsPage> {
   const params = new URLSearchParams();
+  // Every event newer than this id, unbounded: how a client catches up after a gap.
+  if (options.afterId !== undefined) {
+    params.set("cursor", String(options.afterId));
+  }
   if (options.messages !== undefined) {
     params.set("messages", String(options.messages));
   }

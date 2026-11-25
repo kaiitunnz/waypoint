@@ -1,0 +1,21 @@
+.copy {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+
+@media (max-width: 899.98px) {
+  .copy::after {
+    content: "";
+    position: absolute;
+    inset: -15px;
+  }
+}
+
+.copy:hover {
+  color: var(--text-strong);
+}

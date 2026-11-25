@@ -2,6 +2,13 @@ import type { SessionRecord } from "../types";
 
 export type ConnectionState = "connecting" | "open" | "reconnecting";
 
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+
+export function reconnectDelay(attempt: number): number {
+  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+}
+
 export function isAgentBusy(
   session: SessionRecord,
   connection: ConnectionState,

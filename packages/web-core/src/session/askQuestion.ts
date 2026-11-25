@@ -23,6 +23,21 @@ export interface AskAnswerEntry {
   notes?: string;
 }
 
+// The structured answers of an ask-question answer event; empty for events that
+// pre-date the structured payload.
+export function askAnswerEntries(event: EventRecord): AskAnswerEntry[] {
+  const raw = event.metadata?.answers;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      question: typeof item.question === "string" ? item.question : "",
+      answer: typeof item.answer === "string" ? item.answer : null,
+      notes: typeof item.notes === "string" ? item.notes : undefined,
+    }))
+    .filter((item) => item.question);
+}
+
 export type AskQuestionResolution =
   | { state: "pending" }
   | { state: "answered"; answerEvent: EventRecord }
@@ -229,4 +244,35 @@ export function mergePendingQuestionSnapshot(
     return next.as_of_sequence > current.as_of_sequence ? next : current;
   }
   return next.revision >= current.revision ? next : current;
+}
+
+export interface AskCardState {
+  // The human has yet to answer.
+  waiting: boolean;
+  outcome: "answered" | "cancelled" | "not answered" | null;
+  // The answers given, for an answered question.
+  answers: AskAnswerEntry[];
+}
+
+// How a question card stands: waiting, or how it ended.
+export function askCardState(
+  event: EventRecord,
+  evidence: AskQuestionEvidence,
+  snapshot: PendingQuestionsSnapshot | null,
+): AskCardState {
+  const toolUseId = askToolUseId(event);
+  const resolution: AskQuestionResolution = toolUseId
+    ? resolveAskQuestion(toolUseId, evidence)
+    : { state: "pending" };
+  const waiting = resolution.state === "pending" && askFormState(snapshot, event, resolution) !== "gone";
+  const outcome =
+    resolution.state === "answered"
+      ? "answered"
+      : resolution.state === "cancelled"
+        ? "cancelled"
+        : waiting
+          ? null
+          : "not answered";
+  const answers = resolution.state === "answered" ? askAnswerEntries(resolution.answerEvent) : [];
+  return { waiting, outcome, answers };
 }

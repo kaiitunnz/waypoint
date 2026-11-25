@@ -5,22 +5,20 @@ import { useCallback, useMemo, useState } from "react";
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { useSessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
 import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
-import { HOME_HIDDEN_SOURCES, buildSections, searchSessions } from "@waypoint/web-core/sessionSections";
-import { useMergedSessionPage, useSessionHistory } from "@waypoint/web-core/sessionHistory";
+import { buildSections, searchSessions } from "@waypoint/web-core/sessionSections";
 import { summarizeScheduled } from "@waypoint/web-core/usageSummary";
 import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useDesktop } from "@/lib/layout";
+import { useShowExited } from "@/lib/show-exited";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { ExitedGroup } from "./ExitedGroup";
@@ -28,23 +26,20 @@ import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { NewSessionDialog } from "./NewSessionDialog";
 import { SearchResults } from "./SearchResults";
-import { SessionDialogs, type HomeDialog } from "./SessionDialogs";
-import { SessionMenu, type SessionAction } from "./SessionMenu";
+import { SessionMenu } from "./SessionMenu";
 import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
+import { useExitedSessions } from "./useExitedSessions";
+import { useSessionMenuActions } from "./useSessionMenuActions";
 import { useSwitcher } from "./SwitcherProvider";
 import { BoardSummaryCard, LimitsReadout, LimitsStrip, ScheduledSummaryList } from "./Summaries";
 import styles from "./SessionsHome.module.css";
-
-const PAGE_SIZE = 10;
 
 export function SessionsHome() {
   const desktop = useDesktop();
   const { host, token, needsYou, inboxCount } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
-  const { toast } = useToast();
-  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
-  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
+  const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
   const now = useNow();
@@ -53,59 +48,34 @@ export function SessionsHome() {
 
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [exitedOpen, setExitedOpen] = useState(false);
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [showExited, setShowExited] = useShowExited();
   const [newOpen, setNewOpen] = useState(false);
-  const [dialog, setDialog] = useState<HomeDialog | null>(null);
   const searching = query.trim() !== "";
 
   const asks = useMemo(() => feed.pendingAsks?.items ?? [], [feed.pendingAsks]);
   const sections = useMemo(() => buildSections(sessions, askSessionIds), [sessions, askSessionIds]);
   const found = useMemo(() => searchSessions(sessions, query), [sessions, query]);
-  const activities = useSessionActivity(host, token, sections.live, handleAuthFailure);
+  const previewed = useMemo(() => [...sections.pinned, ...sections.live], [sections.pinned, sections.live]);
+  const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
 
   // Exited history is paged from the server, per query; live and pinned sessions
   // arrive over the socket.
-  const historyCount = useSessionHistory({
-    host,
-    token,
-    query: "",
-    withItems: false,
-    revision: feed.historyRevision,
-    excludeSources: HOME_HIDDEN_SOURCES,
-    onAuthError: handleAuthFailure,
-  });
-  const history = useSessionHistory({
-    host,
-    token,
+  const {
+    count: exitedCount,
+    listed,
+    paging,
+  } = useExitedSessions({
     query,
-    withItems: true,
-    enabled: searching || exitedOpen,
-    revision: feed.historyRevision,
-    excludeSources: HOME_HIDDEN_SOURCES,
-    pageSize: PAGE_SIZE,
-    onAuthError: handleAuthFailure,
+    live: searching ? found.rest : sections.exited,
+    lead: searching ? found.lead : undefined,
+    enabled: searching || showExited,
   });
-  const exitedCount = sections.exited.length + (historyCount.total ?? 0);
-  const listed = useMergedSessionPage(
-    searching ? found.rest : sections.exited,
-    history,
-    true,
-    1,
-    limit,
-    searching ? found.lead : undefined,
-  );
 
   const agentFor = useCallback((session: SessionRecord) => agentModelLabel(session, catalog), [catalog]);
   const agentLabel = useCallback(
     (ask: PendingAsk) => humaniseBackend(ask.session_backend, catalog),
     [catalog],
   );
-
-  function onAction(action: SessionAction, session: SessionRecord) {
-    if (action === "pin" || action === "unpin") void actions.setPinned(session.id, action === "pin");
-    else setDialog({ kind: action, session });
-  }
 
   const menuFor = (session: SessionRecord) => (
     <SessionMenu
@@ -126,13 +96,29 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  const compactRow = (session: SessionRecord, pinned = false) => (
-    <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} pinned={pinned} />
-  );
+  // Pinned and Live read alike: a serif title, the lamp, the time and the preview line.
+  const previewGroup = (title: string, group: SessionRecord[]) =>
+    group.length > 0 ? (
+      <section>
+        <SectionHeading title={title} count={group.length} dense={!desktop} />
+        {desktop ? (
+          <ul className={styles.tiles}>
+            {group.map((session) => (
+              <LiveTile key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
+            ))}
+          </ul>
+        ) : (
+          <List>
+            {group.map((session) => (
+              <LiveRow key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
+            ))}
+          </List>
+        )}
+      </section>
+    ) : null;
 
   const loading = feed.sessions === null;
   const empty = !loading && sessions.length === 0 && needsYou === 0 && exitedCount === 0;
-  const shownCount = listed.items.length;
 
   const results = searching ? (
     <SearchResults
@@ -140,11 +126,7 @@ export function SessionsHome() {
       rows={listed.items.map((session) => (
         <ResultRow key={session.id} {...rowProps(session)} />
       ))}
-      searching={history.pending || listed.filling}
-      failed={Boolean(history.error)}
-      onRetry={history.retry}
-      hasMore={shownCount < listed.total}
-      onMore={() => setLimit((value) => value + PAGE_SIZE)}
+      paging={paging}
       desktop={desktop}
     />
   ) : null;
@@ -152,47 +134,23 @@ export function SessionsHome() {
   const sectionsView = searching ? null : (
     <>
       <NeedsYouSection asks={asks} inbox={inboxCount} desktop={desktop} agentLabel={agentLabel} now={now} />
-      {sections.pinned.length > 0 ? (
-        <section>
-          <SectionHeading title="Pinned" count={sections.pinned.length} dense={!desktop} />
-          <div className={styles.inset}>
-            <List>{sections.pinned.map((session) => compactRow(session, true))}</List>
-          </div>
-        </section>
-      ) : null}
-      {sections.live.length > 0 ? (
-        <section>
-          <SectionHeading title="Live" count={sections.live.length} dense={!desktop} />
-          {desktop ? (
-            <ul className={styles.tiles}>
-              {sections.live.map((session) => (
-                <LiveTile key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
-              ))}
-            </ul>
-          ) : (
-            <List>
-              {sections.live.map((session) => (
-                <LiveRow key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
-              ))}
-            </List>
-          )}
-        </section>
-      ) : null}
+      {previewGroup("Pinned", sections.pinned)}
+      {previewGroup("Live", sections.live)}
       {exitedCount > 0 ? (
         <ExitedGroup
           count={exitedCount}
-          desktop={desktop}
-          open={exitedOpen}
-          onToggle={() => setExitedOpen((value) => !value)}
-          onDeleteExited={() => setDialog({ kind: "deleteExited" })}
-          loading={history.pending || listed.filling}
-          failed={Boolean(history.error)}
-          onRetry={history.retry}
-          hasMore={shownCount < listed.total}
-          onMore={() => setLimit((value) => value + PAGE_SIZE)}
+          short={!desktop}
+          open={showExited}
+          onToggle={() => setShowExited(!showExited)}
+          onDeleteExited={() => openDialog({ kind: "deleteExited" })}
+          paging={paging}
         >
           <div className={styles.inset}>
-            <List>{listed.items.map((session) => compactRow(session))}</List>
+            <List>
+              {listed.items.map((session) => (
+                <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} />
+              ))}
+            </List>
           </div>
         </ExitedGroup>
       ) : null}
@@ -217,10 +175,7 @@ export function SessionsHome() {
       <HomeHeader
         desktop={desktop}
         query={query}
-        onQuery={(next) => {
-          setQuery(next);
-          setLimit(PAGE_SIZE);
-        }}
+        onQuery={setQuery}
         searchOpen={searchOpen}
         onSearchOpen={setSearchOpen}
         onNew={() => setNewOpen(true)}
@@ -252,7 +207,7 @@ export function SessionsHome() {
       ) : null}
 
       <NewSessionDialog open={newOpen} onClose={() => setNewOpen(false)} />
-      <SessionDialogs dialog={dialog} actions={actions} onClose={() => setDialog(null)} />
+      {dialogs}
     </div>
   );
 }

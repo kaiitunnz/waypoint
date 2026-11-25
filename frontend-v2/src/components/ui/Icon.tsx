@@ -13,6 +13,13 @@ export type IconName =
   | "check"
   | "close"
   | "more"
+  | "chat"
+  | "terminal"
+  | "copy"
+  | "panel-right"
+  | "panel-left"
+  | "arrow-down"
+  | "pin"
   | "plus"
   | "sun"
   | "moon"
@@ -62,6 +69,35 @@ const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  chat: (
+    <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+  ),
+  terminal: (
+    <>
+      <rect x="3" y="4.5" width="18" height="15" rx="2" />
+      <path d="M7 10l3 2.5L7 15M12.5 15H17" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  "panel-right": (
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M14.5 5v14" />
+    </>
+  ),
+  "panel-left": (
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M9.5 5v14" />
+    </>
+  ),
+  "arrow-down": <path d="M12 5v14M6 13l6 6 6-6" />,
+  pin: <path d="M9 4h6l-.8 5.2L17 12.5H7l2.8-3.3L9 4zM12 12.5V20" />,
   more: (
     <>
       <circle cx="5.5" cy="12" r="1.2" />

@@ -1,6 +1,7 @@
 import { humaniseBackend, displayAgentFor, type BackendCatalog } from "./backends";
 import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDisplay";
-import type { SessionRecord } from "./types";
+import { connectionLabel, type ConnectionState } from "./session/connection";
+import type { SessionRecord, SessionStatus } from "./types";
 
 // Lamps differ by shape and fill as well as hue.
 export type SessionLamp = "needs" | "working" | "done" | "error" | "idle" | "exited";
@@ -10,10 +11,14 @@ export function isUnread(session: SessionRecord): boolean {
   return Date.parse(session.last_event_at) > Date.parse(session.read_at);
 }
 
+export function isWorkingStatus(status: SessionStatus | null | undefined): boolean {
+  return status === "running" || status === "starting";
+}
+
 export function sessionLamp(session: SessionRecord, hasAsk: boolean): SessionLamp {
   if (session.status === "exited") return "exited";
   if (hasAsk || session.status === "waiting_input") return "needs";
-  if (session.status === "running" || session.status === "starting") return "working";
+  if (isWorkingStatus(session.status)) return "working";
   if (session.status === "error" || session.status === "interrupted") return "error";
   return isUnread(session) ? "done" : "idle";
 }
@@ -35,6 +40,17 @@ export function lampWord(lamp: SessionLamp, status: SessionRecord["status"]): st
   }
 }
 
+export interface SessionStanding {
+  lamp: SessionLamp;
+  word: string;
+}
+
+// The lamp and word for one session's screen: the socket's state is the word until it is open.
+export function sessionStanding(session: SessionRecord, hasAsk: boolean, connection: ConnectionState): SessionStanding {
+  const lamp = sessionLamp(session, hasAsk);
+  return { lamp, word: connection === "open" ? lampWord(lamp, session.status) : connectionLabel(connection, session.status) };
+}
+
 // A short model name for a row: "Opus 4.8", "gpt-6.2-sol", "Sonnet".
 export function shortModelLabel(session: SessionRecord): string | null {
   const resolved = formatResolvedModelLabel(session.resolved_model, null, []);
@@ -45,9 +61,14 @@ export function shortModelLabel(session: SessionRecord): string | null {
   return CLAUDE_MODEL_FAMILY_LABELS[bare] ?? bare.split("/").pop() ?? selection;
 }
 
+// "Claude Code".
+export function agentLabel(session: SessionRecord, catalog?: BackendCatalog): string {
+  return humaniseBackend(displayAgentFor(session.backend, session.transport, catalog), catalog);
+}
+
 // "Claude Code, Opus 4.8".
 export function agentModelLabel(session: SessionRecord, catalog?: BackendCatalog): string {
-  const agent = humaniseBackend(displayAgentFor(session.backend, session.transport, catalog), catalog);
+  const agent = agentLabel(session, catalog);
   const model = shortModelLabel(session);
   return model ? `${agent}, ${model}` : agent;
 }

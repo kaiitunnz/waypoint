@@ -1,0 +1,29 @@
+.chip {
+  composes: hit from "../../styles/hit.module.css";
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.chip:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--fill-quiet);
+}
+
+.chip:active {
+  background: var(--fill-raised);
+}
+
+.chip:disabled,
+.chip[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}

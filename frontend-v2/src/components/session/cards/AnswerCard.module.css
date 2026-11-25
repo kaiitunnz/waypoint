@@ -1,0 +1,28 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  flex-direction: column;
+}
+
+.question {
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--muted);
+}
+
+.none {
+  color: var(--muted);
+}
+
+.note {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}

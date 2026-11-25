@@ -29,7 +29,7 @@
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
   align-items: start;
   column-gap: 12px;
   width: 100%;
@@ -38,7 +38,7 @@
 }
 
 .noLamp {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .lamp {
@@ -79,6 +79,14 @@
   white-space: nowrap;
 }
 
+.chev {
+  grid-column: -2;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  color: var(--faint);
+}
+
 .trailing {
   font-size: var(--f-meta);
   line-height: 24px;
@@ -107,21 +115,14 @@
   line-height: 22px;
 }
 
+.compact .chev {
+  height: 22px;
+}
+
 .dimmed .title {
   color: var(--muted);
 }
 
 .selected {
   background: var(--plane-raised);
-}
-
-/* The dog-ear: a squared corner fold in brass. */
-.pinned::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  border-style: solid;
-  border-width: 0 11px 11px 0;
-  border-color: transparent var(--brass) transparent transparent;
 }

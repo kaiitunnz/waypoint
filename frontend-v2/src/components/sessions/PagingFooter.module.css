@@ -1,0 +1,9 @@
+.status {
+  padding: 6px 16px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.more {
+  padding: 6px 16px;
+}

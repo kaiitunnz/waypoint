@@ -1,0 +1,7 @@
+.add {
+  color: var(--done);
+}
+
+.del {
+  color: var(--error);
+}

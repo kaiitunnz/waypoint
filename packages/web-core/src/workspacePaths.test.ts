@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { findWorkspacePaths, formatCwdSegments, isWorkspacePathHref, remarkLinkifyPaths } from "./workspacePaths";
+import {
+  findWorkspacePaths,
+  formatCwdSegments,
+  isWorkspacePathHref,
+  relativeToCwd,
+  relativizeInText,
+  remarkLinkifyPaths,
+  splitPath,
+} from "./workspacePaths";
 
 describe("isWorkspacePathHref", () => {
   it.each(["/etc/hosts", "/a", "~/notes.md", "./src/a.ts", "../up/file"])("accepts %s", (href) => {
@@ -142,5 +150,48 @@ describe("formatCwdSegments", () => {
   it("splits relative and home-relative paths without a leading slash", () => {
     expect(formatCwdSegments("~/work/repo")).toEqual(["~", "work", "repo"]);
     expect(formatCwdSegments("a/b")).toEqual(["a", "b"]);
+  });
+});
+
+describe("relativeToCwd", () => {
+  it("drops the working directory from a path inside it", () => {
+    expect(relativeToCwd("/repo/backend/src/runtime.py", "/repo")).toBe("backend/src/runtime.py");
+    expect(relativeToCwd("/repo/hello.py", "/repo/")).toBe("hello.py");
+    expect(relativeToCwd("/repo", "/repo")).toBe(".");
+    expect(relativeToCwd("/repo/", "/repo")).toBe(".");
+  });
+
+  it("keeps a path outside the working directory", () => {
+    expect(relativeToCwd("/etc/hosts", "/repo")).toBe("/etc/hosts");
+    expect(relativeToCwd("/repository/a.py", "/repo")).toBe("/repository/a.py");
+  });
+
+  it("keeps a path that is already relative, and any path with no working directory", () => {
+    expect(relativeToCwd("src/a.py", "/repo")).toBe("src/a.py");
+    expect(relativeToCwd("/repo/a.py", "")).toBe("/repo/a.py");
+    expect(relativeToCwd("/repo/a.py", null)).toBe("/repo/a.py");
+    expect(relativeToCwd("/a.py", "/")).toBe("/a.py");
+  });
+});
+
+describe("relativizeInText", () => {
+  it("makes the paths inside the working directory relative, wherever they stand in the text", () => {
+    expect(relativizeInText("release_all  ·  /repo/backend", "/repo")).toBe("release_all  ·  backend");
+    expect(relativizeInText("path: /repo/a.py, other: /repo/b/c.py", "/repo")).toBe("path: a.py, other: b/c.py");
+    expect(relativizeInText("/repo/src", "/repo/")).toBe("src");
+    expect(relativizeInText("in /repo", "/repo")).toBe("in .");
+  });
+
+  it("leaves paths outside it and lookalikes alone", () => {
+    expect(relativizeInText("/etc/hosts and /repository/a.py", "/repo")).toBe("/etc/hosts and /repository/a.py");
+    expect(relativizeInText("/other/repo/a.py", "/repo")).toBe("/other/repo/a.py");
+    expect(relativizeInText("/repo/a.py", "")).toBe("/repo/a.py");
+  });
+});
+
+describe("splitPath", () => {
+  it("separates the directory from the name", () => {
+    expect(splitPath("backend/src/runtime.py")).toEqual({ dir: "backend/src/", base: "runtime.py" });
+    expect(splitPath("runtime.py")).toEqual({ dir: "", base: "runtime.py" });
   });
 });

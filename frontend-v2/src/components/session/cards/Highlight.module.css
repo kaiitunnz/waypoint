@@ -1,0 +1,82 @@
+/* Syntax colours for tokens the web-core highlighter emits as hljs-* classes. */
+.hl :global(.hljs-comment),
+.hl :global(.hljs-quote) {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+.hl :global(.hljs-keyword),
+.hl :global(.hljs-selector-tag),
+.hl :global(.hljs-subst) {
+  color: var(--hl-keyword);
+}
+
+.hl :global(.hljs-string),
+.hl :global(.hljs-regexp),
+.hl :global(.hljs-meta .hljs-string) {
+  color: var(--hl-string);
+}
+
+.hl :global(.hljs-number),
+.hl :global(.hljs-literal),
+.hl :global(.hljs-bullet) {
+  color: var(--hl-number);
+}
+
+.hl :global(.hljs-title),
+.hl :global(.hljs-section),
+.hl :global(.hljs-name) {
+  color: var(--hl-function);
+}
+
+.hl :global(.hljs-type),
+.hl :global(.hljs-built_in) {
+  color: var(--hl-type);
+}
+
+.hl :global(.hljs-attr),
+.hl :global(.hljs-attribute),
+.hl :global(.hljs-property),
+.hl :global(.hljs-selector-attr),
+.hl :global(.hljs-selector-class),
+.hl :global(.hljs-selector-id) {
+  color: var(--hl-attr);
+}
+
+.hl :global(.hljs-variable),
+.hl :global(.hljs-template-variable) {
+  color: var(--hl-variable);
+}
+
+.hl :global(.hljs-meta),
+.hl :global(.hljs-doctag) {
+  color: var(--hl-meta);
+}
+
+.hl :global(.hljs-symbol),
+.hl :global(.hljs-link),
+.hl :global(.hljs-params) {
+  color: var(--hl-symbol);
+}
+
+.hl :global(.hljs-tag),
+.hl :global(.hljs-punctuation),
+.hl :global(.hljs-operator) {
+  color: var(--hl-punct);
+}
+
+.hl :global(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.hl :global(.hljs-strong) {
+  font-weight: 600;
+}
+
+.hl :global(.hljs-deletion) {
+  color: var(--error);
+}
+
+.hl :global(.hljs-addition) {
+  color: var(--done);
+}

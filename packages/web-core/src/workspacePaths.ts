@@ -104,3 +104,28 @@ export function formatCwdSegments(cwd: string): string[] {
   }
   return segments.length ? segments : [trimmed];
 }
+
+const trimCwd = (cwd: string | null | undefined) => cwd?.replace(/\/+$/, "");
+
+export function splitPath(path: string): { dir: string; base: string } {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? { dir: "", base: path } : { dir: path.slice(0, slash + 1), base: path.slice(slash + 1) };
+}
+
+// A path as the session's own files read: relative to `cwd` when it lies inside it,
+// otherwise unchanged.
+export function relativeToCwd(path: string, cwd: string | null | undefined): string {
+  const root = trimCwd(cwd);
+  if (!root) return path;
+  if (path === root) return ".";
+  return path.startsWith(`${root}/`) ? path.slice(root.length).replace(/^\/+/, "") || "." : path;
+}
+
+// Every path inside `cwd` that appears in free text, made relative to it.
+export function relativizeInText(text: string, cwd: string | null | undefined): string {
+  const root = trimCwd(cwd);
+  if (!root) return text;
+  const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const inside = new RegExp(`(^|[^\\w./~-])${escaped}(?:/(\\S*)|(?![\\w./-]))`, "g");
+  return text.replace(inside, (_match, lead: string, rest: string | undefined) => `${lead}${rest || "."}`);
+}

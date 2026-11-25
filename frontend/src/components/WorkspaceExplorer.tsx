@@ -22,7 +22,8 @@ import {
   type WorkspaceGitStatus,
   type WorkspaceTreePage,
 } from "@waypoint/web-core/api";
-import { FileIcon, formatBytes } from "@/components/AttachmentTray";
+import { formatFileSize } from "@waypoint/web-core/attachments";
+import { FileIcon } from "@/components/AttachmentTray";
 import { FilePreview } from "@/components/FilePreview";
 import { WorkspaceDiff } from "@/components/WorkspaceDiff";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
@@ -793,7 +794,7 @@ export function WorkspaceExplorer({
                   ) : null}
                   {previewMode === "content" && fileData ? (
                     <span className="wp-preview-meta">
-                      {formatBytes(fileData.size)} · {mtime}
+                      {formatFileSize(fileData.size)} · {mtime}
                     </span>
                   ) : null}
                   <button

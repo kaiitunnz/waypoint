@@ -2,6 +2,8 @@ import type { SessionActivity } from "@waypoint/web-core/activity";
 
 import { Meter } from "@/components/ui/Meter";
 
+import { StepText } from "./StepText";
+
 import styles from "./ActivityLine.module.css";
 
 interface ActivityLineProps {
@@ -17,7 +19,7 @@ export function ActivityLine({ fallback, activity, bright, progressStyle = "shor
   const progress = activity?.progress ?? null;
   return (
     <span className={bright ? styles.bright : styles.line}>
-      <span className={styles.text}>{activity?.line ?? fallback}</span>
+      <span className={styles.text}>{activity?.step ? <StepText step={activity.step} /> : (activity?.line ?? fallback)}</span>
       {progress ? (
         <>
           <Meter value={(progress.done / progress.total) * 100} label="Tasks done" />

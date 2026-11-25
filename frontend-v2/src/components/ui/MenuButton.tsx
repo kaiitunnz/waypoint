@@ -24,29 +24,33 @@ interface MenuButtonProps {
   items: MenuButtonItem[];
   onSelect: (id: string) => void;
   size?: "md" | "sm";
+  header?: ReactNode;
 }
 
 // Destructive actions are menu items, never inline buttons.
-export function MenuButton({ label, title, subtitle, items, onSelect, size = "md" }: MenuButtonProps) {
+export function MenuButton({ label, title, subtitle, items, onSelect, size = "md", header }: MenuButtonProps) {
   const desktop = useDesktop();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
 
   const menu = (
-    <Menu label={label}>
-      {items.map((item) => (
-        <MenuItem
-          key={item.id}
-          tone={item.tone}
-          onSelect={() => {
-            setOpen(false);
-            onSelect(item.id);
-          }}
-        >
-          {item.label}
-        </MenuItem>
-      ))}
-    </Menu>
+    <>
+      {header}
+      <Menu label={label}>
+        {items.map((item) => (
+          <MenuItem
+            key={item.id}
+            tone={item.tone}
+            onSelect={() => {
+              setOpen(false);
+              onSelect(item.id);
+            }}
+          >
+            {item.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
   );
 
   return (

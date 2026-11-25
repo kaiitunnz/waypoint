@@ -19,6 +19,8 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   label: string;
+  // `sm` is compact for a toolbar; `icon` is for segments that hold an icon.
+  size?: "sm" | "icon";
 }
 
 export function SegmentedControl<T extends string>({
@@ -26,10 +28,12 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   label,
+  size,
 }: SegmentedControlProps<T>) {
   const group = useRef<HTMLDivElement>(null);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     if (!step) return;
     event.preventDefault();
@@ -44,7 +48,7 @@ export function SegmentedControl<T extends string>({
       ref={group}
       role="radiogroup"
       aria-label={label}
-      className={styles.group}
+      className={cx(styles.group, size && styles[size])}
       onKeyDown={onKeyDown}
     >
       {segments.map((segment) => (

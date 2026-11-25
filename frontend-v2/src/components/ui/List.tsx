@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
 
+import { Icon } from "./Icon";
 import { StatusLamp, type LampState } from "./StatusLamp";
 import styles from "./List.module.css";
 
@@ -18,10 +19,9 @@ interface ListRowProps {
   titleFont?: "serif" | "sans";
   status?: ReactNode;
   trailing?: ReactNode;
-  pinned?: boolean;
   // A selected row takes a fill, never an edge rail.
   selected?: boolean;
-  // One-line row (idle, pinned, exited): no status line.
+  // One-line row (exited): no status line.
   compact?: boolean;
   dimmed?: boolean;
   href?: string;
@@ -37,7 +37,6 @@ export function ListRow({
   titleFont = "serif",
   status,
   trailing,
-  pinned,
   selected,
   compact,
   dimmed,
@@ -50,7 +49,6 @@ export function ListRow({
     !lamp && styles.noLamp,
     compact && styles.compact,
     dimmed && styles.dimmed,
-    pinned && styles.pinned,
     selected && styles.selected,
   );
   const content = (
@@ -65,6 +63,11 @@ export function ListRow({
         {status ? <span className={styles.status}>{status}</span> : null}
       </span>
       {trailing ? <span className={styles.trailing}>{trailing}</span> : null}
+      {href ? (
+        <span className={styles.chev} aria-hidden="true">
+          <Icon name="chevron-right" size={16} strokeWidth={2} />
+        </span>
+      ) : null}
     </>
   );
   const current = selected ? "true" : undefined;

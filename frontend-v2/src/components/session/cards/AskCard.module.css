@@ -1,0 +1,53 @@
+.outcome {
+  margin-right: 8px;
+  color: var(--faint);
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 4px;
+  font-size: var(--f-meta);
+}
+
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.text {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.options li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+
+.label {
+  color: var(--text);
+}
+
+.desc {
+  color: var(--faint);
+}
+
+.answer {
+  color: var(--text-strong);
+}
+
+.answer::before {
+  content: "Answer: ";
+  color: var(--faint);
+}

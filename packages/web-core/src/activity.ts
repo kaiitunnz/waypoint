@@ -1,10 +1,22 @@
 import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
+import { commandForEvent } from "./session/toolPresentation";
+import { isWorkingStatus } from "./sessionPresentation";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
+
+// A tool call in plain words: a verb and, when it names one, the command or file it acts on.
+export interface Step {
+  verb: string;
+  subject: string | null;
+}
+
+const stepText = (step: Step) => (step.subject ? `${step.verb} ${step.subject}` : step.verb);
 
 export interface SessionActivity {
   // One short line: the current step while working, else the last thing the agent said.
   line: string | null;
+  // The step `line` reads, when it reads one.
+  step: Step | null;
   // Task progress from the latest todo list, until every task is done.
   progress: { done: number; total: number } | null;
 }
@@ -20,12 +32,6 @@ function firstLine(text: string): string {
   return text.split("\n").find((line) => line.trim())?.trim() ?? "";
 }
 
-// `/bin/bash -lc "npm run lint"` reads as `npm run lint`.
-function unwrapShell(command: string): string {
-  const wrapped = /^(?:\/\S+\/)?(?:ba|z)?sh\s+-l?c\s+(["'])([\s\S]*)\1$/.exec(command.trim());
-  return wrapped ? wrapped[2] : command;
-}
-
 // Claude carries a tool's input under the payload's `input`, Codex under the started item.
 function toolInput(event: EventRecord): Record<string, unknown> {
   const metadata = event.metadata ?? {};
@@ -38,25 +44,32 @@ function baseName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
-// A tool call in plain words: "Running npm run lint", "Editing runtime.py".
-export function describeStep(event: EventRecord): string | null {
+// "Running" with `npm run lint`, "Editing" with `runtime.py`.
+export function describeStep(event: EventRecord): Step | null {
   const tool = normalizeToolName(readToolName(event));
   const input = toolInput(event);
-  const command = typeof input.command === "string" ? firstLine(unwrapShell(input.command)) : "";
-  if (command) return `Running ${truncate(command, MAX_COMMAND)}`;
+  const command = firstLine(commandForEvent(event) ?? "");
+  if (command) return { verb: "Running", subject: truncate(command, MAX_COMMAND) };
   const path = toolFilePath(input);
   const file = path ? baseName(path) : "";
-  if (tool && FILE_EDIT_TOOLS.has(tool)) return file ? `Editing ${file}` : "Editing files";
-  if (tool === "Read") return file ? `Reading ${file}` : "Reading files";
-  if (tool === "Grep" || tool === "Glob") return "Searching the code";
-  if (tool === "Task" || tool === "Agent") return "Running a subagent";
-  if (tool === "WebFetch" || tool === "WebSearch") return "Searching the web";
-  if (tool === "TodoWrite") return "Updating the task list";
-  return tool;
+  if (tool && FILE_EDIT_TOOLS.has(tool)) return file ? { verb: "Editing", subject: file } : { verb: "Editing files", subject: null };
+  if (tool === "Read") return file ? { verb: "Reading", subject: file } : { verb: "Reading files", subject: null };
+  const plain =
+    tool === "Grep" || tool === "Glob"
+      ? "Searching the code"
+      : tool === "Task" || tool === "Agent"
+        ? "Running a subagent"
+        : tool === "WebFetch" || tool === "WebSearch"
+          ? "Searching the web"
+          : tool === "TodoWrite"
+            ? "Updating the task list"
+            : tool;
+  return plain ? { verb: plain, subject: null } : null;
 }
 
 function plainLine(text: string): string {
   const line = firstLine(text)
+    .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
     .replace(/^[#>\-*\s]+/, "")
     .replace(/[*_`]/g, "")
     .replace(/\s+/g, " ")
@@ -78,7 +91,7 @@ function lastAgentMessage(events: EventRecord[]): string | null {
   return plainLine(text) || null;
 }
 
-function lastStep(events: EventRecord[]): string | null {
+function lastStep(events: EventRecord[]): Step | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     if (events[index].kind !== "tool_call") continue;
     const step = describeStep(events[index]);
@@ -95,16 +108,16 @@ export function deriveActivity(
   const todos = summarizeTodos(readTodoEntries(latestTodo));
   const progress =
     todos && !todos.allComplete ? { done: todos.completed, total: todos.total } : null;
-  const working = status === "running" || status === "starting";
-  const line = working ? (lastStep(events) ?? lastAgentMessage(events)) : lastAgentMessage(events);
-  return { line, progress };
+  const step = isWorkingStatus(status) ? lastStep(events) : null;
+  return { line: step ? stepText(step) : lastAgentMessage(events), step, progress };
 }
 
 // ─── Loading ───
 
 export interface ActivityLoaderOptions<T> {
   fetch: (id: string, signal: AbortSignal) => Promise<T>;
-  onResult: (id: string, result: T) => void;
+  // `lastEventAt` is the value the result was fetched for.
+  onResult: (id: string, result: T, lastEventAt: string) => void;
   // A change settles for this long before it is fetched, but never waits past
   // `maxWaitMs`, so a session that streams constantly still refreshes.
   settleMs?: number;
@@ -164,6 +177,11 @@ export class ActivityLoader<T> {
     });
   }
 
+  // Records a result already held for this `lastEventAt`, so it is not fetched again.
+  seed(id: string, lastEventAt: string): void {
+    if (!this.disposed) this.loaded.set(id, lastEventAt);
+  }
+
   forget(id: string): void {
     const held = this.pending.get(id);
     if (held) clearTimeout(held.timer);
@@ -204,7 +222,7 @@ export class ActivityLoader<T> {
         .then((result) => {
           if (controller.signal.aborted) return;
           succeeded = true;
-          this.options.onResult(id, result);
+          this.options.onResult(id, result, held.lastEventAt);
         })
         .catch(() => {})
         .finally(() => {

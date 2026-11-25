@@ -34,4 +34,34 @@
   .segment {
     height: 32px;
   }
+
+  .sm .segment {
+    height: 28px;
+    padding: 0 10px;
+    font-size: var(--f-meta);
+  }
+}
+
+.icon {
+  flex: none;
+}
+
+.icon .segment {
+  position: relative;
+  justify-content: center;
+  width: 40px;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  color: var(--faint);
+}
+
+.icon .segment::after {
+  content: "";
+  position: absolute;
+  inset: -4px -2px;
+}
+
+.icon .on {
+  color: var(--text-strong);
 }

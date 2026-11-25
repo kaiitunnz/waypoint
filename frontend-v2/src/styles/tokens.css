@@ -43,6 +43,7 @@
   --working: #7fa9d1;
   --done: #73c59b;
   --error: #e8787a;
+  --danger: var(--error);
 
   /* Type. */
   --serif: var(--font-serif), "Source Serif 4", Georgia, serif;
@@ -60,6 +61,7 @@
   --r-card: 12px;
   --r-modal: 16px;
   --r-sheet: 18px;
+  --r-pill: 999px;
 
   /* Safe areas: chrome pads by these insets. */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -67,10 +69,37 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
 
+  /* The session transcript: compact bubbles, the route, diffs, syntax colours. */
+  --bubble: #1a2029;
+  --bubble-user: color-mix(in srgb, var(--brass) 17%, var(--bubble));
+  --route: color-mix(in srgb, #c9a86a 30%, #343d4b);
+  --route-marker: color-mix(in srgb, var(--brass) 62%, var(--line-strong));
+  --diff-add: color-mix(in srgb, var(--done) 13%, transparent);
+  --diff-del: color-mix(in srgb, var(--error) 12%, transparent);
+  --f-bubble: 15px;
+  --lh-bubble: 20px;
+  --f-stamp: 11.5px;
+  --f-diff: 12px;
+  --lh-diff: 17px;
+  --r-bubble: 14px;
+  --hl-comment: #868f9e;
+  --hl-keyword: #cf98b1;
+  --hl-string: #9cc7a6;
+  --hl-number: #d9a86a;
+  --hl-function: #8fb3d6;
+  --hl-type: #7fbac0;
+  --hl-attr: #bca7d4;
+  --hl-variable: #d7dde6;
+  --hl-meta: #848fa0;
+  --hl-symbol: #8fb3d6;
+  --hl-punct: #97a2b3;
+
   /* Layout. */
   --rail-width: 64px;
   --tabbar-height: 52px;
   --bar-height: 48px;
+  --session-col: 860px;
+  --session-gutter: 28px;
 
   /* Layers. Sheets, modals and popovers share one, so whichever opened last is
      on top, whether a dialog opens from a popover or a popover from a dialog. */
@@ -115,6 +144,27 @@ html[data-theme="light"] {
   --working: #2f6f9e;
   --done: #257a50;
   --error: #b83038;
+
+  --bubble: #efede8;
+  --route: color-mix(in srgb, #b8820e 34%, #cbc6ba);
+  --hl-comment: #685e47;
+  --hl-keyword: #9c3f6e;
+  --hl-string: #276c43;
+  --hl-number: #8a5410;
+  --hl-function: #2a648e;
+  --hl-type: #186b73;
+  --hl-attr: #6b4fa0;
+  --hl-variable: #2a261f;
+  --hl-meta: #6b5f4b;
+  --hl-symbol: #2a648e;
+  --hl-punct: #6a5f53;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --f-bubble: 14.5px;
+    --lh-bubble: 21px;
+  }
 }
 
 /* Mobile body text is 16px so iOS does not zoom into form fields. */

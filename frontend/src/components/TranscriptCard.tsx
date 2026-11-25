@@ -1,6 +1,5 @@
 import {
   memo,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -13,35 +12,38 @@ import {
   humaniseBackend,
   type BackendCatalog,
 } from "@waypoint/web-core/backends";
-import { fetchAttachmentPreview, type AttachmentPreview } from "@waypoint/web-core/api";
+import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
+import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
+import { BackendModelOption, EventRecord, SessionTransport } from "@waypoint/web-core/types";
 import {
-  AttachmentSpec,
-  BackendModelOption,
-  EventRecord,
-  SessionTransport,
-} from "@waypoint/web-core/types";
-import { modelLabelFor } from "@waypoint/web-core/modelDisplay";
-import {
-  capturedTexts,
-  inlineAttachmentIds,
-  isModelChangeEvent,
-  isModelSwitchEvent,
   parseEvent,
   parseTaskNotification,
   planTextForEvent,
   readToolName,
-  type EventDiffPreview,
   type TaskNotificationKind,
   type TaskNotificationView,
 } from "@waypoint/web-core/events";
+import { readTodoEntries, summarizeTodos, type TodoEntry } from "@waypoint/web-core/todos";
+import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
 import {
-  isTodoToolEvent,
-  readTodoEntries,
-  summarizeTodos,
-  type TodoEntry,
-} from "@waypoint/web-core/todos";
+  formatEventTime,
+  modelChangeText,
+  reasoningPreview,
+  sendUserFileInput,
+} from "@waypoint/web-core/session/cardText";
 import {
-  attachmentSpecsFor,
+  fallbackDiffPreviewForFileEdit,
+  previewForToolEvent,
+  toolBadgeFor,
+  toolPairAttachments,
+} from "@waypoint/web-core/session/toolPresentation";
+import { toolRunCounts } from "@waypoint/web-core/session/toolRun";
+import {
+  TASK_NOTIFICATION_BADGES,
+  taskStatusLamp,
+} from "@waypoint/web-core/session/taskNotificationView";
+import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";
+import {
   MessageAttachments,
   useAttachmentContext,
 } from "@/components/AttachmentTray";
@@ -53,6 +55,7 @@ import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TodoListBody } from "@/components/TodoList";
 import { AskQuestionForm, useAskQuestionController } from "@/components/AskQuestion";
 import {
+  askAnswerEntries,
   askFormState,
   askToolUseId,
   parseAskUserQuestion,
@@ -60,9 +63,6 @@ import {
   type AskUserQuestion,
 } from "@waypoint/web-core/session/askQuestion";
 import type { ToolPair } from "@waypoint/web-core/session/transcript";
-
-// Claude Code's tool for handing local files to the human.
-const SEND_USER_FILE_TOOL = "SendUserFile";
 
 // Measure the meta strip's real width and surface it as `--meta-reserve`
 // on the bubble, so the inline phantom at the end of the last paragraph
@@ -107,7 +107,7 @@ export function PendingUserInputCard({
       <MarkdownMessage text={text} />
       <div ref={metaRef} className="transcript-meta">
         <span className="badge user">you</span>
-        <span className="role-time">{formatTime(ts)}</span>
+        <span className="role-time">{formatEventTime(ts)}</span>
       </div>
     </article>
   );
@@ -194,96 +194,56 @@ function CodexCard({
   modelOptions?: BackendModelOption[];
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
-  switch (event.kind) {
-    case "user_input": {
-      if (event.metadata?.kind === "ask_user_question_answer") {
-        return <AskAnswerSummaryCard event={event} />;
-      }
+  switch (cardKindOf(event)) {
+    case "ask_answer":
+      return <AskAnswerSummaryCard event={event} />;
+    case "user_message":
       return <UserMessageBubble event={event} />;
-    }
-    case "agent_output":
-      // A blank agent message — e.g. a whitespace-only OpenCode text part —
-      // carries nothing to render and would collapse to a zero-width bubble
-      // whose absolutely-positioned meta strip overflows (the timestamp wraps
-      // one character per line). Drop it.
-      if (!event.text.trim()) {
-        return null;
-      }
-      if (event.metadata?.item_kind === "reasoning") {
-        return <ReasoningDisclosure event={event} agentLabel={agentLabel} />;
-      }
+    case "reasoning":
+      return <ReasoningDisclosure event={event} agentLabel={agentLabel} />;
+    case "agent_message":
       return <AgentMessageBubble event={event} agentLabel={agentLabel} />;
-    case "tool_call": {
-      const ask = parseAskUserQuestion(event);
-      if (ask) {
-        return (
-          <AskUserQuestionCard event={event} questions={ask} />
-        );
-      }
-      // A SendUserFile call is normally paired (ToolPairCard); this covers the
-      // unpaired import-path render.
-      if (readToolName(event) === SEND_USER_FILE_TOOL) {
-        return <SendUserFileCard event={event} />;
-      }
-      if (isTodoToolEvent(event)) {
-        return <TodoToolCard event={event} />;
-      }
+    case "ask_question":
+      return <AskUserQuestionCard event={event} questions={parseAskUserQuestion(event) ?? []} />;
+    case "send_file":
+      return <SendUserFileCard event={event} />;
+    case "todo":
+      return <TodoToolCard event={event} />;
+    case "tool":
       return (
         <ToolDisclosure
           event={event}
-          bodyClassName="shell"
+          bodyClassName={event.kind === "tool_call" ? "shell" : "output"}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
         />
       );
-    }
-    case "tool_result":
-      if (isTodoToolEvent(event)) {
-        return <TodoToolCard event={event} />;
-      }
-      return (
-        <ToolDisclosure
-          event={event}
-          bodyClassName="output"
-          onOpenWorkspaceFile={onOpenWorkspaceFile}
-        />
-      );
-    case "approval_request":
-      // The interactive ApprovalCard sits above the composer with the same
-      // text and Approve/Decline buttons; rendering the event here too would
-      // duplicate the prompt. The chronological record lives in the
-      // post-resolution "Approval response sent: …" system note.
-      return null;
-    case "system_note":
-    case "status_update": {
+    case "plan": {
       const plan = planTextForEvent(event);
-      if (plan) {
-        return (
-          <PlanApprovalCard
-            agentLabel={agentLabel}
-            className="transcript codex plan-output"
-            plan={plan}
-            prompt="Plan"
-            timeLabel={formatTime(event.ts)}
-          />
-        );
-      }
-      if (event.metadata?.builtin_command === "/status") {
-        return <CommandStatusCard event={event} agentLabel={agentLabel} />;
-      }
-      if (isModelChangeEvent(event)) {
-        // Switch renders the divider; launch-time mismatch renders nothing here.
-        return isModelSwitchEvent(event) ? (
-          <ModelChangeDivider event={event} modelOptions={modelOptions} />
-        ) : null;
-      }
-      const taskNotification = parseTaskNotification(event);
-      if (taskNotification) {
-        return <TaskNotificationCard view={taskNotification} event={event} />;
-      }
-      return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
+      return plan ? (
+        <PlanApprovalCard
+          agentLabel={agentLabel}
+          className="transcript codex plan-output"
+          plan={plan}
+          prompt="Plan"
+          timeLabel={formatEventTime(event.ts)}
+        />
+      ) : null;
     }
-    default:
+    case "status":
+      return <CommandStatusCard event={event} agentLabel={agentLabel} />;
+    case "model_switch":
+      return <ModelChangeDivider event={event} modelOptions={modelOptions} />;
+    case "task_notification": {
+      const view = parseTaskNotification(event);
+      return view ? <TaskNotificationCard view={view} event={event} /> : null;
+    }
+    case "diff_note":
+    case "rule":
+      return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
+    case "heuristic":
       return <HeuristicCard event={event} />;
+    case "none":
+      return null;
   }
 }
 
@@ -294,27 +254,14 @@ function ModelChangeDivider({
   event: EventRecord;
   modelOptions?: BackendModelOption[];
 }) {
-  const current =
-    typeof event.metadata?.current_model === "string"
-      ? event.metadata.current_model
-      : "";
-  const previous =
-    typeof event.metadata?.previous_model === "string"
-      ? event.metadata.previous_model
-      : "";
-  const opts = modelOptions ?? [];
-  const currentLabel = modelLabelFor(current, opts);
-  const text = previous
-    ? `Model changed from ${modelLabelFor(previous, opts)} to ${currentLabel}`
-    : `Switched to ${currentLabel}`;
   return (
     <div className="system-rule model-change" role="note">
       <span className="system-rule-body">
-        <span className="system-rule-time">{formatTime(event.ts)}</span>
+        <span className="system-rule-time">{formatEventTime(event.ts)}</span>
         <span className="model-change-glyph" aria-hidden="true">
           ⇄
         </span>
-        <span className="system-rule-text">{text}</span>
+        <span className="system-rule-text">{modelChangeText(event, modelOptions)}</span>
       </span>
     </div>
   );
@@ -332,7 +279,7 @@ function UserMessageBubble({ event }: { event: EventRecord }) {
       <MessageAttachments specs={attachmentSpecsFor(event)} />
       <div ref={metaRef} className="transcript-meta">
         <span className="badge user">you</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
         <CopyMessageButton text={event.text} />
       </div>
     </article>
@@ -356,7 +303,7 @@ function AgentMessageBubble({
       <MarkdownMessage text={event.text} />
       <div ref={metaRef} className="transcript-meta">
         <span className="badge agent">{agentLabel}</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
         <CopyMessageButton text={event.text} />
       </div>
     </article>
@@ -374,7 +321,7 @@ function CommandStatusCard({
     <article className="panel transcript codex command-status">
       <div className="transcript-role">
         <span className="badge neutral">/status</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
         <span className="muted">{agentLabel}</span>
         <CopyMessageButton text={event.text} />
       </div>
@@ -397,7 +344,7 @@ function SystemRule({
         <summary className="transcript-summary">
           <div className="transcript-role">
             <span className="badge neutral">changes</span>
-            <span className="role-time">{formatTime(event.ts)}</span>
+            <span className="role-time">{formatEventTime(event.ts)}</span>
           </div>
           <p className="transcript-preview">{event.text}</p>
         </summary>
@@ -408,7 +355,7 @@ function SystemRule({
   return (
     <div className="system-rule" role="note">
       <span className="system-rule-body">
-        <span className="system-rule-time">{formatTime(event.ts)}</span>
+        <span className="system-rule-time">{formatEventTime(event.ts)}</span>
         <span className="system-rule-text" title={event.text}>
           {event.text}
         </span>
@@ -435,157 +382,13 @@ function ReasoningDisclosure({
       <summary className="transcript-summary">
         <div className="transcript-role">
           <span className="badge agent reasoning">{agentLabel} thinking</span>
-          <span className="role-time">{formatTime(event.ts)}</span>
+          <span className="role-time">{formatEventTime(event.ts)}</span>
         </div>
         {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
       <MarkdownMessage text={event.text} />
     </details>
   );
-}
-
-function reasoningPreview(text: string, max = 140): string {
-  // The preview is plain text; summaries often open with **bold** headings.
-  const collapsed = text
-    .replace(/(\*\*|__)(.+?)\1/g, "$2")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (collapsed.length <= max) return collapsed;
-  return `${collapsed.slice(0, max - 1).trimEnd()}…`;
-}
-
-interface ToolBadge {
-  glyph: string;
-  variant: string;
-  label: string;
-}
-
-// variant maps to a CSS-only colour theme, so no icon assets ship.
-const TOOL_BADGES: Record<string, ToolBadge> = {
-  Bash: { glyph: "›_", variant: "bash", label: "Bash" },
-  Read: { glyph: "▤", variant: "read", label: "Read" },
-  Edit: { glyph: "✎", variant: "edit", label: "Edit" },
-  MultiEdit: { glyph: "✎", variant: "edit", label: "MultiEdit" },
-  NotebookEdit: { glyph: "✎", variant: "edit", label: "NotebookEdit" },
-  Write: { glyph: "✚", variant: "write", label: "Write" },
-  Grep: { glyph: "⌕", variant: "grep", label: "Grep" },
-  Glob: { glyph: "✱", variant: "glob", label: "Glob" },
-  WebFetch: { glyph: "⌖", variant: "web", label: "WebFetch" },
-  WebSearch: { glyph: "⌖", variant: "web", label: "WebSearch" },
-  // Codex collaboration mode drives subagents through spawnAgent → wait (the
-  // join, whose result carries the subagent's report) → closeAgent.
-  Task: { glyph: "◇", variant: "task", label: "Task" },
-  Agent: { glyph: "◇", variant: "task", label: "Agent" },
-  spawnAgent: { glyph: "◇", variant: "task", label: "spawnAgent" },
-  Wait: { glyph: "◈", variant: "task", label: "Wait" },
-  closeAgent: { glyph: "◇", variant: "task", label: "closeAgent" },
-  // Codex subagent mode: spawning or messaging a subagent.
-  Subagent: { glyph: "◇", variant: "task", label: "Subagent" },
-  Monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
-  SendMessage: { glyph: "⇄", variant: "web", label: "SendMessage" },
-  PushNotification: { glyph: "✉", variant: "web", label: "PushNotification" },
-  ReadNotifications: { glyph: "✉", variant: "read", label: "ReadNotifications" },
-  Skill: { glyph: "❖", variant: "skill", label: "Skill" },
-  TodoWrite: { glyph: "☑", variant: "todo", label: "Todo" },
-  AskUserQuestion: { glyph: "?", variant: "task", label: "Ask" },
-};
-
-// MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
-// ``server:tool``); there is an open-ended set of them, so badge them
-// generically and shorten the label to the readable ``server·tool`` tail.
-function isPluginToolName(toolName: string): boolean {
-  return toolName.includes("__") || toolName.includes(":");
-}
-
-function prettyPluginName(toolName: string): string {
-  const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
-  return stripped.replace(/__/g, "·").replace(/:/g, "·");
-}
-
-function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
-  if (!toolName) {
-    return { glyph: "→", variant: "default", label: "tool" };
-  }
-  const known = TOOL_BADGES[toolName];
-  if (known) {
-    return known;
-  }
-  if (isPluginToolName(toolName)) {
-    return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
-  }
-  // Unlisted tools stay neutral by design — badging harness plumbing (waits,
-  // polling, mode toggles) would add glare, not signal.
-  return { glyph: "ƒ", variant: "default", label: toolName };
-}
-
-function isFileEditToolName(toolName: string | null | undefined): boolean {
-  return (
-    toolName === "Edit" ||
-    toolName === "MultiEdit" ||
-    toolName === "Write" ||
-    toolName === "NotebookEdit"
-  );
-}
-
-function isAgentToolName(toolName: string | null | undefined): boolean {
-  return (
-    toolName === "Task" ||
-    toolName === "Agent" ||
-    toolName === "spawnAgent" ||
-    toolName === "Wait" ||
-    toolName === "closeAgent" ||
-    toolName === "Subagent"
-  );
-}
-
-function fallbackDiffPreviewForFileEdit(
-  events: (EventRecord | null | undefined)[],
-  phase: EventDiffPreview["phase"],
-): EventDiffPreview | null {
-  for (const event of events) {
-    if (!event || !isFileEditToolName(readToolName(event))) {
-      continue;
-    }
-    const path = filePathForToolInput(toolInputForEvent(event));
-    if (!path) {
-      continue;
-    }
-    return {
-      schemaVersion: 1,
-      phase,
-      files: [
-        {
-          path,
-          oldPath: null,
-          changeType: "update",
-          diff: "",
-          additions: 0,
-          deletions: 0,
-          truncated: false,
-          binary: false,
-          unavailableReason: "Diff preview was not included by the backend.",
-        },
-      ],
-      totalAdditions: 0,
-      totalDeletions: 0,
-      truncated: false,
-    };
-  }
-  return null;
-}
-
-function toolInputForEvent(event: EventRecord): Record<string, unknown> | null {
-  const meta = event.metadata as Record<string, unknown> | undefined;
-  const payload = asRecord(meta?.payload);
-  return asRecord(payload?.input) ?? asRecord(meta?.tool_input);
-}
-
-function filePathForToolInput(input: Record<string, unknown> | null): string | null {
-  if (!input) {
-    return null;
-  }
-  const value = input.file_path ?? input.path ?? input.notebook_path;
-  return typeof value === "string" && value ? value : null;
 }
 
 export function ToolCallRunGroup({
@@ -598,24 +401,16 @@ export function ToolCallRunGroup({
   children: React.ReactNode;
 }) {
   const count = toolNames.length;
-  let bashCount = 0;
-  let editCount = 0;
-  let readCount = 0;
-  let todoCount = 0;
-  let agentCount = 0;
-  let skillCount = 0;
-  let monitorCount = 0;
-  let otherCount = 0;
-  for (const name of toolNames) {
-    if (name === "Bash") bashCount++;
-    else if (isFileEditToolName(name)) editCount++;
-    else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
-    else if (name === "TodoWrite") todoCount++;
-    else if (isAgentToolName(name)) agentCount++;
-    else if (name === "Skill") skillCount++;
-    else if (name === "Monitor") monitorCount++;
-    else otherCount++;
-  }
+  const {
+    bash: bashCount,
+    edit: editCount,
+    read: readCount,
+    todo: todoCount,
+    agent: agentCount,
+    skill: skillCount,
+    monitor: monitorCount,
+    other: otherCount,
+  } = toolRunCounts(toolNames);
 
   return (
     <details className="tool-call-run" open={initiallyOpen}>
@@ -791,7 +586,7 @@ function ToolDisclosure({
           </span>
           <span className="tool-name">{tool.label}</span>
           <span className="badge tool-status pending">{kindLabel}</span>
-          <span className="role-time">{formatTime(event.ts)}</span>
+          <span className="role-time">{formatEventTime(event.ts)}</span>
         </div>
         {preview ? <p className="transcript-preview">{preview}</p> : null}
         <MessageAttachments specs={attachmentSpecsFor(event)} />
@@ -813,22 +608,15 @@ function ToolPairCard({
   onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const { call, result } = pair;
-  if (call) {
-    const ask = parseAskUserQuestion(call);
-    if (ask) {
-      return (
-        <AskUserQuestionCard event={call} questions={ask} />
-      );
-    }
+  const kind = pairCardKindOf(pair);
+  if (kind === "ask_question" && call) {
+    return <AskUserQuestionCard event={call} questions={parseAskUserQuestion(call) ?? []} />;
   }
-  const sendUserFileEvent =
-    readToolName(call ?? result ?? ({} as EventRecord)) === SEND_USER_FILE_TOOL
-      ? (call ?? result)
-      : null;
-  if (sendUserFileEvent) {
-    return <SendUserFileCard event={sendUserFileEvent} />;
+  if (kind === "send_file") {
+    const sendUserFileEvent = call ?? result;
+    if (sendUserFileEvent) return <SendUserFileCard event={sendUserFileEvent} />;
   }
-  if (isTodoToolEvent(call) || isTodoToolEvent(result)) {
+  if (kind === "todo") {
     return <TodoToolPairCard pair={pair} />;
   }
   const status = result ? "complete" : "pending";
@@ -850,7 +638,7 @@ function ToolPairCard({
           </span>
           <span className="tool-name">{tool.label}</span>
           <span className={`badge tool-status ${status}`}>{status}</span>
-          <span className="role-time">{formatTime(pair.ts)}</span>
+          <span className="role-time">{formatEventTime(pair.ts)}</span>
         </div>
         {summary ? <p className="transcript-preview">{summary}</p> : null}
         <MessageAttachments specs={toolPairAttachments(pair)} />
@@ -883,37 +671,6 @@ function ToolPairCard({
   );
 }
 
-// A pair's attachments may ride on its call or its result.
-function toolPairAttachments({ call, result }: ToolPair): AttachmentSpec[] {
-  const seen = new Set<string>();
-  const specs: AttachmentSpec[] = [];
-  for (const event of [call, result]) {
-    if (!event) continue;
-    for (const spec of attachmentSpecsFor(event)) {
-      if (seen.has(spec.id)) continue;
-      seen.add(spec.id);
-      specs.push(spec);
-    }
-  }
-  return specs;
-}
-
-function sendUserFileInput(event: EventRecord): {
-  files: string[];
-  caption: string | null;
-} {
-  const input = (event.metadata?.payload as { input?: unknown } | undefined)
-    ?.input as { files?: unknown; caption?: unknown } | undefined;
-  const files = Array.isArray(input?.files)
-    ? input.files.filter((p): p is string => typeof p === "string" && p.length > 0)
-    : [];
-  const caption =
-    typeof input?.caption === "string" && input.caption.trim()
-      ? input.caption
-      : null;
-  return { files, caption };
-}
-
 // The agent's SendUserFile hand-off. Rendered standalone (classified "content")
 // with the sent files and a shortcut to the Files browser.
 function SendUserFileCard({ event }: { event: EventRecord }) {
@@ -931,7 +688,7 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
         <span className="send-user-file-count">
           {count} file{count === 1 ? "" : "s"}
         </span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
       </div>
       {caption ? <p className="send-user-file-caption">{caption}</p> : null}
       {specs.length > 0 ? (
@@ -956,140 +713,6 @@ function SendUserFileCard({ event }: { event: EventRecord }) {
       ) : null}
     </article>
   );
-}
-
-// Task lifecycle card: subagent/Agent completion, Monitor events and
-// terminal state, or background-command completion. Kind reads from the left
-// (glyph + label), terminal state from the right (status lamp — text, never
-// colour alone). A captured full report reuses the shared attachment row.
-const TASK_NOTIFICATION_BADGES: Record<
-  TaskNotificationView["kind"],
-  { glyph: string; variant: string; label: string }
-> = {
-  agent: { glyph: "◇", variant: "task", label: "Agent" },
-  monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
-  background_command: { glyph: "›_", variant: "bash", label: "Command" },
-  message: { glyph: "↘", variant: "default", label: "Message" },
-  unknown: { glyph: "⁂", variant: "default", label: "Task" },
-};
-
-function taskStatusLamp(
-  view: TaskNotificationView,
-): { tone: string; label: string } | null {
-  const status = view.status?.trim();
-  if (status) {
-    switch (status.toLowerCase()) {
-      case "completed":
-        return { tone: "ok", label: "Completed" };
-      case "failed":
-        return { tone: "danger", label: "Failed" };
-      case "stopped":
-        return { tone: "warn", label: "Stopped" };
-      default:
-        return { tone: "off", label: status };
-    }
-  }
-  if (view.kind === "monitor" && view.event) {
-    return { tone: "info", label: "Event" };
-  }
-  return null;
-}
-
-function formatTaskDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
-}
-
-function taskUsageParts(usage: TaskNotificationView["usage"]): string[] {
-  if (!usage) return [];
-  const parts: string[] = [];
-  if (usage.subagentTokens != null) {
-    parts.push(`${usage.subagentTokens.toLocaleString()} tokens`);
-  }
-  if (usage.toolUses != null) {
-    parts.push(`${usage.toolUses} tool ${usage.toolUses === 1 ? "use" : "uses"}`);
-  }
-  if (usage.durationMs != null) {
-    parts.push(formatTaskDuration(usage.durationMs));
-  }
-  return parts;
-}
-
-function reportUnavailableText(view: TaskNotificationView): string | null {
-  if (view.outputAvailable) {
-    // Capture was expected but produced no attachment (file vanished/unreadable).
-    return "Report unavailable";
-  }
-  switch (view.outputUnavailableReason) {
-    case null:
-      return null;
-    case "full output not captured on import":
-      return "Full report wasn't captured on import";
-    default:
-      return view.outputUnavailableReason;
-  }
-}
-
-// Collapse whitespace so containment survives wrapping and trailing newlines.
-function flattenWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-type ReportPreviewState =
-  | { status: "loading" }
-  | { status: "ready"; preview: AttachmentPreview }
-  | { status: "error" };
-
-// Lazily reads a bounded text prefix of a captured report once its card is
-// expanded. The request is abandoned when the card collapses or unmounts, and
-// a failure only ever costs the preview — the attachment link stays.
-// Previews are immutable per attachment id; one fetch per id per page life.
-const reportPreviewCache = new Map<string, AttachmentPreview>();
-
-function useReportPreview(
-  spec: AttachmentSpec | null,
-  open: boolean,
-): ReportPreviewState | null {
-  const ctx = useAttachmentContext();
-  const attachmentId = spec?.id ?? null;
-  const cached = attachmentId ? reportPreviewCache.get(attachmentId) : undefined;
-  const [state, setState] = useState<ReportPreviewState | null>(
-    cached ? { status: "ready", preview: cached } : null,
-  );
-
-  useEffect(() => {
-    if (!open || !ctx || !attachmentId) {
-      return;
-    }
-    const hit = reportPreviewCache.get(attachmentId);
-    if (hit) {
-      setState({ status: "ready", preview: hit });
-      return;
-    }
-    const controller = new AbortController();
-    setState({ status: "loading" });
-    fetchAttachmentPreview(ctx.host, ctx.token, ctx.sessionId, attachmentId, {
-      signal: controller.signal,
-    })
-      .then((preview) => {
-        reportPreviewCache.set(attachmentId, preview);
-        if (!controller.signal.aborted) {
-          setState({ status: "ready", preview });
-        }
-      })
-      .catch(() => {
-        // A 404 from a backend without the route lands here too.
-        if (!controller.signal.aborted) {
-          setState({ status: "error" });
-        }
-      });
-    return () => controller.abort();
-  }, [open, ctx, attachmentId]);
-
-  return state;
 }
 
 function TaskReportPreview({ state }: { state: ReportPreviewState | null }) {
@@ -1132,59 +755,23 @@ function TaskNotificationCard({
   event: EventRecord;
 }) {
   const [open, setOpen] = useState(false);
+  const attachmentContext = useAttachmentContext();
   const badge = TASK_NOTIFICATION_BADGES[view.kind];
   const lamp = taskStatusLamp(view);
-  const headline = view.summary || view.event || "Task notification";
-  // With a summary present the `event` line rides under the headline; without
-  // one it is the headline. Both surfaces clamp, so the body renders it in full.
-  const preview = view.summary ? view.event : null;
-  const inlineIds = inlineAttachmentIds(event);
-  // An Agent's captured output-file is its transcript, not its report. Older
-  // events still carry one; drop it, but keep spilled bodies.
-  const reportIsInline = view.kind === "agent" && Boolean(view.resultPreview);
-  const specs = attachmentSpecsFor(event).filter(
-    (spec) => !reportIsInline || inlineIds.has(spec.id),
-  );
-  // A separately captured report, else a spilled body holding the text the
-  // inline prefix was cut from.
-  const reportSpec =
-    specs.find((spec) => !inlineIds.has(spec.id)) ?? specs[0] ?? null;
+  const report = taskNoteReport(view, event);
+  const { specs, reportSpec, inlineReports } = report;
+  const previewState = useReportPreview(attachmentContext, reportSpec, open);
+  const {
+    headline,
+    teaser: preview,
+    usageParts,
+    unavailable,
+    hasBody,
+    showLinks,
+    supersedes,
+    cutCaption,
+  } = taskNoteBody(view, report, previewState);
   const hasReport = reportSpec !== null;
-  // Small enough that the runtime read it into the event; no request needed.
-  const inlineReports = capturedTexts(event);
-  const previewState = useReportPreview(reportSpec, open);
-  const previewText =
-    previewState?.status === "ready" && !previewState.preview.binary
-      ? previewState.preview.content
-      : (inlineReports[0] ?? null);
-  // A captured report is often the fuller version of a body the event carries
-  // inline, so when it contains that body the duplicate is dropped.
-  const supersedes = (body: string | null) =>
-    Boolean(body && previewText && flattenWhitespace(previewText).includes(flattenWhitespace(body)));
-  // Only `reportSpec` is previewed: several attachments are always linked, a
-  // lone one once its preview fails or comes back partial.
-  const previewIsPartial =
-    previewState?.status === "error" ||
-    (previewState?.status === "ready" &&
-      (previewState.preview.truncated ||
-        previewState.preview.binary ||
-        previewState.preview.content === null));
-  const showLinks = specs.length > 1 || previewIsPartial;
-  const usageParts = taskUsageParts(view.usage);
-  // An ignored transcript leaves nothing missing, but those events were stored
-  // with output_available set.
-  const unavailable =
-    hasReport || reportIsInline ? null : reportUnavailableText(view);
-  const retained = specs.length > 0 || inlineReports.length > 0;
-  const hasBody = Boolean(
-    view.resultPreview ||
-      view.event ||
-      view.note ||
-      usageParts.length > 0 ||
-      specs.length > 0 ||
-      inlineReports.length > 0 ||
-      unavailable,
-  );
 
   const header = (
     <div className="transcript-role">
@@ -1200,7 +787,7 @@ function TaskNotificationCard({
           {lamp.label}
         </span>
       ) : null}
-      <span className="role-time">{formatTime(event.ts)}</span>
+      <span className="role-time">{formatEventTime(event.ts)}</span>
     </div>
   );
 
@@ -1213,17 +800,16 @@ function TaskNotificationCard({
     );
   }
 
-  // Belongs to the inline block: once a loaded report supersedes it, the text
-  // on screen is the whole body. `retained` is card-wide, never the failure
-  // flag, so one failed spill cannot disown a sibling attached below.
-  const cutCaption = (body: string | null, truncated: boolean) =>
-    truncated && !supersedes(body) ? (
+  const renderCutCaption = (body: string | null, truncated: boolean) => {
+    const caption = cutCaption(body, truncated);
+    return caption ? (
       <p className="task-note-caption">
-        {retained
+        {caption === "retained"
           ? "Preview shown — full output attached below"
           : "Preview — the rest was not retained"}
       </p>
     ) : null;
+  };
 
   return (
     <details
@@ -1238,13 +824,13 @@ function TaskNotificationCard({
         {view.resultPreview && !supersedes(view.resultPreview) ? (
           <pre className="task-note-result">{view.resultPreview}</pre>
         ) : null}
-        {cutCaption(view.resultPreview, view.resultTruncated)}
+        {renderCutCaption(view.resultPreview, view.resultTruncated)}
         {view.event && !supersedes(view.event) ? (
           <pre className="task-note-result">{view.event}</pre>
         ) : null}
-        {cutCaption(view.event, view.eventTruncated)}
+        {renderCutCaption(view.event, view.eventTruncated)}
         {view.note ? <p className="task-note-text">{view.note}</p> : null}
-        {cutCaption(view.note, view.noteTruncated)}
+        {renderCutCaption(view.note, view.noteTruncated)}
         {usageParts.length > 0 ? (
           <p className="task-note-usage">{usageParts.join(" · ")}</p>
         ) : null}
@@ -1301,7 +887,7 @@ function TodoMarkerCard({ todos, ts }: { todos: TodoEntry[] | null; ts: string }
         </span>
         <span className="tool-name">{TODO_BADGE.label}</span>
         <span className="todo-marker-meta">{summary}</span>
-        <span className="role-time">{formatTime(ts)}</span>
+        <span className="role-time">{formatEventTime(ts)}</span>
       </summary>
       <div className="todo-marker-body">
         <TodoListBody todos={todos} />
@@ -1317,10 +903,6 @@ function TodoToolCard({ event }: { event: EventRecord }) {
 function TodoToolPairCard({ pair }: { pair: ToolPair }) {
   const todos = readTodoEntries(pair.result) ?? readTodoEntries(pair.call);
   return <TodoMarkerCard todos={todos} ts={pair.ts} />;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
 function AskUserQuestionCard({
@@ -1357,7 +939,7 @@ function AskUserQuestionCard({
         ) : (
           <span className="badge tool-status pending">awaiting answer</span>
         )}
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
       </div>
       <AskQuestionForm
         event={event}
@@ -1387,19 +969,7 @@ function AskUserQuestionCard({
 }
 
 function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
-  const meta = event.metadata as Record<string, unknown> | undefined;
-  const rawAnswers = Array.isArray(meta?.answers) ? meta!.answers : [];
-  const answers = rawAnswers
-    .filter(
-      (item): item is Record<string, unknown> =>
-        Boolean(item) && typeof item === "object",
-    )
-    .map((item) => ({
-      question: typeof item.question === "string" ? item.question : "",
-      answer: typeof item.answer === "string" ? item.answer : null,
-      notes: typeof item.notes === "string" ? item.notes : undefined,
-    }))
-    .filter((item) => item.question);
+  const answers = askAnswerEntries(event);
 
   return (
     <article
@@ -1433,138 +1003,10 @@ function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
       <div className="transcript-meta">
         <span className="badge user">you</span>
         <span className="badge neutral ask-answer-chip">answered</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
       </div>
     </article>
   );
-}
-
-function previewForToolEvent(event: EventRecord, toolLabel: string): string {
-  // Prefer extracting a meaningful field from the structured tool input —
-  // event.text for Claude tool_call events is `"ToolName\n{json input}"`,
-  // which is verbose and redundant with the tool-name chip we already render
-  // in the role row.
-  const toolName = readToolName(event);
-  const input = toolInputForEvent(event);
-
-  if (event.kind === "tool_call" && input) {
-    if (toolName === "Bash" && typeof input.command === "string") {
-      return truncate(collapseWhitespace(input.command), 240);
-    }
-    if (isFileEditToolName(toolName)) {
-      const path = filePathForToolInput(input);
-      if (path) {
-        return path;
-      }
-    }
-    if (toolName === "Read" && typeof input.file_path === "string") {
-      const range =
-        typeof input.offset === "number" || typeof input.limit === "number"
-          ? ` · ${typeof input.offset === "number" ? input.offset : 1}..${
-              typeof input.limit === "number"
-                ? (typeof input.offset === "number" ? input.offset : 0) + input.limit
-                : "end"
-            }`
-          : "";
-      return `${input.file_path}${range}`;
-    }
-    if (toolName === "Grep" && typeof input.pattern === "string") {
-      const path = typeof input.path === "string" ? input.path : "";
-      return path ? `${input.pattern}  ·  ${path}` : input.pattern;
-    }
-    if (toolName === "Glob" && typeof input.pattern === "string") {
-      return input.pattern;
-    }
-    if ((toolName === "WebFetch" || toolName === "WebSearch") && typeof input.url === "string") {
-      return input.url;
-    }
-    if (toolName === "WebSearch" && typeof input.query === "string") {
-      return input.query;
-    }
-    if ((toolName === "Task" || toolName === "Agent") && typeof input.description === "string") {
-      return input.description;
-    }
-    if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
-      return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;
-    }
-    const generic = summarizeStructuredInput(input);
-    if (generic) {
-      return truncate(generic, 240);
-    }
-  }
-
-  // Fall back to summarising the raw event text. Strip a leading tool-name
-  // line (Claude's "Bash\n{json}" shape) so the preview doesn't redundantly
-  // repeat what the role-row chip already shows.
-  return summarizeToolText(event.text, toolLabel);
-}
-
-function summarizeStructuredInput(input: Record<string, unknown>): string {
-  // Generic preview for tool calls that don't have a dedicated branch above
-  // (Skill, ToolSearch, custom MCP tools, etc.). Joining the entries on a
-  // single line surfaces the actual arg values instead of the bare "{" the
-  // line-based fallback used to produce for pretty-printed JSON.
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(input)) {
-    parts.push(`${key}: ${formatStructuredValue(value)}`);
-  }
-  return parts.join(", ");
-}
-
-function formatStructuredValue(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  try {
-    return collapseWhitespace(JSON.stringify(value));
-  } catch {
-    return "";
-  }
-}
-
-function summarizeToolText(text: string, toolLabel?: string): string {
-  let lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (toolLabel && lines.length > 0 && lines[0].toLowerCase() === toolLabel.toLowerCase()) {
-    lines = lines.slice(1);
-  }
-  if (!lines.length) {
-    return "No output";
-  }
-  // Pretty-printed JSON puts the opening brace on its own line, which made
-  // the preview read as a useless "{ · N lines". When the body parses as
-  // JSON, collapse it into a one-line key/value summary instead.
-  const joined = lines.join("\n");
-  if (joined.startsWith("{") || joined.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(joined);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const generic = summarizeStructuredInput(parsed as Record<string, unknown>);
-        if (generic) return truncate(generic, 240);
-      }
-      return truncate(collapseWhitespace(JSON.stringify(parsed)), 240);
-    } catch {
-      // Fall through to the line-based summary.
-    }
-  }
-  const first = lines[0];
-  const suffix = lines.length > 1 ? ` · ${lines.length} lines` : "";
-  return `${truncate(first, 160)}${suffix}`;
-}
-
-function collapseWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) {
-    return value;
-  }
-  return `${value.slice(0, max - 1)}…`;
 }
 
 function HeuristicCard({ event }: { event: EventRecord }) {
@@ -1572,19 +1014,11 @@ function HeuristicCard({ event }: { event: EventRecord }) {
     <article className={`panel transcript ${event.kind}`}>
       <div className="transcript-role">
         <span className="badge neutral">{event.kind.replaceAll("_", " ")}</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatEventTime(event.ts)}</span>
         <CopyMessageButton text={event.text} />
       </div>
       <pre>{event.text}</pre>
       <MessageAttachments specs={attachmentSpecsFor(event)} />
     </article>
   );
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
 }

@@ -5,9 +5,8 @@ import { useState } from "react";
 import { stripRecommendedSuffix, visibleOptions, type PromptPick } from "@waypoint/web-core/pendingAskActions";
 import type { PendingAskPrompt } from "@waypoint/web-core/types";
 
-import { Button } from "@/components/ui/Button";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Chip } from "@/components/ui/Chip";
-import { Icon } from "@/components/ui/Icon";
 import { TextInput } from "@/components/ui/Field";
 
 import styles from "./PromptField.module.css";
@@ -57,10 +56,9 @@ export function PromptField({
           </Chip>
         ))}
         {limited ? (
-          <Button variant="text" size="sm" onClick={() => setExpanded(true)}>
+          <ActionChip icon="chevron-down" onClick={() => setExpanded(true)}>
             More
-            <Icon name="chevron-down" size={15} strokeWidth={2} />
-          </Button>
+          </ActionChip>
         ) : null}
         {otherOpen ? null : (
           <Chip quiet disabled={disabled} onClick={() => setOtherOpen(true)}>

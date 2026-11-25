@@ -1,0 +1,11 @@
+.preview {
+  margin-left: 8px;
+  color: var(--faint);
+}
+
+.text {
+  padding: 2px 0 4px;
+  font-size: var(--f-meta);
+  line-height: 19px;
+  color: var(--muted);
+}

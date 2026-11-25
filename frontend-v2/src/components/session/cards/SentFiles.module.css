@@ -1,0 +1,40 @@
+.card {
+  composes: card from "./RaisedCard.module.css";
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.glyph {
+  color: var(--faint);
+}
+
+.title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.time {
+  composes: time from "./RaisedCard.module.css";
+}
+
+.caption {
+  color: var(--muted);
+}
+
+.names {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text);
+}
+
+.open {
+  margin-top: 6px;
+}

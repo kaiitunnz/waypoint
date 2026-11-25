@@ -9,32 +9,49 @@ const claudeTool = (sequence: number, name: string, input: Record<string, unknow
 
 const agent = (sequence: number, text: string) => ev(sequence, "agent_output", text);
 
+const stepOf = (event: EventRecord) => {
+  const step = describeStep(event);
+  return step && [step.verb, step.subject].filter(Boolean).join(" ");
+};
+
 describe("describeStep", () => {
   it("names shell commands, edits and reads in plain words", () => {
-    expect(describeStep(claudeTool(1, "Bash", { command: "npm run lint\nmore" }))).toBe("Running npm run lint");
-    expect(describeStep(claudeTool(2, "Edit", { file_path: "/a/backend/runtime.py" }))).toBe("Editing runtime.py");
-    expect(describeStep(claudeTool(3, "Read", { file_path: "/a/b.ts" }))).toBe("Reading b.ts");
-    expect(describeStep(claudeTool(4, "Grep", { pattern: "x" }))).toBe("Searching the code");
-    expect(describeStep(claudeTool(5, "Agent", {}))).toBe("Running a subagent");
+    expect(stepOf(claudeTool(1, "Bash", { command: "npm run lint\nmore" }))).toBe("Running npm run lint");
+    expect(stepOf(claudeTool(2, "Edit", { file_path: "/a/backend/runtime.py" }))).toBe("Editing runtime.py");
+    expect(stepOf(claudeTool(3, "Read", { file_path: "/a/b.ts" }))).toBe("Reading b.ts");
+    expect(stepOf(claudeTool(4, "Grep", { pattern: "x" }))).toBe("Searching the code");
+    expect(stepOf(claudeTool(5, "Agent", {}))).toBe("Running a subagent");
+  });
+
+  it("separates the verb from the command or file it acts on", () => {
+    expect(describeStep(claudeTool(1, "Bash", { command: "npm test" }))).toEqual({ verb: "Running", subject: "npm test" });
+    expect(describeStep(claudeTool(2, "Edit", { file_path: "/a/b.py" }))).toEqual({ verb: "Editing", subject: "b.py" });
+    expect(describeStep(claudeTool(3, "Grep", { pattern: "x" }))).toEqual({ verb: "Searching the code", subject: null });
   });
 
   it("unwraps a Codex shell command and truncates a long one", () => {
     const codex = ev(1, "tool_call", "", {
       item: { item: { command: '/bin/bash -lc "npm run lint -- --fix"' } },
     });
-    expect(describeStep(codex)).toBe("Running npm run lint -- --fix");
-    const long = describeStep(claudeTool(2, "Bash", { command: "x".repeat(200) })) ?? "";
+    expect(stepOf(codex)).toBe("Running npm run lint -- --fix");
+    const long = stepOf(claudeTool(2, "Bash", { command: "x".repeat(200) })) ?? "";
     expect(long.length).toBeLessThanOrEqual("Running ".length + 80);
     expect(long.endsWith("…")).toBe(true);
   });
 
   it("falls back to the tool name, or nothing", () => {
-    expect(describeStep(claudeTool(1, "mcp__thing", {}))).toBe("mcp__thing");
-    expect(describeStep(ev(1, "tool_call", ""))).toBeNull();
+    expect(stepOf(claudeTool(1, "mcp__thing", {}))).toBe("mcp__thing");
+    expect(stepOf(ev(1, "tool_call", ""))).toBeNull();
   });
 });
 
 describe("deriveActivity", () => {
+  it("carries the step only while it is the line", () => {
+    const events = [agent(1, "Looking at it."), claudeTool(2, "Bash", { command: "npm test" })];
+    expect(deriveActivity(events, null, "running").step).toEqual({ verb: "Running", subject: "npm test" });
+    expect(deriveActivity(events, null, "idle").step).toBeNull();
+  });
+
   it("shows the current step while working", () => {
     const events = [agent(1, "Looking at it."), claudeTool(2, "Bash", { command: "npm test" })];
     expect(deriveActivity(events, null, "running").line).toBe("Running npm test");
@@ -58,13 +75,17 @@ describe("deriveActivity", () => {
 
   it("cleans markdown and caps the line", () => {
     expect(deriveActivity([agent(1, "## `Done` - all green")], null, "idle").line).toBe("Done - all green");
+    expect(deriveActivity([agent(1, "Sent the [T4 readout](/home/x/report.md) and ![chart](a.png)")], null, "idle").line).toBe(
+      "Sent the T4 readout and chart",
+    );
+    expect(deriveActivity([agent(1, "See [the run](https://x.test/a_(b)) now")], null, "idle").line).toBe("See the run now");
     const long = deriveActivity([agent(1, "word ".repeat(80))], null, "idle").line ?? "";
     expect(long.length).toBeLessThanOrEqual(140);
     expect(long.endsWith("…")).toBe(true);
   });
 
   it("has no line without events", () => {
-    expect(deriveActivity([], null, "idle")).toEqual({ line: null, progress: null });
+    expect(deriveActivity([], null, "idle")).toEqual({ line: null, step: null, progress: null });
   });
 
   it("reports task progress until every task is done", () => {
@@ -108,8 +129,19 @@ describe("ActivityLoader", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch).toHaveBeenCalledTimes(1);
     await settle();
-    expect(onResult).toHaveBeenCalledWith("a", "result:a");
+    expect(onResult).toHaveBeenCalledWith("a", "result:a", "t1");
     loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch a session whose result it was given for the same event time", async () => {
+    const { loader, fetch } = make();
+    loader.seed("a", "t1");
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetch).not.toHaveBeenCalled();
+    loader.request("a", "t2");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +165,7 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(200);
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(onResult).toHaveBeenCalledWith("a", "ok");
+    expect(onResult).toHaveBeenCalledWith("a", "ok", "t1");
 
     loader.request("a", "t1");
     await vi.advanceTimersByTimeAsync(5000);

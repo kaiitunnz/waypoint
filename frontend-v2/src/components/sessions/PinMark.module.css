@@ -1,0 +1,6 @@
+.pin {
+  display: inline-flex;
+  flex: none;
+  color: var(--faint);
+  vertical-align: -2px;
+}

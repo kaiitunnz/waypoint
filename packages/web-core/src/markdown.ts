@@ -1,4 +1,4 @@
-import type { Root } from "hast";
+import type { Element, ElementContent, Root, RootContent } from "hast";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -55,3 +55,52 @@ export const COMMON_REHYPE_PLUGINS: PluggableList = [
   rehypePreserveMathFences,
   [rehypeKatex, { trust: false, maxExpand: 1000, errorColor: "var(--danger)" }],
 ];
+
+const INLINE_END_BLOCKS = new Set(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6"]);
+const NESTING_BLOCKS = new Set(["ul", "ol", "blockquote"]);
+const OPAQUE_BLOCKS = new Set(["pre", "table", "hr", "div", "details", "img"]);
+
+const reserveSpan = (): Element => ({
+  type: "element",
+  tagName: "span",
+  properties: { className: ["rsv"] },
+  children: [],
+});
+
+function lastMeaningful(node: Root | Element): RootContent | ElementContent | null {
+  for (let index = node.children.length - 1; index >= 0; index -= 1) {
+    const child = node.children[index];
+    if (child.type === "text" && !child.value.trim()) continue;
+    if (child.type === "comment") continue;
+    return child;
+  }
+  return null;
+}
+
+function appendReserve(node: Root | Element): boolean {
+  const last = lastMeaningful(node);
+  if (last?.type === "element") {
+    if (OPAQUE_BLOCKS.has(last.tagName)) return false;
+    if (INLINE_END_BLOCKS.has(last.tagName) || NESTING_BLOCKS.has(last.tagName)) return appendReserve(last);
+  }
+  // Text or an inline element ends the block.
+  if (node.type !== "element" || !INLINE_END_BLOCKS.has(node.tagName)) return false;
+  node.children.push(reserveSpan());
+  return true;
+}
+
+// Appends an inline spacer to the end of the last text block, so a message
+// bubble's absolutely positioned time and copy button have room on the last line.
+// When the message ends in a code block, table or rule there is no line to share,
+// and a short empty row is added for the meta to sit on.
+export function rehypeAppendReserve() {
+  return (tree: Root) => {
+    if (appendReserve(tree)) return;
+    tree.children.push({
+      type: "element",
+      tagName: "div",
+      properties: { className: ["rsv-row"] },
+      children: [],
+    });
+  };
+}

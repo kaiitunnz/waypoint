@@ -16,6 +16,10 @@
   color: var(--muted);
 }
 
+.action {
+  margin-top: 8px;
+}
+
 @media (min-width: 900px) {
   .empty {
     padding: 32px 36px;

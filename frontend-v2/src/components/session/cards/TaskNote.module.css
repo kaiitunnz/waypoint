@@ -1,0 +1,107 @@
+.note {
+  composes: card from "./RaisedCard.module.css";
+}
+
+.head {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.head > svg {
+  margin-top: 2px;
+  color: var(--faint);
+}
+
+.glyph {
+  flex: none;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.headline {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.status {
+  flex: none;
+  font-size: var(--f-stamp);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.ok {
+  color: var(--done);
+}
+
+.danger {
+  color: var(--error);
+}
+
+.warn {
+  color: color-mix(in srgb, var(--warn) 80%, var(--text-strong));
+}
+
+.info {
+  color: var(--working);
+}
+
+.time {
+  composes: time from "./RaisedCard.module.css";
+  flex: none;
+  font-weight: 400;
+}
+
+.teaser {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.result {
+  composes: block from "./FoldedText.module.css";
+  color: var(--text);
+}
+
+.text {
+  color: var(--text);
+}
+
+.caption {
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: var(--f-stamp);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The header is a button only when the note opens. */
+.tap {
+  composes: hit from "../../../styles/hit.module.css";
+}

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { FileIcon, formatBytes, typeTag } from "@/components/AttachmentTray";
+import { formatFileSize } from "@waypoint/web-core/attachments";
+import { FileIcon, typeTag } from "@/components/AttachmentTray";
 import {
   attachmentUrl,
   deleteAllAttachments,
@@ -100,7 +101,7 @@ export function SessionFilesPanel({
   const summary =
     items === null
       ? "Loading…"
-      : `${items.length} file${items.length === 1 ? "" : "s"} · ${formatBytes(total)}`;
+      : `${items.length} file${items.length === 1 ? "" : "s"} · ${formatFileSize(total)}`;
 
   return createPortal(
     <div
@@ -201,7 +202,7 @@ export function SessionFilesPanel({
                       </>
                     ) : null}
                     {typeTag(it.filename, it.kind === "image")} ·{" "}
-                    {formatBytes(it.size)} ·{" "}
+                    {formatFileSize(it.size)} ·{" "}
                     {formatRelativeTime(
                       new Date(it.uploaded_at * 1000).toISOString(),
                     )}

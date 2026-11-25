@@ -19,11 +19,34 @@ export interface ToolPair {
   sequence: number;
 }
 
-export type TranscriptItem =
+export type LeafItem =
   | { kind: "single"; event: EventRecord }
-  | { kind: "pair"; event: EventRecord; pair: ToolPair }
-  | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] }
-  | { kind: "notification_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
+  | { kind: "pair"; event: EventRecord; pair: ToolPair };
+
+export type TranscriptItem =
+  | LeafItem
+  | { kind: "tool_run"; items: LeafItem[] }
+  | { kind: "notification_run"; items: LeafItem[] };
+
+// The event that stands for a leaf item: a pair's call, else its result.
+export function primaryEvent(item: LeafItem): EventRecord {
+  return item.kind === "pair" ? (item.pair.call ?? item.pair.result ?? item.event) : item.event;
+}
+
+// A stable React key for an entry: it survives later events being appended and
+// streamed deltas being merged in (a merged event keeps its first id, not its sequence).
+export function itemKey(item: TranscriptItem): string {
+  switch (item.kind) {
+    case "single":
+      return item.event.id === undefined ? `seq-${item.event.sequence}` : `event-${item.event.id}`;
+    case "pair":
+      return `pair-${item.pair.itemId}`;
+    default: {
+      const first = item.items[0];
+      return `${item.kind}-${first ? itemKey(first) : "empty"}`;
+    }
+  }
+}
 
 export function minRawSequence(events: EventRecord[]): number | null {
   let min: number | null = null;
@@ -203,7 +226,7 @@ function planDecisionItemId(event: EventRecord): string | null {
 }
 
 export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
-  const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
+  const result: LeafItem[] = [];
   const pairIndex = new Map<string, number>();
   for (const event of events) {
     if (event.kind !== "tool_call" && event.kind !== "tool_result") {
@@ -252,7 +275,7 @@ export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   //                  join the active run (rendered as quiet separators when
   //                  expanded), or fall through as standalone if no run is
   //                  active yet.
-  function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "notification" | "absorbed" {
+  function classifyItem(item: LeafItem): "content" | "tool" | "notification" | "absorbed" {
     if (item.kind === "pair") {
       const { call, result } = item.pair;
       const isSpecial = (e: EventRecord | null) =>
@@ -288,7 +311,7 @@ export function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   let run:
     | {
         kind: "tool" | "notification";
-        items: Extract<TranscriptItem, { kind: "single" | "pair" }>[];
+        items: LeafItem[];
       }
     | null = null;
   const flush = () => {

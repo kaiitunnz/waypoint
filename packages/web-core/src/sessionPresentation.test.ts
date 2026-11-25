@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentLabel,
   agentModelLabel,
   formatSessionTime,
   isUnread,
+  isWorkingStatus,
   lampWord,
   sessionLamp,
+  sessionStanding,
   shortModelLabel,
 } from "./sessionPresentation";
 import type { SessionRecord } from "./types";
@@ -72,6 +75,30 @@ describe("sessionLamp", () => {
   });
 });
 
+describe("isWorkingStatus", () => {
+  it("is true while the agent runs or starts", () => {
+    expect(["running", "starting"].map((status) => isWorkingStatus(status as SessionRecord["status"]))).toEqual([true, true]);
+    expect(["idle", "waiting_input", "exited"].some((status) => isWorkingStatus(status as SessionRecord["status"]))).toBe(false);
+    expect(isWorkingStatus(null)).toBe(false);
+    expect(isWorkingStatus(undefined)).toBe(false);
+  });
+});
+
+describe("sessionStanding", () => {
+  it("names the lamp once the socket is open", () => {
+    expect(sessionStanding(session({ status: "running" }), false, "open")).toEqual({ lamp: "working", word: "Working" });
+    expect(sessionStanding(session({ status: "running" }), true, "open")).toEqual({ lamp: "needs", word: "Needs you" });
+  });
+
+  it("names the connection while the socket is not open", () => {
+    expect(sessionStanding(session({ status: "running" }), false, "reconnecting")).toEqual({
+      lamp: "working",
+      word: "Reconnecting",
+    });
+    expect(sessionStanding(session(), false, "connecting").word).toBe("Connecting");
+  });
+});
+
 describe("agentModelLabel", () => {
   it("reads the resolved model, a Claude alias or a bare id", () => {
     expect(shortModelLabel(session({ resolved_model: "claude-opus-4-8", model: "opus[1m]" }))).toBe("Opus 4.8");
@@ -79,6 +106,10 @@ describe("agentModelLabel", () => {
     expect(shortModelLabel(session({ model: "google/gemini-3.1-pro-preview" }))).toBe("gemini-3.1-pro-preview");
     expect(shortModelLabel(session({ model: "gpt-6.2-sol" }))).toBe("gpt-6.2-sol");
     expect(shortModelLabel(session())).toBeNull();
+  });
+
+  it("names the agent alone", () => {
+    expect(agentLabel(session({ model: "sonnet" }))).toBe("Claude Code");
   });
 
   it("joins the agent and the model", () => {

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { ActionChip, ActionChipLink } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
@@ -12,6 +13,7 @@ import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Fi
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
+import { InlineCode } from "@/components/ui/InlineCode";
 import { List, ListRow } from "@/components/ui/List";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { Meter } from "@/components/ui/Meter";
@@ -37,6 +39,8 @@ export function Gallery() {
   const trigger = useRef<HTMLButtonElement>(null);
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
+  const [density, setDensity] = useState("summary");
+  const [folded, setFolded] = useState(true);
   const [on, setOn] = useState(true);
   const [picked, setPicked] = useState("Lock around release");
 
@@ -99,7 +103,18 @@ export function Gallery() {
           ]}
         />
         <SegmentedControl
+          label="Density"
+          size="sm"
+          value={density}
+          onChange={setDensity}
+          segments={[
+            { value: "summary", label: "Summary" },
+            { value: "full", label: "Full" },
+          ]}
+        />
+        <SegmentedControl
           label="View"
+          size="icon"
           value={view}
           onChange={setView}
           segments={[
@@ -107,6 +122,23 @@ export function Gallery() {
             { value: "terminal", label: <Icon name="ssh" size={18} />, ariaLabel: "Terminal" },
           ]}
         />
+      </div>
+
+      <SectionHeading title="Actions in content" />
+      <div className={styles.row}>
+        <ActionChip icon="chevron-up">Load older messages</ActionChip>
+        <ActionChip icon={folded ? "chevron-down" : "chevron-up"} aria-expanded={!folded} onClick={() => setFolded(!folded)}>
+          {folded ? "Show all 63 lines" : "Show less"}
+        </ActionChip>
+        <ActionChip icon="refresh" disabled>
+          Retry
+        </ActionChip>
+        <ActionChipLink href="/gallery" icon="chevron-right">
+          Open files
+        </ActionChipLink>
+        <span>
+          Running <InlineCode>npm run lint</InlineCode>
+        </span>
       </div>
 
       <SectionHeading title="Toggle, lamps, badges" />
@@ -137,7 +169,7 @@ export function Gallery() {
       <SectionHeading title="List rows" count={4} action="See all" />
       <List>
         <ListRow lamp="needs" title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
-        <ListRow lamp="idle" title="Paper figures" compact pinned trailing="Yesterday" />
+        <ListRow lamp="idle" title="Paper figures" compact trailing="Yesterday" />
         <ListRow
           lamp="working"
           title="Heatmap keyboard access"
@@ -149,6 +181,7 @@ export function Gallery() {
               label="Row actions"
               title="Heatmap keyboard access"
               subtitle="Claude Code, Opus 4.8"
+              header={<SegmentedControl label="Density" value={density} onChange={setDensity} segments={[{ value: "summary", label: "Summary" }, { value: "full", label: "Full" }]} />}
               items={[
                 { id: "pin", label: "Pin" },
                 { id: "terminate", label: "Terminate…", tone: "danger" },

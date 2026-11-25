@@ -102,7 +102,7 @@ export function SessionScreen({ id }: { id: string }) {
       onAction={onAction}
     />
   ) : null;
-  const title = session?.title ?? "";
+  const title = session?.title || "Session";
 
   const body = loadFailed ? (
     <EmptyState
@@ -144,7 +144,7 @@ export function SessionScreen({ id }: { id: string }) {
                 overflow={overflow}
               />
             ) : (
-              <SessionBar title={title} standing={standing} agent={agent} othersNeedYou={othersNeedYou} onTitle={switcher.open} switcher={viewSwitch} overflow={overflow} />
+              <SessionBar title={title} standing={standing} agent={agent} othersNeedYou={othersNeedYou} onTitle={switcher.open} view={viewSwitch} overflow={overflow} />
             )}
             {body}
             <SessionFooter />

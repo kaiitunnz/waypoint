@@ -5,7 +5,6 @@ import { EmptyState } from "@/components/ui/EmptyState";
 
 interface EmptyTranscriptProps {
   status: SessionStatus | null;
-  // Events Summary left out.
   hiddenCount: number;
   onShowAll: () => void;
 }

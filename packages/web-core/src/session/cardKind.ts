@@ -34,7 +34,7 @@ export type CardKind =
   | "heuristic"
   | "none";
 
-// The card an event renders as. An unrecognised event kind is "heuristic".
+// An unrecognised event kind is "heuristic".
 export function cardKindOf(event: EventRecord): CardKind {
   switch (event.kind) {
     case "user_input":
@@ -67,7 +67,6 @@ export function cardKindOf(event: EventRecord): CardKind {
   }
 }
 
-// The card a paired tool call and result renders as.
 export function pairCardKindOf({ call, result }: ToolPair): CardKind {
   if (call && parseAskUserQuestion(call)) return "ask_question";
   const first = call ?? result;

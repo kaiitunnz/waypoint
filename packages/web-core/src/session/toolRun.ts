@@ -245,7 +245,6 @@ export interface CallRow {
   deletions: number | null;
   status: "pending" | "done" | "failed";
   durationMs: number | null;
-  // A command's whole output.
   output: string | null;
   diff: EventDiffPreview | null;
 }
@@ -295,7 +294,6 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
   }
 }
 
-// One compact row of an expanded run.
 export function describeCall(child: LeafItem, cwd?: string | null): CallRow | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;

@@ -24,7 +24,6 @@ interface MenuButtonProps {
   items: MenuButtonItem[];
   onSelect: (id: string) => void;
   size?: "md" | "sm";
-  // A control above the items, such as a setting that belongs to the screen.
   header?: ReactNode;
 }
 

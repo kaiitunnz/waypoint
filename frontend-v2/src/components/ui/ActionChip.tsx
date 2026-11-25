@@ -27,7 +27,6 @@ export function ActionChip({
   );
 }
 
-// The same chip for an action that navigates.
 export function ActionChipLink({ href, icon, children }: ChipContent & { href: string }) {
   return (
     <Link href={href} className={styles.chip}>

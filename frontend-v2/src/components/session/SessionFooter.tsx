@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import styles from "./SessionFooter.module.css";
 
 interface SessionFooterProps {
-  // Above the composer: what is waiting on the human.
   dock?: ReactNode;
   composer?: ReactNode;
 }

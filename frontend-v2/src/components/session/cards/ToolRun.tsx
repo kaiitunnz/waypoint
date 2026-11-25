@@ -17,7 +17,6 @@ import styles from "./ToolRun.module.css";
 
 interface ToolRunProps {
   items: LeafItem[];
-  // The session is working and this is its last run.
   working: boolean;
 }
 

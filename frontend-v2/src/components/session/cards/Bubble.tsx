@@ -18,7 +18,6 @@ interface BubbleProps {
   // What the copy button copies, when it differs from `text`.
   copy?: string;
   attachments?: AttachmentSpec[];
-  // A body other than markdown.
   children?: ReactNode;
 }
 

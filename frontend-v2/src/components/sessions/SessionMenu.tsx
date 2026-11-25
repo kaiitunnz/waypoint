@@ -14,7 +14,6 @@ interface SessionMenuProps {
   subtitle: string;
   onAction: (action: SessionAction, session: SessionRecord) => void;
   size?: "md" | "sm";
-  // Shown above the actions.
   header?: ReactNode;
 }
 

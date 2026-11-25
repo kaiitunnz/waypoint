@@ -9,7 +9,6 @@ interface PathLabelProps {
   title?: string;
 }
 
-// A file path with its directory muted.
 export function PathLabel({ dir, base, className, title }: PathLabelProps) {
   return (
     <span className={cx(styles.path, className)} title={title}>

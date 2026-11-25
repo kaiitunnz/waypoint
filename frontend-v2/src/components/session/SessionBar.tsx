@@ -18,11 +18,11 @@ interface SessionBarProps {
   agent: string;
   othersNeedYou: number;
   onTitle: () => void;
-  switcher: ReactNode;
+  view: ReactNode;
   overflow: ReactNode;
 }
 
-export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, switcher, overflow }: SessionBarProps) {
+export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, view, overflow }: SessionBarProps) {
   return (
     <GlassBar>
       <Link
@@ -33,14 +33,14 @@ export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, swi
         <Icon name="chevron-left" size={22} />
         <Badge count={othersNeedYou} className={styles.badge} />
       </Link>
-      <button type="button" className={styles.title} onClick={onTitle} aria-label={`${title || "Session"}. Switch session`}>
+      <button type="button" className={styles.title} onClick={onTitle} aria-label={`${title}. Switch session`}>
         <span className={styles.nameRow}>
-          <span className={styles.name}>{title || "Session"}</span>
+          <span className={styles.name}>{title}</span>
           <Icon name="chevron-down" size={14} strokeWidth={2} />
         </span>
         {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
       </button>
-      {switcher}
+      {view}
       {overflow}
     </GlassBar>
   );

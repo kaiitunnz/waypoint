@@ -74,16 +74,8 @@
 }
 
 .out {
-  margin: 0;
-  padding: 6px 9px;
-  border-radius: 8px;
-  background: var(--sunken);
-  font-family: var(--mono);
-  font-size: var(--f-diff);
-  line-height: var(--lh-diff);
+  composes: block from "./FoldedText.module.css";
   color: var(--muted);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 .todos {

@@ -76,7 +76,8 @@ describe("trapTabFocus", () => {
   // A root holding, in document order, a tab stop, a non-stop, the other tab stop
   // and a trailing non-stop; `focused` picks what holds focus.
   type Spot = "root" | "first" | "middle" | "last" | "trailing" | "outside";
-  function press(focused: Spot, shiftKey: boolean, fromNonStops?: boolean) {
+  let selector = "";
+  function press(focused: Spot, shiftKey: boolean, tabStopsOnly?: boolean) {
     const order: Spot[] = ["root", "first", "middle", "last", "trailing"];
     const moved: string[] = [];
     const nodes = new Map(
@@ -92,14 +93,17 @@ describe("trapTabFocus", () => {
     );
     const root = {
       ...nodes.get("root")!,
-      querySelectorAll: () => [nodes.get("first")!, nodes.get("last")!],
+      querySelectorAll: (query: string) => {
+        selector = query;
+        return [nodes.get("first")!, nodes.get("last")!];
+      },
       contains: (node: { spot: Spot }) => node.spot !== "outside",
     };
     const active = focused === "root" ? root : (nodes.get(focused) ?? { spot: "outside" });
     vi.stubGlobal("document", { activeElement: active });
     vi.stubGlobal("Node", { DOCUMENT_POSITION_PRECEDING: 2, DOCUMENT_POSITION_FOLLOWING: 4 });
     const event = { ...key({ key: "Tab", shiftKey }), preventDefault: vi.fn() };
-    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { fromNonStops });
+    trapTabFocus(event as unknown as KeyboardEvent, root as unknown as HTMLElement, { tabStopsOnly });
     return moved;
   }
 
@@ -113,6 +117,17 @@ describe("trapTabFocus", () => {
     expect(press("first", true)).toEqual(["last"]);
     expect(press("outside", false)).toEqual(["first"]);
     expect(press("first", false)).toEqual([]);
+  });
+
+  it("leaves a control out of the tab order out of the cycle, only when asked to", () => {
+    press("first", false);
+    expect(selector).toBe(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    press("first", false, true);
+    const parts = selector.split(", ");
+    expect(parts).toHaveLength(6);
+    expect(parts.every((part) => part.endsWith(':not([tabindex="-1"])'))).toBe(true);
   });
 
   it("wraps from a non-stop with nothing beyond it, only when asked to", () => {

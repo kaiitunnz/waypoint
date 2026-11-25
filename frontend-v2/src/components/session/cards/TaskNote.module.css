@@ -47,7 +47,7 @@
 }
 
 .warn {
-  color: var(--warn);
+  color: color-mix(in srgb, var(--warn) 80%, var(--text-strong));
 }
 
 .info {

@@ -66,6 +66,10 @@
   align-items: flex-start;
 }
 
+.open {
+  padding-top: 2px;
+}
+
 .open::before,
 .open::after {
   margin-top: 8px;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { rankSessionsForSwitcher, stepSelection } from "./switcher";
+import { mergeSwitcherEntries, rankSessionsForSwitcher, stepSelection } from "./switcher";
 import type { SessionRecord } from "./types";
 
 const session = (id: string, title: string, overrides: Partial<SessionRecord> = {}): SessionRecord =>
@@ -59,6 +59,18 @@ describe("rankSessionsForSwitcher", () => {
 
   it("returns nothing when nothing matches", () => {
     expect(rankSessionsForSwitcher(sessions, asks, "zzzzzz")).toEqual([]);
+  });
+});
+
+describe("mergeSwitcherEntries", () => {
+  it("appends server history as Exited, without repeating a session the list holds", () => {
+    const ranked = rankSessionsForSwitcher([session("a", "Alpha")], new Set(), "");
+    const merged = mergeSwitcherEntries(ranked, [session("a", "Alpha"), session("b", "Older")]);
+    expect(merged.map((e) => [e.session.id, e.section])).toEqual([
+      ["a", "live"],
+      ["b", "exited"],
+    ]);
+    expect(merged[1].positions).toEqual([]);
   });
 });
 

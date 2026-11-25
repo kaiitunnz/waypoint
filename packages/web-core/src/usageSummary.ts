@@ -1,6 +1,3 @@
-// Glanceable summaries of the data behind the home instrument tiles: account
-// rate-limit windows, provider health, queued schedules and board channels.
-
 import { humaniseBackend, type BackendCatalog } from "./backends";
 import { isRecurring } from "./recurrence";
 import type {
@@ -44,7 +41,6 @@ export function bucketPeak(bucket: WindowSource): number {
   return Math.max(0, ...bucket.snapshot.windows.map((window) => rateLimitWindowPercent(window) ?? 0));
 }
 
-// Worst-first, so the account nearest its limit reads first.
 export function orderBucketsWorstFirst(buckets: UsageDashboardBucket[]): UsageDashboardBucket[] {
   return [...buckets].sort((a, b) => bucketPeak(b) - bucketPeak(a));
 }
@@ -93,7 +89,6 @@ function readWindow(kind: UsageWindowKind, window: UsageWindow | null, now: numb
   };
 }
 
-// An account's 5-hour and weekly windows, whichever it reports.
 export function accountWindows(bucket: UsageDashboardBucket, now: number = Date.now()): WindowReading[] {
   return (["5h", "weekly"] as const)
     .map((kind) => readWindow(kind, findUsageWindow(bucket, kind), now))
@@ -137,7 +132,6 @@ const PROVIDER_ERROR_LABELS: Record<string, ProviderHealthLine> = {
   no_matching_usage: { text: "no usage", danger: false },
 };
 
-// The worst coarse error a provider reported, as one compact line.
 export function providerHealthLine(status: ProviderUsageStatus): ProviderHealthLine | null {
   const errors = Object.entries(status.error_counts).filter(([, count]) => count > 0);
   if (errors.length === 0) return null;
@@ -212,7 +206,6 @@ export function formatShortWhen(iso: string | null | undefined, now: number = Da
 
 export interface ScheduledSummary {
   queued: number;
-  // The soonest first.
   items: ScheduledItem[];
   overflow: number;
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { stripRecommendedSuffix, type PromptPick } from "@waypoint/web-core/pendingAskActions";
+import { stripRecommendedSuffix, visibleOptions, type PromptPick } from "@waypoint/web-core/pendingAskActions";
 import type { PendingAskPrompt } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
@@ -22,12 +22,9 @@ interface PromptFieldProps {
   showQuestion?: boolean;
   onOption: (label: string) => void;
   onCustom: (text: string) => void;
-  // Called when the Other field is submitted with Enter.
   onSubmitCustom?: () => void;
 }
 
-// One question's answers: option chips (the agent's recommended one marked), and
-// an "Other…" field for a free-text answer.
 export function PromptField({
   prompt,
   pick,
@@ -41,14 +38,7 @@ export function PromptField({
   const [expanded, setExpanded] = useState(false);
   // With no options to choose, the free-text field is the whole question.
   const [otherOpen, setOtherOpen] = useState(pick.other !== "" || prompt.options.length === 0);
-  // A multi-select prompt shows every option, so a choice is never out of sight.
-  const limited =
-    limit !== undefined && !prompt.multi_select && !expanded && prompt.options.length > limit;
-  // Keep the recommended answer in view when the list is cut.
-  const ordered = limited
-    ? [...prompt.options].sort((a, b) => Number(b.recommended) - Number(a.recommended))
-    : prompt.options;
-  const shown = limited ? ordered.slice(0, limit) : ordered;
+  const { shown, limited } = visibleOptions(prompt, limit, expanded);
 
   return (
     <div className={styles.field}>

@@ -209,10 +209,17 @@ export function readToolName(event: EventRecord): string | null {
   return null;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+export const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
+
+export function toolFilePath(input: Record<string, unknown> | null | undefined): string | null {
+  const path = input?.file_path ?? input?.path ?? input?.notebook_path;
+  return typeof path === "string" && path ? path : null;
 }
 
 export type PlanDecision = "accept" | "acceptForSession" | "decline" | "cancel";

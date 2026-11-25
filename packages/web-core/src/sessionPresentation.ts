@@ -2,18 +2,14 @@ import { humaniseBackend, displayAgentFor, type BackendCatalog } from "./backend
 import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDisplay";
 import type { SessionRecord } from "./types";
 
-// One attention vocabulary across the home, the switcher and the rail: lamps
-// differ by shape and fill as well as hue.
+// Lamps differ by shape and fill as well as hue.
 export type SessionLamp = "needs" | "working" | "done" | "error" | "idle" | "exited";
 
-// A session is unread while its latest activity is newer than the read marker
-// (docs/session_read_marker.md). A missing marker reads as read.
 export function isUnread(session: SessionRecord): boolean {
   if (!session.read_at) return false;
   return Date.parse(session.last_event_at) > Date.parse(session.read_at);
 }
 
-// `hasAsk`: the session has a pending question, approval or plan.
 export function sessionLamp(session: SessionRecord, hasAsk: boolean): SessionLamp {
   if (session.status === "exited") return "exited";
   if (hasAsk || session.status === "waiting_input") return "needs";

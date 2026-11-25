@@ -24,7 +24,6 @@ interface ListRowProps {
   // One-line row (idle, pinned, exited): no status line.
   compact?: boolean;
   dimmed?: boolean;
-  // Opens a route; the row is then a link.
   href?: string;
   onClick?: () => void;
   // A control beside the row, such as its menu button; it is not part of the row's own link.

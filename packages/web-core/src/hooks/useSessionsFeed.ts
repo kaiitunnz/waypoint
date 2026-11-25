@@ -33,21 +33,17 @@ export interface SessionsFeed {
   // Bumped on every `board_update` frame, so board views can refetch.
   boardRevision: number;
   connection: ConnectionState;
-  // Fold a server-returned record into the live list right away, ahead of the
-  // next list frame.
+  // Applied to the live list ahead of the next list frame.
   upsertSession: (session: SessionRecord) => void;
-  // Drop sessions from the live list right away (after a delete).
   removeSessions: (shouldRemove: (session: SessionRecord) => boolean) => void;
-  // Replace a session in place (optimistic edits and their rollback).
   patchSession: (id: string, change: (session: SessionRecord) => SessionRecord) => void;
 }
 
 const NO_SCHEDULES: ScheduledSession[] = [];
 const NO_MESSAGE_SCHEDULES: MessageSchedule[] = [];
 
-// Everything the sessions socket carries, over one connection: the live session
-// list, pending asks (docs/pending_asks.md), schedules and board activity.
-// Seeds from REST, follows `/ws/sessions` frames and reconnects with backoff.
+// Everything `/ws/sessions` carries, over one connection: the live session list,
+// pending asks (docs/pending_asks.md), schedules and board activity.
 // `onAuthFailure` must be stable: a new one restarts the socket.
 export function useSessionsFeed(
   host: string,

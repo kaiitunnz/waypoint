@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
+import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { PendingAsk } from "@waypoint/web-core/types";
 
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -15,13 +16,12 @@ interface AskCardProps {
   children: ReactNode;
 }
 
-// The attention tier: only an item waiting on the human takes this surface.
 export function AskCard({ ask, agent, now, children }: AskCardProps) {
   return (
     <section className={styles.card} aria-label={`${ask.session_title}: ${ask.title}`}>
       <div className={styles.source}>
         <StatusLamp state="needs" size="sm" flat />
-        <Link href={`/session/${encodeURIComponent(ask.session_id)}`} className={styles.name}>
+        <Link href={sessionHref(ask.session_id)} className={styles.name}>
           {ask.session_title}
         </Link>
         <span className={styles.agent}>{agent}</span>

@@ -140,6 +140,21 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("stops asking after repeated failures until the session changes", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("forbidden");
+    });
+    const loader = new ActivityLoader<string>({ fetch, onResult: vi.fn(), settleMs: 100 });
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      loader.request("a", "t1");
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(fetch).toHaveBeenCalledTimes(3);
+    loader.request("a", "t2");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
   it("settles a change before fetching again", async () => {
     const { loader, fetch, settle } = make({ settleMs: 1000 });
     loader.request("a", "t1");

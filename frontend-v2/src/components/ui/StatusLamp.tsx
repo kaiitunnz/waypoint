@@ -1,9 +1,11 @@
+import type { SessionLamp } from "@waypoint/web-core/sessionPresentation";
+
 import { cx } from "@/lib/cx";
 
 import styles from "./StatusLamp.module.css";
 
 // Lamps differ by shape and fill as well as hue, so state survives colour blindness.
-export type LampState = "needs" | "working" | "done" | "error" | "idle" | "exited";
+export type LampState = SessionLamp;
 
 interface StatusLampProps {
   state: LampState;

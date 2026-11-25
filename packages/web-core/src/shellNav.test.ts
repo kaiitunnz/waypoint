@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeNavKey, formatBadgeCount, NAV_DESTINATIONS, showsTabBar } from "./shellNav";
+import { activeNavKey, formatBadgeCount, NAV_DESTINATIONS, sessionHref, showsTabBar } from "./shellNav";
 
 describe("activeNavKey", () => {
   it("maps each route to its destination", () => {
@@ -24,6 +24,13 @@ describe("activeNavKey", () => {
     for (const destination of NAV_DESTINATIONS) {
       expect(activeNavKey(destination.href)).toBe(destination.key);
     }
+  });
+});
+
+describe("sessionHref", () => {
+  it("encodes the id", () => {
+    expect(sessionHref("claude_code-1")).toBe("/session/claude_code-1");
+    expect(sessionHref("a/b c")).toBe("/session/a%2Fb%20c");
   });
 });
 

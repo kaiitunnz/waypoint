@@ -2,10 +2,9 @@ import { rankItems } from "./fuzzy";
 import { byRecency } from "./sessionHistory";
 import type { SessionRecord } from "./types";
 
-// The same order as the home: Needs you, Pinned, Live, Exited.
-export type SwitcherSection = "needs" | "pinned" | "live" | "exited";
+const SWITCHER_SECTIONS = ["needs", "pinned", "live", "exited"] as const;
 
-export const SWITCHER_SECTIONS: SwitcherSection[] = ["needs", "pinned", "live", "exited"];
+export type SwitcherSection = (typeof SWITCHER_SECTIONS)[number];
 
 export const SWITCHER_SECTION_LABELS: Record<SwitcherSection, string> = {
   needs: "Needs you",
@@ -50,7 +49,16 @@ export function rankSessionsForSwitcher(
   );
 }
 
-// The entry one step away, wrapping at both ends; null when there is none.
+// Server-paged history, already matched by the server, follows the ranked live
+// entries as Exited, minus sessions the list already holds.
+export function mergeSwitcherEntries(ranked: SwitcherEntry[], history: SessionRecord[]): SwitcherEntry[] {
+  const known = new Set(ranked.map((entry) => entry.session.id));
+  const older = history
+    .filter((session) => !known.has(session.id))
+    .map((session): SwitcherEntry => ({ session, section: "exited", positions: [] }));
+  return [...ranked, ...older];
+}
+
 export function stepSelection(index: number, step: 1 | -1, count: number): number | null {
   if (count === 0) return null;
   return (index + step + count) % count;

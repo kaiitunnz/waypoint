@@ -4,6 +4,7 @@ import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
+import { useDesktop } from "@/lib/layout";
 
 import { Icon } from "./Icon";
 import { IconButton } from "./IconButton";
@@ -14,13 +15,12 @@ interface DialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
-  // A line under the title, such as what the title names.
   subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
-  // A modal only: wide for a search palette.
+  // Modal only.
   size?: "md" | "lg";
 }
 
@@ -107,4 +107,10 @@ export function Sheet(props: DialogProps) {
 
 export function Modal(props: DialogProps) {
   return <Surface {...props} variant="modal" />;
+}
+
+// A modal on desktop, a sheet on mobile.
+export function Dialog(props: DialogProps) {
+  const desktop = useDesktop();
+  return desktop ? <Modal {...props} /> : <Sheet {...props} />;
 }

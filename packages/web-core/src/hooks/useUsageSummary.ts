@@ -3,17 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { fetchUsageDashboard, isAuthError, refreshUsageDashboard } from "../api";
-import type { ProviderUsageStatus, UsageDashboardBucket, UsageDashboardResponse } from "../types";
+import type { UsageDashboardBucket, UsageDashboardResponse } from "../types";
 
 export interface UsageSummaryState {
   // Null until the first fetch lands, and again when usage is unavailable.
   buckets: UsageDashboardBucket[] | null;
-  providers: ProviderUsageStatus[];
   refreshing: boolean;
   refresh: () => void;
 }
-
-const NO_PROVIDERS: ProviderUsageStatus[] = [];
 
 // One rate-limit snapshot per account from /api/usage, fetched once; no polling.
 // `onAuthFailure` must be stable.
@@ -52,7 +49,6 @@ export function useUsageSummary(host: string, token: string, onAuthFailure?: () 
 
   return {
     buckets: response?.buckets ?? null,
-    providers: response?.providers ?? NO_PROVIDERS,
     refreshing,
     refresh,
   };

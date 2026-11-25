@@ -24,7 +24,6 @@ export function useSwitcher(): SwitcherControls {
 // screen, and a screen's title can open it through `useSwitcher`.
 export function SwitcherProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const show = useCallback(() => setOpen(true), []);
   const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
@@ -37,7 +36,7 @@ export function SwitcherProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const controls = useMemo(() => ({ open: show }), [show]);
+  const controls = useMemo(() => ({ open: () => setOpen(true) }), []);
   return (
     <SwitcherContext.Provider value={controls}>
       {children}

@@ -3,16 +3,17 @@
 import { useState } from "react";
 
 import {
-  buildAnswer,
+  answerQuestion,
   emptyPicks,
   isAnswerable,
-  toggleOption,
+  showsSend,
+  tapOption,
   type PromptPick,
 } from "@waypoint/web-core/pendingAskActions";
 import type { PendingQuestionAsk } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
-import { Modal, Sheet } from "@/components/ui/Dialog";
+import { Dialog } from "@/components/ui/Dialog";
 import { useDesktop } from "@/lib/layout";
 
 import { AskCard } from "./AskCard";
@@ -27,16 +28,13 @@ interface QuestionAskProps {
   now: number;
 }
 
-// A question answered where it is listed. One single-select question sends on a
-// tap; a multi-select question, an Other answer, or several questions take a
-// Send button.
 export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
   const desktop = useDesktop();
   const prompts = ask.question.questions;
   const single = prompts.length === 1 ? prompts[0] : null;
   const [picks, setPicks] = useState<PromptPick[]>(() => emptyPicks(prompts));
   const [open, setOpen] = useState(false);
-  const { phase, send, busy } = useAskResponder(ask);
+  const { phase, send, busy } = useAskResponder();
   const actionable = ask.availability === "actionable";
   const disabled = busy || !actionable;
   const answerable = isAnswerable(prompts, picks);
@@ -45,24 +43,16 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
     setPicks((current) => current.map((pick, i) => (i === index ? change(pick) : pick)));
 
   async function submit(next: PromptPick[] = picks) {
-    if (!buildAnswer(prompts, next)) return;
-    if (await send({ kind: "answer", picks: next })) setOpen(false);
+    if (!isAnswerable(prompts, next)) return;
+    if (await send((host, token, retry) => answerQuestion(host, token, ask, next, retry))) setOpen(false);
   }
 
   function pickOption(index: number, label: string) {
-    const prompt = prompts[index];
-    // A lone single-select question has nothing left to ask once an option is chosen,
-    // so a tap always sends it, including a second tap after a failed send.
-    if (single && !prompt.multi_select) {
-      const chosen = { labels: [label], other: "" };
-      update(index, () => chosen);
-      void submit([chosen]);
-      return;
-    }
-    update(index, () => toggleOption(picks[index], label, prompt.multi_select));
+    const tapped = tapOption(prompts, picks, index, label);
+    setPicks(tapped.picks);
+    if (tapped.send) void submit(tapped.picks);
   }
 
-  const Surface = desktop ? Modal : Sheet;
   const headline = single ? single.question : ask.title;
 
   return (
@@ -79,7 +69,7 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
             onCustom={(text) => update(0, (pick) => ({ ...pick, other: text }))}
             onSubmitCustom={() => void submit()}
           />
-          {single.multi_select || picks[0].other.trim() ? (
+          {showsSend(single, picks[0]) ? (
             <div className={styles.actions}>
               <Button variant="primary" size="sm" disabled={disabled || !answerable} onClick={() => void submit()}>
                 Send
@@ -97,7 +87,7 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
       )}
       <AskStatus availability={ask.availability} phase={phase} />
       {single ? null : (
-        <Surface
+        <Dialog
           open={open}
           onClose={() => setOpen(false)}
           title={ask.title}
@@ -116,13 +106,13 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
                 pick={picks[index]}
                 disabled={disabled}
                 showQuestion
-                onOption={(label) => update(index, (pick) => toggleOption(pick, label, prompt.multi_select))}
+                onOption={(label) => setPicks(tapOption(prompts, picks, index, label).picks)}
                 onCustom={(text) => update(index, (pick) => ({ ...pick, other: text }))}
               />
             ))}
             <AskStatus availability={ask.availability} phase={phase} />
           </div>
-        </Surface>
+        </Dialog>
       )}
     </AskCard>
   );

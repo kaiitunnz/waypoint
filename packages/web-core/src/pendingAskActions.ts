@@ -1,28 +1,27 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
-import { normalizeToolName } from "./events";
+import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import type {
-  PendingAsk,
-  PendingAskApproval,
-  PendingAskPlan,
+  PendingApprovalAsk,
+  PendingAskOption,
   PendingAskPrompt,
+  PendingPlanAsk,
+  PendingQuestionAsk,
 } from "./types";
 
 // ─── Questions ───
 
-// The label an option shows: the agent's "(Recommended)" marker is carried by
-// the `recommended` flag instead.
+// The recommended flag carries the "(Recommended)" marker, so the label drops it.
 export function stripRecommendedSuffix(label: string): string {
   return label.replace(/\s*\(recommended\)\s*$/i, "").trim() || label;
 }
 
-// What the human picked for one prompt: option labels (verbatim) and an
-// optional free-text "Other" answer.
+// Labels are the options' own text, "(Recommended)" included.
 export interface PromptPick {
   labels: string[];
   other: string;
 }
 
-export const EMPTY_PICK: PromptPick = { labels: [], other: "" };
+const EMPTY_PICK: PromptPick = { labels: [], other: "" };
 
 export function emptyPicks(prompts: PendingAskPrompt[]): PromptPick[] {
   return prompts.map(() => EMPTY_PICK);
@@ -36,6 +35,38 @@ export function toggleOption(pick: PromptPick, label: string, multiSelect: boole
     return { ...pick, labels: has ? pick.labels.filter((item) => item !== label) : [...pick.labels, label] };
   }
   return { ...pick, labels: has ? [] : [label] };
+}
+
+// A lone single-select question is answered by tapping an option, so a tap
+// always sends it, a second tap after a failed send included.
+export function tapOption(
+  prompts: PendingAskPrompt[],
+  picks: PromptPick[],
+  index: number,
+  label: string,
+): { picks: PromptPick[]; send: boolean } {
+  const prompt = prompts[index];
+  const lone = prompts.length === 1 && !prompt.multi_select;
+  const next = lone ? { labels: [label], other: "" } : toggleOption(picks[index], label, prompt.multi_select);
+  return { picks: picks.map((pick, i) => (i === index ? next : pick)), send: lone };
+}
+
+// A lone prompt shows Send when an option tap does not send it.
+export function showsSend(prompt: PendingAskPrompt, pick: PromptPick): boolean {
+  return prompt.multi_select || pick.other.trim() !== "";
+}
+
+// A multi-select prompt shows every option; otherwise a cut list keeps the
+// recommended answer in view.
+export function visibleOptions(
+  prompt: PendingAskPrompt,
+  limit: number | undefined,
+  expanded: boolean,
+): { shown: PendingAskOption[]; limited: boolean } {
+  const limited = limit !== undefined && !prompt.multi_select && !expanded && prompt.options.length > limit;
+  if (!limited) return { shown: prompt.options, limited };
+  const ordered = [...prompt.options].sort((a, b) => Number(b.recommended) - Number(a.recommended));
+  return { shown: ordered.slice(0, limit), limited };
 }
 
 function pickValues(pick: PromptPick): string[] {
@@ -69,14 +100,13 @@ export function buildAnswer(prompts: PendingAskPrompt[], picks: PromptPick[]): B
 
 // ─── Approvals and plans ───
 
-// The id sent to the approve endpoint: `accept` and `decline` are understood by
-// every agent; the session-scoped allow is the agent's own advertised id.
-export type AskDecision = string;
+export type DecisionKind = "approve" | "session" | "decline";
 
 export interface DecisionAction {
-  decision: AskDecision;
+  // The id sent to the approve endpoint.
+  decision: string;
   label: string;
-  tone: "primary" | "quiet" | "danger";
+  kind: DecisionKind;
 }
 
 // "acceptForSession", "allow_for_session", "approve-for-this-session": matched by
@@ -87,40 +117,28 @@ export function sessionScopedAllow(decisions: readonly string[]): string | undef
   return decisions.find((decision) => SESSION_ALLOW.test(decision.toLowerCase().replace(/[^a-z]/g, "")));
 }
 
-// Approve and Decline always show (every agent maps them to allow and deny); the
-// session-scoped allow shows whenever the agent lists one.
+// Every agent maps accept and decline to allow and deny; the session-scoped
+// allow shows whenever the agent lists one.
 function decisionActions(decisions: readonly string[]): DecisionAction[] {
   const forSession = sessionScopedAllow(decisions);
   return [
-    { decision: "accept", label: "Approve", tone: "primary" },
-    ...(forSession ? [{ decision: forSession, label: "For this session", tone: "quiet" as const }] : []),
-    { decision: "decline", label: "Decline", tone: "danger" },
+    { decision: "accept", label: "Approve", kind: "approve" },
+    ...(forSession ? [{ decision: forSession, label: "For this session", kind: "session" as const }] : []),
+    { decision: "decline", label: "Decline", kind: "decline" },
   ];
 }
 
-export const approvalActions = (approval: PendingAskApproval) => decisionActions(approval.decisions);
-export const planActions = (plan: PendingAskPlan) => decisionActions(plan.decisions);
+export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
 
-export type ApprovalPreview =
-  | { kind: "command"; text: string }
-  | { kind: "path"; tool: string; path: string }
-  | { kind: "none" };
-
-const FILE_EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
-
-// What an approval is about, from its tool input: the shell command, or the file
-// being edited.
-export function approvalPreview(approval: PendingAskApproval): ApprovalPreview {
+// What a tool approval is about: the shell command, or the file being edited.
+function approvalPreview(approval: PendingApprovalAsk["approval"]): ApprovalPreview {
   const tool = normalizeToolName(approval.tool_name);
   const input = approval.tool_input;
   if (tool === "Bash" && typeof input?.command === "string" && input.command) {
     return { kind: "command", text: input.command };
   }
-  if (tool && FILE_EDIT_TOOLS.has(tool)) {
-    const path = input?.file_path ?? input?.path ?? input?.notebook_path;
-    if (typeof path === "string" && path) return { kind: "path", tool, path };
-  }
-  return { kind: "none" };
+  const path = tool && FILE_EDIT_TOOLS.has(tool) ? toolFilePath(input) : null;
+  return path ? { kind: "path", path } : null;
 }
 
 // The first lines of a plan with the markdown marks off, for a card.
@@ -131,6 +149,32 @@ export function planPreview(text: string, maxLines = 3): string {
     .filter(Boolean)
     .slice(0, maxLines)
     .join("\n");
+}
+
+export interface DecisionView {
+  actions: DecisionAction[];
+  supportsNote: boolean;
+  preview: ApprovalPreview;
+  // The full plan, for a plan approval.
+  planBody: string | null;
+}
+
+export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): DecisionView {
+  if (ask.kind === "approval") {
+    const { approval } = ask;
+    return {
+      actions: decisionActions(approval.decisions),
+      supportsNote: approval.supports_note,
+      preview: approvalPreview(approval),
+      planBody: null,
+    };
+  }
+  return {
+    actions: decisionActions(ask.plan.decisions),
+    supportsNote: ask.plan.supports_note,
+    preview: null,
+    planBody: ask.plan.text,
+  };
 }
 
 // ─── Responding ───
@@ -171,42 +215,41 @@ export async function retryWhileNotReady<T>(run: () => Promise<T>, options: Retr
   }
 }
 
-export type AskResponse =
-  | { kind: "answer"; picks: PromptPick[] }
-  | { kind: "decision"; decision: AskDecision; note?: string };
-
-// Sends a response through the ask's own per-session endpoint: an answer to
-// answer-question, an approval to approve, a plan to approve or approve-plan as
-// its `resolve_via` names.
-export function respondToAsk(
+export function answerQuestion(
   host: string,
   token: string,
-  ask: PendingAsk,
-  response: AskResponse,
+  ask: PendingQuestionAsk,
+  picks: PromptPick[],
   retry: RetryOptions = {},
 ): Promise<void> {
+  const built = buildAnswer(ask.question.questions, picks);
+  if (!built) return Promise.reject(new Error("nothing to send"));
+  return retryWhileNotReady(
+    () => answerAskQuestion(host, token, ask.session_id, built.text, ask.question.tool_use_id, built.answers),
+    retry,
+  );
+}
+
+// A tool approval goes to approve; a plan to approve or approve-plan as its
+// `resolve_via` names.
+export function decideAsk(
+  host: string,
+  token: string,
+  ask: PendingApprovalAsk | PendingPlanAsk,
+  decision: string,
+  note: string | undefined,
+  retry: RetryOptions = {},
+): Promise<void> {
+  const text = note?.trim() || undefined;
   const send = async () => {
-    if (response.kind === "answer") {
-      if (ask.kind !== "question") throw new Error("not a question");
-      const built = buildAnswer(ask.question.questions, response.picks);
-      if (!built) throw new Error("nothing to send");
-      await answerAskQuestion(host, token, ask.session_id, built.text, ask.question.tool_use_id, built.answers);
-      return;
-    }
-    const note = response.note?.trim() || undefined;
     if (ask.kind === "approval") {
-      await approveSession(host, token, ask.session_id, response.decision, note, ask.approval.approval_id);
-    } else if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
-      // approve-plan takes its own fixed vocabulary; the session-scoped allow is its acceptForSession.
-      const decision =
-        response.decision === "accept" || response.decision === "decline"
-          ? response.decision
-          : "acceptForSession";
-      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, decision, note);
-    } else if (ask.kind === "plan_approval") {
-      await approveSession(host, token, ask.session_id, response.decision, note, ask.plan.plan_id);
+      await approveSession(host, token, ask.session_id, decision, text, ask.approval.approval_id);
+    } else if (ask.plan.resolve_via === "approve_plan") {
+      // approve-plan has its own fixed vocabulary; the session-scoped allow is its acceptForSession.
+      const planDecision = decision === "accept" || decision === "decline" ? decision : "acceptForSession";
+      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, planDecision, text);
     } else {
-      throw new Error("not an approval");
+      await approveSession(host, token, ask.session_id, decision, text, ask.plan.plan_id);
     }
   };
   return retryWhileNotReady(send, retry);

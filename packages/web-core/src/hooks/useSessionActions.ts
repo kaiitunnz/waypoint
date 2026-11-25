@@ -10,7 +10,7 @@ import {
   setSessionPinned,
   setSessionTitle,
 } from "../api";
-import { isExited, renameTarget, revertTitle, withTitle } from "../sessionActions";
+import { revertTitle } from "../sessionActions";
 import {
   applySessionState,
   forgetHistorySession,
@@ -21,7 +21,7 @@ import type { SessionsFeed } from "./useSessionsFeed";
 
 export interface SessionActions {
   setPinned: (sessionId: string, pinned: boolean) => Promise<void>;
-  rename: (session: SessionRecord, draft: string) => Promise<void>;
+  rename: (session: SessionRecord, title: string) => Promise<void>;
   terminate: (sessionId: string) => Promise<void>;
   remove: (sessionId: string) => Promise<void>;
   removeExited: () => Promise<void>;
@@ -60,10 +60,8 @@ export function useSessionActions(
           upsertSession(updated);
           applySessionState(host, updated);
         }, "failed to update pin"),
-      rename: (session, draft) => {
-        const title = renameTarget(session, draft);
-        if (title === null) return Promise.resolve();
-        patchSession(session.id, (current) => withTitle(current, title));
+      rename: (session, title) => {
+        patchSession(session.id, (current) => ({ ...current, title }));
         return attempt(
           async () => {
             const updated = await setSessionTitle(host, token, session.id, title);
@@ -87,7 +85,7 @@ export function useSessionActions(
           await deleteExitedSessions(host, token);
           // The server deletes in the background; each deletion's list frame moves
           // the counts, and this drops the rows already on screen.
-          removeSessions(isExited);
+          removeSessions((session) => session.status === "exited");
           invalidateSessionHistory(host);
         }, "failed to delete exited sessions"),
     };

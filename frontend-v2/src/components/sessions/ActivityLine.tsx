@@ -5,7 +5,6 @@ import { Meter } from "@/components/ui/Meter";
 import styles from "./ActivityLine.module.css";
 
 interface ActivityLineProps {
-  // The fallback while a session's activity has not loaded, or has none.
   fallback: string;
   activity?: SessionActivity;
   // A finished turn reads brighter than a running step.

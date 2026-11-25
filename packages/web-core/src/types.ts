@@ -200,9 +200,7 @@ export interface SessionRecord {
   raw_log_path: string;
   structured_log_path: string;
   pinned_at?: string | null;
-  // Activity at or before this instant has been seen; the session is unread
-  // while last_event_at is later (docs/session_read_marker.md). Absent or null
-  // reads as read.
+  // Unread while last_event_at is later; absent or null reads as read.
   read_at?: string | null;
   focus?: boolean;
   // waiting_input because a finished turn left a question open, with nothing

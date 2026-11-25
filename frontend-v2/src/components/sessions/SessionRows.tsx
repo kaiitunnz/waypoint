@@ -2,7 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { SessionActivity } from "@waypoint/web-core/activity";
-import { formatSessionTime, lampWord, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { formatSessionTime, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ListRow } from "@/components/ui/List";
@@ -14,32 +15,33 @@ import styles from "./SessionRows.module.css";
 interface RowProps {
   session: SessionRecord;
   lamp: SessionLamp;
+  // The lamp's spoken name.
+  word: string;
   now: number;
-  // The agent and model; desktop rows and tiles show it, mobile rows keep it for the menu.
   agent: string;
   menu: ReactNode;
 }
 
-const href = (session: SessionRecord) => `/session/${encodeURIComponent(session.id)}`;
+const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
-// A running or idle session: its name, then one line of what it is doing.
 export function LiveRow({
   session,
   lamp,
+  word,
   now,
   menu,
   activity,
-}: RowProps & { activity?: SessionActivity }) {
+}: Omit<RowProps, "agent"> & { activity?: SessionActivity }) {
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={lampWord(lamp, session.status)}
+      lampLabel={word}
       title={session.title}
       status={
         <ActivityLine
-          fallback={lampWord(lamp, session.status)}
+          fallback={word}
           activity={activity}
           bright={lamp === "done"}
         />
@@ -50,10 +52,11 @@ export function LiveRow({
   );
 }
 
-// One line: a pinned session, or any session in a result list.
+// One line: a pinned or exited session.
 export function CompactRow({
   session,
   lamp,
+  word,
   now,
   agent,
   menu,
@@ -64,7 +67,7 @@ export function CompactRow({
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={lampWord(lamp, session.status)}
+      lampLabel={word}
       title={session.title}
       compact
       pinned={pinned}
@@ -84,10 +87,10 @@ export function CompactRow({
   );
 }
 
-// A live session on the desktop home: a quiet raised tile, no border.
 export function LiveTile({
   session,
   lamp,
+  word,
   now,
   agent,
   menu,
@@ -101,9 +104,9 @@ export function LiveTile({
           <span className={styles.time}>{time(session, now)}</span>
         </span>
         <span className={styles.step}>
-          <StatusLamp state={lamp} size="sm" label={lampWord(lamp, session.status)} />
+          <StatusLamp state={lamp} size="sm" label={word} />
           <ActivityLine
-            fallback={lampWord(lamp, session.status)}
+            fallback={word}
             activity={activity}
             bright={lamp === "done"}
             progressStyle="long"
@@ -116,14 +119,13 @@ export function LiveTile({
   );
 }
 
-// A search result: the name, then where the session runs.
-export function ResultRow({ session, lamp, now, agent, menu }: RowProps) {
+export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
   const where = [agent, session.repo_name, session.branch].filter(Boolean).join(", ");
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={lampWord(lamp, session.status)}
+      lampLabel={word}
       title={session.title}
       dimmed={lamp === "exited"}
       status={where}

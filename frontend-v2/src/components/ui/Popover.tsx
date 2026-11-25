@@ -16,7 +16,6 @@ interface PopoverProps {
   triggerRef: RefObject<HTMLElement | null>;
   label: string;
   width?: number;
-  // Which edge of the trigger the panel lines up with.
   align?: "left" | "right";
   children: ReactNode;
 }

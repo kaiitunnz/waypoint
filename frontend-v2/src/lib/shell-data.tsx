@@ -1,32 +1,35 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
 import { useLaunchTargets, type LaunchTargetsState } from "@waypoint/web-core/hooks/useLaunchTargets";
-import { useSessionActions, type SessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionsFeed, type SessionsFeed } from "@waypoint/web-core/hooks/useSessionsFeed";
 import type { ConnectionState } from "@waypoint/web-core/session/connection";
 import { pendingAsksCount } from "@waypoint/web-core/pendingAsks";
+import { visibleSessions } from "@waypoint/web-core/sessionSections";
+import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { handleAuthFailure } from "@/lib/auth";
-import { useToast } from "@/components/ui/Toast";
 
 export interface ShellData {
   host: string;
   token: string;
   // Pending asks plus open inbox items: everything waiting on the human.
   needsYou: number;
+  inboxCount: number;
   connection: ConnectionState;
   launchTargets: LaunchTargetsState;
 }
 
 const ShellDataContext = createContext<ShellData | null>(null);
 
-// The sessions feed and the row actions live apart from ShellData: the feed
-// changes on every session event, and the navigation only needs the counts.
+// The feed changes on every session event, so it lives apart from ShellData, which
+// the navigation reads for its counts.
 export interface SessionsData extends SessionsFeed {
-  actions: SessionActions;
+  // The sessions the home and the switcher list.
+  visible: SessionRecord[];
+  askSessionIds: ReadonlySet<string>;
 }
 
 const SessionsDataContext = createContext<SessionsData | null>(null);
@@ -60,17 +63,21 @@ export function ShellDataProvider({
   const inboxCount = useInboxCount(host, token, handleAuthFailure);
   const feed = useSessionsFeed(host, token, handleAuthFailure);
   const launchTargets = useLaunchTargets(host, token, handleAuthFailure);
-  const { toast } = useToast();
-  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
-  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
   const needsYou = pendingAsksCount(feed.pendingAsks) + inboxCount;
   const { connection } = feed;
 
   const shell = useMemo(
-    () => ({ host, token, needsYou, connection, launchTargets }),
-    [host, token, needsYou, connection, launchTargets],
+    () => ({ host, token, needsYou, inboxCount, connection, launchTargets }),
+    [host, token, needsYou, inboxCount, connection, launchTargets],
   );
-  const sessions = useMemo(() => ({ ...feed, actions }), [feed, actions]);
+  const sessions = useMemo<SessionsData>(
+    () => ({
+      ...feed,
+      visible: visibleSessions(feed.sessions ?? []),
+      askSessionIds: new Set((feed.pendingAsks?.items ?? []).map((ask) => ask.session_id)),
+    }),
+    [feed],
+  );
   return (
     <ShellDataContext.Provider value={shell}>
       <SessionsDataContext.Provider value={sessions}>{children}</SessionsDataContext.Provider>

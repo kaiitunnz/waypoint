@@ -26,8 +26,7 @@ interface MenuButtonProps {
   size?: "md" | "sm";
 }
 
-// A "more" button whose actions live in a menu: a popover on desktop, a sheet on
-// mobile. Destructive actions are items here, never inline buttons.
+// Destructive actions are menu items, never inline buttons.
 export function MenuButton({ label, title, subtitle, items, onSelect, size = "md" }: MenuButtonProps) {
   const desktop = useDesktop();
   const [open, setOpen] = useState(false);

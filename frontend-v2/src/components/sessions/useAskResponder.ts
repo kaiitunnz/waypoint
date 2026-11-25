@@ -3,13 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
-import {
-  isAgentNotReady,
-  NOT_READY_MESSAGE,
-  respondToAsk,
-  type AskResponse,
-} from "@waypoint/web-core/pendingAskActions";
-import type { PendingAsk } from "@waypoint/web-core/types";
+import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint/web-core/pendingAskActions";
 
 import { handleAuthFailure } from "@/lib/auth";
 import { useShellData } from "@/lib/shell-data";
@@ -21,13 +15,12 @@ export type AskPhase =
   | { state: "sent" }
   | { state: "error"; message: string };
 
-// A sent ask leaves the feed when the agent closes it; if it is still listed
+// An answered ask leaves the feed when the agent closes it; if it is still listed
 // after this, the card takes input again.
 const SENT_HOLD_MS = 10_000;
 
-// Sends the human's response to one ask. Nothing the human typed is cleared here:
-// a failure keeps the card as it was, with the reason.
-export function useAskResponder(ask: PendingAsk) {
+// Runs one response to an ask. A failure keeps the card as it was, with the reason.
+export function useAskResponder() {
   const { host, token } = useShellData();
   const [phase, setPhase] = useState<AskPhase>({ state: "idle" });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,12 +33,10 @@ export function useAskResponder(ask: PendingAsk) {
   );
 
   const send = useCallback(
-    async (response: AskResponse): Promise<boolean> => {
+    async (run: (host: string, token: string, retry: RetryOptions) => Promise<void>): Promise<boolean> => {
       setPhase({ state: "sending", retrying: false });
       try {
-        await respondToAsk(host, token, ask, response, {
-          onRetry: () => setPhase({ state: "sending", retrying: true }),
-        });
+        await run(host, token, { onRetry: () => setPhase({ state: "sending", retrying: true }) });
         setPhase({ state: "sent" });
         timer.current = setTimeout(() => setPhase({ state: "idle" }), SENT_HOLD_MS);
         return true;
@@ -65,7 +56,7 @@ export function useAskResponder(ask: PendingAsk) {
         return false;
       }
     },
-    [host, token, ask],
+    [host, token],
   );
 
   const busy = phase.state === "sending" || phase.state === "sent";

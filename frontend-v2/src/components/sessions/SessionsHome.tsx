@@ -5,22 +5,19 @@ import { useCallback, useMemo, useState } from "react";
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useSessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
-import { agentModelLabel, sessionLamp } from "@waypoint/web-core/sessionPresentation";
-import {
-  HOME_HIDDEN_SOURCES,
-  buildSections,
-  searchSessions,
-  visibleSessions,
-} from "@waypoint/web-core/sessionSections";
+import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { HOME_HIDDEN_SOURCES, buildSections, searchSessions } from "@waypoint/web-core/sessionSections";
 import { useMergedSessionPage, useSessionHistory } from "@waypoint/web-core/sessionHistory";
 import { summarizeScheduled } from "@waypoint/web-core/usageSummary";
 import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useDesktop } from "@/lib/layout";
@@ -30,7 +27,8 @@ import { ExitedGroup } from "./ExitedGroup";
 import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { NewSessionDialog } from "./NewSessionDialog";
-import { RenameDialog } from "./RenameDialog";
+import { SearchResults } from "./SearchResults";
+import { SessionDialogs, type HomeDialog } from "./SessionDialogs";
 import { SessionMenu, type SessionAction } from "./SessionMenu";
 import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
 import { useSwitcher } from "./SwitcherProvider";
@@ -39,16 +37,14 @@ import styles from "./SessionsHome.module.css";
 
 const PAGE_SIZE = 10;
 
-type Dialog =
-  | { kind: "rename"; session: SessionRecord }
-  | { kind: "terminate"; session: SessionRecord }
-  | { kind: "delete"; session: SessionRecord }
-  | { kind: "deleteExited" };
-
 export function SessionsHome() {
   const desktop = useDesktop();
-  const { host, token, needsYou } = useShellData();
+  const { host, token, needsYou, inboxCount } = useShellData();
   const feed = useSessionsData();
+  const { visible: sessions, askSessionIds } = feed;
+  const { toast } = useToast();
+  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
+  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
   const now = useNow();
@@ -60,12 +56,10 @@ export function SessionsHome() {
   const [exitedOpen, setExitedOpen] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [newOpen, setNewOpen] = useState(false);
-  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [dialog, setDialog] = useState<HomeDialog | null>(null);
   const searching = query.trim() !== "";
 
   const asks = useMemo(() => feed.pendingAsks?.items ?? [], [feed.pendingAsks]);
-  const askSessionIds = useMemo(() => new Set(asks.map((ask) => ask.session_id)), [asks]);
-  const sessions = useMemo(() => visibleSessions(feed.sessions ?? []), [feed.sessions]);
   const sections = useMemo(() => buildSections(sessions, askSessionIds), [sessions, askSessionIds]);
   const found = useMemo(() => searchSessions(sessions, query), [sessions, query]);
   const activities = useSessionActivity(host, token, sections.live, handleAuthFailure);
@@ -103,9 +97,10 @@ export function SessionsHome() {
   );
 
   const agentFor = useCallback((session: SessionRecord) => agentModelLabel(session, catalog), [catalog]);
-  const agentLabel = useCallback((ask: PendingAsk) => humaniseBackend(ask.session_backend, catalog), [catalog]);
-  const lampFor = (session: SessionRecord) => sessionLamp(session, askSessionIds.has(session.id));
-  const { actions } = feed;
+  const agentLabel = useCallback(
+    (ask: PendingAsk) => humaniseBackend(ask.session_backend, catalog),
+    [catalog],
+  );
 
   function onAction(action: SessionAction, session: SessionRecord) {
     if (action === "pin" || action === "unpin") void actions.setPinned(session.id, action === "pin");
@@ -120,13 +115,17 @@ export function SessionsHome() {
       size={desktop ? "sm" : "md"}
     />
   );
-  const rowProps = (session: SessionRecord) => ({
-    session,
-    lamp: lampFor(session),
-    now,
-    agent: agentFor(session),
-    menu: menuFor(session),
-  });
+  const rowProps = (session: SessionRecord) => {
+    const lamp = sessionLamp(session, askSessionIds.has(session.id));
+    return {
+      session,
+      lamp,
+      word: lampWord(lamp, session.status),
+      now,
+      agent: agentFor(session),
+      menu: menuFor(session),
+    };
+  };
   const compactRow = (session: SessionRecord, pinned = false) => (
     <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} pinned={pinned} />
   );
@@ -136,42 +135,23 @@ export function SessionsHome() {
   const shownCount = listed.items.length;
 
   const results = searching ? (
-    <section>
-      <SectionHeading title="Results" count={listed.total} dense={!desktop} />
-      {listed.items.length > 0 ? (
-        <div className={styles.inset}>
-          <List>
-            {listed.items.map((session) => (
-              <ResultRow key={session.id} {...rowProps(session)} />
-            ))}
-          </List>
-        </div>
-      ) : history.pending || listed.filling ? (
-        <p className={styles.status}>Searching older sessions…</p>
-      ) : history.error ? null : (
-        <p className={styles.status}>No sessions match.</p>
-      )}
-      {history.error ? (
-        <p className={styles.status}>
-          Older sessions failed to load.{" "}
-          <button type="button" className={styles.retry} onClick={history.retry}>
-            Retry
-          </button>
-        </p>
-      ) : null}
-      {shownCount < listed.total ? (
-        <div className={styles.more}>
-          <button type="button" className={styles.retry} onClick={() => setLimit((value) => value + PAGE_SIZE)}>
-            Show more
-          </button>
-        </div>
-      ) : null}
-    </section>
+    <SearchResults
+      total={listed.total}
+      rows={listed.items.map((session) => (
+        <ResultRow key={session.id} {...rowProps(session)} />
+      ))}
+      searching={history.pending || listed.filling}
+      failed={Boolean(history.error)}
+      onRetry={history.retry}
+      hasMore={shownCount < listed.total}
+      onMore={() => setLimit((value) => value + PAGE_SIZE)}
+      desktop={desktop}
+    />
   ) : null;
 
   const sectionsView = searching ? null : (
     <>
-      <NeedsYouSection asks={asks} waiting={needsYou} desktop={desktop} agentLabel={agentLabel} now={now} />
+      <NeedsYouSection asks={asks} inbox={inboxCount} desktop={desktop} agentLabel={agentLabel} now={now} />
       {sections.pinned.length > 0 ? (
         <section>
           <SectionHeading title="Pinned" count={sections.pinned.length} dense={!desktop} />
@@ -216,9 +196,7 @@ export function SessionsHome() {
           </div>
         </ExitedGroup>
       ) : null}
-      {empty ? (
-        <p className={styles.status}>No sessions yet. Start one with New.</p>
-      ) : null}
+      {empty ? <EmptyState title="No sessions yet" detail="Start one with New." /> : null}
     </>
   );
 
@@ -274,37 +252,7 @@ export function SessionsHome() {
       ) : null}
 
       <NewSessionDialog open={newOpen} onClose={() => setNewOpen(false)} />
-      {dialog?.kind === "rename" ? (
-        <RenameDialog
-          session={dialog.session}
-          onSave={(title) => void actions.rename(dialog.session, title)}
-          onClose={() => setDialog(null)}
-        />
-      ) : null}
-      <ConfirmDialog
-        open={dialog?.kind === "terminate"}
-        title="Terminate session"
-        detail="Any running command will be stopped."
-        confirmLabel="Terminate"
-        onConfirm={() => (dialog?.kind === "terminate" ? actions.terminate(dialog.session.id) : undefined)}
-        onClose={() => setDialog(null)}
-      />
-      <ConfirmDialog
-        open={dialog?.kind === "delete"}
-        title="Delete session"
-        detail="The session and its transcript are deleted. This cannot be undone."
-        confirmLabel="Delete"
-        onConfirm={() => (dialog?.kind === "delete" ? actions.remove(dialog.session.id) : undefined)}
-        onClose={() => setDialog(null)}
-      />
-      <ConfirmDialog
-        open={dialog?.kind === "deleteExited"}
-        title="Delete exited sessions"
-        detail="Every exited session and its transcript is deleted. This cannot be undone."
-        confirmLabel="Delete exited"
-        onConfirm={() => actions.removeExited()}
-        onClose={() => setDialog(null)}
-      />
+      <SessionDialogs dialog={dialog} actions={actions} onClose={() => setDialog(null)} />
     </div>
   );
 }

@@ -14,8 +14,6 @@ interface SessionMenuProps {
   size?: "md" | "sm";
 }
 
-// Row actions: pin, rename, then the destructive one for the session's state.
-// Settings joins when the settings screen exists.
 export function SessionMenu({ session, subtitle, onAction, size }: SessionMenuProps) {
   const items: MenuButtonItem[] = [
     { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },

@@ -1,4 +1,4 @@
-import { normalizeToolName, readToolName } from "./events";
+import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
 
@@ -9,16 +9,8 @@ export interface SessionActivity {
   progress: { done: number; total: number } | null;
 }
 
-export const NO_ACTIVITY: SessionActivity = { line: null, progress: null };
-
 const MAX_LINE = 140;
 const MAX_COMMAND = 80;
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
@@ -34,20 +26,17 @@ function unwrapShell(command: string): string {
   return wrapped ? wrapped[2] : command;
 }
 
-// The tool's input, wherever the backend put it: Claude carries it under the
-// payload's `input`, Codex under the started item.
+// Claude carries a tool's input under the payload's `input`, Codex under the started item.
 function toolInput(event: EventRecord): Record<string, unknown> {
   const metadata = event.metadata ?? {};
-  const payload = record(metadata.payload);
-  const item = record(record(metadata.item)?.item) ?? record(payload?.item);
-  return record(metadata.tool_input) ?? record(payload?.input) ?? item ?? {};
+  const payload = asRecord(metadata.payload);
+  const item = asRecord(asRecord(metadata.item)?.item) ?? asRecord(payload?.item);
+  return asRecord(metadata.tool_input) ?? asRecord(payload?.input) ?? item ?? {};
 }
 
 function baseName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
-
-const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 
 // A tool call in plain words: "Running npm run lint", "Editing runtime.py".
 export function describeStep(event: EventRecord): string | null {
@@ -55,9 +44,9 @@ export function describeStep(event: EventRecord): string | null {
   const input = toolInput(event);
   const command = typeof input.command === "string" ? firstLine(unwrapShell(input.command)) : "";
   if (command) return `Running ${truncate(command, MAX_COMMAND)}`;
-  const path = input.file_path ?? input.path ?? input.notebook_path;
-  const file = typeof path === "string" && path ? baseName(path) : "";
-  if (tool && EDIT_TOOLS.has(tool)) return file ? `Editing ${file}` : "Editing files";
+  const path = toolFilePath(input);
+  const file = path ? baseName(path) : "";
+  if (tool && FILE_EDIT_TOOLS.has(tool)) return file ? `Editing ${file}` : "Editing files";
   if (tool === "Read") return file ? `Reading ${file}` : "Reading files";
   if (tool === "Grep" || tool === "Glob") return "Searching the code";
   if (tool === "Task" || tool === "Agent") return "Running a subagent";
@@ -66,7 +55,6 @@ export function describeStep(event: EventRecord): string | null {
   return tool;
 }
 
-// Markdown noise out, first line only.
 function plainLine(text: string): string {
   const line = firstLine(text)
     .replace(/^[#>\-*\s]+/, "")
@@ -76,8 +64,7 @@ function plainLine(text: string): string {
   return truncate(line, MAX_LINE);
 }
 
-// The last reply: the trailing run of agent_output events (streamed deltas
-// arrive as many events).
+// Streamed deltas arrive as many agent_output events; the trailing run is the reply.
 function lastAgentMessage(events: EventRecord[]): string | null {
   let end = events.length - 1;
   while (end >= 0 && events[end].kind !== "agent_output") end -= 1;
@@ -131,16 +118,17 @@ interface PendingFetch {
   timer: ReturnType<typeof setTimeout>;
 }
 
+const MAX_FAILURES = 3;
+
 // Fetches a session's latest activity when its `last_event_at` moves: at once the
-// first time, then settled and capped, a few at a time. A failed fetch is not
-// retried until the session changes again.
+// first time, then settled and capped, a few at a time. A failed fetch is asked
+// for again on the next request, after a settle, up to MAX_FAILURES times per change.
 export class ActivityLoader<T> {
   private readonly settleMs: number;
   private readonly maxWaitMs: number;
   private readonly concurrency: number;
   private readonly loaded = new Map<string, string>();
-  // Sessions whose last fetch failed: asked for again on the next request, after a settle.
-  private readonly failed = new Set<string>();
+  private readonly failures = new Map<string, { lastEventAt: string; count: number }>();
   private readonly pending = new Map<string, PendingFetch>();
   private readonly inflight = new Map<string, { lastEventAt: string; controller: AbortController }>();
   private readonly queue: string[] = [];
@@ -157,12 +145,14 @@ export class ActivityLoader<T> {
     if (this.loaded.get(id) === lastEventAt || this.inflight.get(id)?.lastEventAt === lastEventAt) {
       return;
     }
+    const failure = this.failures.get(id);
+    if (failure?.lastEventAt === lastEventAt && failure.count >= MAX_FAILURES) return;
     const held = this.pending.get(id);
     if (held) {
       if (held.lastEventAt === lastEventAt) return;
       clearTimeout(held.timer);
     }
-    const first = !this.loaded.has(id) && !this.failed.has(id) && !this.inflight.has(id) && !held;
+    const first = !this.loaded.has(id) && !this.failures.has(id) && !this.inflight.has(id) && !held;
     const firstAt = held?.firstAt ?? now;
     const delay = first ? 0 : Math.max(0, Math.min(this.settleMs, firstAt + this.maxWaitMs - now));
     this.pending.set(id, {
@@ -179,7 +169,7 @@ export class ActivityLoader<T> {
     this.inflight.get(id)?.controller.abort();
     this.inflight.delete(id);
     this.loaded.delete(id);
-    this.failed.delete(id);
+    this.failures.delete(id);
     const queued = this.queue.indexOf(id);
     if (queued !== -1) this.queue.splice(queued, 1);
   }
@@ -215,9 +205,11 @@ export class ActivityLoader<T> {
           if (controller.signal.aborted) return;
           if (succeeded) {
             this.loaded.set(id, held.lastEventAt);
-            this.failed.delete(id);
+            this.failures.delete(id);
           } else {
-            this.failed.add(id);
+            const previous = this.failures.get(id);
+            const count = previous?.lastEventAt === held.lastEventAt ? previous.count + 1 : 1;
+            this.failures.set(id, { lastEventAt: held.lastEventAt, count });
           }
           this.inflight.delete(id);
           this.pump();

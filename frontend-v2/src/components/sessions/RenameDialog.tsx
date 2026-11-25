@@ -6,9 +6,8 @@ import { renameTarget } from "@waypoint/web-core/sessionActions";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
-import { Modal, Sheet } from "@/components/ui/Dialog";
+import { Dialog } from "@/components/ui/Dialog";
 import { Field, TextInput } from "@/components/ui/Field";
-import { useDesktop } from "@/lib/layout";
 
 interface RenameDialogProps {
   session: SessionRecord;
@@ -17,7 +16,6 @@ interface RenameDialogProps {
 }
 
 export function RenameDialog({ session, onSave, onClose }: RenameDialogProps) {
-  const Surface = useDesktop() ? Modal : Sheet;
   const [draft, setDraft] = useState(session.title);
   const title = renameTarget(session, draft);
 
@@ -28,7 +26,7 @@ export function RenameDialog({ session, onSave, onClose }: RenameDialogProps) {
   }
 
   return (
-    <Surface
+    <Dialog
       open
       onClose={onClose}
       title="Rename session"
@@ -58,6 +56,6 @@ export function RenameDialog({ session, onSave, onClose }: RenameDialogProps) {
           />
         </Field>
       </form>
-    </Surface>
+    </Dialog>
   );
 }

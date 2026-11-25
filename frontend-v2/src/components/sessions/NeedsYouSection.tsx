@@ -14,22 +14,19 @@ import { DecisionAsk } from "./DecisionAsk";
 import { QuestionAsk } from "./QuestionAsk";
 import styles from "./NeedsYouSection.module.css";
 
-// The cards one screen shows before the rest fold behind "Show more".
 const MOBILE_LIMIT = 3;
 
 interface NeedsYouSectionProps {
   asks: PendingAsk[];
-  // Everything waiting on the human, inbox items included.
-  waiting: number;
+  // Open inbox items, which have no card here.
+  inbox: number;
   desktop: boolean;
   agentLabel: (ask: PendingAsk) => string;
   now: number;
 }
 
-export function NeedsYouSection({ asks, waiting, desktop, agentLabel, now }: NeedsYouSectionProps) {
+export function NeedsYouSection({ asks, inbox, desktop, agentLabel, now }: NeedsYouSectionProps) {
   const [all, setAll] = useState(false);
-  // Inbox items have no card here; one row opens the inbox until the queue lists them.
-  const inbox = Math.max(0, waiting - asks.length);
   if (asks.length === 0 && inbox === 0) return null;
   const folded = !desktop && !all && asks.length > MOBILE_LIMIT;
   const shown = folded ? asks.slice(0, MOBILE_LIMIT) : asks;

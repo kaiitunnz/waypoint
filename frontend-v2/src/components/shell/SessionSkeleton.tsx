@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { sessionHref } from "@waypoint/web-core/shellNav";
+
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
@@ -12,7 +14,7 @@ export function SessionSkeleton({ id, view, subject }: { id: string; view: "chat
   return (
     <div className={styles.screen}>
       <GlassBar>
-        <Link href={view === "files" ? `/session/${encodeURIComponent(id)}` : "/"} className={styles.back} aria-label="Back">
+        <Link href={view === "files" ? sessionHref(id) : "/"} className={styles.back} aria-label="Back">
           <Icon name="chevron-left" size={22} />
         </Link>
         <div className={styles.titles}>

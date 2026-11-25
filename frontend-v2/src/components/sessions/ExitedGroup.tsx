@@ -15,18 +15,15 @@ interface ExitedGroupProps {
   open: boolean;
   onToggle: () => void;
   onDeleteExited: () => void;
-  // The expanded rows, then what the history is doing.
   children: ReactNode;
   loading: boolean;
   failed: boolean;
   onRetry: () => void;
-  // More exited sessions than the rows shown.
   hasMore: boolean;
   onMore: () => void;
 }
 
-// Exited sessions: one collapsed line with the count. Opened, it lists the exited
-// history; "Delete exited" lives in its menu, never as a loud button.
+// "Delete exited" lives in the menu, never as a loud button.
 export function ExitedGroup({
   count,
   desktop,
@@ -50,15 +47,13 @@ export function ExitedGroup({
             <Icon name="chevron-right" size={16} strokeWidth={2} />
           </span>
         </button>
-        {count > 0 ? (
-          <MenuButton
-            label="Exited sessions actions"
-            title="Exited sessions"
-            subtitle={`${count} exited`}
-            items={[{ id: "delete", label: "Delete exited…", tone: "danger" }]}
-            onSelect={onDeleteExited}
-          />
-        ) : null}
+        <MenuButton
+          label="Exited sessions actions"
+          title="Exited sessions"
+          subtitle={`${count} exited`}
+          items={[{ id: "delete", label: "Delete exited…", tone: "danger" }]}
+          onSelect={onDeleteExited}
+        />
       </div>
       {open ? (
         <div>

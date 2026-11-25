@@ -17,7 +17,6 @@ export function isComposingKeyEvent(event: KeyboardEventLike): boolean {
   return event.isComposing === true || event.nativeEvent?.isComposing === true;
 }
 
-// Cmd/Ctrl+K, the session switcher.
 export function isSwitcherShortcut(
   event: KeyboardEventLike & Pick<globalThis.KeyboardEvent, "altKey">,
 ): boolean {

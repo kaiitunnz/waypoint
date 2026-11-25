@@ -8,7 +8,6 @@ interface SectionHeadingProps {
   title: string;
   count?: number;
   action?: ReactNode;
-  // Tighter spacing, for a screen with little height to spare.
   dense?: boolean;
 }
 

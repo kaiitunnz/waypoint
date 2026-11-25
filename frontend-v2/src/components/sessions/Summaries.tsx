@@ -19,10 +19,8 @@ import styles from "./Summaries.module.css";
 
 const METER_TONE: Record<UsageTone, MeterTone> = { good: "calm", warn: "warn", danger: "danger" };
 
-// Limit pressure reads warn orange, never brass.
 const pressure = (tone: UsageTone) => (tone === "good" ? "" : styles.hot);
 
-// The most constrained window, in one line, linking to usage.
 export function LimitsStrip({ usage, now }: { usage: UsageSummaryState; now: number }) {
   const top = usage.buckets ? mostConstrainedWindow(usage.buckets, now) : null;
   if (!top) return null;
@@ -40,7 +38,6 @@ export function LimitsStrip({ usage, now }: { usage: UsageSummaryState; now: num
   );
 }
 
-// Every account's windows, worst first.
 export function LimitsReadout({ usage, now }: { usage: UsageSummaryState; now: number }) {
   const buckets = usage.buckets ? orderBucketsWorstFirst(usage.buckets) : [];
   return (
@@ -68,7 +65,7 @@ export function LimitsReadout({ usage, now }: { usage: UsageSummaryState; now: n
           {buckets.map((bucket) => {
             const windows = accountWindows(bucket, now);
             return (
-              <div key={bucket.account_key} className={styles.account}>
+              <div key={bucket.account_key}>
                 {windows.map((reading, index) => (
                   <div key={reading.kind} className={styles.window}>
                     <span className={index === 0 ? styles.accountName : styles.reset}>

@@ -8,8 +8,6 @@ interface AskStatusProps {
   phase: AskPhase;
 }
 
-// One quiet line under an ask: why it cannot be answered yet, that it is going,
-// or why it failed.
 export function AskStatus({ availability, phase }: AskStatusProps) {
   if (phase.state === "error") {
     return (

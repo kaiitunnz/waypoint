@@ -11,17 +11,18 @@ import {
   lampWord,
   sessionLamp,
 } from "@waypoint/web-core/sessionPresentation";
-import { HOME_HIDDEN_SOURCES, visibleSessions } from "@waypoint/web-core/sessionSections";
+import { HOME_HIDDEN_SOURCES } from "@waypoint/web-core/sessionSections";
+import { sessionHref } from "@waypoint/web-core/shellNav";
 import { useSessionHistory } from "@waypoint/web-core/sessionHistory";
 import {
+  mergeSwitcherEntries,
   rankSessionsForSwitcher,
   stepSelection,
   SWITCHER_SECTION_LABELS,
-  type SwitcherEntry,
 } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
-import { Modal, Sheet } from "@/components/ui/Dialog";
+import { Dialog } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
@@ -46,8 +47,7 @@ function highlighted(title: string, positions: number[]): ReactNode {
   );
 }
 
-// Jump to a session: fuzzy over name, repo, branch and directory, grouped like the
-// home (Needs you, Pinned, Live, Exited). Exited sessions page in from the server.
+// Exited sessions page in from the server.
 export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const desktop = useDesktop();
@@ -60,10 +60,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const list = useRef<HTMLUListElement>(null);
   const listId = useId();
 
-  const askSessionIds = useMemo(
-    () => new Set((feed.pendingAsks?.items ?? []).map((ask) => ask.session_id)),
-    [feed.pendingAsks],
-  );
+  const { visible, askSessionIds } = feed;
   const history = useSessionHistory({
     host,
     token,
@@ -75,15 +72,10 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     onAuthError: handleAuthFailure,
   });
 
-  const entries = useMemo<SwitcherEntry[]>(() => {
-    const ranked = rankSessionsForSwitcher(visibleSessions(feed.sessions ?? []), askSessionIds, query);
-    const known = new Set(ranked.map((entry) => entry.session.id));
-    // The server already matched these, so they are not filtered again.
-    const older = history.items
-      .filter((session) => !known.has(session.id))
-      .map((session): SwitcherEntry => ({ session, section: "exited", positions: [] }));
-    return [...ranked, ...older];
-  }, [feed.sessions, askSessionIds, query, history.items]);
+  const entries = useMemo(
+    () => mergeSwitcherEntries(rankSessionsForSwitcher(visible, askSessionIds, query), history.items),
+    [visible, askSessionIds, query, history.items],
+  );
 
   const selected = Math.min(active, Math.max(0, entries.length - 1));
   useEffect(() => {
@@ -92,7 +84,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
 
   function open(session: SessionRecord) {
     onClose();
-    router.push(`/session/${encodeURIComponent(session.id)}`);
+    router.push(sessionHref(session.id));
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -118,10 +110,8 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const Surface = desktop ? Modal : Sheet;
-  let previous: string | null = null;
   return (
-    <Surface open onClose={onClose} title="Switch session" size="lg" flush>
+    <Dialog open onClose={onClose} title="Switch session" size="lg" flush>
       <div className={styles.search}>
         <SearchInput
           data-autofocus={desktop ? "" : undefined}
@@ -143,8 +133,8 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
         {entries.map((entry, index) => {
           const { session } = entry;
           const lamp = sessionLamp(session, askSessionIds.has(session.id));
-          const heading = entry.section !== previous ? SWITCHER_SECTION_LABELS[entry.section] : null;
-          previous = entry.section;
+          const heading =
+            entry.section !== entries[index - 1]?.section ? SWITCHER_SECTION_LABELS[entry.section] : null;
           return (
             <li key={session.id} role="presentation">
               {heading ? <div className={styles.heading}>{heading}</div> : null}
@@ -181,6 +171,6 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           </li>
         ) : null}
       </ul>
-    </Surface>
+    </Dialog>
   );
 }

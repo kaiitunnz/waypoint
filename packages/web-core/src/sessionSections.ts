@@ -40,13 +40,11 @@ export function buildSections(
 }
 
 export interface SessionSearch {
-  // Pinned matches, which lead the results.
   lead: SessionRecord[];
-  // Every other match, newest first.
   rest: SessionRecord[];
 }
 
-// v1's query syntax (fields, quotes, regex, OR) over the sessions in hand.
+// The session query syntax (fields, quotes, regex, OR) over the sessions in hand.
 export function searchSessions(sessions: SessionRecord[], query: string): SessionSearch {
   const terms = parseQuery(query);
   const matches = sessions.filter((session) => matchesQuery(session, terms, SESSION_SEARCH_FIELDS));

@@ -2,19 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import {
-  approvalActions,
-  approvalPreview,
+  answerQuestion,
   buildAnswer,
+  decideAsk,
+  decisionView,
   emptyPicks,
   isAnswerable,
   isAgentNotReady,
-  planActions,
-  sessionScopedAllow,
   planPreview,
-  respondToAsk,
   retryWhileNotReady,
+  sessionScopedAllow,
+  showsSend,
   stripRecommendedSuffix,
+  tapOption,
   toggleOption,
+  visibleOptions,
   type PromptPick,
 } from "./pendingAskActions";
 import type {
@@ -98,24 +100,30 @@ describe("answers", () => {
 });
 
 describe("decisions", () => {
-  const approval = (overrides: Partial<PendingAskApproval> = {}): PendingAskApproval => ({
-    approval_id: "r1",
-    tool_name: "Bash",
-    tool_input: { command: "git push -u origin feat/x" },
-    tool_input_truncated: false,
-    decisions: ["accept", "decline"],
-    supports_note: true,
-    ...overrides,
-  });
+  const approval = (overrides: Partial<PendingAskApproval> = {}): PendingApprovalAsk =>
+    ({
+      kind: "approval",
+      approval: {
+        approval_id: "r1",
+        tool_name: "Bash",
+        tool_input: { command: "git push -u origin feat/x" },
+        tool_input_truncated: false,
+        decisions: ["accept", "decline"],
+        supports_note: true,
+        ...overrides,
+      },
+    }) as unknown as PendingApprovalAsk;
+  const plan = (decisions: string[]) =>
+    ({ kind: "plan_approval", plan: { plan_id: "p1", text: "# Plan", decisions, supports_note: false, resolve_via: "approve" } }) as unknown as PendingPlanAsk;
 
   it("always offers approve and decline, and an escalation only when listed", () => {
-    expect(approvalActions(approval()).map((a) => a.decision)).toEqual(["accept", "decline"]);
+    expect(decisionView(approval()).actions.map((a) => a.decision)).toEqual(["accept", "decline"]);
     expect(
-      approvalActions(approval({ decisions: ["accept", "acceptForSession", "decline", "acceptAlways"] })).map(
+      decisionView(approval({ decisions: ["accept", "acceptForSession", "decline", "acceptAlways"] })).actions.map(
         (a) => a.decision,
       ),
     ).toEqual(["accept", "acceptForSession", "decline"]);
-    expect(planActions({ decisions: ["acceptForSession"] } as PendingAskPlan).map((a) => a.label)).toEqual([
+    expect(decisionView(plan(["acceptForSession"])).actions.map((a) => a.label)).toEqual([
       "Approve",
       "For this session",
       "Decline",
@@ -124,7 +132,7 @@ describe("decisions", () => {
 
   it("sends the agent's own id for the session-scoped allow, whatever its spelling", () => {
     for (const id of ["acceptForSession", "allow_for_session", "approve-for-this-session", "AllowForSession"]) {
-      const actions = approvalActions(approval({ decisions: ["approve", id, "decline"] }));
+      const { actions } = decisionView(approval({ decisions: ["approve", id, "decline"] }));
       expect(actions.map((a) => [a.decision, a.label])).toEqual([
         ["accept", "Approve"],
         [id, "For this session"],
@@ -135,22 +143,71 @@ describe("decisions", () => {
     expect(sessionScopedAllow([])).toBeUndefined();
   });
 
-  it("keeps Approve primary and Decline last", () => {
-    const actions = approvalActions(approval({ decisions: ["approve", "acceptForSession", "decline"] }));
-    expect(actions.map((a) => a.tone)).toEqual(["primary", "quiet", "danger"]);
+  it("keeps Approve first and Decline last", () => {
+    const { actions } = decisionView(approval({ decisions: ["approve", "acceptForSession", "decline"] }));
+    expect(actions.map((a) => a.kind)).toEqual(["approve", "session", "decline"]);
   });
 
-  it("previews the command or the edited file", () => {
-    expect(approvalPreview(approval())).toEqual({ kind: "command", text: "git push -u origin feat/x" });
-    expect(approvalPreview(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } }))).toEqual({
+  it("previews the command or the edited file, and carries the plan text", () => {
+    expect(decisionView(approval()).preview).toEqual({ kind: "command", text: "git push -u origin feat/x" });
+    expect(decisionView(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } })).preview).toEqual({
       kind: "path",
-      tool: "Edit",
       path: "/a/b.py",
     });
-    expect(approvalPreview(approval({ tool_name: "WebFetch", tool_input: { url: "x" } }))).toEqual({
-      kind: "none",
+    expect(decisionView(approval({ tool_name: "WebFetch", tool_input: { url: "x" } })).preview).toBeNull();
+    expect(decisionView(approval({ tool_input: null })).preview).toBeNull();
+    expect(decisionView(plan([])).planBody).toBe("# Plan");
+    expect(decisionView(approval()).planBody).toBeNull();
+  });
+
+  it("reads the note support from the approval or the plan", () => {
+    expect(decisionView(approval({ supports_note: false })).supportsNote).toBe(false);
+    expect(decisionView(approval()).supportsNote).toBe(true);
+  });
+});
+
+describe("option taps", () => {
+  const options = [
+    { label: "Lock (Recommended)", description: null, recommended: true },
+    { label: "Retry", description: null, recommended: false },
+    { label: "Both", description: null, recommended: false },
+  ];
+  const single: PendingAskPrompt = { question: "Which?", header: null, multi_select: false, options };
+  const multi: PendingAskPrompt = { ...single, multi_select: true };
+
+  it("sends a lone single-select tap, again on a repeat tap", () => {
+    const first = tapOption([single], emptyPicks([single]), 0, "Retry");
+    expect(first).toEqual({ picks: [{ labels: ["Retry"], other: "" }], send: true });
+    expect(tapOption([single], first.picks, 0, "Retry")).toEqual({ picks: first.picks, send: true });
+  });
+
+  it("toggles a multi-select option without sending", () => {
+    const first = tapOption([multi], emptyPicks([multi]), 0, "Retry");
+    expect(first).toEqual({ picks: [{ labels: ["Retry"], other: "" }], send: false });
+    expect(tapOption([multi], first.picks, 0, "Retry").picks).toEqual([{ labels: [], other: "" }]);
+  });
+
+  it("only toggles when there are several prompts", () => {
+    const picks = emptyPicks([single, single]);
+    expect(tapOption([single, single], picks, 1, "Both")).toEqual({
+      picks: [picks[0], { labels: ["Both"], other: "" }],
+      send: false,
     });
-    expect(approvalPreview(approval({ tool_input: null }))).toEqual({ kind: "none" });
+  });
+
+  it("shows Send for a multi-select prompt or typed text", () => {
+    expect(showsSend(single, { labels: [], other: "" })).toBe(false);
+    expect(showsSend(single, { labels: [], other: " custom " })).toBe(true);
+    expect(showsSend(multi, { labels: [], other: "" })).toBe(true);
+  });
+
+  it("cuts a long single-select list, recommended first, and shows a multi-select whole", () => {
+    expect(visibleOptions(single, undefined, false)).toEqual({ shown: options, limited: false });
+    const cut = visibleOptions(single, 2, false);
+    expect(cut.limited).toBe(true);
+    expect(cut.shown.map((o) => o.label)).toEqual(["Lock (Recommended)", "Retry"]);
+    expect(visibleOptions(single, 2, true).limited).toBe(false);
+    expect(visibleOptions(multi, 2, false)).toEqual({ shown: options, limited: false });
   });
 });
 
@@ -201,7 +258,7 @@ describe("retryWhileNotReady", () => {
   });
 });
 
-describe("respondToAsk", () => {
+describe("answering and deciding", () => {
   beforeEach(() => vi.clearAllMocks());
   const base = { session_id: "s1", availability: "actionable", title: "t", body: null } as const;
 
@@ -211,7 +268,7 @@ describe("respondToAsk", () => {
       kind: "question",
       question: { tool_use_id: "tu1", questions: [prompt()] },
     } as unknown as PendingQuestionAsk;
-    await respondToAsk("h", "t", ask, { kind: "answer", picks: [{ labels: ["Retry on conflict"], other: "" }] });
+    await answerQuestion("h", "t", ask, [{ labels: ["Retry on conflict"], other: "" }]);
     expect(api.answerAskQuestion).toHaveBeenCalledWith(
       "h",
       "t",
@@ -222,24 +279,34 @@ describe("respondToAsk", () => {
     );
   });
 
+  it("refuses to send an unanswered question", async () => {
+    const ask = {
+      ...base,
+      kind: "question",
+      question: { tool_use_id: "tu1", questions: [prompt()] },
+    } as unknown as PendingQuestionAsk;
+    await expect(answerQuestion("h", "t", ask, emptyPicks([prompt()]))).rejects.toThrow("nothing to send");
+    expect(api.answerAskQuestion).not.toHaveBeenCalled();
+  });
+
   it("sends an approval with its id and a trimmed note", async () => {
     const ask = {
       ...base,
       kind: "approval",
       approval: { approval_id: "r1", decisions: [], supports_note: true },
     } as unknown as PendingApprovalAsk;
-    await respondToAsk("h", "t", ask, { kind: "decision", decision: "decline", note: "  no  " });
+    await decideAsk("h", "t", ask, "decline", "  no  ");
     expect(api.approveSession).toHaveBeenCalledWith("h", "t", "s1", "decline", "no", "r1");
   });
 
   it("routes a plan by resolve_via", async () => {
     const plan = (resolve_via: PendingAskPlan["resolve_via"]) =>
       ({ ...base, kind: "plan_approval", plan: { plan_id: "p1", decisions: [], resolve_via } }) as unknown as PendingPlanAsk;
-    await respondToAsk("h", "t", plan("approve"), { kind: "decision", decision: "accept" });
+    await decideAsk("h", "t", plan("approve"), "accept", undefined);
     expect(api.approveSession).toHaveBeenCalledWith("h", "t", "s1", "accept", undefined, "p1");
-    await respondToAsk("h", "t", plan("approve_plan"), { kind: "decision", decision: "accept", note: "go" });
+    await decideAsk("h", "t", plan("approve_plan"), "accept", "go");
     expect(api.approvePlan).toHaveBeenCalledWith("h", "t", "s1", "p1", "accept", "go");
-    await respondToAsk("h", "t", plan("approve_plan"), { kind: "decision", decision: "allow_for_session" });
+    await decideAsk("h", "t", plan("approve_plan"), "allow_for_session", undefined);
     expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "acceptForSession", undefined);
   });
 
@@ -252,7 +319,7 @@ describe("respondToAsk", () => {
       kind: "approval",
       approval: { approval_id: "r1", decisions: [], supports_note: false },
     } as unknown as PendingApprovalAsk;
-    await respondToAsk("h", "t", ask, { kind: "decision", decision: "accept" }, { sleep: async () => {} });
+    await decideAsk("h", "t", ask, "accept", undefined, { sleep: async () => {} });
     expect(api.approveSession).toHaveBeenCalledTimes(2);
   });
 });

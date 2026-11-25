@@ -2,8 +2,8 @@
 
 import { forwardRef, MutableRefObject } from "react";
 
-import { formatFileSize } from "@waypoint/web-core/attachments";
-import { FileIcon, typeTag } from "@/components/AttachmentTray";
+import { formatFileSize, typeTag } from "@waypoint/web-core/attachments";
+import { FileIcon } from "@/components/AttachmentTray";
 import { HighlightedText } from "@/components/HighlightedText";
 import { attachmentUrl } from "@waypoint/web-core/api";
 import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions";

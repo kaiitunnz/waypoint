@@ -16,8 +16,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { filesFromDataTransfer } from "@/components/AttachmentTray";
-import { installFileDropGuard, isExternalFileDrag } from "@waypoint/web-core/fileDrop";
+import { filesFromDataTransfer, installFileDropGuard, isExternalFileDrag } from "@waypoint/web-core/fileDrop";
+import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
 
 // Cancels file drops nobody accepted, which the browser would open in the
 // tab.
@@ -129,52 +129,8 @@ export function FileDropZone({
   children: ReactNode;
 }) {
   const [target, setTarget] = useState<FileDropTarget | null>(null);
-  const [visible, setVisible] = useState(false);
+  const [visible] = useFileDragVisible();
   const [box, setBox] = useState<OverlayBox | null>(null);
-  const depth = useRef(0);
-  const watchdog = useRef<number | undefined>(undefined);
-
-  const hide = useCallback(() => {
-    depth.current = 0;
-    window.clearTimeout(watchdog.current);
-    setVisible(false);
-  }, []);
-
-  useEffect(() => {
-    // Browsers repeat `dragover` every few hundred ms while a drag hovers the
-    // page, so silence means it ended without a leave the counter saw.
-    const arm = () => {
-      window.clearTimeout(watchdog.current);
-      watchdog.current = window.setTimeout(hide, 1000);
-    };
-    const onDragEnter = (event: globalThis.DragEvent) => {
-      if (!isExternalFileDrag(event.dataTransfer)) return;
-      depth.current += 1;
-      setVisible(true);
-      arm();
-    };
-    const onDragLeave = () => {
-      if (depth.current === 0) return;
-      depth.current -= 1;
-      if (depth.current === 0) hide();
-    };
-    const onDragOver = () => {
-      if (depth.current > 0) arm();
-    };
-    window.addEventListener("dragenter", onDragEnter, true);
-    window.addEventListener("dragleave", onDragLeave, true);
-    window.addEventListener("dragover", onDragOver, true);
-    // Bubble phase: hiding during capture lets React flush the unmount at a
-    // trusted drop's microtask checkpoint, before the overlay's onDrop runs.
-    window.addEventListener("drop", hide);
-    return () => {
-      window.removeEventListener("dragenter", onDragEnter, true);
-      window.removeEventListener("dragleave", onDragLeave, true);
-      window.removeEventListener("dragover", onDragOver, true);
-      window.removeEventListener("drop", hide);
-      window.clearTimeout(watchdog.current);
-    };
-  }, [hide]);
 
   useLayoutEffect(() => {
     if (!visible) return;

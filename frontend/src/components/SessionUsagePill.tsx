@@ -14,18 +14,9 @@ import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend, type BackendCatalog } from "@waypoint/web-core/backends";
-import { UNIFIED_TOKEN_LABELS, unifyTokens } from "@waypoint/web-core/tokens";
-import type {
-  SessionContextUsage,
-  SessionRecord,
-  SessionTokenUsage,
-} from "@waypoint/web-core/types";
-import {
-  clampPercent,
-  formatRelativeTime,
-  formatTokens,
-  rateLimitUsageTone,
-} from "@waypoint/web-core/usage";
+import { coverageLabel, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
+import type { SessionRecord } from "@waypoint/web-core/types";
+import { formatRelativeTime, formatTokens } from "@waypoint/web-core/usage";
 import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
@@ -357,98 +348,24 @@ export function SessionUsagePill({
       setRendered({ width: panel.offsetWidth, height: panel.offsetHeight });
   }, [open, showResizeControls, panelStyle]);
 
-  const contextUsage = session?.context_usage ?? null;
-  const tokenUsage = session?.session_token_usage ?? null;
-  const rateLimitUsage = session?.rate_limit_usage ?? null;
-  const contextUsagePercentValue = contextUsage
-    ? contextUsagePercent(contextUsage)
-    : null;
-  const contextUsagePercentDisplay = clampPercent(contextUsagePercentValue);
-  const contextUsageToneValue = contextUsage
-    ? contextUsageTone(contextUsagePercentValue)
-    : "good";
-  const rateLimitUsageToneValue = rateLimitUsageTone(rateLimitUsage);
-  const contextUsageBreakdown = contextUsage
-    ? Object.entries(contextUsage.breakdown ?? {}).filter(([, value]) => value > 0)
-    : [];
-  const contextUsageHasWindow =
-    contextUsage !== null &&
-    typeof contextUsage.context_window_tokens === "number" &&
-    contextUsage.context_window_tokens > 0;
-  const contextUsageWindowTokens = contextUsageHasWindow
-    ? contextUsage.context_window_tokens
-    : null;
-  const contextUsageWindowDisplay = contextUsageWindowTokens ?? 0;
-  // The endpoint reported a turn but no prompt/cache tokens, so context fill is
-  // unknown: show the window capacity but no fabricated 0% readout.
-  const contextUsageUnreported =
-    contextUsage !== null && contextUsage.used_tokens <= 0;
-  const contextUsageSummary = contextUsage
-    ? contextUsageUnreported
-      ? contextUsageWindowTokens !== null
-        ? `${formatTokens(contextUsageWindowDisplay)} window · usage not reported`
-        : "usage not reported"
-      : contextUsageWindowTokens !== null && contextUsagePercentDisplay !== null
-        ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
-        : formatTokens(contextUsage.used_tokens)
-    : null;
-
-  // Raw per-backend ledger totals overlap (Codex/OpenCode totals already
-  // include cached/reasoning tokens); unify onto the 5 disjoint buckets
-  // before display so the chip list never double-counts.
-  const hasTokenTotals =
-    tokenUsage !== null && Object.keys(tokenUsage.totals ?? {}).length > 0;
-  const tokenUsageTotals = tokenUsage
-    ? Object.entries(unifyTokens(tokenUsage.source, tokenUsage.totals ?? {}))
-    : [];
-  // A partial disclosure with nothing tracked (e.g. Codex tmux) carries only a
-  // coverage note; the per-turn totals are genuinely unavailable there.
-  const tokenUsageHasTotals =
-    tokenUsage !== null && tokenUsage.tracked_turns > 0;
-
-  const rateLimitUsageSummary = rateLimitUsage
-    ? rateLimitUsage.windows.length > 0
-      ? rateLimitUsage.windows
-          .map(
-            (window) => `${window.label} ${Math.round(window.used_percent)}%`,
-          )
-          .join(" · ")
-      : rateLimitUsage.notes?.length
-        ? rateLimitUsage.notes.join(" · ")
-        : null
-    : null;
-  const rateLimitSourceLabel = rateLimitUsage
-    ? rateLimitUsage.origin === "usage_provider"
-      ? // Provider projections carry a server-owned display label; flag an
-        // unavailable selection so the readout isn't mistaken for live.
-        (rateLimitUsage.unavailable
-          ? `${rateLimitUsage.source_label ?? "Usage provider"} (unavailable)`
-          : rateLimitUsage.source_label) ?? "Usage provider"
-      : rateLimitUsage.notes?.length
-        ? rateLimitUsage.notes.join(" · ")
-        : humaniseBackend(rateLimitUsage.source, catalog)
-    : "Unavailable";
-  // The trigger only ever wears the context-pressure or rate-limit tone; the
-  // cumulative total never raises an alarm colour.
-  const usageToneValue = (() => {
-    if (contextUsage === null) return rateLimitUsageToneValue;
-    if (rateLimitUsage === null) return contextUsageToneValue;
-    if (
-      contextUsageToneValue === "danger" ||
-      rateLimitUsageToneValue === "danger"
-    ) {
-      return "danger";
-    }
-    if (
-      contextUsageToneValue === "warn" ||
-      rateLimitUsageToneValue === "warn"
-    ) {
-      return "warn";
-    }
-    return "good";
-  })();
-  const showUsagePopover =
-    contextUsage !== null || tokenUsage !== null || rateLimitUsage !== null;
+  const {
+    contextUsage,
+    tokenUsage,
+    rateLimitUsage,
+    hasUsage: showUsagePopover,
+    contextPercent: contextUsagePercentDisplay,
+    contextTone: contextUsageToneValue,
+    contextWindowTokens: contextUsageWindowTokens,
+    contextUnreported: contextUsageUnreported,
+    contextBreakdown: contextUsageBreakdown,
+    rateLimitSourceLabel,
+    tone: usageToneValue,
+    tokenTotals: tokenUsageTotals,
+    hasTokenTotals,
+    hasTrackedTurns: tokenUsageHasTotals,
+    contextSummary: contextUsageSummary,
+    rateLimitSummary: rateLimitUsageSummary,
+  } = usagePanelModel(session, catalog);
   const usagePopoverTitle = [
     contextUsageSummary ? `Current context ${contextUsageSummary}` : null,
     rateLimitUsageSummary ? `Rate limits ${rateLimitUsageSummary}` : null,
@@ -599,7 +516,7 @@ export function SessionUsagePill({
                           <p className="usage-line">
                             <span>
                               {contextUsageWindowTokens !== null
-                                ? formatTokens(contextUsageWindowDisplay)
+                                ? formatTokens(contextUsageWindowTokens)
                                 : "—"}
                             </span>
                             <em>token window</em>
@@ -610,7 +527,7 @@ export function SessionUsagePill({
                             <em>of</em>
                             <span>
                               {contextUsageWindowTokens !== null
-                                ? formatTokens(contextUsageWindowDisplay)
+                                ? formatTokens(contextUsageWindowTokens)
                                 : "—"}
                             </span>
                             <em>tokens</em>
@@ -625,7 +542,7 @@ export function SessionUsagePill({
                             percent={contextUsagePercentDisplay}
                             tone={contextUsageToneValue}
                             disabled={
-                              !contextUsageHasWindow ||
+                              contextUsageWindowTokens === null ||
                               contextUsagePercentDisplay === null
                             }
                           />
@@ -646,9 +563,9 @@ export function SessionUsagePill({
                       <div className="usage-chip-group">
                         <p className="usage-chips-caption">Last turn</p>
                         <ul className="usage-chips">
-                          {contextUsageBreakdown.map(([key, value]) => (
-                            <li key={key}>
-                              <em>{tokenCategoryLabel(key)}</em>
+                          {contextUsageBreakdown.map(([label, value]) => (
+                            <li key={label}>
+                              <em>{label}</em>
                               <strong>{formatTokens(value)}</strong>
                             </li>
                           ))}
@@ -726,13 +643,9 @@ export function SessionUsagePill({
                         </div>
                         {hasTokenTotals ? (
                           <ul className="usage-chips">
-                            {tokenUsageTotals.map(([key, value]) => (
-                              <li key={key}>
-                                <em>
-                                  {UNIFIED_TOKEN_LABELS[
-                                    key as keyof typeof UNIFIED_TOKEN_LABELS
-                                  ] ?? key}
-                                </em>
+                            {tokenUsageTotals.map(([label, value]) => (
+                              <li key={label}>
+                                <em>{label}</em>
                                 <strong>{formatTokens(value)}</strong>
                               </li>
                             ))}
@@ -758,61 +671,4 @@ export function SessionUsagePill({
         : null}
     </div>
   );
-}
-
-function contextUsagePercent(usage: SessionContextUsage): number | null {
-  const windowTokens = usage.context_window_tokens;
-  if (!windowTokens || windowTokens <= 0) {
-    return null;
-  }
-  // A snapshot with no used tokens comes from an endpoint that reports only
-  // output usage (no prompt/cache accounting), so the fill is unknown rather
-  // than genuinely empty — surface it as no percentage, not 0%.
-  if (usage.used_tokens <= 0) {
-    return null;
-  }
-  return Math.round((usage.used_tokens / windowTokens) * 100);
-}
-
-function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
-  if (percent === null) return "good";
-  if (percent >= 90) return "danger";
-  if (percent >= 70) return "warn";
-  return "good";
-}
-
-function coverageLabel(usage: SessionTokenUsage): string {
-  switch (usage.coverage) {
-    case "entire_waypoint_session":
-      return "Entire Waypoint session";
-    case "tracked_since":
-      return `Tracked since ${formatRelativeTime(usage.observed_from)}`;
-    case "partial":
-      return usage.coverage_note ?? "Partial coverage";
-    default:
-      return usage.coverage_note ?? "Partial coverage";
-  }
-}
-
-function tokenCategoryLabel(key: string): string {
-  switch (key) {
-    case "input_tokens":
-      return "Input";
-    case "cached_input_tokens":
-      return "Cached input";
-    case "output_tokens":
-      return "Output";
-    case "reasoning_output_tokens":
-      return "Reasoning";
-    case "reasoning_tokens":
-      return "Reasoning";
-    case "cache_read_tokens":
-      return "Cache read";
-    case "cache_creation_tokens":
-      return "Cache write";
-    case "cache_write_tokens":
-      return "Cache write";
-    default:
-      return key.replaceAll("_", " ");
-  }
 }

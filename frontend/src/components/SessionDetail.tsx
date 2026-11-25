@@ -5,7 +5,6 @@ import {
   ChangeEvent,
   ClipboardEvent,
   KeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   memo,
   startTransition,
   useCallback,
@@ -21,26 +20,20 @@ import {
   approvePlan,
   approveSession,
   cancelHeldMessages,
-  cloneSession,
   connectSessionSocket,
   connectTerminalSocket,
   createMessageSchedule,
   deleteSession as deleteSessionRequest,
-  fetchBackendModels,
   fetchEvents,
   fetchSession,
-  forkSession,
   isAuthError,
   postAction,
   refreshSessionRateLimitUsage,
   releaseHeldMessages,
   resolveWorkspacePath,
   sendInput,
-  setSessionEffort,
-  setSessionModel,
   setSessionFocus,
   setTaskDockDismissed,
-  setSessionPermissionMode,
   setSessionPinned,
   setSessionTitle,
 } from "@waypoint/web-core/api";
@@ -58,9 +51,7 @@ import {
   permissionModesFor,
   supportsApprovalNote,
   supportsAttachments,
-  supportsFork,
   supportsPlanApproval,
-  supportsReattachAfterExit,
   supportsStructuredApproval,
   terminalInteractive,
   terminalKeyInjection,
@@ -72,7 +63,20 @@ import {
 import { clearToken } from "@waypoint/web-core/store";
 import { type TerminalSubmitResult } from "@/lib/composer";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { matchControlCommand, useCommandCompletions } from "@waypoint/web-core/composer-completions";
+import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
+import { useHoldMenu } from "@waypoint/web-core/hooks/useHoldMenu";
+import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
+import { interruptPrompt, useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
+import { useTuningDraft } from "@waypoint/web-core/hooks/useTuningDraft";
+import { canFork, composerAvailability, deliverInput, isExitedSession, runControlCommand } from "@waypoint/web-core/session/send";
+import { SEND_MODES, type SendMode } from "@waypoint/web-core/session/sendModes";
+import {
+  nextModeId,
+  pendingRestartLabel,
+  restartFields,
+  tuningOptions,
+  tuningSummary,
+} from "@waypoint/web-core/session/tuning";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
@@ -109,13 +113,9 @@ import {
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionPresence } from "@waypoint/web-core/hooks/useSessionPresence";
 import { formatRelativeTime } from "@waypoint/web-core/usage";
-import {
-  AttachmentContextProvider,
-  AttachmentTray,
-  filesFromDataTransfer,
-  PaperclipIcon,
-  useAttachments,
-} from "@/components/AttachmentTray";
+import { AttachmentContextProvider, AttachmentTray, PaperclipIcon } from "@/components/AttachmentTray";
+import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
+import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { FileDropZone, useFileDropTarget } from "@/components/FileDrop";
 import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
@@ -151,7 +151,7 @@ import {
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
-import { isTodoListEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
+import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import {
   effortLabel,
   formatResolvedModelLabel,
@@ -478,14 +478,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
-  const [modeBusy, setModeBusy] = useState(false);
-  const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
-  const [effortLevels, setEffortLevels] = useState<string[]>([]);
-  const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
-  const [defaultModelLabel, setDefaultModelLabel] = useState<string | null>(null);
-  const [defaultEffort, setDefaultEffort] = useState<string | null>(null);
-  const [modelBusy, setModelBusy] = useState(false);
-  const [effortBusy, setEffortBusy] = useState(false);
   const [rateLimitRefreshBusy, setRateLimitRefreshBusy] = useState(false);
   const [approvalPageIndex, setApprovalPageIndex] = useState(0);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
@@ -564,167 +556,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
   // Backends that apply settings by relaunching the process (claude_tty)
   // interrupt the live turn, so confirm before changing one mid-turn.
-  const confirmTurnInterrupt = useCallback(
-    (field: string): boolean => {
-      if (!session) return false;
-      const interrupts = catalog.byId(session.backend)?.capabilities
-        .settings_change_interrupts_turn;
-      const running =
-        session.status === "running" || session.status === "waiting_input";
-      if (!interrupts || !running) return true;
-      return window.confirm(
-        `Changing the ${field} restarts this session and interrupts the current turn. Continue?`,
-      );
-    },
-    [session, catalog],
-  );
-
-  // `confirmed`: the change comes from the restart pill, which already confirmed it.
-  const handlePermissionModeChange = useCallback(
-    async (nextMode: string, confirmed = false) => {
-      if (!session || nextMode === (session.permission_mode ?? "default")) {
-        return;
-      }
-      if (!confirmed && !confirmTurnInterrupt("permission mode")) {
-        return;
-      }
-      setModeBusy(true);
-      setError("");
-      try {
-        const updated = await setSessionPermissionMode(host, token, session.id, nextMode);
-        setSession(updated);
-      } catch (modeError) {
-        if (isAuthError(modeError)) {
-          handleAuthFailure();
-          return;
-        }
-        setError(
-          modeError instanceof Error ? modeError.message : "failed to update mode",
-        );
-      } finally {
-        setModeBusy(false);
-      }
-    },
-    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
-  );
-
-  // Refresh the model picker whenever the active backend, launch target, or
-  // account profile changes. Codex resolves its list from the profile's own
-  // config, so it can shift between profiles and remote SSH targets; for
-  // Claude this just reads the curated config list.
-  // Depend only on the specific fields we read — including `session` itself
-  // would re-fire on every poll-induced reference change and stampede the
-  // backend with /models calls.
-  const sessionBackend = session?.backend;
-  const sessionLaunchTargetId = session?.launch_target_id;
-  const sessionAccountProfileId = session?.account_profile_id ?? null;
-  useEffect(() => {
-    if (!sessionBackend) {
-      return;
-    }
-    let cancelled = false;
-    fetchBackendModels(host, token, sessionBackend, {
-      launchTargetId: sessionLaunchTargetId,
-      accountProfileId: sessionAccountProfileId,
-    })
-      .then((response) => {
-        if (cancelled) return;
-        setModelOptions(response.models);
-        setEffortLevels(response.effort_levels ?? []);
-        setDefaultModelId(response.default_model_id ?? null);
-        setDefaultModelLabel(response.default_model_label ?? null);
-        setDefaultEffort(response.default_effort ?? null);
-      })
-      .catch((modelsError) => {
-        if (cancelled) return;
-        if (isAuthError(modelsError)) {
-          handleAuthFailure();
-          return;
-        }
-        // Discovery failure is non-fatal: the picker just falls back to
-        // showing whatever model the session already has.
-        setModelOptions([]);
-        setEffortLevels([]);
-        setDefaultModelId(null);
-        setDefaultModelLabel(null);
-        setDefaultEffort(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
+  const confirmInterrupt = useCallback((field: string) => window.confirm(interruptPrompt(field)), []);
+  const {
+    busy: tuningBusy,
+    changeMode: handlePermissionModeChange,
+    changeModel: handleModelChange,
+    changeEffort: handleEffortChange,
+  } = useSessionTuning({
     host,
     token,
-    sessionBackend,
-    sessionLaunchTargetId,
-    sessionAccountProfileId,
+    session,
+    catalog,
+    onSession: setSession,
+    onError: setError,
+    onAuthFailure: handleAuthFailure,
+    confirmInterrupt,
+  });
+  const { mode: modeBusy, model: modelBusy, effort: effortBusy } = tuningBusy;
+  const { modelOptions, effortLevels, defaultModelId, defaultModelLabel, defaultEffort } = useSessionModels(
+    host,
+    token,
+    session,
     handleAuthFailure,
-  ]);
-
-  const handleModelChange = useCallback(
-    async (nextModel: string, confirmed = false) => {
-      if (!session) {
-        return;
-      }
-      const cleaned = nextModel.trim() || null;
-      const current = session.model ?? null;
-      if (cleaned === current) {
-        return;
-      }
-      if (!confirmed && !confirmTurnInterrupt("model")) {
-        return;
-      }
-      setModelBusy(true);
-      setError("");
-      try {
-        const updated = await setSessionModel(host, token, session.id, cleaned);
-        setSession(updated);
-      } catch (modelError) {
-        if (isAuthError(modelError)) {
-          handleAuthFailure();
-          return;
-        }
-        setError(
-          modelError instanceof Error ? modelError.message : "failed to update model",
-        );
-      } finally {
-        setModelBusy(false);
-      }
-    },
-    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
-  );
-
-  const handleEffortChange = useCallback(
-    async (nextEffort: string, confirmed = false) => {
-      if (!session) {
-        return;
-      }
-      const cleaned = nextEffort.trim() || null;
-      const current = session.effort ?? null;
-      if (cleaned === current) {
-        return;
-      }
-      if (!confirmed && !confirmTurnInterrupt("effort")) {
-        return;
-      }
-      setEffortBusy(true);
-      setError("");
-      try {
-        const updated = await setSessionEffort(host, token, session.id, cleaned);
-        setSession(updated);
-      } catch (effortError) {
-        if (isAuthError(effortError)) {
-          handleAuthFailure();
-          return;
-        }
-        setError(
-          effortError instanceof Error ? effortError.message : "failed to update effort",
-        );
-      } finally {
-        setEffortBusy(false);
-      }
-    },
-    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
   );
 
   const flushPendingEvents = useCallback(() => {
@@ -1096,66 +949,33 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       opts?: { allowFork?: boolean; allowNew?: boolean },
     ): Promise<"handled" | "error" | null> => {
       if (!session) return null;
-      const allowFork = opts?.allowFork ?? true;
-      const allowNew = opts?.allowNew ?? true;
-
-      const newArgs = allowNew ? matchControlCommand(text, "new") : null;
-      if (newArgs !== null) {
-        try {
-          // Clone server-side so the child inherits the source's private
-          // launch_env (env vars, account/config-dir profile) that a public
-          // SessionRecord can't carry.
-          const created = await cloneSession(host, token, sessionId);
-          if (newArgs) {
-            await sendInput(host, token, created.id, newArgs);
-          }
-          router.push(`/session/${created.id}`);
-          return "handled";
-        } catch (e) {
-          if (isAuthError(e)) {
-            handleAuthFailure();
-            return "error";
-          }
-          setError(e instanceof Error ? e.message : "failed to create session");
+      try {
+        const opened = await runControlCommand({
+          host,
+          token,
+          sessionId,
+          text,
+          allowNew: opts?.allowNew,
+          allowFork: opts?.allowFork,
+        });
+        if (opened === null) return null;
+        router.push(`/session/${opened}`);
+        return "handled";
+      } catch (e) {
+        if (isAuthError(e)) {
+          handleAuthFailure();
           return "error";
         }
+        setError(e instanceof Error ? e.message : "failed to create session");
+        return "error";
       }
-
-      const forkArgs = allowFork ? matchControlCommand(text, "fork") : null;
-      if (forkArgs !== null) {
-        try {
-          const forked = await forkSession(host, token, sessionId);
-          if (forkArgs) {
-            await sendInput(host, token, forked.id, forkArgs);
-          }
-          router.push(`/session/${forked.id}`);
-          return "handled";
-        } catch (e) {
-          if (isAuthError(e)) {
-            handleAuthFailure();
-            return "error";
-          }
-          setError(e instanceof Error ? e.message : "failed to fork session");
-          return "error";
-        }
-      }
-
-      return null;
     },
     [session, host, token, sessionId, router, handleAuthFailure],
   );
 
-  // Whether /fork is offered. Fork-ability is (agent supports it) AND (the
-  // transport allows it): the live-terminal/tmux-wrapper transport has no fork
-  // path (TmuxPlugin.fork_session is unimplemented), so an agent that otherwise
-  // forks (claude_code) still can't when wrapped in a pane. The persistent
-  // assistant additionally suppresses it (forking would spawn a stray managed
-  // session off the launchpad).
-  const canFork = Boolean(
-    session &&
-      supportsFork(session.backend, catalog) &&
-      !liveTerminal(session.transport, catalog),
-  );
+  // The persistent assistant additionally suppresses /fork (forking would spawn
+  // a stray managed session off the launchpad).
+  const forkAllowed = canFork(session, catalog);
 
   const submitInput = useCallback(async (
     text: string,
@@ -1171,7 +991,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     // Attachment-bearing turns are never control commands, so skip the check.
     if (!attachments?.length) {
       const handled = await runFrontendControlCommand(text, {
-        allowFork: canFork && !assistant,
+        allowFork: forkAllowed && !assistant,
         allowNew: !assistant,
       });
       if (handled !== null) {
@@ -1190,7 +1010,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
       return false;
     }
-  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant, canFork]);
+  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant, forkAllowed]);
 
   const onSendWithOptimistic = useCallback(
     async (
@@ -1198,46 +1018,50 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       command?: SessionCommandInvocation,
       attachments?: string[],
     ) => {
+      if (!text.trim() && !attachments?.length) return false;
       const tempId = Math.random().toString(36).slice(2);
       const ts = new Date().toISOString();
       setOptimisticMessages((prev) => [...prev, { tempId, text, ts }]);
       try {
         // Sending a message to an exited session restarts it: the placeholder
         // "Session has exited — send a message to reattach…" promises this UX.
-        // Reattach first, then submit; both are sequenced so the input lands
-        // after the freshly-restored transport accepts stdin.
-        if (
-          session &&
-          (session.status === "exited" || session.status === "error") &&
-          supportsReattachAfterExit(session.backend, catalog)
-        ) {
-          try {
-            await postAction(host, token, sessionId, "reattach");
-          } catch (reattachError) {
-            if (isAuthError(reattachError)) {
-              handleAuthFailure();
-              return false;
-            }
-            setError(
-              reattachError instanceof Error
-                ? reattachError.message
-                : "failed to reconnect",
-            );
-            return false;
-          }
+        // The persistent assistant isn't a launchpad, so `/new` and `/fork`
+        // flow to it as text.
+        const { openSessionId } = await deliverInput({
+          host,
+          token,
+          sessionId,
+          session,
+          catalog,
+          text,
+          command,
+          attachments,
+          allowNew: !assistant,
+          allowFork: forkAllowed && !assistant,
+          reattachFirst: true,
+        });
+        if (openSessionId) router.push(`/session/${openSessionId}`);
+        return true;
+      } catch (sendError) {
+        if (isAuthError(sendError)) {
+          handleAuthFailure();
+          return false;
         }
-        return await submitInput(text, command, attachments);
+        setError(sendError instanceof Error ? sendError.message : "failed to send input");
+        return false;
       } finally {
         setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId));
       }
     },
     [
-      submitInput,
       session,
       catalog,
       host,
       token,
       sessionId,
+      assistant,
+      forkAllowed,
+      router,
       handleAuthFailure,
     ],
   );
@@ -1514,37 +1338,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // to `loadedTodoEvent` (the tail-page snapshot) when the latest todo predates
   // the loaded window; the higher sequence wins so a live update always beats
   // the load-time snapshot.
-  const currentTaskEvent = useMemo(() => {
-    let windowTodo: EventRecord | null = null;
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      if (isTodoListEvent(events[i])) {
-        windowTodo = events[i];
-        break;
-      }
-    }
-    if (!windowTodo) {
-      return loadedTodoEvent;
-    }
-    if (loadedTodoEvent && loadedTodoEvent.sequence > windowTodo.sequence) {
-      return loadedTodoEvent;
-    }
-    return windowTodo;
-  }, [events, loadedTodoEvent]);
+  const currentTaskEvent = useMemo(
+    () => currentTodoEvent(events, loadedTodoEvent),
+    [events, loadedTodoEvent],
+  );
   const taskProgress = useMemo(
     () => summarizeTodos(readTodoEntries(currentTaskEvent)),
     [currentTaskEvent],
   );
-  // Session has stopped its backend process (clean shutdown or crash).
-  const sessionExited = Boolean(
-    session && (session.status === "exited" || session.status === "error"),
-  );
+  const sessionExited = isExitedSession(session);
   // The transport renders a live xterm pane (and locks the chat composer into
   // terminal mode) rather than a structured transcript.
   const terminalOnly = Boolean(session && liveTerminal(session.transport, catalog));
-  const canReattachAfterExit = Boolean(
-    session && supportsReattachAfterExit(session.backend, catalog),
-  );
-  const dormantReattach = sessionExited && canReattachAfterExit;
+  const { disabled: composerDisabled, dormant: dormantReattach } = composerAvailability(session, catalog);
 
   const reportAskRequestError = useCallback(
     (requestError: unknown, fallback: string) => {
@@ -1622,8 +1428,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     });
     return () => window.cancelAnimationFrame(frame);
   }, [revealTarget, events, hasOlderEvents, loadingOlder, loadOlderEvents]);
-  const composerDisabled =
-    !session || (sessionExited && !canReattachAfterExit);
   const composerPlaceholder = !session
     ? "Loading session…"
     : dormantReattach
@@ -1825,7 +1629,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // here as a Waypoint control command instead of being typed into the
   // wrapped CLI; ``/fork`` follows the agent's fork capability.
   const handleTerminalSubmit = useCallback(async (text: string): Promise<TerminalSubmitResult> => {
-    const handled = await runFrontendControlCommand(text, { allowFork: canFork });
+    const handled = await runFrontendControlCommand(text, { allowFork: forkAllowed });
     if (handled !== null) {
       return handled === "handled" ? "ok" : "command-error";
     }
@@ -1833,7 +1637,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     if (socket?.readyState !== WebSocket.OPEN) return "socket-closed";
     socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
     return "ok";
-  }, [runFrontendControlCommand, canFork]);
+  }, [runFrontendControlCommand, forkAllowed]);
 
   // Attachment-bearing terminal submits go over HTTP, not the terminal WS:
   // handle_input routes them through the tmux transport, which appends the
@@ -2662,34 +2466,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
           catalog={catalog}
-          modeRequiresConfirm={
-            Boolean(
-              session?.transport &&
-                catalog.capsFor(session.backend, session.transport)
-                  ?.supports_set_permission_mode_with_restart,
-            )
-          }
-          modelRequiresConfirm={
-            // A model swap restarts on some transports (claude_tty) and is
-            // inline on others, so resolve against the (agent, transport) pair.
-            Boolean(
-              session?.transport &&
-                catalog.capsFor(session.backend, session.transport)
-                  ?.supports_set_model_with_restart,
-            )
-          }
-          effortRequiresConfirm={
-            // The plugin advertises "effort swap requires a restart"
-            // (Claude does, Codex doesn't) and we surface the confirm
-            // step accordingly. Falls back to false until the catalog
-            // hydrates so a fresh load doesn't gate the picker.
-            Boolean(
-              session &&
-                catalog
-                  .byId(session.backend)
-                  ?.capabilities.supports_set_effort_with_restart,
-            )
-          }
+          modeRequiresConfirm={restartFields(session, catalog).mode}
+          modelRequiresConfirm={restartFields(session, catalog).model}
+          effortRequiresConfirm={restartFields(session, catalog).effort}
           hasToolRuns={hasToolRuns}
           toolRunsExpanded={toolRunsExpanded}
           onToggleToolRuns={() => {
@@ -2902,13 +2681,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const [sending, setSending] = useState(false);
   // The transcript records nothing until the interrupt request returns.
   const [stopping, setStopping] = useState(false);
-  // Delayed-hover / long-press send menu (Send now / idle-delivery choices).
-  const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [idleSending, setIdleSending] = useState(false);
-  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
-  const sendMenuItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const sendHoverTimer = useRef<number | null>(null);
-  const sendTouchLongPress = useRef(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
@@ -2934,10 +2707,6 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // Picks staged behind the restart pill; `null` when none.
-  const [pendingMode, setPendingMode] = useState<string | null>(null);
-  const [pendingModel, setPendingModel] = useState<string | null>(null);
-  const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
   // CSS (:focus-within) so focusing the field never triggers a React re-render
   // that could drop focus mid-gesture. The chevron re-opens them by forcing
@@ -3074,31 +2843,6 @@ const ReplyComposer = memo(function ReplyComposer({
     };
   }, [tuneOpen]);
 
-  // A touch-opened send menu has no pointerleave to dismiss it; close on an
-  // outside pointerdown. Escape is handled on the trigger/menu directly.
-  useEffect(() => {
-    if (!sendMenuOpen) {
-      return;
-    }
-    function onPointer(event: PointerEvent) {
-      const wrap = sendButtonRef.current?.parentElement;
-      if (wrap && wrap.contains(event.target as Node)) return;
-      setSendMenuOpen(false);
-    }
-    window.addEventListener("pointerdown", onPointer);
-    return () => window.removeEventListener("pointerdown", onPointer);
-  }, [sendMenuOpen]);
-
-  // Drop a pending hover/long-press timer if the composer unmounts mid-delay.
-  useEffect(
-    () => () => {
-      if (sendHoverTimer.current !== null) {
-        window.clearTimeout(sendHoverTimer.current);
-      }
-    },
-    [],
-  );
-
   async function handleSend() {
     const text = draft.trim();
     const attachmentIds = attachments.readyIds;
@@ -3136,7 +2880,7 @@ const ReplyComposer = memo(function ReplyComposer({
     if ((!text && attachmentIds.length === 0) || attachments.uploading) {
       return;
     }
-    setSendMenuOpen(false);
+    closeSendMenu();
     setIdleSending(true);
     const invocation = selectedCommandInvocation(text);
     try {
@@ -3163,29 +2907,10 @@ const ReplyComposer = memo(function ReplyComposer({
 
   // ↑ marks the immediate send, ◷ the idle-triggered ones; the batch nuance is
   // in each row's tooltip.
-  const idleActions = [
-    {
-      key: "now" as const,
-      icon: "↑",
-      label: "Send now",
-      hint: "Send immediately",
-      run: () => void handleSend(),
-    },
-    {
-      key: "with_previous" as const,
-      icon: "◷",
-      label: "Send when idle",
-      hint: "Joins the next idle batch",
-      run: () => void handleIdleSend("with_previous"),
-    },
-    {
-      key: "next_cycle" as const,
-      icon: "◷",
-      label: "Send next idle cycle",
-      hint: "Waits for the following idle point",
-      run: () => void handleIdleSend("next_cycle"),
-    },
-  ];
+  function runSendMode(mode: SendMode) {
+    if (mode === "now") void handleSend();
+    else void handleIdleSend(mode);
+  }
 
   const sendDisabled =
     disabled ||
@@ -3194,101 +2919,17 @@ const ReplyComposer = memo(function ReplyComposer({
     attachments.uploading ||
     (!draft.trim() && attachments.readyIds.length === 0);
 
-  function openSendMenu(focusFirst: boolean) {
-    if (sendDisabled) {
-      return;
-    }
-    setSendMenuOpen(true);
-    if (focusFirst) {
-      // Defer to after the menu mounts, then focus its first action.
-      requestAnimationFrame(() => sendMenuItemRefs.current[0]?.focus());
-    }
-  }
-
-  function closeSendMenu(refocusTrigger: boolean) {
-    setSendMenuOpen(false);
-    if (refocusTrigger) {
-      sendButtonRef.current?.focus();
-    }
-  }
-
-  function clearHoverTimer() {
-    if (sendHoverTimer.current !== null) {
-      window.clearTimeout(sendHoverTimer.current);
-      sendHoverTimer.current = null;
-    }
-  }
-
-  function handleSendPointerEnter(event: ReactPointerEvent<HTMLDivElement>) {
-    // Hover-to-reveal is a mouse affordance; touch uses the long-press below.
-    if (event.pointerType !== "mouse" || sendDisabled) {
-      return;
-    }
-    clearHoverTimer();
-    sendHoverTimer.current = window.setTimeout(() => openSendMenu(false), 450);
-  }
-
-  function handleSendPointerLeave(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.pointerType !== "mouse") {
-      return;
-    }
-    clearHoverTimer();
-    setSendMenuOpen(false);
-  }
-
-  function handleSendPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.pointerType !== "touch" || sendDisabled) {
-      return;
-    }
-    sendTouchLongPress.current = false;
-    clearHoverTimer();
-    sendHoverTimer.current = window.setTimeout(() => {
-      // A held touch opens the menu and suppresses this gesture's tap-send.
-      sendTouchLongPress.current = true;
-      openSendMenu(false);
-    }, 450);
-  }
-
-  function handleSendPointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.pointerType !== "touch") {
-      return;
-    }
-    clearHoverTimer();
-  }
-
-  function handleSendClick() {
-    // Swallow the click that ends a long-press (it already opened the menu).
-    if (sendTouchLongPress.current) {
-      sendTouchLongPress.current = false;
-      return;
-    }
-    void handleSend();
-  }
-
-  function handleSendButtonKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowDown" || event.key === " ") {
-      event.preventDefault();
-      openSendMenu(true);
-    } else if (event.key === "Escape" && sendMenuOpen) {
-      event.preventDefault();
-      closeSendMenu(true);
-    }
-  }
-
-  function handleSendMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const items = sendMenuItemRefs.current.filter(Boolean);
-    const current = items.findIndex((el) => el === document.activeElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeSendMenu(true);
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      items[(current + 1 + items.length) % items.length]?.focus();
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      items[(current - 1 + items.length) % items.length]?.focus();
-    }
-  }
+  // The delayed-hover / long-press menu: Send now or an idle delivery.
+  const {
+    open: sendMenuOpen,
+    close: closeSendMenu,
+    triggerRef: sendButtonRef,
+    itemRefs: sendMenuItemRefs,
+    wrapRef: sendWrapRef,
+    wrapProps: sendWrapProps,
+    triggerProps: sendTriggerProps,
+    menuProps: sendMenuProps,
+  } = useHoldMenu(sendDisabled, () => void handleSend());
 
   const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
@@ -3312,12 +2953,9 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     if (event.key === "Tab" && event.shiftKey) {
       event.preventDefault();
-      if (permissionModeOptions.length > 0 && !modeBusy) {
-        const currentIndex = permissionModeOptions.findIndex(
-          (opt) => opt.id === modeDisplayValue,
-        );
-        const nextIndex = (currentIndex + 1) % permissionModeOptions.length;
-        handleModeSelect(permissionModeOptions[nextIndex].id);
+      const next = modeBusy ? null : nextModeId(permissionModeOptions, tuning.shown.mode);
+      if (next !== null) {
+        tuning.select("mode", next);
         if (modeRequiresConfirm) setTuneOpen(true);
       }
       return;
@@ -3338,113 +2976,28 @@ const ReplyComposer = memo(function ReplyComposer({
   const modeOptions = permissionModeOptions;
   // Refresh is always available, so the overflow menu is always present.
   const hasOverflow = true;
-  const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
-  // Surface a custom-named model the user already has even if it's not in the
-  // curated list, so the dropdown reflects the truth instead of silently
-  // showing "Default".
-  const modelEntries: BackendModelOption[] =
-    currentModel && !modelOptions.some((opt) => opt.id === currentModel)
-      ? [
-          {
-            id: currentModel,
-            label: `Custom · ${currentModel}`,
-            description: null,
-          },
-          ...modelOptions,
-        ]
-      : modelOptions;
-  // Effort levels gated by the currently-selected model. With no explicit
-  // model pick (rare for a live session, but possible), fall back to the
-  // default model's supported levels.
-  const resolvedModelId = currentModel || defaultModelId;
-  const matchingModelEntry = resolvedModelId
-    ? modelOptions.find((opt) => opt.id === resolvedModelId)
-    : undefined;
-  const effortOptions: string[] = matchingModelEntry
-    ? matchingModelEntry.supported_efforts == null
-      ? effortLevels // unknown → the agent's full vocabulary
-      : matchingModelEntry.supported_efforts
-    : Array.from(
-        new Set(
-          modelOptions.flatMap((opt) => opt.supported_efforts ?? []),
-        ),
-      );
-  const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
-  const currentMode = permissionMode ?? "default";
-  // A staged pick is ignored once the transport applies inline (e.g. after an
-  // interface switch).
-  const modeDisplayValue = modeRequiresConfirm
-    ? (pendingMode ?? currentMode)
-    : currentMode;
-  const modePendingDiffers =
-    modeRequiresConfirm && pendingMode !== null && pendingMode !== currentMode;
-  const modelDisplayValue = modelRequiresConfirm
-    ? (pendingModel ?? (currentModel ?? ""))
-    : (currentModel ?? "");
-  const modelPendingDiffers =
-    modelRequiresConfirm &&
-    pendingModel !== null &&
-    pendingModel !== (currentModel ?? "");
-  const effortDisplayValue = effortRequiresConfirm
-    ? (pendingEffort ?? (currentEffort ?? ""))
-    : (currentEffort ?? "");
-  const effortPendingDiffers =
-    effortRequiresConfirm &&
-    pendingEffort !== null &&
-    pendingEffort !== (currentEffort ?? "");
-  const handleModeSelect = (next: string) => {
-    if (modeRequiresConfirm) {
-      setPendingMode(next === currentMode ? null : next);
-      return;
-    }
-    void onModeChange(next);
+  const tuningInput = {
+    modeOptions,
+    modelOptions,
+    effortLevels,
+    defaultModelId,
+    defaultModelLabel,
+    currentModel,
+    currentEffort,
+    permissionMode,
   };
-  const handleModelSelect = (next: string) => {
-    if (modelRequiresConfirm) {
-      setPendingModel(next === (currentModel ?? "") ? null : next);
-      return;
-    }
-    void onModelChange(next);
-  };
-  const handleEffortSelect = (next: string) => {
-    if (effortRequiresConfirm) {
-      setPendingEffort(next === (currentEffort ?? "") ? null : next);
-      return;
-    }
-    void onEffortChange(next);
-  };
-  const pendingRestartLabel = [
-    modePendingDiffers && pendingMode
-      ? `${modeOptions.find((option) => option.id === pendingMode)?.label ?? pendingMode} mode`
-      : null,
-    modelPendingDiffers
-      ? pendingModel
-        ? (modelEntries.find((option) => option.id === pendingModel)?.label ??
-          pendingModel)
-        : "the default model"
-      : null,
-    effortPendingDiffers
-      ? pendingEffort
-        ? `${effortLabel(pendingEffort)} effort`
-        : "the default effort"
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" and ");
-  const hasPendingRestart =
-    modePendingDiffers || modelPendingDiffers || effortPendingDiffers;
+  const options = tuningOptions(tuningInput);
+  const { modelEntries, effortOptions, hasModelPicker, hasEffortPicker } = options;
+  const tuning = useTuningDraft(
+    tuningInput,
+    { mode: modeRequiresConfirm, model: modelRequiresConfirm, effort: effortRequiresConfirm },
+    { mode: onModeChange, model: onModelChange, effort: onEffortChange },
+  );
+  const restartLabel = pendingRestartLabel(tuning, modeOptions, modelEntries);
   const restartBusy = modeBusy || modelBusy || effortBusy;
   const applyPendingRestart = async () => {
-    const mode = modePendingDiffers ? pendingMode : null;
-    const model = modelPendingDiffers ? pendingModel : null;
-    const effort = effortPendingDiffers ? pendingEffort : null;
-    setPendingMode(null);
-    setPendingModel(null);
-    setPendingEffort(null);
     setTuneOpen(false);
-    if (mode !== null) await onModeChange(mode, true);
-    if (model !== null) await onModelChange(model, true);
-    if (effort !== null) await onEffortChange(effort, true);
+    await tuning.applyRestart();
   };
 
   const assistantOps = assistant ? assistantControls : null;
@@ -3561,23 +3114,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const assistantExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
   );
-  const tuneSummary = (() => {
-    const parts: string[] = [];
-    if (modeOptions.length > 0) {
-      const matched = modeOptions.find(
-        (option) => option.id === (permissionMode ?? "default"),
-      );
-      parts.push(matched?.label ?? "Default");
-    }
-    if (hasModelPicker) {
-      const matched = modelEntries.find((option) => option.id === (currentModel ?? ""));
-       parts.push(matched?.label ?? (currentModel || (defaultModelLabel ? `Default (${defaultModelLabel})` : "Default")));
-    }
-    if (hasEffortPicker) {
-      parts.push(currentEffort ? effortLabel(currentEffort) : "Default");
-    }
-    return parts.join(" · ") || "Settings";
-  })();
+  const tuneSummary = tuningSummary(tuningInput, options).join(" · ") || "Settings";
 
   return (
     <section className="composer" ref={composerRef}>
@@ -3595,7 +3132,7 @@ const ReplyComposer = memo(function ReplyComposer({
               {"⚙︎"}
             </span>
             <span className="composer-tune-summary">{tuneSummary}</span>
-            {hasPendingRestart ? (
+            {tuning.hasPending ? (
               <span
                 className="composer-tune-pending"
                 aria-label="Pending change"
@@ -3740,8 +3277,8 @@ const ReplyComposer = memo(function ReplyComposer({
                 <label className="composer-tune-field">
                   <span>Permission mode</span>
                   <select
-                    value={modeDisplayValue}
-                    onChange={(event) => handleModeSelect(event.target.value)}
+                    value={tuning.shown.mode}
+                    onChange={(event) => tuning.select("mode", event.target.value)}
                     disabled={modeBusy || disabled}
                   >
                     {modeOptions.map((option) => (
@@ -3756,8 +3293,8 @@ const ReplyComposer = memo(function ReplyComposer({
                 <label className="composer-tune-field">
                   <span>Model</span>
                   <select
-                    value={modelDisplayValue}
-                    onChange={(event) => handleModelSelect(event.target.value)}
+                    value={tuning.shown.model}
+                    onChange={(event) => tuning.select("model", event.target.value)}
                     disabled={modelBusy || disabled}
                   >
                      <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
@@ -3773,8 +3310,8 @@ const ReplyComposer = memo(function ReplyComposer({
                 <label className="composer-tune-field">
                   <span>Reasoning effort</span>
                   <select
-                    value={effortDisplayValue}
-                    onChange={(event) => handleEffortSelect(event.target.value)}
+                    value={tuning.shown.effort}
+                    onChange={(event) => tuning.select("effort", event.target.value)}
                     disabled={effortBusy || disabled}
                   >
                     <option value="">
@@ -3810,10 +3347,10 @@ const ReplyComposer = memo(function ReplyComposer({
                   <span className="switch-thumb" />
                 </button>
               </div>
-              {hasPendingRestart ? (
+              {tuning.hasPending ? (
                 <div className="composer-tune-restart">
                   <p>
-                    Restart Claude with <strong>{pendingRestartLabel}</strong>?
+                    Restart Claude with <strong>{restartLabel}</strong>?
                     The current turn is interrupted and the session resumes with
                     the new settings.
                   </p>
@@ -4023,20 +3560,12 @@ const ReplyComposer = memo(function ReplyComposer({
           placeholder={placeholder}
           aria-label="Reply"
         />
-        <div
-          className="composer-send-wrap"
-          onPointerEnter={handleSendPointerEnter}
-          onPointerLeave={handleSendPointerLeave}
-        >
+        <div className="composer-send-wrap" ref={sendWrapRef} {...sendWrapProps}>
           <button
             ref={sendButtonRef}
             type="button"
             className="composer-send"
-            onClick={handleSendClick}
-            onPointerDown={handleSendPointerDown}
-            onPointerUp={handleSendPointerUp}
-            onPointerCancel={handleSendPointerUp}
-            onKeyDown={handleSendButtonKeyDown}
+            {...sendTriggerProps}
             disabled={sendDisabled}
             aria-label="Send"
             aria-haspopup="menu"
@@ -4052,25 +3581,25 @@ const ReplyComposer = memo(function ReplyComposer({
               className="composer-send-menu"
               role="menu"
               aria-label="Send options"
-              onKeyDown={handleSendMenuKeyDown}
+              {...sendMenuProps}
             >
-              {idleActions.map((action, index) => (
+              {SEND_MODES.map((mode, index) => (
                 <button
-                  key={action.key}
+                  key={mode.value}
                   ref={(el) => {
                     sendMenuItemRefs.current[index] = el;
                   }}
                   type="button"
                   role="menuitem"
                   className="composer-send-menu-item"
-                  onClick={action.run}
+                  onClick={() => runSendMode(mode.value)}
                   disabled={sendDisabled}
-                  title={action.hint}
+                  title={mode.hint}
                 >
                   <span className="composer-send-menu-icon" aria-hidden>
-                    {action.icon}
+                    {mode.value === "now" ? "↑" : "◷"}
                   </span>
-                  <span className="composer-send-menu-label">{action.label}</span>
+                  <span className="composer-send-menu-label">{mode.label}</span>
                 </button>
               ))}
             </div>

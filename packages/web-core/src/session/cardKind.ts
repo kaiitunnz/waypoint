@@ -34,7 +34,6 @@ export type CardKind =
   | "heuristic"
   | "none";
 
-// An unrecognised event kind is "heuristic".
 export function cardKindOf(event: EventRecord): CardKind {
   switch (event.kind) {
     case "user_input":

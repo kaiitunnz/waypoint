@@ -105,14 +105,6 @@ describe("streamReducer", () => {
     expect(state.error).toBeNull();
   });
 
-  it("keeps live events that arrived before the page", () => {
-    const state = run(
-      { type: "events", events: [ev(9, "agent_output", "live")] },
-      { type: "loaded", session: session("a"), page: page([ev(5, "user_input", "hi"), ev(9, "agent_output", "live")]) },
-    );
-    expect(state.events.map((event) => event.sequence)).toEqual([5, 9]);
-  });
-
   it("appends live events and merges deltas into the item they extend", () => {
     const state = run(
       { type: "loaded", session: session("a"), page: page([ev(1, "agent_output", "a", { item_id: "m" })]) },

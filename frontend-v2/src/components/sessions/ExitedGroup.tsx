@@ -12,7 +12,7 @@ import type { ExitedPaging } from "./useExitedSessions";
 
 interface ExitedGroupProps {
   count: number;
-  // The heading reads "3 exited", not "3 exited sessions".
+  // Shortens the heading to "3 exited".
   short?: boolean;
   open: boolean;
   onToggle: () => void;

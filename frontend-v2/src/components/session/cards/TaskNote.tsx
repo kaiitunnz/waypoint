@@ -17,7 +17,6 @@ import { Attachments } from "./Attachments";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
 
-// Lines of a result or report shown before it is opened.
 const REPORT_LINES = 8;
 
 function ReportPreview({ state }: { state: ReportPreviewState | null }) {

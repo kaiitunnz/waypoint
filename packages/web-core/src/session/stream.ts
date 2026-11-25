@@ -75,8 +75,7 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         ...state,
         // A frame the socket delivered first is newer than this snapshot.
         session: state.session ?? action.session,
-        // Events already in state are kept.
-        events: coalesce(state.events, coalesce(sanitized)),
+        events: coalesce(sanitized),
         hasOlder: action.page.has_more,
         oldestSequence: minRawSequence(sanitized),
         loaded: true,

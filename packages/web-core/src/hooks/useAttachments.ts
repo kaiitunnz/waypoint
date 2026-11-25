@@ -235,6 +235,20 @@ export function useAttachments({
     });
   }, [revoke]);
 
+  // Like `clear`, for the given files only: a send leaves any added since.
+  const release = useCallback(
+    (ids: readonly string[]) => {
+      setItems((prev) =>
+        prev.filter((item) => {
+          const sent = item.spec !== undefined && ids.includes(item.spec.id);
+          if (sent) revoke(item.previewUrl);
+          return !sent;
+        }),
+      );
+    },
+    [revoke],
+  );
+
   // Discard every pending attachment AND free its server blob — the explicit
   // "Clear all" control, only ever used before the message is sent.
   const discardAll = useCallback(() => {
@@ -265,6 +279,7 @@ export function useAttachments({
     referenceExisting,
     attachedIds,
     clear,
+    release,
     discardAll,
     uploading,
     readyIds,

@@ -36,6 +36,6 @@
   /* With both open on a narrower window the side columns give way, so the
      conversation keeps room for its header and text. */
   .railOpen.paneOpen {
-    grid-template-columns: minmax(210px, var(--session-rail)) minmax(330px, 1fr) minmax(260px, var(--side-pane));
+    grid-template-columns: minmax(200px, var(--session-rail)) minmax(330px, 1fr) minmax(250px, var(--side-pane));
   }
 }

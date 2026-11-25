@@ -37,8 +37,9 @@ waypoint sessions send <target-id> "[wp-msg from=$ME] Run the backend test suite
 
 `"send": "held"` in the result means the target is in Focus (its human releases
 or cancels the message later), waiting on a dialog (the message is delivered
-once the human answers it), or being restored after a backend restart (it is
-delivered afterwards; after a failed restore, once the session is reconnected).
+once the human answers it), or being restored or restarted (after a backend
+restart, a reconnect or a settings change; it is delivered afterwards, and after
+a failed restore once the session is reconnected).
 Expect a delayed reply, or none. To retract it,
 `waypoint sessions held cancel <held_message_id>`.
 

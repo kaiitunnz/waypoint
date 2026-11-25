@@ -7,6 +7,7 @@ export type IconName =
   | "chevron-up"
   | "search"
   | "refresh"
+  | "reset"
   | "eye"
   | "eye-off"
   | "link"
@@ -51,6 +52,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <circle cx="11" cy="11" r="6.5" />
       <path d="M20 20l-4.2-4.2" />
+    </>
+  ),
+  reset: (
+    <>
+      <path d="M4 9a8 8 0 1 1-.5 5" />
+      <path d="M3.5 4v5h5" />
     </>
   ),
   refresh: (

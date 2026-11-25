@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
+import { USAGE_POPOVER_SIZE_KEY } from "@waypoint/web-core/popoverSize";
 import { usagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
@@ -73,6 +74,7 @@ export function UsageControl({ session, catalog, onRefresh, refreshing }: UsageC
         width={380}
         side="top"
         align="right"
+        resizeKey={USAGE_POPOVER_SIZE_KEY}
       >
         <UsagePanel model={model} catalog={catalog} onRefresh={onRefresh} refreshing={refreshing} />
       </Flyout>

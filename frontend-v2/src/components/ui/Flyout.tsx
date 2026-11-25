@@ -17,13 +17,27 @@ interface FlyoutProps {
   width?: number;
   align?: "left" | "right";
   side?: "bottom" | "top";
+  // Lets a pointer client resize the popover; a sheet has one size.
+  resizeKey?: string;
   // No padding around the sheet's body, for lists and menus.
   flush?: boolean;
   children: ReactNode;
 }
 
 // A popover from its trigger on a pointer client, a sheet on touch.
-export function Flyout({ open, onClose, triggerRef, title, subtitle, width, align, side, flush, children }: FlyoutProps) {
+export function Flyout({
+  open,
+  onClose,
+  triggerRef,
+  title,
+  subtitle,
+  width,
+  align,
+  side,
+  resizeKey,
+  flush,
+  children,
+}: FlyoutProps) {
   const pointer = usePointerUI();
   return pointer ? (
     <Popover
@@ -36,6 +50,7 @@ export function Flyout({ open, onClose, triggerRef, title, subtitle, width, alig
       width={width}
       align={align}
       side={side}
+      resizeKey={resizeKey}
     >
       {children}
     </Popover>

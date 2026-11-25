@@ -5,10 +5,12 @@ import { createPortal } from "react-dom";
 
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
+import { useResizablePopover } from "@waypoint/web-core/hooks/useResizablePopover";
 
 import { cx } from "@/lib/cx";
 
 import styles from "./Popover.module.css";
+import { ResizeControls } from "./ResizeControls";
 
 interface PopoverProps {
   open: boolean;
@@ -19,6 +21,8 @@ interface PopoverProps {
   align?: "left" | "right";
   // `top` for a trigger near the bottom edge, such as the composer's.
   side?: "bottom" | "top";
+  // The storage key that lets a person resize the panel and keeps their size.
+  resizeKey?: string;
   children: ReactNode;
 }
 
@@ -30,12 +34,26 @@ export function Popover({
   width = 360,
   align = "left",
   side = "bottom",
+  resizeKey,
   children,
 }: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 }, side === "top" ? "rise" : "dropdown");
   usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
+  // The free edges are the ones away from the trigger.
+  const direction = { width: align === "right" ? -1 : 1, height: side === "top" ? -1 : 1 } as const;
   const placed = open && anchor.style !== null;
+  const { style: sized, resizable, custom, rendered, startResize, onResizeKey, reset } = useResizablePopover({
+    storageKey: resizeKey ?? "",
+    open: placed,
+    enabled: resizeKey !== undefined,
+    bounds: anchor.bounds,
+    panelRef: panel,
+    bodyRef: body,
+    defaultWidth: width,
+    direction,
+  });
   // The panel is portaled to the end of the page, so focus moves into it for the keyboard.
   useEffect(() => {
     if (placed) panel.current?.focus({ preventScroll: true });
@@ -55,9 +73,23 @@ export function Popover({
         ...anchor.style,
         width: Math.min(width, anchor.bounds?.maxWidth ?? width),
         maxHeight: anchor.bounds?.maxHeight,
+        ...sized,
       }}
     >
-      <div className={styles.scroll}>{children}</div>
+      {resizable && anchor.bounds ? (
+        <ResizeControls
+          direction={direction}
+          bounds={anchor.bounds}
+          rendered={rendered}
+          custom={custom}
+          onStart={startResize}
+          onKey={onResizeKey}
+          onReset={reset}
+        />
+      ) : null}
+      <div ref={body} className={styles.scroll}>
+        {children}
+      </div>
     </div>,
     document.body,
   );

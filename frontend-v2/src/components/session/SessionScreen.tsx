@@ -113,7 +113,7 @@ export function SessionScreen({ id }: { id: string }) {
     <Transcript
       turns={transcript.turns}
       status={session?.status ?? null}
-      loading={stream.loading}
+      loading={stream.loading || rendered !== events}
       hasOlder={stream.hasOlder}
       loadingOlder={stream.loadingOlder}
       onLoadOlder={stream.loadOlder}

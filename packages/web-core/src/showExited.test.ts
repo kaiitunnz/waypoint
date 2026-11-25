@@ -16,9 +16,9 @@ describe("show exited sessions", () => {
   it("shows exited sessions until they are turned off", () => {
     const storage = memoryStorage();
     expect(readShowExited(storage, "k")).toBe(true);
-    writeShowExited(storage, "k", false);
+    expect(writeShowExited(storage, "k", false)).toBe(true);
     expect(readShowExited(storage, "k")).toBe(false);
-    writeShowExited(storage, "k", true);
+    expect(writeShowExited(storage, "k", true)).toBe(true);
     expect(readShowExited(storage, "k")).toBe(true);
     expect(storage.data.size).toBe(0);
   });
@@ -43,7 +43,7 @@ describe("show exited sessions", () => {
       },
     };
     expect(readShowExited(broken, "k")).toBe(true);
-    expect(() => writeShowExited(broken, "k", false)).not.toThrow();
-    expect(() => writeShowExited(null, "k", false)).not.toThrow();
+    expect(writeShowExited(broken, "k", false)).toBe(false);
+    expect(writeShowExited(null, "k", false)).toBe(false);
   });
 });

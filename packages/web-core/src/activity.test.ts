@@ -61,6 +61,7 @@ describe("deriveActivity", () => {
     expect(deriveActivity([agent(1, "Sent the [T4 readout](/home/x/report.md) and ![chart](a.png)")], null, "idle").line).toBe(
       "Sent the T4 readout and chart",
     );
+    expect(deriveActivity([agent(1, "See [the run](https://x.test/a_(b)) now")], null, "idle").line).toBe("See the run now");
     const long = deriveActivity([agent(1, "word ".repeat(80))], null, "idle").line ?? "";
     expect(long.length).toBeLessThanOrEqual(140);
     expect(long.endsWith("…")).toBe(true);
@@ -111,8 +112,19 @@ describe("ActivityLoader", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch).toHaveBeenCalledTimes(1);
     await settle();
-    expect(onResult).toHaveBeenCalledWith("a", "result:a");
+    expect(onResult).toHaveBeenCalledWith("a", "result:a", "t1");
     loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch a session whose result it was given for the same event time", async () => {
+    const { loader, fetch } = make();
+    loader.seed("a", "t1");
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetch).not.toHaveBeenCalled();
+    loader.request("a", "t2");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -136,7 +148,7 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(200);
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(onResult).toHaveBeenCalledWith("a", "ok");
+    expect(onResult).toHaveBeenCalledWith("a", "ok", "t1");
 
     loader.request("a", "t1");
     await vi.advanceTimersByTimeAsync(5000);

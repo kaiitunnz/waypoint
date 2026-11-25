@@ -8,6 +8,16 @@ export { PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY };
 
 // Surfaces in this tab that share a key learn of a change through this; other tabs through `storage`.
 const sameTab = new Set<() => void>();
+// Choices storage refused, kept for the life of the page.
+const unsaved = new Map<string, boolean>();
+
+function localStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function subscribe(listener: () => void): () => void {
   sameTab.add(listener);
@@ -22,12 +32,13 @@ function subscribe(listener: () => void): () => void {
 export function useShowExitedSessions(storageKey: string): [boolean, (next: boolean) => void] {
   const show = useSyncExternalStore(
     subscribe,
-    () => readShowExited(window.localStorage, storageKey),
+    () => unsaved.get(storageKey) ?? readShowExited(localStorageOrNull(), storageKey),
     () => true,
   );
   const update = useCallback(
     (next: boolean) => {
-      writeShowExited(window.localStorage, storageKey, next);
+      if (writeShowExited(localStorageOrNull(), storageKey, next)) unsaved.delete(storageKey);
+      else unsaved.set(storageKey, next);
       for (const listener of sameTab) listener();
     },
     [storageKey],

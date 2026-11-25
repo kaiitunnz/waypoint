@@ -13,11 +13,14 @@ export function readShowExited(storage: ReadableStorage | null, key: string): bo
   }
 }
 
-export function writeShowExited(storage: WritableStorage | null, key: string, show: boolean): void {
+// Whether the choice was stored; storage can be unavailable (private windows, a full quota).
+export function writeShowExited(storage: WritableStorage | null, key: string, show: boolean): boolean {
+  if (!storage) return false;
   try {
-    if (show) storage?.removeItem(key);
-    else storage?.setItem(key, "0");
+    if (show) storage.removeItem(key);
+    else storage.setItem(key, "0");
+    return true;
   } catch {
-    // Storage can be unavailable (private windows); the choice then lasts until reload.
+    return false;
   }
 }

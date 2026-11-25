@@ -57,7 +57,7 @@ export function describeStep(event: EventRecord): string | null {
 
 function plainLine(text: string): string {
   const line = firstLine(text)
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
     .replace(/^[#>\-*\s]+/, "")
     .replace(/[*_`]/g, "")
     .replace(/\s+/g, " ")
@@ -105,7 +105,8 @@ export function deriveActivity(
 
 export interface ActivityLoaderOptions<T> {
   fetch: (id: string, signal: AbortSignal) => Promise<T>;
-  onResult: (id: string, result: T) => void;
+  // `lastEventAt` is the value the result was fetched for.
+  onResult: (id: string, result: T, lastEventAt: string) => void;
   // A change settles for this long before it is fetched, but never waits past
   // `maxWaitMs`, so a session that streams constantly still refreshes.
   settleMs?: number;
@@ -165,6 +166,11 @@ export class ActivityLoader<T> {
     });
   }
 
+  // Records a result already held for this `lastEventAt`, so it is not fetched again.
+  seed(id: string, lastEventAt: string): void {
+    if (!this.disposed) this.loaded.set(id, lastEventAt);
+  }
+
   forget(id: string): void {
     const held = this.pending.get(id);
     if (held) clearTimeout(held.timer);
@@ -205,7 +211,7 @@ export class ActivityLoader<T> {
         .then((result) => {
           if (controller.signal.aborted) return;
           succeeded = true;
-          this.options.onResult(id, result);
+          this.options.onResult(id, result, held.lastEventAt);
         })
         .catch(() => {})
         .finally(() => {

@@ -39,11 +39,12 @@ export function SessionRail({ currentId }: { currentId: string }) {
     () => rankSessionsForSwitcher(feed.visible, feed.askSessionIds, ""),
     [feed.visible, feed.askSessionIds],
   );
-  const bySection = (section: SwitcherSection) =>
-    entries.filter((entry) => entry.section === section).map((entry) => entry.session);
-  const pinned = useMemo(() => entries.filter((entry) => entry.section === "pinned").map((entry) => entry.session), [entries]);
-  const live = useMemo(() => entries.filter((entry) => entry.section === "live").map((entry) => entry.session), [entries]);
-  const exitedLive = useMemo(() => entries.filter((entry) => entry.section === "exited").map((entry) => entry.session), [entries]);
+  const grouped = useMemo(() => {
+    const groups: Record<SwitcherSection, SessionRecord[]> = { needs: [], pinned: [], live: [], exited: [] };
+    for (const entry of entries) groups[entry.section].push(entry.session);
+    return groups;
+  }, [entries]);
+  const { pinned, live, exited: exitedLive } = grouped;
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
@@ -56,7 +57,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
   });
   const asks = feed.pendingAsks?.items ?? [];
 
-  const row = (session: SessionRecord, section: SwitcherSection | "exited") => {
+  const row = (session: SessionRecord, section: SwitcherSection) => {
     const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
     const word = lampWord(lamp, session.status);
     const ask = asks.find((item) => item.session_id === session.id);
@@ -91,7 +92,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
       </div>
       <div className={styles.scroll}>
         {SECTIONS.map((section) => {
-          const sessions = bySection(section);
+          const sessions = grouped[section];
           if (sessions.length === 0) return null;
           return (
             <section key={section}>

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 
+import { PanelButton, type PanelControl } from "./PanelButton";
 import { SessionStatusLine } from "./SessionStatusLine";
 import styles from "./SessionBar.module.css";
 
@@ -18,11 +19,15 @@ interface SessionBarProps {
   agent: string;
   othersNeedYou: number;
   onTitle: () => void;
+  // Where there is room for the side panels beside the conversation.
+  rail?: PanelControl;
+  pane?: PanelControl;
   view: ReactNode;
   overflow: ReactNode;
 }
 
-export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, view, overflow }: SessionBarProps) {
+// The touch header: there is no nav rail, so it holds the way back.
+export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, rail, pane, view, overflow }: SessionBarProps) {
   return (
     <GlassBar>
       <Link
@@ -33,6 +38,7 @@ export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, vie
         <Icon name="chevron-left" size={22} />
         <Badge count={othersNeedYou} className={styles.badge} />
       </Link>
+      {rail ? <PanelButton panel="rail" control={rail} /> : null}
       <button type="button" className={styles.title} onClick={onTitle} aria-label={standing ? `${title}. ${standing.word}. Switch session` : `${title}. Switch session`}>
         <span className={styles.nameRow}>
           <span className={styles.name}>{title}</span>
@@ -41,6 +47,7 @@ export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, vie
         {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
       </button>
       {view}
+      {pane ? <PanelButton panel="pane" control={pane} /> : null}
       {overflow}
     </GlassBar>
   );

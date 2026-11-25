@@ -85,3 +85,10 @@
   top: 4px;
   right: 4px;
 }
+
+/* The tile's menu button is 44px on touch; the title row stays clear of it. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .head {
+    padding-right: 36px;
+  }
+}

@@ -30,12 +30,8 @@
   text-align: left;
 }
 
-.item:hover,
 .selected {
   background: var(--fill-quiet);
-}
-
-.selected {
   color: var(--text-strong);
   font-weight: 600;
 }
@@ -44,8 +40,12 @@
   color: var(--error);
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .item {
     min-height: 36px;
+  }
+
+  .item:hover {
+    background: var(--fill-quiet);
   }
 }

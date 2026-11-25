@@ -23,7 +23,7 @@
   white-space: nowrap;
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .chip {
     height: 36px;
   }

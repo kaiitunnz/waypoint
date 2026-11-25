@@ -14,7 +14,7 @@ import type { PendingQuestionAsk } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { useDesktop } from "@/lib/layout";
+import { usePhoneLayout } from "@/lib/layout";
 
 import { AskCard } from "./AskCard";
 import { AskStatus } from "./AskStatus";
@@ -29,7 +29,7 @@ interface QuestionAskProps {
 }
 
 export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
-  const desktop = useDesktop();
+  const phone = usePhoneLayout();
   const prompts = ask.question.questions;
   const single = prompts.length === 1 ? prompts[0] : null;
   const [picks, setPicks] = useState<PromptPick[]>(() => emptyPicks(prompts));
@@ -64,7 +64,7 @@ export function QuestionAsk({ ask, agent, now }: QuestionAskProps) {
             prompt={single}
             pick={picks[0]}
             disabled={disabled}
-            limit={desktop ? undefined : 2}
+            limit={phone ? 2 : undefined}
             onOption={(label) => pickOption(0, label)}
             onCustom={(text) => update(0, (pick) => ({ ...pick, other: text }))}
             onSubmitCustom={() => void submit()}

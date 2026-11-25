@@ -1,4 +1,9 @@
 .group {
+  margin-top: 10px;
+}
+
+.divided {
+  margin-top: 0;
   border-top: 1px solid var(--line);
 }
 
@@ -31,15 +36,4 @@
 
 .open {
   transform: rotate(90deg);
-}
-
-@media (min-width: 900px) {
-  .group {
-    margin-top: 10px;
-    border-top: 0;
-  }
-
-  .toggle {
-    padding-left: 16px;
-  }
 }

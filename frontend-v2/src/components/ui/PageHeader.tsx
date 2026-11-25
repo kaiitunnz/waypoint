@@ -10,7 +10,7 @@ interface PageHeaderProps {
   subtitle?: ReactNode;
   // Sits right after the title (the host chip).
   titleExtra?: ReactNode;
-  // A way out on mobile screens that have no tab bar; desktop has the rail.
+  // A way out on touch screens that have no tab bar; a pointer client has the nav rail.
   back?: { href: string; label: string };
 }
 

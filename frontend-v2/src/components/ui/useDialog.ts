@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, type RefObject } from "react";
 
-import { trapTabFocus } from "@waypoint/web-core/keyboard";
+import { TAB_STOP_SELECTOR, trapTabFocus } from "@waypoint/web-core/keyboard";
 
 // Open dialogs, topmost last: only the topmost answers Escape, so a sheet opened
 // from a modal closes alone.
@@ -39,7 +39,7 @@ export function useDialog(open: boolean, onClose: () => void, panel: RefObject<H
         close.current();
         return;
       }
-      trapTabFocus(event, panel.current, { preventWhenEmpty: true });
+      trapTabFocus(event, panel.current, { preventWhenEmpty: true, rootIsEdge: true, selector: TAB_STOP_SELECTOR });
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {

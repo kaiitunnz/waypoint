@@ -7,23 +7,25 @@ import { Button } from "@/components/ui/Button";
 import { SearchInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
+import { cx } from "@/lib/cx";
+import { usePointerUI } from "@/lib/layout";
 
 import styles from "./HomeHeader.module.css";
 
 interface HomeHeaderProps {
-  desktop: boolean;
+  phone: boolean;
   query: string;
   onQuery: (query: string) => void;
-  // Mobile: whether the search field is showing.
+  // Phone: whether the search field is showing.
   searchOpen: boolean;
   onSearchOpen: (open: boolean) => void;
   onNew: () => void;
-  // Mobile: tapping the title opens the session switcher.
+  // Touch: tapping the title opens the session switcher.
   onTitle: () => void;
 }
 
 export function HomeHeader({
-  desktop,
+  phone,
   query,
   onQuery,
   searchOpen,
@@ -31,10 +33,11 @@ export function HomeHeader({
   onNew,
   onTitle,
 }: HomeHeaderProps) {
+  const pointer = usePointerUI();
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (searchOpen && !desktop) field.current?.focus();
-  }, [searchOpen, desktop]);
+    if (searchOpen && phone) field.current?.focus();
+  }, [searchOpen, phone]);
 
   const search = (
     <SearchInput
@@ -47,16 +50,16 @@ export function HomeHeader({
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         onQuery("");
-        if (!desktop) onSearchOpen(false);
+        if (phone) onSearchOpen(false);
       }}
     />
   );
 
   return (
     <>
-      <header className={styles.header}>
+      <header className={cx(styles.header, !phone && styles.full)}>
         <h1 className={styles.title}>
-          {desktop ? (
+          {pointer ? (
             "Sessions"
           ) : (
             <button type="button" className={styles.titleButton} aria-haspopup="dialog" onClick={onTitle}>
@@ -65,9 +68,9 @@ export function HomeHeader({
           )}
         </h1>
         <HostSwitcher />
-        {desktop ? search : null}
+        {phone ? null : search}
         <span className={styles.grow} />
-        {desktop ? null : (
+        {phone ? (
           <IconButton
             label={searchOpen ? "Close search" : "Search sessions"}
             onClick={() => {
@@ -77,13 +80,13 @@ export function HomeHeader({
           >
             <Icon name={searchOpen ? "close" : "search"} size={21} />
           </IconButton>
-        )}
+        ) : null}
         <Button variant="primary" onClick={onNew}>
           <Icon name="plus" size={18} strokeWidth={2.2} />
-          {desktop ? "New session" : "New"}
+          {phone ? "New" : "New session"}
         </Button>
       </header>
-      {desktop || !searchOpen ? null : <div className={styles.searchRow}>{search}</div>}
+      {phone && searchOpen ? <div className={styles.searchRow}>{search}</div> : null}
     </>
   );
 }

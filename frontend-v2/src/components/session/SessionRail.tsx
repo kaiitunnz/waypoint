@@ -22,6 +22,7 @@ import { useShowExited } from "@/lib/show-exited";
 import { cx } from "@/lib/cx";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
+import { PanelButton } from "./PanelButton";
 import styles from "./SessionRail.module.css";
 
 const SECTIONS: SwitcherSection[] = ["needs", "pinned", "live"];
@@ -29,7 +30,8 @@ const SECTIONS: SwitcherSection[] = ["needs", "pinned", "live"];
 // The rail mounts again on every session switch; this is where it was scrolled to.
 let scrollTop = 0;
 
-export function SessionRail({ currentId }: { currentId: string }) {
+// `onClose` is for the rail drawn as a drawer.
+export function SessionRail({ currentId, onClose }: { currentId: string; onClose?: () => void }) {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
@@ -84,7 +86,8 @@ export function SessionRail({ currentId }: { currentId: string }) {
 
   return (
     <aside className={styles.rail} aria-label="Sessions">
-      <div className={styles.top}>
+      <div className={cx(styles.top, onClose && styles.closable)}>
+        {onClose ? <PanelButton panel="rail" size="sm" control={{ open: true, toggle: onClose }} /> : null}
         <h2 className={styles.heading}>Sessions</h2>
         <IconButton label="Search sessions" size="sm" onClick={switcher.open}>
           <Icon name="search" size={18} />

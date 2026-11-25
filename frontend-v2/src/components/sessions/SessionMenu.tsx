@@ -10,7 +10,7 @@ export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
 
 interface SessionMenuProps {
   session: SessionRecord;
-  // The agent and model, under the title on mobile.
+  // The agent and model, under the title in the touch sheet.
   subtitle: string;
   onAction: (action: SessionAction, session: SessionRecord) => void;
   size?: "md" | "sm";

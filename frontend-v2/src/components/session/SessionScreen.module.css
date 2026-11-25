@@ -26,14 +26,14 @@
   }
 
   .railOpen {
-    grid-template-columns: 272px minmax(0, 1fr);
+    grid-template-columns: var(--session-rail) minmax(0, 1fr);
   }
 
   .paneOpen {
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) var(--side-pane);
   }
 
   .railOpen.paneOpen {
-    grid-template-columns: 272px minmax(0, 1fr) 340px;
+    grid-template-columns: var(--session-rail) minmax(0, 1fr) var(--side-pane);
   }
 }

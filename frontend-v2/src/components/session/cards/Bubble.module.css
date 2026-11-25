@@ -43,11 +43,13 @@
   color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   .bub {
     padding: 8px 12px;
   }
+}
 
+@media (min-width: 900px) {
   .user {
     max-width: 78%;
   }

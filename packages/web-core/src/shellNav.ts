@@ -39,7 +39,7 @@ export function activeNavKey(pathname: string): NavKey | null {
   return null;
 }
 
-// The mobile tab bar shows on the top-level screens only. A session, a single
+// The touch tab bar shows on the top-level screens only. A session, a single
 // needs-you item and the assistant take the whole screen.
 export function showsTabBar(pathname: string): boolean {
   return ["/", "/inbox", "/board", "/telemetry"].includes(normalize(pathname));

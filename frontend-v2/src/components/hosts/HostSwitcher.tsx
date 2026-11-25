@@ -9,7 +9,7 @@ import { Sheet } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
 import { Popover } from "@/components/ui/Popover";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
-import { useDesktop } from "@/lib/layout";
+import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
 
 import { SshConnectDialog } from "./SshConnectDialog";
@@ -18,7 +18,7 @@ import { SwitcherPanel } from "./SwitcherPanel";
 
 export function HostSwitcher() {
   const { host, connection, launchTargets } = useShellData();
-  const desktop = useDesktop();
+  const pointer = usePointerUI();
   const [open, setOpen] = useState(false);
   const [recents, setRecents] = useState(readRecentHosts);
   // The SSH password dialog stacks over the open popover or sheet, which stays
@@ -70,7 +70,7 @@ export function HostSwitcher() {
         <span className={styles.name}>{name}</span>
         <Icon name="chevron-down" size={15} strokeWidth={2} />
       </button>
-      {desktop ? (
+      {pointer ? (
         <Popover open={open} onOpenChange={requestOpen} triggerRef={trigger} label={label} width={380}>
           {open ? panel : null}
         </Popover>

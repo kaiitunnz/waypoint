@@ -38,14 +38,24 @@
   padding: 4px 16px 0;
 }
 
-@media (min-width: 900px) {
-  .header {
-    gap: 14px;
-    padding: 20px 16px 4px;
-  }
+/* The full header: the search field sits in the row, and takes a row of its own
+   when the header is tight. */
+.full {
+  container-type: inline-size;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: calc(var(--safe-top) + 20px) 16px 4px;
+}
 
-  .grow {
-    flex: none;
-    margin-left: auto;
+.full .grow {
+  flex: none;
+  margin-left: auto;
+}
+
+@container (max-width: 560px) {
+  .full .search {
+    order: 1;
+    flex: 1 0 100%;
+    max-width: none;
   }
 }

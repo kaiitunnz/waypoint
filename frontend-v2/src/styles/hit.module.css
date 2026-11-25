@@ -1,5 +1,5 @@
-/* Extends a compact control's tap target to 44px on mobile. The control must be positioned. */
-@media (max-width: 899.98px) {
+/* Extends a compact control's tap target to 44px on touch. The control must be positioned. */
+@media not all and (hover: hover) and (pointer: fine) {
   .hit::after {
     content: "";
     position: absolute;

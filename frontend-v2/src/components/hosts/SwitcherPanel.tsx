@@ -19,7 +19,7 @@ import type { LaunchTargetSummary } from "@waypoint/web-core/types";
 import { Button } from "@/components/ui/Button";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { switchHost } from "@/lib/auth";
-import { useDesktop } from "@/lib/layout";
+import { usePointerUI } from "@/lib/layout";
 import { PROBE_LABEL } from "@/lib/probe";
 import { useShellData } from "@/lib/shell-data";
 import { useTheme } from "@/lib/theme";
@@ -37,7 +37,7 @@ interface SwitcherPanelProps {
 
 export function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPanelProps) {
   const { host, token, launchTargets } = useShellData();
-  const desktop = useDesktop();
+  const pointer = usePointerUI();
   const { snapshot } = useTailnetSnapshot({ kind: "backend", host, token });
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -137,7 +137,7 @@ export function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPan
             {sshError}
           </p>
         ) : null}
-        {desktop ? null : <ThemeRow />}
+        {pointer ? null : <ThemeRow />}
         <Button variant="primary" block disabled={!dirty} onClick={apply}>
           Switch
         </Button>

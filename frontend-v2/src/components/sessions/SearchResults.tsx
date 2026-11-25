@@ -13,14 +13,14 @@ interface SearchResultsProps {
   total: number;
   rows: ReactNode[];
   paging: ExitedPaging;
-  desktop: boolean;
+  phone: boolean;
 }
 
-export function SearchResults({ total, rows, paging, desktop }: SearchResultsProps) {
+export function SearchResults({ total, rows, paging, phone }: SearchResultsProps) {
   const { loading, failed } = paging;
   return (
     <section>
-      <SectionHeading title="Results" count={total} dense={!desktop} />
+      <SectionHeading title="Results" count={total} dense={phone} />
       {rows.length > 0 ? (
         <div className={styles.inset}>
           <List>{rows}</List>

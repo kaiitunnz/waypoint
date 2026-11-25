@@ -1,5 +1,8 @@
 /* Design tokens: every colour, radius, size and layer resolves from here. Dark is
-   the default; html[data-theme="light"] swaps the values. */
+   the default; html[data-theme="light"] swaps the values.
+
+   Input picks the chrome and density: `(hover: hover) and (pointer: fine)` is a
+   pointer client and anything else is touch. Width (900px) only picks the layout. */
 
 :root {
   color-scheme: dark;
@@ -100,6 +103,8 @@
   --bar-height: 48px;
   --session-col: 860px;
   --session-gutter: 28px;
+  --session-rail: 272px;
+  --side-pane: 340px;
 
   /* Layers. Sheets, modals and popovers share one, so whichever opened last is
      on top, whether a dialog opens from a popover or a popover from a dialog. */
@@ -160,15 +165,15 @@ html[data-theme="light"] {
   --hl-punct: #6a5f53;
 }
 
-@media (min-width: 900px) {
+@media (hover: hover) and (pointer: fine) {
   :root {
     --f-bubble: 14.5px;
     --lh-bubble: 21px;
   }
 }
 
-/* Mobile body text is 16px so iOS does not zoom into form fields. */
-@media (max-width: 899.98px) {
+/* Touch body text is 16px so iOS does not zoom into form fields. */
+@media not all and (hover: hover) and (pointer: fine) {
   :root {
     --f-page: 26px;
     --f-head: 18px;

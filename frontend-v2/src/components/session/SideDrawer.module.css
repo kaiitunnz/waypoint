@@ -1,0 +1,54 @@
+.root {
+  position: absolute;
+  z-index: var(--z-overlay);
+  inset: 0;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  /* Always leaves some scrim to close it by. */
+  max-width: calc(100% - 48px);
+  background: var(--ground);
+  box-shadow: var(--shadow-modal);
+  outline: none;
+  animation: 180ms ease-out;
+}
+
+.drawer > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.left {
+  left: 0;
+  width: var(--session-rail);
+  animation-name: from-left;
+}
+
+.right {
+  right: 0;
+  width: var(--side-pane);
+  animation-name: from-right;
+}
+
+@keyframes from-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes from-right {
+  from {
+    transform: translateX(100%);
+  }
+}

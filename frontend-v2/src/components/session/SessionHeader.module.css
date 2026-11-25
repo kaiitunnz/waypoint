@@ -28,8 +28,10 @@
   color: var(--faint);
 }
 
-.switch:hover {
-  background: var(--fill-quiet);
+@media (hover: hover) and (pointer: fine) {
+  .switch:hover {
+    background: var(--fill-quiet);
+  }
 }
 
 .switch:active {

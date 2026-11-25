@@ -14,13 +14,13 @@ const SEGMENTS: { value: TranscriptDensity; label: string }[] = [
 interface DensityToggleProps {
   value: TranscriptDensity;
   onChange: (value: TranscriptDensity) => void;
-  // Inline in the desktop header, a full-width row in the mobile menu.
-  variant: "text" | "segmented";
+  // Inline in the header, or a full-width row in the overflow menu.
+  variant: "inline" | "menu";
 }
 
 export function DensityToggle({ value, onChange, variant }: DensityToggleProps) {
   const control = (
-    <SegmentedControl label="Transcript density" segments={SEGMENTS} value={value} onChange={onChange} size={variant === "text" ? "sm" : undefined} />
+    <SegmentedControl label="Transcript density" segments={SEGMENTS} value={value} onChange={onChange} size={variant === "inline" ? "sm" : undefined} />
   );
-  return variant === "segmented" ? <div className={styles.menuRow}>{control}</div> : control;
+  return variant === "menu" ? <div className={styles.menuRow}>{control}</div> : control;
 }

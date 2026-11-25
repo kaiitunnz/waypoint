@@ -4,7 +4,7 @@ import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
-import { useDesktop } from "@/lib/layout";
+import { usePointerUI } from "@/lib/layout";
 
 import { Icon } from "./Icon";
 import { IconButton } from "./IconButton";
@@ -109,8 +109,8 @@ export function Modal(props: DialogProps) {
   return <Surface {...props} variant="modal" />;
 }
 
-// A modal on desktop, a sheet on mobile.
+// A modal for a pointer, a sheet for touch.
 export function Dialog(props: DialogProps) {
-  const desktop = useDesktop();
-  return desktop ? <Modal {...props} /> : <Sheet {...props} />;
+  const pointer = usePointerUI();
+  return pointer ? <Modal {...props} /> : <Sheet {...props} />;
 }

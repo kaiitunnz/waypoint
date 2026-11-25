@@ -48,15 +48,22 @@ inspection is unaffected.
 
 ## Lifecycle
 
+- The assistant is set up in the background after the backend starts serving.
+  Until it finishes, its reset, attach, terminate and reconnect controls return
+  `409` (terminate is accepted while the thread is still being restored).
 - On startup the runtime refreshes the assistant workspace asset links, then
-  reuses any still-alive assistant thread that lives in the managed workspace,
-  **regardless of its agent or interface**. The live thread is the source of
-  truth, so an agent and interface chosen from the UI survive a redeploy. The
+  reuses the assistant thread that lives in the managed workspace,
+  **regardless of its agent or interface**. The thread is the source of truth,
+  so an agent and interface chosen from the UI survive a redeploy. The
   `assistant` block in `waypoint.yaml` only seeds the *first* creation; editing
   `assistant.backend` / `assistant.transport` later has no effect while a thread
   exists — clear the context to re-seed.
-- If no live thread exists (first boot, or the previous one exited), a fresh
-  thread is created from the `waypoint.yaml` defaults.
+- A thread in `error` is kept, so its context survives: reconnect it, or clear
+  the context to replace it. A pane-backed thread (Emulated or Terminal) in
+  `error` is replaced, because it cannot relaunch.
+- If no usable thread exists (first boot, or the previous one exited), a fresh
+  thread is created from the `waypoint.yaml` defaults. If that launch fails, the
+  previous thread stays the assistant.
 - The assistant cannot be **deleted**, and the generic session terminate/delete
   endpoints reject it (it is a protected singleton).
 

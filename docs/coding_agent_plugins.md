@@ -293,7 +293,8 @@ async def create_session(
 - `setup(runtime)` runs once during `SessionRuntime.__init__`. Build any
   external resources here (Claude resolves its host-side support bundle).
   Resilient to missing prerequisites: log and bail without raising so a
-  partial install still boots.
+  partial install still boots. A `setup` that raises marks the plugin
+  unavailable.
 - `shutdown(runtime)` runs from `SessionRuntime.stop` so the plugin can
   close adapters and drain background state in the order it was brought up.
 - `register_routes(app, context)` runs once during `create_app`. Mount
@@ -304,9 +305,45 @@ async def create_session(
   the protocol process, swallow startup errors as `HTTPException(400)`, and
   return the persisted record. The runtime has already validated
   `permission_mode` and resolved `resolved_model` / `resolved_effort`.
-- `restore_session` runs at startup for sessions that weren't `EXITED` /
-  `ERROR` when the runtime stopped, and on user-initiated reattach. Use it to
-  reconnect to the protocol process and emit a "session restored" system note.
+- `restore_session` runs at startup for every session that wasn't `EXITED` when
+  the runtime stopped, on user-initiated reattach, and after a restart-scoped
+  settings change. Use it to reconnect to the protocol process, write the
+  session's status, and emit a "session restored" system note. See
+  [Startup and restore](#startup-and-restore).
+
+### Startup and restore
+
+No plugin can keep the backend from starting or serving. Boot restores run
+concurrently in the background, one per session, as do the orphaned one-shot
+sweep and the [assistant bootstrap](personal_assistant.md#lifecycle). Sessions
+on a `password` SSH target with no live connection are left as stored.
+
+What happens during a restore depends on the driver's `has_terminal_pane`:
+
+- **No terminal pane** (a native structured adapter). The session shows
+  `starting` and the restore is bounded by `session_restore_timeout_seconds`
+  (default 90). Requests that drive the agent return `409`. Agent sends,
+  scheduled messages and wakes are held and delivered once the session can take
+  them. Terminate and delete cancel the restore.
+- **Terminal pane** (tmux, `claude_tty`). The pane is live, so the session keeps
+  its status and the restore is not bounded or cancelled.
+
+A restore that raises or times out records "Could not restore this session:
+<reason>. Reconnect to try again." A session without a pane becomes `error`;
+messages held for it stay queued and go out in order after a successful
+reconnect. A pane-backed session keeps its status.
+
+A plugin that raises in `setup`, `transport_view` or `register_routes`, and a
+session whose backend or transport no plugin provides, are logged with the
+plugin's name. Their sessions become `error` with a "Session unavailable" note
+saying why, and requests that drive them return `503`; terminate and delete still
+work. A session returns to its earlier status on the first start where its plugin
+works again.
+
+A restore without a pane must tolerate cancellation, including calls it offloads
+to a thread, and release the processes it started. No restore may block the event
+loop. Fail at once when the agent's server speaks an incompatible protocol rather
+than waiting out the timeout.
 
 ### Control surface
 

@@ -3195,7 +3195,12 @@ class SessionRuntime:
         self, plugin: Any, session: SessionRecord
     ) -> None:
         async with self._keep_read(session.id):
-            await self.restores.run(session, plugin.restore_session(self, session))
+            failure = await self.restores.run(
+                session, plugin.restore_session(self, session)
+            )
+        if isinstance(failure, asyncio.CancelledError):
+            # Terminate or delete stopped it: start nothing for this session.
+            return
         refreshed = self.storage.get_session(session.id)
         if refreshed is None:
             return
@@ -3622,8 +3627,7 @@ class SessionRuntime:
         failure = await self.restores.run(
             session, plugin.restore_session(self, session)
         )
-        if isinstance(failure, HTTPException):
-            raise failure
+        self.restores.raise_for_request(failure)
         # _restore_*_session swallows failures (it tags the session ERROR or
         # EXITED and emits a system_note instead of raising). Re-read storage
         # so the caller sees the post-restore status, and translate any
@@ -4213,8 +4217,7 @@ class SessionRuntime:
                 else target_plugin.restore_session(self, restored_session)
             ),
         )
-        if isinstance(failure, HTTPException):
-            raise failure
+        self.restores.raise_for_request(failure)
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —

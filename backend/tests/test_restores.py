@@ -252,14 +252,43 @@ async def test_terminate_cancels_an_in_flight_restore(
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
     stub_restores(monkeypatch, {"s1": hang})
+    sent = record_dispatches(runtime, monkeypatch)
+    warmed: list[str] = []
+    monkeypatch.setattr(
+        runtime,
+        "_warm_command_completions",
+        lambda session, **_: warmed.append(session.id),
+    )
 
     async with started(runtime):
         await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
         async with asyncio.timeout(2):
             await runtime.terminate("s1")
         assert not runtime.restores.is_restoring("s1")
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.4)
         assert stored(runtime, "s1").status == SessionStatus.EXITED
+        # Nothing starts for the closed session: no probe, no held delivery.
+        assert warmed == []
+        assert sent == []
+
+
+async def test_terminate_fails_the_reattach_it_cancels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", status=SessionStatus.EXITED)
+    stub_restores(monkeypatch, {"s1": hang})
+
+    reattach = asyncio.create_task(runtime.reattach("s1"))
+    await until(lambda: runtime.restores.is_restoring("s1"))
+    async with asyncio.timeout(2):
+        await runtime.terminate("s1")
+
+    with pytest.raises(HTTPException) as cancelled:
+        await reattach
+    assert cancelled.value.status_code == 409
+    assert stored(runtime, "s1").status == SessionStatus.EXITED
 
 
 async def test_stopping_mid_restore_writes_the_status_back(

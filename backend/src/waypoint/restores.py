@@ -49,10 +49,22 @@ class RestoreCoordinator:
                 status_code=status.HTTP_409_CONFLICT, detail=RESTORING_DETAIL
             )
 
+    @staticmethod
+    def raise_for_request(failure: BaseException | None) -> None:
+        """Fail a request whose restore was cancelled or refused outright."""
+        if isinstance(failure, asyncio.CancelledError):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the restore was cancelled",
+            )
+        if isinstance(failure, HTTPException):
+            raise failure
+
     async def run(
         self, session: SessionRecord, restore: Coroutine[Any, Any, None]
     ) -> BaseException | None:
-        """Await ``restore`` and return its failure, if it raised or timed out.
+        """Await ``restore`` and return its failure, if it raised, timed out or
+        was cancelled (a ``CancelledError``, whose session is being closed).
 
         ``session`` is the record as read before any status write, which is also
         what ``restore`` must have been given."""
@@ -106,7 +118,10 @@ class RestoreCoordinator:
                 await _abandon(entry.call)
                 failure = TimeoutError(f"timed out after {self._timeout:g}s")
                 log.error("restore of session %s %s", session.id, failure)
-            elif not entry.call.cancelled():
+            elif entry.call.cancelled():
+                self._write_back(previous)
+                return asyncio.CancelledError()
+            else:
                 failure = entry.call.exception()
                 if failure is not None:
                     log.error(

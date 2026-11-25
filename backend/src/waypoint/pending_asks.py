@@ -437,14 +437,13 @@ class PendingAskFeed:
 
     def _derive(self, session: SessionRecord) -> _Entry:
         entry = _Entry(state=_state(session))
-        runtime = self._runtime
         if (
             session.status is SessionStatus.EXITED
             or session.source is SessionSource.TELEMETRY
-            or runtime.plugin_unavailable_reason(session)
         ):
             self._walks.pop(session.id, None)
             return entry
+        runtime = self._runtime
         plugin = runtime.registry.plugin_for(session)
         plan_plugin = plugin if isinstance(plugin, PlanApprovalLifecycle) else None
         entry.plan_plugin = plan_plugin

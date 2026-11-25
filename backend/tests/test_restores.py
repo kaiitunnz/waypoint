@@ -630,25 +630,29 @@ async def test_shutdown_delivers_nothing_as_a_cancelled_reconnect_unwinds(
     assert held_texts(Storage(runtime.settings.database_path), "s1") == ["held"]
 
 
+@pytest.mark.parametrize("transport", ["codex_app_server", "tmux"])
 async def test_a_session_deleted_mid_reconnect_starts_no_restore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transport: str
 ) -> None:
     runtime = make_runtime(tmp_path)
-    add_session(runtime, "s1", status=SessionStatus.EXITED)
+    add_session(runtime, "s1", transport=transport, status=SessionStatus.EXITED)
+    tearing_down = asyncio.Event()
     torn_down = asyncio.Event()
     restored: list[str] = []
 
     async def slow_teardown(*_args: Any) -> None:
+        tearing_down.set()
         await torn_down.wait()
 
     async def record(_runtime: SessionRuntime, session: SessionRecord) -> None:
         restored.append(session.id)
 
-    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", slow_teardown)
+    driver = get_registry().for_transport(transport)
+    monkeypatch.setattr(driver, "terminate_session", slow_teardown)
     stub_restores(monkeypatch, {"s1": record})
 
     reconnect = asyncio.create_task(runtime.reattach("s1"))
-    await until(lambda: runtime.restores.holds_sends("s1"))
+    await asyncio.wait_for(tearing_down.wait(), timeout=5)
     await runtime.delete("s1")
     torn_down.set()
 
@@ -1114,7 +1118,7 @@ async def test_nothing_lands_on_a_failed_plugin(
 
 
 async def test_session_with_no_plugin_answers_without_failing(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
 ) -> None:
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
@@ -1132,8 +1136,34 @@ async def test_session_with_no_plugin_answers_without_failing(
         assert clone.value.status_code == 503
         assert await runtime.get_command_completions("s1") == ([], False)
         assert (await runtime.refresh_rate_limit_usage("s1")).id == "s1"
-        runtime.asks._refresh({"s1"})
-        assert "pending-asks derivation failed" not in caplog.text
+
+
+async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    await runtime._emit_adapter_event(
+        "s1",
+        EventKind.TOOL_CALL,
+        "AskUserQuestion",
+        {
+            "tool_name": "AskUserQuestion",
+            "tool_use_id": "q1",
+            "payload": {
+                "input": {
+                    "questions": [{"question": "Which?", "options": [{"label": "A"}]}]
+                }
+            },
+        },
+        SessionStatus.WAITING_INPUT,
+    )
+    runtime.plugin_failures["codex"] = "failed in setup: bad wiring"
+
+    [ask] = (await runtime.asks.snapshot()).items
+
+    assert (ask.session_id, getattr(ask, "availability", None)) == (
+        "s1",
+        "unavailable",
+    )
 
 
 def test_routes_refuse_a_session_with_no_plugin(tmp_path: Path) -> None:

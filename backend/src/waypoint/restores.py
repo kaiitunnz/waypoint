@@ -119,6 +119,12 @@ class RestoreCoordinator:
         if session.id in self._closing:
             restore.close()
             return asyncio.CancelledError()
+        if self._runtime.storage.get_session(session.id) is None:
+            # Deleted while its old process was torn down.
+            restore.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
+            )
         if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
             try:
                 await restore
@@ -141,12 +147,6 @@ class RestoreCoordinator:
         if self.is_restoring(session.id):
             restore.close()
             self.require_restored(session.id)
-        if self._runtime.storage.get_session(session.id) is None:
-            # Deleted while its old process was torn down.
-            restore.close()
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
-            )
         previous = session
         if previous.status is SessionStatus.STARTING:
             # Left behind by a process that stopped mid-restore.

@@ -314,6 +314,7 @@ def test_tool_completed_event_carries_attachments() -> None:
     assert text.startswith("Result for Read:")
     assert metadata["tool_use_id"] == "call_1"
     assert metadata["attachments"] == [{"path": "/etc/hosts"}]
+    assert metadata["is_error"] is False
 
 
 def test_tool_error_event_uses_tool_result_kind() -> None:
@@ -335,6 +336,7 @@ def test_tool_error_event_uses_tool_result_kind() -> None:
     assert kind == EventKind.TOOL_RESULT
     assert text == "Error: command not found"
     assert metadata["tool_name"] == "Bash"
+    assert metadata["is_error"] is True
 
 
 def test_session_status_busy_marks_session_running() -> None:

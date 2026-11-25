@@ -13,6 +13,8 @@ export interface SessionStream extends StreamState {
   loading: boolean;
   loadingOlder: boolean;
   loadOlder: () => void;
+  // Takes a session record the server returned, ahead of its next session frame.
+  setSession: (session: SessionRecord) => void;
 }
 
 // One session's record, its events and its socket: the tail page loads first,
@@ -218,5 +220,7 @@ export function useSessionStream(
       });
   }, [host, token, sessionId, hasOlder, oldestSequence, onAuthFailure]);
 
-  return { ...state, loading: !state.loaded && state.error === null, loadingOlder, loadOlder };
+  const setSession = useCallback((session: SessionRecord) => dispatch({ type: "session", session }), []);
+
+  return { ...state, loading: !state.loaded && state.error === null, loadingOlder, loadOlder, setSession };
 }

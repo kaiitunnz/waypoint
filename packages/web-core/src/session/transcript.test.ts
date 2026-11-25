@@ -5,9 +5,11 @@ import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,
   foldOlderEvents,
+  itemKey,
   latestActionablePlanEvent,
   mergeEvents,
   minRawSequence,
+  primaryEvent,
   removeConfirmedOptimisticMessages,
   sanitizeEvent,
   type TranscriptItem,
@@ -428,5 +430,33 @@ describe("sanitizeEvent", () => {
     expect(clean.text).toBe("red");
     expect(clean.metadata).toBe(event.metadata);
     expect(clean).not.toBe(event);
+  });
+});
+
+describe("itemKey", () => {
+  it("survives a streamed delta merged into the first event", () => {
+    const first = buildTranscriptItems([ev(1, "agent_output", "Hi ", { item_id: "i" })])[0];
+    const merged = buildTranscriptItems(mergeEvents([ev(1, "agent_output", "Hi ", { item_id: "i" })], ev(4, "agent_output", "there", { item_id: "i" })))[0];
+    expect(itemKey(merged)).toBe(itemKey(first));
+  });
+
+  it("names a pair by its item id and a run by its first entry", () => {
+    const [item] = buildTranscriptItems([call(1, "a"), ev(2, "tool_result", "", { item_id: "a" }), call(3, "b")]);
+    if (item.kind !== "tool_run") throw new Error("expected a tool run");
+    expect(itemKey(item.items[0])).toBe("pair-a");
+    expect(itemKey(item)).toBe("tool_run-pair-a");
+  });
+});
+
+describe("primaryEvent", () => {
+  const leaf = (events: ReturnType<typeof ev>[]) => {
+    const [run] = buildTranscriptItems(events);
+    if (run.kind !== "tool_run") throw new Error("expected a tool run");
+    return run.items[0];
+  };
+
+  it("is the call of a pair, else its result", () => {
+    expect(primaryEvent(leaf([call(1, "a"), ev(2, "tool_result", "", { item_id: "a" })])).sequence).toBe(1);
+    expect(primaryEvent(leaf([ev(2, "tool_result", "", { item_id: "z" })])).sequence).toBe(2);
   });
 });

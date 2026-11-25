@@ -20,8 +20,9 @@ import type { SessionRecord } from "../types";
 import type { SessionsFeed } from "./useSessionsFeed";
 
 export interface SessionActions {
-  setPinned: (sessionId: string, pinned: boolean) => Promise<void>;
-  rename: (session: SessionRecord, title: string) => Promise<void>;
+  // `onUpdated` receives the session record the server returns.
+  setPinned: (sessionId: string, pinned: boolean, onUpdated?: (session: SessionRecord) => void) => Promise<void>;
+  rename: (session: SessionRecord, title: string, onUpdated?: (session: SessionRecord) => void) => Promise<void>;
   terminate: (sessionId: string) => Promise<void>;
   // `onRemoved` runs once the server has deleted the session.
   remove: (sessionId: string, onRemoved?: () => void) => Promise<void>;
@@ -55,19 +56,21 @@ export function useSessionActions(
       }
     }
     return {
-      setPinned: (sessionId, pinned) =>
+      setPinned: (sessionId, pinned, onUpdated) =>
         attempt(async () => {
           const updated = await setSessionPinned(host, token, sessionId, pinned);
           upsertSession(updated);
           applySessionState(host, updated);
+          onUpdated?.(updated);
         }, "failed to update pin"),
-      rename: (session, title) => {
+      rename: (session, title, onUpdated) => {
         patchSession(session.id, (current) => ({ ...current, title }));
         return attempt(
           async () => {
             const updated = await setSessionTitle(host, token, session.id, title);
             patchSession(session.id, () => updated);
             applySessionState(host, updated);
+            onUpdated?.(updated);
           },
           "failed to update title",
           () => patchSession(session.id, (current) => revertTitle(current, title, session.title)),

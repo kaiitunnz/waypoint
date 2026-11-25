@@ -20,8 +20,14 @@ interface SessionMenuActions {
   dialogs: ReactNode;
 }
 
-// `onRemoved` runs after a session is deleted from a dialog.
-export function useSessionMenuActions(onRemoved?: () => void): SessionMenuActions {
+interface SessionMenuOptions {
+  // Runs after a session is deleted from a dialog.
+  onRemoved?: () => void;
+  // Receives the session record after a rename or a pin change.
+  onUpdated?: (session: SessionRecord) => void;
+}
+
+export function useSessionMenuActions({ onRemoved, onUpdated }: SessionMenuOptions = {}): SessionMenuActions {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const { toast } = useToast();
@@ -30,11 +36,16 @@ export function useSessionMenuActions(onRemoved?: () => void): SessionMenuAction
   const [dialog, setDialog] = useState<HomeDialog | null>(null);
 
   const confirmed = useMemo(
-    () => (onRemoved ? { ...actions, remove: (sessionId: string) => actions.remove(sessionId, onRemoved) } : actions),
-    [actions, onRemoved],
+    () => ({
+      ...actions,
+      setPinned: (sessionId: string, pinned: boolean) => actions.setPinned(sessionId, pinned, onUpdated),
+      rename: (session: SessionRecord, title: string) => actions.rename(session, title, onUpdated),
+      remove: (sessionId: string) => actions.remove(sessionId, onRemoved),
+    }),
+    [actions, onRemoved, onUpdated],
   );
   const onAction = (action: SessionAction, session: SessionRecord) => {
-    if (action === "pin" || action === "unpin") void actions.setPinned(session.id, action === "pin");
+    if (action === "pin" || action === "unpin") void confirmed.setPinned(session.id, action === "pin");
     else setDialog({ kind: action, session });
   };
 

@@ -51,7 +51,7 @@ export function SessionScreen({ id }: { id: string }) {
   const [railOpen, setRailOpen] = usePanelOpen("waypoint-session-rail", RAIL_QUERY);
   const [paneOpen, setPaneOpen] = usePanelOpen("waypoint-session-pane", PANE_QUERY);
   const goHome = useCallback(() => router.replace("/"), [router]);
-  const { onAction, dialogs } = useSessionMenuActions(goHome);
+  const { onAction, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
 
   // A failed first load fills the page; any later failure is a toast.
   const { error, errorCount } = stream;

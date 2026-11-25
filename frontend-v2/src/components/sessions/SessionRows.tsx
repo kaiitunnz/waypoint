@@ -10,6 +10,7 @@ import { ListRow } from "@/components/ui/List";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
 import { ActivityLine } from "./ActivityLine";
+import { PinMark } from "./PinMark";
 import styles from "./SessionRows.module.css";
 
 interface RowProps {
@@ -52,7 +53,7 @@ export function LiveRow({
   );
 }
 
-// One line: a pinned or exited session.
+// One line: an exited session.
 export function CompactRow({
   session,
   lamp,
@@ -61,8 +62,7 @@ export function CompactRow({
   agent,
   menu,
   desktop,
-  pinned,
-}: RowProps & { desktop: boolean; pinned?: boolean }) {
+}: RowProps & { desktop: boolean }) {
   return (
     <ListRow
       href={href(session)}
@@ -70,7 +70,6 @@ export function CompactRow({
       lampLabel={word}
       title={session.title}
       compact
-      pinned={pinned}
       dimmed={lamp === "exited"}
       trailing={
         desktop ? (
@@ -129,7 +128,16 @@ export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
       title={session.title}
       dimmed={lamp === "exited"}
       status={where}
-      trailing={time(session, now)}
+      trailing={
+        session.pinned_at ? (
+          <span className={styles.pinned}>
+            <PinMark />
+            {time(session, now)}
+          </span>
+        ) : (
+          time(session, now)
+        )
+      }
       actions={menu}
     />
   );

@@ -100,44 +100,12 @@
   white-space: nowrap;
 }
 
-.compact {
+/* An exited session: one muted line. */
+.single {
   min-height: 36px;
 }
 
-.compact .name {
+.single .name {
   font-weight: 400;
-}
-
-.pinned::after {
-  content: "";
-  position: absolute;
-  top: 7px;
-  right: 12px;
-  border-style: solid;
-  border-width: 0 8px 8px 0;
-  border-color: transparent var(--brass) transparent transparent;
-}
-
-.pinned .time {
-  margin-right: 10px;
-}
-
-.exited {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  margin: 6px 0 0 8px;
-  padding: 0 14px;
-  border-radius: var(--r) 0 0 var(--r);
-  font-size: var(--f-body);
   color: var(--muted);
-}
-
-.exited:hover {
-  background: var(--fill-quiet);
-}
-
-.exitedLabel {
-  flex: 1 1 auto;
 }

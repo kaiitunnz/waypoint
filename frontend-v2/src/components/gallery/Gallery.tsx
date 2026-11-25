@@ -137,7 +137,7 @@ export function Gallery() {
       <SectionHeading title="List rows" count={4} action="See all" />
       <List>
         <ListRow lamp="needs" title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
-        <ListRow lamp="idle" title="Paper figures" compact pinned trailing="Yesterday" />
+        <ListRow lamp="idle" title="Paper figures" compact trailing="Yesterday" />
         <ListRow
           lamp="working"
           title="Heatmap keyboard access"

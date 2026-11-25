@@ -14,7 +14,8 @@ interface ExitedGroupProps {
   desktop: boolean;
   open: boolean;
   onToggle: () => void;
-  onDeleteExited: () => void;
+  // Without it the group has no menu.
+  onDeleteExited?: () => void;
   children: ReactNode;
   loading: boolean;
   failed: boolean;
@@ -47,13 +48,15 @@ export function ExitedGroup({
             <Icon name="chevron-right" size={16} strokeWidth={2} />
           </span>
         </button>
-        <MenuButton
-          label="Exited sessions actions"
-          title="Exited sessions"
-          subtitle={`${count} exited`}
-          items={[{ id: "delete", label: "Delete exited…", tone: "danger" }]}
-          onSelect={onDeleteExited}
-        />
+        {onDeleteExited ? (
+          <MenuButton
+            label="Exited sessions actions"
+            title="Exited sessions"
+            subtitle={`${count} exited`}
+            items={[{ id: "delete", label: "Delete exited…", tone: "danger" }]}
+            onSelect={onDeleteExited}
+          />
+        ) : null}
       </div>
       {open ? (
         <div>

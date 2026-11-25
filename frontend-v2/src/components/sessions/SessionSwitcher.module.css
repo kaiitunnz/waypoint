@@ -18,6 +18,35 @@
   color: var(--muted);
 }
 
+.groupToggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 18px 0;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+}
+
+.groupCount {
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.chevron,
+.open {
+  display: inline-flex;
+  margin-left: auto;
+  transition: transform 120ms ease-out;
+}
+
+.open {
+  transform: rotate(90deg);
+}
+
 .option {
   display: flex;
   align-items: center;
@@ -65,7 +94,10 @@
 }
 
 .time {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  gap: 6px;
   font-size: var(--f-meta);
   color: var(--faint);
 }

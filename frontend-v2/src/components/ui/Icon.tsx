@@ -19,6 +19,7 @@ export type IconName =
   | "panel-right"
   | "panel-left"
   | "arrow-down"
+  | "pin"
   | "plus"
   | "sun"
   | "moon"
@@ -96,6 +97,7 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   "arrow-down": <path d="M12 5v14M6 13l6 6 6-6" />,
+  pin: <path d="M9 4h6l-.8 5.2L17 12.5H7l2.8-3.3L9 4zM12 12.5V20" />,
   more: (
     <>
       <circle cx="5.5" cy="12" r="1.2" />

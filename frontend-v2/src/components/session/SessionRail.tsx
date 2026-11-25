@@ -1,19 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { formatSessionTime, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
-import { HOME_HIDDEN_SOURCES } from "@waypoint/web-core/sessionSections";
-import { useSessionHistory } from "@waypoint/web-core/sessionHistory";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ActivityLine } from "@/components/sessions/ActivityLine";
+import { ExitedGroup } from "@/components/sessions/ExitedGroup";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
+import { EXITED_PAGE_SIZE, useExitedSessions } from "@/components/sessions/useExitedSessions";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -31,6 +32,8 @@ export function SessionRail({ currentId }: { currentId: string }) {
   const feed = useSessionsData();
   const switcher = useSwitcher();
   const now = useNow();
+  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
+  const [limit, setLimit] = useState(EXITED_PAGE_SIZE);
 
   const entries = useMemo(
     () => rankSessionsForSwitcher(feed.visible, feed.askSessionIds, ""),
@@ -38,38 +41,37 @@ export function SessionRail({ currentId }: { currentId: string }) {
   );
   const bySection = (section: SwitcherSection) =>
     entries.filter((entry) => entry.section === section).map((entry) => entry.session);
+  const pinned = useMemo(() => entries.filter((entry) => entry.section === "pinned").map((entry) => entry.session), [entries]);
   const live = useMemo(() => entries.filter((entry) => entry.section === "live").map((entry) => entry.session), [entries]);
-  const exitedLive = entries.filter((entry) => entry.section === "exited").length;
+  const exitedLive = useMemo(() => entries.filter((entry) => entry.section === "exited").map((entry) => entry.session), [entries]);
 
-  const activities = useSessionActivity(host, token, live, handleAuthFailure);
-  const history = useSessionHistory({
-    host,
-    token,
+  // The previews follow the rows that show them: pinned and live, not the exited.
+  const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
+  const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
+  const { count: exitedCount, listed, history } = useExitedSessions({
     query: "",
-    withItems: false,
-    revision: feed.historyRevision,
-    excludeSources: HOME_HIDDEN_SOURCES,
-    onAuthError: handleAuthFailure,
+    live: exitedLive,
+    enabled: showExited,
+    limit,
   });
-  const exited = exitedLive + (history.total ?? 0);
   const asks = feed.pendingAsks?.items ?? [];
 
-  const row = (session: SessionRecord, section: SwitcherSection) => {
+  const row = (session: SessionRecord, section: SwitcherSection | "exited") => {
     const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
     const word = lampWord(lamp, session.status);
     const ask = asks.find((item) => item.session_id === session.id);
-    const compact = section === "pinned";
+    const single = section === "exited";
     return (
       <li key={session.id}>
         <Link
           href={sessionHref(session.id)}
           aria-current={session.id === currentId ? "page" : undefined}
-          className={cx(styles.item, session.id === currentId && styles.on, compact && styles.compact, section === "pinned" && styles.pinned)}
+          className={cx(styles.item, session.id === currentId && styles.on, single && styles.single)}
         >
           <StatusLamp state={lamp} size="sm" label={word} />
           <span className={styles.name}>{session.title}</span>
           <span className={styles.time}>{formatSessionTime(session.last_event_at, now)}</span>
-          {compact ? null : (
+          {single ? null : (
             <span className={styles.sub}>
               {section === "needs" && ask ? ask.title : <ActivityLine fallback={word} activity={activities.get(session.id)} bright={lamp === "done"} />}
             </span>
@@ -100,12 +102,20 @@ export function SessionRail({ currentId }: { currentId: string }) {
             </section>
           );
         })}
-        {exited > 0 ? (
-          <Link href="/" className={styles.exited}>
-            <StatusLamp state="exited" size="sm" />
-            <span className={styles.exitedLabel}>{exited} exited</span>
-            <Icon name="chevron-right" size={14} />
-          </Link>
+        {exitedCount > 0 ? (
+          <ExitedGroup
+            count={exitedCount}
+            desktop={false}
+            open={showExited}
+            onToggle={() => setShowExited(!showExited)}
+            loading={history.pending || listed.filling}
+            failed={Boolean(history.error)}
+            onRetry={history.retry}
+            hasMore={listed.items.length < listed.total}
+            onMore={() => setLimit((value) => value + EXITED_PAGE_SIZE)}
+          >
+            <ul className={styles.list}>{listed.items.map((session) => row(session, "exited"))}</ul>
+          </ExitedGroup>
         ) : null}
       </div>
     </aside>

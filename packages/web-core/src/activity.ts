@@ -57,6 +57,7 @@ export function describeStep(event: EventRecord): string | null {
 
 function plainLine(text: string): string {
   const line = firstLine(text)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^[#>\-*\s]+/, "")
     .replace(/[*_`]/g, "")
     .replace(/\s+/g, " ")

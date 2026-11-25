@@ -58,6 +58,9 @@ describe("deriveActivity", () => {
 
   it("cleans markdown and caps the line", () => {
     expect(deriveActivity([agent(1, "## `Done` - all green")], null, "idle").line).toBe("Done - all green");
+    expect(deriveActivity([agent(1, "Sent the [T4 readout](/home/x/report.md) and ![chart](a.png)")], null, "idle").line).toBe(
+      "Sent the T4 readout and chart",
+    );
     const long = deriveActivity([agent(1, "word ".repeat(80))], null, "idle").line ?? "";
     expect(long.length).toBeLessThanOrEqual(140);
     expect(long.endsWith("…")).toBe(true);

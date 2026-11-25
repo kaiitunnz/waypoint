@@ -1,46 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
-export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
-export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
+import { PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY, readShowExited, writeShowExited } from "../showExited";
 
-function readShowExited(storageKey: string): boolean {
-  if (typeof window === "undefined") {
-    return true;
-  }
-  return window.localStorage.getItem(storageKey) !== "0";
+export { PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY };
+
+// Surfaces in this tab that share a key learn of a change through this; other tabs through `storage`.
+const sameTab = new Set<() => void>();
+
+function subscribe(listener: () => void): () => void {
+  sameTab.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    sameTab.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
 }
 
-// Persisted show-exited flag for one surface; default on. Synced across tabs.
+// Persisted show-exited flag; default on. Every surface using one key agrees, in this tab and across tabs.
 export function useShowExitedSessions(storageKey: string): [boolean, (next: boolean) => void] {
-  // Init true and hydrate in the effect to avoid an SSR/client hydration mismatch.
-  const [showExited, setShowExited] = useState(true);
-
-  useEffect(() => {
-    setShowExited(readShowExited(storageKey));
-    function handleStorage(event: StorageEvent) {
-      if (event.key === storageKey) {
-        setShowExited(readShowExited(storageKey));
-      }
-    }
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, [storageKey]);
-
+  const show = useSyncExternalStore(
+    subscribe,
+    () => readShowExited(window.localStorage, storageKey),
+    () => true,
+  );
   const update = useCallback(
     (next: boolean) => {
-      if (typeof window !== "undefined") {
-        if (next) {
-          window.localStorage.removeItem(storageKey);
-        } else {
-          window.localStorage.setItem(storageKey, "0");
-        }
-      }
-      setShowExited(next);
+      writeShowExited(window.localStorage, storageKey, next);
+      for (const listener of sameTab) listener();
     },
     [storageKey],
   );
-
-  return [showExited, update];
+  return [show, update];
 }

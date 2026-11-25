@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useBackendCatalog } from "@waypoint/web-core/backends";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 import {
   agentModelLabel,
   formatSessionTime,
@@ -24,11 +25,13 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Dialog } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { useDesktop } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
+import { PinMark } from "./PinMark";
 import styles from "./SessionSwitcher.module.css";
 
 const HISTORY_PAGE = 10;
@@ -60,22 +63,29 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const list = useRef<HTMLUListElement>(null);
   const listId = useId();
 
+  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
+
   const { visible, askSessionIds } = feed;
-  const history = useSessionHistory({
+  const historyOptions = {
     host,
     token,
     query,
-    withItems: true,
     revision: feed.historyRevision,
     excludeSources: HOME_HIDDEN_SOURCES,
-    pageSize: HISTORY_PAGE,
     onAuthError: handleAuthFailure,
-  });
+  };
+  // The count keeps fresh while the Exited group is collapsed; its rows load only when shown.
+  const counted = useSessionHistory({ ...historyOptions, withItems: false });
+  const history = useSessionHistory({ ...historyOptions, withItems: true, enabled: showExited, pageSize: HISTORY_PAGE });
 
+  const ranked = useMemo(() => rankSessionsForSwitcher(visible, askSessionIds, query), [visible, askSessionIds, query]);
+  const all = useMemo(() => mergeSwitcherEntries(ranked, history.items), [ranked, history.items]);
+  const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (counted.total ?? 0);
   const entries = useMemo(
-    () => mergeSwitcherEntries(rankSessionsForSwitcher(visible, askSessionIds, query), history.items),
-    [visible, askSessionIds, query, history.items],
+    () => (showExited ? all : all.filter((entry) => entry.section !== "exited")),
+    [all, showExited],
   );
+  const firstExited = entries.findIndex((entry) => entry.section === "exited");
 
   const selected = Math.min(active, Math.max(0, entries.length - 1));
   useEffect(() => {
@@ -110,6 +120,25 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Exited sessions sit under their own heading, which also hides and shows them.
+  const exitedHeading =
+    exitedCount > 0 ? (
+      <li role="presentation">
+        <button
+          type="button"
+          className={styles.groupToggle}
+          aria-expanded={showExited}
+          onClick={() => setShowExited(!showExited)}
+        >
+          <span>{SWITCHER_SECTION_LABELS.exited}</span>
+          <span className={styles.groupCount}>{exitedCount}</span>
+          <span className={showExited ? styles.open : styles.chevron}>
+            <Icon name="chevron-right" size={14} strokeWidth={2} />
+          </span>
+        </button>
+      </li>
+    ) : null;
+
   return (
     <Dialog open onClose={onClose} title="Switch session" size="lg" flush>
       <div className={styles.search}>
@@ -134,31 +163,40 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           const { session } = entry;
           const lamp = sessionLamp(session, askSessionIds.has(session.id));
           const heading =
-            entry.section !== entries[index - 1]?.section ? SWITCHER_SECTION_LABELS[entry.section] : null;
+            entry.section !== "exited" && entry.section !== entries[index - 1]?.section
+              ? SWITCHER_SECTION_LABELS[entry.section]
+              : null;
           return (
-            <li key={session.id} role="presentation">
-              {heading ? <div className={styles.heading}>{heading}</div> : null}
-              <button
-                type="button"
-                role="option"
-                id={`${listId}-${session.id}`}
-                aria-selected={index === selected}
-                tabIndex={-1}
-                className={styles.option}
-                onMouseMove={() => setActive(index)}
-                onClick={() => open(session)}
-              >
-                <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
-                <span className={styles.text}>
-                  <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>
-                  <span className={styles.meta}>{agentModelLabel(session, catalog)}</span>
-                </span>
-                <span className={styles.time}>{formatSessionTime(session.last_event_at, now)}</span>
-              </button>
-            </li>
+            <Fragment key={session.id}>
+              {index === firstExited ? exitedHeading : null}
+              <li role="presentation">
+                {heading ? <div className={styles.heading}>{heading}</div> : null}
+                <button
+                  type="button"
+                  role="option"
+                  id={`${listId}-${session.id}`}
+                  aria-selected={index === selected}
+                  tabIndex={-1}
+                  className={styles.option}
+                  onMouseMove={() => setActive(index)}
+                  onClick={() => open(session)}
+                >
+                  <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
+                  <span className={styles.text}>
+                    <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>
+                    <span className={styles.meta}>{agentModelLabel(session, catalog)}</span>
+                  </span>
+                  <span className={styles.time}>
+                    {session.pinned_at && entry.section !== "pinned" ? <PinMark /> : null}
+                    {formatSessionTime(session.last_event_at, now)}
+                  </span>
+                </button>
+              </li>
+            </Fragment>
           );
         })}
-        {entries.length === 0 ? (
+        {firstExited === -1 ? exitedHeading : null}
+        {entries.length === 0 && exitedCount === 0 ? (
           <li role="presentation" className={styles.empty}>
             {history.pending || history.loading ? "Searching…" : "No matching sessions"}
           </li>

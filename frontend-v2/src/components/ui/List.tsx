@@ -18,10 +18,9 @@ interface ListRowProps {
   titleFont?: "serif" | "sans";
   status?: ReactNode;
   trailing?: ReactNode;
-  pinned?: boolean;
   // A selected row takes a fill, never an edge rail.
   selected?: boolean;
-  // One-line row (idle, pinned, exited): no status line.
+  // One-line row (exited): no status line.
   compact?: boolean;
   dimmed?: boolean;
   href?: string;
@@ -37,7 +36,6 @@ export function ListRow({
   titleFont = "serif",
   status,
   trailing,
-  pinned,
   selected,
   compact,
   dimmed,
@@ -50,7 +48,6 @@ export function ListRow({
     !lamp && styles.noLamp,
     compact && styles.compact,
     dimmed && styles.dimmed,
-    pinned && styles.pinned,
     selected && styles.selected,
   );
   const content = (

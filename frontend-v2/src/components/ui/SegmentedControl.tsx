@@ -33,6 +33,7 @@ export function SegmentedControl<T extends string>({
   const group = useRef<HTMLDivElement>(null);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     if (!step) return;
     event.preventDefault();

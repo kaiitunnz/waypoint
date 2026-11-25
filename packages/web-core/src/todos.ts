@@ -15,6 +15,12 @@ export const TODO_MARKER: Record<TodoStatus, string> = {
   pending: "○",
 };
 
+export const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
+  completed: "Done",
+  "in-progress": "In progress",
+  pending: "Pending",
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }

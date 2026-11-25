@@ -128,6 +128,7 @@ describe("describeCall", () => {
     const [item] = run([call(1, "a", "Edit", { file_path: "/a/b.py" }), result(2, "a", "", diffMeta(14, 3))]);
     expect(describeCall(item)).toMatchObject({
       glyph: "✎",
+      toolLabel: "Edit",
       path: { dir: "/a/", base: "b.py" },
       mono: true,
       additions: 14,

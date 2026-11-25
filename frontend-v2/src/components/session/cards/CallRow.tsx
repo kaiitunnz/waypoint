@@ -1,7 +1,7 @@
 "use client";
 
 import { formatCallDuration, type CallView } from "@waypoint/web-core/session/toolRun";
-import { TODO_MARKER, type TodoEntry } from "@waypoint/web-core/todos";
+import { TODO_MARKER, TODO_STATUS_LABEL, type TodoEntry } from "@waypoint/web-core/todos";
 
 import { cx } from "@/lib/cx";
 
@@ -22,10 +22,13 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
     <ul className={styles.todos}>
       {todos.map((todo, index) => (
         <li key={`${todo.text}-${index}`} className={cx(styles.todo, todo.status === "completed" && styles.todoDone, todo.status === "in-progress" && styles.todoNow)}>
-          <span className={styles.mark} aria-hidden="true">
+          <span className={styles.mark} role="img" aria-label={TODO_STATUS_LABEL[todo.status]}>
             {TODO_MARKER[todo.status]}
           </span>
-          <span>{todo.text}</span>
+          <span>
+            {todo.text}
+            {todo.detail ? <span className={styles.detail}>{todo.detail}</span> : null}
+          </span>
         </li>
       ))}
     </ul>
@@ -76,7 +79,7 @@ export function CallRow({ row }: { row: CallView }) {
   return (
     <div className={styles.call}>
       <div className={styles.head}>
-        <span className={styles.glyph} aria-hidden="true">
+        <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
           {row.glyph}
         </span>
         <div className={styles.subject} title={command ? undefined : row.title}>

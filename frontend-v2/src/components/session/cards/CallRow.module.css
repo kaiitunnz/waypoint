@@ -97,6 +97,13 @@
   color: var(--faint);
 }
 
+.detail {
+  display: block;
+  font-size: var(--f-stamp);
+  line-height: 16px;
+  color: var(--muted);
+}
+
 .todoDone {
   color: var(--faint);
 }

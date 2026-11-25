@@ -235,6 +235,8 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
 export interface CallView {
   key: string;
   glyph: string;
+  // The tool's name, for the glyph's accessible label.
+  toolLabel: string;
   // What the call touched: a path, a command, a pattern; a todo list's progress.
   label: string;
   todos: TodoEntry[] | null;
@@ -321,6 +323,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   return {
     key: itemKey(child),
     glyph: badge.glyph,
+    toolLabel: badge.label,
     label: subject ?? label,
     todos,
     path: shownPath ? splitPath(shownPath) : null,

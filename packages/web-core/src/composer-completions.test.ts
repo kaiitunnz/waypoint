@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SLASH_NEW_FALLBACK,
   commandLabel,
+  insertTrigger,
   matchControlCommand,
   parseWorkspacePathToken,
   rowDescription,
@@ -157,5 +158,15 @@ describe("matchControlCommand", () => {
     expect(matchControlCommand("new", "new")).toBeNull();
     expect(matchControlCommand(" /new", "new")).toBeNull();
     expect(matchControlCommand("", "new")).toBeNull();
+  });
+});
+
+describe("insertTrigger", () => {
+  it("adds the trigger as a word of its own at the caret", () => {
+    expect(insertTrigger("", 0, "/")).toEqual({ draft: "/", caret: 1 });
+    expect(insertTrigger("see", 3, "@")).toEqual({ draft: "see @", caret: 5 });
+    expect(insertTrigger("see ", 4, "/")).toEqual({ draft: "see /", caret: 5 });
+    expect(insertTrigger("ab", 1, "@")).toEqual({ draft: "a @ b", caret: 3 });
+    expect(insertTrigger("ab", 99, "@")).toEqual({ draft: "ab @", caret: 4 });
   });
 });

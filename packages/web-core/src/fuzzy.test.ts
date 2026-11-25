@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchPath, rankItems, span } from "./fuzzy";
+import { highlightRuns, matchPath, rankItems, span } from "./fuzzy";
 
 const names = (items: string[], query: string, options?: { prefixOnly?: boolean }) =>
   rankItems(items, query, (item) => item, undefined, options).map((r) => r.item);
@@ -142,5 +142,18 @@ describe("matchPath", () => {
 
   it("returns null for a query made only of slashes", () => {
     expect(matchPath("a/b", "/")).toBeNull();
+  });
+});
+
+describe("highlightRuns", () => {
+  it("joins neighbouring hits and keeps the text whole", () => {
+    expect(highlightRuns("review", [0, 1, 3])).toEqual([
+      { hit: true, value: "re" },
+      { hit: false, value: "v" },
+      { hit: true, value: "i" },
+      { hit: false, value: "ew" },
+    ]);
+    expect(highlightRuns("abc", [])).toEqual([{ hit: false, value: "abc" }]);
+    expect(highlightRuns("", [0])).toEqual([]);
   });
 });

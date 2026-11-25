@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { installFileDropGuard, isExternalFileDrag } from "./fileDrop";
+import { filesFromDataTransfer, installFileDropGuard, isExternalFileDrag } from "./fileDrop";
 
 function dragEvent(type: string, types: string[] = ["Files"]) {
   const event = new Event(type, { cancelable: true }) as Event & { dataTransfer: unknown };
@@ -62,5 +62,23 @@ describe("installFileDropGuard", () => {
     const over = dragEvent("dragover");
     target.dispatchEvent(over);
     expect(over.defaultPrevented).toBe(false);
+  });
+});
+
+describe("filesFromDataTransfer", () => {
+  const file = { name: "a.txt" } as File;
+  it("reads the items' files, skipping text", () => {
+    const data = {
+      items: [
+        { kind: "string", getAsFile: () => null },
+        { kind: "file", getAsFile: () => file },
+      ],
+      files: [],
+    } as unknown as DataTransfer;
+    expect(filesFromDataTransfer(data)).toEqual([file]);
+  });
+  it("falls back to the file list and ignores nothing to read", () => {
+    expect(filesFromDataTransfer({ items: [], files: [file] } as unknown as DataTransfer)).toEqual([file]);
+    expect(filesFromDataTransfer(null)).toEqual([]);
   });
 });

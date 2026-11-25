@@ -272,3 +272,19 @@ export function matchPath(path: string, query: string): number[] | null {
   positions.push(...hit.positions.map((i) => i + name.start));
   return positions;
 }
+
+// A matched label as runs of hit and plain text, for highlighting.
+export function highlightRuns(text: string, positions: ReadonlyArray<number>): { hit: boolean; value: string }[] {
+  const hits = new Set(positions);
+  const runs: { hit: boolean; value: string }[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const hit = hits.has(index);
+    const last = runs[runs.length - 1];
+    if (last && last.hit === hit) {
+      last.value += text[index];
+    } else {
+      runs.push({ hit, value: text[index] });
+    }
+  }
+  return runs;
+}

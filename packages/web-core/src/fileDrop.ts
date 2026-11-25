@@ -41,3 +41,21 @@ export function installFileDropGuard(
     target.removeEventListener("drop", onDrop as EventListener);
   };
 }
+
+// The files of a paste or drop, preferring the `items` API (which carries pasted
+// screenshots) and falling back to `files`.
+export function filesFromDataTransfer(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const out: File[] = [];
+  if (data.items && data.items.length > 0) {
+    for (const item of Array.from(data.items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+  } else if (data.files && data.files.length > 0) {
+    out.push(...Array.from(data.files));
+  }
+  return out;
+}

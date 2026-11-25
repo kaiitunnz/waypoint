@@ -2,14 +2,13 @@ import type { DiffLine } from "../highlight";
 
 export type CompactDiffRow =
   | { kind: "line"; line: DiffLine }
-  // Unchanged lines left out between (or around) the changes.
-  | { kind: "fold"; count: number }
-  // Rows past the cap.
-  | { kind: "more"; count: number };
+  // Unchanged lines left out between two changes.
+  | { kind: "fold"; count: number };
 
 // A diff reduced to its changes: file and hunk headers dropped, unchanged context
-// folded to one line between changes (never around them), the whole capped to
-// `maxLines` diff lines (folds do not count).
+// before the first and after the last change dropped, the unchanged lines between
+// changes folded to one row, and the whole capped to `maxLines` diff lines (folds
+// do not count).
 export function compactDiff(lines: readonly DiffLine[], maxLines = Infinity): CompactDiffRow[] {
   const rows: CompactDiffRow[] = [];
   let pending: DiffLine[] = [];
@@ -29,10 +28,8 @@ export function compactDiff(lines: readonly DiffLine[], maxLines = Infinity): Co
   let shown = 0;
   const cut = rows.findIndex((row) => row.kind === "line" && ++shown > maxLines);
   if (cut === -1) return rows;
-  // A fold just before the cut joins what is hidden.
-  const from = rows[cut - 1]?.kind === "fold" ? cut - 1 : cut;
-  const hidden = rows.slice(from).reduce((sum, row) => sum + (row.kind === "fold" ? row.count : 1), 0);
-  return [...rows.slice(0, from), { kind: "more", count: hidden }];
+  // A fold just before the cut goes with what is hidden.
+  return rows.slice(0, rows[cut - 1]?.kind === "fold" ? cut - 1 : cut);
 }
 
 // Every line of a diff but its file and hunk headers, with nothing folded or capped.

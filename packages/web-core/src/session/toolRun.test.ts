@@ -148,7 +148,7 @@ describe("describeCall", () => {
   it("shortens the directory a search looks in and keeps the full row as its title", () => {
     const [grep] = run([call(1, "a", "Grep", { pattern: "needle", path: "/repo/backend" })]);
     expect(describeCall(grep, "/repo")).toMatchObject({
-      label: "needle  ·  backend",
+      label: "needle\nbackend",
       title: "needle  ·  /repo/backend",
     });
   });
@@ -157,10 +157,34 @@ describe("describeCall", () => {
     const [grep] = run([call(1, "a", "Grep", { pattern: "needle", path: "src/" }), result(2, "a", "src/a.py:3:needle")]);
     const row = describeCall(grep);
     expect(row?.path).toBeNull();
-    expect(row?.mono).toBe(false);
-    expect(row?.label).toContain("needle");
+    expect(row?.mono).toBe(true);
+    expect(row?.label).toBe("needle\nsrc/");
     const [glob] = run([call(1, "a", "Glob", { pattern: "**/*.py", path: "src/" })]);
     expect(describeCall(glob)?.label).toContain("**/*.py");
+  });
+
+  it("lists the arguments of a web call and of a tool with no card of its own", () => {
+    const [web] = run([call(1, "a", "WebFetch", { url: "https://example.test/a?b=1" })]);
+    expect(describeCall(web)).toMatchObject({ label: "https://example.test/a?b=1", mono: true });
+    const [other] = run([call(1, "a", "mcp__thing", { id: 7, query: "x y", filters: { a: 1 } })]);
+    expect(describeCall(other)).toMatchObject({ label: 'id: 7\nquery: x y\nfilters: {"a":1}', mono: true });
+    const [agent] = run([call(1, "a", "Task", { description: "Explore the repo", prompt: "p" })]);
+    expect(describeCall(agent)?.mono).toBe(false);
+  });
+
+  it("reads a Codex command from the item and its output without the echoed command line", () => {
+    const started = ev(1, "tool_call", "$ /bin/bash -lc 'npm test'", {
+      item_id: "a",
+      tool_name: "Bash",
+      payload: { item: { type: "commandExecution", command: "/bin/bash -lc 'npm test'" } },
+    });
+    const done = ev(2, "tool_result", "$ /bin/bash -lc 'npm test'\nok 3 tests", {
+      item_id: "a",
+      tool_name: "Bash",
+      payload: { item: { type: "commandExecution", command: "/bin/bash -lc 'npm test'", aggregatedOutput: "ok 3 tests\n" } },
+    });
+    const [item] = run([started, done]);
+    expect(describeCall(item)).toMatchObject({ label: "npm test", mono: true, output: "ok 3 tests" });
   });
 
   it("reads a todo list's entries and its progress", () => {

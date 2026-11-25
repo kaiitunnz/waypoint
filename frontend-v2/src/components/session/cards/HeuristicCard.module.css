@@ -23,9 +23,7 @@
 }
 
 .text {
-  max-height: 160px;
   margin: 2px 0 0;
-  overflow: auto;
   font-family: var(--mono);
   font-size: var(--f-diff);
   line-height: var(--lh-diff);

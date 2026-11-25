@@ -44,7 +44,6 @@
   letter-spacing: -0.01em;
 }
 
-/* Each line of a command is a block, so a wrapped line hangs under its own start. */
 .ln {
   display: block;
   padding-left: 2ch;
@@ -70,7 +69,7 @@
   color: var(--faint);
 }
 
-.result {
+.inset {
   margin: 6px 0 0 23px;
 }
 
@@ -85,15 +84,6 @@
   color: var(--muted);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.outOpen {
-  max-height: min(60vh, 480px);
-  overflow-y: auto;
-}
-
-.fold {
-  margin-top: 6px;
 }
 
 .todos {

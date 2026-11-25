@@ -14,7 +14,7 @@
   white-space: nowrap;
 }
 
-.chip:hover {
+.chip:hover:not(:disabled) {
   background: var(--fill-quiet);
 }
 

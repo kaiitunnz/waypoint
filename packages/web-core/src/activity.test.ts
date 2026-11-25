@@ -46,6 +46,12 @@ describe("describeStep", () => {
 });
 
 describe("deriveActivity", () => {
+  it("carries the step only while it is the line", () => {
+    const events = [agent(1, "Looking at it."), claudeTool(2, "Bash", { command: "npm test" })];
+    expect(deriveActivity(events, null, "running").step).toEqual({ verb: "Running", subject: "npm test" });
+    expect(deriveActivity(events, null, "idle").step).toBeNull();
+  });
+
   it("shows the current step while working", () => {
     const events = [agent(1, "Looking at it."), claudeTool(2, "Bash", { command: "npm test" })];
     expect(deriveActivity(events, null, "running").line).toBe("Running npm test");

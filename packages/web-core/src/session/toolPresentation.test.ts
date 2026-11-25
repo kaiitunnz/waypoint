@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
 import {
+  commandForEvent,
+  commandOutputForEvent,
   fallbackDiffPreviewForFileEdit,
   isAgentToolName,
   isFileEditToolName,
@@ -33,6 +35,22 @@ describe("toolBadgeFor", () => {
 
   it("leaves unlisted tools neutral", () => {
     expect(toolBadgeFor("ScheduleWakeup")).toEqual({ glyph: "ƒ", variant: "default", label: "ScheduleWakeup" });
+  });
+});
+
+describe("commandForEvent", () => {
+  it("reads a Claude command from the tool input and a Codex command from the item", () => {
+    const claude = ev(1, "tool_call", "", { tool_name: "Bash", payload: { input: { command: "ls -la" } } });
+    const codex = ev(2, "tool_call", "", { tool_name: "Bash", payload: { item: { command: "/bin/bash -lc \"npm run lint\"" } } });
+    expect(commandForEvent(claude)).toBe("ls -la");
+    expect(commandForEvent(codex)).toBe("npm run lint");
+    expect(commandForEvent(ev(3, "tool_call", ""))).toBeNull();
+  });
+
+  it("reads a Codex command's output from the item, else the result text", () => {
+    const codex = ev(1, "tool_result", "$ ls\nout", { payload: { item: { aggregatedOutput: "out" } } });
+    expect(commandOutputForEvent(codex)).toBe("out");
+    expect(commandOutputForEvent(ev(2, "tool_result", "plain"))).toBe("plain");
   });
 });
 

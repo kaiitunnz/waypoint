@@ -9,13 +9,13 @@ import { compactDiff, fullDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
-import { ActionChip } from "@/components/ui/ActionChip";
 import { cx } from "@/lib/cx";
 
 import { useSessionContext } from "../SessionContext";
 import styles from "./DiffBlock.module.css";
 import highlight from "./Highlight.module.css";
 import { DiffStat } from "./DiffStat";
+import { Disclosure } from "./Disclosure";
 import { PathLabel } from "./PathLabel";
 import { Tokens } from "./Tokens";
 
@@ -26,7 +26,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   const [open, setOpen] = useState(false);
   const compact = useMemo(() => compactDiff(lines, COMPACT_LINES), [lines]);
   const full = useMemo(() => fullDiff(lines), [lines]);
-  const folded = compact.some((row) => row.kind !== "line");
+  const folded = compact.length < full.length;
   const rows = open ? full : compact;
   const change = displayChangeType(file);
   const { cwd } = useSessionContext();
@@ -53,7 +53,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
       ) : null}
       {file.unavailableReason ? (
         <p className={styles.note}>{file.unavailableReason}</p>
-      ) : file.diff ? (
+      ) : full.length > 0 ? (
         <div className={cx(styles.code, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
           {rows.map((row, index) => {
             if (row.kind === "fold") {
@@ -63,7 +63,6 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
                 </div>
               );
             }
-            if (row.kind === "more") return null;
             const { line } = row;
             return (
               <div key={index} className={cx(styles.line, line.kind === "add" && styles.addLine, line.kind === "del" && styles.delLine)}>
@@ -79,13 +78,11 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
           })}
         </div>
       ) : (
-        <p className={styles.note}>No diff content available.</p>
+        <p className={styles.note}>{file.diff ? "No line changes." : "No diff content available."}</p>
       )}
-      {file.diff && folded ? (
+      {folded ? (
         <div className={styles.foot}>
-          <ActionChip icon={open ? "chevron-up" : "chevron-down"} aria-expanded={open} onClick={() => setOpen(!open)}>
-            {open ? "Show less" : `Show all ${full.length} lines`}
-          </ActionChip>
+          <Disclosure open={open} total={full.length} onToggle={() => setOpen(!open)} />
         </div>
       ) : null}
       {file.truncated ? <p className={styles.note}>Diff truncated.</p> : null}

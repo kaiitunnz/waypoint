@@ -80,6 +80,7 @@
 }
 
 .chev {
+  grid-column: -2;
   display: inline-flex;
   align-items: center;
   height: 24px;

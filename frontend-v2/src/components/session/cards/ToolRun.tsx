@@ -32,7 +32,7 @@ function RunNote({ child }: { child: LeafItem }) {
       return <ChangesNote event={event} />;
     default:
       return (
-        <div className={styles.note} title={event.text}>
+        <div className={styles.note}>
           <span className={styles.noteText}>{event.text}</span>
           <time>{formatEventTime(event.ts)}</time>
         </div>

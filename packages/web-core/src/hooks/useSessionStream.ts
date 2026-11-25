@@ -96,7 +96,10 @@ export function useSessionStream(
             // reconnect catch up from where the transcript really ends.
             pending = [];
             socket?.close();
-            if (error instanceof ApiError && error.status === 404) missing = true;
+            if (error instanceof ApiError && error.status === 404) {
+              missing = true;
+              if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+            }
             fail(error, "failed to refresh the transcript");
           },
         )

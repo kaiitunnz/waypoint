@@ -4,6 +4,7 @@ import type { EventRecord } from "@waypoint/web-core/types";
 
 import { Attachments } from "./Attachments";
 import { CopyButton } from "./CopyButton";
+import { FoldedText } from "./FoldedText";
 import styles from "./HeuristicCard.module.css";
 
 // An event of a kind with no card of its own, such as raw terminal output.
@@ -15,7 +16,7 @@ export function HeuristicCard({ event }: { event: EventRecord }) {
         <time className={styles.time}>{formatEventTime(event.ts)}</time>
         <CopyButton text={event.text} />
       </div>
-      <pre className={styles.text}>{event.text}</pre>
+      <FoldedText text={event.text} lines={8} keep="start" className={styles.text} />
       <Attachments specs={attachmentSpecsFor(event)} />
     </div>
   );

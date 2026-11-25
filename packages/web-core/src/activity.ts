@@ -1,4 +1,5 @@
 import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
+import { commandForEvent } from "./session/toolPresentation";
 import { isWorkingStatus } from "./sessionPresentation";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
@@ -31,12 +32,6 @@ function firstLine(text: string): string {
   return text.split("\n").find((line) => line.trim())?.trim() ?? "";
 }
 
-// `/bin/bash -lc "npm run lint"` reads as `npm run lint`.
-function unwrapShell(command: string): string {
-  const wrapped = /^(?:\/\S+\/)?(?:ba|z)?sh\s+-l?c\s+(["'])([\s\S]*)\1$/.exec(command.trim());
-  return wrapped ? wrapped[2] : command;
-}
-
 // Claude carries a tool's input under the payload's `input`, Codex under the started item.
 function toolInput(event: EventRecord): Record<string, unknown> {
   const metadata = event.metadata ?? {};
@@ -53,7 +48,7 @@ function baseName(path: string): string {
 export function describeStep(event: EventRecord): Step | null {
   const tool = normalizeToolName(readToolName(event));
   const input = toolInput(event);
-  const command = typeof input.command === "string" ? firstLine(unwrapShell(input.command)) : "";
+  const command = firstLine(commandForEvent(event) ?? "");
   if (command) return { verb: "Running", subject: truncate(command, MAX_COMMAND) };
   const path = toolFilePath(input);
   const file = path ? baseName(path) : "";

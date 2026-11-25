@@ -6,12 +6,13 @@ import { foldLines } from "@waypoint/web-core/session/foldText";
 import { formatCallDuration, type CallRow as CallRowModel } from "@waypoint/web-core/session/toolRun";
 import { TODO_MARKER, type TodoEntry } from "@waypoint/web-core/todos";
 
-import { ActionChip } from "@/components/ui/ActionChip";
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
+import { Disclosure } from "./Disclosure";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
+import { FoldedText } from "./FoldedText";
 import { PathLabel } from "./PathLabel";
 
 const COMMAND_LINES = 6;
@@ -32,21 +33,13 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
   );
 }
 
-// Each line of a text its own block, so a wrapped line hangs under its own start.
+// Each line of a text is its own block, so a wrapped line hangs under its own start.
 function Lines({ text }: { text: string }) {
   return text.split("\n").map((line, index) => (
     <span key={index} className={styles.ln}>
       {line || " "}
     </span>
   ));
-}
-
-function Disclosure({ open, total, onToggle }: { open: boolean; total: number; onToggle: () => void }) {
-  return (
-    <ActionChip icon={open ? "chevron-up" : "chevron-down"} aria-expanded={open} onClick={onToggle}>
-      {open ? "Show less" : `Show all ${total} lines`}
-    </ActionChip>
-  );
 }
 
 function Command({ text }: { text: string }) {
@@ -59,21 +52,6 @@ function Command({ text }: { text: string }) {
       </div>
       {folded.hidden > 0 ? <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} /> : null}
     </>
-  );
-}
-
-function Output({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const folded = foldLines(text, OUTPUT_LINES, "end");
-  return (
-    <div className={styles.result}>
-      <pre className={cx(styles.out, open && styles.outOpen)}>{open ? text : folded.text}</pre>
-      {folded.hidden > 0 ? (
-        <div className={styles.fold}>
-          <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} />
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -111,8 +89,16 @@ export function CallRow({ row }: { row: CallRowModel }) {
         <span className={styles.status}>{status}</span>
       </div>
       {todos && todos.length > 0 ? <TodoItems todos={todos} /> : null}
-      {row.diff ? <DiffBlock preview={row.diff} /> : null}
-      {row.output ? <Output text={row.output} /> : null}
+      {row.diff ? (
+        <div className={styles.inset}>
+          <DiffBlock preview={row.diff} />
+        </div>
+      ) : null}
+      {row.output ? (
+        <div className={styles.inset}>
+          <FoldedText text={row.output} lines={OUTPUT_LINES} keep="end" className={styles.out} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,9 +1,0 @@
-.empty {
-  display: flex;
-  flex-direction: column;
-}
-
-.showAll {
-  align-self: flex-start;
-  padding: 0 16px;
-}

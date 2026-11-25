@@ -95,6 +95,30 @@ export function toolInputForEvent(event: EventRecord): Record<string, unknown> |
   return asRecord(payload?.input) ?? asRecord(meta?.tool_input);
 }
 
+// The item a Codex tool call is about, carried under the started event's payload.
+function startedItem(event: EventRecord): Record<string, unknown> | null {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  return asRecord(asRecord(meta?.item)?.item) ?? asRecord(asRecord(meta?.payload)?.item);
+}
+
+// `/bin/bash -lc "npm run lint"` reads as `npm run lint`.
+function unwrapShell(command: string): string {
+  const wrapped = /^(?:\/\S+\/)?(?:ba|z)?sh\s+-l?c\s+(["'])([\s\S]*)\1$/.exec(command.trim());
+  return wrapped ? wrapped[2] : command;
+}
+
+// The shell command a call runs: Claude carries it in the tool input, Codex in the item.
+export function commandForEvent(event: EventRecord): string | null {
+  const command = toolInputForEvent(event)?.command ?? startedItem(event)?.command;
+  return typeof command === "string" ? unwrapShell(command) : null;
+}
+
+// A command's own output. Codex's result text opens with the command line, so its item's output is read.
+export function commandOutputForEvent(event: EventRecord): string {
+  const output = startedItem(event)?.aggregatedOutput;
+  return typeof output === "string" ? output : event.text;
+}
+
 // A file-edit tool whose backend sent no diff still names the file it touched.
 export function fallbackDiffPreviewForFileEdit(
   events: (EventRecord | null | undefined)[],

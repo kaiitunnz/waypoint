@@ -1,0 +1,9 @@
+/* Only very long text scrolls once opened. */
+.open {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+
+.fold {
+  margin-top: 6px;
+}

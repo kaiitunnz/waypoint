@@ -3,6 +3,8 @@ import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from
 import type { EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import {
+  commandForEvent,
+  commandOutputForEvent,
   isAgentToolName,
   isFileEditToolName,
   previewForToolEvent,
@@ -248,6 +250,11 @@ export interface CallRow {
   diff: EventDiffPreview | null;
 }
 
+// The output without the blank lines around it and with `\n` line ends.
+function cleanOutput(text: string): string | null {
+  return text.replace(/\r\n?/g, "\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd() || null;
+}
+
 // Under half a second the two timestamps say when the events were recorded, not how long the call ran.
 const MIN_DURATION_MS = 500;
 
@@ -267,6 +274,27 @@ export function formatCallDuration(ms: number): string {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
+// A call's arguments as the lines a person would read: a query and where it looks, a URL,
+// or one `name: value` line per argument. Null for a call with nothing to show that way.
+function argumentLines(tool: string | null, input: Record<string, unknown> | null, cwd: string | null | undefined): string | null {
+  if (!input) return null;
+  const text = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value) ?? "");
+  switch (categoryOf(tool)) {
+    case "search": {
+      const where = typeof input.path === "string" ? relativeToCwd(input.path, cwd) : "";
+      return [text(input.pattern), where].filter(Boolean).join("\n") || null;
+    }
+    case "web":
+      return text(input.url ?? input.query) || null;
+    case "skill":
+    case "monitor":
+    case "other":
+      return Object.entries(input).map(([name, value]) => `${name}: ${text(value)}`).join("\n") || null;
+    default:
+      return null;
+  }
+}
+
 // One compact row of an expanded run.
 export function describeCall(child: LeafItem, cwd?: string | null): CallRow | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
@@ -283,10 +311,10 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
     categoryOf(tool) === "search"
       ? null
       : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
-  const command = tool === "Bash" && typeof input?.command === "string" ? input.command : null;
+  const command = tool === "Bash" ? commandForEvent(event) : null;
   const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
   const preview = previewForToolEvent(event, badge.label);
-  const commandText = command ? command.replace(/\r\n?/g, "\n").trim() : null;
+  const subject = (command ? command.replace(/\r\n?/g, "\n").trim() : null) ?? argumentLines(tool, input, cwd);
   const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos
@@ -298,16 +326,16 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
   return {
     key: itemKey(child),
     glyph: badge.glyph,
-    label: commandText ?? label,
+    label: subject ?? label,
     todos,
     path: shownPath ? splitPath(shownPath) : null,
-    title: commandText ?? filePath ?? preview,
-    mono: filePath !== null || command !== null,
+    title: filePath ?? preview,
+    mono: filePath !== null || subject !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
     status: !result ? "pending" : result.metadata?.is_error === true ? "failed" : "done",
     durationMs: durationBetween(call, result),
-    output: tool === "Bash" && result ? result.text.replace(/^(?:[ \t]*\n)+/, "").trimEnd() || null : null,
+    output: tool === "Bash" && result ? cleanOutput(commandOutputForEvent(result)) : null,
     diff,
   };
 }

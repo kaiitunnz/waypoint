@@ -45,8 +45,15 @@ export function SessionHeader({
           <Icon name="panel-left" size={18} />
         </IconButton>
         <div className={styles.ttl}>
-          <button type="button" className={styles.name} onClick={onTitle} title="Switch session">
-            {title || "Session"}
+          <button
+            type="button"
+            className={styles.switch}
+            onClick={onTitle}
+            title="Switch session"
+            aria-label={`${title || "Session"}. Switch session`}
+          >
+            <span className={styles.name}>{title || "Session"}</span>
+            <Icon name="chevron-down" size={14} strokeWidth={2} />
           </button>
           {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
         </div>

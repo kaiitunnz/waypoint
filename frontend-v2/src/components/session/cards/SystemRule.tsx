@@ -9,7 +9,7 @@ interface SystemRuleProps {
 export function SystemRule({ text, time, glyph }: SystemRuleProps) {
   return (
     <div className={styles.rule} role="note">
-      <span className={styles.body} title={text}>
+      <span className={styles.body}>
         {glyph ? <span aria-hidden="true">{glyph}</span> : null}
         <span className={styles.text}>{text}</span>
         <time className={styles.time}>{time}</time>

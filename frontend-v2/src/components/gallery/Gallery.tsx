@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { ActionChip, ActionChipLink } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
@@ -12,6 +13,7 @@ import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Fi
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
+import { InlineCode } from "@/components/ui/InlineCode";
 import { List, ListRow } from "@/components/ui/List";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { Meter } from "@/components/ui/Meter";
@@ -38,6 +40,7 @@ export function Gallery() {
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
   const [density, setDensity] = useState("summary");
+  const [folded, setFolded] = useState(true);
   const [on, setOn] = useState(true);
   const [picked, setPicked] = useState("Lock around release");
 
@@ -119,6 +122,23 @@ export function Gallery() {
             { value: "terminal", label: <Icon name="ssh" size={18} />, ariaLabel: "Terminal" },
           ]}
         />
+      </div>
+
+      <SectionHeading title="Actions in content" />
+      <div className={styles.row}>
+        <ActionChip icon="chevron-up">Load older messages</ActionChip>
+        <ActionChip icon={folded ? "chevron-down" : "chevron-up"} aria-expanded={!folded} onClick={() => setFolded(!folded)}>
+          {folded ? "Show all 63 lines" : "Show less"}
+        </ActionChip>
+        <ActionChip icon="refresh" disabled>
+          Retry
+        </ActionChip>
+        <ActionChipLink href="/gallery" icon="chevron-right">
+          Open files
+        </ActionChipLink>
+        <span>
+          Running <InlineCode>npm run lint</InlineCode>
+        </span>
       </div>
 
       <SectionHeading title="Toggle, lamps, badges" />

@@ -16,8 +16,27 @@
   min-width: 0;
 }
 
-.name {
+.switch {
+  display: inline-flex;
   flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+}
+
+.switch:hover {
+  background: var(--fill-quiet);
+}
+
+.switch:active {
+  background: var(--fill-raised);
+}
+
+.name {
   min-width: 0;
   overflow: hidden;
   font-family: var(--serif);

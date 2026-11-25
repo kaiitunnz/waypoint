@@ -36,7 +36,16 @@
   border-radius: var(--r);
 }
 
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--faint);
+}
+
 .name {
+  min-width: 0;
   overflow: hidden;
   font-family: var(--serif);
   font-size: var(--f-head);

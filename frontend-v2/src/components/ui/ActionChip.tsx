@@ -11,8 +11,7 @@ interface ChipContent {
   children: ReactNode;
 }
 
-// A compact action inside flowing content: Load older, Show all, Retry. It has an outline,
-// hover and pressed states, and a 44px target on mobile.
+// An outlined action for flowing content, where bare text would not read as a control.
 export function ActionChip({
   icon,
   children,

@@ -45,6 +45,8 @@ export function useSessionStream(
     let latestId: number | null = null;
     let loaded = false;
     let loading = false;
+    let loadFailures = 0;
+    let loadRetry: ReturnType<typeof setTimeout> | null = null;
     // Live events wait until the tail page is in and while a catch-up runs, so each
     // reaches the reducer once and in order.
     let holds = 1;
@@ -121,6 +123,8 @@ export function useSessionStream(
         (error) => {
           loading = false;
           fail(error, "failed to load session");
+          // The socket may already be open, so its opening cannot be what retries.
+          if (active && !isAuthError(error)) loadRetry = setTimeout(load, reconnectDelay(loadFailures++));
         },
       );
     };
@@ -135,8 +139,11 @@ export function useSessionStream(
         sessionId,
         (message) => {
           if (message.type === "event") {
-            pending.push(sanitizeEvent(message.payload.event as EventRecord));
-            scheduleFlush();
+            // Before the page loads, the catch-up that follows it reads these events anyway.
+            if (loaded) {
+              pending.push(sanitizeEvent(message.payload.event as EventRecord));
+              scheduleFlush();
+            }
           } else if (message.type === "session_state") {
             dispatch({ type: "session", session: message.payload.session as SessionRecord });
           } else if (message.type === "pending_questions") {
@@ -175,6 +182,7 @@ export function useSessionStream(
     return () => {
       active = false;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      if (loadRetry !== null) clearTimeout(loadRetry);
       if (frame !== null) window.cancelAnimationFrame(frame);
       pending = [];
       socket?.close();

@@ -7,6 +7,7 @@ import type { SessionAttachment } from "@waypoint/web-core/types";
 import { formatRelativeTime } from "@waypoint/web-core/usage";
 
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dialog } from "@/components/ui/Dialog";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
@@ -57,80 +58,79 @@ export function SessionFilesDialog({
 
   const footer =
     items && items.length > 0 ? (
-      confirmingClear ? (
-        <>
-          <Button variant="text" onClick={() => setConfirmingClear(false)}>
-            Cancel
-          </Button>
-          <Button variant="danger" busy={busy} disabled={locked} onClick={() => void removeAll()}>
-            {busy ? "Deleting…" : "Delete all?"}
-          </Button>
-        </>
-      ) : (
-        <Button variant="danger" disabled={locked} onClick={() => setConfirmingClear(true)}>
-          Delete all
-        </Button>
-      )
+      <Button variant="danger" busy={busy} disabled={locked} onClick={() => setConfirmingClear(true)}>
+        {busy ? "Deleting…" : "Delete all"}
+      </Button>
     ) : undefined;
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="Session files"
-      subtitle={items ? filesSummary(items) : "Loading…"}
-      size="lg"
-      footer={footer}
-      flush
-    >
-      {error ? <p className={styles.empty}>{error}</p> : null}
-      {items === null && !error ? <p className={styles.empty}>Loading files…</p> : null}
-      {items !== null && items.length === 0 && !error ? (
-        <p className={styles.empty}>No files uploaded to this session yet.</p>
-      ) : null}
-      <ul className={styles.list}>
-        {(items ?? []).map((file) => {
-          const url = attachmentUrl(host, token, sessionId, file.id);
-          const added = referencedIds.has(file.id);
-          return (
-            <li key={file.id} className={styles.row}>
-              <FileThumb className={styles.thumb} src={file.kind === "image" ? url : null} />
-              <span className={styles.text}>
-                <span className={styles.name} title={file.filename}>
-                  {file.filename}
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title="Session files"
+        subtitle={items ? filesSummary(items) : "Loading…"}
+        size="lg"
+        footer={footer}
+        flush
+      >
+        {error ? <p className={styles.empty}>{error}</p> : null}
+        {items === null && !error ? <p className={styles.empty}>Loading files…</p> : null}
+        {items !== null && items.length === 0 && !error ? (
+          <p className={styles.empty}>No files uploaded to this session yet.</p>
+        ) : null}
+        <ul className={styles.list}>
+          {(items ?? []).map((file) => {
+            const url = attachmentUrl(host, token, sessionId, file.id);
+            const added = referencedIds.has(file.id);
+            return (
+              <li key={file.id} className={styles.row}>
+                <FileThumb className={styles.thumb} src={file.kind === "image" ? url : null} />
+                <span className={styles.text}>
+                  <span className={styles.name} title={file.filename}>
+                    {file.filename}
+                  </span>
+                  <span className={styles.meta}>
+                    {file.origin === "task_output" ? <span className={styles.origin}>task report</span> : null}
+                    <span>{typeTag(file.filename, file.kind === "image")}</span>
+                    <span>{formatFileSize(file.size)}</span>
+                    <span>{formatRelativeTime(new Date(file.uploaded_at * 1000).toISOString())}</span>
+                  </span>
                 </span>
-                <span className={styles.meta}>
-                  {file.origin === "task_output" ? <span className={styles.origin}>task report</span> : null}
-                  <span>{typeTag(file.filename, file.kind === "image")}</span>
-                  <span>{formatFileSize(file.size)}</span>
-                  <span>{formatRelativeTime(new Date(file.uploaded_at * 1000).toISOString())}</span>
-                </span>
-              </span>
-              <IconButton
-                label={added ? `${file.filename} added to message` : `Add ${file.filename} to message`}
-                size="sm"
-                disabled={added}
-                onClick={() => onReference(file)}
-              >
-                <Icon name={added ? "check" : "plus"} size={18} />
-              </IconButton>
-              <a
-                className={styles.open}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open ${file.filename}`}
-                title="Open in new tab"
-              >
-                <Icon name="external" size={18} />
-              </a>
-              <IconButton label={`Delete ${file.filename}`} size="sm" disabled={locked} onClick={() => void removeFile(file.id)}>
-                <Icon name="trash" size={18} />
-              </IconButton>
-            </li>
-          );
-        })}
-      </ul>
-    </Dialog>
+                <IconButton
+                  label={added ? `${file.filename} added to message` : `Add ${file.filename} to message`}
+                  size="sm"
+                  disabled={added}
+                  onClick={() => onReference(file)}
+                >
+                  <Icon name={added ? "check" : "plus"} size={18} />
+                </IconButton>
+                <a
+                  className={styles.open}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open ${file.filename}`}
+                  title="Open in new tab"
+                >
+                  <Icon name="external" size={18} />
+                </a>
+                <IconButton label={`Delete ${file.filename}`} size="sm" disabled={locked} onClick={() => void removeFile(file.id)}>
+                  <Icon name="trash" size={18} />
+                </IconButton>
+              </li>
+            );
+          })}
+        </ul>
+      </Dialog>
+      <ConfirmDialog
+        open={open && confirmingClear}
+        title="Delete all files"
+        detail="Every file uploaded to this session is deleted. This cannot be undone."
+        confirmLabel="Delete all"
+        onConfirm={removeAll}
+        onClose={() => setConfirmingClear(false)}
+      />
+    </>
   );
 }

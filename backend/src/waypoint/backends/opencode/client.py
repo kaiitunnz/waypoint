@@ -72,9 +72,16 @@ class LocalOpenCodeClient:
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
         client = self._require_session()
-        async with client.get(f"{self.base_url}{path}", params=params) as resp:
+        url = f"{self.base_url}{path}"
+        async with client.get(url, params=params) as resp:
             resp.raise_for_status()
-            return await resp.json()
+            try:
+                return await resp.json()
+            except (aiohttp.ContentTypeError, json.JSONDecodeError) as exc:
+                raise OpenCodeNonJsonError(
+                    f"GET {path} returned HTTP {resp.status} "
+                    f"{resp.content_type} instead of JSON"
+                ) from exc
 
     async def post(
         self,
@@ -237,7 +244,10 @@ class RemoteOpenCodeClient:
         try:
             return json.loads(body_text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"invalid JSON response from curl: {body_text}") from exc
+            raise OpenCodeNonJsonError(
+                f"{method} {path} returned HTTP {status_code} instead of JSON: "
+                f"{body_text[:200]}"
+            ) from exc
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
         return await self._run_curl("GET", path, None, params)
@@ -326,6 +336,10 @@ class OpenCodeHttpError(RuntimeError):
         super().__init__(f"{method} {url} returned HTTP {status}: {snippet}")
         self.status = status
         self.body = body
+
+
+class OpenCodeNonJsonError(RuntimeError):
+    """Raised when a successful OpenCode HTTP response is not JSON."""
 
 
 def _split_curl_status(out_text: str) -> tuple[str, int]:

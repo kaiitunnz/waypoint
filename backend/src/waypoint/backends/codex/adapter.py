@@ -461,8 +461,15 @@ class CodexAppServerAdapter:
 
         factory = client_factory_override or self._client_factory
         client = factory(cwd, approval_handler)
-        await asyncio.to_thread(client.start)
-        await asyncio.to_thread(client.initialize)
+        try:
+            await asyncio.to_thread(client.start)
+            await asyncio.to_thread(client.initialize)
+        except BaseException:
+            # The SDK waits without a timeout; closing the client releases the
+            # worker thread a cancellation leaves behind. On its own thread,
+            # since the executor may be full of such waits.
+            threading.Thread(target=client.close, daemon=True).start()
+            raise
         state = CodexSessionState(
             session_id=session_id,
             cwd=cwd,

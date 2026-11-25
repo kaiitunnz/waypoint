@@ -2642,3 +2642,31 @@ async def test_approval_event_exposes_the_responder_identity() -> None:
             adapter._cancel_pending_approval(state)
         await asyncio.wait_for(reader, timeout=2)
         await adapter.terminate_session("sess")
+
+
+@pytest.mark.asyncio
+async def test_interrupted_launch_closes_the_client() -> None:
+    entered = threading.Event()
+    closed = threading.Event()
+
+    class HangingClient(FakeCodexClient):
+        def initialize(self) -> None:
+            entered.set()
+            # The SDK waits without a timeout; only close() releases it.
+            closed.wait(timeout=10)
+
+        def close(self) -> None:
+            closed.set()
+
+    adapter = CodexAppServerAdapter(
+        lambda *_: None,  # type: ignore[arg-type]
+        client_factory=lambda *_: cast(CodexClient, HangingClient()),
+    )
+    launch = asyncio.create_task(adapter.start_session("sess", "/tmp/work"))
+    await asyncio.to_thread(entered.wait, 5)
+    launch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await launch
+
+    assert await asyncio.to_thread(closed.wait, 5)
+    assert "sess" not in adapter._sessions

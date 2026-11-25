@@ -4,6 +4,7 @@ import pytest
 
 from waypoint.backends.opencode.client import (
     OpenCodeHttpError,
+    OpenCodeNonJsonError,
     RemoteOpenCodeClient,
     _split_curl_status,
 )
@@ -181,3 +182,21 @@ async def test_remote_client_delete_issues_delete_and_parses_boolean(
     flat = " ".join(str(arg) for arg in captured[0])
     assert "DELETE" in flat
     assert "/session/ses_1" in flat
+
+
+@pytest.mark.asyncio
+async def test_remote_web_ui_answer_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _HtmlProcess(_FakeProcess):
+        async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+            return b"<!doctype html>\n200", b""
+
+    _make_fake_subprocess(monkeypatch, _HtmlProcess())
+    target = SshLaunchTargetConfig(
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
+    )
+    client = RemoteOpenCodeClient(target, 4096)
+
+    with pytest.raises(OpenCodeNonJsonError, match="HTTP 200 instead of JSON"):
+        await client.get("/config")

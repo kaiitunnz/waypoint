@@ -23,7 +23,7 @@ interface BubbleProps {
 }
 
 // A message. The time and copy button sit inside it, on the last line when it
-// fits; otherwise on a short line of their own, so they cost no extra row.
+// fits; otherwise on a row of their own.
 export function Bubble({ tone, first, text, time, copy, attachments = [], children }: BubbleProps) {
   const spare = attachments.length > 0 || children !== undefined;
   return (

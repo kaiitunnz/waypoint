@@ -60,7 +60,7 @@ export function CallRow({ row }: { row: CallRowModel }) {
   const command = row.mono && !row.path;
 
   const status =
-    row.additions !== null && row.deletions !== null ? (
+    row.status !== "failed" && row.additions !== null && row.deletions !== null ? (
       <DiffStat additions={row.additions} deletions={row.deletions} />
     ) : row.status === "pending" ? (
       <span className={styles.pending}>…</span>

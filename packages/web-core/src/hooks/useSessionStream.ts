@@ -41,6 +41,8 @@ export function useSessionStream(
     let loading = false;
     let loadFailures = 0;
     let loadRetry: ReturnType<typeof setTimeout> | null = null;
+    // A session that does not exist stays missing: nothing retries or reconnects.
+    let missing = false;
     // Live events wait until the tail page is in and while a catch-up runs, so each
     // reaches the reducer once and in order.
     let holds = 1;
@@ -101,7 +103,7 @@ export function useSessionStream(
     };
 
     const load = () => {
-      if (!active || loaded || loading) return;
+      if (!active || loaded || loading || missing) return;
       if (loadRetry !== null) clearTimeout(loadRetry);
       loadRetry = null;
       loading = true;
@@ -119,8 +121,15 @@ export function useSessionStream(
         (error) => {
           loading = false;
           fail(error, "failed to load session");
-          // The socket may already be open, so its opening cannot be what retries.
-          if (active && !isAuthError(error)) loadRetry = setTimeout(load, reconnectDelay(loadFailures++));
+          missing = error instanceof ApiError && error.status === 404;
+          if (!active || isAuthError(error)) return;
+          if (missing) {
+            if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+            socket?.close();
+          } else {
+            // The socket may already be open, so its opening cannot be what retries.
+            loadRetry = setTimeout(load, reconnectDelay(loadFailures++));
+          }
         },
       );
     };
@@ -164,7 +173,7 @@ export function useSessionStream(
             else load();
           },
           onClose: () => {
-            if (!active) return;
+            if (!active || missing) return;
             const delay = reconnectDelay(attempt);
             attempt += 1;
             dispatch({ type: "connection", connection: "reconnecting" });

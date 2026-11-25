@@ -74,8 +74,8 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     excludeSources: HOME_HIDDEN_SOURCES,
     onAuthError: handleAuthFailure,
   };
-  // The Exited rows load when the group is shown; while it is collapsed only the count does.
-  const counted = useSessionHistory({ ...historyOptions, withItems: false, enabled: !showExited });
+  // The count loads always; the Exited rows load when the group is shown.
+  const counted = useSessionHistory({ ...historyOptions, withItems: false });
   const history = useSessionHistory({ ...historyOptions, withItems: true, enabled: showExited, pageSize: EXITED_PAGE_SIZE });
 
   const ranked = useMemo(() => rankSessionsForSwitcher(visible, askSessionIds, query), [visible, askSessionIds, query]);
@@ -85,10 +85,9 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const exited = useMemo(() => (showExited ? all.slice(listed.length) : []), [all, listed, showExited]);
   const entries = showExited ? all : listed;
 
-  const exitedTotal = showExited ? history.total : counted.total;
-  const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (exitedTotal ?? 0);
+  const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (counted.total ?? 0);
   // The heading stays until the count is known to be zero, so the toggle is never unmounted under the focus.
-  const exitedUnknown = exitedTotal === null && !(showExited ? history.error : counted.error);
+  const exitedUnknown = counted.total === null && !counted.error;
 
   const selected = Math.min(active, Math.max(0, entries.length - 1));
   useEffect(() => {
@@ -167,7 +166,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           onClick={() => setShowExited(!showExited)}
         >
           <span>{SWITCHER_SECTION_LABELS.exited}</span>
-          {exitedTotal === null ? null : <span className={styles.groupCount}>{exitedCount}</span>}
+          {counted.total === null ? null : <span className={styles.groupCount}>{exitedCount}</span>}
           <span className={showExited ? styles.open : styles.chevron}>
             <Icon name="chevron-right" size={14} strokeWidth={2} />
           </span>

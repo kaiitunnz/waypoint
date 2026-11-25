@@ -33,7 +33,7 @@ export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, swi
         <Icon name="chevron-left" size={22} />
         <Badge count={othersNeedYou} className={styles.badge} />
       </Link>
-      <button type="button" className={styles.title} onClick={onTitle} aria-label={`${title}. Switch session`}>
+      <button type="button" className={styles.title} onClick={onTitle} aria-label={`${title || "Session"}. Switch session`}>
         <span className={styles.name}>{title || "Session"}</span>
         {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
       </button>

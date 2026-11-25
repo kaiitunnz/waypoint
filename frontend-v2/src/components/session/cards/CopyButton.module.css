@@ -8,11 +8,12 @@
   color: var(--faint);
 }
 
-/* A 44px target around a 14px glyph. */
-.copy::after {
-  content: "";
-  position: absolute;
-  inset: -15px;
+@media (max-width: 899.98px) {
+  .copy::after {
+    content: "";
+    position: absolute;
+    inset: -15px;
+  }
 }
 
 .copy:hover {

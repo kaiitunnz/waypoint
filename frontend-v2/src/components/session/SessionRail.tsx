@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
@@ -26,12 +26,19 @@ import styles from "./SessionRail.module.css";
 
 const SECTIONS: SwitcherSection[] = ["needs", "pinned", "live"];
 
+// The rail mounts again on every session switch; this is where it was scrolled to.
+let scrollTop = 0;
+
 export function SessionRail({ currentId }: { currentId: string }) {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
   const now = useNow();
   const [showExited, setShowExited] = useShowExited();
+  const scroller = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = scrollTop;
+  }, []);
 
   const entries = useMemo(
     () => rankSessionsForSwitcher(feed.visible, feed.askSessionIds, ""),
@@ -83,7 +90,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
           <Icon name="search" size={18} />
         </IconButton>
       </div>
-      <div className={styles.scroll}>
+      <div ref={scroller} className={styles.scroll} onScroll={(event) => (scrollTop = event.currentTarget.scrollTop)}>
         {SECTIONS.map((section) => {
           const sessions = grouped[section];
           if (sessions.length === 0) return null;

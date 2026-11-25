@@ -32,7 +32,7 @@ export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked,
       <span className={styles.sum}>{phrase}</span>
       {stats ? <span className={styles.stats}>{stats}</span> : null}
       {open ? null : (
-        <span className={styles.glyphs}>
+        <span className={styles.glyphs} aria-hidden="true">
           {glyphs.map((entry) => (
             <span key={entry.glyph}>
               {entry.glyph} {entry.count}

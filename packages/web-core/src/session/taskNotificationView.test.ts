@@ -88,7 +88,6 @@ describe("summarizeNotificationRun", () => {
         { glyph: "◇", count: 2 },
         { glyph: "›_", count: 1 },
       ],
-      count: 3,
     });
     expect(summarizeNotificationRun(["unknown"]).phrase).toBe("Reports from 1 task");
     expect(summarizeNotificationRun([]).phrase).toBe("Reports");

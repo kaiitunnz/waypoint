@@ -231,8 +231,6 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
 export interface CallRow {
   key: string;
   glyph: string;
-  // The tool's own name: "Bash", "Edit", "Read".
-  tool: string | null;
   // What the call touched: a path, a command, a pattern; a todo list's progress.
   label: string;
   // A todo list's entries.
@@ -309,7 +307,6 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
   return {
     key: itemKey(child),
     glyph: badge.glyph,
-    tool,
     label: commandText ?? label,
     todos,
     path: shownPath ? splitPath(shownPath) : null,

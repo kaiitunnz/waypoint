@@ -217,8 +217,8 @@ export function previewForToolEvent(event: EventRecord, toolLabel: string): stri
 }
 
 // A one-line `key: value` preview for tool calls with no dedicated branch above
-// (Skill, ToolSearch, custom MCP tools), so the actual arguments show instead of
-// the bare "{" a line-based fallback would produce for pretty-printed JSON.
+// (Skill, ToolSearch, custom MCP tools), so the arguments show and not the bare "{"
+// a line-based fallback would produce for pretty-printed JSON.
 function summarizeStructuredInput(input: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(input)) {
@@ -253,7 +253,7 @@ function summarizeToolText(text: string, toolLabel?: string): string {
   }
   // Pretty-printed JSON puts the opening brace on its own line, which would read
   // as a useless "{ · N lines". A body that parses as JSON becomes a one-line
-  // key/value summary instead.
+  // key/value summary.
   const joined = lines.join("\n");
   if (joined.startsWith("{") || joined.startsWith("[")) {
     try {

@@ -11,7 +11,7 @@ import styles from "./AskCard.module.css";
 export function AskCard({ event }: { event: EventRecord }) {
   const { evidence, snapshot } = useAskState();
   const questions = parseAskUserQuestion(event) ?? [];
-  const { toolUseId, waiting, outcome, answers } = askCardState(event, evidence, snapshot);
+  const { waiting, outcome, answers } = askCardState(event, evidence, snapshot);
   const first = questions[0]?.question ?? "";
 
   return (
@@ -25,7 +25,7 @@ export function AskCard({ event }: { event: EventRecord }) {
       }
       trailing={<time>{formatEventTime(event.ts)}</time>}
     >
-      <div className={styles.detail} data-ask-tool-use-id={toolUseId ?? undefined}>
+      <div className={styles.detail}>
         {questions.map((question, index) => (
           <div key={index} className={styles.question}>
             <p className={styles.text}>{question.question}</p>

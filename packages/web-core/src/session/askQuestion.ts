@@ -247,7 +247,6 @@ export function mergePendingQuestionSnapshot(
 }
 
 export interface AskCardState {
-  toolUseId: string | null;
   // The human has yet to answer.
   waiting: boolean;
   outcome: "answered" | "cancelled" | "not answered" | null;
@@ -275,5 +274,5 @@ export function askCardState(
           ? null
           : "not answered";
   const answers = resolution.state === "answered" ? askAnswerEntries(resolution.answerEvent) : [];
-  return { toolUseId, waiting, outcome, answers };
+  return { waiting, outcome, answers };
 }

@@ -11,7 +11,7 @@ import { Markdown } from "./Markdown";
 
 interface BubbleProps {
   tone: "agent" | "user";
-  // The first bubble of a turn has the sharp origin corner.
+  // The first agent bubble of a turn has the sharp origin corner; a user bubble always does.
   first?: boolean;
   text?: string;
   time: string;

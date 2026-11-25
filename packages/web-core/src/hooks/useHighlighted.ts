@@ -34,7 +34,6 @@ export function useHighlightedFence(code: string, lang: string): HighlightToken[
   return done?.key === key ? done.lines : null;
 }
 
-// A diff's lines: plain at first, highlighted once the highlighter is ready.
 export function useHighlightedDiff(diff: string, path: string): DiffLine[] {
   const plain = useMemo(() => buildPlainDiffLines(diff), [diff]);
   const [done, setDone] = useState<{ diff: string; lines: DiffLine[] } | null>(null);

@@ -87,7 +87,6 @@ export interface NotificationRunSummary {
   // "Reports from 2 subagents, 1 background command".
   phrase: string;
   glyphs: { glyph: string; count: number }[];
-  count: number;
 }
 
 const NOTIFICATION_NOUNS: Record<TaskNotificationView["kind"], [one: string, many: string]> = {
@@ -111,6 +110,5 @@ export function summarizeNotificationRun(kinds: readonly TaskNotificationView["k
   return {
     phrase: parts.length > 0 ? `Reports from ${parts.join(", ")}` : "Reports",
     glyphs: present.map((kind) => ({ glyph: TASK_NOTIFICATION_BADGES[kind].glyph, count: counts.get(kind) ?? 0 })),
-    count: kinds.length,
   };
 }

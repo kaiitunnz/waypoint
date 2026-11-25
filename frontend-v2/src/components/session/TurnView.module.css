@@ -10,7 +10,7 @@
   align-items: flex-end;
 }
 
-/* The route: a 1px line in a 14px gutter, behind the bubbles, seen where runs sit. */
+/* The route: a thin line behind the bubbles, seen where runs sit. */
 .routed::before {
   content: "";
   position: absolute;

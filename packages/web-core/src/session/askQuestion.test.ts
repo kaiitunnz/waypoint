@@ -293,7 +293,7 @@ describe("askCardState", () => {
     askCardState(ask, indexAskQuestionEvidence(events), snapshot);
 
   it("waits while nothing has answered it", () => {
-    expect(state([ask])).toMatchObject({ toolUseId: "q1", waiting: true, outcome: null, answers: [] });
+    expect(state([ask])).toMatchObject({ waiting: true, outcome: null, answers: [] });
   });
 
   it("is answered, with the answers", () => {

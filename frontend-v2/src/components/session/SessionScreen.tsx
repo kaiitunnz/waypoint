@@ -116,7 +116,6 @@ export function SessionScreen({ id }: { id: string }) {
       loading={stream.loading || rendered !== events}
       hasOlder={stream.hasOlder}
       loadingOlder={stream.loadingOlder}
-      olderPending={stream.loadingOlder || rendered !== events}
       onLoadOlder={stream.loadOlder}
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}

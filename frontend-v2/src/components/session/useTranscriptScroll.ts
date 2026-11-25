@@ -8,14 +8,20 @@ import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
 const FOLLOW_PX = 160;
 
 // The transcript's scrolling: it follows the end while you are there, keeps its place
-// when older messages load above, and says when you are away from the end.
-export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boolean, onLoadOlder: () => void) {
+// when older messages land above, and says when you are away from the end.
+export function useTranscriptScroll(turns: TranscriptTurn[]) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const following = useRef(true);
-  const anchor = useRef<{ height: number; top: number } | null>(null);
+  // The scroller's height and offset as last laid out: what a prepend is measured against.
+  const placed = useRef({ height: 0, top: 0 });
   const firstKey = useRef<string | null>(null);
   const [away, setAway] = useState(false);
+
+  const remember = useCallback(() => {
+    const el = scroller.current;
+    if (el) placed.current = { height: el.scrollHeight, top: el.scrollTop };
+  }, []);
 
   const onScroll = useCallback(() => {
     const el = scroller.current;
@@ -23,26 +29,22 @@ export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boole
     const near = el.scrollHeight - el.clientHeight - el.scrollTop < FOLLOW_PX;
     following.current = near;
     setAway(!near);
-  }, []);
+    remember();
+  }, [remember]);
 
-  // New turns: hold the place when older ones arrived above, else follow the end.
+  // New turns: a new first turn is older history, so hold the place; else follow the end.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const head = turns[0]?.key ?? null;
-    if (anchor.current && head !== firstKey.current) {
-      el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height);
-      anchor.current = null;
+    if (firstKey.current !== null && head !== firstKey.current) {
+      el.scrollTop = placed.current.top + (el.scrollHeight - placed.current.height);
     } else if (following.current) {
       el.scrollTop = el.scrollHeight;
     }
     firstKey.current = head;
-  }, [turns]);
-
-  // A load that ends without a new first turn (it failed, or its messages are hidden) leaves no place to keep.
-  useLayoutEffect(() => {
-    if (!olderPending) anchor.current = null;
-  }, [olderPending]);
+    remember();
+  }, [turns, remember]);
 
   // Content that grows after layout (markdown, math, images, a run opening) keeps the end in view.
   useEffect(() => {
@@ -51,22 +53,16 @@ export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boole
     if (!el || !node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (following.current) el.scrollTop = el.scrollHeight;
+      remember();
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
-
-  const loadOlder = useCallback(() => {
-    if (anchor.current) return;
-    const el = scroller.current;
-    if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
-    onLoadOlder();
-  }, [onLoadOlder]);
+  }, [remember]);
 
   const jumpToEnd = useCallback(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, []);
 
-  return { scroller, content, away, onScroll, loadOlder, jumpToEnd };
+  return { scroller, content, away, onScroll, jumpToEnd };
 }

@@ -1,8 +1,5 @@
 /* Design tokens: every colour, radius, size and layer resolves from here. Dark is
-   the default; html[data-theme="light"] swaps the values.
-
-   Input picks the chrome and density: `(hover: hover) and (pointer: fine)` is a
-   pointer client and anything else is touch. Width (900px) only picks the layout. */
+   the default; html[data-theme="light"] swaps the values. */
 
 :root {
   color-scheme: dark;

@@ -15,7 +15,7 @@ interface ExitedGroupProps {
   count: number;
   // Shortens the heading to "3 exited".
   short?: boolean;
-  // A hairline sets it off from the rows above, instead of space.
+  // A hairline sets it off from the rows above.
   divided?: boolean;
   open: boolean;
   onToggle: () => void;

@@ -158,6 +158,18 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a change that arrived during a fetch waiting for its settle", async () => {
+    const { loader, fetch, settle } = make({ settleMs: 1000 });
+    loader.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    loader.request("a", "t2");
+    await settle();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("stops asking after repeated failures until the session changes", async () => {
     const fetch = vi.fn(async () => {
       throw new Error("forbidden");

@@ -116,6 +116,8 @@ interface PendingFetch {
   lastEventAt: string;
   firstAt: number;
   timer: ReturnType<typeof setTimeout>;
+  // Settled while an older fetch for the session was still running.
+  ready?: boolean;
 }
 
 const MAX_FAILURES = 3;
@@ -188,7 +190,11 @@ export class ActivityLoader<T> {
     while (!this.disposed && this.inflight.size < this.concurrency && this.queue.length > 0) {
       const id = this.queue.shift() as string;
       const held = this.pending.get(id);
-      if (!held || this.inflight.has(id)) continue;
+      if (!held) continue;
+      if (this.inflight.has(id)) {
+        held.ready = true;
+        continue;
+      }
       this.pending.delete(id);
       const controller = new AbortController();
       this.inflight.set(id, { lastEventAt: held.lastEventAt, controller });
@@ -212,8 +218,7 @@ export class ActivityLoader<T> {
             this.failures.set(id, { lastEventAt: held.lastEventAt, count });
           }
           this.inflight.delete(id);
-          // A change that settled while this fetch was in flight is still waiting.
-          if (this.pending.has(id)) this.enqueue(id);
+          if (this.pending.get(id)?.ready) this.enqueue(id);
           else this.pump();
         });
     }

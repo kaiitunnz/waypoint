@@ -1,15 +1,11 @@
 import type { TaskNotificationView } from "../events";
 import { formatDuration } from "./cardText";
-
-export interface TaskNotificationBadge {
-  glyph: string;
-  variant: string;
-  label: string;
-}
+import type { ToolBadge } from "./toolPresentation";
+import type { RunGlyph } from "./toolRun";
 
 // A task lifecycle card: subagent/Agent completion, Monitor events and terminal
 // state, or background-command completion.
-export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], TaskNotificationBadge> = {
+export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge> = {
   agent: { glyph: "◇", variant: "task", label: "Agent" },
   monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
   background_command: { glyph: "›_", variant: "bash", label: "Command" },
@@ -79,7 +75,7 @@ export function taskNoteHeadline(view: TaskNotificationView): string {
 export interface NotificationRunSummary {
   // "Reports from 2 subagents, 1 background command".
   phrase: string;
-  glyphs: { glyph: string; count: number }[];
+  glyphs: RunGlyph[];
 }
 
 const NOTIFICATION_NOUNS: Record<TaskNotificationView["kind"], [one: string, many: string]> = {

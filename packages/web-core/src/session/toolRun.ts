@@ -231,7 +231,7 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
   return { phrase: sentence(parts), glyphs, additions, deletions };
 }
 
-export interface CallRow {
+export interface CallView {
   key: string;
   glyph: string;
   // What the call touched: a path, a command, a pattern; a todo list's progress.
@@ -291,7 +291,7 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
   }
 }
 
-export function describeCall(child: LeafItem, cwd?: string | null): CallRow | null {
+export function describeCall(child: LeafItem, cwd?: string | null): CallView | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;
   const event = call ?? result;

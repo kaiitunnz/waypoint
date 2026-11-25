@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCallDuration, type CallRow as CallRowModel } from "@waypoint/web-core/session/toolRun";
+import { formatCallDuration, type CallView } from "@waypoint/web-core/session/toolRun";
 import { TODO_MARKER, type TodoEntry } from "@waypoint/web-core/todos";
 
 import { cx } from "@/lib/cx";
@@ -53,7 +53,7 @@ function Command({ text }: { text: string }) {
   );
 }
 
-export function CallRow({ row }: { row: CallRowModel }) {
+export function CallRow({ row }: { row: CallView }) {
   const { todos } = row;
   const command = row.mono && !row.path;
 
@@ -61,10 +61,14 @@ export function CallRow({ row }: { row: CallRowModel }) {
     row.status !== "failed" && row.additions !== null && row.deletions !== null ? (
       <DiffStat additions={row.additions} deletions={row.deletions} />
     ) : row.status === "pending" ? (
-      <span className={styles.pending}>…</span>
+      <span className={styles.pending} role="img" aria-label="Running">
+        …
+      </span>
     ) : (
       <span className={row.status === "failed" ? styles.bad : styles.ok}>
-        {row.status === "failed" ? "✕" : "✓"}
+        <span role="img" aria-label={row.status === "failed" ? "Failed" : "Done"}>
+          {row.status === "failed" ? "✕" : "✓"}
+        </span>
         {row.durationMs !== null ? ` ${formatCallDuration(row.durationMs)}` : ""}
       </span>
     );

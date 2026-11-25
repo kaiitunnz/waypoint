@@ -80,6 +80,13 @@
   color: var(--error);
 }
 
+/* Clear of the tap targets that reach down from the control row above. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .tray {
+    padding-top: 4px;
+  }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .name {
     font-size: var(--f-meta);

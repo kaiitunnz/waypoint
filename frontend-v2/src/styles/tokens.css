@@ -43,6 +43,7 @@
   --working: #7fa9d1;
   --done: #73c59b;
   --error: #e8787a;
+  --danger: var(--error);
 
   /* Type. */
   --serif: var(--font-serif), "Source Serif 4", Georgia, serif;

@@ -15,7 +15,6 @@
   color: var(--muted);
 }
 
-/* The route marker: a hollow ring on the 1px line. */
 .line::before {
   content: "";
   position: absolute;

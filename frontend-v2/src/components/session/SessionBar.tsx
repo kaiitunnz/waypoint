@@ -22,7 +22,6 @@ interface SessionBarProps {
   overflow: ReactNode;
 }
 
-// The mobile top bar: it floats over the transcript, which scrolls under it.
 export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, switcher, overflow }: SessionBarProps) {
   return (
     <GlassBar>

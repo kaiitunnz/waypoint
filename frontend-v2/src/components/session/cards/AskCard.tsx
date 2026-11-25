@@ -17,7 +17,6 @@ export function AskCard({ event }: { event: EventRecord }) {
   return (
     <RunLine
       asked={waiting}
-      defaultOpen={false}
       phrase={
         <>
           Asked you{first ? `: ${first}` : ""}

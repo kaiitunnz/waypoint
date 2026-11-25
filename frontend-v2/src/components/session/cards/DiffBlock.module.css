@@ -33,7 +33,6 @@
   font-size: var(--f-code);
 }
 
-/* Lines never wrap; the block scrolls sideways. */
 .code {
   overflow-x: auto;
   border-radius: 8px;

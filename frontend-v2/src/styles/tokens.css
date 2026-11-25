@@ -159,7 +159,6 @@ html[data-theme="light"] {
   --hl-punct: #6e6356;
 }
 
-/* Bubble type is a half-point smaller on the desktop. */
 @media (min-width: 900px) {
   :root {
     --f-bubble: 14.5px;

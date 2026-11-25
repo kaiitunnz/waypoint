@@ -23,7 +23,8 @@ export interface SessionActions {
   setPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   rename: (session: SessionRecord, title: string) => Promise<void>;
   terminate: (sessionId: string) => Promise<void>;
-  remove: (sessionId: string) => Promise<void>;
+  // `onRemoved` runs once the server has deleted the session.
+  remove: (sessionId: string, onRemoved?: () => void) => Promise<void>;
   removeExited: () => Promise<void>;
 }
 
@@ -74,11 +75,12 @@ export function useSessionActions(
       },
       terminate: (sessionId) =>
         attempt(() => postAction(host, token, sessionId, "terminate"), "failed to terminate"),
-      remove: (sessionId) =>
+      remove: (sessionId, onRemoved) =>
         attempt(async () => {
           await deleteSession(host, token, sessionId);
           removeSessions((session) => session.id === sessionId);
           forgetHistorySession(host, sessionId);
+          onRemoved?.();
         }, "failed to delete session"),
       removeExited: () =>
         attempt(async () => {

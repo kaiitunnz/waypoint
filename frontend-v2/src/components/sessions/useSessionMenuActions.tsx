@@ -16,10 +16,11 @@ interface SessionMenuActions {
   // A menu's choice: pinning acts at once, the rest open their dialog.
   onAction: (action: SessionAction, session: SessionRecord) => void;
   openDialog: (dialog: HomeDialog) => void;
-  // Render once, beside the menus. `onRemoved` runs after a confirmed delete.
+  // Render once, beside the menus.
   dialogs: ReactNode;
 }
 
+// `onRemoved` runs after a session is deleted from a dialog.
 export function useSessionMenuActions(onRemoved?: () => void): SessionMenuActions {
   const { host, token } = useShellData();
   const feed = useSessionsData();
@@ -29,16 +30,7 @@ export function useSessionMenuActions(onRemoved?: () => void): SessionMenuAction
   const [dialog, setDialog] = useState<HomeDialog | null>(null);
 
   const confirmed = useMemo(
-    () =>
-      onRemoved
-        ? {
-            ...actions,
-            remove: async (sessionId: string) => {
-              await actions.remove(sessionId);
-              onRemoved();
-            },
-          }
-        : actions,
+    () => (onRemoved ? { ...actions, remove: (sessionId: string) => actions.remove(sessionId, onRemoved) } : actions),
     [actions, onRemoved],
   );
   const onAction = (action: SessionAction, session: SessionRecord) => {

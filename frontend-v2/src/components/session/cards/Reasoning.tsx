@@ -11,7 +11,6 @@ export function Reasoning({ event }: { event: EventRecord }) {
   const preview = reasoningPreview(event.text);
   return (
     <RunLine
-      defaultOpen={false}
       phrase={
         <>
           Thinking{preview ? <span className={styles.preview}>{preview}</span> : null}

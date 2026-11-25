@@ -7,9 +7,9 @@ import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 
-import styles from "./SessionSkeleton.module.css";
+import styles from "./FilesSkeleton.module.css";
 
-export function SessionSkeleton({ id, subject }: { id: string; subject?: string }) {
+export function FilesSkeleton({ id, subject }: { id: string; subject?: string }) {
   return (
     <div className={styles.screen}>
       <GlassBar>

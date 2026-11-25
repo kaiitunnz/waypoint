@@ -8,7 +8,7 @@ import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
 import { RunLine } from "./RunLine";
 
-export function ChangesNote({ event, defaultOpen }: { event: EventRecord; defaultOpen: boolean }) {
+export function ChangesNote({ event, defaultOpen }: { event: EventRecord; defaultOpen?: boolean }) {
   const preview = parseEvent(event).diffPreview;
   if (!preview) return null;
   return (

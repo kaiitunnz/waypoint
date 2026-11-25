@@ -12,8 +12,7 @@ import styles from "./RunLine.module.css";
 interface RunLineProps {
   phrase: ReactNode;
   glyphs?: RunGlyph[];
-  // Whether the run opens by itself: in Full density.
-  defaultOpen: boolean;
+  defaultOpen?: boolean;
   live?: boolean;
   asked?: boolean;
   // Changes the run made: kept whole while the phrase shortens, and in place of the
@@ -21,14 +20,12 @@ interface RunLineProps {
   stats?: ReactNode;
   // Right-aligned text where the glyphs go, such as a time.
   trailing?: ReactNode;
-  // A run with nothing to open is a plain line.
-  children?: ReactNode;
+  children: ReactNode;
 }
 
-export function RunLine({ phrase, glyphs = [], defaultOpen, live, asked, stats, trailing, children }: RunLineProps) {
+export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked, stats, trailing, children }: RunLineProps) {
   const [choice, setChoice] = useState<boolean | null>(null);
-  const openable = children !== undefined && children !== null;
-  const open = openable && (choice ?? defaultOpen);
+  const open = choice ?? defaultOpen;
   const classes = cx(styles.line, live && styles.live, asked && styles.asked, Boolean(stats) && styles.hasStats);
   const inner = (
     <>
@@ -44,22 +41,16 @@ export function RunLine({ phrase, glyphs = [], defaultOpen, live, asked, stats, 
         </span>
       )}
       {trailing ? <span className={styles.trailing}>{trailing}</span> : null}
-      {openable ? (
-        <span className={styles.chev}>
-          <Icon name={open ? "chevron-up" : "chevron-right"} size={14} strokeWidth={2} />
-        </span>
-      ) : null}
+      <span className={styles.chev}>
+        <Icon name={open ? "chevron-up" : "chevron-right"} size={14} strokeWidth={2} />
+      </span>
     </>
   );
   return (
     <div className={styles.run}>
-      {openable ? (
-        <button type="button" className={classes} aria-expanded={open} onClick={() => setChoice(!open)}>
-          {inner}
-        </button>
-      ) : (
-        <div className={classes}>{inner}</div>
-      )}
+      <button type="button" className={classes} aria-expanded={open} onClick={() => setChoice(!open)}>
+        {inner}
+      </button>
       {open ? <div className={styles.body}>{children}</div> : null}
     </div>
   );

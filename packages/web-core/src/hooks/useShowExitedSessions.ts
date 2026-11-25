@@ -4,10 +4,9 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import { readShowExited, writeShowExited } from "../showExited";
 
-// v1's panel and switcher show exited sessions unless turned off.
+// An unset key means the surface's own default, so v1's two surfaces and v2's lists keep separate keys.
 export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
 export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
-// v2's lists, which start with them hidden, share this one.
 export const LIST_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.list";
 
 // Surfaces in this tab that share a key learn of a change through this; other tabs through `storage`.

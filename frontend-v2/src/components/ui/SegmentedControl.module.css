@@ -44,7 +44,6 @@
   }
 }
 
-/* Icon segments are 40px wide, with a 44px target around each. */
 .icon {
   flex: none;
 }

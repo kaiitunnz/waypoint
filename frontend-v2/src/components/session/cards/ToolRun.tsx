@@ -27,7 +27,7 @@ function RunNote({ child }: { child: LeafItem }) {
     case "none":
       return null;
     case "diff_note":
-      return <ChangesNote event={event} defaultOpen={false} />;
+      return <ChangesNote event={event} />;
     default:
       return (
         <div className={styles.note} title={event.text}>

@@ -25,7 +25,6 @@ interface SessionHeaderProps {
   overflow: ReactNode;
 }
 
-// The desktop header: it floats over the top of the conversation column.
 export function SessionHeader({
   title,
   standing,

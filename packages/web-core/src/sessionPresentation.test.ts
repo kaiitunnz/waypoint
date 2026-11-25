@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentLabel,
   agentModelLabel,
   formatSessionTime,
   isUnread,
@@ -105,6 +106,10 @@ describe("agentModelLabel", () => {
     expect(shortModelLabel(session({ model: "google/gemini-3.1-pro-preview" }))).toBe("gemini-3.1-pro-preview");
     expect(shortModelLabel(session({ model: "gpt-6.2-sol" }))).toBe("gpt-6.2-sol");
     expect(shortModelLabel(session())).toBeNull();
+  });
+
+  it("names the agent alone", () => {
+    expect(agentLabel(session({ model: "sonnet" }))).toBe("Claude Code");
   });
 
   it("joins the agent and the model", () => {

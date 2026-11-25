@@ -24,7 +24,6 @@ import { useSessionContext } from "./SessionContext";
 
 interface ItemViewProps {
   item: TranscriptItem;
-  // The first item of its turn: a bubble here has the sharp origin corner.
   first: boolean;
   // This is the last run of a working session.
   live: boolean;

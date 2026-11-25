@@ -37,6 +37,7 @@ export function Gallery() {
   const trigger = useRef<HTMLButtonElement>(null);
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
+  const [density, setDensity] = useState("summary");
   const [on, setOn] = useState(true);
   const [picked, setPicked] = useState("Lock around release");
 
@@ -99,7 +100,18 @@ export function Gallery() {
           ]}
         />
         <SegmentedControl
+          label="Density"
+          size="sm"
+          value={density}
+          onChange={setDensity}
+          segments={[
+            { value: "summary", label: "Summary" },
+            { value: "full", label: "Full" },
+          ]}
+        />
+        <SegmentedControl
           label="View"
+          size="icon"
           value={view}
           onChange={setView}
           segments={[
@@ -149,6 +161,7 @@ export function Gallery() {
               label="Row actions"
               title="Heatmap keyboard access"
               subtitle="Claude Code, Opus 4.8"
+              header={<SegmentedControl label="Density" value={density} onChange={setDensity} segments={[{ value: "summary", label: "Summary" }, { value: "full", label: "Full" }]} />}
               items={[
                 { id: "pin", label: "Pin" },
                 { id: "terminate", label: "Terminate…", tone: "danger" },

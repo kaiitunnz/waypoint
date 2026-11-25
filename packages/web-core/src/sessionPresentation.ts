@@ -61,9 +61,14 @@ export function shortModelLabel(session: SessionRecord): string | null {
   return CLAUDE_MODEL_FAMILY_LABELS[bare] ?? bare.split("/").pop() ?? selection;
 }
 
+// "Claude Code".
+export function agentLabel(session: SessionRecord, catalog?: BackendCatalog): string {
+  return humaniseBackend(displayAgentFor(session.backend, session.transport, catalog), catalog);
+}
+
 // "Claude Code, Opus 4.8".
 export function agentModelLabel(session: SessionRecord, catalog?: BackendCatalog): string {
-  const agent = humaniseBackend(displayAgentFor(session.backend, session.transport, catalog), catalog);
+  const agent = agentLabel(session, catalog);
   const model = shortModelLabel(session);
   return model ? `${agent}, ${model}` : agent;
 }

@@ -7,7 +7,7 @@ import { liveTerminal, hasTerminalPane, fidelityFor, useBackendCatalog } from "@
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
-import { agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
+import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { SessionMenu } from "@/components/sessions/SessionMenu";
 import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
@@ -62,7 +62,7 @@ export function SessionScreen({ id }: { id: string }) {
   }, [error, errorCount, loadFailed, toast]);
 
   const agent = session ? agentModelLabel(session, catalog) : "";
-  const agentName = agent.split(",")[0] || "Agent";
+  const agentName = (session && agentLabel(session, catalog)) || "Agent";
   useEffect(() => {
     if (!session) return;
     const previous = document.title;

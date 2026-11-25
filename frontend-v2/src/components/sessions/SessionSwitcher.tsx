@@ -157,7 +157,6 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     );
   };
 
-  // Exited sessions sit under their own heading, which also hides and shows them.
   const exitedHeading =
     exitedCount > 0 || exitedUnknown ? (
       <li role="presentation">

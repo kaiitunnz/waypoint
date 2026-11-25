@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { SessionSkeleton } from "@/components/shell/SessionSkeleton";
+import { FilesSkeleton } from "@/components/shell/FilesSkeleton";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -14,5 +14,5 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function Page({ params, searchParams }: Props) {
   const [{ id }, { path }] = await Promise.all([params, searchParams]);
-  return <SessionSkeleton id={id} subject={path} />;
+  return <FilesSkeleton id={id} subject={path} />;
 }

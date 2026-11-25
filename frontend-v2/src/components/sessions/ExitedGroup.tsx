@@ -12,11 +12,10 @@ import type { ExitedPaging } from "./useExitedSessions";
 
 interface ExitedGroupProps {
   count: number;
-  // The heading reads "3 exited" instead of "3 exited sessions".
+  // The heading reads "3 exited", not "3 exited sessions".
   short?: boolean;
   open: boolean;
   onToggle: () => void;
-  // Without it the group has no menu.
   onDeleteExited?: () => void;
   children: ReactNode;
   paging: ExitedPaging;

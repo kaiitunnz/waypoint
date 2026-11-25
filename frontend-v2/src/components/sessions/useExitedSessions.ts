@@ -37,6 +37,7 @@ export function useExitedSessions({ query, live, lead, enabled }: ExitedOptions)
   const { host, token } = useShellData();
   // A new query starts from the first page again.
   const [paged, setPaged] = useState({ query, limit: EXITED_PAGE_SIZE });
+  if (paged.query !== query) setPaged({ query, limit: EXITED_PAGE_SIZE });
   const limit = paged.query === query ? paged.limit : EXITED_PAGE_SIZE;
   const feed = useSessionsData();
   const common = {

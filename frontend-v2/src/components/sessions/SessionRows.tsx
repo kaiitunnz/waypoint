@@ -53,7 +53,6 @@ export function LiveRow({
   );
 }
 
-// One line: an exited session.
 export function CompactRow({
   session,
   lamp,

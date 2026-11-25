@@ -5,7 +5,6 @@ export type ConnectionState = "connecting" | "open" | "reconnecting";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-// The wait before reconnect attempt `attempt` (0-based): 1s doubling to 15s.
 export function reconnectDelay(attempt: number): number {
   return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
 }

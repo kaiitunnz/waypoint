@@ -5,7 +5,7 @@ import { parseTaskNotification, planTextForEvent } from "@waypoint/web-core/even
 import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
 import { modelChangeText } from "@waypoint/web-core/session/cardText";
 import { summarizeNotificationRun } from "@waypoint/web-core/session/taskNotificationView";
-import { primaryEvent, type LeafItem, type TranscriptItem } from "@waypoint/web-core/session/transcript";
+import { itemKey, primaryEvent, type LeafItem, type TranscriptItem } from "@waypoint/web-core/session/transcript";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { AnswerCard } from "./cards/AnswerCard";
@@ -19,7 +19,7 @@ import { RunLine } from "./cards/RunLine";
 import { SentFiles } from "./cards/SentFiles";
 import { SystemRule } from "./cards/SystemRule";
 import { TaskNote } from "./cards/TaskNote";
-import { ToolRun } from "./cards/ToolRun";
+import { RunNote, ToolRun } from "./cards/ToolRun";
 import { useSessionContext } from "./SessionContext";
 
 interface ItemViewProps {
@@ -31,15 +31,15 @@ interface ItemViewProps {
 
 function NotificationRun({ items }: { items: LeafItem[] }) {
   const { full } = useSessionContext();
-  const notes = items.flatMap((child) => {
+  const views = items.map((child) => parseTaskNotification(primaryEvent(child)));
+  const cards = items.map((child, index) => {
     const event = primaryEvent(child);
-    const view = parseTaskNotification(event);
-    return view ? [{ event, view }] : [];
+    const view = views[index];
+    return view ? <TaskNote key={itemKey(child)} view={view} event={event} /> : <RunNote key={itemKey(child)} child={child} />;
   });
-  if (notes.length === 0) return null;
-  const cards = notes.map(({ event, view }) => <TaskNote key={event.sequence} view={view} event={event} />);
-  if (notes.length === 1) return cards[0];
-  const summary = summarizeNotificationRun(notes.map(({ view }) => view.kind));
+  const kinds = views.flatMap((view) => (view ? [view.kind] : []));
+  if (kinds.length < 2) return <>{cards}</>;
+  const summary = summarizeNotificationRun(kinds);
   return (
     <RunLine phrase={summary.phrase} glyphs={summary.glyphs} defaultOpen={full}>
       {cards}

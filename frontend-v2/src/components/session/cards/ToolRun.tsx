@@ -21,7 +21,7 @@ interface ToolRunProps {
 }
 
 // A note that came in with the run: attached, resumed, a compaction, or a set of changes.
-function RunNote({ child }: { child: LeafItem }) {
+export function RunNote({ child }: { child: LeafItem }) {
   if (child.kind !== "single") return null;
   const { event } = child;
   switch (cardKindOf(event)) {

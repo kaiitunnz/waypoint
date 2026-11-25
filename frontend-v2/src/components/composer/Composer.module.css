@@ -1,0 +1,206 @@
+/* One DOM for both inputs, in the pointer box's order: tray, field, then the row
+   of controls. Touch reorders it into a control row above an input row. */
+.composer {
+  position: relative;
+  padding: 2px 12px 6px;
+}
+
+.surface {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.surface::before {
+  order: 3;
+  flex-basis: 100%;
+  content: "";
+}
+
+.tune {
+  display: flex;
+  flex: 1 1 0;
+  order: 1;
+  align-items: center;
+  min-width: 0;
+  height: 30px;
+  margin-bottom: 4px;
+}
+
+.meta {
+  display: flex;
+  flex: none;
+  order: 2;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin-bottom: 4px;
+}
+
+.tray {
+  flex: 0 0 100%;
+  order: 4;
+  min-width: 0;
+}
+
+.plus {
+  display: flex;
+  flex: none;
+  order: 5;
+}
+
+.field {
+  display: block;
+  flex: 1 1 0;
+  order: 6;
+  min-width: 0;
+  min-height: 44px;
+  max-height: min(180px, 34dvh);
+  padding: 11px 16px;
+  overflow-y: auto;
+  border: 1px solid var(--field-line);
+  border-radius: 22px;
+  background: var(--field);
+  color: var(--text-strong);
+  font: inherit;
+  /* 16px or more: iOS zooms the page when a smaller field takes focus. */
+  font-size: var(--f-body);
+  line-height: 20px;
+  outline: none;
+  resize: none;
+}
+
+.field::placeholder {
+  color: var(--faint);
+}
+
+.field:focus-visible {
+  border-color: color-mix(in srgb, var(--text-strong) 70%, transparent);
+}
+
+.field:disabled {
+  opacity: 0.55;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  order: 7;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.tasks {
+  font-size: var(--f-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.menuIcon {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.focusPill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--f-meta);
+  color: var(--text);
+}
+
+.focusMark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--working);
+}
+
+.focusPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .composer {
+    padding: 4px 12px 12px;
+  }
+
+  /* The box is the field's boundary, so it takes the field's line. */
+  .surface {
+    column-gap: 4px;
+    padding: 2px 6px 6px;
+    border: 1px solid var(--field-line);
+    border-radius: var(--r-card);
+    background: var(--field);
+  }
+
+  .surface:has(.field:focus-visible) {
+    border-color: color-mix(in srgb, var(--text-strong) 70%, transparent);
+  }
+
+  .surface::before {
+    content: none;
+  }
+
+  .tray {
+    order: 1;
+    padding: 0 6px;
+  }
+
+  .field {
+    flex-basis: 100%;
+    order: 2;
+    min-height: 40px;
+    max-height: min(240px, 40dvh);
+    padding: 10px 8px 6px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .plus {
+    order: 3;
+  }
+
+  .tune {
+    order: 4;
+    height: 32px;
+    margin: 0;
+  }
+
+  .meta {
+    order: 5;
+    height: 32px;
+    margin: 0 4px 0 0;
+  }
+
+  .actions {
+    order: 6;
+    gap: 4px;
+  }
+
+  .plus,
+  .tune,
+  .meta,
+  .actions {
+    align-self: center;
+  }
+}
+
+@media (min-width: 900px) {
+  .composer {
+    padding-right: 0;
+    padding-left: 0;
+  }
+}

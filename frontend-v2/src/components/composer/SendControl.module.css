@@ -1,0 +1,95 @@
+.wrap {
+  position: relative;
+  display: flex;
+}
+
+.send,
+.stop {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--fill-quiet);
+  color: var(--muted);
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.stop {
+  color: var(--text-strong);
+}
+
+.send:disabled {
+  cursor: default;
+}
+
+/* Send is the composer's one primary action. */
+.ready {
+  background: var(--action);
+  color: var(--on-action);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.menu {
+  position: absolute;
+  z-index: var(--z-overlay);
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-pop);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  text-align: left;
+  white-space: nowrap;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .send,
+  .stop {
+    width: 32px;
+    height: 32px;
+  }
+
+  .stop:hover {
+    background: var(--fill-raised);
+  }
+
+  .item {
+    min-height: 34px;
+  }
+
+  .item:hover {
+    background: var(--fill-quiet);
+  }
+}

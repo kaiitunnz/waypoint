@@ -12,6 +12,12 @@
   outline: none;
 }
 
+.scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .menu {
   display: flex;
   flex-direction: column;
@@ -28,6 +34,11 @@
   font-size: var(--f-body);
   color: var(--text);
   text-align: left;
+}
+
+.item:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .selected {

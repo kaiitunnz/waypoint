@@ -3,13 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 
-import { liveTerminal, hasTerminalPane, fidelityFor, useBackendCatalog } from "@waypoint/web-core/backends";
+import { postAction, isAuthError } from "@waypoint/web-core/api";
+import { liveTerminal, hasTerminalPane, fidelityFor, supportsAttachments, useBackendCatalog } from "@waypoint/web-core/backends";
+import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
+import { composerAvailability } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
+import { Composer } from "@/components/composer/Composer";
 import { SessionMenu } from "@/components/sessions/SessionMenu";
 import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
@@ -37,7 +41,7 @@ import { ViewSwitch, type SessionView } from "./ViewSwitch";
 export function SessionScreen({ id }: { id: string }) {
   const pointer = usePointerUI();
   const panels = useSessionPanels();
-  const [conversation, narrowHeader] = useNarrowerThan(COMPACT_HEADER_WIDTH);
+  const [measureConversation, narrowHeader] = useNarrowerThan(COMPACT_HEADER_WIDTH);
   const router = useRouter();
   const { host, token } = useShellData();
   const feed = useSessionsData();
@@ -46,6 +50,18 @@ export function SessionScreen({ id }: { id: string }) {
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
   const { session, events, connection, pendingQuestions } = stream;
+  const optimistic = useOptimisticSends(events);
+  const [filesOpen, setFilesOpen] = useState(false);
+  // Where the composer shows a file being dragged over the conversation.
+  const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
+
+  const conversationRef = useCallback(
+    (node: HTMLElement | null) => {
+      setConversationNode(node);
+      return measureConversation(node);
+    },
+    [measureConversation],
+  );
 
   const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
   const [view, setView] = useState<SessionView>("chat");
@@ -82,9 +98,13 @@ export function SessionScreen({ id }: { id: string }) {
   const activeView: SessionView = terminalOnly ? "terminal" : hasPane ? view : "chat";
   const structured = session ? fidelityFor(session.transport, catalog) === "structured" : true;
   const full = density === "full";
+  // A terminal-only transport takes its input in the pane.
+  const composing = !loadFailed && !terminalOnly;
+  const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
+  const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
-    () => ({ host, token, sessionId: id, cwd, agentName, full, structured }),
-    [host, token, id, cwd, agentName, full, structured],
+    () => ({ host, token, sessionId: id, cwd, agentName, full, structured, openFiles }),
+    [host, token, id, cwd, agentName, full, structured, openFiles],
   );
 
   const asking = feed.askSessionIds.has(id);
@@ -95,8 +115,34 @@ export function SessionScreen({ id }: { id: string }) {
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
   const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
+  const dormant = session ? composerAvailability(session, catalog).dormant : false;
+  const sessionActions = [
+    { id: "refresh", label: "Refresh" },
+    ...(dormant ? [{ id: "reconnect", label: "Reconnect session" }] : []),
+  ];
+  const reconnect = useCallback(async () => {
+    try {
+      await postAction(host, token, id, "reattach");
+    } catch (reconnectError) {
+      if (isAuthError(reconnectError)) {
+        handleAuthFailure();
+        return;
+      }
+      toast({ message: reconnectError instanceof Error ? reconnectError.message : "failed to reconnect", tone: "error" });
+    }
+  }, [host, token, id, toast]);
   const overflow = session ? (
-    <SessionMenu session={session} subtitle={agent} header={menuDensity} onAction={onAction} />
+    <SessionMenu
+      session={session}
+      subtitle={agent}
+      header={menuDensity}
+      onAction={onAction}
+      extra={sessionActions}
+      onExtra={(action) => {
+        if (action === "reconnect") void reconnect();
+        else window.location.reload();
+      }}
+    />
   ) : null;
   const title = session?.title || "Session";
   const columns = panels.mode === "columns";
@@ -118,6 +164,7 @@ export function SessionScreen({ id }: { id: string }) {
       onLoadOlder={stream.loadOlder}
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}
+      pending={optimistic.pending}
       override={activeView === "terminal" ? <EmptyState title="Not built yet" detail="Terminal" /> : undefined}
     />
   );
@@ -127,7 +174,7 @@ export function SessionScreen({ id }: { id: string }) {
       <AskStateProvider value={askState}>
         <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
           {railColumn ? <SessionRail currentId={id} /> : null}
-          <section ref={conversation} className={styles.conv} aria-label="Conversation">
+          <section ref={conversationRef} className={styles.conv} aria-label="Conversation">
             {pointer ? (
               <SessionHeader
                 title={title}
@@ -154,7 +201,25 @@ export function SessionScreen({ id }: { id: string }) {
               />
             )}
             {body}
-            <SessionFooter />
+            <SessionFooter
+              composer={
+                composing ? (
+                  <Composer
+                    sessionId={id}
+                    session={session}
+                    catalog={catalog}
+                    agentName={agentName}
+                    events={events}
+                    latestTodo={stream.latestTodo}
+                    onSession={stream.setSession}
+                    dropRoot={conversationNode}
+                    filesOpen={filesOpen}
+                    onFilesOpenChange={setFilesOpen}
+                    onPending={optimistic.add}
+                  />
+                ) : null
+              }
+            />
           </section>
           {paneColumn ? <SidePane /> : null}
           {panels.drawer === "rail" ? (

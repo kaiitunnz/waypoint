@@ -14,3 +14,11 @@
     padding: 0 var(--session-gutter);
   }
 }
+
+/* On touch the composer is receding chrome, down through the home indicator. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .filled {
+    border-top: 1px solid var(--line);
+    background: var(--ground);
+  }
+}

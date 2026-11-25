@@ -21,6 +21,18 @@ export type IconName =
   | "arrow-down"
   | "pin"
   | "plus"
+  | "arrow-up"
+  | "stop"
+  | "paperclip"
+  | "files"
+  | "file"
+  | "clock"
+  | "slash"
+  | "at"
+  | "trash"
+  | "external"
+  | "alert"
+  | "info"
   | "sun"
   | "moon"
   | "sessions"
@@ -97,6 +109,38 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   "arrow-down": <path d="M12 5v14M6 13l6 6 6-6" />,
+  "arrow-up": <path d="M12 19V5M6 11l6-6 6 6" />,
+  stop: <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />,
+  paperclip: <path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6" />,
+  files: <path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />,
+  file: (
+    <>
+      <path d="M13 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9z" />
+      <path d="M13 3.5v6h6" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  slash: <path d="M15 5L9 19" />,
+  at: (
+    <>
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M15.5 8.5v5a2.3 2.3 0 0 0 4.5-.8V12a8 8 0 1 0-3.6 6.7" />
+    </>
+  ),
+  trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 11v5M13.5 11v5" />,
+  external: <path d="M13 5h6v6M19 5l-8.5 8.5M11 7H6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-5" />,
+  alert: <path d="M12 4l9 16H3zM12 10v4.5M12 17v.01" />,
+  info: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 11v5M12 8v.01" />
+    </>
+  ),
   pin: <path d="M9 4h6l-.8 5.2L17 12.5H7l2.8-3.3L9 4zM12 12.5V20" />,
   more: (
     <>

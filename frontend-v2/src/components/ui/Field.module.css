@@ -100,3 +100,29 @@
     font-size: var(--f-code);
   }
 }
+
+.input.select {
+  appearance: none;
+  padding-right: 34px;
+  text-overflow: ellipsis;
+}
+
+.select:disabled {
+  opacity: 0.55;
+}
+
+.select option {
+  background: var(--plane);
+  color: var(--text);
+}
+
+.caret {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  bottom: 0;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  pointer-events: none;
+}

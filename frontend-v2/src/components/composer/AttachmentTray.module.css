@@ -1,0 +1,87 @@
+.tray {
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0 4px;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  max-width: min(280px, 80vw);
+  padding: 2px 0 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--plane);
+}
+
+.failed {
+  border-color: color-mix(in srgb, var(--error) 60%, transparent);
+}
+
+.thumb,
+.tile {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+}
+
+.thumb {
+  object-fit: cover;
+}
+
+.tile {
+  display: inline-grid;
+  place-items: center;
+  background: var(--fill-quiet);
+  color: var(--muted);
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 18px;
+}
+
+.name {
+  overflow: hidden;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  font-size: var(--f-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.failed .meta {
+  color: var(--error);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .name {
+    font-size: var(--f-meta);
+  }
+}

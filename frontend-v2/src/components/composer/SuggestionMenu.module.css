@@ -1,0 +1,121 @@
+/* Floats over the transcript, above the composer; the field keeps the focus. */
+.menu {
+  position: absolute;
+  z-index: var(--z-overlay);
+  right: 8px;
+  bottom: calc(100% + 6px);
+  left: 8px;
+  max-height: min(300px, 40dvh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-pop);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+
+.active {
+  background: var(--fill-quiet);
+}
+
+.name {
+  min-width: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  color: var(--faint);
+}
+
+.description {
+  display: flex;
+  flex: 1 1 12ch;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hit {
+  background: none;
+  color: inherit;
+  font-weight: 700;
+}
+
+.section {
+  padding: 8px 12px 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.file {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.thumb,
+.tile {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+}
+
+.thumb {
+  object-fit: cover;
+}
+
+.tile {
+  display: inline-grid;
+  place-items: center;
+  background: var(--fill-quiet);
+  color: var(--muted);
+}
+
+.fileText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fileText .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileText .description {
+  flex: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .menu {
+    right: 0;
+    left: 0;
+  }
+
+  .row {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+}

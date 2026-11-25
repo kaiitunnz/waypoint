@@ -17,12 +17,23 @@ interface PopoverProps {
   label: string;
   width?: number;
   align?: "left" | "right";
+  // `top` for a trigger near the bottom edge, such as the composer's.
+  side?: "bottom" | "top";
   children: ReactNode;
 }
 
-export function Popover({ open, onOpenChange, triggerRef, label, width = 360, align = "left", children }: PopoverProps) {
+export function Popover({
+  open,
+  onOpenChange,
+  triggerRef,
+  label,
+  width = 360,
+  align = "left",
+  side = "bottom",
+  children,
+}: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
-  const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 });
+  const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 }, side === "top" ? "rise" : "dropdown");
   usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
   const placed = open && anchor.style !== null;
   // The panel is portaled to the end of the page, so focus moves into it for the keyboard.
@@ -46,7 +57,7 @@ export function Popover({ open, onOpenChange, triggerRef, label, width = 360, al
         maxHeight: anchor.bounds?.maxHeight,
       }}
     >
-      {children}
+      <div className={styles.scroll}>{children}</div>
     </div>,
     document.body,
   );
@@ -65,12 +76,14 @@ interface MenuItemProps {
   children: ReactNode;
   selected?: boolean;
   tone?: "default" | "danger";
+  disabled?: boolean;
 }
 
-export function MenuItem({ onSelect, children, selected, tone = "default" }: MenuItemProps) {
+export function MenuItem({ onSelect, children, selected, tone = "default", disabled }: MenuItemProps) {
   return (
     <button
       type="button"
+      disabled={disabled}
       aria-current={selected || undefined}
       className={cx(styles.item, selected && styles.selected, tone === "danger" && styles.danger)}
       onClick={onSelect}

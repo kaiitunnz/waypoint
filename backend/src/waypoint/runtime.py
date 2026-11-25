@@ -31,7 +31,7 @@ from typing import Any, TextIO, cast
 from fastapi import HTTPException, status
 
 from waypoint import session_search
-from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
+from waypoint.assistant_assets import ensure_assistant_assets
 from waypoint.assistant_boot import AssistantBoot
 from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import (
@@ -679,6 +679,9 @@ class SessionRuntime:
             )
         # Before any restore can finish and kick its session's held items.
         self.held.start()
+        # Before any restore can relaunch the assistant, so it reads them.
+        if self.settings.assistant_backend() is not None:
+            self._refresh_assistant_assets()
         for session in self.storage.list_sessions():
             # A one-shot has no state worth resuming; the sweep below reaps it.
             if session.source == SessionSource.TELEMETRY:
@@ -2095,17 +2098,9 @@ class SessionRuntime:
                 )
             self.assistant_session_id = None
             return
-        # Refresh assistant workspace asset links on every boot so repo
-        # updates to AGENTS.md / CLAUDE.md / skills are visible to backends
-        # without recreating the live thread. If the refresh fails, keep a
-        # healthy live assistant tracked rather than making asset validation a
-        # new availability gate for an existing thread.
-        asset_error: Exception | None = None
-        try:
-            self._prepare_assistant_workspace()
-        except (AssistantAssetError, OSError) as exc:
-            asset_error = exc
-            log.warning("failed to refresh assistant workspace assets", exc_info=True)
+        # A failed refresh keeps a healthy live assistant tracked, so that asset
+        # validation gates only a new thread.
+        asset_error = self._refresh_assistant_assets()
         # Reuse any assistant that already lives in the managed workspace,
         # regardless of its backend: the thread is the source of truth, so a
         # backend switched from the UI survives a redeploy. ``assistant_backend()``
@@ -2195,6 +2190,16 @@ class SessionRuntime:
         workspace = self._assistant_workspace_dir()
         ensure_assistant_assets(workspace, config_path=self.settings.config_path)
         return str(workspace)
+
+    def _refresh_assistant_assets(self) -> Exception | None:
+        """Link the current assets into the assistant's workspace on every boot,
+        so a live thread sees repo updates, and return any failure."""
+        try:
+            self._prepare_assistant_workspace()
+        except Exception as exc:
+            log.warning("failed to refresh assistant workspace assets", exc_info=True)
+            return exc
+        return None
 
     def is_assistant_session(self, session: SessionRecord) -> bool:
         return session.source == SessionSource.ASSISTANT

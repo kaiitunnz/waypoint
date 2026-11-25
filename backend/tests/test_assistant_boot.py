@@ -83,6 +83,27 @@ async def test_assistant_is_pinned_before_its_restore_ends(
         assert summary.status == SessionStatus.EXITED
 
 
+async def test_assistant_assets_are_current_before_its_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, **assistant_settings())
+    add_assistant(runtime)
+    steps: list[str] = []
+
+    async def restore(*_args: Any) -> None:
+        steps.append("restore")
+
+    monkeypatch.setattr(
+        runtime, "_prepare_assistant_workspace", lambda: steps.append("assets")
+    )
+    stub_restores(monkeypatch, {"assistant": restore})
+
+    async with started(runtime):
+        await until(lambda: "restore" in steps)
+
+    assert steps[:2] == ["assets", "restore"]
+
+
 async def test_assistant_is_replaced_when_its_restore_ends_exited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

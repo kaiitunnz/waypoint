@@ -250,9 +250,6 @@ class OpenCodeAdapter:
             await self._wait_for_server()
         except Exception as exc:
             log.error("failed to start local opencode server: %s", exc)
-            await self._client.close()
-            self._client = None
-            self._terminate_server_process()
             raise OpenCodeError(f"failed to start opencode server: {exc}") from exc
 
     async def _read_local_listening_port(self, timeout: float = 30.0) -> int | None:
@@ -333,7 +330,6 @@ class OpenCodeAdapter:
                 continue
 
         if remote_port is None:
-            self._terminate_server_process()
             raise OpenCodeError("timeout waiting for remote opencode server port")
 
         log.info("remote opencode bound to port %d", remote_port)
@@ -344,9 +340,6 @@ class OpenCodeAdapter:
             await self._wait_for_server()
         except Exception as exc:
             log.error("failed to start remote opencode server: %s", exc)
-            await self._client.close()
-            self._client = None
-            self._terminate_server_process()
             raise OpenCodeError(
                 f"failed to start remote opencode server: {exc}"
             ) from exc

@@ -489,8 +489,7 @@ class CodexAppServerAdapter:
             return await self._call_client(state, func, *args)
         except BaseException as exc:
             if isinstance(exc, asyncio.CancelledError):
-                # ``terminate_session`` closes through the executor, which may
-                # be full of abandoned waits.
+                # ``terminate_session`` closes on the executor, so this goes first.
                 _close_detached(state.client)
             await self.terminate_session(state.session_id)
             raise
@@ -1217,9 +1216,8 @@ class CodexAppServerAdapter:
 
 
 def _close_detached(client: CodexClient) -> None:
-    """Close ``client`` on a thread of its own. The SDK waits without a timeout,
-    so this is what releases a worker thread a cancellation leaves behind, even
-    when such threads fill the executor."""
+    """Close ``client`` off the executor: the SDK waits without a timeout, and
+    abandoned waits can fill the pool."""
     threading.Thread(target=client.close, daemon=True).start()
 
 

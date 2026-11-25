@@ -1795,6 +1795,7 @@ class HeldReason(StrEnum):
     FOCUS = "focus"  # the human
     DIALOG = "dialog"  # the session's open dialog clearing
     IDLE = "idle"  # the session going idle
+    RESTORE = "restore"  # the session's restore ending
 
 
 class HeldMessageRecord(BaseModel):

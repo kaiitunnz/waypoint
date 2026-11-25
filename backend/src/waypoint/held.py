@@ -1,14 +1,14 @@
 """Held delivery for agent sends, scheduled firings, and board/inbox wakes.
 
 Each held message records what releases it: the human (Focus), the session's
-open dialog clearing, or the session going idle (wakes). Focus pauses every
-automatic release."""
+open dialog clearing, the session going idle (wakes), or its restore ending
+(sends). Focus pauses every automatic release."""
 
 import asyncio
 import logging
 import uuid
 from collections import defaultdict
-from contextlib import nullcontext, suppress
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -76,41 +76,44 @@ class HeldQueue:
         if self._runtime.get_session(session_id).focus:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
-        # A send that reopens the session keeps the send lock through the
-        # restore, so the sends behind it are held without waiting for the lock.
-        lock = (
-            nullcontext()
-            if self._runtime.restores.holds_sends(session_id)
-            else self._send_locks[session_id]
-        )
-        async with lock:
-            session = self._runtime.get_session(session_id)
-            if session.focus:
-                return await self._hold(session_id, request, origin, HeldReason.FOCUS)
-            after_restore = self._awaits_restore(session)
-            if not after_restore and self._deliverable_now(session, wake):
-                with suppress(InputBlockedError):
-                    delivered = await self._runtime.handle_input(session_id, request)
-                    if wake and self._runtime.storage.delete_held_wake(session_id):
-                        await self._publish(session_id)
-                    return delivered
-            reason = HeldReason.IDLE if wake or after_restore else HeldReason.DIALOG
+        if self._runtime.restores.holds_sends(session_id):
+            # Without the send lock: a send that reopened the session keeps it
+            # through the restore.
+            reason = HeldReason.IDLE if wake else HeldReason.RESTORE
             record = await self._hold(session_id, request, origin, reason)
+        else:
+            async with self._send_locks[session_id]:
+                session = self._runtime.get_session(session_id)
+                if session.focus:
+                    return await self._hold(
+                        session_id, request, origin, HeldReason.FOCUS
+                    )
+                queued = self._queued_behind_restore(session)
+                if not queued and self._deliverable_now(session, wake):
+                    with suppress(InputBlockedError):
+                        delivered = await self._runtime.handle_input(
+                            session_id, request
+                        )
+                        if wake and self._runtime.storage.delete_held_wake(session_id):
+                            await self._publish(session_id)
+                        return delivered
+                if wake:
+                    reason = HeldReason.IDLE
+                else:
+                    reason = HeldReason.RESTORE if queued else HeldReason.DIALOG
+                record = await self._hold(session_id, request, origin, reason)
         self._auto_held.add(session_id)
         self.kick(session_id)
         return record
 
-    def _awaits_restore(self, session: SessionRecord) -> bool:
-        """Whether a send must queue: the session is restoring or about to, or
-        sends held while it was are still waiting. Only those are ``idle``-held without
-        being wakes. A send reopens an exited session, so nothing queues behind
-        what such a session left held."""
+    def _queued_behind_restore(self, session: SessionRecord) -> bool:
+        """Whether a send waits for a restore, or behind sends still held from
+        one. A send reopens an exited session, so nothing queues behind what that
+        left."""
         if self._runtime.restores.holds_sends(session.id):
             return True
-        return session.status is not SessionStatus.EXITED and any(
-            held.hold_reason is HeldReason.IDLE
-            and held.origin is not HeldMessageOrigin.WAKE
-            for held in self._runtime.storage.list_held_messages(session.id)
+        return session.status is not SessionStatus.EXITED and (
+            self._runtime.storage.has_held_messages(session.id, HeldReason.RESTORE)
         )
 
     def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:
@@ -227,7 +230,7 @@ class HeldQueue:
         if (
             session.focus
             or session.status in _UNDELIVERABLE
-            or self._paused(session_id)
+            or self._runtime.restores.pauses_delivery(session_id)
         ):
             return
         transport = self._runtime.transport_for(session)
@@ -237,10 +240,14 @@ class HeldQueue:
                     continue
                 current = self._runtime.storage.get_session(session_id)
                 # A restart or close can begin while an earlier item goes out.
-                if current is None or current.focus or self._paused(session_id):
+                if (
+                    current is None
+                    or current.focus
+                    or self._runtime.restores.pauses_delivery(session_id)
+                ):
                     break
                 session = current
-                if held.hold_reason is HeldReason.IDLE and not self._ready_for(
+                if held.hold_reason is not HeldReason.DIALOG and not self._ready_for(
                     held, session
                 ):
                     continue
@@ -267,16 +274,12 @@ class HeldQueue:
         ):
             self._auto_held.discard(session_id)
 
-    def _paused(self, session_id: str) -> bool:
-        restores = self._runtime.restores
-        return restores.holds_sends(session_id) or restores.is_closing(session_id)
-
     def _ready_for(self, held: HeldMessageRecord, session: SessionRecord) -> bool:
-        """Whether an ``idle``-held item may go out."""
-        # A send queued behind a restore also follows an interrupted turn, as a
-        # fresh send would. A wake waits for the session to be at rest.
+        """Whether a message waiting on the session's state may go out."""
+        # A send queued behind a restore follows an interrupted turn too, as a
+        # fresh send would.
         if (
-            held.origin is not HeldMessageOrigin.WAKE
+            held.hold_reason is HeldReason.RESTORE
             and session.status is SessionStatus.INTERRUPTED
         ):
             return True

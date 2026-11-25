@@ -417,7 +417,7 @@ async def test_a_restore_that_ignores_a_terminate_records_nothing(
     async with started(runtime):
         try:
             await entered.wait()
-            restore = runtime._restore_tasks["s1"]
+            assert (restore := runtime.restores.boot_task("s1"))
             await runtime.terminate("s1")
             await asyncio.wait({restore}, timeout=2)
             assert restore.done()
@@ -701,7 +701,7 @@ async def test_send_mid_restore_is_held_and_delivered_after(
         await until(lambda: runtime.restores.is_restoring("s1"))
         await runtime.held.deliver("s1", peer_send("first"), HeldMessageOrigin.AGENT)
         [held] = runtime.storage.list_held_messages("s1")
-        assert held.hold_reason is HeldReason.IDLE
+        assert held.hold_reason is HeldReason.RESTORE
         assert sent == []
 
         release.set()
@@ -764,12 +764,12 @@ def add_assistant(
 async def test_assistant_creation_does_not_block_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("waypoint.runtime.ASSISTANT_LAUNCH_STOP_SECONDS", 0.05)
+    monkeypatch.setattr("waypoint.assistant_boot.LAUNCH_STOP_GRACE_SECONDS", 0.05)
     runtime = make_runtime(tmp_path, **assistant_settings())
     monkeypatch.setattr(runtime, "_create_assistant_session", hang)
 
     async with started(runtime):
-        await until(lambda: runtime._assistant_creating)
+        await until(lambda: runtime.assistant_boot._launching)
         for request in (
             runtime.reset_assistant(),
             runtime.reattach_assistant(),
@@ -852,7 +852,7 @@ async def test_errored_assistant_is_kept_unless_it_runs_in_a_pane(
 async def test_the_thread_being_replaced_takes_no_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("waypoint.runtime.ASSISTANT_LAUNCH_STOP_SECONDS", 0.05)
+    monkeypatch.setattr("waypoint.assistant_boot.LAUNCH_STOP_GRACE_SECONDS", 0.05)
     runtime = make_runtime(tmp_path, **assistant_settings())
     add_assistant(runtime, status=SessionStatus.EXITED)
     monkeypatch.setattr(runtime, "_create_assistant_session", hang)
@@ -860,7 +860,7 @@ async def test_the_thread_being_replaced_takes_no_message(
     sent = record_dispatches(runtime, monkeypatch)
 
     async with started(runtime):
-        await until(lambda: runtime._assistant_creating)
+        await until(lambda: runtime.assistant_boot._launching)
         with pytest.raises(HTTPException) as refused:
             await runtime.handle_input("assistant", SessionInputRequest(text="hi"))
         assert refused.value.status_code == 409
@@ -910,7 +910,7 @@ async def test_failed_assistant_creation_keeps_the_previous_one(
     monkeypatch.setattr(runtime, "_create_assistant_session", fail)
 
     async with started(runtime):
-        task = runtime._assistant_bootstrap_task
+        task = runtime.assistant_boot._task
         assert task is not None
         await asyncio.wait({task})
         assert runtime.assistant_session_id == "assistant"
@@ -941,7 +941,7 @@ async def test_hung_paneless_launch_is_bounded_and_marked(
             SessionCreateRequest(
                 backend="codex", transport="codex_app_server", cwd=str(tmp_path)
             ),
-            driver_timeout=0.1,
+            launch_timeout=0.1,
         )
 
     [session] = runtime.storage.list_sessions()
@@ -1098,7 +1098,7 @@ async def test_nothing_lands_on_a_failed_plugin(
         return {o.id for o in runtime.get_launch_settings("s1").transport_options}
 
     assert "tmux" in offered()
-    runtime.plugin_failures["tmux"] = "failed in setup: bad wiring"
+    runtime.availability.failures["tmux"] = "failed in setup: bad wiring"
     assert "tmux" not in offered()
 
     async def describe_target(_target: str) -> Any:
@@ -1156,7 +1156,7 @@ async def test_questions_of_a_failed_plugin_stay_in_the_feed(tmp_path: Path) -> 
         },
         SessionStatus.WAITING_INPUT,
     )
-    runtime.plugin_failures["codex"] = "failed in setup: bad wiring"
+    runtime.availability.failures["codex"] = "failed in setup: bad wiring"
 
     [ask] = (await runtime.asks.snapshot()).items
 
@@ -1198,7 +1198,7 @@ def test_plugin_that_fails_to_register_routes_does_not_stop_the_app(
 
     app = create_app(Settings(data_dir=tmp_path / "data"))
 
-    assert app.state.context.runtime.plugin_failures == {
+    assert app.state.context.runtime.availability.failures == {
         "codex": "failed in register_routes: bad route"
     }
 

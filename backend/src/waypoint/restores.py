@@ -1,20 +1,19 @@
-"""Running ``restore_session``: failures are noted on the session, and a restore
-without a terminal pane is bounded, tracked and cancellable.
+"""Running ``restore_session``, noting its failures on the session.
 
-Such a restore re-attaches the agent's own process or server, which can hang. A
-pane-backed session keeps its live pane and its relaunch is not safe to cancel
-midway (it would orphan the agent), so those restores run to completion."""
+Only a restore without a terminal pane is bounded and cancellable: cancelling a
+pane relaunch midway orphans its agent."""
 
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator, Coroutine, Iterator
-from contextlib import asynccontextmanager, contextmanager, suppress
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
+from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.schemas import SessionRecord, SessionStatus
 
 if TYPE_CHECKING:
@@ -27,11 +26,22 @@ CANCEL_GRACE_SECONDS = 5.0
 
 RESTORING_DETAIL = "session is still being restored; try again in a moment"
 
+type Restore = Callable[["SessionRuntime", SessionRecord], Coroutine[Any, Any, None]]
+
+
+class RestoreCancelled(HTTPException):
+    """The session is being closed, or the backend is stopping."""
+
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_409_CONFLICT, "the restore was cancelled")
+
 
 @dataclass
 class _Restore:
     call: asyncio.Task[None]
-    # Set once the coordinator is done with the session.
+    # Asks for the call to be stopped.
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    # Set once this restore writes nothing more.
     settled: asyncio.Event = field(default_factory=asyncio.Event)
     # The session is being closed, and its closer records the final status.
     superseded: bool = False
@@ -41,11 +51,22 @@ class RestoreCoordinator:
     def __init__(self, runtime: "SessionRuntime", timeout_seconds: float) -> None:
         self._runtime = runtime
         self._timeout = timeout_seconds
+        # Boot restores, which no request awaits.
+        self._boot_tasks: dict[str, asyncio.Task[None]] = {}
+        # Bounded restores in flight, and ones a close stopped until it ends.
         self._restoring: dict[str, _Restore] = {}
         # Sessions whose process is being replaced, from before the old one goes.
         self._restarting: set[str] = set()
         # Sessions being closed, which take no new restore.
         self._closing: Counter[str] = Counter()
+
+    def spawn_boot(self, session_id: str, boot: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.create_task(boot, name=f"restore-{session_id}")
+        self._boot_tasks[session_id] = task
+        task.add_done_callback(lambda _: self._boot_tasks.pop(session_id, None))
+
+    def boot_task(self, session_id: str) -> asyncio.Task[None] | None:
+        return self._boot_tasks.get(session_id)
 
     def is_restoring(self, session_id: str) -> bool:
         return session_id in self._restoring
@@ -54,15 +75,21 @@ class RestoreCoordinator:
         """Whether sends queue for the session: it is restoring or about to."""
         return self.is_restoring(session_id) or session_id in self._restarting
 
-    def is_closing(self, session_id: str) -> bool:
-        return session_id in self._closing
+    def pauses_delivery(self, session_id: str) -> bool:
+        """Whether queued sends wait: the session holds sends or is closing."""
+        return self.holds_sends(session_id) or session_id in self._closing
+
+    def require_restored(self, session_id: str) -> None:
+        if self.is_restoring(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=RESTORING_DETAIL
+            )
 
     @contextmanager
     def restarting(self, session: SessionRecord) -> Iterator[None]:
-        """Queue sends for the whole of a reattach or settings change, which
-        tears the old process down before its restore begins. The caller holds
-        the session lock."""
-        if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
+        """Queue sends from before a reattach or settings change tears the old
+        process down. The caller holds the session lock."""
+        if not self._is_bounded(session):
             yield
             return
         self._restarting.add(session.id)
@@ -73,11 +100,8 @@ class RestoreCoordinator:
 
     @asynccontextmanager
     async def closing(self, session_id: str) -> AsyncIterator[None]:
-        """Keep restores off a session while the block closes it.
-
-        The restore in flight is stopped and any other is refused. A stopped one
-        leaves the session ``starting`` and counts as restoring until the block
-        ends, so the block records the final status."""
+        """Stop the restore in flight and refuse new ones while the block closes
+        the session. The block records the final status."""
         self._closing[session_id] += 1
         try:
             if entry := self._restoring.get(session_id):
@@ -91,87 +115,72 @@ class RestoreCoordinator:
                 # Any entry left is a restore this close stopped.
                 self._restoring.pop(session_id, None)
 
-    def require_restored(self, session_id: str) -> None:
-        if self.is_restoring(session_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=RESTORING_DETAIL
-            )
-
-    @staticmethod
-    def raise_for_request(failure: BaseException | None) -> None:
-        """Fail a request whose restore was cancelled or refused outright."""
-        if isinstance(failure, asyncio.CancelledError):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="the restore was cancelled",
-            )
-        if isinstance(failure, HTTPException):
-            raise failure
-
     async def run(
-        self, session: SessionRecord, restore: Coroutine[Any, Any, None]
+        self, session: SessionRecord, restore: Restore
     ) -> BaseException | None:
-        """Await ``restore`` and return its failure, if it raised, timed out or
-        was cancelled (a ``CancelledError``, whose session is being closed).
+        """Restore ``session``, the record as read before any status write, and
+        return the failure noted on it.
 
-        ``session`` is the record as read before any status write, which is also
-        what ``restore`` must have been given."""
+        Raises ``RestoreCancelled`` when the session is being closed or the
+        backend is stopping, and 404 when it has been deleted."""
         if session.id in self._closing:
-            restore.close()
-            return asyncio.CancelledError()
+            raise RestoreCancelled
         if self._runtime.storage.get_session(session.id) is None:
-            # Deleted while its old process was torn down.
-            restore.close()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
             )
-        if self._runtime.registry.plugin_for(session).capabilities.has_terminal_pane:
-            try:
-                await restore
-            except Exception as exc:
-                log.exception("restore failed for session %s", session.id)
-                # The pane may be alive, and an errored pane session cannot
-                # relaunch, so the status stands.
-                await self._note_failure(session.id, exc, None)
-                return exc
-            return None
-        return await self._run_bounded(session, restore)
+        if self._is_bounded(session):
+            return await self._run_bounded(session, restore)
+        try:
+            await restore(self._runtime, session)
+        except Exception as exc:
+            log.exception("restore failed for session %s", session.id)
+            # The pane may be alive, and an errored pane session cannot
+            # relaunch, so the status stands.
+            await self._note_failure(session.id, exc, None)
+            return exc
+        return None
 
     async def stop(self) -> None:
         """Stop every restore for shutdown, giving each session its status back."""
+        await cancel_and_wait(*self._boot_tasks.values())
         await asyncio.gather(*map(_stop, list(self._restoring.values())))
 
+    def _is_bounded(self, session: SessionRecord) -> bool:
+        plugin = self._runtime.registry.plugin_for(session)
+        return not plugin.capabilities.has_terminal_pane
+
     async def _run_bounded(
-        self, session: SessionRecord, restore: Coroutine[Any, Any, None]
+        self, session: SessionRecord, restore: Restore
     ) -> BaseException | None:
-        if self.is_restoring(session.id):
-            restore.close()
-            self.require_restored(session.id)
         previous = session
         if previous.status is SessionStatus.STARTING:
             # Left behind by a process that stopped mid-restore.
             previous = previous.model_copy(update={"status": SessionStatus.IDLE})
+        self._runtime.storage.update_session(session.id, status=SessionStatus.STARTING)
         entry = _Restore(
-            asyncio.create_task(restore, name=f"restore-call-{session.id}")
+            asyncio.create_task(
+                restore(self._runtime, session), name=f"restore-call-{session.id}"
+            )
         )
+        entry.call.add_done_callback(_consume_result)
         self._restoring[session.id] = entry
         try:
-            self._runtime.storage.update_session(
-                session.id, status=SessionStatus.STARTING
-            )
             self._runtime._publish_session_state(session.id)
-            done, _ = await asyncio.wait({entry.call}, timeout=self._timeout)
-            failure: BaseException | None = None
-            if not done:
+            await _wait_for_end(entry, self._timeout)
+            timed_out = not entry.call.done() and not entry.stop.is_set()
+            if not entry.call.done():
                 await _abandon(entry.call)
-                failure = TimeoutError(f"timed out after {self._timeout:g}s")
-            elif not entry.call.cancelled():
-                failure = entry.call.exception()
             if entry.superseded:
-                return asyncio.CancelledError()
-            if done and entry.call.cancelled():
+                raise RestoreCancelled
+            failure: BaseException | None
+            if timed_out:
+                failure = TimeoutError(f"timed out after {self._timeout:g}s")
+            elif entry.stop.is_set() or entry.call.cancelled():
                 self._write_back(previous)
-                return asyncio.CancelledError()
+                raise RestoreCancelled
+            else:
+                failure = entry.call.exception()
             if failure is None:
                 self._write_back(previous)
             else:
@@ -215,11 +224,22 @@ class RestoreCoordinator:
         )
 
 
+async def _wait_for_end(entry: _Restore, timeout: float) -> None:
+    """Wait until the call ends, a stop is asked for, or ``timeout`` passes."""
+    stopping = asyncio.create_task(entry.stop.wait())
+    try:
+        await asyncio.wait(
+            {entry.call, stopping},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        stopping.cancel()
+
+
 async def _stop(entry: _Restore) -> None:
-    entry.call.cancel()
-    with suppress(TimeoutError):
-        async with asyncio.timeout(CANCEL_GRACE_SECONDS):
-            await entry.settled.wait()
+    entry.stop.set()
+    await entry.settled.wait()
 
 
 async def _abandon(call: asyncio.Task[None]) -> None:
@@ -227,9 +247,6 @@ async def _abandon(call: asyncio.Task[None]) -> None:
     done, _ = await asyncio.wait({call}, timeout=CANCEL_GRACE_SECONDS)
     if not done:
         log.warning("%s ignored its cancellation; abandoning it", call.get_name())
-        call.add_done_callback(_consume_result)
-    else:
-        _consume_result(call)
 
 
 def _consume_result(call: asyncio.Task[None]) -> None:

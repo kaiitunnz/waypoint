@@ -344,9 +344,8 @@ class Settings(BaseModel):
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
-    # How long a session without a terminal pane may take to restore, or such an
-    # assistant to launch at startup, before it is marked ``error``. Override
-    # with ``WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS``.
+    # Bound on restoring a session without a terminal pane, and on launching such
+    # an assistant at startup. Env: ``WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS``.
     session_restore_timeout_seconds: float = Field(default=90.0, gt=0)
     # tmux pane liveness/pid refresh runs on this slower cadence than the
     # raw-output ingest above: describe_target spawns a tmux subprocess per

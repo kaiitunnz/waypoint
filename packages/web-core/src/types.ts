@@ -983,7 +983,7 @@ export interface SessionEnvelope {
 
 export type HeldMessageOrigin = "agent" | "schedule" | "wake";
 
-export type HeldReason = "focus" | "dialog" | "idle";
+export type HeldReason = "focus" | "dialog" | "idle" | "restore";
 
 // A delivery a session is holding. Mirrors backend schemas.HeldMessageRecord.
 export interface HeldMessage {

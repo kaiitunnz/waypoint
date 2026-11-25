@@ -5,7 +5,6 @@ import mimetypes
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
@@ -445,9 +444,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Plugin-registered routes (e.g. the Claude PreToolUse hook) come
     # in here so api.py stays backend-agnostic.
     for plugin in context.runtime.registry.all():
-        context.runtime.run_plugin_hook(
-            plugin, "register_routes", partial(plugin.register_routes, app, context)
-        )
+        with context.runtime.availability.guard(plugin, "register_routes"):
+            plugin.register_routes(app, context)
 
     @app.get("/api/tailnet/peers")
     async def tailnet_peers(_: Annotated[str, Depends(token_dependency())]) -> Any:
@@ -1891,10 +1889,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sqid: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Response:
-        session = context.runtime.get_session(session_id)
-        context.runtime.require_available(session)
-        plugin = context.runtime.registry.plugin_for(session)
-        await plugin.dismiss_side_question(context.runtime, session, sqid)
+        await context.runtime.dismiss_side_question(session_id, sqid)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/backends/{backend}/models")
@@ -2526,14 +2521,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return
         # Only transports with a terminal pane can be mirrored here; backends
         # with no pane (pure structured streams) publish via the event WS.
-        if context.runtime.plugin_unavailable_reason(session):
+        plugin = context.runtime.availability.driver(session)
+        if plugin is None or not plugin.capabilities.has_terminal_pane:
             await websocket.close(code=4403)
             return
-        plugin = context.runtime.registry.plugin_for(session)
         caps = plugin.capabilities
-        if not caps.has_terminal_pane:
-            await websocket.close(code=4403)
-            return
         terminal_interactive = caps.terminal_interactive
         # Discrete key-bar / scroll-wheel injection is allowed for fully
         # interactive panes and for panes that opt into the narrow escape hatch

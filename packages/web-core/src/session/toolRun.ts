@@ -316,6 +316,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
       : "Tasks"
     : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
+  const failed = result?.metadata?.is_error === true;
   return {
     key: itemKey(child),
     glyph: badge.glyph,
@@ -326,9 +327,9 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
     mono: filePath !== null || subject !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
-    status: !result ? "pending" : result.metadata?.is_error === true ? "failed" : "done",
+    status: !result ? "pending" : failed ? "failed" : "done",
     durationMs: durationBetween(call, result),
-    output: tool === "Bash" && result ? cleanOutput(commandOutputForEvent(result)) : null,
+    output: result && (tool === "Bash" || failed) ? cleanOutput(commandOutputForEvent(result)) : null,
     diff,
     attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),
   };

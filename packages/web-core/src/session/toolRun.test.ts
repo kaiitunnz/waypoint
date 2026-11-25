@@ -172,6 +172,13 @@ describe("describeCall", () => {
     expect(describeCall(agent)?.mono).toBe(false);
   });
 
+  it("keeps the reason a non-command call failed, and only then", () => {
+    const [failed] = run([call(1, "a", "Edit", { file_path: "/repo/a.py" }), result(2, "a", "String not found in file", { is_error: true })]);
+    expect(describeCall(failed)).toMatchObject({ status: "failed", output: "String not found in file" });
+    const [read] = run([call(1, "b", "Read", { file_path: "/repo/a.py" }), result(2, "b", "contents")]);
+    expect(describeCall(read)?.output).toBeNull();
+  });
+
   it("shows no command block for a blank command", () => {
     const [bash] = run([call(1, "a", "Bash", { command: "  \n " })]);
     expect(describeCall(bash)?.mono).toBe(false);

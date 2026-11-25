@@ -344,6 +344,10 @@ class Settings(BaseModel):
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
+    # How long a session without a terminal pane may take to restore before it
+    # is marked ``error``. Override with
+    # ``WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS``.
+    session_restore_timeout_seconds: float = Field(default=90.0, gt=0)
     # tmux pane liveness/pid refresh runs on this slower cadence than the
     # raw-output ingest above: describe_target spawns a tmux subprocess per
     # poll per session, so refreshing every ingest tick is wasteful. The
@@ -589,6 +593,10 @@ def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     if "WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS" in os.environ:
         overrides["attachment_orphan_ttl_seconds"] = int(
             os.environ["WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS"]
+        )
+    if "WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS" in os.environ:
+        overrides["session_restore_timeout_seconds"] = float(
+            os.environ["WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS"]
         )
     if "WAYPOINT_WORKSPACE_PREVIEW_ENABLED" in os.environ:
         overrides["workspace_preview_enabled"] = os.environ[

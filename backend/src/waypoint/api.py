@@ -5,6 +5,7 @@ import mimetypes
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
@@ -444,7 +445,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Plugin-registered routes (e.g. the Claude PreToolUse hook) come
     # in here so api.py stays backend-agnostic.
     for plugin in context.runtime.registry.all():
-        plugin.register_routes(app, context)
+        context.runtime.run_plugin_hook(
+            plugin, "register_routes", partial(plugin.register_routes, app, context)
+        )
 
     @app.get("/api/tailnet/peers")
     async def tailnet_peers(_: Annotated[str, Depends(token_dependency())]) -> Any:

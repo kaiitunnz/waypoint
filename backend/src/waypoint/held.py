@@ -80,17 +80,28 @@ class HeldQueue:
             session = self._runtime.get_session(session_id)
             if session.focus:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
-            if self._deliverable_now(session, wake):
+            after_restore = self._awaits_restore(session_id)
+            if not after_restore and self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
                     delivered = await self._runtime.handle_input(session_id, request)
                     if wake and self._runtime.storage.delete_held_wake(session_id):
                         await self._publish(session_id)
                     return delivered
-            reason = HeldReason.IDLE if wake else HeldReason.DIALOG
+            reason = HeldReason.IDLE if wake or after_restore else HeldReason.DIALOG
             record = await self._hold(session_id, request, origin, reason)
         self._auto_held.add(session_id)
         self.kick(session_id)
         return record
+
+    def _awaits_restore(self, session_id: str) -> bool:
+        """Whether a send must queue: the session is restoring, or sends held
+        while it was are still waiting. Only those are ``idle``-held without
+        being wakes."""
+        return self._runtime.restores.is_restoring(session_id) or any(
+            held.hold_reason is HeldReason.IDLE
+            and held.origin is not HeldMessageOrigin.WAKE
+            for held in self._runtime.storage.list_held_messages(session_id)
+        )
 
     def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:
         # Queue behind items waiting on a dialog so delivery keeps its order.
@@ -203,7 +214,11 @@ class HeldQueue:
         if session is None:
             self._auto_held.discard(session_id)
             return
-        if session.focus or session.status in _UNDELIVERABLE:
+        if (
+            session.focus
+            or session.status in _UNDELIVERABLE
+            or self._runtime.restores.is_restoring(session_id)
+        ):
             return
         transport = self._runtime.transport_for(session)
         async with self._send_locks[session_id]:

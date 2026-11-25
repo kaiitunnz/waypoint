@@ -13,6 +13,12 @@ cors_origins: []
                           # tool_call+tool_result pair) into one unit so
                           # a page of N reliably surfaces N bubbles.
 
+# session_restore_timeout_seconds: 90  # how long a session without a terminal
+#                                      #   pane may take to restore (backend
+#                                      #   startup, reconnect) before it is
+#                                      #   marked `error`.
+#                                      #   Env: WAYPOINT_SESSION_RESTORE_TIMEOUT_SECONDS
+
 # Attachments and task output.
 # attachment_preview_max_bytes: 65536  # text a transcript card may inline from a
 #                                      #   stored attachment. Larger reports show

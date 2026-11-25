@@ -43,7 +43,7 @@ export function Popover({
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const anchor = usePopoverAnchor(triggerRef, open, align, { gap: 8 }, side === "top" ? "rise" : "dropdown");
-  usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef);
+  usePopoverDismiss(open, onOpenChange, triggerRef, panel, triggerRef, { keepOutsideFocus: !autoFocus });
   // The free edges are the ones away from the trigger.
   const direction = { width: align === "right" ? -1 : 1, height: side === "top" ? -1 : 1 } as const;
   const placed = open && anchor.style !== null;

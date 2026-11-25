@@ -30,8 +30,10 @@ RESTORING_DETAIL = "session is still being restored; try again in a moment"
 @dataclass
 class _Restore:
     call: asyncio.Task[None]
-    # Set once the session's status is final.
+    # Set once the coordinator is done with the session.
     settled: asyncio.Event = field(default_factory=asyncio.Event)
+    # The session is being closed, and its closer records the final status.
+    superseded: bool = False
 
 
 class RestoreCoordinator:
@@ -81,17 +83,17 @@ class RestoreCoordinator:
         return await self._run_bounded(session, restore)
 
     async def cancel(self, session_id: str) -> None:
-        """Stop an in-flight restore and wait for the session to settle."""
-        entry = self._restoring.get(session_id)
-        if entry is None:
-            return
-        entry.call.cancel()
-        with suppress(TimeoutError):
-            async with asyncio.timeout(CANCEL_GRACE_SECONDS):
-                await entry.settled.wait()
+        """Stop an in-flight restore of a session that is being closed.
+
+        The session keeps its ``starting`` status, which holds sends back, until
+        the caller records the final one."""
+        if entry := self._restoring.get(session_id):
+            entry.superseded = True
+            await _stop(entry)
 
     async def stop(self) -> None:
-        await asyncio.gather(*(self.cancel(sid) for sid in list(self._restoring)))
+        """Stop every restore for shutdown, giving each session its status back."""
+        await asyncio.gather(*map(_stop, list(self._restoring.values())))
 
     async def _run_bounded(
         self, session: SessionRecord, restore: Coroutine[Any, Any, None]
@@ -117,24 +119,23 @@ class RestoreCoordinator:
             if not done:
                 await _abandon(entry.call)
                 failure = TimeoutError(f"timed out after {self._timeout:g}s")
-                log.error("restore of session %s %s", session.id, failure)
-            elif entry.call.cancelled():
+            elif not entry.call.cancelled():
+                failure = entry.call.exception()
+            if entry.superseded:
+                return asyncio.CancelledError()
+            if done and entry.call.cancelled():
                 self._write_back(previous)
                 return asyncio.CancelledError()
-            else:
-                failure = entry.call.exception()
-                if failure is not None:
-                    log.error(
-                        "restore failed for session %s", session.id, exc_info=failure
-                    )
             if failure is None:
                 self._write_back(previous)
             else:
+                log.error("restore failed for session %s", session.id, exc_info=failure)
                 await self._note_failure(session.id, failure, SessionStatus.ERROR)
             return failure
         except asyncio.CancelledError:
             await _abandon(entry.call)
-            self._write_back(previous)
+            if not entry.superseded:
+                self._write_back(previous)
             raise
         finally:
             self._restoring.pop(session.id, None)
@@ -164,6 +165,13 @@ class RestoreCoordinator:
             f"Could not restore this session: {reason}. Reconnect to try again.",
             status=new_status,
         )
+
+
+async def _stop(entry: _Restore) -> None:
+    entry.call.cancel()
+    with suppress(TimeoutError):
+        async with asyncio.timeout(CANCEL_GRACE_SECONDS):
+            await entry.settled.wait()
 
 
 async def _abandon(call: asyncio.Task[None]) -> None:

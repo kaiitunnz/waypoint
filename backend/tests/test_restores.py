@@ -3,14 +3,17 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 from fastapi import HTTPException
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from waypoint.api import create_app
 from waypoint.backends import get_registry
@@ -19,6 +22,7 @@ from waypoint.schemas import (
     EventKind,
     HeldMessageOrigin,
     HeldReason,
+    SessionAttachRequest,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
@@ -305,6 +309,112 @@ async def test_stopping_mid_restore_writes_the_status_back(
     session = reopened.get_session("s1")
     assert session is not None
     assert session.status == SessionStatus.WAITING_INPUT
+
+
+def held_texts(storage: Storage, session_id: str) -> list[str]:
+    return [message.text for message in storage.list_held_messages(session_id)]
+
+
+async def test_nothing_is_delivered_while_a_terminate_closes_a_restoring_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    stub_restores(monkeypatch, {"s1": hang})
+    sent = record_dispatches(runtime, monkeypatch)
+    closing = asyncio.Event()
+    close = asyncio.Event()
+
+    async def slow_terminate(*_args: Any) -> None:
+        closing.set()
+        await close.wait()
+
+    monkeypatch.setattr(
+        get_registry().get("codex"), "terminate_session", slow_terminate
+    )
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+        terminate = asyncio.create_task(runtime.terminate("s1"))
+        await closing.wait()
+        # Longer than the broadcast debounce, which is what releases held sends.
+        await asyncio.sleep(0.4)
+        assert sent == []
+        close.set()
+        await terminate
+        assert stored(runtime, "s1").status == SessionStatus.EXITED
+        assert held_texts(runtime.storage, "s1") == ["held"]
+
+
+async def test_nothing_is_delivered_while_shutdown_cancels_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    add_session(runtime, "slow")
+
+    async def unwind_slowly(*_args: Any) -> None:
+        try:
+            await hang()
+        finally:
+            await asyncio.sleep(0.6)
+
+    stub_restores(monkeypatch, {"s1": hang, "slow": unwind_slowly})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("held"), HeldMessageOrigin.AGENT)
+
+    assert sent == []
+    assert held_texts(Storage(runtime.settings.database_path), "s1") == ["held"]
+
+
+async def test_a_send_reopens_a_session_closed_mid_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    stub_restores(monkeypatch, {"s1": hang})
+    sent = record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("old"), HeldMessageOrigin.AGENT)
+        await runtime.terminate("s1")
+        stub_restores(monkeypatch, {})
+        await runtime.held.deliver("s1", peer_send("new"), HeldMessageOrigin.AGENT)
+
+        assert sent[:1] == ["new"]
+
+
+async def test_a_restore_that_ignores_a_terminate_records_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("waypoint.restores.CANCEL_GRACE_SECONDS", 0.05)
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.3)
+    add_session(runtime, "s1")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stubborn(*_args: Any) -> None:
+        entered.set()
+        while not release.is_set():
+            with suppress(asyncio.CancelledError):
+                await release.wait()
+
+    stub_restores(monkeypatch, {"s1": stubborn})
+
+    async with started(runtime):
+        try:
+            await entered.wait()
+            await runtime.terminate("s1")
+            await until(lambda: not runtime.restores.is_restoring("s1"))
+            assert stored(runtime, "s1").status == SessionStatus.EXITED
+            assert "Could not restore" not in notes(runtime, "s1")
+        finally:
+            release.set()
 
 
 def record_dispatches(
@@ -625,7 +735,98 @@ async def test_pane_session_recovers_once_its_plugin_is_back(
     async with started(recovered):
         session = stored(recovered, "pane")
         assert session.status == SessionStatus.RUNNING
-        assert "status_before_unavailable" not in session.transport_state
+        assert "unavailable_mark" not in session.transport_state
+
+
+async def test_unavailable_session_is_noted_once_and_stays_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(*_args: Any) -> None:
+        raise RuntimeError("bad wiring")
+
+    monkeypatch.setattr(get_registry().get("codex"), "setup", explode)
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    runtime.storage.update_session("s1", read_at=datetime.now(UTC))
+    async with started(runtime):
+        assert not stored(runtime, "s1").unread
+
+    again = make_runtime(tmp_path)
+    async with started(again):
+        assert notes(again, "s1").count("Session unavailable") == 1
+        assert not stored(again, "s1").unread
+
+
+async def test_nothing_lands_on_a_failed_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1", backend="claude_code", transport="claude_cli")
+
+    def offered() -> set[str]:
+        return {o.id for o in runtime.get_launch_settings("s1").transport_options}
+
+    assert "tmux" in offered()
+    runtime.plugin_failures["tmux"] = "failed in setup: bad wiring"
+    assert "tmux" not in offered()
+
+    async def describe_target(_target: str) -> Any:
+        return SimpleNamespace()
+
+    monkeypatch.setattr(runtime.tmux, "describe_target", describe_target)
+    for request in (
+        runtime.import_thread("codex", {"thread_id": "t", "transport": "tmux"}),
+        runtime.attach_tmux(
+            SessionAttachRequest(tmux_target="main", backend_hint="codex")
+        ),
+    ):
+        with pytest.raises(HTTPException) as refused:
+            await request
+        assert refused.value.status_code == 503
+        assert "backend plugin tmux" in refused.value.detail
+
+
+async def test_session_with_no_plugin_answers_without_failing(
+    tmp_path: Path,
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    runtime.storage.connection.execute(
+        "UPDATE sessions SET transport = 'gone_transport' WHERE id = 's1'"
+    )
+    runtime.storage.connection.commit()
+
+    async with started(runtime):
+        with pytest.raises(HTTPException) as settings:
+            runtime.get_launch_settings("s1")
+        assert settings.value.status_code == 503
+        with pytest.raises(HTTPException) as clone:
+            await runtime.clone_session_launch("s1")
+        assert clone.value.status_code == 503
+        assert await runtime.get_command_completions("s1") == ([], False)
+        assert (await runtime.refresh_rate_limit_usage("s1")).id == "s1"
+
+
+def test_routes_refuse_a_session_with_no_plugin(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data"))
+    context = app.state.context
+    add_session(context.runtime, "s1")
+    context.runtime.storage.connection.execute(
+        "UPDATE sessions SET transport = 'gone_transport' WHERE id = 's1'"
+    )
+    context.runtime.storage.connection.commit()
+    token = context.tokens.issue().token
+
+    with TestClient(app) as client:
+        response = client.delete(
+            "/api/sessions/s1/side-questions/q1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 503
+        with client.websocket_connect(f"/ws/sessions/s1/terminal?token={token}") as ws:
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_text()
+        assert closed.value.code == 4403
 
 
 def test_plugin_that_fails_to_register_routes_does_not_stop_the_app(
@@ -662,4 +863,4 @@ async def test_terminating_an_unavailable_session_outlives_the_plugin_return(
     async with started(recovered):
         session = stored(recovered, "pane")
         assert session.status == SessionStatus.EXITED
-        assert "status_before_unavailable" not in session.transport_state
+        assert "unavailable_mark" not in session.transport_state

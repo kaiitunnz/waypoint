@@ -80,7 +80,7 @@ class HeldQueue:
             session = self._runtime.get_session(session_id)
             if session.focus:
                 return await self._hold(session_id, request, origin, HeldReason.FOCUS)
-            after_restore = self._awaits_restore(session_id)
+            after_restore = self._awaits_restore(session)
             if not after_restore and self._deliverable_now(session, wake):
                 with suppress(InputBlockedError):
                     delivered = await self._runtime.handle_input(session_id, request)
@@ -93,14 +93,17 @@ class HeldQueue:
         self.kick(session_id)
         return record
 
-    def _awaits_restore(self, session_id: str) -> bool:
+    def _awaits_restore(self, session: SessionRecord) -> bool:
         """Whether a send must queue: the session is restoring, or sends held
         while it was are still waiting. Only those are ``idle``-held without
-        being wakes."""
-        return self._runtime.restores.is_restoring(session_id) or any(
+        being wakes. A send reopens an exited session, so nothing queues behind
+        what such a session left held."""
+        if self._runtime.restores.is_restoring(session.id):
+            return True
+        return session.status is not SessionStatus.EXITED and any(
             held.hold_reason is HeldReason.IDLE
             and held.origin is not HeldMessageOrigin.WAKE
-            for held in self._runtime.storage.list_held_messages(session_id)
+            for held in self._runtime.storage.list_held_messages(session.id)
         )
 
     def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:

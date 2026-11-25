@@ -226,7 +226,7 @@ ONE_SHOT_POLL_INTERVAL_SECONDS = 0.5
 STRUCTURED_LOG_FLUSH_EVERY = 16
 # ``transport_state`` key holding the status a session had before its plugin
 # became unavailable.
-_UNAVAILABLE_STATUS_KEY = "status_before_unavailable"
+_UNAVAILABLE_MARK_KEY = "unavailable_mark"
 ASSISTANT_STARTING_DETAIL = "the assistant is still starting; try again in a moment"
 # Stable sentinel returned when a launch's working directory does not exist.
 # The frontend matches it (like ``ssh-master-required``) to surface an inline
@@ -697,40 +697,57 @@ class SessionRuntime:
                     detail=f"backend plugin {plugin_id} {failure}",
                 )
 
-    def require_drivable(self, session_id: str) -> None:
-        """Refuse an operation that drives the agent while nothing can take it."""
-        if reason := self.plugin_unavailable_reason(self.get_session(session_id)):
+    def require_available(self, session: SessionRecord) -> None:
+        """Refuse an operation that needs a plugin the session does not have."""
+        if reason := self.plugin_unavailable_reason(session):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"session is unavailable: {reason}",
             )
+
+    def require_drivable(self, session_id: str) -> None:
+        """Refuse an operation that drives the agent while nothing can take it."""
+        self.require_available(self.get_session(session_id))
         self.restores.require_restored(session_id)
 
     async def _mark_session_unavailable(
         self, session: SessionRecord, reason: str
     ) -> None:
-        # The status to return to once the plugin is back: a restore of a pane
-        # session does not write one, and an errored pane cannot relaunch.
-        if _UNAVAILABLE_STATUS_KEY not in session.transport_state:
-            self.storage.update_session(
-                session.id,
-                transport_state={
-                    **session.transport_state,
-                    _UNAVAILABLE_STATUS_KEY: session.status,
+        # The mark keeps the status to return to once the plugin is back (a
+        # restore of a pane session does not write one, and an errored pane
+        # cannot relaunch), and the reason already noted on the transcript.
+        mark = session.transport_state.get(_UNAVAILABLE_MARK_KEY)
+        if (
+            mark is not None
+            and mark["reason"] == reason
+            and session.status == SessionStatus.ERROR
+        ):
+            return
+        self.storage.update_session(
+            session.id,
+            transport_state={
+                **session.transport_state,
+                _UNAVAILABLE_MARK_KEY: {
+                    "status": mark["status"] if mark else session.status,
+                    "reason": reason,
                 },
-            )
-        await self._record_system_event(
-            session.id, f"Session unavailable: {reason}", status=SessionStatus.ERROR
+            },
         )
+        async with self._keep_read(session.id):
+            await self._record_system_event(
+                session.id,
+                f"Session unavailable: {reason}",
+                status=SessionStatus.ERROR,
+            )
 
     def _clear_unavailable_mark(self, session: SessionRecord) -> SessionRecord:
-        previous = session.transport_state.get(_UNAVAILABLE_STATUS_KEY)
-        if previous is None:
+        mark = session.transport_state.get(_UNAVAILABLE_MARK_KEY)
+        if mark is None:
             return session
         state = dict(session.transport_state)
-        del state[_UNAVAILABLE_STATUS_KEY]
+        del state[_UNAVAILABLE_MARK_KEY]
         return self.storage.update_session(
-            session.id, transport_state=state, status=SessionStatus(previous)
+            session.id, transport_state=state, status=SessionStatus(mark["status"])
         )
 
     async def start(self) -> None:
@@ -883,13 +900,17 @@ class SessionRuntime:
                     ),
                 )
 
-    def _discard_restore_task(
-        self, session_id: str, _task: "asyncio.Task[None]"
-    ) -> None:
+    def _discard_restore_task(self, session_id: str, _task: asyncio.Task[None]) -> None:
         self._restore_tasks.pop(session_id, None)
 
     async def stop(self) -> None:
+        # Whatever delivers messages stops first: a cancelled restore hands its
+        # session a deliverable status that nothing has restored.
         await self.scheduler.stop()
+        wake_tasks = list(self._wake_tasks)
+        self._wake_tasks.clear()
+        await cancel_and_wait(*wake_tasks)
+        await self.held.stop()
         await cancel_and_wait(
             *filter(None, (self._assistant_bootstrap_task, self._oneshot_sweep_task))
         )
@@ -941,10 +962,6 @@ class SessionRuntime:
         account_probe_tasks = list(self._account_probe_tasks)
         self._account_probe_tasks.clear()
         await cancel_and_wait(*account_probe_tasks)
-        wake_tasks = list(self._wake_tasks)
-        self._wake_tasks.clear()
-        await cancel_and_wait(*wake_tasks)
-        await self.held.stop()
         if self._broadcast_flusher is not None:
             await cancel_and_wait(self._broadcast_flusher)
             self._broadcast_flusher = None
@@ -2675,36 +2692,32 @@ class SessionRuntime:
         transport = getattr(request, "transport", None)
         if transport is not None:
             self._validate_supported_transport(backend, transport)
-            resolved = self.registry.resolve(backend, transport)
-            # The resolved transport owner carries the transport axis (e.g.
-            # has_terminal_pane) for the readiness guard; below it may be swapped
-            # for the agent plugin as the import *mechanism* (a wrapper transport
-            # can't enumerate threads), but the session still runs on ``resolved``.
-            transport_caps = resolved.capabilities
+            # ``runner`` is what the session will run on. A wrapper transport
+            # can't enumerate threads, so the agent plugin is then the import
+            # *mechanism*.
+            runner = self.registry.resolve(backend, transport)
             driver = (
-                resolved
-                if resolved.capabilities.supports_thread_import
-                else agent_plugin
+                runner if runner.capabilities.supports_thread_import else agent_plugin
             )
         else:
             driver = agent_plugin
             # No pinned transport: import resumes over the agent's structured
             # (headless) path unless it falls through to the tmux wrapper — the
             # caller forced it, or AUTO can't use the structured adapter. Mirror
-            # the plugin's own resume-wrapper predicate so the guard sees the
+            # the plugin's own resume-wrapper predicate so the guards see the
             # transport the session will actually run on.
             launch_mode = getattr(request, "launch_mode", None)
             uses_wrapper = launch_mode == LaunchMode.TMUX_WRAPPER or (
                 launch_mode == LaunchMode.AUTO
                 and not agent_plugin.is_available_for_managed_launch(self)
             )
-            if uses_wrapper:
-                fallback = self.registry.fallback_for_managed_launch()
-                transport_caps = (fallback or agent_plugin).capabilities
-            else:
-                transport_caps = agent_plugin.capabilities
+            fallback = (
+                self.registry.fallback_for_managed_launch() if uses_wrapper else None
+            )
+            runner = fallback or agent_plugin
+        self._require_plugin_available(backend, runner.id, driver.id)
         self._ensure_profile_config_dir_ready(
-            backend, transport_caps, launch_env, account_profile_id, launch_target
+            backend, runner.capabilities, launch_env, account_profile_id, launch_target
         )
         session = await driver.import_thread(self, request, agent=backend)
         # Persist the profile used for listing/import so a later
@@ -2944,6 +2957,7 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
+        self.require_available(source)
         overrides = overrides or SessionDeriveRequest()
         self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(
@@ -2989,6 +3003,9 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         backend = request.backend_hint or self._infer_backend(request.tmux_target)
+        self._require_plugin_available(
+            self.registry.for_transport(TMUX_TRANSPORT_ID).id, backend
+        )
         session_id = self._generate_session_id(backend)
         title = request.title or f"{backend} attached {target.session}"
         session_dir = self._session_dir(session_id)
@@ -3146,6 +3163,8 @@ class SessionRuntime:
         force_refresh: bool = False,
     ) -> tuple[list[CommandCompletion], bool]:
         session = self.get_session(session_id)
+        if self.plugin_unavailable_reason(session):
+            return [], False
         plugin = self.registry.plugin_for(session)
         key = (session.id, trigger)
         builtins = waypoint_builtin_completions(plugin.capabilities, trigger=trigger)
@@ -3418,7 +3437,7 @@ class SessionRuntime:
             log.exception("terminate failed for unavailable session %s", session.id)
         # A termination replaces the status saved for the plugin's return.
         state = dict(self.get_session(session.id).transport_state)
-        if state.pop(_UNAVAILABLE_STATUS_KEY, None) is not None:
+        if state.pop(_UNAVAILABLE_MARK_KEY, None) is not None:
             self.storage.update_session(session.id, transport_state=state)
 
     async def reattach(self, session_id: str) -> SessionRecord:
@@ -3440,6 +3459,8 @@ class SessionRuntime:
                     session.usage_provider_id, force=True
                 )
             return self.get_session(session_id)
+        if self.plugin_unavailable_reason(session):
+            return session
         plugin = self.registry.plugin_for(session)
         refresher = getattr(plugin, "refresh_rate_limit_usage", None)
         if callable(refresher):
@@ -3690,6 +3711,9 @@ class SessionRuntime:
                 )
             except KeyError:
                 continue
+            driver_id = self.registry.resolve(session.backend, transport_id).id
+            if driver_id in self.plugin_failures:
+                continue
             # Use the same predicate the switch gate enforces, so a projected
             # target can't be rejected with a confusing 400 on apply.
             if not (
@@ -3726,6 +3750,7 @@ class SessionRuntime:
 
     def get_launch_settings(self, session_id: str) -> LaunchSettingsResponse:
         session = self.get_session(session_id)
+        self.require_available(session)
         caps = self.registry.capabilities_for(session)
         launch_target = self._find_launch_target(session.launch_target_id)
         profiles = redacted_profile_metadata(

@@ -1892,6 +1892,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Response:
         session = context.runtime.get_session(session_id)
+        context.runtime.require_available(session)
         plugin = context.runtime.registry.plugin_for(session)
         await plugin.dismiss_side_question(context.runtime, session, sqid)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -2525,6 +2526,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return
         # Only transports with a terminal pane can be mirrored here; backends
         # with no pane (pure structured streams) publish via the event WS.
+        if context.runtime.plugin_unavailable_reason(session):
+            await websocket.close(code=4403)
+            return
         plugin = context.runtime.registry.plugin_for(session)
         caps = plugin.capabilities
         if not caps.has_terminal_pane:

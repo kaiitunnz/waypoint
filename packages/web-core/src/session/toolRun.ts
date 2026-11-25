@@ -3,7 +3,6 @@ import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from
 import type { EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import {
-  collapseWhitespace,
   isAgentToolName,
   isFileEditToolName,
   previewForToolEvent,
@@ -244,17 +243,9 @@ export interface CallRow {
   deletions: number | null;
   status: "pending" | "done" | "failed";
   durationMs: number | null;
-  // The last meaningful line of a command's output.
+  // A command's whole output.
   output: string | null;
   diff: EventDiffPreview | null;
-}
-
-function lastLine(text: string): string | null {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.length > 0 ? lines[lines.length - 1].slice(0, 200) : null;
 }
 
 // Under half a second the two timestamps say when the events were recorded, not how long the call ran.
@@ -295,7 +286,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
   const command = tool === "Bash" && typeof input?.command === "string" ? input.command : null;
   const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
   const preview = previewForToolEvent(event, badge.label);
-  const commandText = command ? collapseWhitespace(command) : null;
+  const commandText = command ? command.replace(/\r\n?/g, "\n").trim() : null;
   const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos
@@ -316,7 +307,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallRow | nu
     deletions: stats ? stats.totalDeletions : null,
     status: !result ? "pending" : result.metadata?.is_error === true ? "failed" : "done",
     durationMs: durationBetween(call, result),
-    output: tool === "Bash" && result ? lastLine(result.text) : null,
+    output: tool === "Bash" && result ? result.text.replace(/^(?:[ \t]*\n)+/, "").trimEnd() || null : null,
     diff,
   };
 }

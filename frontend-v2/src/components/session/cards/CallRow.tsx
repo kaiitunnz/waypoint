@@ -2,16 +2,20 @@
 
 import { useState } from "react";
 
-import { TODO_MARKER } from "@waypoint/web-core/todos";
+import { foldLines } from "@waypoint/web-core/session/foldText";
 import { formatCallDuration, type CallRow as CallRowModel } from "@waypoint/web-core/session/toolRun";
-import type { TodoEntry } from "@waypoint/web-core/todos";
+import { TODO_MARKER, type TodoEntry } from "@waypoint/web-core/todos";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
 import { PathLabel } from "./PathLabel";
+
+const COMMAND_LINES = 6;
+const OUTPUT_LINES = 4;
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
   return (
@@ -28,9 +32,54 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
   );
 }
 
+// Each line of a text its own block, so a wrapped line hangs under its own start.
+function Lines({ text }: { text: string }) {
+  return text.split("\n").map((line, index) => (
+    <span key={index} className={styles.ln}>
+      {line || " "}
+    </span>
+  ));
+}
+
+function Disclosure({ open, total, onToggle }: { open: boolean; total: number; onToggle: () => void }) {
+  return (
+    <ActionChip icon={open ? "chevron-up" : "chevron-down"} aria-expanded={open} onClick={onToggle}>
+      {open ? "Show less" : `Show all ${total} lines`}
+    </ActionChip>
+  );
+}
+
+function Command({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const folded = foldLines(text, COMMAND_LINES, "start");
+  return (
+    <>
+      <div className={cx(styles.text, styles.mono)}>
+        <Lines text={open ? text : folded.text} />
+      </div>
+      {folded.hidden > 0 ? <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} /> : null}
+    </>
+  );
+}
+
+function Output({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const folded = foldLines(text, OUTPUT_LINES, "end");
+  return (
+    <div className={styles.result}>
+      <pre className={cx(styles.out, open && styles.outOpen)}>{open ? text : folded.text}</pre>
+      {folded.hidden > 0 ? (
+        <div className={styles.fold}>
+          <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function CallRow({ row }: { row: CallRowModel }) {
-  const [wrapped, setWrapped] = useState(false);
   const { todos } = row;
+  const command = row.mono && !row.path;
 
   const status =
     row.additions !== null && row.deletions !== null ? (
@@ -44,35 +93,26 @@ export function CallRow({ row }: { row: CallRowModel }) {
       </span>
     );
 
-  const line = (
-    <>
-      <span className={styles.glyph} aria-hidden="true">
-        {row.glyph}
-      </span>
-      {row.path ? (
-        <PathLabel dir={row.path.dir} base={row.path.base} className={styles.label} />
-      ) : (
-        <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{row.label}</span>
-      )}
-      <span className={styles.status}>{status}</span>
-    </>
-  );
-
   return (
-    <>
-      {/* A command or pattern can be long: its row opens to show it whole. */}
-      {row.path || todos ? (
-        <div className={styles.call} title={row.title}>
-          {line}
+    <div className={styles.call}>
+      <div className={styles.head}>
+        <span className={styles.glyph} aria-hidden="true">
+          {row.glyph}
+        </span>
+        <div className={styles.subject} title={command ? undefined : row.title}>
+          {command ? (
+            <Command text={row.label} />
+          ) : (
+            <div className={cx(styles.text, row.mono && styles.mono)}>
+              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} /> : <Lines text={row.label} />}
+            </div>
+          )}
         </div>
-      ) : (
-        <button type="button" className={cx(styles.call, styles.tappable)} onClick={() => setWrapped((value) => !value)} aria-expanded={wrapped} title={row.title}>
-          {line}
-        </button>
-      )}
+        <span className={styles.status}>{status}</span>
+      </div>
       {todos && todos.length > 0 ? <TodoItems todos={todos} /> : null}
       {row.diff ? <DiffBlock preview={row.diff} /> : null}
-      {row.output ? <div className={cx(styles.out, row.status === "failed" && styles.outFailed)}>{row.output}</div> : null}
-    </>
+      {row.output ? <Output text={row.output} /> : null}
+    </div>
   );
 }

@@ -5,8 +5,5 @@
 
 .showAll {
   align-self: flex-start;
-  height: 44px;
   padding: 0 16px;
-  font-weight: 600;
-  color: var(--text);
 }

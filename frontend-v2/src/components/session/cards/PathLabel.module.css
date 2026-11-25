@@ -1,20 +1,11 @@
 .path {
-  display: flex;
   min-width: 0;
   font-family: var(--mono);
   font-size: var(--f-code);
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
 }
 
 .dir {
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
   color: var(--faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.base {
-  flex: none;
 }

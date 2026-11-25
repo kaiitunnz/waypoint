@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
-
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
 import { formatEventTime, sendUserFileInput } from "@waypoint/web-core/session/cardText";
 import { sessionFilesHref } from "@waypoint/web-core/shellNav";
 import type { EventRecord } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
+
+import { ActionChipLink } from "@/components/ui/ActionChip";
 
 import { useSessionContext } from "../SessionContext";
 import { Attachments } from "./Attachments";
@@ -38,9 +38,11 @@ export function SentFiles({ event }: { event: EventRecord }) {
           ))}
         </ul>
       )}
-      <Link href={sessionFilesHref(sessionId)} className={styles.open}>
-        Open files
-      </Link>
+      <div className={styles.open}>
+        <ActionChipLink href={sessionFilesHref(sessionId)} icon="chevron-right">
+          Open files
+        </ActionChipLink>
+      </div>
     </div>
   );
 }

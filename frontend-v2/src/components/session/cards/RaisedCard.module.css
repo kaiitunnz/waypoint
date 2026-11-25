@@ -10,11 +10,6 @@
   line-height: 19px;
 }
 
-/* A card that ends in a compact control, whose own height supplies the bottom space. */
-.snug {
-  padding-bottom: 4px;
-}
-
 .time {
   font-size: var(--f-stamp);
   color: var(--faint);

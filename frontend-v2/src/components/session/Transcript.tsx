@@ -6,6 +6,7 @@ import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
 import type { SessionStatus } from "@waypoint/web-core/types";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/lib/cx";
 
@@ -48,9 +49,11 @@ export function Transcript({
           {override ?? (
             <>
               {hasOlder ? (
-                <button type="button" className={styles.older} onClick={loadOlder} disabled={loadingOlder}>
-                  {loadingOlder ? "Loading older messages…" : "Load older messages"}
-                </button>
+                <div className={styles.older}>
+                  <ActionChip icon="chevron-up" onClick={loadOlder} disabled={loadingOlder}>
+                    {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                  </ActionChip>
+                </div>
               ) : null}
               <div className={styles.turns} role="log" aria-label="Transcript">
                 {turns.map((turn, index) => (

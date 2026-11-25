@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { formatEventTime } from "@waypoint/web-core/session/cardText";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { cx } from "@/lib/cx";
 
 import { CopyButton } from "./CopyButton";
@@ -22,9 +23,11 @@ export function PlanCard({ plan, ts }: { plan: string; ts: string }) {
       <div className={cx(styles.body, !all && styles.clamped)}>
         <Markdown text={plan} />
       </div>
-      <button type="button" className={styles.more} onClick={() => setAll(!all)} aria-expanded={all}>
-        {all ? "Show less" : "Show all"}
-      </button>
+      <div className={styles.more}>
+        <ActionChip icon={all ? "chevron-up" : "chevron-down"} aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? "Show less" : "Show all"}
+        </ActionChip>
+      </div>
     </div>
   );
 }

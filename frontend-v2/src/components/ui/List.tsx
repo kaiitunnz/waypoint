@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
 
+import { Icon } from "./Icon";
 import { StatusLamp, type LampState } from "./StatusLamp";
 import styles from "./List.module.css";
 
@@ -62,6 +63,11 @@ export function ListRow({
         {status ? <span className={styles.status}>{status}</span> : null}
       </span>
       {trailing ? <span className={styles.trailing}>{trailing}</span> : null}
+      {href ? (
+        <span className={styles.chev} aria-hidden="true">
+          <Icon name="chevron-right" size={16} strokeWidth={2} />
+        </span>
+      ) : null}
     </>
   );
   const current = selected ? "true" : undefined;

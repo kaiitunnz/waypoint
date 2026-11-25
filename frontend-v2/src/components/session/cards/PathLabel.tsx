@@ -9,12 +9,12 @@ interface PathLabelProps {
   title?: string;
 }
 
-// A file path with its directory muted. The directory shortens first, so the file name stays whole.
+// A file path with its directory muted.
 export function PathLabel({ dir, base, className, title }: PathLabelProps) {
   return (
     <span className={cx(styles.path, className)} title={title}>
       {dir ? <span className={styles.dir}>{dir}</span> : null}
-      <span className={styles.base}>{base}</span>
+      {base}
     </span>
   );
 }

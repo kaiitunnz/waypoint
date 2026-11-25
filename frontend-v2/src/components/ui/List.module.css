@@ -29,7 +29,7 @@
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
   align-items: start;
   column-gap: 12px;
   width: 100%;
@@ -38,7 +38,7 @@
 }
 
 .noLamp {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .lamp {
@@ -79,6 +79,13 @@
   white-space: nowrap;
 }
 
+.chev {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  color: var(--faint);
+}
+
 .trailing {
   font-size: var(--f-meta);
   line-height: 24px;
@@ -105,6 +112,10 @@
 
 .compact .trailing {
   line-height: 22px;
+}
+
+.compact .chev {
+  height: 22px;
 }
 
 .dimmed .title {

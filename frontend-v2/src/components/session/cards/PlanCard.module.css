@@ -1,5 +1,5 @@
 .card {
-  composes: card snug from "./RaisedCard.module.css";
+  composes: card from "./RaisedCard.module.css";
 }
 
 .head {
@@ -29,11 +29,5 @@
 }
 
 .more {
-  composes: hit from "../../../styles/hit.module.css";
-  position: relative;
-  display: block;
-  height: 32px;
-  font-size: var(--f-meta);
-  font-weight: 600;
-  color: var(--muted);
+  margin: 6px 0 4px;
 }

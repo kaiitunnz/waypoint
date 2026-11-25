@@ -20,12 +20,10 @@
 .path {
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
   font-family: var(--mono);
   font-size: var(--f-code);
   color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .stats {
@@ -89,10 +87,8 @@
   text-align: left;
 }
 
-.more {
-  composes: hit from "../../../styles/hit.module.css";
-  position: relative;
-  color: var(--muted);
+.foot {
+  margin-top: 6px;
 }
 
 .note {

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/Button";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -50,9 +50,9 @@ export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, chil
           {failed ? (
             <p className={styles.status} role="status">
               Older sessions failed to load.{" "}
-              <Button variant="text" size="sm" onClick={onRetry}>
+              <ActionChip icon="refresh" onClick={onRetry}>
                 Retry
-              </Button>
+              </ActionChip>
             </p>
           ) : loading ? (
             <p className={styles.status} role="status">
@@ -61,9 +61,9 @@ export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, chil
           ) : null}
           {hasMore ? (
             <div className={styles.more}>
-              <Button variant="text" size="sm" onClick={onMore}>
+              <ActionChip icon="chevron-down" onClick={onMore}>
                 Show more
-              </Button>
+              </ActionChip>
             </div>
           ) : null}
         </div>

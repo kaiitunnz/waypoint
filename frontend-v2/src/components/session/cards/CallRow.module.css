@@ -1,35 +1,41 @@
 .call {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 24px;
   min-width: 0;
+  padding: 7px 0;
   font-size: var(--f-meta);
   color: var(--muted);
 }
 
-.tappable {
-  composes: hit from "../../../styles/hit.module.css";
-  position: relative;
+.call + .call {
+  border-top: 1px solid var(--line);
+}
+
+.head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 7px;
+  line-height: var(--lh-diff);
 }
 
 .glyph {
-  flex: none;
-  width: 16px;
   font-family: var(--mono);
   font-size: var(--f-stamp);
   color: var(--faint);
   text-align: center;
 }
 
-.label {
+.subject {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
+}
+
+.text {
+  width: 100%;
+  min-width: 0;
   color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mono {
@@ -38,15 +44,16 @@
   letter-spacing: -0.01em;
 }
 
-.wrapped {
-  overflow: visible;
-  white-space: normal;
-  word-break: break-word;
+/* Each line of a command is a block, so a wrapped line hangs under its own start. */
+.ln {
+  display: block;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .status {
-  flex: none;
-  margin-left: auto;
   font-size: var(--f-code);
   white-space: nowrap;
 }
@@ -63,23 +70,34 @@
   color: var(--faint);
 }
 
+.result {
+  margin: 6px 0 0 23px;
+}
+
 .out {
-  padding: 0 0 0 23px;
-  overflow: hidden;
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--sunken);
   font-family: var(--mono);
   font-size: var(--f-diff);
   line-height: var(--lh-diff);
   color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-.outFailed {
-  color: var(--error);
+.outOpen {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+
+.fold {
+  margin-top: 6px;
 }
 
 .todos {
-  margin: 0 0 2px;
+  margin: 4px 0 0;
   padding: 0 0 0 23px;
   list-style: none;
 }

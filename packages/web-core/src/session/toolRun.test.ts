@@ -174,21 +174,34 @@ describe("describeCall", () => {
     expect(row?.todos?.map((entry) => entry.text)).toEqual(["a", "b"]);
   });
 
-  it("describes a command with its last output line and duration", () => {
+  it("describes a command with its output and duration", () => {
     const [item] = run([
-      call(1, "a", "Bash", { command: "uv run  pytest -q" }),
+      call(1, "a", "Bash", { command: "uv run pytest -q" }),
       ev(4, "tool_result", "collecting\n12 passed in 1.84s\n", { item_id: "a" }),
     ]);
     const row = describeCall(item);
     expect(row).toMatchObject({
       glyph: "›_",
       label: "uv run pytest -q",
-      output: "12 passed in 1.84s",
+      output: "collecting\n12 passed in 1.84s",
       status: "done",
       path: null,
       mono: true,
     });
     expect(row?.durationMs).toBe(3000);
+  });
+
+  it("keeps a multi-line command's line breaks", () => {
+    const [item] = run([
+      call(1, "a", "Bash", { command: "\n  set -e\n  npm run lint &&\n    npm test\n" }),
+      ev(2, "tool_result", "", { item_id: "a" }),
+    ]);
+    expect(describeCall(item)).toMatchObject({ label: "set -e\n  npm run lint &&\n    npm test", output: null });
+  });
+
+  it("keeps the indentation of a command's first output line", () => {
+    const [item] = run([call(1, "a", "Bash", { command: "git status -s" }), ev(2, "tool_result", "\n M a.ts\n?? b.ts\n\n", { item_id: "a" })]);
+    expect(describeCall(item)?.output).toBe(" M a.ts\n?? b.ts");
   });
 
   it("leaves out a duration too short to be a measurement", () => {

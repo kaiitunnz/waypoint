@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
@@ -32,16 +33,16 @@ export function SearchResults({ total, rows, paging, desktop }: SearchResultsPro
       {failed ? (
         <p className={styles.status}>
           Older sessions failed to load.{" "}
-          <button type="button" className={styles.retry} onClick={onRetry}>
+          <ActionChip icon="refresh" onClick={onRetry}>
             Retry
-          </button>
+          </ActionChip>
         </p>
       ) : null}
       {hasMore ? (
         <div className={styles.more}>
-          <button type="button" className={styles.retry} onClick={onMore}>
+          <ActionChip icon="chevron-down" onClick={onMore}>
             Show more
-          </button>
+          </ActionChip>
         </div>
       ) : null}
     </section>

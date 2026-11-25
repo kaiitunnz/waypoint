@@ -34,3 +34,8 @@ export function compactDiff(lines: readonly DiffLine[], maxLines = Infinity): Co
   const hidden = rows.slice(from).reduce((sum, row) => sum + (row.kind === "fold" ? row.count : 1), 0);
   return [...rows.slice(0, from), { kind: "more", count: hidden }];
 }
+
+// Every line of a diff but its file and hunk headers, with nothing folded or capped.
+export function fullDiff(lines: readonly DiffLine[]): CompactDiffRow[] {
+  return lines.flatMap((line): CompactDiffRow[] => (line.kind === "meta" || line.kind === "hunk" ? [] : [{ kind: "line", line }]));
+}

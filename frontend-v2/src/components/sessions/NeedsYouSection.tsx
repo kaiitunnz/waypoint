@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { PendingAsk } from "@waypoint/web-core/types";
 
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
@@ -46,9 +46,9 @@ export function NeedsYouSection({ asks, inbox, desktop, agentLabel, now }: Needs
       </div>
       {folded ? (
         <div className={styles.more}>
-          <Button variant="text" size="sm" onClick={() => setAll(true)}>
+          <ActionChip icon="chevron-down" onClick={() => setAll(true)}>
             Show {asks.length - MOBILE_LIMIT} more
-          </Button>
+          </ActionChip>
         </div>
       ) : null}
       {inbox > 0 ? (

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildPlainDiffLines } from "../highlight";
-import { compactDiff } from "./diffCompact";
+import { compactDiff, fullDiff } from "./diffCompact";
 
 const DIFF = [
   "--- a/f.py",
@@ -45,5 +45,13 @@ describe("compactDiff", () => {
 
   it("returns nothing for an empty diff", () => {
     expect(kinds("")).toEqual([]);
+  });
+});
+
+describe("fullDiff", () => {
+  it("keeps every line, context included, and drops the headers", () => {
+    const rows = fullDiff(buildPlainDiffLines(DIFF));
+    expect(rows).toHaveLength(11);
+    expect(rows.every((row) => row.kind === "line")).toBe(true);
   });
 });

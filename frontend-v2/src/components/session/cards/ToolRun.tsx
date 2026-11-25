@@ -6,6 +6,8 @@ import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import { itemKey, primaryEvent, type LeafItem } from "@waypoint/web-core/session/transcript";
 
+import { StepText } from "@/components/sessions/StepText";
+
 import { useSessionContext } from "../SessionContext";
 import { CallRow } from "./CallRow";
 import { ChangesNote } from "./ChangesNote";
@@ -48,7 +50,7 @@ export function ToolRun({ items, working }: ToolRunProps) {
 
   return (
     <RunLine
-      phrase={step ?? summary.phrase}
+      phrase={step ? <StepText step={step} /> : summary.phrase}
       stats={
         summary.additions > 0 || summary.deletions > 0 ? (
           <DiffStat additions={summary.additions} deletions={summary.deletions} />

@@ -23,6 +23,7 @@ import {
 } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Dialog } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -142,7 +143,9 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           onMouseMove={() => setActive(index)}
           onClick={() => open(session)}
         >
-          <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
+          <span className={styles.lamp}>
+            <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
+          </span>
           <span className={styles.text}>
             <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>
             <span className={styles.meta}>{agentModelLabel(session, catalog)}</span>
@@ -204,9 +207,9 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
         ) : null}
         {history.hasMore ? (
           <li role="presentation" className={styles.moreRow}>
-            <button type="button" className={styles.more} tabIndex={-1} onClick={history.loadMore}>
+            <ActionChip icon="chevron-down" tabIndex={-1} onClick={history.loadMore}>
               Show more
-            </button>
+            </ActionChip>
           </li>
         ) : null}
       </ul>

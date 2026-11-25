@@ -3354,17 +3354,18 @@ class SessionRuntime:
         )
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
+        # Serialized with terminate and the launch-settings switch.
+        async with self._session_lock(session.id), self._keep_read(session.id):
+            return await self._reattach_locked(session.id)
+
+    async def _reattach_locked(self, session_id: str) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
         # still be in `_sessions` — the stream/process watchers emit the
         # error event but do not pop the slot. Tear it down explicitly here
         # so `_spawn` does not overwrite a live state and orphan its
         # subprocess + background tasks. terminate_session is a no-op when
         # the session id is not tracked, so this is safe for clean EXITED
-        # paths too. Serialized with terminate and the launch-settings switch.
-        async with self._session_lock(session.id), self._keep_read(session.id):
-            return await self._reattach_locked(session.id)
-
-    async def _reattach_locked(self, session_id: str) -> SessionRecord:
+        # paths too.
         # Re-read under the lock: a concurrent switch/terminate may have
         # changed the record since the caller captured it.
         session = self.get_session(session_id)
@@ -3556,7 +3557,9 @@ class SessionRuntime:
                 detail="another lifecycle operation is in progress for this session",
             )
         async with lock, self._keep_read(session_id):
-            return await self._update_launch_settings_locked(session_id, request)
+            await self._update_launch_settings_locked(session_id, request)
+        await self.broadcast_session_list()
+        return self.get_session(session_id)
 
     def _has_durable_conversation(self, session_id: str) -> bool:
         """Whether a fresh native thread could discard visible conversation context."""
@@ -3567,7 +3570,7 @@ class SessionRuntime:
 
     async def _update_launch_settings_locked(
         self, session_id: str, request: LaunchSettingsUpdateRequest
-    ) -> SessionRecord:
+    ) -> None:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         agent_plugin = self.registry.get(session.backend)
@@ -4004,8 +4007,6 @@ class SessionRuntime:
                 "Pending approval was cancelled by the interface change; "
                 "re-run the request on the new interface if needed",
             )
-        await self.broadcast_session_list()
-        return self.get_session(session.id)
 
     def delete_exited_sessions(self) -> int:
         """Start a background sweep deleting every exited session.
@@ -4698,7 +4699,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="permission mode is required",
             )
-        await plugin.apply_permission_mode(self, session, validated)
+        async with self._keep_read(session_id):
+            await plugin.apply_permission_mode(self, session, validated)
         updated = self.storage.update_session(session_id, permission_mode=validated)
         await self.broadcast_session_list()
         self.asks.mark_dirty(session_id)
@@ -4751,7 +4753,8 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"model selection is not supported for {session.backend}",
             )
-        await plugin.apply_model(self, session, cleaned)
+        async with self._keep_read(session_id):
+            await plugin.apply_model(self, session, cleaned)
         self.storage.update_session(session_id, model=cleaned)
         # Refresh the window immediately for restart-style transports (claude_tty
         # tails from EOF and won't otherwise update until the next turn). A no-op
@@ -4782,18 +4785,19 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"effort selection is not supported for {session.backend}",
             )
-        announce = await plugin.apply_effort(self, session, cleaned)
-        # Restart-style swaps short-circuit when the value is unchanged
-        # (apply_effort returns False); skip the storage write/broadcast
-        # in that case so we don't churn for nothing.
-        if not announce and not caps.supports_set_effort_inline:
-            return session
-        if announce:
-            await self._record_system_event(
-                session_id,
-                plugin.effort_swap_message(cleaned),
-                status=SessionStatus.IDLE,
-            )
+        async with self._keep_read(session_id):
+            announce = await plugin.apply_effort(self, session, cleaned)
+            # Restart-style swaps short-circuit when the value is unchanged
+            # (apply_effort returns False); skip the storage write/broadcast
+            # in that case so we don't churn for nothing.
+            if not announce and not caps.supports_set_effort_inline:
+                return session
+            if announce:
+                await self._record_system_event(
+                    session_id,
+                    plugin.effort_swap_message(cleaned),
+                    status=SessionStatus.IDLE,
+                )
         updated = self.storage.update_session(session_id, effort=cleaned)
         await self.broadcast_session_list()
         return updated

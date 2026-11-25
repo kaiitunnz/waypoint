@@ -1133,20 +1133,16 @@ async def test_update_rejects_unpersisted_thread_with_conversation_events(
 # ── read marker across lifecycle operations ──────────────────────────────────
 
 
-async def _note(runtime: SessionRuntime, session: SessionRecord, text: str) -> None:
-    await runtime._record_system_event(session.id, text)
-
-
 def _plugin_pair(runtime: SessionRuntime, monkeypatch: pytest.MonkeyPatch) -> None:
     """Plugins that record a lifecycle note on terminate and on restore."""
     plugin = runtime.registry.resolve("claude_code", "claude_cli")
     target = runtime.registry.resolve("claude_code", "claude_tty")
 
     async def fake_terminate(_rt: Any, session: SessionRecord) -> None:
-        await _note(runtime, session, "Terminating")
+        await runtime._record_system_event(session.id, "Terminating")
 
     async def fake_restore(_rt: Any, session: SessionRecord) -> None:
-        await _note(runtime, session, "Restored")
+        await runtime._record_system_event(session.id, "Restored")
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
 
     monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
@@ -1203,6 +1199,38 @@ async def test_reattach_keeps_the_read_state(
         await _unwatched_activity(runtime)
 
     await runtime.reattach("s1")
+
+    session = runtime.storage.get_session("s1")
+    assert session is not None
+    assert session.unread is (not read)
+
+
+@pytest.mark.parametrize("read", [True, False])
+async def test_a_setting_change_keeps_the_read_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: bool
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="claude_cli",
+        transport_state={"thread_id": TID},
+    )
+    plugin = runtime.registry.resolve("claude_code", "claude_cli")
+
+    async def apply_model(_rt: Any, session: SessionRecord, _model: Any) -> None:
+        await runtime._record_system_event(session.id, "Model changed")
+
+    async def apply_effort(_rt: Any, _session: SessionRecord, _effort: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(plugin, "apply_model", apply_model)
+    monkeypatch.setattr(plugin, "apply_effort", apply_effort)
+    if not read:
+        await _unwatched_activity(runtime)
+
+    await runtime.set_model("s1", "opus")
+    await runtime.set_effort("s1", "high")
 
     session = runtime.storage.get_session("s1")
     assert session is not None

@@ -37,9 +37,9 @@ unread when they produce activity nobody watched.
 
 The notes a lifecycle step records are not activity. Starting a session (launch,
 import, fork, side-question fork, tmux attach) marks it read once the step
-completes. Restoring one (backend startup, reattach, a launch-settings switch)
-leaves it as it was, so a backend restart does not turn restored sessions into
-Done.
+completes. Restoring or restarting one (backend startup, reattach, a launch-settings
+switch, a mode, model or effort change) leaves it as it was, so a backend
+restart does not turn restored sessions into Done.
 
 ## Done
 

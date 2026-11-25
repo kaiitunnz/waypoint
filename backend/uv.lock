@@ -1440,11 +1440,11 @@ wheels = [
 
 [[package]]
 name = "types-croniter"
-version = "6.2.4.20261006"
+version = "6.2.4.20261122"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7c/3d/ce852f015fd6ae2babd67b8e5a7c8dedb52f1cd717b6cac6da3483e82f89/types_croniter-6.2.4.20261006.tar.gz", hash = "sha256:7c2bccf800beed6f52ec89f5f8f23b2c0b0cd9c941f059c2a7405de0e62fb54b", size = 12368, upload-time = "2026-10-06T08:15:24.32Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/93/84d343920c1182146307cdf83dba7f5e00a1d7f9b1771bc04cd9f74abaa6/types_croniter-6.2.4.20261122.tar.gz", hash = "sha256:c777dcde6a783dcc3b7959bf3b4e3ea3689dfa2da389270ff9879221b02c2bd0", size = 12452, upload-time = "2026-11-22T08:57:52.647Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/d0/98d0e4fb118717b308ddfad8ca18ba1cc2419439a224dc49a89a46067eea/types_croniter-6.2.4.20261006-py3-none-any.whl", hash = "sha256:1aff83e76866cd01abbe3bb3b18b27f038d65a097b5995bdcc11a658d972cfa0", size = 9787, upload-time = "2026-10-06T08:15:23.47Z" },
+    { url = "https://files.pythonhosted.org/packages/81/7e/956400200b46ebe562259ba0c5bb177a8287d6d64100fdb7a25d06c8f873/types_croniter-6.2.4.20261122-py3-none-any.whl", hash = "sha256:0f6231c362bcc1b28f2543a4f5e1d3839b6a814a71d6d3226f39deb8f5fdcfea", size = 9800, upload-time = "2026-11-22T08:57:51.901Z" },
 ]
 
 [[package]]
@@ -1580,7 +1580,7 @@ dev = [
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-asyncio", specifier = ">=1.5.0" },
     { name = "ruff", specifier = ">=0.17.6" },
-    { name = "types-croniter", specifier = ">=6.2.4.20261006" },
+    { name = "types-croniter", specifier = ">=6.2.4.20261122" },
     { name = "types-pyyaml", specifier = ">=6.0.0" },
     { name = "types-regex", specifier = ">=2026.11.19.20261119" },
 ]

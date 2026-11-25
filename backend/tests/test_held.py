@@ -471,6 +471,9 @@ class BlockingTransport:
     async def input_blocked(self, session: SessionRecord) -> bool:
         return self.blocked or self.pending
 
+    async def ready_for_input(self, session: SessionRecord) -> bool:
+        return True
+
 
 def blocking_runtime(tmp_path: Path, monkeypatch) -> tuple[SessionRuntime, Any]:
     runtime = make_runtime(tmp_path)

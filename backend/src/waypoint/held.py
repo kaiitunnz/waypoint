@@ -265,11 +265,10 @@ class HeldQueue:
                 transport = self._runtime.transport_for(session)
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
-                if await transport.input_blocked(session) or (
-                    # A send into a booting pane is lost, so it waits however
-                    # long the boot takes.
-                    held.hold_reason is HeldReason.RESTORE
-                    and not await transport.ready_for_input(session)
+                # A message sent into a booting pane is lost, so a release waits
+                # for the pane however long it takes.
+                if await transport.input_blocked(session) or not (
+                    await transport.ready_for_input(session)
                 ):
                     self._retry_later(session_id)
                     break

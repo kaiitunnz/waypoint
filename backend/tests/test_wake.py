@@ -67,6 +67,9 @@ class _ApprovalStub:
     async def input_blocked(self, session: SessionRecord) -> bool:
         return False
 
+    async def ready_for_input(self, session: SessionRecord) -> bool:
+        return True
+
 
 def _record_wakes(runtime: SessionRuntime, monkeypatch) -> list[tuple[str, str]]:
     calls: list[tuple[str, str]] = []

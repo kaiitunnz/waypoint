@@ -3485,7 +3485,7 @@ class SessionRuntime:
         await self._require_live_master(
             self._find_launch_target(session.launch_target_id)
         )
-        await plugin.terminate_session(self, session)
+        await self.restores.tear_down(plugin.terminate_session(self, session))
         await self._cancel_context_usage_source(session.id)
         # User-initiated retry: bypass any per-target cooldown / circuit
         # breaker so the click takes effect immediately. Plugins without
@@ -4061,7 +4061,7 @@ class SessionRuntime:
         # the next input with "can't find pane". Native transports (claude_cli,
         # codex) relaunch unconditionally, so this is a no-op for them. The old
         # (current) plugin tears down; the target plugin restores.
-        await plugin.terminate_session(self, session)
+        await self.restores.tear_down(plugin.terminate_session(self, session))
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
             session.id,

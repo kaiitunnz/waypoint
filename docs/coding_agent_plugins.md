@@ -329,9 +329,8 @@ A restore depends on the driver's `has_terminal_pane`:
   reconnect or settings change does before the restore. Terminate and delete
   cancel the restore.
 - **Terminal pane** (tmux, `claude_tty`). The session keeps its status, and the
-  restore is unbounded and cannot be cancelled. Messages held through an
-  interface switch to a pane wait until `pane_ready_for_input` sees its input
-  box.
+  restore is unbounded and cannot be cancelled. A held message is released into
+  a pane only once `pane_ready_for_input` sees its input box.
 
 A restore that raises or times out records "Could not restore this session:
 <reason>. Reconnect to try again." A session without a pane becomes `error`, and

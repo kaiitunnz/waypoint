@@ -60,6 +60,8 @@ class RestoreCoordinator:
         self._restarting: dict[str, asyncio.Timeout] = {}
         # Sessions being closed, which take no new restore.
         self._closing: Counter[str] = Counter()
+        # Teardowns in flight, which can outlive the request that began them.
+        self._teardowns: set[asyncio.Task[None]] = set()
 
     def spawn_boot(self, session_id: str, boot: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(boot, name=f"restore-{session_id}")
@@ -128,6 +130,14 @@ class RestoreCoordinator:
                 # Any entry left is a restore this close stopped.
                 self._restoring.pop(session_id, None)
 
+    async def tear_down(self, teardown: Coroutine[Any, Any, None]) -> None:
+        """Await ``teardown`` without cancelling it: one cut short leaves its
+        process running and untracked."""
+        task = asyncio.create_task(teardown)
+        self._teardowns.add(task)
+        task.add_done_callback(self._teardowns.discard)
+        await asyncio.shield(task)
+
     async def run(
         self, session: SessionRecord, restore: Restore
     ) -> BaseException | None:
@@ -161,6 +171,9 @@ class RestoreCoordinator:
         """Stop every restore for shutdown, giving each session its status back."""
         await cancel_and_wait(*self._boot_tasks.values())
         await asyncio.gather(*map(_stop, list(self._restoring.values())))
+        if self._teardowns:
+            _, stuck = await asyncio.wait(self._teardowns, timeout=CANCEL_GRACE_SECONDS)
+            await cancel_and_wait(*stuck)
 
     def _is_bounded(self, session: SessionRecord) -> bool:
         plugin = self._runtime.registry.plugin_for(session)

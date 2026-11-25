@@ -606,6 +606,8 @@ async def test_sends_held_through_a_switch_to_a_pane_wait_for_its_input_box(
             )
         )
         await until(lambda: runtime.restores.holds_sends("s1"))
+        wake = SessionInputRequest(text="wake")
+        await runtime.held.deliver("s1", wake, HeldMessageOrigin.WAKE)
         for text in ("one", "two"):
             await runtime.held.deliver("s1", peer_send(text), HeldMessageOrigin.AGENT)
         torn_down.set()
@@ -613,9 +615,9 @@ async def test_sends_held_through_a_switch_to_a_pane_wait_for_its_input_box(
         # Longer than the restore timeout: a booting pane is never typed into.
         await asyncio.sleep(0.8)
         assert sent == []
-        assert held_texts(runtime.storage, "s1") == ["one", "two"]
+        assert held_texts(runtime.storage, "s1") == ["wake", "one", "two"]
         booted.set()
-        await until(lambda: sent == ["one", "two"])
+        await until(lambda: sent == ["wake", "one", "two"])
 
 
 async def test_a_send_that_fails_as_a_restart_begins_stays_held(
@@ -665,7 +667,16 @@ async def test_a_hung_teardown_is_bounded_and_keeps_held_sends(
 ) -> None:
     runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.3)
     add_session(runtime, "s1")
-    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", hang)
+    release = asyncio.Event()
+    torn_down = asyncio.Event()
+
+    async def stuck_teardown(*_args: Any) -> None:
+        await release.wait()
+        torn_down.set()
+
+    monkeypatch.setattr(
+        get_registry().get("codex"), "terminate_session", stuck_teardown
+    )
     stub_restores(monkeypatch, {})
     sent = record_dispatches(runtime, monkeypatch)
 
@@ -683,11 +694,16 @@ async def test_a_hung_teardown_is_bounded_and_keeps_held_sends(
         assert "timed out after 0.3s" in notes(runtime, "s1")
         assert sent == []
         assert held_texts(runtime.storage, "s1") == ["held"]
+        # The teardown was left to finish, not cut short.
+        release.set()
+        await asyncio.wait_for(torn_down.wait(), timeout=2)
 
 
 async def test_a_restart_stops_a_delivery_already_under_way(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Shutdown gives the teardown that never ends this long.
+    monkeypatch.setattr("waypoint.restores.CANCEL_GRACE_SECONDS", 0.05)
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
     release = asyncio.Event()

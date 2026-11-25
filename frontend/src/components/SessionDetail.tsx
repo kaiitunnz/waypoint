@@ -80,7 +80,6 @@ import {
   isTaskNotificationEvent,
   parseTaskNotification,
   planForEvent,
-  readToolName,
   type PlanDecision,
   type PlanViewModel,
   type TaskNotificationKind,
@@ -93,6 +92,8 @@ import {
   type ConnectionState,
 } from "@waypoint/web-core/session/connection";
 import { isImportantEvent } from "@waypoint/web-core/session/importance";
+import { reconnectDelay } from "@waypoint/web-core/session/stream";
+import { toolNamesOfRun } from "@waypoint/web-core/session/toolRun";
 import { wrapBracketedPaste } from "@waypoint/web-core/session/terminalText";
 import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";
 import {
@@ -351,9 +352,6 @@ type FilterMode = "important" | "all";
 // read `--composer-height` to sit just above it. The fallback keeps things
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
-
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 15000;
 
 // A live model-change notice: a mid-session switch or a launch-time mismatch.
 type ModelNotice = {
@@ -991,7 +989,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             if (!active) {
               return;
             }
-            const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+            const delay = reconnectDelay(attempt);
             attempt += 1;
             setConnection("reconnecting");
             reconnectTimer = setTimeout(connect, delay);
@@ -1786,7 +1784,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         },
         onClose: () => {
           if (!active) return;
-          const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
+          const delay = reconnectDelay(attempt);
           attempt += 1;
           reconnectTimer = setTimeout(() => {
             if (active) connect();
@@ -2400,15 +2398,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           {session && transcriptItems.length > 0
             ? transcriptItems.map((item, index) => {
                 if (item.kind === "tool_run") {
-                  const toolNames = item.items
-                    .map((child) => {
-                      const event = child.kind === "pair" ? child.pair.call ?? child.pair.result : child.event;
-                      if (!event) return null;
-                      // Codex's todo event carries no tool_name; tag every todo
-                      // as "TodoWrite" so the run summary can show a todos chip.
-                      return isTodoListEvent(event) ? "TodoWrite" : readToolName(event);
-                    })
-                    .filter((name): name is string => name !== null);
+                  const toolNames = toolNamesOfRun(item.items);
                   return (
                     <ToolCallRunGroup
                       key={`run-${index}`}

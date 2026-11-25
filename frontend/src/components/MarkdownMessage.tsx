@@ -1,6 +1,5 @@
 import {
   Fragment,
-  isValidElement,
   memo,
   useEffect,
   useMemo,
@@ -20,6 +19,7 @@ import {
   COMMON_REMARK_PLUGINS,
   orderedListMarkerDigits,
 } from "@waypoint/web-core/markdown";
+import { fenceLanguage, HIGHLIGHT_DEBOUNCE_MS, nodeToText } from "@waypoint/web-core/markdownCode";
 import { isWorkspacePathHref, remarkLinkifyPaths } from "@waypoint/web-core/workspacePaths";
 
 interface MarkdownMessageProps {
@@ -32,37 +32,6 @@ interface MarkdownMessageProps {
 // remarkLinkifyPaths runs after remarkMath so a path-like TeX fragment is a
 // math node, not a workspace link.
 const REMARK_PLUGINS = [...COMMON_REMARK_PLUGINS, remarkLinkifyPaths];
-
-// react-markdown renders fenced blocks as <pre><code>…</code></pre>; the pre
-// override only receives the rendered tree, so recover the raw code by walking
-// the children for the copy button.
-function nodeToText(node: ReactNode): string {
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(nodeToText).join("");
-  if (isValidElement(node)) {
-    return nodeToText((node.props as { children?: ReactNode }).children);
-  }
-  return "";
-}
-
-// react-markdown stamps the fence info onto the inner <code> as
-// `language-<info>`; pull it back out for the highlighter.
-function fenceLanguage(children: ReactNode): string {
-  const child = Array.isArray(children) ? children[0] : children;
-  if (isValidElement(child)) {
-    const className = (child.props as { className?: string }).className ?? "";
-    const match = /(?:^|\s)language-(\S+)/.exec(className);
-    if (match) return match[1];
-  }
-  return "";
-}
-
-// Highlight only once the code stops changing: every streamed delta grows the
-// text and resets this timer, so an in-flight message renders raw and a
-// finalized one upgrades ~one debounce later. Comfortably longer than the gap
-// between streamed tokens, short enough to feel instant on loaded history.
-const HIGHLIGHT_DEBOUNCE_MS = 300;
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const code = useMemo(() => nodeToText(children).replace(/\n$/, ""), [children]);

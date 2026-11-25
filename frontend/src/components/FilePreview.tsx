@@ -2,7 +2,7 @@
 
 import { type CSSProperties, Fragment, useEffect, useMemo, useState } from "react";
 
-import { formatBytes } from "@/components/AttachmentTray";
+import { formatFileSize } from "@waypoint/web-core/attachments";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { WorkspaceFile } from "@waypoint/web-core/api";
 import { highlightToLines, type HighlightToken } from "@waypoint/web-core/highlight";
@@ -40,7 +40,7 @@ export function FilePreview({ file, rawUrl }: FilePreviewProps) {
         <p className="wp-file-binary-label">
           {file.binary ? "Binary file" : "File too large to preview"}
         </p>
-        <p className="wp-file-binary-size">{formatBytes(file.size)}</p>
+        <p className="wp-file-binary-size">{formatFileSize(file.size)}</p>
         <a
           href={rawUrl}
           target="_blank"
@@ -72,7 +72,7 @@ export function FilePreview({ file, rawUrl }: FilePreviewProps) {
       <div className="wp-file-binary">
         <span className="wp-file-binary-icon" aria-hidden="true">⬜</span>
         <p className="wp-file-binary-label">Could not load image</p>
-        <p className="wp-file-binary-size">{formatBytes(file.size)}</p>
+        <p className="wp-file-binary-size">{formatFileSize(file.size)}</p>
         <a
           href={rawUrl}
           target="_blank"

@@ -1,0 +1,160 @@
+import { describe, expect, it } from "vitest";
+
+import { ev } from "../test-helpers";
+import { buildTranscriptItems, type TranscriptItem } from "./transcript";
+import {
+  describeCall,
+  formatCallDuration,
+  splitPath,
+  summarizeToolRun,
+  toolNamesOfRun,
+  toolRunCounts,
+} from "./toolRun";
+
+type Child = Extract<TranscriptItem, { kind: "single" | "pair" }>;
+
+const call = (seq: number, id: string, tool: string, input: Record<string, unknown> = {}) =>
+  ev(seq, "tool_call", "", { item_id: id, tool_name: tool, payload: { input } });
+const result = (seq: number, id: string, text = "", extra: Record<string, unknown> = {}) =>
+  ev(seq, "tool_result", text, { item_id: id, ...extra });
+
+function run(events: ReturnType<typeof ev>[]): Child[] {
+  const [item] = buildTranscriptItems(events);
+  if (item.kind !== "tool_run") throw new Error(`expected a tool run, got ${item.kind}`);
+  return item.items;
+}
+
+const diffMeta = (additions: number, deletions: number, path = "/a/b.py") => ({
+  diff_preview: {
+    files: [{ path, change_type: "update", diff: "", additions, deletions }],
+    total_additions: additions,
+    total_deletions: deletions,
+    phase: "applied",
+  },
+});
+
+describe("toolRunCounts", () => {
+  it("buckets tool names", () => {
+    expect(
+      toolRunCounts(["Bash", "Edit", "Write", "Read", "Grep", "Glob", "TodoWrite", "Task", "Skill", "Monitor", "Foo"]),
+    ).toEqual({ bash: 1, edit: 2, read: 3, todo: 1, agent: 1, skill: 1, monitor: 1, other: 1 });
+  });
+});
+
+describe("toolNamesOfRun", () => {
+  it("names each call, tagging todo lists as TodoWrite", () => {
+    const items = run([
+      call(1, "a", "Read"),
+      result(2, "a"),
+      ev(3, "tool_result", "", { item_type: "todo_list", item_id: "t" }),
+    ]);
+    expect(toolNamesOfRun(items)).toEqual(["Read", "TodoWrite"]);
+  });
+});
+
+describe("summarizeToolRun", () => {
+  it("reads like a sentence in a fixed order", () => {
+    const items = run([
+      call(1, "a", "Bash", { command: "ls" }),
+      result(2, "a"),
+      call(3, "b", "Read", { file_path: "/x" }),
+      result(4, "b"),
+      call(5, "c", "Read", { file_path: "/y" }),
+      call(6, "d", "Read", { file_path: "/z" }),
+      call(7, "e", "Grep", { pattern: "p" }),
+      call(8, "f", "Grep", { pattern: "q" }),
+    ]);
+    const summary = summarizeToolRun(items);
+    expect(summary.phrase).toBe("Read 3 files, searched 2 patterns, ran 1 command");
+    expect(summary.glyphs).toEqual([
+      { glyph: "▤", count: 5 },
+      { glyph: "›_", count: 1 },
+    ]);
+    expect(summary.calls).toBe(6);
+  });
+
+  it("counts edited files once and sums the changes", () => {
+    const items = run([
+      call(1, "a", "Edit", { file_path: "/a/b.py" }),
+      result(2, "a", "", diffMeta(10, 2)),
+      call(3, "b", "Edit", { file_path: "/a/b.py" }),
+      result(4, "b", "", diffMeta(4, 1)),
+      call(5, "c", "Bash", { command: "pytest" }),
+    ]);
+    const summary = summarizeToolRun(items);
+    expect(summary.phrase).toBe("Edited 1 file, ran 1 command");
+    expect(summary.additions).toBe(14);
+    expect(summary.deletions).toBe(3);
+  });
+
+  it("uses singular and plural forms", () => {
+    expect(summarizeToolRun(run([call(1, "a", "Grep", { pattern: "p" })])).phrase).toBe("Searched 1 pattern");
+    expect(summarizeToolRun(run([call(1, "a", "Skill"), call(2, "b", "Skill")])).phrase).toBe("Used 2 skills");
+    expect(summarizeToolRun(run([call(1, "a", "WebSearch")])).phrase).toBe("Searched the web");
+    expect(summarizeToolRun(run([call(1, "a", "Mystery")])).phrase).toBe("Used 1 other tool");
+  });
+
+  it("counts a todo list with no tool name", () => {
+    const items = run([ev(1, "tool_result", "", { item_type: "todo_list", item_id: "t" })]);
+    expect(summarizeToolRun(items).phrase).toBe("Updated the task list");
+  });
+});
+
+describe("describeCall", () => {
+  it("describes an edit with its path and changes", () => {
+    const [item] = run([call(1, "a", "Edit", { file_path: "/a/b.py" }), result(2, "a", "", diffMeta(14, 3))]);
+    expect(describeCall(item)).toMatchObject({
+      glyph: "✎",
+      path: { dir: "/a/", base: "b.py" },
+      mono: true,
+      additions: 14,
+      deletions: 3,
+      status: "done",
+    });
+  });
+
+  it("describes a command with its last output line and duration", () => {
+    const [item] = run([
+      call(1, "a", "Bash", { command: "uv run  pytest -q" }),
+      ev(4, "tool_result", "collecting\n12 passed in 1.84s\n", { item_id: "a" }),
+    ]);
+    const row = describeCall(item);
+    expect(row).toMatchObject({
+      glyph: "›_",
+      label: "uv run pytest -q",
+      output: "12 passed in 1.84s",
+      status: "done",
+      path: null,
+      mono: true,
+    });
+    expect(row?.durationMs).toBe(3000);
+  });
+
+  it("marks an unanswered call pending and a failed result failed", () => {
+    const [pending] = run([call(1, "a", "Bash", { command: "sleep 9" })]);
+    expect(describeCall(pending)?.status).toBe("pending");
+    const [failed] = run([call(1, "a", "Bash", { command: "false" }), result(2, "a", "boom", { is_error: true })]);
+    expect(describeCall(failed)?.status).toBe("failed");
+  });
+
+  it("is null for a note absorbed into the run", () => {
+    const items = run([call(1, "a", "Read", { file_path: "/x" }), ev(2, "system_note", "attached")]);
+    expect(describeCall(items[1])).toBeNull();
+  });
+});
+
+describe("formatCallDuration", () => {
+  it("scales from tenths to minutes", () => {
+    expect(formatCallDuration(1840)).toBe("1.8s");
+    expect(formatCallDuration(42_000)).toBe("42s");
+    expect(formatCallDuration(124_000)).toBe("2m 4s");
+    expect(formatCallDuration(120_000)).toBe("2m");
+  });
+});
+
+describe("splitPath", () => {
+  it("separates the directory from the name", () => {
+    expect(splitPath("backend/src/runtime.py")).toEqual({ dir: "backend/src/", base: "runtime.py" });
+    expect(splitPath("runtime.py")).toEqual({ dir: "", base: "runtime.py" });
+  });
+});

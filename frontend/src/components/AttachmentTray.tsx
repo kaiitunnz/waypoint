@@ -10,7 +10,8 @@ import {
 } from "react";
 
 import { attachmentUrl, deleteAttachment, uploadAttachment } from "@waypoint/web-core/api";
-import type { AttachmentSpec, EventRecord } from "@waypoint/web-core/types";
+import { formatFileSize } from "@waypoint/web-core/attachments";
+import type { AttachmentSpec } from "@waypoint/web-core/types";
 
 export interface PendingAttachment {
   localId: string;
@@ -25,19 +26,6 @@ export interface PendingAttachment {
   // via the picker or @-mention) rather than a fresh upload — removing it must
   // not delete the shared blob.
   referenced?: boolean;
-}
-
-// Human-readable byte size, e.g. "812 B", "2.4 MB".
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
 // A short type tag for a chip — the uppercased extension, else IMAGE/FILE.
@@ -415,11 +403,6 @@ export function useAttachmentContext(): AttachmentContextValue | null {
   return useContext(AttachmentContext);
 }
 
-export function attachmentSpecsFor(event: EventRecord): AttachmentSpec[] {
-  const raw = event.metadata?.attachments;
-  return Array.isArray(raw) ? (raw as AttachmentSpec[]) : [];
-}
-
 // One compact card for a sent message's attachment — a small thumbnail
 // (images) or file glyph plus name and size. A thumbnail whose blob was since
 // deleted via the files manager 404s, so it falls back to the file glyph
@@ -457,7 +440,7 @@ function MessageAttachmentCard({
       )}
       <span className="attachment-body">
         <span className="attachment-name">{spec.filename}</span>
-        <span className="attachment-meta">{formatBytes(spec.size)}</span>
+        <span className="attachment-meta">{formatFileSize(spec.size)}</span>
       </span>
     </a>
   );
@@ -493,7 +476,7 @@ export function AttachmentTray({
 }) {
   if (items.length === 0) return null;
   const total = items.reduce((sum, item) => sum + item.size, 0);
-  const summary = `${items.length} file${items.length === 1 ? "" : "s"} · ${formatBytes(total)}`;
+  const summary = `${items.length} file${items.length === 1 ? "" : "s"} · ${formatFileSize(total)}`;
   return (
     <div className="attachment-tray-wrap">
       <div className="attachment-tray-header">
@@ -531,7 +514,7 @@ export function AttachmentTray({
               <span className="attachment-meta">
                 {item.status === "error"
                   ? "Upload failed"
-                  : `${item.referenced ? "↪ " : ""}${typeTag(item.name, item.isImage)} · ${formatBytes(item.size)}`}
+                  : `${item.referenced ? "↪ " : ""}${typeTag(item.name, item.isImage)} · ${formatFileSize(item.size)}`}
               </span>
             </span>
             {item.status === "uploading" ? (

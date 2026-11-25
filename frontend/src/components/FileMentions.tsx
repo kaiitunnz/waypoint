@@ -2,7 +2,8 @@
 
 import { forwardRef, MutableRefObject } from "react";
 
-import { FileIcon, formatBytes, typeTag } from "@/components/AttachmentTray";
+import { formatFileSize } from "@waypoint/web-core/attachments";
+import { FileIcon, typeTag } from "@/components/AttachmentTray";
 import { HighlightedText } from "@/components/HighlightedText";
 import { attachmentUrl } from "@waypoint/web-core/api";
 import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions";
@@ -65,7 +66,7 @@ export const FileMentions = forwardRef<HTMLUListElement, FileMentionsProps>(
                   </span>
                   <span className="slash-desc">
                     {typeTag(file.filename, file.kind === "image")} ·{" "}
-                    {formatBytes(file.size)}
+                    {formatFileSize(file.size)}
                   </span>
                 </span>
               </button>

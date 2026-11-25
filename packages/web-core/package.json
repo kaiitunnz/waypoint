@@ -7,6 +7,7 @@
   "exports": {
     "./activity": "./src/activity.ts",
     "./api": "./src/api.ts",
+    "./attachments": "./src/attachments.ts",
     "./backendAddress": "./src/backendAddress.ts",
     "./backends": "./src/backends.ts",
     "./board": "./src/board.ts",
@@ -20,6 +21,7 @@
     "./keyboard": "./src/keyboard.ts",
     "./launchTargets": "./src/launchTargets.ts",
     "./markdown": "./src/markdown.ts",
+    "./markdownCode": "./src/markdownCode.ts",
     "./modelDisplay": "./src/modelDisplay.ts",
     "./pendingAskActions": "./src/pendingAskActions.ts",
     "./pendingAsks": "./src/pendingAsks.ts",

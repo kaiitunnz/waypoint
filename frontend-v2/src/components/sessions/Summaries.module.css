@@ -187,3 +187,12 @@
   font-size: var(--f-body);
   color: var(--text);
 }
+
+/* The readout's link is a 44px target on a touch tablet. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .actions a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

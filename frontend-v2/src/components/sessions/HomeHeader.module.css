@@ -52,7 +52,12 @@
   margin-left: auto;
 }
 
-@container (max-width: 560px) {
+/* The field takes what is left over, so it never pushes the button to a new row. */
+.full .search {
+  flex: 1 1 0;
+}
+
+@container (max-width: 600px) {
   .full .search {
     order: 1;
     flex: 1 0 100%;

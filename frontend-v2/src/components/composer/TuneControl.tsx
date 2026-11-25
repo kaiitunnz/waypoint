@@ -11,6 +11,7 @@ import { Flyout } from "@/components/ui/Flyout";
 import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { Toggle } from "@/components/ui/Toggle";
+import { usePointerUI } from "@/lib/layout";
 
 import styles from "./TuneControl.module.css";
 import type { ComposerTuning } from "./useComposerTuning";
@@ -26,6 +27,7 @@ interface TuneControlProps {
 
 export function TuneControl({ tuning, triggerRef, agentName, disabled, focus }: TuneControlProps) {
   const id = useId();
+  const pointer = usePointerUI();
   const { input, options, draft, busy, defaultEffort, open, interrupt } = tuning;
   const { modeOptions, defaultModelLabel } = input;
   const summary = tuningSummary(input, options);
@@ -34,6 +36,8 @@ export function TuneControl({ tuning, triggerRef, agentName, disabled, focus }: 
 
   async function applyRestart() {
     tuning.setOpen(false);
+    // The popover took the focus with it.
+    if (pointer) triggerRef.current?.focus();
     await draft.applyRestart();
   }
 

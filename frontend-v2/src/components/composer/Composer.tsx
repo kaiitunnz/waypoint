@@ -140,11 +140,12 @@ export function Composer({
   });
 
   const openSession = useCallback((id: string) => router.push(`/session/${id}`), [router]);
-  // For a control about to remove itself: its focus goes to the field. A tap
-  // that never focused the control moves nothing.
+  // For a control about to remove itself: its focus goes to the field. On touch
+  // only a keyboard's focus moves, so a tap does not raise the on-screen one.
   const keepFocus = useCallback(() => {
-    if (root.current?.contains(document.activeElement)) field.current?.focus();
-  }, []);
+    const control = document.activeElement;
+    if (root.current?.contains(control) && (pointer || control?.matches(":focus-visible"))) field.current?.focus();
+  }, [pointer]);
   const { canSend, sending, stopping, failure, send, retry, dismiss, stop } = useComposerSend({
     host,
     token,
@@ -232,9 +233,18 @@ export function Composer({
     <div key="tray" className={styles.tray}>
       <AttachmentTray
         items={attachments.items}
-        onRemove={attachments.remove}
-        onRetry={attachments.retry}
-        onClear={attachments.discardAll}
+        onRemove={(localId) => {
+          keepFocus();
+          attachments.remove(localId);
+        }}
+        onRetry={(localId) => {
+          keepFocus();
+          attachments.retry(localId);
+        }}
+        onClear={() => {
+          keepFocus();
+          attachments.discardAll();
+        }}
         locked={sending}
       />
     </div>
@@ -289,7 +299,15 @@ export function Composer({
   );
   const actionButtons = (
     <div key="actions" className={styles.actions}>
-      {canInterrupt(session) ? <StopButton stopping={stopping} onStop={() => void stop()} /> : null}
+      {canInterrupt(session) ? (
+        <StopButton
+          stopping={stopping}
+          onStop={() => {
+            keepFocus();
+            void stop();
+          }}
+        />
+      ) : null}
       <SendControl canSend={canSend} sending={sending} dormant={dormant} onSend={send} onPick={keepFocus} />
     </div>
   );

@@ -26,6 +26,7 @@
     "./modelDisplay": "./src/modelDisplay.ts",
     "./pendingAskActions": "./src/pendingAskActions.ts",
     "./pendingAsks": "./src/pendingAsks.ts",
+    "./popoverSize": "./src/popoverSize.ts",
     "./recentHosts": "./src/recentHosts.ts",
     "./recurrence": "./src/recurrence.ts",
     "./scheduleTime": "./src/scheduleTime.ts",

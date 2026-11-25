@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  CSSProperties,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { CSSProperties, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
@@ -20,74 +11,17 @@ import { formatRelativeTime, formatTokens } from "@waypoint/web-core/usage";
 import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 import { usePopoverDismiss } from "@waypoint/web-core/hooks/use-popover-dismiss";
+import { useResizablePopover } from "@waypoint/web-core/hooks/useResizablePopover";
+import { USAGE_POPOVER_SIZE_KEY } from "@waypoint/web-core/popoverSize";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
-// Versioned so a future shape change can coexist with an old saved value.
-const SIZE_STORAGE_KEY = "waypoint.usage-popover-size.v1";
 // Below this viewport width the mobile bottom sheet takes over; resize controls
 // and saved desktop dimensions are suppressed. Matches the ``.usage-panel``
 // media query and the hook's ``deferBelow``.
 const DESKTOP_MIN_WIDTH = 541;
-// Pixel steps for keyboard resize; Shift takes the larger stride.
-const KEY_STEP = 24;
-const KEY_STEP_LARGE = 72;
-// The 440px CSS default width and the content-driven natural height act as snap
-// detents: a resize landing within this many pixels returns that axis to its
-// default (clearing the stored dimension).
+// The 440px CSS default width, which a resize snaps back to.
 const DEFAULT_PANEL_WIDTH = 440;
-const SNAP_THRESHOLD = 14;
-
-interface UsagePopoverSize {
-  width?: number;
-  height?: number;
-}
-
-function readStoredSize(): UsagePopoverSize {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(SIZE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== "object") return {};
-    const record = parsed as Record<string, unknown>;
-    const size: UsagePopoverSize = {};
-    if (
-      typeof record.width === "number" &&
-      Number.isFinite(record.width) &&
-      record.width > 0
-    ) {
-      size.width = record.width;
-    }
-    if (
-      typeof record.height === "number" &&
-      Number.isFinite(record.height) &&
-      record.height > 0
-    ) {
-      size.height = record.height;
-    }
-    return size;
-  } catch {
-    return {};
-  }
-}
-
-function writeStoredSize(size: UsagePopoverSize): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (size.width === undefined && size.height === undefined) {
-      window.localStorage.removeItem(SIZE_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(SIZE_STORAGE_KEY, JSON.stringify(size));
-    }
-  } catch {
-    // Storage disabled or over quota: the preference is best-effort only.
-  }
-}
-
-function clampSize(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max));
-}
 
 interface SessionUsagePillProps {
   session: SessionRecord | null;
@@ -119,6 +53,7 @@ export function SessionUsagePill({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const widthSeamRef = useRef<HTMLDivElement | null>(null);
 
   // Desktop drives resize controls and saved dimensions; the mobile sheet is
@@ -137,84 +72,34 @@ export function SessionUsagePill({
     anchored ? "dropdown" : "composer",
   );
 
-  // The saved preference is the source of truth; the rendered size is this
-  // clamped against the current placement bounds on every measurement, so an
-  // oversized preference is retained but shown clamped and expands when space
-  // permits.
-  const [pref, setPref] = useState<UsagePopoverSize>(() => readStoredSize());
-  // Mirrors ``pref`` for the pointer/keyboard handlers, which merge into the
-  // latest committed value; updated eagerly in those handlers and reconciled
-  // here for any other path.
-  const prefRef = useRef(pref);
-  useEffect(() => {
-    prefRef.current = pref;
-  }, [pref]);
-  // Actual rendered dimensions, measured after layout, for accurate seam
-  // ``aria-valuenow`` (the natural default height is not known until measured).
-  const [rendered, setRendered] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
+  // Composer free edges are top/left (a negative pointer delta grows the
+  // panel); terminal free edges are bottom/right (a positive delta grows it).
+  const grow = anchored ? 1 : -1;
+  const {
+    style: sizeStyle,
+    resizable: showResizeControls,
+    custom: hasCustomSize,
+    rendered,
+    startResize,
+    onResizeKey,
+    reset,
+  } = useResizablePopover({
+    storageKey: USAGE_POPOVER_SIZE_KEY,
+    open,
+    enabled: isDesktop,
+    bounds,
+    panelRef,
+    bodyRef,
+    defaultWidth: DEFAULT_PANEL_WIDTH,
+    direction: { width: grow, height: grow },
+  });
 
-  const applyResize = useCallback((patch: UsagePopoverSize) => {
-    const next = { ...prefRef.current, ...patch };
-    prefRef.current = next;
-    setPref(next);
-    writeStoredSize(next);
-  }, []);
-
-  const resetSize = useCallback(() => {
-    prefRef.current = {};
-    setPref({});
-    writeStoredSize({});
+  const resetSize = () => {
+    reset();
     // Reset auto-hides once no preference remains; keep focus in the panel by
     // moving it to a resize seam rather than dropping it to the body.
     widthSeamRef.current?.focus();
-  }, []);
-
-  // The default detent a resize snaps to: 440px for width, the content-driven
-  // natural height for height. The height is derived from the content plus the
-  // panel's vertical chrome, independent of the panel's current height, so the
-  // target never chases a panel that has grown past its content (which would
-  // otherwise oscillate the snap and flicker). Computed once per gesture.
-  const snapTarget = useCallback(
-    (axis: "width" | "height"): number | null => {
-      if (!bounds) return null;
-      if (axis === "width") {
-        return clampSize(
-          Math.min(DEFAULT_PANEL_WIDTH, bounds.maxWidth),
-          bounds.minWidth,
-          bounds.maxWidth,
-        );
-      }
-      const panel = panelRef.current;
-      const body = panel?.querySelector<HTMLElement>(".usage-panel-body");
-      if (!panel || !body) return null;
-      const cs = window.getComputedStyle(panel);
-      // ``offsetTop`` covers the top border + padding above the body (the sole
-      // flow child); the bottom chrome is read from the computed style.
-      const chrome =
-        body.offsetTop +
-        parseFloat(cs.paddingBottom) +
-        parseFloat(cs.borderBottomWidth);
-      return clampSize(
-        chrome + body.scrollHeight,
-        bounds.minHeight,
-        bounds.maxHeight,
-      );
-    },
-    [bounds],
-  );
-
-  // Re-read storage on open so a resize made in the other placement is picked
-  // up, then apply within current bounds.
-  useEffect(() => {
-    if (open) {
-      const stored = readStoredSize();
-      prefRef.current = stored;
-      setPref(stored);
-    }
-  }, [open]);
+  };
 
   usePopoverDismiss(open, setOpen, wrapRef, panelRef, triggerRef);
 
@@ -222,131 +107,8 @@ export function SessionUsagePill({
     if (!open) setTotalTipOpen(false);
   }, [open]);
 
-  const startResize = useCallback(
-    (axis: "width" | "height") => (event: React.PointerEvent) => {
-      if (!bounds) return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      event.preventDefault();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const startWidth = panel.offsetWidth;
-      const startHeight = panel.offsetHeight;
-      // Composer free edges are top/left (a negative pointer delta grows the
-      // panel); terminal free edges are bottom/right (a positive delta grows it).
-      const sign = anchored ? 1 : -1;
-      const bodyClass =
-        axis === "width" ? "usage-resizing-x" : "usage-resizing-y";
-      document.body.classList.add(bodyClass);
-      // Captured once so the snap detent is a fixed target for the whole drag.
-      const target = snapTarget(axis);
-      const onMove = (ev: PointerEvent) => {
-        if (axis === "width") {
-          const raw = clampSize(
-            startWidth + sign * (ev.clientX - startX),
-            bounds.minWidth,
-            bounds.maxWidth,
-          );
-          const snap =
-            target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
-          applyResize({ width: snap ? undefined : raw });
-        } else {
-          const raw = clampSize(
-            startHeight + sign * (ev.clientY - startY),
-            bounds.minHeight,
-            bounds.maxHeight,
-          );
-          const snap =
-            target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
-          applyResize({ height: snap ? undefined : raw });
-        }
-      };
-      const onUp = () => {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        document.body.classList.remove(bodyClass);
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    },
-    [bounds, anchored, applyResize, snapTarget],
-  );
-
-  const onResizeKey = useCallback(
-    (axis: "width" | "height") => (event: React.KeyboardEvent) => {
-      if (!bounds) return;
-      const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
-      const panel = panelRef.current;
-      // The arrow toward the placement's free edge grows the panel, matching
-      // the pointer drag on the same seam: composer grows up/left, terminal
-      // grows down/right. ``sign`` mirrors ``startResize``.
-      const sign = anchored ? 1 : -1;
-      if (axis === "width") {
-        let dir = 0;
-        if (event.key === "ArrowRight") dir = 1;
-        else if (event.key === "ArrowLeft") dir = -1;
-        else return;
-        event.preventDefault();
-        const current =
-          prefRef.current.width ?? panel?.offsetWidth ?? bounds.minWidth;
-        const raw = clampSize(
-          current + dir * sign * step,
-          bounds.minWidth,
-          bounds.maxWidth,
-        );
-        const target = snapTarget("width");
-        const snap =
-          target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
-        applyResize({ width: snap ? undefined : raw });
-      } else {
-        let dir = 0;
-        if (event.key === "ArrowDown") dir = 1;
-        else if (event.key === "ArrowUp") dir = -1;
-        else return;
-        event.preventDefault();
-        const current =
-          prefRef.current.height ?? panel?.offsetHeight ?? bounds.minHeight;
-        const raw = clampSize(
-          current + dir * sign * step,
-          bounds.minHeight,
-          bounds.maxHeight,
-        );
-        const target = snapTarget("height");
-        const snap =
-          target !== null && Math.abs(raw - target) <= SNAP_THRESHOLD;
-        applyResize({ height: snap ? undefined : raw });
-      }
-    },
-    [bounds, anchored, applyResize, snapTarget],
-  );
-
-  const showResizeControls = isDesktop && bounds !== null;
-  const hasCustomSize = pref.width !== undefined || pref.height !== undefined;
-
-  const panelStyle = useMemo<CSSProperties | undefined>(() => {
-    const base = anchored ? (anchorStyle ?? undefined) : undefined;
-    if (!isDesktop || !bounds) return base;
-    const style: CSSProperties = { ...(base ?? {}) };
-    style.maxWidth = bounds.maxWidth;
-    style.maxHeight = bounds.maxHeight;
-    if (pref.width !== undefined) {
-      style.width = clampSize(pref.width, bounds.minWidth, bounds.maxWidth);
-    }
-    if (pref.height !== undefined) {
-      style.height = clampSize(pref.height, bounds.minHeight, bounds.maxHeight);
-    }
-    return style;
-  }, [anchored, anchorStyle, isDesktop, bounds, pref]);
-
-  useLayoutEffect(() => {
-    if (!open || !showResizeControls) {
-      setRendered(null);
-      return;
-    }
-    const panel = panelRef.current;
-    if (panel)
-      setRendered({ width: panel.offsetWidth, height: panel.offsetHeight });
-  }, [open, showResizeControls, panelStyle]);
+  const base = anchored ? (anchorStyle ?? undefined) : undefined;
+  const panelStyle: CSSProperties | undefined = sizeStyle ? { ...base, ...sizeStyle } : base;
 
   const {
     contextUsage,
@@ -471,7 +233,7 @@ export function SessionUsagePill({
                   ) : null}
                 </>
               ) : null}
-              <div className="usage-panel-body">
+              <div ref={bodyRef} className="usage-panel-body">
                 {rateLimitUsage ? (
                   <UsageReadout
                     usage={rateLimitUsage}

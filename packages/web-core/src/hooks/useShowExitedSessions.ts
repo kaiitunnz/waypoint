@@ -2,9 +2,15 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import { PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY, readShowExited, writeShowExited } from "../showExited";
+import {
+  LIST_SHOW_EXITED_KEY,
+  PANEL_SHOW_EXITED_KEY,
+  SWITCHER_SHOW_EXITED_KEY,
+  readShowExited,
+  writeShowExited,
+} from "../showExited";
 
-export { PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY };
+export { LIST_SHOW_EXITED_KEY, PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY };
 
 // Surfaces in this tab that share a key learn of a change through this; other tabs through `storage`.
 const sameTab = new Set<() => void>();
@@ -28,20 +34,24 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-// Persisted show-exited flag; default on. Every surface using one key agrees, in this tab and across tabs.
-export function useShowExitedSessions(storageKey: string): [boolean, (next: boolean) => void] {
+// Persisted show-exited flag, `shownByDefault` until a choice is made. Every surface using one key
+// agrees, in this tab and across tabs.
+export function useShowExitedSessions(
+  storageKey: string,
+  shownByDefault = true,
+): [boolean, (next: boolean) => void] {
   const show = useSyncExternalStore(
     subscribe,
-    () => unsaved.get(storageKey) ?? readShowExited(localStorageOrNull(), storageKey),
-    () => true,
+    () => unsaved.get(storageKey) ?? readShowExited(localStorageOrNull(), storageKey, shownByDefault),
+    () => shownByDefault,
   );
   const update = useCallback(
     (next: boolean) => {
-      if (writeShowExited(localStorageOrNull(), storageKey, next)) unsaved.delete(storageKey);
+      if (writeShowExited(localStorageOrNull(), storageKey, next, shownByDefault)) unsaved.delete(storageKey);
       else unsaved.set(storageKey, next);
       for (const listener of sameTab) listener();
     },
-    [storageKey],
+    [storageKey, shownByDefault],
   );
   return [show, update];
 }

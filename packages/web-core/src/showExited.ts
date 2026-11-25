@@ -1,24 +1,36 @@
+// v1's panel and switcher show exited sessions unless turned off.
 export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
 export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
+// v2's lists, which start with them hidden, share this one: its default differs, so it has its own key.
+export const LIST_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.list";
 
 type ReadableStorage = Pick<Storage, "getItem">;
 type WritableStorage = Pick<Storage, "removeItem" | "setItem">;
 
-// Exited sessions show unless the person turned them off.
-export function readShowExited(storage: ReadableStorage | null, key: string): boolean {
+// The stored choice, or `fallback` when none was made. Only the choice that differs from the
+// default is stored, so a stored "0" always means hidden and "1" shown.
+export function readShowExited(storage: ReadableStorage | null, key: string, fallback = true): boolean {
   try {
-    return storage?.getItem(key) !== "0";
+    const stored = storage?.getItem(key);
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    return fallback;
   } catch {
-    return true;
+    return fallback;
   }
 }
 
 // Whether the choice was stored; storage can be unavailable (private windows, a full quota).
-export function writeShowExited(storage: WritableStorage | null, key: string, show: boolean): boolean {
+export function writeShowExited(
+  storage: WritableStorage | null,
+  key: string,
+  show: boolean,
+  fallback = true,
+): boolean {
   if (!storage) return false;
   try {
-    if (show) storage.removeItem(key);
-    else storage.setItem(key, "0");
+    if (show === fallback) storage.removeItem(key);
+    else storage.setItem(key, show ? "1" : "0");
     return true;
   } catch {
     return false;

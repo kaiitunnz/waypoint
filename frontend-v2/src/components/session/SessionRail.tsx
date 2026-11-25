@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { formatSessionTime, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
@@ -19,6 +18,7 @@ import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
+import { useShowExited } from "@/lib/show-exited";
 import { cx } from "@/lib/cx";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
@@ -32,7 +32,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
   const feed = useSessionsData();
   const switcher = useSwitcher();
   const now = useNow();
-  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
+  const [showExited, setShowExited] = useShowExited();
   const [limit, setLimit] = useState(EXITED_PAGE_SIZE);
 
   const entries = useMemo(

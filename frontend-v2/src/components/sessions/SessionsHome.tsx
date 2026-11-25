@@ -7,7 +7,6 @@ import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
 import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { buildSections, searchSessions } from "@waypoint/web-core/sessionSections";
@@ -21,6 +20,7 @@ import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useDesktop } from "@/lib/layout";
+import { useShowExited } from "@/lib/show-exited";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { ExitedGroup } from "./ExitedGroup";
@@ -54,7 +54,7 @@ export function SessionsHome() {
 
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
+  const [showExited, setShowExited] = useShowExited();
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [newOpen, setNewOpen] = useState(false);
   const [dialog, setDialog] = useState<HomeDialog | null>(null);

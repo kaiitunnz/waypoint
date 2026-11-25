@@ -5,7 +5,6 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 
 import { useBackendCatalog } from "@waypoint/web-core/backends";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { PANEL_SHOW_EXITED_KEY, useShowExitedSessions } from "@waypoint/web-core/hooks/useShowExitedSessions";
 import {
   agentModelLabel,
   formatSessionTime,
@@ -29,6 +28,7 @@ import { SearchInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
+import { useShowExited } from "@/lib/show-exited";
 import { useDesktop } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
@@ -63,7 +63,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const list = useRef<HTMLUListElement>(null);
   const listId = useId();
 
-  const [showExited, setShowExited] = useShowExitedSessions(PANEL_SHOW_EXITED_KEY);
+  const [showExited, setShowExited] = useShowExited();
 
   const { visible, askSessionIds } = feed;
   const historyOptions = {

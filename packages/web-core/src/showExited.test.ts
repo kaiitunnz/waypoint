@@ -47,3 +47,46 @@ describe("show exited sessions", () => {
     expect(writeShowExited(null, "k", false)).toBe(false);
   });
 });
+
+describe("show exited sessions, by default", () => {
+  it("v1's default shows them and stores only a hide, exactly as before", () => {
+    const storage = memoryStorage();
+    expect(readShowExited(storage, "k")).toBe(true);
+    writeShowExited(storage, "k", false);
+    expect(storage.data.get("k")).toBe("0");
+    expect(readShowExited(storage, "k")).toBe(false);
+    writeShowExited(storage, "k", true);
+    expect(storage.data.has("k")).toBe(false);
+    expect(readShowExited(storage, "k")).toBe(true);
+  });
+
+  it("a hidden default starts hidden, remembers a show, and returns to the default when hidden again", () => {
+    const storage = memoryStorage();
+    expect(readShowExited(storage, "k", false)).toBe(false);
+    writeShowExited(storage, "k", true, false);
+    expect(storage.data.get("k")).toBe("1");
+    expect(readShowExited(storage, "k", false)).toBe(true);
+    writeShowExited(storage, "k", false, false);
+    expect(storage.data.has("k")).toBe(false);
+    expect(readShowExited(storage, "k", false)).toBe(false);
+  });
+
+  it("a stored choice wins over either default", () => {
+    const storage = memoryStorage();
+    storage.setItem("k", "0");
+    expect(readShowExited(storage, "k", true)).toBe(false);
+    storage.setItem("k", "1");
+    expect(readShowExited(storage, "k", false)).toBe(true);
+  });
+
+  it("falls back to the default when storage is missing or throws", () => {
+    expect(readShowExited(null, "k", false)).toBe(false);
+    const broken = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+    };
+    expect(readShowExited(broken, "k", false)).toBe(false);
+    expect(readShowExited(broken, "k")).toBe(true);
+  });
+});

@@ -96,7 +96,7 @@ export function DiffBlock({ preview, headers }: { preview: EventDiffPreview; hea
       {preview.files.map((file, index) => (
         <FileDiff key={`${file.path}-${index}`} file={file} showHeader={headers ?? preview.files.length > 1} />
       ))}
-      {preview.truncated ? <p className={styles.note}>Diff truncated.</p> : null}
+      {preview.truncated && !preview.files.some((file) => file.truncated) ? <p className={styles.note}>Diff truncated.</p> : null}
     </>
   );
 }

@@ -82,7 +82,7 @@ export function UsagePanel({ model, catalog, onRefresh, refreshing }: UsagePanel
                       </span>
                       <strong className={cx(styles.percent, styles[tone])}>{percent !== null ? `${percent}%` : "—"}</strong>
                     </p>
-                    <Meter value={percent ?? 0} tone={meterTone(tone, "calm")} label={window.label} className={styles.meter} />
+                    <Meter value={percent} tone={meterTone(tone, "calm")} label={window.label} className={styles.meter} />
                     {tokens ? <p className={styles.muted}>{tokens}</p> : null}
                   </li>
                 );
@@ -134,7 +134,7 @@ export function UsagePanel({ model, catalog, onRefresh, refreshing }: UsagePanel
             <p className={styles.muted}>This endpoint doesn’t report context usage</p>
           ) : (
             <Meter
-              value={model.contextPercent ?? 0}
+              value={model.contextPercent}
               tone={meterTone(model.contextTone, "working")}
               label="Context window"
               className={styles.meter}

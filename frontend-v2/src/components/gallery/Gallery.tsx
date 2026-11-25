@@ -168,6 +168,7 @@ export function Gallery() {
         <Meter label="Calm" value={30} tone="calm" className={styles.meter} />
         <Meter label="Approaching the limit" value={77} tone="warn" className={styles.meter} />
         <Meter label="At the limit" value={96} tone="danger" className={styles.meter} />
+        <Meter label="Unknown" value={null} className={styles.meter} />
       </div>
 
       <SectionHeading title="List rows" count={4} action="See all" />

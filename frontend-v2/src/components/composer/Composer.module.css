@@ -2,7 +2,8 @@
    of controls. Touch reorders it into a control row above an input row. */
 .composer {
   position: relative;
-  padding: 2px 12px 6px;
+  /* The top keeps the control row's tap targets inside the footer. */
+  padding: 6px 12px;
 }
 
 .surface {
@@ -26,7 +27,8 @@
   align-items: center;
   min-width: 0;
   height: 30px;
-  margin-bottom: 4px;
+  /* Their 44px tap targets reach this far below. */
+  margin-bottom: 7px;
 }
 
 .meta {
@@ -36,7 +38,7 @@
   align-items: center;
   gap: 10px;
   height: 30px;
-  margin-bottom: 4px;
+  margin-bottom: 7px;
 }
 
 .tray {

@@ -56,6 +56,16 @@
   box-shadow: var(--shadow-pop);
 }
 
+/* Covers the gap to the button, so a mouse crossing it does not leave. */
+.menu::before {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 10px;
+  content: "";
+}
+
 .item {
   display: flex;
   align-items: center;

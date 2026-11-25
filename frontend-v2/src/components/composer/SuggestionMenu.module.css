@@ -45,9 +45,8 @@
 }
 
 .description {
-  display: flex;
+  display: block;
   flex: 1 1 12ch;
-  gap: 10px;
   min-width: 0;
   overflow: hidden;
   font-size: var(--f-meta);
@@ -105,7 +104,9 @@
 }
 
 .fileText .description {
+  display: flex;
   flex: none;
+  gap: 10px;
 }
 
 @media (hover: hover) and (pointer: fine) {

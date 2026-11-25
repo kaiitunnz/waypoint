@@ -51,7 +51,7 @@ export function SidePane() {
           </button>
         ))}
       </div>
-      <div role="tabpanel" id="pane-panel" aria-labelledby={`pane-tab-${tab}`} className={styles.body}>
+      <div role="tabpanel" id="pane-panel" tabIndex={0} aria-labelledby={`pane-tab-${tab}`} className={styles.body}>
         <EmptyState title="Not built yet" detail={TABS.find((item) => item.id === tab)?.label} />
       </div>
     </aside>

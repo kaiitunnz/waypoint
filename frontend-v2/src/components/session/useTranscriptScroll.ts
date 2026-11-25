@@ -57,10 +57,11 @@ export function useTranscriptScroll(turns: TranscriptTurn[], olderPending: boole
   }, []);
 
   const loadOlder = useCallback(() => {
+    if (olderPending) return;
     const el = scroller.current;
     if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
     onLoadOlder();
-  }, [onLoadOlder]);
+  }, [olderPending, onLoadOlder]);
 
   const jumpToEnd = useCallback(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });

@@ -26,7 +26,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   const [open, setOpen] = useState(false);
   const compact = useMemo(() => compactDiff(lines, COMPACT_LINES), [lines]);
   const full = useMemo(() => fullDiff(lines), [lines]);
-  const folded = compact.length < full.length;
+  const folded = compact.filter((row) => row.kind === "line").length < full.length;
   const rows = open ? full : compact;
   const change = displayChangeType(file);
   const { cwd } = useSessionContext();
@@ -96,6 +96,7 @@ export function DiffBlock({ preview, headers }: { preview: EventDiffPreview; hea
       {preview.files.map((file, index) => (
         <FileDiff key={`${file.path}-${index}`} file={file} showHeader={headers ?? preview.files.length > 1} />
       ))}
+      {preview.truncated ? <p className={styles.note}>Diff truncated.</p> : null}
     </>
   );
 }

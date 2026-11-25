@@ -10,6 +10,7 @@
 }
 
 .tappable {
+  composes: hit from "../../../styles/hit.module.css";
   position: relative;
 }
 
@@ -50,11 +51,11 @@
   white-space: nowrap;
 }
 
-.add {
+.ok {
   color: var(--done);
 }
 
-.del {
+.bad {
   color: var(--error);
 }
 
@@ -111,13 +112,4 @@
 
 .todoNow .mark {
   color: var(--working);
-}
-
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  .tappable::after {
-    content: "";
-    position: absolute;
-    inset: -10px 0;
-  }
 }

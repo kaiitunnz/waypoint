@@ -1,8 +1,8 @@
 export const sessionHref = (id: string) => `/session/${encodeURIComponent(id)}`;
 
-// A path the session screen links to for the workspace explorer.
-export const sessionFilesHref = (id: string, path: string) =>
-  `${sessionHref(id)}/files?path=${encodeURIComponent(path)}`;
+// The session's workspace explorer, opened at `path` when given.
+export const sessionFilesHref = (id: string, path?: string) =>
+  `${sessionHref(id)}/files${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`;
 
 export type NavKey = "sessions" | "needs-you" | "assistant" | "board" | "usage";
 

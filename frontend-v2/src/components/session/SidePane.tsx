@@ -15,7 +15,7 @@ const TABS: { id: PaneTab; label: string }[] = [
   { id: "files", label: "Files" },
 ];
 
-// The desktop side pane. The terminal is a main-pane view, never a tab here.
+// The terminal is a main-pane view, never a tab here.
 export function SidePane() {
   const [tab, setTab] = useState<PaneTab>("overview");
   return (

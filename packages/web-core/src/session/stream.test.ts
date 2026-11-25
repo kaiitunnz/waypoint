@@ -4,9 +4,6 @@ import { ev } from "../test-helpers";
 import type { EventsPage, PendingQuestionsSnapshot, SessionRecord } from "../types";
 import {
   INITIAL_STREAM_STATE,
-  RECONNECT_BASE_MS,
-  RECONNECT_MAX_MS,
-  reconnectDelay,
   streamReducer,
   maxEventId,
   takeNewer,
@@ -26,20 +23,6 @@ const snapshot = (asOf: number, revision: number) =>
   ({ as_of_sequence: asOf, revision, questions: [] }) as unknown as PendingQuestionsSnapshot;
 
 const run = (...actions: StreamAction[]): StreamState => actions.reduce(streamReducer, INITIAL_STREAM_STATE);
-
-describe("reconnectDelay", () => {
-  it("doubles from the base up to the cap", () => {
-    expect([0, 1, 2, 3, 4, 5, 9].map(reconnectDelay)).toEqual([
-      RECONNECT_BASE_MS,
-      2000,
-      4000,
-      8000,
-      RECONNECT_MAX_MS,
-      RECONNECT_MAX_MS,
-      RECONNECT_MAX_MS,
-    ]);
-  });
-});
 
 describe("maxEventId", () => {
   it("takes the highest id, ignoring events without one", () => {

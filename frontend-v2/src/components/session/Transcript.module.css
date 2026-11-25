@@ -21,7 +21,7 @@
 /* A short transcript sits at the bottom, like a messenger. */
 .col {
   width: 100%;
-  max-width: 860px;
+  max-width: var(--session-col);
   margin: auto auto 0;
   padding: 0 12px 10px;
 }
@@ -51,20 +51,8 @@
   color: var(--faint);
 }
 
-.empty {
-  display: flex;
-  flex-direction: column;
-}
-
-.showAll {
-  align-self: flex-start;
-  height: 44px;
-  padding: 0 16px;
-  font-weight: 600;
-  color: var(--text);
-}
-
 .jump {
+  composes: hit from "../../styles/hit.module.css";
   position: absolute;
   bottom: 12px;
   left: 50%;
@@ -91,15 +79,6 @@
   }
 
   .col {
-    padding: 0 28px 10px;
-  }
-}
-
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  .jump::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
+    padding: 0 var(--session-gutter) 10px;
   }
 }

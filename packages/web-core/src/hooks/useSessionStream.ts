@@ -3,14 +3,8 @@
 import { startTransition, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { ApiError, connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
-import {
-  INITIAL_STREAM_STATE,
-  maxEventId,
-  reconnectDelay,
-  streamReducer,
-  takeNewer,
-  type StreamState,
-} from "../session/stream";
+import { reconnectDelay } from "../session/connection";
+import { INITIAL_STREAM_STATE, maxEventId, streamReducer, takeNewer, type StreamState } from "../session/stream";
 import { sanitizeEvent } from "../session/transcript";
 import type { EventRecord, PendingQuestionsSnapshot, SessionRecord } from "../types";
 

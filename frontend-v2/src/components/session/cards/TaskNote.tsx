@@ -34,8 +34,7 @@ const CAPTIONS = {
   not_retained: "Preview. The rest was not retained.",
 } as const;
 
-// A task notification (a subagent, a monitor, a background command finishing) as a
-// raised card on the route; opening it shows the result and the full report.
+// A task notification: a subagent, a monitor or a background command finishing.
 export function TaskNote({ view, event }: { view: TaskNotificationView; event: EventRecord }) {
   const [open, setOpen] = useState(false);
   const credentials = useSessionContext();
@@ -67,7 +66,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
   return (
     <div className={styles.note}>
       {hasBody ? (
-        <button type="button" className={styles.head} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button type="button" className={cx(styles.head, styles.tap)} aria-expanded={open} onClick={() => setOpen(!open)}>
           {header}
           <Icon name={open ? "chevron-up" : "chevron-right"} size={14} strokeWidth={2} />
         </button>

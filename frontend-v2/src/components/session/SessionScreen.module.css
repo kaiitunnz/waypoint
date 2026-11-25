@@ -21,6 +21,7 @@
   .screen {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     background: var(--ground);
   }
 
@@ -34,17 +35,5 @@
 
   .railOpen.paneOpen {
     grid-template-columns: 272px minmax(0, 1fr) 340px;
-  }
-
-  .rail,
-  .pane {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .rail > *,
-  .pane > * {
-    flex: 1 1 auto;
   }
 }

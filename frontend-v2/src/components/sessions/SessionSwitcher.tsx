@@ -80,10 +80,10 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
 
   const ranked = useMemo(() => rankSessionsForSwitcher(visible, askSessionIds, query), [visible, askSessionIds, query]);
   const all = useMemo(() => mergeSwitcherEntries(ranked, history.items), [ranked, history.items]);
-  // Exited entries always come last.
+  // Exited entries come last, so `listed` leads `all`.
   const listed = useMemo(() => all.filter((entry) => entry.section !== "exited"), [all]);
-  const exited = useMemo(() => (showExited ? all.filter((entry) => entry.section === "exited") : []), [all, showExited]);
-  const entries = useMemo(() => [...listed, ...exited], [listed, exited]);
+  const exited = useMemo(() => (showExited ? all.slice(listed.length) : []), [all, listed, showExited]);
+  const entries = showExited ? all : listed;
 
   const exitedTotal = showExited ? history.total : counted.total;
   const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (exitedTotal ?? 0);

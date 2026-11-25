@@ -15,7 +15,7 @@ interface BubbleProps {
   first?: boolean;
   text?: string;
   time: string;
-  // Sent and copied text; defaults to `text`.
+  // What the copy button copies, when it differs from `text`.
   copy?: string;
   attachments?: AttachmentSpec[];
   // A body other than markdown.

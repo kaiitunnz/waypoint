@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/events";
-import { buildPlainDiffLines, DIFF_MARKER, highlightDiffToLines, type DiffLine } from "@waypoint/web-core/highlight";
+import { DIFF_MARKER } from "@waypoint/web-core/highlight";
+import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
 import { compactDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
@@ -13,29 +14,16 @@ import { cx } from "@/lib/cx";
 import { useSessionContext } from "../SessionContext";
 import styles from "./DiffBlock.module.css";
 import highlight from "./Highlight.module.css";
+import { DiffStat } from "./DiffStat";
 import { PathLabel } from "./PathLabel";
 import { Tokens } from "./Tokens";
 
 const COMPACT_LINES = 6;
 
 function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader: boolean }) {
-  const plain = useMemo(() => buildPlainDiffLines(file.diff), [file.diff]);
-  const [highlighted, setHighlighted] = useState<{ diff: string; lines: DiffLine[] } | null>(null);
+  const lines = useHighlightedDiff(file.diff, file.path);
   const [all, setAll] = useState(false);
-  const lines = highlighted?.diff === file.diff ? highlighted.lines : plain;
-
-  useEffect(() => {
-    if (!file.diff) return;
-    let cancelled = false;
-    void highlightDiffToLines(file.diff, file.path).then((result) => {
-      if (!cancelled && result) setHighlighted({ diff: file.diff, lines: result });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [file.diff, file.path]);
-
-  const rows = useMemo(() => compactDiff(lines, { maxLines: all ? Infinity : COMPACT_LINES }), [lines, all]);
+  const rows = useMemo(() => compactDiff(lines, all ? Infinity : COMPACT_LINES), [lines, all]);
   const change = displayChangeType(file);
   const { cwd } = useSessionContext();
   const shown = diffFilePathLabel(file, cwd);
@@ -55,7 +43,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
             <PathLabel dir={split.dir} base={split.base} className={styles.path} title={diffFilePathLabel(file)} />
           )}
           <span className={styles.stats}>
-            <span className={styles.add}>+{file.additions}</span> <span className={styles.del}>−{file.deletions}</span>
+            <DiffStat additions={file.additions} deletions={file.deletions} />
           </span>
         </div>
       ) : null}
@@ -82,7 +70,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
             return (
               <div key={index} className={cx(styles.line, line.kind === "add" && styles.addLine, line.kind === "del" && styles.delLine)}>
                 <span className={styles.no}>{line.kind === "del" ? line.oldNo : line.newNo}</span>
-                <span className={cx(styles.sign, line.kind === "add" && styles.addSign, line.kind === "del" && styles.delSign)}>
+                <span className={cx(line.kind === "add" && styles.addSign, line.kind === "del" && styles.delSign)}>
                   {DIFF_MARKER[line.kind]}
                 </span>
                 <span>
@@ -100,7 +88,6 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   );
 }
 
-// Edited files as compact diffs: the changes with a line of context, the rest folded.
 export function DiffBlock({ preview, headers }: { preview: EventDiffPreview; headers?: boolean }) {
   return (
     <>

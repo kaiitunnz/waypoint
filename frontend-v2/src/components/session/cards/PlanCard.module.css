@@ -1,12 +1,5 @@
 .card {
-  position: relative;
-  z-index: 1;
-  margin-left: 20px;
-  padding: 7px 11px 4px;
-  border-radius: var(--r);
-  background: var(--plane-raised);
-  font-size: var(--f-bubble);
-  line-height: 19px;
+  composes: card snug from "./RaisedCard.module.css";
 }
 
 .head {
@@ -22,8 +15,7 @@
 }
 
 .time {
-  font-size: var(--f-stamp);
-  color: var(--faint);
+  composes: time from "./RaisedCard.module.css";
 }
 
 .body {
@@ -37,19 +29,11 @@
 }
 
 .more {
+  composes: hit from "../../../styles/hit.module.css";
   position: relative;
   display: block;
   height: 32px;
   font-size: var(--f-meta);
   font-weight: 600;
   color: var(--muted);
-}
-
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  .more::after {
-    content: "";
-    position: absolute;
-    inset: -6px 0;
-  }
 }

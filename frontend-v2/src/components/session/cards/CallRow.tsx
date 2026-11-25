@@ -10,6 +10,7 @@ import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
 import { DiffBlock } from "./DiffBlock";
+import { DiffStat } from "./DiffStat";
 import { PathLabel } from "./PathLabel";
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
@@ -27,20 +28,17 @@ function TodoItems({ todos }: { todos: TodoEntry[] }) {
   );
 }
 
-// One call of an expanded run: what it touched, what it did, and how it went.
 export function CallRow({ row }: { row: CallRowModel }) {
   const [wrapped, setWrapped] = useState(false);
   const { todos } = row;
 
   const status =
     row.additions !== null && row.deletions !== null ? (
-      <>
-        <span className={styles.add}>+{row.additions}</span> <span className={styles.del}>−{row.deletions}</span>
-      </>
+      <DiffStat additions={row.additions} deletions={row.deletions} />
     ) : row.status === "pending" ? (
       <span className={styles.pending}>…</span>
     ) : (
-      <span className={row.status === "failed" ? styles.del : styles.add}>
+      <span className={row.status === "failed" ? styles.bad : styles.ok}>
         {row.status === "failed" ? "✕" : "✓"}
         {row.durationMs !== null ? ` ${formatCallDuration(row.durationMs)}` : ""}
       </span>

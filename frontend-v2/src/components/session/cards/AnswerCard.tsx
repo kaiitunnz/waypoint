@@ -4,7 +4,6 @@ import type { EventRecord } from "@waypoint/web-core/types";
 import { Bubble } from "./Bubble";
 import styles from "./AnswerCard.module.css";
 
-// Your answers to the agent's questions, as a message from you.
 export function AnswerCard({ event, time, first }: { event: EventRecord; time: string; first: boolean }) {
   const entries = askAnswerEntries(event);
   if (entries.length === 0) {

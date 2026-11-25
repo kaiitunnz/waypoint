@@ -1,12 +1,5 @@
 .card {
-  position: relative;
-  z-index: 1;
-  margin-left: 20px;
-  padding: 7px 11px;
-  border-radius: var(--r);
-  background: var(--plane-raised);
-  font-size: var(--f-bubble);
-  line-height: 19px;
+  composes: card from "./RaisedCard.module.css";
 }
 
 .head {
@@ -26,8 +19,7 @@
 }
 
 .time {
-  font-size: var(--f-stamp);
-  color: var(--faint);
+  composes: time from "./RaisedCard.module.css";
 }
 
 .caption {
@@ -44,6 +36,7 @@
 }
 
 .open {
+  composes: hit from "../../../styles/hit.module.css";
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -51,13 +44,4 @@
   font-size: var(--f-meta);
   font-weight: 600;
   color: var(--text);
-}
-
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  .open::after {
-    content: "";
-    position: absolute;
-    inset: -6px 0;
-  }
 }

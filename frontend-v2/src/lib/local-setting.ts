@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 
+import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
+
 function read<T extends string>(key: string, allowed: readonly T[]): T | null {
   try {
     const stored = localStorage.getItem(key);
@@ -34,8 +36,10 @@ export function useLocalSetting<T extends string>(
   return [value, set];
 }
 
-// A panel's open state the person may override: unset follows `auto`, set wins.
-export function useOverride(key: string): [boolean | null, (open: boolean) => void] {
+// Whether a panel is open: it follows the media `query` until the person opens or closes it.
+export function usePanelOpen(key: string, query: string): [boolean, (open: boolean) => void] {
+  const fits = useMediaQuery(query);
   const [stored, set] = useLocalSetting(key, ["open", "closed", "auto"] as const, "auto");
-  return [stored === "auto" ? null : stored === "open", (open) => set(open ? "open" : "closed")];
+  const setOpen = useCallback((open: boolean) => set(open ? "open" : "closed"), [set]);
+  return [stored === "auto" ? fits : stored === "open", setOpen];
 }

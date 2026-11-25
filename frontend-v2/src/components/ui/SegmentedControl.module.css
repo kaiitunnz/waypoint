@@ -43,3 +43,28 @@
     font-size: var(--f-meta);
   }
 }
+
+/* Icon segments are 40px wide, with a 44px target around each. */
+.icon {
+  flex: none;
+}
+
+.icon .segment {
+  position: relative;
+  justify-content: center;
+  width: 40px;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  color: var(--faint);
+}
+
+.icon .segment::after {
+  content: "";
+  position: absolute;
+  inset: -4px -2px;
+}
+
+.icon .on {
+  color: var(--text-strong);
+}

@@ -3,6 +3,7 @@
 }
 
 .line {
+  composes: hit from "../../../styles/hit.module.css";
   position: relative;
   display: flex;
   align-items: center;
@@ -99,14 +100,5 @@
 @media (min-width: 900px) {
   .line {
     height: 26px;
-  }
-}
-
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  .line::after {
-    content: "";
-    position: absolute;
-    inset: -8px 0;
   }
 }

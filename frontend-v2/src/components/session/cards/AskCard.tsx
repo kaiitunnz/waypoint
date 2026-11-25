@@ -1,17 +1,16 @@
 "use client";
 
 import type { EventRecord } from "@waypoint/web-core/types";
-import { askCardState, type AskUserQuestion } from "@waypoint/web-core/session/askQuestion";
+import { askCardState, parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
 import { formatEventTime } from "@waypoint/web-core/session/cardText";
 
 import { useAskState } from "../SessionContext";
 import { RunLine } from "./RunLine";
 import styles from "./AskCard.module.css";
 
-// A question the agent asked, read-only: one line on the route that opens to the
-// question, its options and the answer. Answering happens in the dock above the composer.
-export function AskCard({ event, questions }: { event: EventRecord; questions: AskUserQuestion[] }) {
+export function AskCard({ event }: { event: EventRecord }) {
   const { evidence, snapshot } = useAskState();
+  const questions = parseAskUserQuestion(event) ?? [];
   const { toolUseId, waiting, outcome, answers } = askCardState(event, evidence, snapshot);
   const first = questions[0]?.question ?? "";
 

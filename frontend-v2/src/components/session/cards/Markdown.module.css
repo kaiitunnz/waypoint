@@ -60,13 +60,6 @@
   line-height: inherit;
 }
 
-.md > h1:first-child,
-.md > h2:first-child,
-.md > h3:first-child,
-.md > h4:first-child {
-  margin-top: 0;
-}
-
 .md hr {
   margin: 8px 0;
   border: 0;

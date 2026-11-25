@@ -41,22 +41,6 @@
   white-space: nowrap;
 }
 
-.state {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-}
-
-.needs {
-  color: var(--brass-text);
-}
-
-.agent {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* With little width the status goes under the title, so neither is cut to nothing. */
 @container (max-width: 1000px) {
   .ttl {

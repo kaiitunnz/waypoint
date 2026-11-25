@@ -9,16 +9,15 @@ import { IconButton } from "@/components/ui/IconButton";
 
 import styles from "./SessionSkeleton.module.css";
 
-export function SessionSkeleton({ id, view, subject }: { id: string; view: "chat" | "files"; subject?: string }) {
-  const title = view === "files" ? "Files" : "Session";
+export function SessionSkeleton({ id, subject }: { id: string; subject?: string }) {
   return (
     <div className={styles.screen}>
       <GlassBar>
-        <Link href={view === "files" ? sessionHref(id) : "/"} className={styles.back} aria-label="Back">
+        <Link href={sessionHref(id)} className={styles.back} aria-label="Back">
           <Icon name="chevron-left" size={22} />
         </Link>
         <div className={styles.titles}>
-          <span className={styles.title}>{title}</span>
+          <span className={styles.title}>Files</span>
           <span className={`${styles.id} mono`}>{id}</span>
         </div>
         <IconButton label="Session actions" disabled>

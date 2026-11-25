@@ -2,19 +2,16 @@
 
 import { useState, type ReactNode } from "react";
 
+import type { RunGlyph } from "@waypoint/web-core/session/toolRun";
+
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/lib/cx";
 
 import styles from "./RunLine.module.css";
 
-export interface RunGlyphCount {
-  glyph: string;
-  count: number;
-}
-
 interface RunLineProps {
   phrase: ReactNode;
-  glyphs?: RunGlyphCount[];
+  glyphs?: RunGlyph[];
   // Whether the run opens by itself: in Full density.
   defaultOpen: boolean;
   live?: boolean;
@@ -28,8 +25,6 @@ interface RunLineProps {
   children?: ReactNode;
 }
 
-// One line on the route: a hollow marker, a plain summary, the glyph counts and a
-// chevron. Opening it lists what the run held.
 export function RunLine({ phrase, glyphs = [], defaultOpen, live, asked, stats, trailing, children }: RunLineProps) {
   const [choice, setChoice] = useState<boolean | null>(null);
   const openable = children !== undefined && children !== null;

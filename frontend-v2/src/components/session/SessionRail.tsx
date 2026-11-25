@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
@@ -13,7 +13,7 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 import { ActivityLine } from "@/components/sessions/ActivityLine";
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
-import { EXITED_PAGE_SIZE, useExitedSessions } from "@/components/sessions/useExitedSessions";
+import { useExitedSessions } from "@/components/sessions/useExitedSessions";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -26,14 +26,12 @@ import styles from "./SessionRail.module.css";
 
 const SECTIONS: SwitcherSection[] = ["needs", "pinned", "live"];
 
-// The desktop rail: every live session by attention, with the open one marked.
 export function SessionRail({ currentId }: { currentId: string }) {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
   const now = useNow();
   const [showExited, setShowExited] = useShowExited();
-  const [limit, setLimit] = useState(EXITED_PAGE_SIZE);
 
   const entries = useMemo(
     () => rankSessionsForSwitcher(feed.visible, feed.askSessionIds, ""),
@@ -49,12 +47,7 @@ export function SessionRail({ currentId }: { currentId: string }) {
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
   const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
-  const { count: exitedCount, listed, history } = useExitedSessions({
-    query: "",
-    live: exitedLive,
-    enabled: showExited,
-    limit,
-  });
+  const { count: exitedCount, listed, paging } = useExitedSessions({ query: "", live: exitedLive, enabled: showExited });
   const asks = feed.pendingAsks?.items ?? [];
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
@@ -106,14 +99,10 @@ export function SessionRail({ currentId }: { currentId: string }) {
         {exitedCount > 0 ? (
           <ExitedGroup
             count={exitedCount}
-            desktop={false}
+            short
             open={showExited}
             onToggle={() => setShowExited(!showExited)}
-            loading={history.pending || listed.filling}
-            failed={Boolean(history.error)}
-            onRetry={history.retry}
-            hasMore={listed.items.length < listed.total}
-            onMore={() => setLimit((value) => value + EXITED_PAGE_SIZE)}
+            paging={paging}
           >
             <ul className={styles.list}>{listed.items.map((session) => row(session, "exited"))}</ul>
           </ExitedGroup>

@@ -1,4 +1,5 @@
 import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
+import { isWorkingStatus } from "./sessionPresentation";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
 
@@ -96,8 +97,7 @@ export function deriveActivity(
   const todos = summarizeTodos(readTodoEntries(latestTodo));
   const progress =
     todos && !todos.allComplete ? { done: todos.completed, total: todos.total } : null;
-  const working = status === "running" || status === "starting";
-  const line = working ? (lastStep(events) ?? lastAgentMessage(events)) : lastAgentMessage(events);
+  const line = isWorkingStatus(status) ? (lastStep(events) ?? lastAgentMessage(events)) : lastAgentMessage(events);
   return { line, progress };
 }
 

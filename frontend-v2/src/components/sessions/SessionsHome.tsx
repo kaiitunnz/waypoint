@@ -5,7 +5,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { useSessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
 import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
@@ -16,7 +15,6 @@ import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useDesktop } from "@/lib/layout";
@@ -28,24 +26,20 @@ import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { NewSessionDialog } from "./NewSessionDialog";
 import { SearchResults } from "./SearchResults";
-import { runSessionAction, SessionDialogs, type HomeDialog } from "./SessionDialogs";
-import { SessionMenu, type SessionAction } from "./SessionMenu";
+import { SessionMenu } from "./SessionMenu";
 import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
-import { EXITED_PAGE_SIZE, useExitedSessions } from "./useExitedSessions";
+import { useExitedSessions } from "./useExitedSessions";
+import { useSessionMenuActions } from "./useSessionMenuActions";
 import { useSwitcher } from "./SwitcherProvider";
 import { BoardSummaryCard, LimitsReadout, LimitsStrip, ScheduledSummaryList } from "./Summaries";
 import styles from "./SessionsHome.module.css";
-
-const PAGE_SIZE = EXITED_PAGE_SIZE;
 
 export function SessionsHome() {
   const desktop = useDesktop();
   const { host, token, needsYou, inboxCount } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
-  const { toast } = useToast();
-  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
-  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
+  const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
   const now = useNow();
@@ -55,9 +49,7 @@ export function SessionsHome() {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [showExited, setShowExited] = useShowExited();
-  const [limit, setLimit] = useState(PAGE_SIZE);
   const [newOpen, setNewOpen] = useState(false);
-  const [dialog, setDialog] = useState<HomeDialog | null>(null);
   const searching = query.trim() !== "";
 
   const asks = useMemo(() => feed.pendingAsks?.items ?? [], [feed.pendingAsks]);
@@ -71,13 +63,12 @@ export function SessionsHome() {
   const {
     count: exitedCount,
     listed,
-    history,
+    paging,
   } = useExitedSessions({
     query,
     live: searching ? found.rest : sections.exited,
     lead: searching ? found.lead : undefined,
     enabled: searching || showExited,
-    limit,
   });
 
   const agentFor = useCallback((session: SessionRecord) => agentModelLabel(session, catalog), [catalog]);
@@ -85,9 +76,6 @@ export function SessionsHome() {
     (ask: PendingAsk) => humaniseBackend(ask.session_backend, catalog),
     [catalog],
   );
-
-  const onAction = (action: SessionAction, session: SessionRecord) =>
-    runSessionAction(action, session, actions, setDialog);
 
   const menuFor = (session: SessionRecord) => (
     <SessionMenu
@@ -108,7 +96,6 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  const compactRow = (session: SessionRecord) => <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} />;
   // Pinned and Live read alike: a serif title, the lamp, the time and the preview line.
   const previewGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
@@ -132,7 +119,6 @@ export function SessionsHome() {
 
   const loading = feed.sessions === null;
   const empty = !loading && sessions.length === 0 && needsYou === 0 && exitedCount === 0;
-  const shownCount = listed.items.length;
 
   const results = searching ? (
     <SearchResults
@@ -140,11 +126,7 @@ export function SessionsHome() {
       rows={listed.items.map((session) => (
         <ResultRow key={session.id} {...rowProps(session)} />
       ))}
-      searching={history.pending || listed.filling}
-      failed={Boolean(history.error)}
-      onRetry={history.retry}
-      hasMore={shownCount < listed.total}
-      onMore={() => setLimit((value) => value + PAGE_SIZE)}
+      paging={paging}
       desktop={desktop}
     />
   ) : null;
@@ -157,18 +139,18 @@ export function SessionsHome() {
       {exitedCount > 0 ? (
         <ExitedGroup
           count={exitedCount}
-          desktop={desktop}
+          short={!desktop}
           open={showExited}
           onToggle={() => setShowExited(!showExited)}
-          onDeleteExited={() => setDialog({ kind: "deleteExited" })}
-          loading={history.pending || listed.filling}
-          failed={Boolean(history.error)}
-          onRetry={history.retry}
-          hasMore={shownCount < listed.total}
-          onMore={() => setLimit((value) => value + PAGE_SIZE)}
+          onDeleteExited={() => openDialog({ kind: "deleteExited" })}
+          paging={paging}
         >
           <div className={styles.inset}>
-            <List>{listed.items.map((session) => compactRow(session))}</List>
+            <List>
+              {listed.items.map((session) => (
+                <CompactRow key={session.id} {...rowProps(session)} desktop={desktop} />
+              ))}
+            </List>
           </div>
         </ExitedGroup>
       ) : null}
@@ -193,10 +175,7 @@ export function SessionsHome() {
       <HomeHeader
         desktop={desktop}
         query={query}
-        onQuery={(next) => {
-          setQuery(next);
-          setLimit(PAGE_SIZE);
-        }}
+        onQuery={setQuery}
         searchOpen={searchOpen}
         onSearchOpen={setSearchOpen}
         onNew={() => setNewOpen(true)}
@@ -228,7 +207,7 @@ export function SessionsHome() {
       ) : null}
 
       <NewSessionDialog open={newOpen} onClose={() => setNewOpen(false)} />
-      <SessionDialogs dialog={dialog} actions={actions} onClose={() => setDialog(null)} />
+      {dialogs}
     </div>
   );
 }

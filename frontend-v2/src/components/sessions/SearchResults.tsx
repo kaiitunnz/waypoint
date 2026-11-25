@@ -6,29 +6,17 @@ import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 import styles from "./SessionsHome.module.css";
+import type { ExitedPaging } from "./useExitedSessions";
 
 interface SearchResultsProps {
   total: number;
   rows: ReactNode[];
-  // Older sessions are still loading from the server.
-  searching: boolean;
-  failed: boolean;
-  onRetry: () => void;
-  hasMore: boolean;
-  onMore: () => void;
+  paging: ExitedPaging;
   desktop: boolean;
 }
 
-export function SearchResults({
-  total,
-  rows,
-  searching,
-  failed,
-  onRetry,
-  hasMore,
-  onMore,
-  desktop,
-}: SearchResultsProps) {
+export function SearchResults({ total, rows, paging, desktop }: SearchResultsProps) {
+  const { loading, failed, onRetry, hasMore, onMore } = paging;
   return (
     <section>
       <SectionHeading title="Results" count={total} dense={!desktop} />
@@ -36,7 +24,7 @@ export function SearchResults({
         <div className={styles.inset}>
           <List>{rows}</List>
         </div>
-      ) : searching ? (
+      ) : loading ? (
         <p className={styles.status}>Searching older sessions…</p>
       ) : failed ? null : (
         <p className={styles.status}>No sessions match.</p>

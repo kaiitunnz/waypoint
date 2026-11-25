@@ -73,6 +73,7 @@ import {
   writeToken,
 } from "@waypoint/web-core/store";
 import { launchableAgents, useBackendCatalog } from "@waypoint/web-core/backends";
+import { reconnectDelay } from "@waypoint/web-core/session/connection";
 import {
   applySessionState,
   clearSessionHistory,
@@ -117,8 +118,6 @@ interface ThreadSummary {
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 15000;
 const BOARD_REFRESH_DEBOUNCE_MS = 300;
 // Exited sessions read when seeding the recent-directory suggestions.
 const RECENT_CWD_HISTORY_LIMIT = 50;
@@ -503,7 +502,7 @@ export default function HomePage() {
             if (!active) {
               return;
             }
-            const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+            const delay = reconnectDelay(attempt);
             attempt += 1;
             setConnection("reconnecting");
             reconnectTimer = setTimeout(connect, delay);

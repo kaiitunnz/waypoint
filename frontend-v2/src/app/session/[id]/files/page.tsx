@@ -14,5 +14,5 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function Page({ params, searchParams }: Props) {
   const [{ id }, { path }] = await Promise.all([params, searchParams]);
-  return <SessionSkeleton id={id} view="files" subject={path} />;
+  return <SessionSkeleton id={id} subject={path} />;
 }

@@ -5,8 +5,15 @@ import {
   connectionLabel,
   connectionTitle,
   isAgentBusy,
+  reconnectDelay,
   type ConnectionState,
 } from "./connection";
+
+describe("reconnectDelay", () => {
+  it("doubles from one second up to fifteen", () => {
+    expect([0, 1, 2, 3, 4, 5, 9].map(reconnectDelay)).toEqual([1000, 2000, 4000, 8000, 15000, 15000, 15000]);
+  });
+});
 
 type Status = SessionRecord["status"];
 const session = (status: Status) => ({ status }) as SessionRecord;

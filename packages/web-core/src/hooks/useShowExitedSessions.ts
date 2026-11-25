@@ -2,15 +2,13 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import {
-  LIST_SHOW_EXITED_KEY,
-  PANEL_SHOW_EXITED_KEY,
-  SWITCHER_SHOW_EXITED_KEY,
-  readShowExited,
-  writeShowExited,
-} from "../showExited";
+import { readShowExited, writeShowExited } from "../showExited";
 
-export { LIST_SHOW_EXITED_KEY, PANEL_SHOW_EXITED_KEY, SWITCHER_SHOW_EXITED_KEY };
+// v1's panel and switcher show exited sessions unless turned off.
+export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
+export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
+// v2's lists, which start with them hidden, share this one.
+export const LIST_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.list";
 
 // Surfaces in this tab that share a key learn of a change through this; other tabs through `storage`.
 const sameTab = new Set<() => void>();

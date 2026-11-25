@@ -60,4 +60,8 @@ describe("sessionFilesHref", () => {
   it("links a session's files route with the path encoded", () => {
     expect(sessionFilesHref("a b", "~/src/x y.py")).toBe("/session/a%20b/files?path=~%2Fsrc%2Fx%20y.py");
   });
+
+  it("opens the explorer at its root without a path", () => {
+    expect(sessionFilesHref("a b")).toBe("/session/a%20b/files");
+  });
 });

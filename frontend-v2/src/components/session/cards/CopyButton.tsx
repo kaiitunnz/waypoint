@@ -12,10 +12,9 @@ interface CopyButtonProps {
   text: string;
   label?: string;
   className?: string;
-  size?: number;
 }
 
-export function CopyButton({ text, label = "Copy", className, size = 13 }: CopyButtonProps) {
+export function CopyButton({ text, label = "Copy", className }: CopyButtonProps) {
   const { copied, markCopied } = useCopied();
   return (
     <button
@@ -28,7 +27,7 @@ export function CopyButton({ text, label = "Copy", className, size = 13 }: CopyB
         });
       }}
     >
-      <Icon name={copied ? "check" : "copy"} size={size} strokeWidth={1.9} />
+      <Icon name={copied ? "check" : "copy"} size={13} strokeWidth={1.9} />
     </button>
   );
 }

@@ -15,9 +15,8 @@ interface CachedActivity {
   activity: SessionActivity;
 }
 
-// What was loaded, per host, for the app's lifetime: a screen that mounts again
-// (the session rail does on every session switch) shows it at once and fetches only
-// the sessions whose `last_event_at` has moved.
+// What was loaded, per host, for the app's lifetime, so a remounted screen shows it
+// at once and fetches only the sessions whose `last_event_at` has moved.
 const cache = new Map<string, Map<string, CachedActivity>>();
 
 function cachedActivities(host: string): ReadonlyMap<string, SessionActivity> {

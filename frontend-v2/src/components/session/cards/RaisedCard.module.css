@@ -1,0 +1,21 @@
+/* A card on the route: the plane raised one step, indented past it. */
+.card {
+  position: relative;
+  z-index: 1;
+  margin-left: 20px;
+  padding: 7px 11px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: var(--f-bubble);
+  line-height: 19px;
+}
+
+/* A card that ends in a compact control, whose own height supplies the bottom space. */
+.snug {
+  padding-bottom: 4px;
+}
+
+.time {
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}

@@ -10,7 +10,6 @@ import { CopyButton } from "./CopyButton";
 import { Markdown } from "./Markdown";
 import styles from "./PlanCard.module.css";
 
-// A plan the agent drew up, read-only: a raised card on the route, clamped until opened.
 export function PlanCard({ plan, ts }: { plan: string; ts: string }) {
   const [all, setAll] = useState(false);
   return (

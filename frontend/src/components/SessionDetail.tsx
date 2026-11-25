@@ -89,10 +89,10 @@ import {
   connectionLabel,
   connectionTitle,
   isAgentBusy,
+  reconnectDelay,
   type ConnectionState,
 } from "@waypoint/web-core/session/connection";
 import { isImportantEvent } from "@waypoint/web-core/session/importance";
-import { reconnectDelay } from "@waypoint/web-core/session/stream";
 import { toolNamesOfRun } from "@waypoint/web-core/session/toolRun";
 import { wrapBracketedPaste } from "@waypoint/web-core/session/terminalText";
 import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";

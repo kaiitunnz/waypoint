@@ -3,14 +3,6 @@ import { mergePendingQuestionSnapshot } from "./askQuestion";
 import type { ConnectionState } from "./connection";
 import { foldOlderEvents, mergeEvents, minRawSequence, sanitizeEvent } from "./transcript";
 
-export const RECONNECT_BASE_MS = 1000;
-export const RECONNECT_MAX_MS = 15000;
-
-// The wait before reconnect attempt `attempt` (0-based): 1s doubling to 15s.
-export function reconnectDelay(attempt: number): number {
-  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
-}
-
 export interface StreamState {
   session: SessionRecord | null;
   // Coalesced: streamed deltas of one item are one event.
@@ -83,7 +75,7 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         ...state,
         // A frame the socket delivered first is newer than this snapshot.
         session: state.session ?? action.session,
-        // Live events that beat the page here keep their place.
+        // Events already in state are kept.
         events: coalesce(state.events, coalesce(sanitized)),
         hasOlder: action.page.has_more,
         oldestSequence: minRawSequence(sanitized),

@@ -3,28 +3,19 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import type { SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import type { SessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { Badge } from "@/components/ui/Badge";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
-import { StatusLamp } from "@/components/ui/StatusLamp";
-import { cx } from "@/lib/cx";
 
+import { SessionStatusLine } from "./SessionStatusLine";
 import styles from "./SessionBar.module.css";
-
-export interface SessionStatus {
-  lamp: SessionLamp;
-  // The state in words: "Needs you", "Working", "Reconnecting".
-  word: string;
-  // "Claude Code, Opus 5.5".
-  agent: string;
-}
 
 interface SessionBarProps {
   title: string;
-  status: SessionStatus | null;
-  // Other sessions waiting on the human.
+  standing: SessionStanding | null;
+  agent: string;
   othersNeedYou: number;
   onTitle: () => void;
   switcher: ReactNode;
@@ -32,7 +23,7 @@ interface SessionBarProps {
 }
 
 // The mobile top bar: it floats over the transcript, which scrolls under it.
-export function SessionBar({ title, status, othersNeedYou, onTitle, switcher, overflow }: SessionBarProps) {
+export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, switcher, overflow }: SessionBarProps) {
   return (
     <GlassBar>
       <Link
@@ -45,15 +36,7 @@ export function SessionBar({ title, status, othersNeedYou, onTitle, switcher, ov
       </Link>
       <button type="button" className={styles.title} onClick={onTitle} aria-label={`${title}. Switch session`}>
         <span className={styles.name}>{title || "Session"}</span>
-        {status ? (
-          <span className={styles.sub}>
-            <span className={cx(styles.state, status.lamp === "needs" && styles.needs)}>
-              <StatusLamp state={status.lamp} size="sm" flat />
-              {status.word}
-            </span>
-            <span className={styles.agent}>{status.agent}</span>
-          </span>
-        ) : null}
+        {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
       </button>
       {switcher}
       {overflow}

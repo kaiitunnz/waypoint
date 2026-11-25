@@ -97,6 +97,8 @@
   --rail-width: 64px;
   --tabbar-height: 52px;
   --bar-height: 48px;
+  --session-col: 860px;
+  --session-gutter: 28px;
 
   /* Layers. Sheets, modals and popovers share one, so whichever opened last is
      on top, whether a dialog opens from a popover or a popover from a dialog. */
@@ -157,7 +159,7 @@ html[data-theme="light"] {
   --hl-punct: #6e6356;
 }
 
-/* Bubbles are denser on the desktop. */
+/* Bubble type is a half-point smaller on the desktop. */
 @media (min-width: 900px) {
   :root {
     --f-bubble: 14.5px;

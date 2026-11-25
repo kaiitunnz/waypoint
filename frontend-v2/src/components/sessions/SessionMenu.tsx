@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { MenuButton, type MenuButtonItem } from "@/components/ui/MenuButton";
@@ -12,9 +14,11 @@ interface SessionMenuProps {
   subtitle: string;
   onAction: (action: SessionAction, session: SessionRecord) => void;
   size?: "md" | "sm";
+  // Shown above the actions.
+  header?: ReactNode;
 }
 
-export function SessionMenu({ session, subtitle, onAction, size }: SessionMenuProps) {
+export function SessionMenu({ session, subtitle, onAction, size, header }: SessionMenuProps) {
   const items: MenuButtonItem[] = [
     { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
     { id: "rename", label: "Rename" },
@@ -29,6 +33,7 @@ export function SessionMenu({ session, subtitle, onAction, size }: SessionMenuPr
       subtitle={subtitle}
       items={items}
       size={size}
+      header={header}
       onSelect={(id) => onAction(id as SessionAction, session)}
     />
   );

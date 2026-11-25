@@ -2,18 +2,19 @@
 
 import type { ReactNode } from "react";
 
+import type { SessionStanding } from "@waypoint/web-core/sessionPresentation";
+
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
-import { StatusLamp } from "@/components/ui/StatusLamp";
-import { cx } from "@/lib/cx";
 
-import type { SessionStatus } from "./SessionBar";
+import { SessionStatusLine } from "./SessionStatusLine";
 import styles from "./SessionHeader.module.css";
 
 interface SessionHeaderProps {
   title: string;
-  status: SessionStatus | null;
+  standing: SessionStanding | null;
+  agent: string;
   onTitle: () => void;
   railOpen: boolean;
   onToggleRail: () => void;
@@ -27,7 +28,8 @@ interface SessionHeaderProps {
 // The desktop header: it floats over the top of the conversation column.
 export function SessionHeader({
   title,
-  status,
+  standing,
+  agent,
   onTitle,
   railOpen,
   onToggleRail,
@@ -47,15 +49,7 @@ export function SessionHeader({
           <button type="button" className={styles.name} onClick={onTitle} title="Switch session">
             {title || "Session"}
           </button>
-          {status ? (
-            <span className={styles.sub}>
-              <span className={cx(styles.state, status.lamp === "needs" && styles.needs)}>
-                <StatusLamp state={status.lamp} size="sm" flat />
-                {status.word}
-              </span>
-              <span className={styles.agent}>{status.agent}</span>
-            </span>
-          ) : null}
+          {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
         </div>
         {view}
         {density}

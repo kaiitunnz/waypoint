@@ -1,12 +1,5 @@
 .note {
-  position: relative;
-  z-index: 1;
-  margin-left: 20px;
-  padding: 7px 11px;
-  border-radius: var(--r);
-  background: var(--plane-raised);
-  font-size: var(--f-bubble);
-  line-height: 19px;
+  composes: card from "./RaisedCard.module.css";
 }
 
 .head {
@@ -62,10 +55,9 @@
 }
 
 .time {
+  composes: time from "./RaisedCard.module.css";
   flex: none;
-  font-size: var(--f-stamp);
   font-weight: 400;
-  color: var(--faint);
 }
 
 .teaser {
@@ -119,11 +111,7 @@
   color: var(--text);
 }
 
-/* A 44px target around the compact control on touch screens. */
-@media (max-width: 899.98px) {
-  button.head::after {
-    content: "";
-    position: absolute;
-    inset: -6px 0;
-  }
+/* The header is a button only when the note opens. */
+.tap {
+  composes: hit from "../../../styles/hit.module.css";
 }

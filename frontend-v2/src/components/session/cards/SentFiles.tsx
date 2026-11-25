@@ -4,14 +4,14 @@ import Link from "next/link";
 
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
 import { formatEventTime, sendUserFileInput } from "@waypoint/web-core/session/cardText";
-import { sessionHref } from "@waypoint/web-core/shellNav";
+import { sessionFilesHref } from "@waypoint/web-core/shellNav";
 import type { EventRecord } from "@waypoint/web-core/types";
+import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { useSessionContext } from "../SessionContext";
 import { Attachments } from "./Attachments";
 import styles from "./SentFiles.module.css";
 
-// Files the agent handed to you.
 export function SentFiles({ event }: { event: EventRecord }) {
   const { sessionId } = useSessionContext();
   const specs = attachmentSpecsFor(event);
@@ -34,11 +34,11 @@ export function SentFiles({ event }: { event: EventRecord }) {
       ) : (
         <ul className={styles.names}>
           {files.map((path, index) => (
-            <li key={`${path}-${index}`}>{path.split(/[\\/]/).pop() || path}</li>
+            <li key={`${path}-${index}`}>{splitPath(path).base || path}</li>
           ))}
         </ul>
       )}
-      <Link href={`${sessionHref(sessionId)}/files`} className={styles.open}>
+      <Link href={sessionFilesHref(sessionId)} className={styles.open}>
         Open files
       </Link>
     </div>

@@ -6,24 +6,12 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 import { RenameDialog } from "./RenameDialog";
-import type { SessionAction } from "./SessionMenu";
 
 export type HomeDialog =
   | { kind: "rename"; session: SessionRecord }
   | { kind: "terminate"; session: SessionRecord }
   | { kind: "delete"; session: SessionRecord }
   | { kind: "deleteExited" };
-
-// A row menu's choice: pinning acts at once, the rest open their dialog.
-export function runSessionAction(
-  action: SessionAction,
-  session: SessionRecord,
-  actions: SessionActions,
-  open: (dialog: HomeDialog) => void,
-) {
-  if (action === "pin" || action === "unpin") void actions.setPinned(session.id, action === "pin");
-  else open({ kind: action, session });
-}
 
 function confirmation(dialog: Exclude<HomeDialog, { kind: "rename" }>, actions: SessionActions) {
   switch (dialog.kind) {

@@ -7,16 +7,10 @@ export type CompactDiffRow =
   // Rows past the cap.
   | { kind: "more"; count: number };
 
-export interface CompactDiffOptions {
-  // At most this many diff lines; folds do not count. Unbounded when omitted.
-  maxLines?: number;
-}
-
 // A diff reduced to its changes: file and hunk headers dropped, unchanged context
 // folded to one line between changes (never around them), the whole capped to
-// `maxLines` lines.
-export function compactDiff(lines: readonly DiffLine[], options: CompactDiffOptions = {}): CompactDiffRow[] {
-  const { maxLines = Infinity } = options;
+// `maxLines` diff lines (folds do not count).
+export function compactDiff(lines: readonly DiffLine[], maxLines = Infinity): CompactDiffRow[] {
   const rows: CompactDiffRow[] = [];
   let pending: DiffLine[] = [];
   for (const line of lines) {

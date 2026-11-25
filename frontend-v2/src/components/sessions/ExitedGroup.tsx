@@ -8,42 +8,29 @@ import { MenuButton } from "@/components/ui/MenuButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
 import styles from "./ExitedGroup.module.css";
+import type { ExitedPaging } from "./useExitedSessions";
 
 interface ExitedGroupProps {
   count: number;
-  desktop: boolean;
+  // The heading reads "3 exited" instead of "3 exited sessions".
+  short?: boolean;
   open: boolean;
   onToggle: () => void;
   // Without it the group has no menu.
   onDeleteExited?: () => void;
   children: ReactNode;
-  loading: boolean;
-  failed: boolean;
-  onRetry: () => void;
-  hasMore: boolean;
-  onMore: () => void;
+  paging: ExitedPaging;
 }
 
 // "Delete exited" lives in the menu, never as a loud button.
-export function ExitedGroup({
-  count,
-  desktop,
-  open,
-  onToggle,
-  onDeleteExited,
-  children,
-  loading,
-  failed,
-  onRetry,
-  hasMore,
-  onMore,
-}: ExitedGroupProps) {
+export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, children, paging }: ExitedGroupProps) {
+  const { loading, failed, onRetry, hasMore, onMore } = paging;
   return (
     <section className={styles.group}>
       <div className={styles.line}>
         <button type="button" className={styles.toggle} aria-expanded={open} onClick={onToggle}>
           <StatusLamp state="exited" />
-          <span className={styles.label}>{desktop ? `${count} exited sessions` : `${count} exited`}</span>
+          <span className={styles.label}>{short ? `${count} exited` : `${count} exited sessions`}</span>
           <span className={open ? styles.open : undefined}>
             <Icon name="chevron-right" size={16} strokeWidth={2} />
           </span>

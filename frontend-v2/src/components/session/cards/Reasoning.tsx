@@ -7,7 +7,6 @@ import { Markdown } from "./Markdown";
 import { RunLine } from "./RunLine";
 import styles from "./Reasoning.module.css";
 
-// The model's scratchpad: one line on the route that opens to the full text.
 export function Reasoning({ event }: { event: EventRecord }) {
   const preview = reasoningPreview(event.text);
   return (

@@ -30,7 +30,6 @@ function AttachmentCard({ spec, url }: { spec: AttachmentSpec; url: string }) {
   );
 }
 
-// The files a message carries, as compact cards that open the file.
 export function Attachments({ specs }: { specs: AttachmentSpec[] }) {
   const { host, token, sessionId } = useSessionContext();
   if (specs.length === 0) return null;

@@ -2,18 +2,18 @@
 
 import "katex/dist/katex.min.css";
 
-import { memo, useEffect, useMemo, useState, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
+import { memo, useMemo, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 
-import { highlightFenceToLines, type HighlightToken } from "@waypoint/web-core/highlight";
+import { useHighlightedFence } from "@waypoint/web-core/hooks/useHighlighted";
 import {
   COMMON_REHYPE_PLUGINS,
   COMMON_REMARK_PLUGINS,
   orderedListMarkerDigits,
   rehypeAppendReserve,
 } from "@waypoint/web-core/markdown";
-import { fenceLanguage, HIGHLIGHT_DEBOUNCE_MS, nodeToText } from "@waypoint/web-core/markdownCode";
+import { fenceLanguage, nodeToText } from "@waypoint/web-core/markdownCode";
 import { sessionFilesHref } from "@waypoint/web-core/shellNav";
 import { isWorkspacePathHref, remarkLinkifyPaths } from "@waypoint/web-core/workspacePaths";
 
@@ -35,25 +35,7 @@ const REHYPE_PLUGINS_RESERVED = [...COMMON_REHYPE_PLUGINS, rehypeAppendReserve];
 function CodeBlock({ children }: { children?: ReactNode }) {
   const code = useMemo(() => nodeToText(children).replace(/\n$/, ""), [children]);
   const lang = useMemo(() => fenceLanguage(children), [children]);
-  // Tagged with the text it was made from, so a growing block shows raw text, not a
-  // shorter highlighted prefix.
-  const [done, setDone] = useState<{ key: string; lines: HighlightToken[][] } | null>(null);
-  const key = `${lang}\n${code}`;
-  const lines = done?.key === key ? done.lines : null;
-
-  useEffect(() => {
-    if (!lang) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void highlightFenceToLines(code, lang).then((highlighted) => {
-        if (!cancelled && highlighted) setDone({ key, lines: highlighted });
-      });
-    }, HIGHLIGHT_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [code, lang, key]);
+  const lines = useHighlightedFence(code, lang);
 
   return (
     <div className={styles.codeblock}>

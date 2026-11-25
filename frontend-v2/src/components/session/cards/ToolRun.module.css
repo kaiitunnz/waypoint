@@ -1,11 +1,3 @@
-.add {
-  color: var(--done);
-}
-
-.del {
-  color: var(--error);
-}
-
 .note {
   display: flex;
   align-items: baseline;

@@ -13,13 +13,13 @@ const events = [
 
 describe("deriveTranscript", () => {
   it("hides low-signal notes in Summary and counts them", () => {
-    const view = deriveTranscript(events, { density: "summary" });
+    const view = deriveTranscript(events, "summary");
     expect(view.hiddenCount).toBe(1);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "agent"]);
   });
 
   it("shows every event in Full", () => {
-    const view = deriveTranscript(events, { density: "full" });
+    const view = deriveTranscript(events, "full");
     expect(view.hiddenCount).toBe(0);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "rule", "agent"]);
   });

@@ -5,7 +5,8 @@ import { groupTurns, type TranscriptTurn } from "./turns";
 
 // Summary shows the important events and folds tool runs; Full shows every event
 // and opens the runs.
-export type TranscriptDensity = "summary" | "full";
+export const TRANSCRIPT_DENSITIES = ["summary", "full"] as const;
+export type TranscriptDensity = (typeof TRANSCRIPT_DENSITIES)[number];
 
 export interface TranscriptView {
   turns: TranscriptTurn[];
@@ -13,13 +14,9 @@ export interface TranscriptView {
   hiddenCount: number;
 }
 
-export interface TranscriptViewOptions {
-  density: TranscriptDensity;
-}
-
-export function deriveTranscript(events: readonly EventRecord[], options: TranscriptViewOptions): TranscriptView {
-  const display = collapseSupersededPlanEvents([...events]);
-  const visible = options.density === "full" ? display : display.filter(isImportantEvent);
+export function deriveTranscript(events: EventRecord[], density: TranscriptDensity): TranscriptView {
+  const display = collapseSupersededPlanEvents(events);
+  const visible = density === "full" ? display : display.filter(isImportantEvent);
   return {
     turns: groupTurns(buildTranscriptItems(visible)),
     hiddenCount: display.length - visible.length,

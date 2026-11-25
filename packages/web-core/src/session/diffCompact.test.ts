@@ -20,8 +20,8 @@ const DIFF = [
   "+tail",
 ].join("\n");
 
-const kinds = (diff: string, options = {}) =>
-  compactDiff(buildPlainDiffLines(diff), options).map((row) =>
+const kinds = (diff: string, maxLines?: number) =>
+  compactDiff(buildPlainDiffLines(diff), maxLines).map((row) =>
     row.kind === "line" ? `${row.line.kind}:${row.line.tokens[0].text}` : `${row.kind}:${row.count}`,
   );
 
@@ -39,8 +39,8 @@ describe("compactDiff", () => {
   });
 
   it("caps the diff lines and counts the rest, folds included", () => {
-    expect(kinds(DIFF, { maxLines: 2 })).toEqual(["del:old", "add:new", "more:5"]);
-    expect(kinds(DIFF, { maxLines: 3 })).toEqual(["del:old", "add:new", "fold:4", "add:tail"]);
+    expect(kinds(DIFF, 2)).toEqual(["del:old", "add:new", "more:5"]);
+    expect(kinds(DIFF, 3)).toEqual(["del:old", "add:new", "fold:4", "add:tail"]);
   });
 
   it("returns nothing for an empty diff", () => {

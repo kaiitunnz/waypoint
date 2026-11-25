@@ -1,0 +1,12 @@
+/* Extends a compact control's tap target to 44px on mobile. The control must be positioned. */
+@media (max-width: 899.98px) {
+  .hit::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
+  }
+}

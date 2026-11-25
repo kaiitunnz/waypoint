@@ -6,7 +6,6 @@ interface SystemRuleProps {
   glyph?: string;
 }
 
-// A system note or model switch: one centred line between the turns.
 export function SystemRule({ text, time, glyph }: SystemRuleProps) {
   return (
     <div className={styles.rule} role="note">

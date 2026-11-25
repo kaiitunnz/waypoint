@@ -4,32 +4,27 @@ import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { liveTerminal, hasTerminalPane, fidelityFor, useBackendCatalog } from "@waypoint/web-core/backends";
-import { useMediaQuery } from "@waypoint/web-core/hooks/use-media-query";
-import { useSessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
-import { connectionLabel } from "@waypoint/web-core/session/connection";
-import { deriveTranscript } from "@waypoint/web-core/session/transcriptView";
-import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
-import type { SessionRecord } from "@waypoint/web-core/types";
+import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
+import { agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
-import { runSessionAction, SessionDialogs, type HomeDialog } from "@/components/sessions/SessionDialogs";
-import type { SessionAction } from "@/components/sessions/SessionMenu";
+import { SessionMenu } from "@/components/sessions/SessionMenu";
+import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useDesktop } from "@/lib/layout";
-import { useLocalSetting, useOverride } from "@/lib/local-setting";
+import { useLocalSetting, usePanelOpen } from "@/lib/local-setting";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
-import { DENSITIES, DensityToggle, type Density } from "./DensityToggle";
+import { DensityToggle } from "./DensityToggle";
 import { AskStateProvider, SessionContextProvider } from "./SessionContext";
-import { SessionBar, type SessionStatus } from "./SessionBar";
+import { SessionBar } from "./SessionBar";
 import { SessionFooter } from "./SessionFooter";
 import { SessionHeader } from "./SessionHeader";
-import { SessionOverflow } from "./SessionOverflow";
 import { SessionRail } from "./SessionRail";
 import styles from "./SessionScreen.module.css";
 import { SidePane } from "./SidePane";
@@ -51,28 +46,12 @@ export function SessionScreen({ id }: { id: string }) {
   const stream = useSessionStream(host, token, id, handleAuthFailure);
   const { session, events, connection, pendingQuestions } = stream;
 
-  const [density, setDensity] = useLocalSetting<Density>("waypoint-session-density", DENSITIES, "summary");
+  const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
   const [view, setView] = useState<SessionView>("chat");
-  const [dialog, setDialog] = useState<HomeDialog | null>(null);
-  const [railOverride, setRailOverride] = useOverride("waypoint-session-rail");
-  const [paneOverride, setPaneOverride] = useOverride("waypoint-session-pane");
-  const railAuto = useMediaQuery(RAIL_QUERY);
-  const paneAuto = useMediaQuery(PANE_QUERY);
-  const railOpen = railOverride ?? railAuto;
-  const paneOpen = paneOverride ?? paneAuto;
-
-  const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
-  const actions = useSessionActions(host, token, feed, reportError, handleAuthFailure);
-  const sessionActions = useMemo(
-    () => ({
-      ...actions,
-      remove: async (sessionId: string) => {
-        await actions.remove(sessionId);
-        router.replace("/");
-      },
-    }),
-    [actions, router],
-  );
+  const [railOpen, setRailOpen] = usePanelOpen("waypoint-session-rail", RAIL_QUERY);
+  const [paneOpen, setPaneOpen] = usePanelOpen("waypoint-session-pane", PANE_QUERY);
+  const goHome = useCallback(() => router.replace("/"), [router]);
+  const { onAction, dialogs } = useSessionMenuActions(goHome);
 
   // A failed first load fills the page; any later failure is a toast.
   const { error, errorCount } = stream;
@@ -83,45 +62,46 @@ export function SessionScreen({ id }: { id: string }) {
   }, [error, errorCount, loadFailed, toast]);
 
   const agent = session ? agentModelLabel(session, catalog) : "";
+  const agentName = agent.split(",")[0] || "Agent";
   useEffect(() => {
     if (!session) return;
     const previous = document.title;
-    document.title = `${agent.split(",")[0]} · ${session.title}`;
+    document.title = `${agentName} · ${session.title}`;
     return () => {
       document.title = previous;
     };
-  }, [session, agent]);
+  }, [session, agentName]);
 
   const rendered = useDeferredValue(events);
-  const transcript = useMemo(() => deriveTranscript(rendered, { density }), [rendered, density]);
+  const transcript = useMemo(() => deriveTranscript(rendered, density), [rendered, density]);
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
   const askState = useMemo(() => ({ evidence, snapshot: pendingQuestions }), [evidence, pendingQuestions]);
   const cwd = session?.cwd ?? "";
-  const agentName = agent.split(",")[0] || "Agent";
-  const context = useMemo(
-    () => ({ host, token, sessionId: id, modelOptions: [], cwd, agentName }),
-    [host, token, id, cwd, agentName],
-  );
 
   const terminalOnly = session ? liveTerminal(session.transport, catalog) : false;
   const hasPane = session ? hasTerminalPane(session.transport, catalog) : false;
   const activeView: SessionView = terminalOnly ? "terminal" : hasPane ? view : "chat";
   const structured = session ? fidelityFor(session.transport, catalog) === "structured" : true;
+  const full = density === "full";
+  const context = useMemo(
+    () => ({ host, token, sessionId: id, cwd, agentName, full, structured }),
+    [host, token, id, cwd, agentName, full, structured],
+  );
 
-  const status: SessionStatus | null = useMemo(() => {
-    if (!session) return null;
-    const hasAsk = feed.askSessionIds.has(id) || (pendingQuestions?.questions.length ?? 0) > 0;
-    const lamp = sessionLamp(session, hasAsk);
-    const word = connection === "open" ? lampWord(lamp, session.status) : connectionLabel(connection, session.status);
-    return { lamp, word, agent };
-  }, [session, feed.askSessionIds, id, pendingQuestions, connection, agent]);
-
-  const othersNeedYou = useMemo(() => [...feed.askSessionIds].filter((sessionId) => sessionId !== id).length, [feed.askSessionIds, id]);
-
-  const onAction = (action: SessionAction, target: SessionRecord) => runSessionAction(action, target, actions, setDialog);
+  const asking = feed.askSessionIds.has(id);
+  const standing = session ? sessionStanding(session, asking || (pendingQuestions?.questions.length ?? 0) > 0, connection) : null;
+  const othersNeedYou = feed.askSessionIds.size - (asking ? 1 : 0);
 
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={desktop ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
-  const overflow = session ? <SessionOverflow session={session} subtitle={agent} density={density} onDensity={setDensity} onAction={onAction} /> : null;
+  const overflow = session ? (
+    <SessionMenu
+      session={session}
+      subtitle={agent}
+      size="sm"
+      header={desktop ? null : <DensityToggle variant="segmented" value={density} onChange={setDensity} />}
+      onAction={onAction}
+    />
+  ) : null;
   const title = session?.title ?? "";
 
   const body = loadFailed ? (
@@ -132,8 +112,6 @@ export function SessionScreen({ id }: { id: string }) {
   ) : (
     <Transcript
       turns={transcript.turns}
-      full={density === "full"}
-      structured={structured}
       status={session?.status ?? null}
       loading={stream.loading}
       hasOlder={stream.hasOlder}
@@ -148,41 +126,32 @@ export function SessionScreen({ id }: { id: string }) {
   return (
     <SessionContextProvider value={context}>
       <AskStateProvider value={askState}>
-        <div
-          className={cx(styles.screen, railOpen && styles.railOpen, paneOpen && styles.paneOpen)}
-        >
-          {desktop && railOpen ? (
-            <div className={styles.rail}>
-              <SessionRail currentId={id} />
-            </div>
-          ) : null}
+        <div className={cx(styles.screen, railOpen && styles.railOpen, paneOpen && styles.paneOpen)}>
+          {desktop && railOpen ? <SessionRail currentId={id} /> : null}
           <section className={styles.conv} aria-label="Conversation">
             {desktop ? (
               <SessionHeader
                 title={title}
-                status={status}
+                standing={standing}
+                agent={agent}
                 onTitle={switcher.open}
                 railOpen={railOpen}
-                onToggleRail={() => setRailOverride(!railOpen)}
+                onToggleRail={() => setRailOpen(!railOpen)}
                 paneOpen={paneOpen}
-                onTogglePane={() => setPaneOverride(!paneOpen)}
+                onTogglePane={() => setPaneOpen(!paneOpen)}
                 view={viewSwitch}
                 density={activeView === "chat" ? <DensityToggle variant="text" value={density} onChange={setDensity} /> : null}
                 overflow={overflow}
               />
             ) : (
-              <SessionBar title={title} status={status} othersNeedYou={othersNeedYou} onTitle={switcher.open} switcher={viewSwitch} overflow={overflow} />
+              <SessionBar title={title} standing={standing} agent={agent} othersNeedYou={othersNeedYou} onTitle={switcher.open} switcher={viewSwitch} overflow={overflow} />
             )}
             {body}
             <SessionFooter />
           </section>
-          {desktop && paneOpen ? (
-            <div className={styles.pane}>
-              <SidePane />
-            </div>
-          ) : null}
+          {desktop && paneOpen ? <SidePane /> : null}
         </div>
-        <SessionDialogs dialog={dialog} actions={sessionActions} onClose={() => setDialog(null)} />
+        {dialogs}
       </AskStateProvider>
     </SessionContextProvider>
   );

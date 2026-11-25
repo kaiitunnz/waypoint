@@ -8,6 +8,7 @@ import type { SessionStanding } from "@waypoint/web-core/sessionPresentation";
 import { Badge } from "@/components/ui/Badge";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
+import { cx } from "@/lib/cx";
 
 import { PanelButton, type PanelControl } from "./PanelButton";
 import { SessionStatusLine } from "./SessionStatusLine";
@@ -32,7 +33,7 @@ export function SessionBar({ title, standing, agent, othersNeedYou, onTitle, rai
     <GlassBar>
       <Link
         href="/"
-        className={styles.back}
+        className={cx(styles.back, rail && styles.beforeToggle)}
         aria-label={othersNeedYou > 0 ? `All sessions, ${othersNeedYou} other${othersNeedYou === 1 ? "" : "s"} need you` : "All sessions"}
       >
         <Icon name="chevron-left" size={22} />

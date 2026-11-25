@@ -13,8 +13,8 @@ type KeyboardEventLike = Pick<
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// A terminal reads Ctrl+K as readline's kill-line, and editable text keeps its own
-// shortcuts; a page-wide shortcut leaves keys from either alone.
+// A terminal reads Ctrl+K as readline's kill-line and a contenteditable region
+// keeps its own editing keys; a page-wide shortcut leaves keys from either alone.
 const KEY_OWNER_SELECTOR = '.xterm, [contenteditable]:not([contenteditable="false"])';
 
 export function ownsShortcutKeys(target: EventTarget | null): boolean {

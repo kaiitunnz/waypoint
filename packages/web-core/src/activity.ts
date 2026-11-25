@@ -212,7 +212,9 @@ export class ActivityLoader<T> {
             this.failures.set(id, { lastEventAt: held.lastEventAt, count });
           }
           this.inflight.delete(id);
-          this.pump();
+          // A change that settled while this fetch was in flight is still waiting.
+          if (this.pending.has(id)) this.enqueue(id);
+          else this.pump();
         });
     }
   }

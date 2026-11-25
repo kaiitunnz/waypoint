@@ -107,9 +107,11 @@ export function mostConstrainedWindow(
   let best: ConstrainedWindow | null = null;
   for (const bucket of buckets) {
     for (const reading of accountWindows(bucket, now)) {
-      if (best === null || reading.percent > best.percent) {
-        best = { ...reading, accountLabel: bucket.account_label };
-      }
+      const beats =
+        best === null ||
+        reading.percent > best.percent ||
+        (reading.percent === best.percent && reading.kind === "5h" && best.kind !== "5h");
+      if (beats) best = { ...reading, accountLabel: bucket.account_label };
     }
   }
   return best;

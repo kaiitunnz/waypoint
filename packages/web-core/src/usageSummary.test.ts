@@ -96,6 +96,13 @@ describe("usage windows", () => {
     expect(bucketSourceLabel(sessionBucket("Max", []), null)).toBe("Claude Code");
   });
 
+  it("breaks a tie across accounts for the 5h window, whatever the order", () => {
+    const week = sessionBucket("Codex Pro", [window({ label: "week", used_percent: 77 })]);
+    const fiveHour = sessionBucket("Claude Max", [window({ label: "5h", used_percent: 77 })]);
+    expect(mostConstrainedWindow([week, fiveHour], NOW)).toMatchObject({ label: "5H", accountLabel: "Claude Max" });
+    expect(mostConstrainedWindow([fiveHour, week], NOW)).toMatchObject({ label: "5H", accountLabel: "Claude Max" });
+  });
+
   it("picks the most constrained window across accounts, the 5h window on a tie", () => {
     const max = sessionBucket("Claude Max", [
       window({ label: "5h", used_percent: 77, resets_at: new Date(NOW + 72 * 60_000).toISOString() }),

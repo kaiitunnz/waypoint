@@ -2,10 +2,10 @@
 
 import type { ReactNode } from "react";
 
-import { ActionChip } from "@/components/ui/ActionChip";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
+import { PagingFooter } from "./PagingFooter";
 import styles from "./SessionsHome.module.css";
 import type { ExitedPaging } from "./useExitedSessions";
 
@@ -17,7 +17,7 @@ interface SearchResultsProps {
 }
 
 export function SearchResults({ total, rows, paging, desktop }: SearchResultsProps) {
-  const { loading, failed, onRetry, hasMore, onMore } = paging;
+  const { loading, failed } = paging;
   return (
     <section>
       <SectionHeading title="Results" count={total} dense={!desktop} />
@@ -30,21 +30,7 @@ export function SearchResults({ total, rows, paging, desktop }: SearchResultsPro
       ) : failed ? null : (
         <p className={styles.status}>No sessions match.</p>
       )}
-      {failed ? (
-        <p className={styles.status}>
-          Older sessions failed to load.{" "}
-          <ActionChip icon="refresh" onClick={onRetry}>
-            Retry
-          </ActionChip>
-        </p>
-      ) : null}
-      {hasMore ? (
-        <div className={styles.more}>
-          <ActionChip icon="chevron-down" onClick={onMore}>
-            Show more
-          </ActionChip>
-        </div>
-      ) : null}
+      <PagingFooter paging={paging} />
     </section>
   );
 }

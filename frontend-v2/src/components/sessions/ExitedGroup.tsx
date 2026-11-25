@@ -2,12 +2,12 @@
 
 import type { ReactNode } from "react";
 
-import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
 import styles from "./ExitedGroup.module.css";
+import { PagingFooter } from "./PagingFooter";
 import type { ExitedPaging } from "./useExitedSessions";
 
 interface ExitedGroupProps {
@@ -23,7 +23,6 @@ interface ExitedGroupProps {
 
 // "Delete exited" lives in the menu, never as a loud button.
 export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, children, paging }: ExitedGroupProps) {
-  const { loading, failed, onRetry, hasMore, onMore } = paging;
   return (
     <section className={styles.group}>
       <div className={styles.line}>
@@ -47,25 +46,7 @@ export function ExitedGroup({ count, short, open, onToggle, onDeleteExited, chil
       {open ? (
         <div>
           {children}
-          {failed ? (
-            <p className={styles.status} role="status">
-              Older sessions failed to load.{" "}
-              <ActionChip icon="refresh" onClick={onRetry}>
-                Retry
-              </ActionChip>
-            </p>
-          ) : loading ? (
-            <p className={styles.status} role="status">
-              Loading older sessions…
-            </p>
-          ) : null}
-          {hasMore ? (
-            <div className={styles.more}>
-              <ActionChip icon="chevron-down" onClick={onMore}>
-                Show more
-              </ActionChip>
-            </div>
-          ) : null}
+          <PagingFooter paging={paging} loadingText="Loading older sessions…" />
         </div>
       ) : null}
     </section>

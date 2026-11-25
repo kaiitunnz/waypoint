@@ -17,6 +17,9 @@ import { Attachments } from "./Attachments";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
 
+// Lines of a result or report shown before it is opened.
+const REPORT_LINES = 8;
+
 function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") return <p className={styles.caption}>Loading report…</p>;
   if (state.status === "error") return <p className={styles.caption}>Report preview unavailable. Open the full file.</p>;
@@ -30,15 +33,11 @@ function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   );
 }
 
-// Lines of a result or report shown before it is opened.
-const REPORT_LINES = 8;
-
 const CAPTIONS = {
   retained: "Preview shown. Full output attached below.",
   not_retained: "Preview. The rest was not retained.",
 } as const;
 
-// A task notification: a subagent, a monitor or a background command finishing.
 export function TaskNote({ view, event }: { view: TaskNotificationView; event: EventRecord }) {
   const [open, setOpen] = useState(false);
   const credentials = useSessionContext();

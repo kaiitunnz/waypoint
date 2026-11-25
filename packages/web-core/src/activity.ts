@@ -10,7 +10,7 @@ export interface Step {
   subject: string | null;
 }
 
-export const stepText = (step: Step) => (step.subject ? `${step.verb} ${step.subject}` : step.verb);
+const stepText = (step: Step) => (step.subject ? `${step.verb} ${step.subject}` : step.verb);
 
 export interface SessionActivity {
   // One short line: the current step while working, else the last thing the agent said.

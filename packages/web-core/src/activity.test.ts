@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityLoader, deriveActivity, describeStep, stepText } from "./activity";
+import { ActivityLoader, deriveActivity, describeStep } from "./activity";
 import type { EventRecord } from "./types";
 import { ev } from "./test-helpers";
 
@@ -11,7 +11,7 @@ const agent = (sequence: number, text: string) => ev(sequence, "agent_output", t
 
 const stepOf = (event: EventRecord) => {
   const step = describeStep(event);
-  return step && stepText(step);
+  return step && [step.verb, step.subject].filter(Boolean).join(" ");
 };
 
 describe("describeStep", () => {

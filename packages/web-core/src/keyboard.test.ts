@@ -1,11 +1,12 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   isComposingKeyEvent,
   isInlineMenuAcceptKey,
   isModifiedEnterShortcut,
   isSwitcherShortcut,
+  ownsShortcutKeys,
   isUnmodifiedEnterKey,
   trapTabFocus,
 } from "./keyboard";
@@ -73,6 +74,26 @@ describe("trapTabFocus", () => {
   it("does nothing for non-Tab keys or a missing root", () => {
     expect(trapTabFocus(key({ key: "a" }) as unknown as KeyboardEvent, {} as HTMLElement)).toBe(false);
     expect(trapTabFocus(key({ key: "Tab" }) as unknown as KeyboardEvent, null)).toBe(false);
+  });
+});
+
+describe("ownsShortcutKeys", () => {
+  const target = (matches: boolean) => ({ closest: vi.fn(() => (matches ? {} : null)) }) as unknown as EventTarget;
+
+  it("is true inside a terminal or an editable region", () => {
+    expect(ownsShortcutKeys(target(true))).toBe(true);
+    expect(ownsShortcutKeys(target(false))).toBe(false);
+  });
+
+  it("asks for a terminal and for editable text that is not turned off", () => {
+    const closest = vi.fn(() => null);
+    ownsShortcutKeys({ closest } as unknown as EventTarget);
+    expect(closest).toHaveBeenCalledWith('.xterm, [contenteditable]:not([contenteditable="false"])');
+  });
+
+  it("is false for no target or a target that is not an element", () => {
+    expect(ownsShortcutKeys(null)).toBe(false);
+    expect(ownsShortcutKeys({} as EventTarget)).toBe(false);
   });
 });
 

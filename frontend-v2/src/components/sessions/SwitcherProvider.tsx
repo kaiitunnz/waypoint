@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { isSwitcherShortcut } from "@waypoint/web-core/keyboard";
+import { isSwitcherShortcut, ownsShortcutKeys } from "@waypoint/web-core/keyboard";
 
 import { SessionSwitcher } from "./SessionSwitcher";
 
@@ -20,6 +20,8 @@ export function useSwitcher(): SwitcherControls {
   return value;
 }
 
+const hasModalDialog = () => document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+
 // Mounted once for the signed-in app: Cmd/Ctrl+K toggles the switcher from every
 // screen, and a screen's title can open it through `useSwitcher`.
 export function SwitcherProvider({ children }: { children: ReactNode }) {
@@ -28,13 +30,14 @@ export function SwitcherProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!isSwitcherShortcut(event)) return;
+      if (!isSwitcherShortcut(event) || ownsShortcutKeys(event.target)) return;
+      if (!open && hasModalDialog()) return;
       event.preventDefault();
-      setOpen((value) => !value);
+      setOpen(!open);
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [open]);
 
   const controls = useMemo(() => ({ open: () => setOpen(true) }), []);
   return (

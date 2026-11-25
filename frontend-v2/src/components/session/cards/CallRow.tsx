@@ -1,8 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
-import { foldLines } from "@waypoint/web-core/session/foldText";
 import { formatCallDuration, type CallRow as CallRowModel } from "@waypoint/web-core/session/toolRun";
 import { TODO_MARKER, type TodoEntry } from "@waypoint/web-core/todos";
 
@@ -15,6 +12,7 @@ import { DiffStat } from "./DiffStat";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { PathLabel } from "./PathLabel";
+import { useFold } from "./useFold";
 
 const COMMAND_LINES = 6;
 const OUTPUT_LINES = 4;
@@ -44,14 +42,13 @@ function Lines({ text }: { text: string }) {
 }
 
 function Command({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const folded = foldLines(text, COMMAND_LINES, "start");
+  const fold = useFold(text, COMMAND_LINES, "start");
   return (
     <>
       <div className={cx(styles.text, styles.mono)}>
-        <Lines text={open ? text : folded.text} />
+        <Lines text={fold.shown} />
       </div>
-      {folded.hidden > 0 ? <Disclosure open={open} total={folded.total} onToggle={() => setOpen(!open)} /> : null}
+      {fold.foldable ? <Disclosure open={fold.open} total={fold.total} onToggle={fold.toggle} /> : null}
     </>
   );
 }

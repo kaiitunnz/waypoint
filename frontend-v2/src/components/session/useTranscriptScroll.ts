@@ -8,19 +8,37 @@ import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
 const FOLLOW_PX = 160;
 
 // The transcript's scrolling: it follows the end while you are there, keeps its place
-// when older messages land above, and says when you are away from the end.
+// when content lands above, and says when you are away from the end.
 export function useTranscriptScroll(turns: TranscriptTurn[]) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
   const following = useRef(true);
-  // The scroller's height and offset as last laid out: what a prepend is measured against.
-  const placed = useRef({ height: 0, top: 0 });
+  // The first turn in view and how far below the top edge it sat, as last laid out. The scroller's
+  // height and offset back it up for when that turn is replaced, as a merged first turn is.
+  const placed = useRef<{ turn: Element | null; offset: number; height: number; top: number } | null>(null);
   const firstKey = useRef<string | null>(null);
   const [away, setAway] = useState(false);
 
   const remember = useCallback(() => {
-    const el = scroller.current;
-    if (el) placed.current = { height: el.scrollHeight, top: el.scrollTop };
+    const view = scroller.current;
+    const rows = log.current?.children;
+    if (!view) return;
+    const edge = view.getBoundingClientRect().top;
+    let low = 0;
+    let high = rows?.length ?? 0;
+    while (rows && low < high) {
+      const mid = (low + high) >> 1;
+      if (rows[mid].getBoundingClientRect().bottom > edge) high = mid;
+      else low = mid + 1;
+    }
+    const turn = rows?.[low] ?? null;
+    placed.current = {
+      turn,
+      offset: turn ? turn.getBoundingClientRect().top - edge : 0,
+      height: view.scrollHeight,
+      top: view.scrollTop,
+    };
   }, []);
 
   const onScroll = useCallback(() => {
@@ -32,15 +50,18 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
     remember();
   }, [remember]);
 
-  // New turns: a new first turn is older history, so hold the place; else follow the end.
+  // New content: keep the turn in view where it was, else follow the end.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const head = turns[0]?.key ?? null;
-    if (firstKey.current !== null && head !== firstKey.current) {
-      el.scrollTop = placed.current.top + (el.scrollHeight - placed.current.height);
-    } else if (following.current) {
+    const before = placed.current;
+    if (following.current) {
       el.scrollTop = el.scrollHeight;
+    } else if (before?.turn?.isConnected) {
+      el.scrollTop += before.turn.getBoundingClientRect().top - el.getBoundingClientRect().top - before.offset;
+    } else if (before && firstKey.current !== null && head !== firstKey.current) {
+      el.scrollTop = before.top + (el.scrollHeight - before.height);
     }
     firstKey.current = head;
     remember();
@@ -64,5 +85,5 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, []);
 
-  return { scroller, content, away, onScroll, jumpToEnd };
+  return { scroller, content, log, away, onScroll, jumpToEnd };
 }

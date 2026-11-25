@@ -39,7 +39,7 @@ export function Transcript({
   onShowAll,
   override,
 }: TranscriptProps) {
-  const { scroller, content, away, onScroll, jumpToEnd } = useTranscriptScroll(turns);
+  const { scroller, content, log, away, onScroll, jumpToEnd } = useTranscriptScroll(turns);
   const working = isWorkingStatus(status);
 
   return (
@@ -50,12 +50,12 @@ export function Transcript({
             <>
               {hasOlder ? (
                 <div className={styles.older}>
-                  <ActionChip icon="chevron-up" onClick={onLoadOlder} disabled={loadingOlder}>
+                  <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
                     {loadingOlder ? "Loading older messages…" : "Load older messages"}
                   </ActionChip>
                 </div>
               ) : null}
-              <div className={styles.turns} role="log" aria-label="Transcript">
+              <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
                 {turns.map((turn, index) => (
                   <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
                 ))}

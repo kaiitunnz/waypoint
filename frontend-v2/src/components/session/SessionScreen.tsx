@@ -10,7 +10,7 @@ import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
 import { connectionLabel } from "@waypoint/web-core/session/connection";
 import { deriveTranscript } from "@waypoint/web-core/session/transcriptView";
-import { agentModelLabel, lampWord, sessionLamp, shortModelLabel } from "@waypoint/web-core/sessionPresentation";
+import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { runSessionAction, SessionDialogs, type HomeDialog } from "@/components/sessions/SessionDialogs";
@@ -94,7 +94,8 @@ export function SessionScreen({ id }: { id: string }) {
   const transcript = useMemo(() => deriveTranscript(rendered, { density }), [rendered, density]);
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
   const askState = useMemo(() => ({ evidence, snapshot: pendingQuestions }), [evidence, pendingQuestions]);
-  const context = useMemo(() => ({ host, token, sessionId: id, modelOptions: [] }), [host, token, id]);
+  const cwd = session?.cwd ?? "";
+  const context = useMemo(() => ({ host, token, sessionId: id, modelOptions: [], cwd }), [host, token, id, cwd]);
 
   const terminalOnly = session ? liveTerminal(session.transport, catalog) : false;
   const hasPane = session ? hasTerminalPane(session.transport, catalog) : false;
@@ -106,7 +107,7 @@ export function SessionScreen({ id }: { id: string }) {
     const hasAsk = feed.askSessionIds.has(id) || (pendingQuestions?.questions.length ?? 0) > 0;
     const lamp = sessionLamp(session, hasAsk);
     const word = connection === "open" ? lampWord(lamp, session.status) : connectionLabel(connection, session.status);
-    return { lamp, word, agent, model: shortModelLabel(session) };
+    return { lamp, word, agent };
   }, [session, feed.askSessionIds, id, pendingQuestions, connection, agent]);
 
   const othersNeedYou = useMemo(() => [...feed.askSessionIds].filter((sessionId) => sessionId !== id).length, [feed.askSessionIds, id]);

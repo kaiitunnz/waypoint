@@ -1,4 +1,5 @@
 import type { EventDiffPreview, EventDiffPreviewFile } from "../events";
+import { relativeToCwd } from "../workspacePaths";
 
 export const PHASE_LABEL: Record<EventDiffPreview["phase"], string> = {
   proposed: "Proposed changes",
@@ -44,7 +45,8 @@ export function cleanDiffPath(path: string): string {
     : withoutTimestamp;
 }
 
-// "old -> new" for a move, else the path.
-export function diffFilePathLabel(file: EventDiffPreviewFile): string {
-  return file.oldPath && file.oldPath !== file.path ? `${file.oldPath} -> ${file.path}` : file.path;
+// "old -> new" for a move, else the path; relative to `cwd` when given.
+export function diffFilePathLabel(file: EventDiffPreviewFile, cwd?: string | null): string {
+  const path = relativeToCwd(file.path, cwd);
+  return file.oldPath && file.oldPath !== file.path ? `${relativeToCwd(file.oldPath, cwd)} -> ${path}` : path;
 }

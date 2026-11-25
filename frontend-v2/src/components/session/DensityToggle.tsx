@@ -21,6 +21,8 @@ interface DensityToggleProps {
 }
 
 export function DensityToggle({ value, onChange, variant }: DensityToggleProps) {
-  const control = <SegmentedControl label="Transcript density" segments={SEGMENTS} value={value} onChange={onChange} />;
+  const control = (
+    <SegmentedControl label="Transcript density" segments={SEGMENTS} value={value} onChange={onChange} size={variant === "text" ? "sm" : undefined} />
+  );
   return variant === "segmented" ? <div className={styles.menuRow}>{control}</div> : control;
 }

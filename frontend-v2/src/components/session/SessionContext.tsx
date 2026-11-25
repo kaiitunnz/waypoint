@@ -11,6 +11,8 @@ export interface SessionContextValue {
   sessionId: string;
   // For labelling a model switch.
   modelOptions: BackendModelOption[];
+  // The session's working directory: paths inside it read relative to it.
+  cwd: string;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);

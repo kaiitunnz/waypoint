@@ -46,4 +46,10 @@ describe("diffFilePathLabel", () => {
     expect(diffFilePathLabel(file({ path: "b.py", oldPath: "a.py" }))).toBe("a.py -> b.py");
     expect(diffFilePathLabel(file({ path: "b.py", oldPath: "b.py" }))).toBe("b.py");
   });
+
+  it("reads relative to the working directory when the file is inside it", () => {
+    expect(diffFilePathLabel(file({ path: "/repo/src/b.py" }), "/repo")).toBe("src/b.py");
+    expect(diffFilePathLabel(file({ path: "/repo/b.py", oldPath: "/repo/a.py" }), "/repo")).toBe("a.py -> b.py");
+    expect(diffFilePathLabel(file({ path: "/etc/b.py" }), "/repo")).toBe("/etc/b.py");
+  });
 });

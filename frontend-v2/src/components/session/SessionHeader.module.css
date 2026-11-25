@@ -57,25 +57,23 @@
   text-overflow: ellipsis;
 }
 
-.model {
-  display: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* With less room the agent gives way to the model alone, then to nothing. */
-@container (max-width: 899px) {
-  .agent {
-    display: none;
+/* With little width the status goes under the title, so neither is cut to nothing. */
+@container (max-width: 1000px) {
+  .ttl {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
   }
 
-  .model {
-    display: block;
+  .name {
+    max-width: 100%;
+    line-height: 20px;
   }
-}
 
-@container (max-width: 640px) {
-  .model {
-    display: none;
+  .sub {
+    flex: 0 1 auto;
+    max-width: 100%;
+    line-height: 16px;
   }
 }

@@ -35,3 +35,11 @@
     height: 32px;
   }
 }
+
+@media (min-width: 900px) {
+  .sm .segment {
+    height: 28px;
+    padding: 0 10px;
+    font-size: var(--f-meta);
+  }
+}

@@ -23,7 +23,7 @@ export function ViewSwitch({ value, onChange, variant, terminalOnly }: ViewSwitc
   const views: SessionView[] = terminalOnly ? ["terminal"] : ["chat", "terminal"];
   if (variant === "text") {
     const segments = views.map((view) => ({ value: view, label: view === "chat" ? "Chat" : "Terminal" }));
-    return <SegmentedControl label="View" segments={segments} value={value} onChange={onChange} />;
+    return <SegmentedControl label="View" segments={segments} value={value} onChange={onChange} size="sm" />;
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {

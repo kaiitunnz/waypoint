@@ -131,6 +131,31 @@ describe("describeCall", () => {
     });
   });
 
+  it("shows a path inside the working directory relative to it and keeps the full one", () => {
+    const [inside] = run([call(1, "a", "Read", { file_path: "/repo/backend/src/runtime.py" })]);
+    expect(describeCall(inside, "/repo")).toMatchObject({
+      label: "backend/src/runtime.py",
+      path: { dir: "backend/src/", base: "runtime.py" },
+      title: "/repo/backend/src/runtime.py",
+    });
+    const [outside] = run([call(1, "a", "Edit", { file_path: "/etc/hosts" })]);
+    expect(describeCall(outside, "/repo")).toMatchObject({ path: { dir: "/etc/", base: "hosts" }, title: "/etc/hosts" });
+    expect(describeCall(inside)?.path).toEqual({ dir: "/repo/backend/src/", base: "runtime.py" });
+  });
+
+  it("has no path for a command", () => {
+    const [bash] = run([call(1, "a", "Bash", { command: "ls /repo" })]);
+    expect(describeCall(bash, "/repo")).toMatchObject({ path: null, title: "ls /repo", label: "ls /repo" });
+  });
+
+  it("shortens the directory a search looks in and keeps the full row as its title", () => {
+    const [grep] = run([call(1, "a", "Grep", { pattern: "needle", path: "/repo/backend" })]);
+    expect(describeCall(grep, "/repo")).toMatchObject({
+      label: "needle  ·  backend",
+      title: "needle  ·  /repo/backend",
+    });
+  });
+
   it("describes a search by its pattern, not the directory it looks in", () => {
     const [grep] = run([call(1, "a", "Grep", { pattern: "needle", path: "src/" }), result(2, "a", "src/a.py:3:needle")]);
     const row = describeCall(grep);

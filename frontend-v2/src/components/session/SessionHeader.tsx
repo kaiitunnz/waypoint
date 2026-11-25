@@ -54,7 +54,6 @@ export function SessionHeader({
                 {status.word}
               </span>
               <span className={styles.agent}>{status.agent}</span>
-              {status.model ? <span className={styles.model}>{status.model}</span> : null}
             </span>
           ) : null}
         </div>

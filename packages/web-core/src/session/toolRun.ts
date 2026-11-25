@@ -1,6 +1,7 @@
 import { normalizeToolName, parseEvent, readToolName, toolFilePath, type EventDiffPreview } from "../events";
 import { isTodoListEvent } from "../todos";
 import type { EventRecord } from "../types";
+import { relativeToCwd, relativizeInText } from "../workspacePaths";
 import {
   isAgentToolName,
   isFileEditToolName,
@@ -247,8 +248,10 @@ export interface CallRow {
   tool: string | null;
   // What the call touched: a path, a command, a pattern.
   label: string;
-  // Set for file tools so the directory can be muted.
+  // Set for file tools so the directory can be muted; relative to the working directory when inside it.
   path: { dir: string; base: string } | null;
+  // The row as the agent gave it, paths unshortened, for a tooltip.
+  title: string;
   mono: boolean;
   additions: number | null;
   deletions: number | null;
@@ -292,7 +295,7 @@ export function formatCallDuration(ms: number): string {
 }
 
 // One compact row of an expanded run.
-export function describeCall(child: RunChild): CallRow | null {
+export function describeCall(child: RunChild, cwd?: string | null): CallRow | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;
   const event = call ?? result;
@@ -308,14 +311,18 @@ export function describeCall(child: RunChild): CallRow | null {
       ? null
       : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const command = tool === "Bash" && typeof input?.command === "string" ? input.command : null;
-  const label = filePath ?? (call ? previewForToolEvent(call, badge.label) : result ? previewForToolEvent(result, badge.label) : "");
+  const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
+  const preview = call ? previewForToolEvent(call, badge.label) : result ? previewForToolEvent(result, badge.label) : "";
+  const label = shownPath ?? relativizeInText(preview, cwd);
+  const commandText = command ? command.replace(/\s+/g, " ").trim() : null;
   const stats = diff && isFileEditToolName(tool) ? diff : null;
   return {
     key: child.kind === "pair" ? child.pair.itemId : itemKey(child),
     glyph: badge.glyph,
     tool,
-    label: command ? command.replace(/\s+/g, " ").trim() : label,
-    path: filePath ? splitPath(filePath) : null,
+    label: commandText ?? label,
+    path: shownPath ? splitPath(shownPath) : null,
+    title: commandText ?? filePath ?? preview,
     mono: filePath !== null || command !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,

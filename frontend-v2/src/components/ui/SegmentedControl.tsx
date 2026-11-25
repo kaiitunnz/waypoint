@@ -19,6 +19,8 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   label: string;
+  // The compact size for a toolbar.
+  size?: "sm";
 }
 
 export function SegmentedControl<T extends string>({
@@ -26,6 +28,7 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   label,
+  size,
 }: SegmentedControlProps<T>) {
   const group = useRef<HTMLDivElement>(null);
 
@@ -44,7 +47,7 @@ export function SegmentedControl<T extends string>({
       ref={group}
       role="radiogroup"
       aria-label={label}
-      className={styles.group}
+      className={cx(styles.group, size === "sm" && styles.sm)}
       onKeyDown={onKeyDown}
     >
       {segments.map((segment) => (

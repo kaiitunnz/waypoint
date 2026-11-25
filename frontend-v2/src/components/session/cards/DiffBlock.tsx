@@ -6,11 +6,14 @@ import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/
 import { buildPlainDiffLines, DIFF_MARKER, highlightDiffToLines, type DiffLine } from "@waypoint/web-core/highlight";
 import { compactDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
+import { splitPath } from "@waypoint/web-core/session/toolRun";
 
 import { cx } from "@/lib/cx";
 
+import { useSessionContext } from "../SessionContext";
 import styles from "./DiffBlock.module.css";
 import highlight from "./Highlight.module.css";
+import { PathLabel } from "./PathLabel";
 import { Tokens } from "./Tokens";
 
 const COMPACT_LINES = 6;
@@ -34,13 +37,23 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
 
   const rows = useMemo(() => compactDiff(lines, { maxLines: all ? Infinity : COMPACT_LINES }), [lines, all]);
   const change = displayChangeType(file);
+  const { cwd } = useSessionContext();
+  const shown = diffFilePathLabel(file, cwd);
+  const moved = Boolean(file.oldPath) && file.oldPath !== file.path;
+  const split = splitPath(shown);
 
   return (
     <div className={styles.file}>
       {showHeader ? (
         <div className={styles.head}>
           <span className={styles.change}>{change.label}</span>
-          <span className={styles.path}>{diffFilePathLabel(file)}</span>
+          {moved ? (
+            <span className={styles.path} title={diffFilePathLabel(file)}>
+              {shown}
+            </span>
+          ) : (
+            <PathLabel dir={split.dir} base={split.base} className={styles.path} title={diffFilePathLabel(file)} />
+          )}
           <span className={styles.stats}>
             <span className={styles.add}>+{file.additions}</span> <span className={styles.del}>−{file.deletions}</span>
           </span>
@@ -49,7 +62,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
       {file.unavailableReason ? (
         <p className={styles.note}>{file.unavailableReason}</p>
       ) : file.diff ? (
-        <div className={cx(styles.code, highlight.hl)} role="group" aria-label={`Diff for ${file.path}`}>
+        <div className={cx(styles.code, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
           {rows.map((row, index) => {
             if (row.kind === "fold") {
               return (

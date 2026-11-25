@@ -11,6 +11,7 @@ import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
 import { DiffBlock } from "./DiffBlock";
+import { PathLabel } from "./PathLabel";
 
 interface CallRowProps {
   row: CallRowModel;
@@ -60,10 +61,7 @@ export function CallRow({ row, sources }: CallRowProps) {
         {row.glyph}
       </span>
       {row.path ? (
-        <span className={cx(styles.label, styles.pathLabel)}>
-          <span className={styles.dir}>{row.path.dir}</span>
-          <span className={styles.base}>{row.path.base}</span>
-        </span>
+        <PathLabel dir={row.path.dir} base={row.path.base} className={styles.label} />
       ) : (
         <span className={cx(styles.label, row.mono && styles.mono, wrapped && styles.wrapped)}>{label}</span>
       )}
@@ -75,11 +73,11 @@ export function CallRow({ row, sources }: CallRowProps) {
     <>
       {/* A command or pattern can be long: its row opens to show it whole. */}
       {row.path || todos ? (
-        <div className={styles.call} title={row.label}>
+        <div className={styles.call} title={row.title}>
           {line}
         </div>
       ) : (
-        <button type="button" className={cx(styles.call, styles.tappable)} onClick={() => setWrapped((value) => !value)} aria-expanded={wrapped} title={row.label}>
+        <button type="button" className={cx(styles.call, styles.tappable)} onClick={() => setWrapped((value) => !value)} aria-expanded={wrapped} title={row.title}>
           {line}
         </button>
       )}

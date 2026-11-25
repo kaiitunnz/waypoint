@@ -19,8 +19,6 @@ export interface SessionStatus {
   word: string;
   // "Claude Code, Opus 5.5".
   agent: string;
-  // "Opus 5.5": the desktop header keeps it when the full label has no room.
-  model: string | null;
 }
 
 interface SessionBarProps {

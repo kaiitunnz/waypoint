@@ -7,6 +7,7 @@ import { formatEventTime } from "@waypoint/web-core/session/cardText";
 import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import type { TranscriptItem } from "@waypoint/web-core/session/transcript";
 
+import { useSessionContext } from "../SessionContext";
 import { CallRow } from "./CallRow";
 import { ChangesNote } from "./ChangesNote";
 import { RunLine } from "./RunLine";
@@ -40,8 +41,9 @@ function RunNote({ child }: { child: RunChild }) {
 
 // A run of tool calls: what was done in plain words, and each call as one row.
 export function ToolRun({ items, defaultOpen, working }: ToolRunProps) {
+  const { cwd } = useSessionContext();
   const summary = summarizeToolRun(items);
-  const calls = items.map((child) => ({ child, row: describeCall(child) }));
+  const calls = items.map((child) => ({ child, row: describeCall(child, cwd) }));
   const pending = calls.findLast(({ row }) => row?.status === "pending");
   const live = working && pending !== undefined;
   const step = live ? describeStep(pending.child.kind === "pair" ? (pending.child.pair.call ?? pending.child.event) : pending.child.event) : null;

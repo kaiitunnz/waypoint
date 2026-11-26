@@ -35,6 +35,12 @@
   visibility: hidden;
 }
 
+.placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+
 .resizer {
   position: absolute;
   top: 0;

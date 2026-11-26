@@ -81,7 +81,11 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
           </section>
           <div ref={detail} className={cx(styles.detail, !columns && selected === null && styles.off)}>
             {children}
-            {columns && selected === null ? <EmptyState title="Select an item to read it" /> : null}
+            {columns && selected === null ? (
+              <div className={styles.placeholder}>
+                <EmptyState title="Select an item to read it" />
+              </div>
+            ) : null}
           </div>
         </div>
       </NeedsYouContext.Provider>

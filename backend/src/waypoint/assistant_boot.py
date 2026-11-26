@@ -69,7 +69,7 @@ class AssistantBoot:
         stopped = await self.cancel_waiting()
         try:
             yield
-        except Exception:
+        except BaseException:
             if stopped:
                 self.start()
             raise

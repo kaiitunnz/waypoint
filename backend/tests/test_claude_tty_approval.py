@@ -999,6 +999,21 @@ def _make_transport(plugin: ClaudeTtyPlugin) -> tuple[ClaudeTtyTransport, MagicM
     return transport, tmux
 
 
+async def test_ready_for_input_reads_the_composer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport, tmux = _make_transport(ClaudeTtyPlugin())
+    session = _make_session()
+    tmux.capture_snapshot = AsyncMock(
+        side_effect=["booting", "❯ ", TmuxError("no pane"), TmuxError("no pane")]
+    )
+
+    results = [await transport.ready_for_input(session) for _ in range(4)]
+
+    assert results == [False, True, False, False]
+    assert caplog.text.count("no pane") == 1
+
+
 async def test_respond_approve_sends_digit_1_enter() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()

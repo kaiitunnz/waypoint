@@ -688,15 +688,10 @@ def test_send_input_waits_for_ready_before_pasting() -> None:
     assert captures_before_paste == 3  # two BOOTING frames, then ready
 
 
-def test_ready_for_input_follows_the_composer() -> None:
-    transport, _ = _transport_with(_AgentConfirmer(), boot_frames=1)
-    assert not asyncio.run(transport.ready_for_input(_session("codex")))
+def test_a_generic_pane_never_holds_a_release_back() -> None:
+    # It may run a TUI whose composer cannot be recognized.
+    transport, adapter = _transport_with(_AgentConfirmer(), boot_frames=99)
     assert asyncio.run(transport.ready_for_input(_session("codex")))
-
-
-def test_ready_for_input_without_pane_hooks() -> None:
-    transport, adapter = _transport_with(_PlainAgent())
-    assert asyncio.run(transport.ready_for_input(_session("opencode")))
     assert adapter.calls == []
 
 

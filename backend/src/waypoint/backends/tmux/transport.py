@@ -339,13 +339,3 @@ class TmuxTransport(TransportAdapter):
         except TmuxError:
             return False
         return confirmer.pane_shows_blocking_dialog(snapshot)
-
-    async def ready_for_input(self, session: SessionRecord) -> bool:
-        confirmer = self._confirmer(session)
-        if confirmer is None:
-            return True
-        try:
-            snapshot = await self.adapter.capture_snapshot(self._target(session))
-        except TmuxError:
-            return False
-        return confirmer.pane_ready_for_input(snapshot)

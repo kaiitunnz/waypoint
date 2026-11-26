@@ -325,18 +325,21 @@ A restore depends on the driver's `has_terminal_pane`:
   `starting` for at most `session_restore_timeout_seconds` (default 90).
   Requests that drive the agent return `409`. Agent sends, scheduled messages
   and wakes are held until the session can take them, from before a reconnect or
-  settings change stops the old process. The same timeout bounds what a
-  reconnect or settings change does before the restore. Terminate and delete
-  cancel the restore.
+  settings change stops the old process. The same timeout bounds stopping that
+  process; a later restart waits for a stop still running, or returns `409`.
+  Terminate and delete cancel the restore.
 - **Terminal pane** (tmux, `claude_tty`). The session keeps its status, and the
-  restore is unbounded and cannot be cancelled. A held message is released into
-  a pane only once `pane_ready_for_input` sees its input box.
+  restore is unbounded and cannot be cancelled. A transport's `ready_for_input`
+  holds a release back while its pane boots, which `claude_tty` reads from the
+  input box. If that does not show within the timeout, the message waits for the
+  session's next state change or a manual release.
 
 A restore that raises or times out records "Could not restore this session:
 <reason>. Reconnect to try again." A session without a pane becomes `error`, and
 messages held for it go out in order after a successful reconnect. An agent or
 scheduled send to an exited session that still holds messages reopens it and
-goes after them.
+goes after them. A held message whose send fails as a restart begins is sent
+again, so the agent can receive it twice.
 
 A plugin that raises in `setup`, `transport_view` or `register_routes` is
 unavailable, as is a backend or transport no plugin provides. It is logged by

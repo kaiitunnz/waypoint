@@ -13,6 +13,7 @@ Thin subclass of ``TmuxTransport`` that overrides:
 """
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 from waypoint.attachments import ResolvedAttachment
@@ -26,6 +27,8 @@ from waypoint.schemas import SessionRecord, SessionStatus
 if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
     from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.claude_tty")
 
 # Dialogs where Esc cancels the turn. Esc means something else on the
 # trust/model/effort popups, so the retry loop must not target those.
@@ -55,6 +58,8 @@ class ClaudeTtyTransport(TmuxTransport):
     def __init__(self, runtime: "SessionRuntime", plugin: "ClaudeTtyPlugin") -> None:
         super().__init__(runtime)
         self._plugin = plugin
+        # Sessions whose unreadable pane has been logged.
+        self._unreadable: set[str] = set()
 
     async def send_input(
         self,
@@ -114,6 +119,17 @@ class ClaudeTtyTransport(TmuxTransport):
         return self.has_pending_approval(session) or await super().input_blocked(
             session
         )
+
+    async def ready_for_input(self, session: SessionRecord) -> bool:
+        try:
+            snapshot = await self.adapter.capture_snapshot(self._target(session))
+        except TmuxError as exc:
+            if session.id not in self._unreadable:
+                self._unreadable.add(session.id)
+                log.warning("cannot read the pane of %s: %s", session.id, exc)
+            return False
+        self._unreadable.discard(session.id)
+        return pane_dialog.composer_ready(snapshot)
 
     async def respond_to_approval(
         self,

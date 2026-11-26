@@ -3450,23 +3450,26 @@ class SessionRuntime:
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
         self.require_drivable(session.id)
-        async with self._restarting(session.id):
-            return await self._reattach_locked(session.id)
+        async with self._restarting(session.id) as begin_teardown:
+            return await self._reattach_locked(session.id, begin_teardown)
 
     @asynccontextmanager
-    async def _restarting(self, session_id: str) -> AsyncIterator[None]:
+    async def _restarting(self, session_id: str) -> AsyncIterator[Callable[[], None]]:
         """Hold the session lock while its process is replaced: sends queue until
         it is over, and its notes leave the read marker."""
         try:
             # Serialized with terminate, reattach and the launch-settings switch.
             async with self._session_lock(session_id), self._keep_read(session_id):
-                async with self.restores.restarting(self.get_session(session_id)):
-                    yield
+                session = self.get_session(session_id)
+                async with self.restores.restarting(session) as begin_teardown:
+                    yield begin_teardown
         finally:
             # Release what queued meanwhile.
             self.held.drain({session_id})
 
-    async def _reattach_locked(self, session_id: str) -> SessionRecord:
+    async def _reattach_locked(
+        self, session_id: str, begin_teardown: Callable[[], None]
+    ) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
         # still be in `_sessions` — the stream/process watchers emit the
         # error event but do not pop the slot. Tear it down explicitly here
@@ -3486,7 +3489,10 @@ class SessionRuntime:
         await self._require_live_master(
             self._find_launch_target(session.launch_target_id)
         )
-        await self.restores.tear_down(plugin.terminate_session(self, session))
+        begin_teardown()
+        await self.restores.tear_down(
+            session.id, plugin.terminate_session(self, session)
+        )
         await self._cancel_context_usage_source(session.id)
         # User-initiated retry: bypass any per-target cooldown / circuit
         # breaker so the click takes effect immediately. Plugins without
@@ -3668,8 +3674,10 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="another lifecycle operation is in progress for this session",
             )
-        async with self._restarting(session_id):
-            await self._update_launch_settings_locked(session_id, request)
+        async with self._restarting(session_id) as begin_teardown:
+            await self._update_launch_settings_locked(
+                session_id, request, begin_teardown
+            )
         await self.broadcast_session_list()
         return self.get_session(session_id)
 
@@ -3681,7 +3689,10 @@ class SessionRuntime:
         )
 
     async def _update_launch_settings_locked(
-        self, session_id: str, request: LaunchSettingsUpdateRequest
+        self,
+        session_id: str,
+        request: LaunchSettingsUpdateRequest,
+        begin_teardown: Callable[[], None],
     ) -> None:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
@@ -4062,7 +4073,10 @@ class SessionRuntime:
         # the next input with "can't find pane". Native transports (claude_cli,
         # codex) relaunch unconditionally, so this is a no-op for them. The old
         # (current) plugin tears down; the target plugin restores.
-        await self.restores.tear_down(plugin.terminate_session(self, session))
+        begin_teardown()
+        await self.restores.tear_down(
+            session.id, plugin.terminate_session(self, session)
+        )
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
             session.id,

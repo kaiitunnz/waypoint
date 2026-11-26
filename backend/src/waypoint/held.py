@@ -54,6 +54,9 @@ class HeldQueue:
         self._draining: set[str] = set()
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
+        # Session id -> when its pane was first seen not taking input, or None
+        # once it is no longer polled.
+        self._unready_since: dict[str, float | None] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._stopped = False
 
@@ -249,6 +252,7 @@ class HeldQueue:
             or session.status in _UNDELIVERABLE
             or self._runtime.restores.pauses_delivery(session_id)
         ):
+            self._unready_since.pop(session_id, None)
             return
         async with self._send_locks[session_id]:
             for held in self._runtime.storage.list_held_messages(session_id):
@@ -271,13 +275,13 @@ class HeldQueue:
                 transport = self._runtime.transport_for(session)
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
-                # A message sent into a booting pane is lost, so a release waits
-                # for the pane however long it takes.
-                if await transport.input_blocked(session) or not (
-                    await transport.ready_for_input(session)
-                ):
+                if await transport.input_blocked(session):
                     self._retry_later(session_id)
                     break
+                if not await transport.ready_for_input(session):
+                    self._await_input_box(session_id)
+                    break
+                self._unready_since.pop(session_id, None)
                 record = self._runtime.storage.take_held_message(held.id)
                 if record is None:
                     continue
@@ -309,6 +313,20 @@ class HeldQueue:
             ):
                 return True
         return self._runtime.wake_eligible(session)
+
+    def _await_input_box(self, session_id: str) -> None:
+        """Check a pane that takes no input again, but only for the restore
+        timeout. A message sent into a booting pane is lost, so past that it
+        stays held until the session's next state change."""
+        now = asyncio.get_running_loop().time()
+        since = self._unready_since.setdefault(session_id, now)
+        if since is None:
+            return
+        if now - since < self._runtime.settings.session_restore_timeout_seconds:
+            self._retry_later(session_id)
+        else:
+            self._unready_since[session_id] = None
+            log.warning("messages held for %s wait for its input box", session_id)
 
     def _retry_later(self, session_id: str) -> None:
         if self._stopped or session_id in self._retries:

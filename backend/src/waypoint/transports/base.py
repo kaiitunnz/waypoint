@@ -65,8 +65,8 @@ class TransportAdapter(ABC):
         return False
 
     async def ready_for_input(self, session: SessionRecord) -> bool:
-        """Whether the session can be seen to take input. A transport over a
-        pane that is still booting reports False."""
+        """Whether a held message can go out now. A transport that can tell its
+        pane is still booting reports False."""
         return True
 
     async def resume(self, session: SessionRecord) -> bool:

@@ -7,7 +7,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -60,12 +60,12 @@ class RestoreCoordinator:
         # Bounded restores in flight, and ones a close stopped until it ends.
         self._restoring: dict[str, _Restore] = {}
         # Sessions whose process is being replaced, from before the old one
-        # goes, each with the deadline on getting to its restore.
+        # goes, each with the deadline on tearing it down.
         self._restarting: dict[str, asyncio.Timeout] = {}
         # Sessions being closed, which take no new restore.
         self._closing: Counter[str] = Counter()
         # Teardowns in flight, which can outlive the request that began them.
-        self._teardowns: set[asyncio.Task[None]] = set()
+        self._teardowns: dict[str, asyncio.Task[None]] = {}
 
     def spawn_boot(self, session_id: str, boot: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(boot, name=f"restore-{session_id}")
@@ -93,18 +93,26 @@ class RestoreCoordinator:
             )
 
     @asynccontextmanager
-    async def restarting(self, session: SessionRecord) -> AsyncIterator[None]:
+    async def restarting(
+        self, session: SessionRecord
+    ) -> AsyncIterator[Callable[[], None]]:
         """Queue sends from before a reattach or settings change tears the old
-        process down, and bound what precedes its restore. The caller holds the
-        session lock."""
+        process down. The caller holds the session lock, and calls the yielded
+        function as the teardown begins, which bounds it like the restore."""
         if not self._is_bounded(session):
-            yield
+            await self._await_earlier_teardown(session.id)
+            yield lambda: None
             return
-        deadline = asyncio.timeout(self._timeout)
+        deadline = asyncio.timeout(None)
+
+        def start_clock() -> None:
+            deadline.reschedule(asyncio.get_running_loop().time() + self._timeout)
+
+        self._restarting[session.id] = deadline
         try:
+            await self._await_earlier_teardown(session.id)
             async with deadline:
-                self._restarting[session.id] = deadline
-                yield
+                yield start_clock
         except TimeoutError:
             if not deadline.expired():
                 raise
@@ -134,13 +142,27 @@ class RestoreCoordinator:
                 # Any entry left is a restore this close stopped.
                 self._restoring.pop(session_id, None)
 
-    async def tear_down(self, teardown: Coroutine[Any, Any, None]) -> None:
+    async def tear_down(
+        self, session_id: str, teardown: Coroutine[Any, Any, None]
+    ) -> None:
         """Await ``teardown`` without cancelling it: one cut short leaves its
         process running and untracked."""
         task = asyncio.create_task(teardown)
-        self._teardowns.add(task)
-        task.add_done_callback(self._teardowns.discard)
+        self._teardowns[session_id] = task
+        task.add_done_callback(lambda _: self._teardowns.pop(session_id, None))
         await asyncio.shield(task)
+
+    async def _await_earlier_teardown(self, session_id: str) -> None:
+        """Wait for a teardown an earlier request stopped waiting for, so no
+        process starts beside the one still going: its adapter has already
+        forgotten it."""
+        if earlier := self._teardowns.get(session_id):
+            done, _ = await asyncio.wait({earlier}, timeout=self._timeout)
+            if not done:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="the previous process is still shutting down",
+                )
 
     async def run(
         self, session: SessionRecord, restore: Restore
@@ -177,9 +199,10 @@ class RestoreCoordinator:
         await asyncio.gather(*map(_stop, list(self._restoring.values())))
         if self._teardowns:
             _, stuck = await asyncio.wait(
-                self._teardowns, timeout=TEARDOWN_STOP_GRACE_SECONDS
+                self._teardowns.values(), timeout=TEARDOWN_STOP_GRACE_SECONDS
             )
-            await cancel_and_wait(*stuck)
+            with suppress(Exception):
+                await cancel_and_wait(*stuck)
 
     def _is_bounded(self, session: SessionRecord) -> bool:
         plugin = self._runtime.registry.plugin_for(session)

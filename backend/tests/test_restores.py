@@ -520,13 +520,23 @@ async def test_a_cancelled_reopening_send_leaves_no_copy_behind(
         assert held_texts(runtime.storage, "s1") == ["old"]
 
 
+async def fail_when_cancelled(*_args: Any) -> None:
+    try:
+        await hang()
+    finally:
+        raise RuntimeError("teardown failed")
+
+
+@pytest.mark.parametrize("teardown", [hang, fail_when_cancelled])
 async def test_shutdown_does_not_wait_long_for_a_hung_teardown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    teardown: Callable[..., Awaitable[None]],
 ) -> None:
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
     stub_restores(monkeypatch, {})
-    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", hang)
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", teardown)
 
     async with asyncio.timeout(3):
         async with started(runtime):
@@ -629,8 +639,10 @@ async def test_sends_held_through_a_switch_to_a_pane_wait_for_its_input_box(
         return False
 
     booted = asyncio.Event()
+    checks: list[bool] = []
 
     async def ready(*_args: Any) -> bool:
+        checks.append(booted.is_set())
         return booted.is_set()
 
     monkeypatch.setattr(runtime, "dispatch_input", dispatch)
@@ -656,7 +668,12 @@ async def test_sends_held_through_a_switch_to_a_pane_wait_for_its_input_box(
         await asyncio.sleep(0.8)
         assert sent == []
         assert held_texts(runtime.storage, "s1") == ["wake", "one", "two"]
+        # Nor is it polled past that: the next state change checks again.
+        polled = len(checks)
+        await asyncio.sleep(0.3)
+        assert len(checks) == polled
         booted.set()
+        runtime.held.drain({"s1"})
         await until(lambda: sent == ["wake", "one", "two"])
 
 
@@ -737,6 +754,61 @@ async def test_a_hung_teardown_is_bounded_and_keeps_held_sends(
         # The teardown was left to finish, not cut short.
         release.set()
         await asyncio.wait_for(torn_down.wait(), timeout=2)
+
+
+async def test_a_slow_step_before_teardown_is_not_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.2)
+    add_session(runtime, "s1", status=SessionStatus.RUNNING)
+    stub_restores(monkeypatch, {})
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", noop)
+    transport = runtime.transport_for(stored(runtime, "s1"))
+
+    async def slow_flush(*_args: Any) -> None:
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(transport, "interrupt", noop)
+    monkeypatch.setattr(transport, "flush_before_restart", slow_flush)
+
+    updated = await change_settings(runtime)
+
+    assert updated.status == SessionStatus.IDLE
+    assert "timed out" not in notes(runtime, "s1")
+
+
+async def test_a_retry_never_overlaps_a_teardown_still_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=0.2)
+    add_session(runtime, "s1", status=SessionStatus.EXITED)
+    release = asyncio.Event()
+    steps: list[str] = []
+
+    async def stuck_teardown(*_args: Any) -> None:
+        steps.append("teardown")
+        await release.wait()
+        steps.append("torn down")
+
+    async def restore(runtime: SessionRuntime, session: SessionRecord) -> None:
+        steps.append("restore")
+        await restore_idle(runtime, session)
+
+    monkeypatch.setattr(
+        get_registry().get("codex"), "terminate_session", stuck_teardown
+    )
+    stub_restores(monkeypatch, {"s1": restore})
+
+    async with asyncio.timeout(5):
+        await assert_refused(runtime.reattach("s1"), 504)
+        await assert_refused(runtime.reattach("s1"), 409, "still shutting down")
+        assert steps == ["teardown"]
+        retry = asyncio.create_task(runtime.reattach("s1"))
+        await asyncio.sleep(0.05)
+        release.set()
+        await retry
+
+    assert steps == ["teardown", "torn down", "teardown", "torn down", "restore"]
 
 
 async def test_a_restart_stops_a_delivery_already_under_way(

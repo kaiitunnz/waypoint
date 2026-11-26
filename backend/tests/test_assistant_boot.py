@@ -161,8 +161,9 @@ async def test_reset_gets_past_a_hung_pane_restore(
         assert summary.session_id == "fresh"
 
 
-async def test_a_failed_reset_leaves_the_setup_to_finish(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_a_reset_that_fails_leaves_the_setup_to_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel: bool
 ) -> None:
     runtime = make_runtime(tmp_path, **assistant_settings())
     add_assistant(runtime, transport="tmux")
@@ -178,10 +179,16 @@ async def test_a_failed_reset_leaves_the_setup_to_finish(
 
     async with started(runtime):
         monkeypatch.setattr(
-            runtime, "_create_assistant_session", raising_async("cannot launch")
+            runtime,
+            "_create_assistant_session",
+            hang if cancel else raising_async("cannot launch"),
         )
-        with pytest.raises(RuntimeError):
-            await runtime.reset_assistant()
+        reset = asyncio.create_task(runtime.reset_assistant())
+        if cancel:
+            await asyncio.sleep(0.05)
+            reset.cancel()
+        with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
+            await reset
         stub_assistant_creation(runtime, monkeypatch)
         release.set()
         # An errored pane assistant is replaced once its restore ends.

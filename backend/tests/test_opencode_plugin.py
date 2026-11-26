@@ -537,6 +537,40 @@ async def test_a_mode_change_applies_the_agent_and_rules_at_once(
 
 
 @pytest.mark.asyncio
+async def test_plan_is_never_the_agent_plan_mode_returns_to() -> None:
+    plugin = OpenCodePlugin()
+    session = _session(permission_mode="ask")
+    runtime = _runtime(session)
+    # An imported thread last used on the plan agent.
+    adapter = _mode_adapter("plan")
+    _live(plugin, runtime, session, adapter)
+
+    await plugin.apply_permission_mode(runtime, session, "plan")
+    session.permission_mode = "plan"
+    await plugin.apply_permission_mode(runtime, session, "ask")
+
+    assert adapter.set_agent.await_args_list[-1].args == ("sess", "build")
+    adapter.default_agent.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_mode_whose_rules_cannot_be_read_changes_nothing() -> None:
+    plugin = OpenCodePlugin()
+    session = _session(permission_mode="ask")
+    runtime = _runtime(session)
+    adapter = _mode_adapter("build")
+    adapter.agent_rules.side_effect = OpenCodeError("failed to list opencode agents")
+    _live(plugin, runtime, session, adapter)
+
+    with pytest.raises(HTTPException) as refused:
+        await plugin.apply_permission_mode(runtime, session, "plan")
+
+    assert refused.value.status_code == 400
+    adapter.set_agent.assert_not_awaited()
+    adapter.set_session_permission.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_leaving_plan_mode_returns_to_the_agent_used_before_it() -> None:
     plugin = OpenCodePlugin()
     session = _session(permission_mode="ask")

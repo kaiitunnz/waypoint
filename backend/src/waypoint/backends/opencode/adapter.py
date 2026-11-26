@@ -1712,18 +1712,23 @@ class OpenCodeAdapter:
             state.agent = previous
             raise OpenCodeError(f"failed to select the agent: {exc}") from exc
 
+    async def _agents(self) -> list[Any]:
+        await self.start()
+        try:
+            return await self._settled_list("/api/agent")
+        except Exception as exc:
+            raise OpenCodeError(f"failed to list opencode agents: {exc}") from exc
+
     async def agent_rules(self, agent: str) -> list[dict[str, str]]:
         """The permission rules an agent of the server brings."""
-        await self.start()
-        for item in await self._settled_list("/api/agent"):
+        for item in await self._agents():
             if isinstance(item, dict) and item.get("id") == agent:
                 return list(item.get("permissions") or [])
         raise OpenCodeError(f"the opencode server has no {agent} agent")
 
     async def default_agent(self) -> str:
         """The server's first primary agent other than plan."""
-        await self.start()
-        for item in await self._settled_list("/api/agent"):
+        for item in await self._agents():
             if (
                 isinstance(item, dict)
                 and item.get("mode") in ("primary", "all")
@@ -1850,13 +1855,17 @@ class OpenCodeAdapter:
         """The model's effort variants, or ``None`` when the catalog cannot be
         read."""
         if (entry := self._cached_model(model)) is None:
+            failed_at = self._models_failed_at
+            if failed_at and time.monotonic() - failed_at < CATALOG_RETRY_SECONDS:
+                return () if self._models else None
             try:
                 await self.list_models()
             except Exception as exc:  # noqa: BLE001
                 log.debug("failed to list opencode models: %s", exc)
+            entry = self._cached_model(model)
+            self._models_failed_at = None if entry else time.monotonic()
             if not self._models:
                 return None
-            entry = self._cached_model(model)
         return entry.variants if entry else ()
 
     async def _model(self, model: str) -> Model | None:

@@ -187,6 +187,21 @@ async def test_an_effort_is_kept_while_the_catalog_cannot_be_read(
 
 
 @pytest.mark.asyncio
+async def test_a_catalog_that_stays_empty_is_not_relisted_on_each_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "CATALOG_SETTLE_SECONDS", 0.0)
+    fake = _fake()
+    fake.unsettled = 100
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter, model="opencode/big-pickle")
+        for effort in ("low", "high", "max"):
+            assert await adapter.set_effort("local", effort)
+
+    assert len(fake.calls("GET", "/api/model")) == 1
+
+
+@pytest.mark.asyncio
 async def test_an_effort_without_a_model_goes_to_the_default_model() -> None:
     fake = FakeOpenCode()
     async with driving(fake) as (adapter, _emitted):
@@ -1120,6 +1135,9 @@ async def test_agents_come_from_the_servers_catalog() -> None:
         assert (await adapter.agent_rules("plan"))[-1]["effect"] == "deny"
         with pytest.raises(OpenCodeError, match="no review agent"):
             await adapter.agent_rules("review")
+        fake.failures[("GET", "/api/agent")] = 500
+        with pytest.raises(OpenCodeError, match="failed to list opencode agents"):
+            await adapter.default_agent()
 
 
 @pytest.mark.parametrize("ask_id", ["per_1", "frm_1"])

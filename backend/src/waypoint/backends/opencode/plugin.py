@@ -774,6 +774,8 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         adapter = self._live_adapter(runtime, session)
         try:
+            # Before any switch, so a failed fetch changes nothing.
+            rules = await _rules_for_mode(adapter, mode)
             if mode == "plan":
                 in_plan = session.permission_mode == "plan"
                 pre_plan_mode = (
@@ -786,6 +788,8 @@ class OpenCodePlugin(DefaultLaunchContract):
                     if in_plan
                     else adapter.get_agent(session.id)
                 )
+                if pre_plan_agent == "plan":
+                    pre_plan_agent = None
                 adapter.set_pre_plan_mode(session.id, pre_plan_mode)
                 success = await adapter.set_agent(session.id, "plan")
                 persisted: dict[str, Any] = {
@@ -806,7 +810,6 @@ class OpenCodePlugin(DefaultLaunchContract):
                     "pre_plan_mode": None,
                     "pre_plan_agent": None,
                 }
-            rules = await _rules_for_mode(adapter, mode)
         except OpenCodeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)

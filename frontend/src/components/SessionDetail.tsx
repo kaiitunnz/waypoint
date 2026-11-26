@@ -2635,11 +2635,8 @@ const ReplyComposer = memo(function ReplyComposer({
   >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
-  // CSS (:focus-within) so focusing the field never triggers a React re-render
-  // that could drop focus mid-gesture. The chevron re-opens them by forcing
-  // `lead-forced`, which overrides the focus-within collapse; typing or
-  // blurring clears it.
+  // The leading actions collapse in CSS, since a re-render on focus can drop focus
+  // mid-gesture. `lead-forced` overrides the collapse until typing or blur.
   const [leadForced, setLeadForced] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2779,6 +2776,7 @@ const ReplyComposer = memo(function ReplyComposer({
     if ((!text && attachmentIds.length === 0) || attachments.uploading) {
       return;
     }
+    closeSendMenu();
     setSending(true);
     setDraft("");
     const invocation = selectedCommandInvocation(text);
@@ -3423,132 +3421,136 @@ const ReplyComposer = memo(function ReplyComposer({
         </div>
       </div>
       <div className={`composer-bar${leadForced ? " lead-forced" : ""}`}>
-      <button
-        type="button"
-        className="composer-lead-expand"
-        onClick={() => {
-          setLeadForced(true);
-          textareaRef.current?.focus();
-        }}
-        aria-label="Show actions"
-        title="Show actions"
-      >
-        ›
-      </button>
-      <button
-        type="button"
-        className={`composer-interrupt-btn${stopping ? " is-stopping" : ""}`}
-        onClick={async () => {
-          if (stopping) return;
-          setStopping(true);
-          try {
-            await onInterrupt();
-          } finally {
-            setStopping(false);
-          }
-        }}
-        disabled={disabled}
-        aria-busy={stopping || undefined}
-        aria-label={stopping ? "Stopping…" : "Interrupt the agent"}
-        title={stopping ? "Stopping…" : "Interrupt the agent"}
-      >
-        <span className="glyph" aria-hidden>
-          ■
-        </span>
-      </button>
-      <div className="reply-textarea-wrap">
-        {attachmentsEnabled ? (
-          <AttachmentTray
-            items={attachments.items}
-            onRemove={attachments.remove}
-            onRetry={attachments.retry}
-            onClear={attachments.discardAll}
-          />
-        ) : null}
-        <textarea
-          ref={textareaRef}
-          className="composer-textarea"
-          rows={1}
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setLeadForced(false);
+        <button
+          type="button"
+          className={`composer-interrupt-btn${stopping ? " is-stopping" : ""}`}
+          onClick={async () => {
+            if (stopping) return;
+            setStopping(true);
+            try {
+              await onInterrupt();
+            } finally {
+              setStopping(false);
+            }
           }}
-          onBlur={() => setLeadForced(false)}
-          onKeyDown={handleDraftKeyDown}
-          onPaste={handlePaste}
           disabled={disabled}
-          placeholder={placeholder}
-          aria-label="Reply"
-        />
-        <div className="composer-send-wrap" ref={sendWrapRef} {...sendWrapProps}>
+          aria-busy={stopping || undefined}
+          aria-label={stopping ? "Stopping…" : "Interrupt the agent"}
+          title={stopping ? "Stopping…" : "Interrupt the agent"}
+        >
+          <span className="glyph" aria-hidden>
+            ■
+          </span>
+        </button>
+        <div className="composer-entry">
           <button
-            ref={sendButtonRef}
             type="button"
-            className="composer-send"
-            {...sendTriggerProps}
-            disabled={sendDisabled}
-            aria-label="Send"
-            aria-haspopup="menu"
-            aria-expanded={sendMenuOpen}
-            title="Send (⌘/Ctrl + ↵) — hold for delivery options"
+            className="composer-lead-expand"
+            // Keeps the field focused where a press doesn't focus the button itself.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              setLeadForced(true);
+              textareaRef.current?.focus();
+            }}
+            aria-label="Show actions"
+            title="Show actions"
           >
-            <span className="composer-send-glyph" aria-hidden>
-              {sending || idleSending ? "…" : "↑"}
-            </span>
+            ›
           </button>
-          {sendMenuOpen ? (
-            <div
-              className="composer-send-menu"
-              role="menu"
-              aria-label="Send options"
-              {...sendMenuProps}
-            >
-              {SEND_MODES.map((mode, index) => (
-                <button
-                  key={mode.value}
-                  ref={(el) => {
-                    sendMenuItemRefs.current[index] = el;
-                  }}
-                  type="button"
-                  role="menuitem"
-                  className="composer-send-menu-item"
-                  onClick={() => runSendMode(mode.value)}
-                  disabled={sendDisabled}
-                  title={mode.hint}
+          <div className="reply-textarea-wrap">
+            {attachmentsEnabled ? (
+              <AttachmentTray
+                items={attachments.items}
+                onRemove={attachments.remove}
+                onRetry={attachments.retry}
+                onClear={attachments.discardAll}
+              />
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              className="composer-textarea"
+              rows={1}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setLeadForced(false);
+              }}
+              onBlur={() => setLeadForced(false)}
+              onKeyDown={handleDraftKeyDown}
+              onPaste={handlePaste}
+              disabled={disabled}
+              placeholder={placeholder}
+              aria-label="Reply"
+            />
+            <div className="composer-send-wrap" ref={sendWrapRef} {...sendWrapProps}>
+              <button
+                ref={sendButtonRef}
+                type="button"
+                className="composer-send"
+                {...sendTriggerProps}
+                disabled={sendDisabled}
+                aria-label="Send"
+                aria-haspopup="menu"
+                aria-expanded={sendMenuOpen}
+                title="Send (⌘/Ctrl + ↵) — hold for delivery options"
+              >
+                <span className="composer-send-glyph" aria-hidden>
+                  {sending || idleSending ? "…" : "↑"}
+                </span>
+              </button>
+              {sendMenuOpen ? (
+                <div
+                  className="composer-send-menu"
+                  role="menu"
+                  aria-label="Send options"
+                  {...sendMenuProps}
                 >
-                  <span className="composer-send-menu-icon" aria-hidden>
-                    {mode.value === "now" ? "↑" : "◷"}
-                  </span>
-                  <span className="composer-send-menu-label">{mode.label}</span>
-                </button>
-              ))}
+                  {SEND_MODES.map((mode, index) => (
+                    <button
+                      key={mode.value}
+                      ref={(el) => {
+                        sendMenuItemRefs.current[index] = el;
+                      }}
+                      type="button"
+                      role="menuitem"
+                      className="composer-send-menu-item"
+                      onClick={() => runSendMode(mode.value)}
+                      disabled={sendDisabled}
+                      title={mode.hint}
+                    >
+                      <span className="composer-send-menu-icon" aria-hidden>
+                        {mode.value === "now" ? "↑" : "◷"}
+                      </span>
+                      <span className="composer-send-menu-label">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+            {suggestionsOpen ? (
+              <CommandSuggestions
+                ref={suggestionsRef}
+                suggestions={suggestions}
+                activeIndex={activeIndex}
+                itemRefs={suggestionItemRefs}
+                onApply={applySuggestion}
+                onHover={setActiveIndex}
+              />
+            ) : null}
+            {mentions.open ? (
+              <FileMentions
+                host={host}
+                token={token}
+                sessionId={sessionId}
+                mentions={mentions.mentions}
+                activeIndex={mentions.activeIndex}
+                itemRefs={mentions.itemRefs}
+                onApply={mentions.apply}
+                onHover={mentions.setActiveIndex}
+              />
+            ) : null}
+          </div>
         </div>
-        {suggestionsOpen ? (
-          <CommandSuggestions
-            ref={suggestionsRef}
-            suggestions={suggestions}
-            activeIndex={activeIndex}
-            itemRefs={suggestionItemRefs}
-            onApply={applySuggestion}
-            onHover={setActiveIndex}
-          />
-        ) : null}
-        {mentions.open ? (
-          <FileMentions
-            host={host}
-            token={token}
-            sessionId={sessionId}
-            mentions={mentions.mentions}
-            activeIndex={mentions.activeIndex}
-            itemRefs={mentions.itemRefs}
-            onApply={mentions.apply}
-            onHover={mentions.setActiveIndex}
-          />
-        ) : null}
-      </div>
         {attachmentsEnabled ? (
           <input
             ref={fileInputRef}

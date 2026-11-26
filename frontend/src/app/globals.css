@@ -7814,13 +7814,18 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
     0 0 0 3px rgba(200, 169, 106, 0.16);
 }
 
-/* The ›-chevron stand-in for the leading cluster. It is always in the DOM but
- * only shown (and the ⊕/📎 collapsed) while the field is focused — driven by
- * CSS :focus-within, so focusing never re-renders and can't drop focus.
- * `lead-forced` (set when the chevron is tapped) reverses it back to ⊕/📎. */
+/* The input pill and its ›-chevron. An element of its own, so :focus-within
+ * holds while focus moves between the two. */
+.composer-entry {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 .composer-lead-expand {
   display: none;
-  order: -4;
   flex: 0 0 auto;
   align-self: flex-end;
   width: 32px;
@@ -7846,13 +7851,14 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   border-radius: 8px;
 }
 
-/* Focused (and not force-opened): show the chevron, collapse ⊕ + 📎. */
-.composer-bar:focus-within:not(.lead-forced) .composer-lead-expand {
+/* Scoped to the entry: a leading button takes focus on mousedown
+ * and must stay put to receive the click. */
+.composer-bar:has(.composer-entry:focus-within):not(.lead-forced) .composer-lead-expand {
   display: inline-flex;
 }
-.composer-bar:focus-within:not(.lead-forced) .composer-plus,
-.composer-bar:focus-within:not(.lead-forced) .composer-interrupt-btn,
-.composer-bar:focus-within:not(.lead-forced) .composer-attach-btn {
+.composer-bar:has(.composer-entry:focus-within):not(.lead-forced) .composer-plus,
+.composer-bar:has(.composer-entry:focus-within):not(.lead-forced) .composer-interrupt-btn,
+.composer-bar:has(.composer-entry:focus-within):not(.lead-forced) .composer-attach-btn {
   display: none;
 }
 
@@ -10332,8 +10338,6 @@ html[data-theme="light"] .term-compose-handle:hover {
     0 0 0 3px rgba(200, 169, 106, 0.16);
 }
 
-/* ›-chevron: shown (and 📁/📎 collapsed) only while focused, via CSS
- * :focus-within — no re-render on focus. `lead-forced` reverses it. */
 .term-compose-lead-expand {
   display: none;
   flex: 0 0 auto;
@@ -10352,10 +10356,10 @@ html[data-theme="light"] .term-compose-handle:hover {
   outline-offset: 2px;
   border-radius: 8px;
 }
-.term-compose-field:focus-within:not(.lead-forced) .term-compose-lead-expand {
+.term-compose-field:has(.composer-entry:focus-within):not(.lead-forced) .term-compose-lead-expand {
   display: inline-flex;
 }
-.term-compose-field:focus-within:not(.lead-forced) .term-compose-act {
+.term-compose-field:has(.composer-entry:focus-within):not(.lead-forced) .term-compose-act {
   display: none;
 }
 

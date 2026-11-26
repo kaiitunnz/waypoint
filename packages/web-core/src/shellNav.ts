@@ -39,6 +39,11 @@ export function activeNavKey(pathname: string): NavKey | null {
   return null;
 }
 
+// Device and server preferences: a page outside the navigation, one path per section.
+export const SETTINGS_HREF = "/settings";
+export const settingsSectionHref = (id: string) => `${SETTINGS_HREF}/${encodeURIComponent(id)}`;
+export const isSettingsPath = (pathname: string) => isUnder(normalize(pathname), SETTINGS_HREF);
+
 // The touch tab bar shows on the top-level screens only. A session, a single
 // needs-you item and the assistant take the whole screen.
 export function showsTabBar(pathname: string): boolean {

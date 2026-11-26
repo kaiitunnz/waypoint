@@ -673,8 +673,7 @@ def _due_launch(runtime: SessionRuntime, seconds_ago: float = 1, **timing: Any):
         ScheduleCreateRequest(backend="codex", cwd="/tmp/project", **timing)
     )
     runtime.storage.update_schedule(
-        schedule.id,
-        scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago),
+        schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago)
     )
     return schedule
 

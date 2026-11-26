@@ -30,6 +30,13 @@ describe("compactDiff", () => {
     expect(kinds(DIFF)).toEqual(["del:old", "add:new", "fold:4", "add:tail"]);
   });
 
+  it("keeps the folded lines where the diff has them, and none between hunks", () => {
+    const folds = (diff: string) =>
+      compactDiff(buildPlainDiffLines(diff)).flatMap((row) => (row.kind === "fold" ? [row.lines?.map((line) => line.tokens[0].text) ?? null] : []));
+    expect(folds(DIFF)).toEqual([["c5", "c6", "c7", "c8"]]);
+    expect(folds("@@ -1,2 +1,2 @@\n-a\n+b\n@@ -20,2 +20,2 @@\n-c\n+d")).toEqual([null]);
+  });
+
   it("drops file and hunk headers", () => {
     expect(kinds(DIFF).some((row) => row.startsWith("meta") || row.startsWith("hunk"))).toBe(false);
   });

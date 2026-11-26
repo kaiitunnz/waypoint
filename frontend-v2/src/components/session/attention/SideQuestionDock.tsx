@@ -19,23 +19,17 @@ import { Strip } from "./Strip";
 
 interface SideQuestionDockProps {
   questions: Iterable<SideQuestion>;
-  // Counts live arrivals; a new one opens the panel.
-  arrivals: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-export function SideQuestionDock({ questions, arrivals }: SideQuestionDockProps) {
+export function SideQuestionDock({ questions, open, onOpenChange }: SideQuestionDockProps) {
   const { host, token, sessionId } = useSessionContext();
   const router = useRouter();
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
   const [dismissing, setDismissing] = useState<Set<string>>(new Set());
   const [forking, setForking] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const [seen, setSeen] = useState(arrivals);
-  if (arrivals !== seen) {
-    setSeen(arrivals);
-    if (arrivals > seen) setOpen(true);
-  }
   const sorted = sortedSideQuestions(questions);
   const count = sorted.length;
 
@@ -79,9 +73,9 @@ export function SideQuestionDock({ questions, arrivals }: SideQuestionDockProps)
         count={count > 1 ? count : undefined}
         ariaLabel={`${title}: ${count}`}
         open={open}
-        onToggle={() => setOpen(!open)}
+        onToggle={() => onOpenChange(!open)}
       />
-      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={title} width={420} side="top" resizeKey="side-questions">
+      <Flyout open={open} onClose={() => onOpenChange(false)} triggerRef={trigger} title={title} width={420} side="top" resizeKey="side-questions">
         <Panel
           title={title}
           count={count}

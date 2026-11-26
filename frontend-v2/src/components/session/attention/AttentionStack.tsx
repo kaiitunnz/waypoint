@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cancelHeldMessages, isAuthError, releaseHeldMessages } from "@waypoint/web-core/api";
 import {
@@ -66,6 +66,14 @@ export function AttentionStack({
   const { host, token, sessionId } = useSessionContext();
   const { toast } = useToast();
   const root = useRef<HTMLDivElement>(null);
+  // Held here, where it survives the side-question strip mounting with its first aside:
+  // a live aside's arrival opens the panel.
+  const [asidesOpen, setAsidesOpen] = useState(false);
+  const [seenArrivals, setSeenArrivals] = useState(sideQuestionArrivals);
+  if (sideQuestionArrivals !== seenArrivals) {
+    setSeenArrivals(sideQuestionArrivals);
+    if (sideQuestionArrivals > seenArrivals) setAsidesOpen(true);
+  }
 
   const approvals = useMemo(
     () => (supportsStructuredApproval(session.transport, catalog) ? findPendingApprovals(events) : []),
@@ -132,7 +140,7 @@ export function AttentionStack({
             onReleaseAll={() => run(() => releaseHeldMessages(host, token, { sessionId }), "Could not release the messages")}
             onCancelAll={() => run(() => cancelHeldMessages(host, token, { sessionId }), "Could not cancel the messages")}
           />
-          <SideQuestionDock questions={sideQuestions.items.values()} arrivals={sideQuestionArrivals} />
+          <SideQuestionDock questions={sideQuestions.items.values()} open={asidesOpen} onOpenChange={setAsidesOpen} />
         </div>
       ) : null}
     </div>

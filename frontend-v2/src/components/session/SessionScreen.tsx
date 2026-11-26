@@ -89,15 +89,20 @@ export function SessionScreen({ id }: { id: string }) {
   const goHome = useCallback(() => router.replace("/"), [router]);
   const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
   // A second reattach would restart the session the first one restored.
+  // The menu and the question form both reattach; the ref stops a second tap before a render.
   const [reconnecting, setReconnecting] = useState(false);
-  const reconnect = async () => {
+  const reconnectingRef = useRef(false);
+  const reconnect = useCallback(async () => {
+    if (reconnectingRef.current) return;
+    reconnectingRef.current = true;
     setReconnecting(true);
     try {
       await reattach(id);
     } finally {
+      reconnectingRef.current = false;
       setReconnecting(false);
     }
-  };
+  }, [reattach, id]);
 
   // A failed first load fills the page; any later failure is a toast.
   const { error, errorCount } = stream;
@@ -162,7 +167,7 @@ export function SessionScreen({ id }: { id: string }) {
     [toast],
   );
   const dormant = composerAvailability(session, catalog).dormant;
-  const reattachForAsk = useCallback(() => void reattach(id), [reattach, id]);
+  const reattachForAsk = useCallback(() => void reconnect(), [reconnect]);
   const askController = useAskQuestionState({
     host,
     token,
@@ -205,7 +210,9 @@ export function SessionScreen({ id }: { id: string }) {
     [density, setDensity],
   );
   // The deferred turns must have caught up before the card can be on the page.
-  const reveal = revealing && revealLoaded && rendered === events ? { toolUseId: revealing.toolUseId, seq: revealing.seq } : null;
+  const revealReady = revealing !== null && revealLoaded && rendered === events;
+  // One object per request, so the transcript's search is not restarted by an unrelated render.
+  const reveal = useMemo(() => (revealReady ? revealing : null), [revealReady, revealing]);
 
   const asking = feed.askSessionIds.has(id);
   const standing = session ? sessionStanding(session, asking || (pendingQuestions?.questions.length ?? 0) > 0, connection) : null;

@@ -46,6 +46,8 @@ export function useAttachments({
   // Unsent uploads, to free if the page goes first. A ref, so the handler below
   // reads the latest without re-subscribing.
   const orphanRef = useRef<string[]>([]);
+  // Uploads a send in flight refers to, which leaving must not delete.
+  const sendingRef = useRef<Set<string>>(new Set());
   const credsRef = useRef({ host, token, sessionId });
 
   const revoke = useCallback((url?: string) => {
@@ -77,6 +79,7 @@ export function useAttachments({
     const flush = () => {
       const { host: h, token: t, sessionId: s } = credsRef.current;
       for (const id of orphanRef.current) {
+        if (sendingRef.current.has(id)) continue;
         void deleteAttachment(h, t, s, id, { keepalive: true }).catch(() => {});
       }
       orphanRef.current = [];
@@ -241,6 +244,15 @@ export function useAttachments({
     [revoke],
   );
 
+  // Holds files out of the unsent set while a request naming them is in flight.
+  // Call what it returns if the request fails.
+  const hold = useCallback((ids: readonly string[]) => {
+    for (const id of ids) sendingRef.current.add(id);
+    return () => {
+      for (const id of ids) sendingRef.current.delete(id);
+    };
+  }, []);
+
   // Frees the server blobs too: only for files that were never sent.
   const discardAll = useCallback(() => {
     setItems((prev) => {
@@ -269,6 +281,7 @@ export function useAttachments({
     attachedIds,
     clear,
     release,
+    hold,
     discardAll,
     uploading,
     readyIds,

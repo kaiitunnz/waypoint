@@ -101,6 +101,8 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     saving.current = true;
     setSubmitting(true);
     setError(null);
+    // Leaving mid-save must not delete the files the reply is naming.
+    const letGo = attachments.hold(attachments.readyIds);
     try {
       await submitInboxBlock(host, token, item.id, block.id, body);
       if (body.reply) sentFiles.current = body.reply.attachments ?? [];
@@ -109,6 +111,7 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
       setNotes(notes.trim());
       setEditing(false);
     } catch (reason) {
+      letGo();
       setError(reason instanceof Error ? reason.message : "failed to submit");
     } finally {
       saving.current = false;

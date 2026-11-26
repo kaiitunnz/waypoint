@@ -10,6 +10,18 @@
   max-width: 900px;
 }
 
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scope {
+  padding: 16px 12px 4px 0;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
 .section {
   scroll-margin-top: 16px;
 }

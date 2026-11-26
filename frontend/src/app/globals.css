@@ -7831,7 +7831,6 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
  * it back to ⊕/📎. */
 .composer-lead-expand {
   display: none;
-  order: -4;
   flex: 0 0 auto;
   align-self: flex-end;
   width: 32px;

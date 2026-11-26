@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   connectSessionsSocket,
@@ -11,9 +11,11 @@ import {
   isAuthError,
   parseLiveSessionList,
 } from "../api";
+import { parseInboxUpdate } from "../inbox";
 import { applyPendingAsksSnapshot, parsePendingAsksSnapshot } from "../pendingAsks";
 import type { ConnectionState } from "../session/connection";
 import { applySessionState, upsertLiveSession } from "../sessionHistory";
+import type { InboxSubscribe } from "./useInboxList";
 import type {
   MessageSchedule,
   PendingAsksSnapshot,
@@ -32,6 +34,10 @@ export interface SessionsFeed {
   messageSchedules: MessageSchedule[];
   // Bumped on every `board_update` frame, so board views can refetch.
   boardRevision: number;
+  // Bumped on every `inbox_update` frame.
+  inboxRevision: number;
+  // The `inbox_update` frames, and "reconnected" after a gap. Stable.
+  subscribeInbox: InboxSubscribe;
   connection: ConnectionState;
   // Applied to the live list ahead of the next list frame.
   upsertSession: (session: SessionRecord) => void;
@@ -43,7 +49,7 @@ const NO_SCHEDULES: ScheduledSession[] = [];
 const NO_MESSAGE_SCHEDULES: MessageSchedule[] = [];
 
 // Everything `/ws/sessions` carries, over one connection: the live session list,
-// pending asks (docs/pending_asks.md), schedules and board activity.
+// pending asks (docs/pending_asks.md), schedules, inbox and board activity.
 // `onAuthFailure` must be stable: a new one restarts the socket.
 export function useSessionsFeed(
   host: string,
@@ -56,6 +62,8 @@ export function useSessionsFeed(
   const [schedules, setSchedules] = useState(NO_SCHEDULES);
   const [messageSchedules, setMessageSchedules] = useState(NO_MESSAGE_SCHEDULES);
   const [boardRevision, setBoardRevision] = useState(0);
+  const [inboxRevision, setInboxRevision] = useState(0);
+  const inboxListeners = useRef(new Set<Parameters<InboxSubscribe>[0]>());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
 
   useEffect(() => {
@@ -140,6 +148,12 @@ export function useSessionsFeed(
             case "board_update":
               setBoardRevision((revision) => revision + 1);
               break;
+            case "inbox_update": {
+              const update = parseInboxUpdate(message.payload);
+              setInboxRevision((revision) => revision + 1);
+              inboxListeners.current.forEach((listener) => listener(update));
+              break;
+            }
           }
         },
         failAuth,
@@ -148,11 +162,13 @@ export function useSessionsFeed(
             attempt = 0;
             if (active) setConnection("open");
             refreshAsks();
-            // The socket replays the session list and asks on connect, not schedules
-            // or board activity, so a reconnect re-reads what it missed.
+            // The socket replays the session list and asks on connect, not schedules,
+            // board or inbox activity, so a reconnect re-reads what it missed.
             if (opened) {
               seedSchedules(true);
               setBoardRevision((revision) => revision + 1);
+              setInboxRevision((revision) => revision + 1);
+              inboxListeners.current.forEach((listener) => listener("reconnected"));
             }
             opened = true;
           },
@@ -183,6 +199,14 @@ export function useSessionsFeed(
     };
   }, [host, token, onAuthFailure]);
 
+  const subscribeInbox = useCallback<InboxSubscribe>((listener) => {
+    const listeners = inboxListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const upsertSession = useCallback((session: SessionRecord) => {
     setSessions((current) => (current === null ? current : upsertLiveSession(current, session)));
   }, []);
@@ -205,6 +229,8 @@ export function useSessionsFeed(
       schedules,
       messageSchedules,
       boardRevision,
+      inboxRevision,
+      subscribeInbox,
       connection,
       upsertSession,
       removeSessions,
@@ -217,6 +243,8 @@ export function useSessionsFeed(
       schedules,
       messageSchedules,
       boardRevision,
+      inboxRevision,
+      subscribeInbox,
       connection,
       upsertSession,
       removeSessions,

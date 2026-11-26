@@ -19,9 +19,11 @@
 }
 
 .label {
+  flex: none;
   font-size: var(--f-meta);
   font-weight: 400;
   color: var(--brass-text);
+  white-space: nowrap;
 }
 
 .quiet {

@@ -2779,6 +2779,7 @@ const ReplyComposer = memo(function ReplyComposer({
     if ((!text && attachmentIds.length === 0) || attachments.uploading) {
       return;
     }
+    closeSendMenu();
     setSending(true);
     setDraft("");
     const invocation = selectedCommandInvocation(text);
@@ -2854,7 +2855,7 @@ const ReplyComposer = memo(function ReplyComposer({
     wrapProps: sendWrapProps,
     triggerProps: sendTriggerProps,
     menuProps: sendMenuProps,
-  } = useHoldMenu(sendDisabled, () => void handleSend());
+  } = useHoldMenu(sendDisabled, () => void handleSend(), { dismissOnActivate: true });
 
   const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];

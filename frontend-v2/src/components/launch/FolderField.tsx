@@ -51,8 +51,12 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
   const options = useFolderSuggestions(host, token, value, launchTargetId, recentCwds);
   const shown = open && options.length > 0;
 
+  // A rejected folder takes the focus without opening the list over its error.
+  const quietFocus = useRef(false);
   useEffect(() => {
-    if (error) input.current?.focus();
+    if (!error) return;
+    quietFocus.current = true;
+    input.current?.focus();
   }, [error]);
 
   function pick(option: string) {
@@ -103,7 +107,10 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
             setActive(-1);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            if (quietFocus.current) quietFocus.current = false;
+            else setOpen(true);
+          }}
           onBlur={() => setOpen(false)}
           onKeyDown={onKeyDown}
         />

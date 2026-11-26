@@ -104,7 +104,11 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
               ) : null}
             </div>
           ) : (
-            <SettingsRow label="Environment" detail={envSummary(resume.envEntries) || "None"} mono onPress={() => setEnvOpen(true)} />
+            <SettingsRow
+              label="Environment"
+              detail={envSummary(resume.envEntries) || "None"}
+              mono={Boolean(envSummary(resume.envEntries))}
+              onPress={() => setEnvOpen(true)} />
           )
         ) : null}
       </div>

@@ -100,7 +100,8 @@ export function useLaunchContext(
     [catalog, descriptors, hostDefaultBackend, hostDefaultCwd, targetKey],
   );
 
-  const fetchPreset = useCallback((presetId: string) => fetchSessionPreset(host, token, presetId), [host, token]);
+  // Values included: the form fills each variable with its value.
+  const fetchPreset = useCallback((presetId: string) => fetchSessionPreset(host, token, presetId, true), [host, token]);
   const savePreset = useCallback(
     async (payload: SessionPresetWriteRequest, presetId: string | null) => {
       let createdId: string | null = null;

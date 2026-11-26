@@ -23,6 +23,7 @@ import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Select } from "@/components/ui/Select";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { ChoiceField } from "@/components/ui/Choice";
 import { LinkRow, PickerRow, SettingsRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useToast } from "@/components/ui/Toast";
@@ -49,6 +50,7 @@ export function Gallery() {
   const [density, setDensity] = useState("summary");
   const [folded, setFolded] = useState(true);
   const [on, setOn] = useState(true);
+  const [choice, setChoice] = useState("high");
   const [picked, setPicked] = useState("Lock around release");
 
   return (
@@ -213,7 +215,20 @@ export function Gallery() {
         />
         <SettingsRow label="Host" detail={<span className="mono">127.0.0.1:8787</span>} />
         <LinkRow label="Appearance" detail="Dark" href="/gallery" />
+        <SettingsRow label="Folder" detail="~/waypoint" mono onPress={() => {}} />
       </SettingsSection>
+
+      <SectionHeading title="Choice field" dense />
+      <ChoiceField
+        label="Choice"
+        value={choice}
+        onChange={setChoice}
+        options={[
+          { value: "", label: "Default" },
+          { value: "high", label: "High", detail: "More thinking per turn" },
+          { value: "low", label: "Low" },
+        ]}
+      />
 
       <SectionHeading title="File thumbnails" dense />
       <div className={styles.row}>

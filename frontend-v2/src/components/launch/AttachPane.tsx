@@ -35,7 +35,6 @@ export function AttachPane({ value, onChange, agents, catalog, busy }: AttachPan
           id={`${id}-pane`}
           mono
           data-autofocus=""
-          placeholder="main:0.0"
           spellCheck={false}
           autoCapitalize="none"
           autoCorrect="off"

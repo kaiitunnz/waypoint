@@ -272,17 +272,21 @@ function Advanced({ form, busy }: { form: LaunchForm; busy: boolean }) {
             <SettingsRow
               label="Environment"
               detail={envSummary(form.envEntries) || "None"}
-              mono
+              mono={Boolean(envSummary(form.envEntries))}
               onPress={() => setEditing("env")}
             />
             {caps.supportsCustomArgs ? (
-              <SettingsRow label="CLI arguments" detail={firstLine(form.customArgsText) || "None"} mono onPress={() => setEditing("args")} />
+              <SettingsRow
+                label="CLI arguments"
+                detail={firstLine(form.customArgsText) || "None"}
+                mono={Boolean(firstLine(form.customArgsText))}
+                onPress={() => setEditing("args")} />
             ) : null}
             {caps.supportsConfigOverrides ? (
               <SettingsRow
                 label="Config overrides"
                 detail={firstLine(form.configOverridesText) || "None"}
-                mono
+                mono={Boolean(firstLine(form.configOverridesText))}
                 onPress={() => setEditing("overrides")}
               />
             ) : null}

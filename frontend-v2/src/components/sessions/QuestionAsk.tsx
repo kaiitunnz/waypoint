@@ -124,7 +124,8 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
                 pick={picks[index]}
                 disabled={disabled}
                 showQuestion
-                onOption={(label) => setPicks(tapOption(prompts, picks, index, label).picks)}
+                // With several prompts a tap never sends.
+                onOption={(label) => pickOption(index, label)}
                 onCustom={(text) => update(index, (pick) => ({ ...pick, other: text }))}
               />
             ))}

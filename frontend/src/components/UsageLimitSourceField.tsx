@@ -30,7 +30,6 @@ export function UsageLimitSourceField({
   }
 
   const showAccountSelect = accounts.length > 0;
-  const selectedProvider = showAccountSelect ? { id: value.providerId ?? "", accounts } : null;
 
   const primaryOptions = choices.map((choice) => (
     <option key={choice.value} value={choice.value} disabled={choice.disabled}>
@@ -67,16 +66,10 @@ export function UsageLimitSourceField({
               id="settings-usage-account"
               className="settings-input"
               value={value.accountKey ?? ""}
-              onChange={(event) =>
-                onChange({
-                  source: "usage_provider",
-                  providerId: selectedProvider!.id,
-                  accountKey: event.target.value,
-                })
-              }
+              onChange={(event) => onChange({ ...value, accountKey: event.target.value })}
               disabled={disabled}
             >
-              {selectedProvider!.accounts.map((account) => (
+              {accounts.map((account) => (
                 <option key={account.account_key} value={account.account_key}>
                   {account.account_label}
                 </option>
@@ -105,16 +98,10 @@ export function UsageLimitSourceField({
           <span>Account</span>
           <select
             value={value.accountKey ?? ""}
-            onChange={(event) =>
-              onChange({
-                source: "usage_provider",
-                providerId: selectedProvider!.id,
-                accountKey: event.target.value,
-              })
-            }
+            onChange={(event) => onChange({ ...value, accountKey: event.target.value })}
             disabled={disabled}
           >
-            {selectedProvider!.accounts.map((account) => (
+            {accounts.map((account) => (
               <option key={account.account_key} value={account.account_key}>
                 {account.account_label}
               </option>

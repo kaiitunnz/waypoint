@@ -5,15 +5,15 @@ import type {
   BackendModelListResponse,
   BackendPermissionMode,
   ScheduleCreateRequest,
+  SessionCreateRequest,
   SessionPresetSpec,
   SessionTransport,
 } from "../types";
 import { PLUGIN_SELECTION, type UsageLimitSourceValue } from "../usageLimitSource";
-import { entriesToRecord, recordToEntries, type EnvEntry } from "./env";
+import { entriesToRecord, envSummary, recordToEntries, type EnvEntry } from "./env";
+import { effortLevelsFor } from "./models";
 
-// The fields a launch shares across New and Schedule: the agent and how it runs,
-// where, and the CLI passthrough. cwd and title are per launch; the rest can come
-// from a preset.
+// One launch's fields. cwd and title belong to the launch; the rest can come from a preset.
 export interface LaunchFormState {
   backend: Backend;
   transport: SessionTransport;
@@ -107,29 +107,9 @@ export function applyPresetSpec(state: LaunchFormState, spec: SessionPresetSpec,
   };
 }
 
-// The effort levels for the chosen model, or for the agent's default model.
-// Unknown levels on a model offer the agent's whole vocabulary; with no model to
-// go by, the union of every model's levels.
 export function effortOptionsFor(modelInfo: BackendModelListResponse | null, model: string): string[] {
   if (!modelInfo) return [];
-  const resolved = model || modelInfo.default_model_id;
-  if (resolved) {
-    const option = modelInfo.models.find((entry) => entry.id === resolved);
-    if (option) {
-      return option.supported_efforts == null ? (modelInfo.effort_levels ?? []) : option.supported_efforts;
-    }
-  }
-  const union = new Set<string>();
-  for (const entry of modelInfo.models) {
-    for (const level of entry.supported_efforts ?? []) union.add(level);
-  }
-  return [...union];
-}
-
-// Over the terminal transport a launch carries only what the agent's launch
-// flags pin; structured transports set every field per session.
-export function isTerminalLaunch(transport: SessionTransport, catalog: BackendCatalog): boolean {
-  return Boolean(transport) && catalog.transportCaps(transport)?.is_structured === false;
+  return effortLevelsFor(modelInfo.models, modelInfo.effort_levels ?? [], model || null, modelInfo.default_model_id ?? null);
 }
 
 export interface LaunchCapabilities {
@@ -157,11 +137,11 @@ export function launchCapabilities(
   const accountProfiles = context.accountProfilesByBackend[state.backend] ?? [];
   const permissionOptions = permissionModesFor(state.backend, catalog);
   const agent = catalog.agentCaps(state.backend);
-  const terminal = isTerminalLaunch(state.transport, catalog);
+  // Over a terminal transport a launch carries only what the agent's launch flags pin.
+  const terminal = catalog.transportCaps(state.transport)?.is_structured === false;
   const modelSupported = !(terminal && agent?.supports_terminal_launch_model === false);
   const effortSupported = !(terminal && agent?.supports_terminal_launch_effort === false);
   const effortOptions = effortOptionsFor(modelInfo, state.model);
-  const flat = catalog.byId(state.backend)?.capabilities;
   return {
     transports,
     showInterface: transports.length > 1,
@@ -173,8 +153,8 @@ export function launchCapabilities(
     effortSupported,
     effortOptions,
     showEffort: effortSupported && effortOptions.length > 0,
-    supportsCustomArgs: flat?.supports_custom_cli_args ?? false,
-    supportsConfigOverrides: flat?.supports_config_overrides ?? false,
+    supportsCustomArgs: agent?.supports_custom_cli_args ?? false,
+    supportsConfigOverrides: agent?.supports_config_overrides ?? false,
   };
 }
 
@@ -217,104 +197,74 @@ const lines = (text: string) =>
     .map((value) => value.trim())
     .filter(Boolean);
 
-export interface LaunchArgs {
-  args: string[];
-  configOverrides: string[];
-  launchEnv: Record<string, string>;
-}
-
-export function collectLaunchArgs(state: LaunchFormState, caps: LaunchCapabilities): LaunchArgs {
-  return {
-    args: caps.supportsCustomArgs ? lines(state.customArgsText) : [],
-    configOverrides: caps.supportsConfigOverrides ? lines(state.configOverridesText) : [],
-    launchEnv: entriesToRecord(state.envEntries),
-  };
-}
-
-function modelValue(state: LaunchFormState, caps: LaunchCapabilities): string | null {
-  return caps.modelSupported ? state.model.trim() || null : null;
-}
-
-function effortValue(state: LaunchFormState, caps: LaunchCapabilities): string | null {
-  return caps.effortSupported ? state.effort.trim() || null : null;
-}
-
-// What a preset saved from this form pins: everything but cwd, title and the
-// launch target, which belong to one launch.
-export function presetSpecFromForm(state: LaunchFormState, caps: LaunchCapabilities): SessionPresetSpec {
-  const { args, configOverrides, launchEnv } = collectLaunchArgs(state, caps);
+// What a launch pins besides cwd, title and the launch target; a preset saved
+// from the form holds exactly these.
+function launchFields(state: LaunchFormState, caps: LaunchCapabilities) {
   return {
     backend: state.backend,
     transport: state.transport || null,
-    model: modelValue(state, caps),
-    effort: effortValue(state, caps),
+    model: caps.modelSupported ? state.model.trim() || null : null,
+    effort: caps.effortSupported ? state.effort.trim() || null : null,
     permission_mode: state.permissionMode || null,
     account_profile_id: state.accountProfileId || null,
     usage_limit_source: state.usageSelection.source,
     usage_provider_id: state.usageSelection.providerId,
     usage_provider_account_key: state.usageSelection.accountKey,
-    args,
-    config_overrides: configOverrides,
-    launch_env: launchEnv,
+    args: caps.supportsCustomArgs ? lines(state.customArgsText) : [],
+    config_overrides: caps.supportsConfigOverrides ? lines(state.configOverridesText) : [],
+    launch_env: entriesToRecord(state.envEntries),
   };
 }
 
-// The body of `POST /api/sessions`.
+export function presetSpecFromForm(state: LaunchFormState, caps: LaunchCapabilities): SessionPresetSpec {
+  return launchFields(state, caps);
+}
+
 export function createSessionRequest(
   state: LaunchFormState,
   caps: LaunchCapabilities,
-  launchTargetId: string,
+  launchTargetId: string | null,
   presetId: string | null,
-): Record<string, unknown> {
-  const { args, configOverrides, launchEnv } = collectLaunchArgs(state, caps);
+): SessionCreateRequest {
   return {
-    backend: state.backend,
+    ...launchFields(state, caps),
     cwd: state.cwd,
-    launch_target_id: launchTargetId || null,
-    transport: state.transport || null,
     title: state.title || null,
+    launch_target_id: launchTargetId || null,
     source_mode: "managed",
-    args,
-    config_overrides: configOverrides,
-    launch_env: launchEnv,
-    model: modelValue(state, caps),
-    effort: effortValue(state, caps),
-    permission_mode: state.permissionMode || null,
-    account_profile_id: state.accountProfileId || null,
-    usage_limit_source: state.usageSelection.source,
-    usage_provider_id: state.usageSelection.providerId,
-    usage_provider_account_key: state.usageSelection.accountKey,
-    // Provenance only: the fields above are already resolved.
     preset_id: presetId,
   };
 }
 
-// The launch half of `POST /api/schedules`; the timing comes from scheduleTiming.
+// The launch half of `POST /api/schedules`; the timing comes from withScheduleTiming.
 export function scheduleLaunchRequest(
   state: LaunchFormState,
   caps: LaunchCapabilities,
+  launchTargetId: string | null,
   initialPrompt: string,
   presetId: string | null,
 ): ScheduleCreateRequest {
-  const { args, configOverrides, launchEnv } = collectLaunchArgs(state, caps);
   return {
-    backend: state.backend,
+    ...launchFields(state, caps),
     cwd: state.cwd,
+    title: state.title.trim() || null,
+    launch_target_id: launchTargetId || null,
     // An explicit transport supersedes launch_mode, so the mode stays "auto".
     launch_mode: "auto",
-    transport: state.transport || null,
-    title: state.title.trim() || null,
     initial_prompt: initialPrompt.trim() || null,
-    permission_mode: state.permissionMode || null,
-    model: modelValue(state, caps),
-    effort: effortValue(state, caps),
-    args,
-    config_overrides: configOverrides,
-    launch_env: launchEnv,
     preset_id: presetId,
-    account_profile_id: state.accountProfileId || null,
-    usage_limit_source: state.usageSelection.source,
-    usage_provider_id: state.usageSelection.providerId,
-    usage_provider_account_key: state.usageSelection.accountKey,
   };
+}
+
+// The Advanced settings that differ from the defaults, for its collapsed summary.
+export function advancedOverrides(
+  state: Pick<LaunchFormState, "usageSelection" | "envEntries" | "customArgsText" | "configOverridesText">,
+  caps: LaunchCapabilities,
+): string[] {
+  const set: string[] = [];
+  if (state.usageSelection.source !== "plugin") set.push("usage");
+  if (envSummary(state.envEntries)) set.push("environment");
+  if (caps.supportsCustomArgs && state.customArgsText.trim()) set.push("arguments");
+  if (caps.supportsConfigOverrides && state.configOverridesText.trim()) set.push("overrides");
+  return set;
 }

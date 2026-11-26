@@ -30,10 +30,10 @@ import {
   type ThreadFilter,
   threadFilterOptions,
   threadFormAgent,
-  threadImportChoices,
+  threadImportBody,
   type ThreadSummary,
 } from "@waypoint/web-core/launch/threads";
-import { Backend, SessionTransport } from "@waypoint/web-core/types";
+import { Backend } from "@waypoint/web-core/types";
 
 import { SearchInput } from "./SearchInput";
 
@@ -47,15 +47,8 @@ interface ResumeThreadPanelProps {
   targetLabel: string | null;
   supportedBackends: Backend[];
   preferredBackend: Backend;
-  onImportThread: (
-    backend: Backend,
-    threadId: string,
-    cwd: string,
-    transport: SessionTransport | null,
-    importHistory: boolean,
-    launchEnv: Record<string, string>,
-    model: string | null,
-  ) => Promise<void>;
+  // Imports a thread with the `POST /api/backends/{id}/sessions/import` body.
+  onImportThread: (thread: AgentThread, body: Record<string, unknown>) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
     threadId: string,
@@ -63,6 +56,7 @@ interface ResumeThreadPanelProps {
   ) => Promise<void>;
   catalog: BackendCatalog;
   defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
+  onAuthFailure: () => void;
 }
 
 const COLLAPSED_VISIBLE = 2;
@@ -75,8 +69,7 @@ const PAGE_SIZE = 5;
 function backendGlyph(id: Backend, catalog?: BackendCatalog): string {
   const badge = catalog?.byId(id)?.badges?.glyph;
   if (badge) return badge.toLowerCase();
-  const label = catalog?.byId(id)?.label ?? humaniseBackend(id);
-  return label.slice(0, 3).toLowerCase();
+  return humaniseBackend(id, catalog).slice(0, 3).toLowerCase();
 }
 
 export function ResumeThreadPanel({
@@ -93,6 +86,7 @@ export function ResumeThreadPanel({
   onDeleteThread,
   catalog,
   defaultLaunchEnvByBackend,
+  onAuthFailure,
 }: ResumeThreadPanelProps) {
   const allThreads = useMemo(
     () => mergeThreads(threadsByBackend, supportedBackends),
@@ -104,8 +98,6 @@ export function ResumeThreadPanel({
     [threadsByBackend, supportedBackends],
   );
 
-  // Default to the cross-agent list when more than one agent can resume; a
-  // lone agent skips the "All" chip entirely.
   const [filter, setFilter] = useState<ThreadFilter>(() =>
     initialThreadFilter(supportedBackends),
   );
@@ -118,10 +110,6 @@ export function ResumeThreadPanel({
   // On by default: an imported thread should look continuous, not empty.
   const [importHistory, setImportHistory] = useState(true);
 
-  // The transport picker only applies to a single-agent view. Feed the hook a
-  // concrete agent (the filtered one, or the preferred fallback while "All" is
-  // active) so its state stays valid; the value is only read when a concrete
-  // agent is selected.
   const transportAgent = threadFormAgent(filter, supportedBackends, preferredBackend);
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>(() =>
     recordToEntries(defaultLaunchEnvByBackend[transportAgent]),
@@ -135,9 +123,6 @@ export function ResumeThreadPanel({
     setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[transportAgent]));
   }, [defaultLaunchEnvByBackend, transportAgent]);
 
-  // Only agents that consume a durable model at import get a picker — a
-  // catalogue alone isn't enough (Codex has one but drops the field). The
-  // durable selection becomes the resumed session's context-window denominator.
   const showModelPicker = showsImportModel(filter, transportAgent, catalog);
   const {
     options: modelOptions,
@@ -150,6 +135,7 @@ export function ResumeThreadPanel({
     launchTargetId,
     accountProfileId,
     showModelPicker,
+    onAuthFailure,
   );
 
   const isExpanded = expanded || query.trim().length > 0;
@@ -182,31 +168,18 @@ export function ResumeThreadPanel({
       : loadingByBackend[filter];
 
   async function handleImport(thread: AgentThread) {
-    // A single-agent view resumes with its chosen interface, environment and
-    // model; the merged "All" view resumes each row with its agent's defaults.
-    const { transport: chosen, launchEnv, model } = threadImportChoices(
+    const body = threadImportBody({
       thread,
       filter,
-      {
-        transport,
-        launchEnv: entriesToRecord(envEntries),
-        model: selectedModel,
-        showModel: showModelPicker,
-      },
+      choices: { transport, launchEnv: entriesToRecord(envEntries), model: selectedModel },
+      scope: { launchTargetId, backend: preferredBackend, accountProfileId },
+      importHistory,
       defaultLaunchEnvByBackend,
       catalog,
-    );
+    });
     setImportingId(thread.id);
     try {
-      await onImportThread(
-        thread.backend,
-        thread.id,
-        thread.cwd,
-        chosen,
-        importHistory,
-        launchEnv,
-        model,
-      );
+      await onImportThread(thread, body);
     } finally {
       setImportingId(null);
     }
@@ -252,10 +225,9 @@ export function ResumeThreadPanel({
                   </option>
                 );
               }
-              const label = catalog.byId(option)?.label ?? humaniseBackend(option);
               return (
                 <option key={option} value={option}>
-                  {label} ({counts[option] ?? 0})
+                  {humaniseBackend(option, catalog)} ({counts[option] ?? 0})
                 </option>
               );
             })}
@@ -350,9 +322,7 @@ export function ResumeThreadPanel({
             const canDelete =
               !!onDeleteThread && canDeleteThread(thread.backend, catalog);
             const busy = importingId !== null || deletingId !== null;
-            const backendLabel =
-              catalog.byId(thread.backend)?.label ??
-              humaniseBackend(thread.backend);
+            const backendLabel = humaniseBackend(thread.backend, catalog);
             return (
               <article
                 className={`import-thread-row resume-thread-row is-${thread.backend}`}

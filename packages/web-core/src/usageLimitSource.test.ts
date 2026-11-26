@@ -7,7 +7,6 @@ import {
   selectionFromRecord,
   selectUsageSource,
   usageSourceChoices,
-  usageSourceLabel,
 } from "./usageLimitSource";
 
 const record = (fields: Record<string, unknown>) => fields as unknown as SessionRecord;
@@ -77,7 +76,6 @@ describe("usage source choices", () => {
     const lumid = usageSourceChoices(options, { source: "usage_provider", providerId: "lumid", accountKey: "b" });
     expect(lumid.value).toBe("provider:lumid");
     expect(lumid.accounts).toHaveLength(2);
-    expect(usageSourceLabel(options, { source: "usage_provider", providerId: "lumid", accountKey: "b" })).toBe("Lumid — Me");
   });
 
   it("keeps a saved choice that is no longer published, disabled", () => {

@@ -28,7 +28,7 @@ export function entriesToRecord(entries: EnvEntry[]): Record<string, string> {
   return record;
 }
 
-export function nextEnvId(entries: EnvEntry[]): number {
+function nextEnvId(entries: EnvEntry[]): number {
   return entries.reduce((max, entry) => Math.max(max, entry.id), 0) + 1;
 }
 
@@ -53,7 +53,8 @@ export function editEnvValue(entries: EnvEntry[], id: number, value: string): En
   });
 }
 
-export function removeEnvEntry(entries: EnvEntry[], id: number): EnvEntry[] {
+// Marks a row for removal on launch.
+export function stageEnvRemoval(entries: EnvEntry[], id: number): EnvEntry[] {
   return entries.flatMap((entry) => {
     if (entry.id !== id) return [entry];
     // A row added here has nothing to strike.
@@ -77,10 +78,6 @@ export function envRowState(entry: EnvEntry): EnvRowState {
   if (entry.removed) return "remove";
   if (entry.added) return "add";
   return entry.original !== undefined ? "edit" : "keep";
-}
-
-export function envHasStagedChanges(entries: EnvEntry[]): boolean {
-  return entries.some((entry) => envRowState(entry) !== "keep");
 }
 
 const SECRET_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH|CREDENTIAL|PRIVATE|_KEY$|^KEY$/i;

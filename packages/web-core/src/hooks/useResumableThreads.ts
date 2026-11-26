@@ -17,12 +17,12 @@ interface ResumableThreadsOptions {
   scopeBackend: Backend | null;
   scopeAccountProfileId: string | null;
   // False skips fetching, for a surface that lists threads only when shown.
-  enabled?: boolean;
+  enabled: boolean;
   // A change refetches, such as a launch target connecting.
-  revision?: unknown;
+  revision: unknown;
   // Both must be stable.
   onAuthFailure: () => void;
-  onError?: (message: string) => void;
+  onError: (message: string) => void;
 }
 
 export interface ResumableThreads {
@@ -39,7 +39,7 @@ export function useResumableThreads({
   launchTargetId,
   scopeBackend,
   scopeAccountProfileId,
-  enabled = true,
+  enabled,
   revision,
   onAuthFailure,
   onError,
@@ -57,14 +57,13 @@ export function useResumableThreads({
     }
     let active = true;
     const ids = JSON.parse(backendsKey) as Backend[];
-    setLoadingByBackend((current) => Object.fromEntries(ids.map((id) => [id, current[id] ?? true])));
+    setLoadingByBackend(Object.fromEntries(ids.map((id) => [id, true])));
     setThreadsByBackend((current) =>
       // The scoped agent is moving to (or away from) a profile: drop its old list
       // so a slow request cannot show the previous profile's threads.
       Object.fromEntries(ids.map((id) => [id, id === scopeBackend ? [] : (current[id] ?? [])])),
     );
     for (const id of ids) {
-      setLoadingByBackend((current) => ({ ...current, [id]: true }));
       const accountProfileId = id === scopeBackend ? scopeAccountProfileId || undefined : undefined;
       fetchBackendThreads<ThreadSummary>(host, token, id, {
         launchTargetId: launchTargetId || undefined,
@@ -79,7 +78,7 @@ export function useResumableThreads({
             onAuthFailure();
             return;
           }
-          onError?.(fetchError instanceof Error ? fetchError.message : `failed to fetch ${id} threads`);
+          onError(fetchError instanceof Error ? fetchError.message : `failed to fetch ${id} threads`);
         })
         .finally(() => {
           if (active) setLoadingByBackend((current) => ({ ...current, [id]: false }));

@@ -50,8 +50,5 @@ export function seedRecentCwdsFromHistory(
     });
   }
   entries.sort((a, b) => b.ts - a.ts);
-  mergeRecentCwds(
-    host,
-    entries.map(({ targetId, cwd }) => ({ targetId, cwd })),
-  );
+  mergeRecentCwds(host, entries);
 }

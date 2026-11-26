@@ -6,6 +6,8 @@ import type { SessionPresetSummary } from "../types";
 import {
   deletePresetMessage,
   filterPresets,
+  loadPresetSpec,
+  openingPreset,
   orderPresets,
   presetBackendUnsupported,
   presetNeedsFullSpec,
@@ -71,5 +73,30 @@ describe("presets", () => {
   it("warns that deleting the default leaves none", () => {
     expect(deletePresetMessage(list[1])).toContain("no default afterwards");
     expect(deletePresetMessage(list[0])).toBe('Delete the preset "codex-worker"? This cannot be undone.');
+  });
+});
+
+describe("opening a preset", () => {
+  const plain = preset("plain", { backend: "codex", model: "gpt" });
+  const withEnv = preset("env", { backend: "codex", launch_env_keys: ["A"] });
+
+  it("opens the default or the chosen preset, with its spec when no values are needed", () => {
+    expect(openingPreset([plain, withEnv], "plain", { kind: "default" })).toEqual({
+      id: "plain",
+      spec: { backend: "codex", model: "gpt" },
+    });
+    expect(openingPreset([plain, withEnv], "plain", { kind: "preset", presetId: "env" })).toEqual({ id: "env", spec: null });
+    expect(openingPreset([plain], "plain", { kind: "preset", presetId: null })).toEqual({ id: null, spec: null });
+    expect(openingPreset([plain], "gone", { kind: "default" })).toEqual({ id: null, spec: null });
+  });
+
+  it("fetches the full spec only for a preset with variables", async () => {
+    const fetched = { ...withEnv, spec: { backend: "codex", launch_env: { A: "1" } } };
+    const fetchPreset = async (id: string) => {
+      if (id !== "env") throw new Error(id);
+      return fetched as never;
+    };
+    expect(await loadPresetSpec(plain, fetchPreset)).toEqual({ backend: "codex", model: "gpt" });
+    expect(await loadPresetSpec(withEnv, fetchPreset)).toEqual({ backend: "codex", launch_env: { A: "1" } });
   });
 });

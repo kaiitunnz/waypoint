@@ -1,20 +1,14 @@
 "use client";
 
-import {
-  Dispatch,
-  SetStateAction,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import {
   agentTransports,
-  defaultTransportFor,
   humaniseBackend,
   transportPresentation,
 } from "@waypoint/web-core/backends";
+import { clampTransport } from "@waypoint/web-core/launch/form";
 import { Backend, SessionTransport } from "@waypoint/web-core/types";
 
 interface AgentPickerProps {
@@ -84,26 +78,12 @@ export function TransportPicker({
   );
 }
 
-// Transport state that tracks the selected agent: it defaults to the agent's
-// preferred transport and re-clamps whenever the agent changes so a transport
-// carried over from another agent never sticks. Returns the live transport set
-// alongside the value/setter so callers can gate agent-specific logic.
+// Transport state that tracks the selected agent: the chosen transport while the
+// agent offers it, else the agent's default.
 export function useTransportForAgent(
   backend: Backend,
   catalog: BackendCatalog,
 ): [SessionTransport, Dispatch<SetStateAction<SessionTransport>>, SessionTransport[]] {
-  const transports = useMemo(
-    () => agentTransports(backend, catalog),
-    [backend, catalog],
-  );
-  const defaultTransport = defaultTransportFor(backend, catalog);
-  const [transport, setTransport] = useState<SessionTransport>("");
-  useEffect(() => {
-    setTransport((current) =>
-      transports.includes(current)
-        ? current
-        : (defaultTransport ?? transports[0] ?? ""),
-    );
-  }, [transports, defaultTransport]);
-  return [transport, setTransport, transports];
+  const [chosen, setTransport] = useState<SessionTransport>("");
+  return [clampTransport(chosen, backend, catalog), setTransport, agentTransports(backend, catalog)];
 }

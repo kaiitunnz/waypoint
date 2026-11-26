@@ -4,6 +4,7 @@ import { buildCatalog } from "../backends";
 import { launchCatalogDescriptors } from "../test-helpers";
 import type { BackendModelListResponse } from "../types";
 import {
+  advancedOverrides,
   applyPresetSpec,
   changeAgent,
   clampLaunchForm,
@@ -202,11 +203,29 @@ describe("requests", () => {
       preset_id: "p1",
       source_mode: "managed",
     });
-    expect(scheduleLaunchRequest(state, caps, "  go ", null)).toMatchObject({ model: null, effort: null, initial_prompt: "go", launch_mode: "auto" });
+    expect(scheduleLaunchRequest(state, caps, "studio", "  go ", null)).toMatchObject({
+      model: null,
+      effort: null,
+      initial_prompt: "go",
+      launch_mode: "auto",
+      launch_target_id: "studio",
+    });
     expect(presetSpecFromForm(state, caps)).toMatchObject({ model: null, effort: null, backend: "opencode" });
   });
 
   it("sends this host as a null target", () => {
     expect(createSessionRequest(state, caps, "", null).launch_target_id).toBeNull();
+    expect(scheduleLaunchRequest(state, caps, null, "", null).launch_target_id).toBeNull();
+  });
+
+  it("names the Advanced settings that are set", () => {
+    expect(advancedOverrides(state, caps)).toEqual(["arguments"]);
+    const busy = {
+      ...state,
+      usageSelection: { source: "usage_provider" as const, providerId: "lumid", accountKey: "a" },
+      envEntries: [{ id: 1, key: "A", value: "1" }],
+    };
+    expect(advancedOverrides(busy, caps)).toEqual(["usage", "environment", "arguments"]);
+    expect(advancedOverrides({ ...state, customArgsText: " " }, caps)).toEqual([]);
   });
 });

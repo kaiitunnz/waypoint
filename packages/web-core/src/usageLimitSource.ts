@@ -34,7 +34,7 @@ export function sameSelection(
   );
 }
 
-export const USAGE_PLUGIN_LABEL = "Agent plugin";
+const USAGE_PLUGIN_LABEL = "Agent plugin";
 const UNAVAILABLE_CHOICE = "__unavailable__";
 
 export interface UsageSourceChoice {
@@ -52,8 +52,7 @@ export interface UsageSourceChoices {
 
 // The "usage limits from" choices: the agent plugin, then each provider. A
 // provider with one account names it; one with none cannot be picked. A saved
-// provider or account no longer published stays shown, disabled, so it is
-// replaced on purpose rather than dropped.
+// provider or account no longer published stays shown, disabled, until replaced.
 export function usageSourceChoices(options: UsageProviderOption[], value: UsageLimitSourceValue): UsageSourceChoices {
   const provider =
     value.source === "usage_provider" && value.providerId
@@ -97,15 +96,4 @@ export function selectUsageSource(options: UsageProviderOption[], choice: string
   const provider = options.find((option) => option.id === id);
   if (!provider || provider.accounts.length === 0) return null;
   return { source: "usage_provider", providerId: id, accountKey: provider.accounts[0].account_key };
-}
-
-// The label of the current selection, for a collapsed row.
-export function usageSourceLabel(options: UsageProviderOption[], value: UsageLimitSourceValue): string {
-  const { value: current, choices } = usageSourceChoices(options, value);
-  const label = choices.find((choice) => choice.value === current)?.label ?? USAGE_PLUGIN_LABEL;
-  const provider = options.find((option) => option.id === value.providerId);
-  const account = provider && provider.accounts.length > 1
-    ? provider.accounts.find((entry) => entry.account_key === value.accountKey)?.account_label
-    : undefined;
-  return account ? `${label} — ${account}` : label;
 }

@@ -12,7 +12,7 @@
 
 import { addEnvEntry, deleteEnvEntry, type EnvEntry, updateEnvEntry } from "@waypoint/web-core/launch/env";
 
-export { entriesToRecord, recordToEntries, type EnvEntry } from "@waypoint/web-core/launch/env";
+export type { EnvEntry } from "@waypoint/web-core/launch/env";
 
 interface EnvVarRowsProps {
   entries: EnvEntry[];

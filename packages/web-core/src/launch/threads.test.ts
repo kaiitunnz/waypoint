@@ -14,8 +14,8 @@ import {
   threadEmptyHint,
   threadFilterOptions,
   threadFormAgent,
-  threadImportChoices,
-  threadImportRequest,
+  threadDiscoveryBackends,
+  threadImportBody,
   threadProfileScope,
   type ThreadSummary,
 } from "./threads";
@@ -58,16 +58,25 @@ describe("threads", () => {
   });
 
   it("imports with the chosen settings only in a single-agent view", () => {
-    const chosen = { transport: "tmux", launchEnv: { A: "1" }, model: "opus", showModel: true };
+    const choices = { transport: "tmux", launchEnv: { A: "1" }, model: "opus" };
     const defaults = { codex: { CODEX_HOME: "/x" } };
-    expect(threadImportChoices(all[2], "claude_code", chosen, defaults, catalog)).toEqual({
+    const scope = { launchTargetId: "", backend: "claude_code", accountProfileId: "work" };
+    const base = { choices, scope, importHistory: true, defaultLaunchEnvByBackend: defaults, catalog };
+    expect(threadImportBody({ ...base, thread: all[2], filter: "claude_code" })).toEqual({
+      thread_id: "c1",
+      launch_target_id: null,
+      account_profile_id: "work",
+      cwd: "/w",
+      launch_mode: "auto",
       transport: "tmux",
-      launchEnv: { A: "1" },
+      launch_env: { A: "1" },
+      import_history: true,
       model: "opus",
     });
-    expect(threadImportChoices(all[1], "all", chosen, defaults, catalog)).toEqual({
+    expect(threadImportBody({ ...base, thread: all[1], filter: "all" })).toMatchObject({
+      account_profile_id: null,
       transport: "codex_app_server",
-      launchEnv: { CODEX_HOME: "/x" },
+      launch_env: { CODEX_HOME: "/x" },
       model: null,
     });
   });
@@ -76,25 +85,6 @@ describe("threads", () => {
     expect(threadProfileScope("codex", "codex", "work")).toBe("work");
     expect(threadProfileScope("claude_code", "codex", "work")).toBeNull();
     expect(threadProfileScope("codex", "codex", "")).toBeNull();
-    expect(
-      threadImportRequest({
-        thread: all[1],
-        launchTargetId: "",
-        accountProfileId: null,
-        choices: { transport: "", launchEnv: {}, model: null },
-        importHistory: false,
-      }),
-    ).toEqual({
-      thread_id: "x1",
-      launch_target_id: null,
-      account_profile_id: null,
-      cwd: "/w",
-      launch_mode: "auto",
-      transport: null,
-      launch_env: {},
-      import_history: false,
-      model: null,
-    });
   });
 
   it("reads delete and model support from the catalog", () => {
@@ -104,6 +94,14 @@ describe("threads", () => {
     expect(showsImportModel("all", "claude_code", catalog)).toBe(false);
     expect(threadFormAgent("all", ["codex"], "claude_code")).toBe("codex");
     expect(threadFormAgent("all", ["codex", "claude_code"], "claude_code")).toBe("claude_code");
+  });
+
+  it("discovers threads where the agent supports it, or may", () => {
+    expect(threadDiscoveryBackends(["claude_code", "codex", "opencode", "future"], catalog)).toEqual([
+      "claude_code",
+      "codex",
+      "future",
+    ]);
   });
 
   it("explains an empty list", () => {

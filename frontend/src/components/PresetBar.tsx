@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { LaunchForm } from "@/components/LaunchFormFields";
+import type { LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
 import { humaniseBackend } from "@waypoint/web-core/backends";
 import { trapTabFocus } from "@waypoint/web-core/keyboard";
 import {
@@ -21,12 +21,8 @@ import type {
   UsageProviderOption,
 } from "@waypoint/web-core/types";
 
-// A compact key=value summary of what a preset spec pins, in the badge/mono
-// vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
-// The account profile rides the account hue (session identity, not tuning), and
-// resolves to its label from the current catalogue — an id no longer offered
-// falls back to the raw id marked unavailable. Used only in the save sheet's
-// captures readout.
+// The save sheet's readout of what a spec pins: the agent as an owner-hue badge,
+// the rest as muted chips.
 function SpecSummary({
   spec,
   profiles,
@@ -90,8 +86,7 @@ export function PresetSelect({
 
   const selected = selectedOf(presets, selectedPresetId);
   const isDefault = selected?.is_default ?? false;
-  const presetBackend = presetBackendUnsupported(selected, supportedBackends);
-  const backendUnsupported = presetBackend !== null;
+  const unsupportedBackend = presetBackendUnsupported(selected, supportedBackends);
 
   async function handleDelete(): Promise<void> {
     if (!selected) return;
@@ -141,9 +136,9 @@ export function PresetSelect({
           </button>
         ) : null}
       </div>
-      {backendUnsupported ? (
+      {unsupportedBackend ? (
         <p className="error preset-bar-error" role="alert">
-          This preset&apos;s backend ({humaniseBackend(presetBackend as Backend)})
+          This preset&apos;s backend ({humaniseBackend(unsupportedBackend)})
           isn&apos;t available here — change the backend or launch target.
         </p>
       ) : null}
@@ -286,7 +281,7 @@ export function PresetSaveActions({
         <PresetSaveModal
           seedDefault={seedDefault}
           spec={form.presetSpec()}
-          profiles={form.accountProfiles}
+          profiles={form.caps.accountProfiles}
           usageProviders={form.usageProviderOptions}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload) => {

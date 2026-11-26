@@ -12,7 +12,7 @@ import {
   updateSessionPreset,
 } from "../api";
 import { useBackendCatalog, type BackendCatalog } from "../backends";
-import { launchDefaults, type LaunchDefaults } from "../launch/launchDefaults";
+import { launchDefaults, type LaunchDefaults } from "../launch/defaults";
 import type {
   LaunchTargetSummary,
   MeResponse,
@@ -54,29 +54,29 @@ export function useLaunchContext(
 ): LaunchContext {
   const [me, setMe] = useState<MeResponse | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setMe(await fetchMe(host, token));
-    } catch (error) {
-      if (isAuthError(error)) onAuthFailure();
-    }
-  }, [host, token, onAuthFailure]);
+  // `isCurrent` drops a response that arrives after the host or token changed.
+  const load = useCallback(
+    async (isCurrent: () => boolean) => {
+      try {
+        const response = await fetchMe(host, token);
+        if (isCurrent()) setMe(response);
+      } catch (error) {
+        if (isCurrent() && isAuthError(error)) onAuthFailure();
+      }
+    },
+    [host, token, onAuthFailure],
+  );
+  const refresh = useCallback(() => load(() => true), [load]);
 
   useEffect(() => {
     if (!host || !token) return;
-    let active = true;
-    fetchMe(host, token)
-      .then((response) => {
-        if (active) setMe(response);
-      })
-      .catch((error) => {
-        if (active && isAuthError(error)) onAuthFailure();
-      });
+    let current = true;
+    void load(() => current);
     return () => {
-      active = false;
+      current = false;
       setMe(null);
     };
-  }, [host, token, onAuthFailure]);
+  }, [host, token, load]);
 
   // Fed the same response, so the catalog and the presets arrive together.
   const catalog = useBackendCatalog(host, token, me);
@@ -131,7 +131,6 @@ export function useLaunchContext(
   );
 
   return {
-    // The catalog fills from the response a render later; launching waits for both.
     ready: me !== null && (catalog.ids().length > 0 || !me.backends?.length),
     catalog,
     defaults,

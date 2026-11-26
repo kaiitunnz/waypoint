@@ -754,6 +754,28 @@ export interface ScheduledSession {
   last_failure_reason?: string | null;
 }
 
+// The body of `POST /api/sessions`.
+export interface SessionCreateRequest {
+  backend: Backend;
+  cwd: string;
+  title: string | null;
+  launch_target_id: string | null;
+  source_mode: "managed";
+  transport: SessionTransport | null;
+  model: string | null;
+  effort: string | null;
+  permission_mode: string | null;
+  account_profile_id: string | null;
+  usage_limit_source: UsageLimitSource;
+  usage_provider_id: string | null;
+  usage_provider_account_key: string | null;
+  args: string[];
+  config_overrides: string[];
+  launch_env: Record<string, string>;
+  // Provenance only: the fields are already resolved.
+  preset_id: string | null;
+}
+
 export interface ScheduleCreateRequest {
   backend: Backend;
   cwd: string;

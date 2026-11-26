@@ -9,17 +9,15 @@ import {
   useState,
 } from "react";
 
-import {
-  LaunchFormFields,
-  useLaunchForm,
-} from "@/components/LaunchFormFields";
+import { LaunchFormFields } from "@/components/LaunchFormFields";
 import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
 import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { attachRequest, attachTargetError } from "@waypoint/web-core/launch/attach";
-import { presetNeedsFullSpec, specFromSummary } from "@waypoint/web-core/launch/presets";
+import { useLaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
+import { loadPresetSpec, type PresetSelection } from "@waypoint/web-core/launch/presets";
 import { withScheduleTiming } from "@waypoint/web-core/launch/schedule";
-import type { ThreadSummary } from "@waypoint/web-core/launch/threads";
+import type { AgentThread, ThreadSummary } from "@waypoint/web-core/launch/threads";
 import {
   defaultRecurrenceState,
   RecurrenceState,
@@ -31,10 +29,10 @@ import {
   AccountProfile,
   Backend,
   ScheduleCreateRequest,
+  SessionCreateRequest,
   SessionPreset,
   SessionPresetSummary,
   SessionPresetWriteRequest,
-  SessionTransport,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
 import {
@@ -43,12 +41,6 @@ import {
 } from "@waypoint/web-core/session/scheduleMessage";
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
-
-// `default` uses the default-preset hydration; `preset` hydrates a specific
-// preset, or clears the selection when `presetId` is null (backend default).
-export type PresetSelection =
-  | { kind: "default" }
-  | { kind: "preset"; presetId: string | null };
 
 interface LaunchPanelProps {
   host: string;
@@ -69,25 +61,17 @@ interface LaunchPanelProps {
   // caller can re-scope the resumable-thread fetch to the selected profile —
   // thread discovery is fetched app-globally, decoupled from this form.
   onDiscoveryScopeChange?: (backend: Backend, accountProfileId: string | null) => void;
-  // The `POST /api/sessions` body, built by the shared launch form.
-  onCreate: (request: Record<string, unknown>) => Promise<void>;
+  onCreate: (request: SessionCreateRequest) => Promise<void>;
   onAttach: (request: Record<string, unknown>) => Promise<void>;
-  onImportThread: (
-    backend: Backend,
-    threadId: string,
-    cwd: string,
-    transport: SessionTransport | null,
-    importHistory: boolean,
-    launchEnv: Record<string, string>,
-    model: string | null,
-  ) => Promise<void>;
+  onImportThread: (thread: AgentThread, body: Record<string, unknown>) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
     threadId: string,
     launchTargetId?: string,
   ) => Promise<void>;
   onCreateSchedule: (payload: ScheduleCreateRequest) => Promise<void>;
-  onAuthFailure?: () => void;
+  // Must be stable.
+  onAuthFailure: () => void;
   // The cwd the backend rejected as nonexistent on the last New launch, or null.
   cwdError?: string | null;
   onClearCwdError?: () => void;
@@ -145,6 +129,9 @@ export function LaunchPanel({
   const mode = controlledMode ?? internalMode;
   const setMode = onModeChange ?? setInternalMode;
   const form = useLaunchForm({
+    host,
+    token,
+    onAuthFailure,
     defaultBackend,
     defaultCwd,
     defaultLaunchEnvByBackend,
@@ -168,11 +155,7 @@ export function LaunchPanel({
       const summary = presets.find((preset) => preset.id === id);
       if (!summary) return;
       try {
-        // A preset with env vars needs the full (unredacted) spec before hydrating.
-        const spec = presetNeedsFullSpec(summary)
-          ? (await onFetchPresetSpec(id)).spec
-          : specFromSummary(summary.spec);
-        form.applyPreset(spec);
+        form.applyPreset(await loadPresetSpec(summary, onFetchPresetSpec));
       } catch {
         // The full (env-carrying) spec couldn't load. Deselect rather than leave
         // a half-hydrated selection: an Update against it would otherwise
@@ -215,7 +198,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onCreate(form.createRequest(launchTargetId ?? "", selectedPresetId));
+      await onCreate(form.createRequest(selectedPresetId));
       form.setTitle("");
     } finally {
       setFormBusy(false);
@@ -299,7 +282,6 @@ export function LaunchPanel({
             supportedBackends={supportedBackends}
             catalog={catalog}
             busy={formBusy}
-            onAuthFailure={onAuthFailure}
             cwdError={cwdError}
             onClearCwdError={onClearCwdError}
           />
@@ -339,7 +321,6 @@ export function LaunchPanel({
             supportedBackends={supportedBackends}
             catalog={catalog}
             busy={formBusy}
-            onAuthFailure={onAuthFailure}
           />
           <label className="field">
             <span>Initial prompt</span>
@@ -442,6 +423,7 @@ export function LaunchPanel({
           onDeleteThread={onDeleteThread}
           catalog={catalog}
           defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
+          onAuthFailure={onAuthFailure}
         />
       ) : null}
 

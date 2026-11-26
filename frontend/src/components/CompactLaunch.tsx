@@ -31,7 +31,6 @@ export function CompactLaunch({
   onOpenPreset,
   onOpenSheet,
 }: CompactLaunchProps) {
-  // Lead with the default preset, then the rest by recency-of-list order.
   const ordered = orderPresets(presets, defaultPresetId);
   const visible = ordered.slice(0, MAX_PRESET_CHIPS);
   const overflow = ordered.length - visible.length;

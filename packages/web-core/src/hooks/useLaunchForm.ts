@@ -8,14 +8,12 @@ import {
   applyPresetSpec,
   changeAgent,
   clampLaunchForm,
-  collectLaunchArgs,
   createSessionRequest,
   initialLaunchForm,
   launchCapabilities,
   presetSpecFromForm,
   resetAgentScope,
   scheduleLaunchRequest,
-  type LaunchArgs,
   type LaunchCapabilities,
   type LaunchFormContext,
   type LaunchFormState,
@@ -24,15 +22,20 @@ import type {
   AccountProfile,
   Backend,
   BackendModelListResponse,
-  BackendPermissionMode,
   ScheduleCreateRequest,
+  SessionCreateRequest,
   SessionPresetSpec,
   SessionTransport,
   UsageProviderOption,
 } from "../types";
 import type { UsageLimitSourceValue } from "../usageLimitSource";
+import { useLaunchModels } from "./useLaunchModels";
 
 export interface UseLaunchFormParams {
+  host: string;
+  token: string;
+  // Must be stable.
+  onAuthFailure: () => void;
   defaultBackend: Backend;
   defaultCwd: string;
   launchTargetId: string | null;
@@ -46,7 +49,6 @@ export interface UseLaunchFormParams {
 
 // The launch form behind New and Schedule, over the pure state in launch/form.
 export interface LaunchForm {
-  state: LaunchFormState;
   caps: LaunchCapabilities;
   backend: Backend;
   cwd: string;
@@ -59,12 +61,10 @@ export interface LaunchForm {
   setEffort: (value: string) => void;
   transport: SessionTransport;
   setTransport: (value: SessionTransport) => void;
-  transports: SessionTransport[];
   permissionMode: string;
   setPermissionMode: (value: string) => void;
   accountProfileId: string;
   setAccountProfileId: (value: string) => void;
-  accountProfiles: AccountProfile[];
   customArgsText: string;
   setCustomArgsText: (value: string) => void;
   configOverridesText: string;
@@ -72,25 +72,20 @@ export interface LaunchForm {
   envEntries: EnvEntry[];
   setEnvEntries: (entries: EnvEntry[]) => void;
   modelInfo: BackendModelListResponse | null;
-  permissionOptions: readonly BackendPermissionMode[];
-  supportsCustomArgs: boolean;
-  supportsConfigOverrides: boolean;
-  modelSupported: boolean;
-  effortSupported: boolean;
-  effortOptions: string[];
   usageProviderOptions: UsageProviderOption[];
   usageSelection: UsageLimitSourceValue;
   setUsageSelection: (value: UsageLimitSourceValue) => void;
   changeBackend: (backend: Backend) => void;
   applyPreset: (spec: SessionPresetSpec) => void;
-  handleModelsLoaded: (response: BackendModelListResponse) => void;
-  collectArgs: () => LaunchArgs;
   presetSpec: () => SessionPresetSpec;
-  createRequest: (launchTargetId: string, presetId: string | null) => Record<string, unknown>;
+  createRequest: (presetId: string | null) => SessionCreateRequest;
   scheduleRequest: (initialPrompt: string, presetId: string | null) => ScheduleCreateRequest;
 }
 
 export function useLaunchForm({
+  host,
+  token,
+  onAuthFailure,
   defaultBackend,
   defaultCwd,
   launchTargetId,
@@ -112,21 +107,20 @@ export function useLaunchForm({
     const initial = initialLaunchForm(defaultBackend, defaultCwd, context);
     return initialPreset ? applyPresetSpec(initial, initialPreset, context) : initial;
   });
-  const stateRef = useRef(state);
-  useEffect(() => {
-    stateRef.current = state;
-  });
-  // A model list belongs to the agent it was loaded for; another agent has none yet.
-  const [loadedModels, setModelInfo] = useState<{ backend: Backend; response: BackendModelListResponse } | null>(null);
-  const modelInfo = loadedModels?.backend === state.backend ? loadedModels.response : null;
+  const modelInfo = useLaunchModels(
+    host,
+    token,
+    state.backend,
+    launchTargetId,
+    state.accountProfileId || null,
+    onAuthFailure,
+  );
 
   const patch = useCallback((next: Partial<LaunchFormState>) => setState((current) => ({ ...current, ...next })), []);
 
-  // A new default agent (another target, or the catalog arriving) restarts the
-  // form on it; so does the target's environment changing under the same agent.
-  // Each reset compares with the values it last saw, so a new object with the
-  // same defaults (a target's connect state changing) keeps what the person
-  // filled in, and an effect run twice resets nothing.
+  // A new default agent or default environment restarts the form on it. Each
+  // reset compares with the value it last saw, so new objects with the same
+  // defaults keep what the person filled in.
   const envKey = JSON.stringify(defaultLaunchEnvByBackend);
   const seen = useRef({ defaultBackend, envKey, launchTargetId, defaultCwd });
   useEffect(() => {
@@ -139,7 +133,6 @@ export function useLaunchForm({
     if (seen.current.launchTargetId === launchTargetId) return;
     seen.current = { ...seen.current, launchTargetId };
     setState((current) => resetAgentScope(current, contextRef.current));
-    setModelInfo(null);
   }, [launchTargetId]);
 
   useEffect(() => {
@@ -164,11 +157,6 @@ export function useLaunchForm({
     setState((current) => applyPresetSpec(current, spec, contextRef.current));
   }, []);
 
-  // The list arrives for the agent selected when it was asked for.
-  const handleModelsLoaded = useCallback(
-    (response: BackendModelListResponse) => setModelInfo({ backend: stateRef.current.backend, response }),
-    [],
-  );
   const setCwd = useCallback((cwd: string) => patch({ cwd }), [patch]);
   const setTitle = useCallback((title: string) => patch({ title }), [patch]);
   const setModel = useCallback((model: string) => patch({ model }), [patch]);
@@ -184,19 +172,18 @@ export function useLaunchForm({
   const setEnvEntries = useCallback((envEntries: EnvEntry[]) => patch({ envEntries }), [patch]);
   const setUsageSelection = useCallback((usageSelection: UsageLimitSourceValue) => patch({ usageSelection }), [patch]);
 
-  const collectArgs = useCallback(() => collectLaunchArgs(state, caps), [state, caps]);
   const presetSpec = useCallback(() => presetSpecFromForm(state, caps), [state, caps]);
   const createRequest = useCallback(
-    (targetId: string, presetId: string | null) => createSessionRequest(state, caps, targetId, presetId),
-    [state, caps],
+    (presetId: string | null) => createSessionRequest(state, caps, launchTargetId, presetId),
+    [state, caps, launchTargetId],
   );
   const scheduleRequest = useCallback(
-    (initialPrompt: string, presetId: string | null) => scheduleLaunchRequest(state, caps, initialPrompt, presetId),
-    [state, caps],
+    (initialPrompt: string, presetId: string | null) =>
+      scheduleLaunchRequest(state, caps, launchTargetId, initialPrompt, presetId),
+    [state, caps, launchTargetId],
   );
 
   return {
-    state,
     caps,
     backend: state.backend,
     cwd: state.cwd,
@@ -209,12 +196,10 @@ export function useLaunchForm({
     setEffort,
     transport: state.transport,
     setTransport,
-    transports: caps.transports,
     permissionMode: state.permissionMode,
     setPermissionMode,
     accountProfileId: state.accountProfileId,
     setAccountProfileId,
-    accountProfiles: caps.accountProfiles,
     customArgsText: state.customArgsText,
     setCustomArgsText,
     configOverridesText: state.configOverridesText,
@@ -222,19 +207,11 @@ export function useLaunchForm({
     envEntries: state.envEntries,
     setEnvEntries,
     modelInfo,
-    permissionOptions: caps.permissionOptions,
-    supportsCustomArgs: caps.supportsCustomArgs,
-    supportsConfigOverrides: caps.supportsConfigOverrides,
-    modelSupported: caps.modelSupported,
-    effortSupported: caps.effortSupported,
-    effortOptions: caps.effortOptions,
     usageProviderOptions,
     usageSelection: state.usageSelection,
     setUsageSelection,
     changeBackend,
     applyPreset,
-    handleModelsLoaded,
-    collectArgs,
     presetSpec,
     createRequest,
     scheduleRequest,

@@ -4,12 +4,11 @@ import {
   addEnvEntry,
   editEnvValue,
   entriesToRecord,
-  envHasStagedChanges,
   envRowState,
   envSummary,
   envValueDisplay,
   recordToEntries,
-  removeEnvEntry,
+  stageEnvRemoval,
   undoEnvEntry,
   updateEnvEntry,
 } from "./env";
@@ -30,11 +29,11 @@ describe("env rows", () => {
     expect(entriesToRecord(edited).UV_CACHE_DIR).toBe("/b");
     const undone = undoEnvEntry(edited, 2);
     expect(undone[1]).toEqual({ id: 2, key: "UV_CACHE_DIR", value: "/mnt/uv" });
-    expect(envHasStagedChanges(undone)).toBe(false);
+    expect(envRowState(undone[1])).toBe("keep");
   });
 
   it("strikes a removed row until undone, restoring an edited value first", () => {
-    const removed = removeEnvEntry(editEnvValue(rows, 1, "changed"), 1);
+    const removed = stageEnvRemoval(editEnvValue(rows, 1, "changed"), 1);
     expect(envRowState(removed[0])).toBe("remove");
     expect(removed[0].value).toBe("ghp_abc");
     expect(entriesToRecord(removed)).toEqual({ UV_CACHE_DIR: "/mnt/uv" });
@@ -46,7 +45,7 @@ describe("env rows", () => {
     const added = updateEnvEntry(addEnvEntry(rows), 3, { key: "DEBUG", value: "1" });
     expect(envRowState(added[2])).toBe("add");
     expect(entriesToRecord(added).DEBUG).toBe("1");
-    expect(removeEnvEntry(added, 3)).toHaveLength(2);
+    expect(stageEnvRemoval(added, 3)).toHaveLength(2);
     expect(undoEnvEntry(added, 3)).toHaveLength(2);
     expect(editEnvValue(added, 3, "2")[2].original).toBeUndefined();
   });

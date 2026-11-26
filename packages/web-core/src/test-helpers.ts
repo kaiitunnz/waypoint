@@ -53,6 +53,9 @@ export function launchCatalogDescriptors(): BackendDescriptor[] {
         effort_levels: [],
         supports_thread_delete: false,
         supports_thread_import_model: false,
+        supports_custom_cli_args: true,
+        supports_config_overrides: false,
+        ...flat,
         ...agentCaps,
       },
       transport_capabilities: transportCaps(true),
@@ -76,10 +79,7 @@ export function launchCatalogDescriptors(): BackendDescriptor[] {
       },
       { supports_thread_discovery: true },
     ),
-    {
-      ...agent("claude_tty", "Claude TUI", "claude_tty", ["claude_tty"], {}),
-      transport_capabilities: transportCaps(true),
-    } as BackendDescriptor,
+    agent("claude_tty", "Claude TUI", "claude_tty", ["claude_tty"], {}),
     agent(
       "codex",
       "Codex",

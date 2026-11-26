@@ -2,8 +2,6 @@ import { launchableAgents, type BackendCatalog } from "../backends";
 import type { AccountProfile, Backend, BackendDescriptor, LaunchTargetSummary } from "../types";
 
 export interface LaunchDefaults {
-  // Agents the host or target registers, including folded transports.
-  supportedBackends: Backend[];
   // The agents a person can pick at launch.
   launchableBackends: Backend[];
   defaultBackend: Backend;
@@ -50,18 +48,10 @@ export function launchDefaults({
   }
 
   return {
-    supportedBackends,
     launchableBackends,
     defaultBackend,
     defaultCwd: activeTarget?.default_cwd ?? hostDefaultCwd,
     defaultLaunchEnvByBackend,
     accountProfilesByBackend,
   };
-}
-
-// The agents whose resumable threads to list: launchable ones that discover
-// threads. An agent missing from the catalog is tried, so a first load before the
-// catalog arrives still fetches.
-export function threadDiscoveryBackends(launchable: Backend[], catalog: BackendCatalog): Backend[] {
-  return launchable.filter((id) => catalog.byId(id)?.capabilities?.supports_thread_discovery ?? true);
 }

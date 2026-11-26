@@ -9,8 +9,6 @@ import type { BackendCatalog } from "@waypoint/web-core/backends";
 import type { LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
 import { Backend } from "@waypoint/web-core/types";
 
-export { useLaunchForm, type LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
-
 interface LaunchFormFieldsProps {
   form: LaunchForm;
   host: string;
@@ -21,7 +19,6 @@ interface LaunchFormFieldsProps {
   supportedBackends: Backend[];
   catalog: BackendCatalog;
   busy: boolean;
-  onAuthFailure?: () => void;
   cwdError?: string | null;
   onClearCwdError?: () => void;
 }
@@ -42,7 +39,6 @@ export function LaunchFormFields({
   supportedBackends,
   catalog,
   busy,
-  onAuthFailure,
   cwdError,
   onClearCwdError,
 }: LaunchFormFieldsProps) {
@@ -56,7 +52,7 @@ export function LaunchFormFields({
           onAgentChange={form.changeBackend}
           transport={form.transport}
           onTransportChange={form.setTransport}
-          accountProfiles={form.accountProfiles}
+          accountProfiles={form.caps.accountProfiles}
           accountProfileId={form.accountProfileId}
           onAccountProfileChange={form.setAccountProfileId}
           targetLabel={targetLabel}
@@ -90,14 +86,14 @@ export function LaunchFormFields({
       <section className="launch-section">
         <span className="launch-section-caption">Tuning</span>
         <div className="field-grid-row">
-          {form.permissionOptions.length > 0 ? (
+          {form.caps.permissionOptions.length > 0 ? (
             <label className="field">
               <span>Permission mode</span>
               <select
                 value={form.permissionMode}
                 onChange={(event) => form.setPermissionMode(event.target.value)}
               >
-                {form.permissionOptions.map((option) => (
+                {form.caps.permissionOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
@@ -105,25 +101,18 @@ export function LaunchFormFields({
               </select>
             </label>
           ) : null}
-          {form.modelSupported ? (
-          <ModelPicker
-            key={`${form.backend}:${launchTargetId ?? "local"}:${form.accountProfileId || "default"}`}
-            host={host}
-            token={token}
-            backend={form.backend}
-            launchTargetId={launchTargetId}
-            accountProfileId={form.accountProfileId}
-            value={form.model}
-            onChange={form.setModel}
-            onAuthFailure={onAuthFailure}
-            onModelsLoaded={form.handleModelsLoaded}
-            disabled={busy}
-            defaultModelLabel={form.modelInfo?.default_model_label ?? null}
-          />
+          {form.caps.modelSupported ? (
+            <ModelPicker
+              models={form.modelInfo?.models ?? []}
+              defaultModelLabel={form.modelInfo?.default_model_label ?? null}
+              value={form.model}
+              onChange={form.setModel}
+              disabled={busy}
+            />
           ) : null}
-          {form.effortSupported ? (
+          {form.caps.effortSupported ? (
             <EffortPicker
-              options={form.effortOptions}
+              options={form.caps.effortOptions}
               value={form.effort}
               onChange={form.setEffort}
               disabled={busy}
@@ -134,8 +123,8 @@ export function LaunchFormFields({
 
       <LaunchOptionsDetails
         mode="new"
-        supportsCustomArgs={form.supportsCustomArgs}
-        supportsConfigOverrides={form.supportsConfigOverrides}
+        supportsCustomArgs={form.caps.supportsCustomArgs}
+        supportsConfigOverrides={form.caps.supportsConfigOverrides}
         customArgsText={form.customArgsText}
         onCustomArgsChange={form.setCustomArgsText}
         configOverridesText={form.configOverridesText}

@@ -8,7 +8,7 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { CompactLaunch, type LaunchSheetMode } from "@/components/CompactLaunch";
 import { HomeNav } from "@/components/HomeNav";
 import { InstrumentRail } from "@/components/InstrumentRail";
-import { LaunchPanel, type PresetSelection } from "@/components/LaunchPanel";
+import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { PresenceFloaters } from "@/components/PresenceFloaters";
 import { SchedulePanel } from "@/components/SchedulePanel";
@@ -71,13 +71,12 @@ import {
 import { useBackendCatalog } from "@waypoint/web-core/backends";
 import { useResumableThreads } from "@waypoint/web-core/hooks/useResumableThreads";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
+import { launchDefaults } from "@waypoint/web-core/launch/defaults";
+import { classifyLaunchFailure } from "@waypoint/web-core/launch/failure";
+import type { PresetSelection } from "@waypoint/web-core/launch/presets";
 import {
-  launchDefaults,
+  type AgentThread,
   threadDiscoveryBackends,
-} from "@waypoint/web-core/launch/launchDefaults";
-import { classifyLaunchFailure } from "@waypoint/web-core/launch/launchError";
-import {
-  threadImportRequest,
   threadProfileScope,
 } from "@waypoint/web-core/launch/threads";
 import { reconnectDelay } from "@waypoint/web-core/session/connection";
@@ -97,12 +96,12 @@ import {
   MessageSchedule,
   ScheduleCreateRequest,
   ScheduledSession,
+  SessionCreateRequest,
   SessionEnvelope,
   SessionPresetSummary,
   ProviderUsageStatus,
   SessionPresetWriteRequest,
   SessionRecord,
-  SessionTransport,
   UsageDashboardBucket,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
@@ -587,9 +586,9 @@ export default function HomePage() {
     }
   }
 
-  async function handleCreate(request: Record<string, unknown>) {
+  async function handleCreate(request: SessionCreateRequest) {
     setCwdError(null);
-    const cwd = String(request.cwd ?? "");
+    const cwd = request.cwd;
     try {
       const session = await createSession(host, token, request);
       setSessions((current) => [
@@ -620,9 +619,7 @@ export default function HomePage() {
         });
         return;
       }
-      setError(
-        failure.kind === "detail" ? failure.message : "failed to create session",
-      );
+      setError(failure.message);
     }
   }
 
@@ -697,36 +694,14 @@ export default function HomePage() {
     }
   }
 
-  async function handleImportThread(
-    backend: Backend,
-    threadId: string,
-    cwd: string,
-    transport: SessionTransport | null,
-    importHistory: boolean,
-    launchEnv: Record<string, string>,
-    model: string | null,
-  ) {
+  async function handleImportThread(thread: AgentThread, body: Record<string, unknown>) {
     try {
-      // Import under the same account profile that scoped the resumable-thread
-      // list the user picked from — otherwise the runtime reads the default
-      // store and 404s on a profile-scoped thread.
-      const payload = threadImportRequest({
-        thread: { id: threadId, cwd },
-        launchTargetId: activeLaunchTargetId,
-        accountProfileId: threadProfileScope(
-          backend,
-          activeFormBackend,
-          activeFormAccountProfileId,
-        ),
-        choices: { transport, launchEnv, model },
-        importHistory,
-      });
-      const session = await importBackendThread(host, token, backend, payload);
+      const session = await importBackendThread(host, token, thread.backend, body);
       setSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
       ]);
-      removeThread(backend, threadId);
+      removeThread(thread.backend, thread.id);
       router.push(`/session/${session.id}`);
     } catch (importError) {
       if (isAuthError(importError)) {
@@ -736,7 +711,7 @@ export default function HomePage() {
       setError(
         importError instanceof Error
           ? importError.message
-          : `failed to import ${backend} thread`,
+          : `failed to import ${thread.backend} thread`,
       );
     }
   }
@@ -773,10 +748,7 @@ export default function HomePage() {
 
   async function handleCreateSchedule(payload: ScheduleCreateRequest) {
     try {
-      const created = await createScheduleRequest(host, token, {
-        ...payload,
-        launch_target_id: activeLaunchTargetId || null,
-      });
+      const created = await createScheduleRequest(host, token, payload);
       setSchedules((current) => [
         created,
         ...current.filter((item) => item.id !== created.id),

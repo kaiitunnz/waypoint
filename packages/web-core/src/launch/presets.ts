@@ -3,6 +3,7 @@ import { effortLabel, modelLabelFor } from "../modelDisplay";
 import type {
   AccountProfile,
   Backend,
+  SessionPreset,
   SessionPresetSpec,
   SessionPresetSpecSummary,
   SessionPresetSummary,
@@ -124,6 +125,31 @@ export function specFromSummary(summary: SessionPresetSpecSummary): SessionPrese
   const spec: SessionPresetSpecSummary = { ...summary };
   delete spec.launch_env_keys;
   return spec;
+}
+
+// The spec that fills a form: the summary's, or the full one fetched with its
+// variables' values.
+export async function loadPresetSpec(
+  preset: SessionPresetSummary,
+  fetchPreset: (presetId: string) => Promise<SessionPreset>,
+): Promise<SessionPresetSpec> {
+  return presetNeedsFullSpec(preset) ? (await fetchPreset(preset.id)).spec : specFromSummary(preset.spec);
+}
+
+// Which preset a launch opens with: the default, or a chosen one (null is none).
+export type PresetSelection = { kind: "default" } | { kind: "preset"; presetId: string | null };
+
+// The preset a launch opens with, and its spec when the form can take it at once;
+// a preset with variables waits for their values.
+export function openingPreset(
+  presets: SessionPresetSummary[],
+  defaultPresetId: string | null,
+  selection: PresetSelection,
+): { id: string | null; spec: SessionPresetSpec | null } {
+  const id = selection.kind === "preset" ? selection.presetId : defaultPresetId;
+  const preset = presets.find((entry) => entry.id === id);
+  if (!preset) return { id: null, spec: null };
+  return { id: preset.id, spec: presetNeedsFullSpec(preset) ? null : specFromSummary(preset.spec) };
 }
 
 export function presetBackendUnsupported(preset: SessionPresetSummary | null, launchable: Backend[]): Backend | null {

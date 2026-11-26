@@ -76,30 +76,6 @@ export function threadFormAgent(filter: ThreadFilter, backends: Backend[], prefe
   return backends.includes(preferred) ? preferred : (backends[0] ?? preferred);
 }
 
-export interface ThreadImportChoices {
-  transport: SessionTransport | null;
-  launchEnv: Record<string, string>;
-  model: string | null;
-}
-
-// What an import sends. A single-agent view resumes with the chosen interface,
-// environment and model; "All" mixes agents, so each thread resumes with its own
-// agent's defaults.
-export function threadImportChoices(
-  thread: AgentThread,
-  filter: ThreadFilter,
-  chosen: { transport: SessionTransport; launchEnv: Record<string, string>; model: string | null; showModel: boolean },
-  defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>,
-  catalog: BackendCatalog,
-): ThreadImportChoices {
-  const own = filter === thread.backend;
-  return {
-    transport: own ? chosen.transport || null : defaultTransportFor(thread.backend, catalog),
-    launchEnv: own ? chosen.launchEnv : { ...(defaultLaunchEnvByBackend[thread.backend] ?? {}) },
-    model: own && chosen.showModel ? chosen.model : null,
-  };
-}
-
 // The account profile a thread's store is scoped to: the form's profile, for the
 // form's own agent only. Import and delete need it, or a profile-scoped thread is
 // not found.
@@ -111,38 +87,58 @@ export function threadProfileScope(
   return backend === scopeBackend ? scopeAccountProfileId || null : null;
 }
 
-// The body of `POST /api/backends/{id}/sessions/import`.
-export function threadImportRequest({
-  thread,
-  launchTargetId,
-  accountProfileId,
-  choices,
-  importHistory,
-}: {
-  thread: Pick<ThreadSummary, "id" | "cwd">;
-  launchTargetId: string;
+// What a single-agent view chose for the import.
+export interface ThreadImportChoices {
+  transport: SessionTransport;
+  launchEnv: Record<string, string>;
+  model: string | null;
+}
+
+export interface ThreadImportScope {
+  launchTargetId: string | null;
+  // The form's agent and account profile, which scope that agent's thread store.
+  backend: Backend | null;
   accountProfileId: string | null;
+}
+
+// The body of `POST /api/backends/{id}/sessions/import`. A single-agent view
+// resumes with the chosen interface, environment and model; "All" mixes agents,
+// so each thread resumes with its own agent's defaults.
+export function threadImportBody({
+  thread,
+  filter,
+  choices,
+  scope,
+  importHistory,
+  defaultLaunchEnvByBackend,
+  catalog,
+}: {
+  thread: AgentThread;
+  filter: ThreadFilter;
   choices: ThreadImportChoices;
+  scope: ThreadImportScope;
   importHistory: boolean;
+  defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
+  catalog: BackendCatalog;
 }): Record<string, unknown> {
+  const own = filter === thread.backend;
   return {
     thread_id: thread.id,
-    launch_target_id: launchTargetId || null,
-    account_profile_id: accountProfileId,
+    launch_target_id: scope.launchTargetId || null,
+    account_profile_id: threadProfileScope(thread.backend, scope.backend, scope.accountProfileId),
     cwd: thread.cwd,
     // An explicit transport supersedes launch_mode, so the mode stays "auto".
     launch_mode: "auto",
-    transport: choices.transport || null,
-    launch_env: choices.launchEnv,
-    // Replays the thread's conversation into the new session's transcript.
+    transport: own ? choices.transport || null : defaultTransportFor(thread.backend, catalog),
+    launch_env: own ? choices.launchEnv : { ...(defaultLaunchEnvByBackend[thread.backend] ?? {}) },
     import_history: importHistory,
     // Null lets the agent resolve its configured default.
-    model: choices.model,
+    model: showsImportModel(filter, thread.backend, catalog) ? choices.model : null,
   };
 }
 
 export function canDeleteThread(backend: Backend, catalog: BackendCatalog): boolean {
-  return Boolean(catalog.byId(backend)?.agent_capabilities?.supports_thread_delete);
+  return catalog.agentCaps(backend)?.supports_thread_delete ?? false;
 }
 
 // An agent offers a model at import only when it keeps that choice.
@@ -153,13 +149,13 @@ export function showsImportModel(filter: ThreadFilter, agent: Backend, catalog: 
 export function threadEmptyHint(filter: ThreadFilter, catalog: BackendCatalog, targetLabel: string | null): string {
   const where = targetLabel ? ` on ${targetLabel}` : "";
   if (filter === "all") return `No importable threads found${where}.`;
-  return `No ${catalog.byId(filter)?.label ?? humaniseBackend(filter)} threads to resume${where}.`;
+  return `No ${humaniseBackend(filter, catalog)} threads to resume${where}.`;
 }
 
 export function deleteThreadMessage(thread: ThreadSummary): string {
   return (
-    `Delete "${thread.title}"?\n\nThis removes the on-disk transcript permanently. ` +
-    "`claude --resume`/codex resume will no longer see it. This cannot be undone."
+    `Delete "${thread.title}"?\n\nThis removes the on-disk transcript permanently, so the agent ` +
+    "can no longer resume it. This cannot be undone."
   );
 }
 
@@ -181,4 +177,11 @@ export function formatThreadTime(value: string, now: number = Date.now()): strin
     }
   }
   return "just now";
+}
+
+// The agents whose resumable threads to list: launchable ones that discover
+// threads. An agent missing from the catalog is tried, so a first load before the
+// catalog arrives still fetches.
+export function threadDiscoveryBackends(launchable: Backend[], catalog: BackendCatalog): Backend[] {
+  return launchable.filter((id) => catalog.agentCaps(id)?.supports_thread_discovery ?? true);
 }

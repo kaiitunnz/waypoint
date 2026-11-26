@@ -23,7 +23,6 @@ interface RowProps {
   menu: ReactNode;
 }
 
-// A row's conversation preview: off by the person's choice, or its activity, undefined while it loads.
 interface PreviewProps {
   previews: boolean;
   activity: SessionActivity | null | undefined;

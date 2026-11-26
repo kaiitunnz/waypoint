@@ -5,7 +5,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  /* One line of the row's own type, whatever it holds, so nothing moves as previews load. */
+  /* One line of the row's type, so nothing moves as previews load. */
   height: 1lh;
 }
 

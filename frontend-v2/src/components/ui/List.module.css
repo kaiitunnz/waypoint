@@ -94,7 +94,6 @@
   white-space: nowrap;
 }
 
-/* One line: the compact exited row, and a live row without its preview. */
 .compact,
 .single {
   align-items: center;

@@ -203,7 +203,7 @@ export function Gallery() {
       <SettingsSection title="Group">
         <SwitchRow label="Conversation previews" checked={on} onChange={setOn} />
         <PickerRow
-          label="Summary"
+          label="Density"
           value={density}
           onChange={setDensity}
           options={[

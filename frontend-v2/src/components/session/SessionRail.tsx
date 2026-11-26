@@ -72,7 +72,7 @@ export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
     const word = lampWord(lamp, session.status);
     const ask = asks.find((item) => item.session_id === session.id);
     const exited = section === "exited";
-    // Exited rows are one muted line; pinned and live are one line when previews are off.
+    // Needs-you rows keep their ask line.
     const single = exited || (!previews && section !== "needs");
     return (
       <li key={session.id}>

@@ -790,12 +790,14 @@ Servers of a launch target start one at a time until the first has migrated a
 - A Waypoint session covers its OpenCode session and that session's subagents:
   their approvals and questions appear in it, and it stays running until all of
   them finish. Their transcripts are not shown.
+- Interrupt stops the subagents too. OpenCode then runs the session to take their
+  results, and the session stays interrupted until new input.
 - Permission modes are the session's permission ruleset, rewritten on restore.
   "Approve for session" adds allow rules to that ruleset, which a mode change,
   restore or fork resets. OpenCode's own `always` reply allows for the whole
   project and is not used.
 - Model, effort (a model variant) and agent are selected on the session when
-  they change.
+  they change. An effort the model has no variant for is refused.
 - A skill runs as a prompt, a slash command through the command endpoint.
 - The tmux transport passes `--standalone`, so the TUI's tools see the session's
   environment. A custom `--server` argument conflicts with it.

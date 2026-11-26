@@ -1,0 +1,112 @@
+.loading {
+  padding: 8px 0 16px;
+  color: var(--muted);
+}
+
+/* ─── Header ─── */
+
+.header {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--f-title);
+  line-height: 28px;
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .titleBlock {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 12px;
+  }
+}
+
+/* ─── Body ─── */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  padding: 0 18px 16px;
+  container-type: inline-size;
+}
+
+.touchModes {
+  padding-bottom: 2px;
+}
+
+/* The modal has a fixed height, so the columns scroll on their own. */
+.pointerLayout {
+  height: 100%;
+}
+
+.pointerLayout .main {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 24px 20px;
+}
+
+.withColumn {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+}
+
+/* ─── Footer ─── */
+
+.footer {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: start;
+  column-gap: 10px;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+}
+
+.noticeGlyph {
+  display: inline-flex;
+  margin-top: 3px;
+  color: var(--error);
+}
+
+.noticeText {
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+}

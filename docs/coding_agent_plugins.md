@@ -149,6 +149,7 @@ Properties of the CLI/protocol itself, the same whichever transport drives it.
 | `supports_custom_cli_args` | `bool` | Allows launch requests and configured targets to pass extra raw CLI arguments to the binary. |
 | `supports_config_overrides` | `bool` | Exposes a separate `config_overrides` input wrapped per-agent (Codex's `--config K=V`). |
 | `supports_slash_compact` | `bool` | Frontend hint that `/compact` is meaningful for this agent. |
+| `supports_terminal_launch_model`, `supports_terminal_launch_effort` | `bool` | Whether `launch_flags` carry the model / the effort, so a terminal (tmux) launch honours the choice; the launch form hides the field when `False`. Default `True`. |
 | `cli_binary` | `str \| None` | Default CLI for local launches and tmux fallback; `None` opts out. Override via `plugin_configs.<id>.local_bin` (local) or `ssh_targets[*].plugin_configs.<id>.remote_bin` (per SSH target). |
 | `config_dir_env_var` | `str \| None` | The env var that scopes the agent's config/account state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Non-`None` lets the agent host named account profiles and support restart-and-resume account switching — see [`account_profiles.md`](account_profiles.md). |
 | `target_aliases` | `tuple[str, ...]` | Substrings used to infer this agent from a tmux pane name. |
@@ -213,7 +214,9 @@ async def capture_thread_id(self, runtime, session_id, cwd, since, launch_target
 
 - `launch_flags` returns the CLI flags that pin model/effort/permission at
   process start, mirroring the structured-launch flag set. Omit flags the CLI
-  doesn't accept (Codex has no `--effort`).
+  doesn't accept (Codex has no `--effort`), and set
+  `supports_terminal_launch_model` / `supports_terminal_launch_effort` to
+  `False` to match.
 - `required_launch_flags` returns the single-token flags every launch needs;
   `launch_flags` includes them, and a `tmux` reconnect adds the ones stored
   launch args lack.

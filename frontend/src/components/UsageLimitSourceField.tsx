@@ -1,7 +1,11 @@
 "use client";
 
 import type { UsageProviderOption } from "@waypoint/web-core/types";
-import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
+import {
+  selectUsageSource,
+  type UsageLimitSourceValue,
+  usageSourceChoices,
+} from "@waypoint/web-core/usageLimitSource";
 
 interface UsageLimitSourceFieldProps {
   variant: "launch" | "settings";
@@ -11,13 +15,6 @@ interface UsageLimitSourceFieldProps {
   disabled?: boolean;
 }
 
-const PLUGIN_LABEL = "Agent plugin";
-const UNAVAILABLE_VALUE = "__unavailable__";
-
-function providerValue(id: string): string {
-  return `provider:${id}`;
-}
-
 export function UsageLimitSourceField({
   variant,
   options,
@@ -25,75 +22,20 @@ export function UsageLimitSourceField({
   onChange,
   disabled,
 }: UsageLimitSourceFieldProps) {
-  const selectedProvider =
-    value.source === "usage_provider" && value.providerId
-      ? options.find((option) => option.id === value.providerId) ?? null
-      : null;
-  const selectedAccountExists =
-    selectedProvider?.accounts.some(
-      (account) => account.account_key === value.accountKey,
-    ) ?? false;
-  // A persisted provider/account that is no longer published: keep the choice
-  // visible (disabled) so the user can see and replace it, never silently
-  // dropping it back to the plugin default.
-  const unavailable =
-    value.source === "usage_provider" && !selectedAccountExists;
-
-  const primaryValue = unavailable
-    ? UNAVAILABLE_VALUE
-    : selectedProvider
-      ? providerValue(selectedProvider.id)
-      : "plugin";
-
-  const unavailableLabel = value.providerId
-    ? `Unavailable: ${value.providerId} account`
-    : "Unavailable account";
+  const { value: primaryValue, choices, accounts } = usageSourceChoices(options, value);
 
   function onPrimaryChange(next: string): void {
-    if (next === "plugin") {
-      onChange({ source: "plugin", providerId: null, accountKey: null });
-      return;
-    }
-    if (next.startsWith("provider:")) {
-      const id = next.slice("provider:".length);
-      const provider = options.find((option) => option.id === id);
-      if (!provider || provider.accounts.length === 0) return;
-      onChange({
-        source: "usage_provider",
-        providerId: id,
-        // Default to the first account; a multi-account provider reveals the
-        // account sub-select below for an explicit pick.
-        accountKey: provider.accounts[0].account_key,
-      });
-    }
+    const selection = selectUsageSource(options, next);
+    if (selection) onChange(selection);
   }
 
-  const showAccountSelect =
-    selectedProvider !== null && selectedProvider.accounts.length > 1;
+  const showAccountSelect = accounts.length > 0;
 
-  const primaryOptions = (
-    <>
-      <option value="plugin">{PLUGIN_LABEL}</option>
-      {options.map((option) => {
-        const empty = option.accounts.length === 0;
-        const label = empty
-          ? `${option.label} (unavailable)`
-          : option.accounts.length === 1
-            ? `${option.label} — ${option.accounts[0].account_label}`
-            : option.label;
-        return (
-          <option key={option.id} value={providerValue(option.id)} disabled={empty}>
-            {label}
-          </option>
-        );
-      })}
-      {unavailable ? (
-        <option value={UNAVAILABLE_VALUE} disabled>
-          {unavailableLabel}
-        </option>
-      ) : null}
-    </>
-  );
+  const primaryOptions = choices.map((choice) => (
+    <option key={choice.value} value={choice.value} disabled={choice.disabled}>
+      {choice.label}
+    </option>
+  ));
 
   if (variant === "settings") {
     return (
@@ -124,16 +66,10 @@ export function UsageLimitSourceField({
               id="settings-usage-account"
               className="settings-input"
               value={value.accountKey ?? ""}
-              onChange={(event) =>
-                onChange({
-                  source: "usage_provider",
-                  providerId: selectedProvider!.id,
-                  accountKey: event.target.value,
-                })
-              }
+              onChange={(event) => onChange({ ...value, accountKey: event.target.value })}
               disabled={disabled}
             >
-              {selectedProvider!.accounts.map((account) => (
+              {accounts.map((account) => (
                 <option key={account.account_key} value={account.account_key}>
                   {account.account_label}
                 </option>
@@ -162,16 +98,10 @@ export function UsageLimitSourceField({
           <span>Account</span>
           <select
             value={value.accountKey ?? ""}
-            onChange={(event) =>
-              onChange({
-                source: "usage_provider",
-                providerId: selectedProvider!.id,
-                accountKey: event.target.value,
-              })
-            }
+            onChange={(event) => onChange({ ...value, accountKey: event.target.value })}
             disabled={disabled}
           >
-            {selectedProvider!.accounts.map((account) => (
+            {accounts.map((account) => (
               <option key={account.account_key} value={account.account_key}>
                 {account.account_label}
               </option>

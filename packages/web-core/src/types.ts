@@ -357,6 +357,10 @@ export interface AgentCapabilities {
   supports_custom_cli_args: boolean;
   supports_config_overrides: boolean;
   supports_slash_compact: boolean;
+  // Whether a terminal (tmux) launch carries the model / the effort. Absent
+  // from older backends, which the launch form reads as true.
+  supports_terminal_launch_model?: boolean;
+  supports_terminal_launch_effort?: boolean;
   cli_binary?: string | null;
   target_aliases: string[];
   badges: Record<string, string>;
@@ -748,6 +752,28 @@ export interface ScheduledSession {
   last_run_at?: string | null;
   last_run_status?: string | null;
   last_failure_reason?: string | null;
+}
+
+// The body of `POST /api/sessions`.
+export interface SessionCreateRequest {
+  backend: Backend;
+  cwd: string;
+  title: string | null;
+  launch_target_id: string | null;
+  source_mode: "managed";
+  transport: SessionTransport | null;
+  model: string | null;
+  effort: string | null;
+  permission_mode: string | null;
+  account_profile_id: string | null;
+  usage_limit_source: UsageLimitSource;
+  usage_provider_id: string | null;
+  usage_provider_account_key: string | null;
+  args: string[];
+  config_overrides: string[];
+  launch_env: Record<string, string>;
+  // Provenance only: the fields are already resolved.
+  preset_id: string | null;
 }
 
 export interface ScheduleCreateRequest {

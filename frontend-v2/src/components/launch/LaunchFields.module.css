@@ -1,0 +1,75 @@
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.grid,
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.grid3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.span {
+  grid-column: 1 / -1;
+}
+
+.rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.heading {
+  padding-bottom: 8px;
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.titleRow span {
+  flex: none;
+}
+
+.titleRow input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-strong);
+  font-size: var(--f-body);
+  text-align: right;
+  outline: none;
+}
+
+.titleRow input::placeholder {
+  color: var(--faint);
+}
+
+.titleRow:focus-within input {
+  text-align: left;
+}
+
+.advanced {
+  border-top: 1px solid var(--line);
+}
+
+@container (max-width: 520px) {
+  .grid3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,26 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.heading {
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.preview strong {
+  color: var(--text-strong);
+}

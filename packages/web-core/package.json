@@ -51,6 +51,8 @@
     "./variant": "./src/variant.ts",
     "./workspacePaths": "./src/workspacePaths.ts",
     "./hooks/*.test": null,
+    "./launch/*.test": null,
+    "./launch/*": "./src/launch/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./session/*.test": null,
     "./session/*": "./src/session/*.ts"

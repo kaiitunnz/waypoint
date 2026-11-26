@@ -1,4 +1,5 @@
 import { type BackendCatalog } from "../backends";
+import { defaultModelChoiceLabel, effortLevelsFor, modelChoices } from "../launch/models";
 import { effortLabel } from "../modelDisplay";
 import type { BackendModelOption, BackendPermissionMode, SessionRecord } from "../types";
 
@@ -27,18 +28,8 @@ export interface TuningOptions {
 
 export function tuningOptions(input: TuningInput): TuningOptions {
   const { modelOptions, effortLevels, currentModel, currentEffort, defaultModelId } = input;
-  // A custom-named model the session already has is listed, so the picker
-  // shows it instead of "Default".
-  const modelEntries =
-    currentModel && !modelOptions.some((option) => option.id === currentModel)
-      ? [{ id: currentModel, label: `Custom · ${currentModel}`, description: null }, ...modelOptions]
-      : [...modelOptions];
-  // Efforts are gated by the selected model; without one, by the default model.
-  const resolved = currentModel || defaultModelId;
-  const entry = resolved ? modelOptions.find((option) => option.id === resolved) : undefined;
-  const effortOptions = entry
-    ? [...(entry.supported_efforts ?? effortLevels)] // null → unknown: the agent's whole vocabulary
-    : Array.from(new Set(modelOptions.flatMap((option) => option.supported_efforts ?? [])));
+  const modelEntries = modelChoices(modelOptions, currentModel);
+  const effortOptions = effortLevelsFor(modelOptions, effortLevels, currentModel, defaultModelId);
   return {
     modelEntries,
     effortOptions,
@@ -59,7 +50,7 @@ export function tuningSummary(input: TuningInput, options: TuningOptions): strin
     const matched = options.modelEntries.find((option) => option.id === (input.currentModel ?? ""));
     parts.push(
       matched?.label ??
-        (input.currentModel || (input.defaultModelLabel ? `Default (${input.defaultModelLabel})` : "Default")),
+        (input.currentModel || defaultModelChoiceLabel(input.defaultModelLabel)),
     );
   }
   if (options.hasEffortPicker) {

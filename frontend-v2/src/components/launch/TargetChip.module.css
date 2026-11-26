@@ -1,0 +1,97 @@
+.on {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--f-body);
+  color: var(--muted);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.chip > :last-child {
+  color: var(--faint);
+}
+
+.chip:hover {
+  background: var(--fill-quiet);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list {
+  margin: 0;
+  padding: 4px 0 8px;
+  list-style: none;
+}
+
+.list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 18px;
+  text-align: left;
+  color: var(--text-strong);
+}
+
+.selected {
+  background: var(--fill-quiet);
+}
+
+.lamp {
+  display: inline-flex;
+  margin-top: 7px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rowName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chip {
+    min-height: 32px;
+  }
+
+  .row {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+
+  .row:hover {
+    background: var(--fill-quiet);
+  }
+}

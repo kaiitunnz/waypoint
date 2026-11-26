@@ -3,9 +3,15 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { LaunchForm } from "@/components/LaunchFormFields";
+import type { LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
 import { humaniseBackend } from "@waypoint/web-core/backends";
 import { trapTabFocus } from "@waypoint/web-core/keyboard";
+import {
+  deletePresetMessage,
+  presetBackendUnsupported,
+  specSummaryChips,
+  summarizeSpec,
+} from "@waypoint/web-core/launch/presets";
 import type {
   AccountProfile,
   Backend,
@@ -15,18 +21,8 @@ import type {
   UsageProviderOption,
 } from "@waypoint/web-core/types";
 
-interface SummaryChip {
-  text: string;
-  className?: string;
-  title?: string;
-}
-
-// A compact key=value summary of what a preset spec pins, in the badge/mono
-// vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
-// The account profile rides the account hue (session identity, not tuning), and
-// resolves to its label from the current catalogue — an id no longer offered
-// falls back to the raw id marked unavailable. Used only in the save sheet's
-// captures readout.
+// The save sheet's readout of what a spec pins: the agent as an owner-hue badge,
+// the rest as muted chips.
 function SpecSummary({
   spec,
   profiles,
@@ -36,41 +32,7 @@ function SpecSummary({
   profiles: AccountProfile[];
   usageProviders: UsageProviderOption[];
 }) {
-  const chips: SummaryChip[] = [];
-  if (spec.model) chips.push({ text: spec.model });
-  if (spec.effort) chips.push({ text: spec.effort });
-  if (spec.permission_mode) chips.push({ text: spec.permission_mode });
-  if (spec.account_profile_id) {
-    const matched = profiles.find((p) => p.id === spec.account_profile_id);
-    chips.push(
-      matched
-        ? { text: matched.label, className: "is-profile" }
-        : {
-            text: spec.account_profile_id,
-            className: "is-profile is-unavailable",
-            title: "Account profile no longer available",
-          },
-    );
-  }
-  if (spec.usage_limit_source === "usage_provider") {
-    const provider = usageProviders.find((p) => p.id === spec.usage_provider_id);
-    const account = provider?.accounts.find(
-      (a) => a.account_key === spec.usage_provider_account_key,
-    );
-    chips.push(
-      provider && account
-        ? { text: `${provider.label} — ${account.account_label}` }
-        : {
-            text: spec.usage_provider_id ?? "usage provider",
-            className: "is-unavailable",
-            title: "Usage provider account no longer available",
-          },
-    );
-  }
-  const envCount = spec.launch_env_keys?.length ?? 0;
-  if (envCount) chips.push({ text: `${envCount} env` });
-  const argsCount = spec.args?.length ?? 0;
-  if (argsCount) chips.push({ text: `${argsCount} arg${argsCount > 1 ? "s" : ""}` });
+  const chips = specSummaryChips(spec, profiles, usageProviders);
   return (
     <span className="preset-summary">
       {spec.backend ? (
@@ -81,7 +43,9 @@ function SpecSummary({
       {chips.map((chip, i) => (
         <span
           key={`${i}-${chip.text}`}
-          className={`preset-summary-chip${chip.className ? ` ${chip.className}` : ""}`}
+          className={`preset-summary-chip${chip.profile ? " is-profile" : ""}${
+            chip.unavailable ? " is-unavailable" : ""
+          }`}
           title={chip.title}
         >
           {i > 0 || spec.backend ? <span className="preset-summary-dot" /> : null}
@@ -97,27 +61,6 @@ function selectedOf(
   id: string | null,
 ): SessionPresetSummary | null {
   return presets.find((p) => p.id === id) ?? null;
-}
-
-// A spec snapshot of the current launch form — the payload a save/update
-// captures. Excludes cwd, title, and launch target: those are per-launch, not
-// preset defaults.
-function formSpec(form: LaunchForm): SessionPresetSpec {
-  const { args, configOverrides, launchEnv } = form.collectArgs();
-  return {
-    backend: form.backend,
-    transport: form.transport || null,
-    model: form.model.trim() || null,
-    effort: form.effortSupported ? form.effort.trim() || null : null,
-    permission_mode: form.permissionMode || null,
-    account_profile_id: form.accountProfileId || null,
-    usage_limit_source: form.usageSelection.source,
-    usage_provider_id: form.usageSelection.providerId,
-    usage_provider_account_key: form.usageSelection.accountKey,
-    args,
-    config_overrides: configOverrides,
-    launch_env: launchEnv,
-  };
 }
 
 interface PresetSelectProps {
@@ -143,15 +86,11 @@ export function PresetSelect({
 
   const selected = selectedOf(presets, selectedPresetId);
   const isDefault = selected?.is_default ?? false;
-  const presetBackend = selected?.spec.backend ?? null;
-  const backendUnsupported =
-    !!presetBackend && !supportedBackends.includes(presetBackend as Backend);
+  const unsupportedBackend = presetBackendUnsupported(selected, supportedBackends);
 
   async function handleDelete(): Promise<void> {
     if (!selected) return;
-    const message = selected.is_default
-      ? `Delete the default preset "${selected.name}"? There will be no default afterwards. This cannot be undone.`
-      : `Delete the preset "${selected.name}"? This cannot be undone.`;
+    const message = deletePresetMessage(selected);
     if (!window.confirm(message)) return;
     setError(null);
     setBusy(true);
@@ -197,10 +136,10 @@ export function PresetSelect({
           </button>
         ) : null}
       </div>
-      {backendUnsupported ? (
+      {unsupportedBackend ? (
         <p className="error preset-bar-error" role="alert">
-          This preset&apos;s backend ({humaniseBackend(presetBackend as Backend)})
-          isn&apos;t available here — change the backend or launch target.
+          This preset&apos;s backend ({humaniseBackend(unsupportedBackend)})
+          isn&apos;t available here — pick another preset or launch target.
         </p>
       ) : null}
       {error ? (
@@ -257,7 +196,7 @@ export function PresetSaveActions({
     setBusy(true);
     try {
       // PATCH the spec only; name/description (and tags) are preserved server-side.
-      await savePreset({ spec: formSpec(form) }, selected.id);
+      await savePreset({ spec: form.presetSpec() }, selected.id);
       setFlashed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to update preset");
@@ -341,8 +280,8 @@ export function PresetSaveActions({
       {saveOpen ? (
         <PresetSaveModal
           seedDefault={seedDefault}
-          spec={formSpec(form)}
-          profiles={form.accountProfiles}
+          spec={form.presetSpec()}
+          profiles={form.caps.accountProfiles}
           usageProviders={form.usageProviderOptions}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload) => {
@@ -393,18 +332,7 @@ function PresetSaveModal({
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const summarySpec: SessionPresetSummary["spec"] = {
-    backend: spec.backend,
-    model: spec.model,
-    effort: spec.effort,
-    permission_mode: spec.permission_mode,
-    account_profile_id: spec.account_profile_id,
-    usage_limit_source: spec.usage_limit_source,
-    usage_provider_id: spec.usage_provider_id,
-    usage_provider_account_key: spec.usage_provider_account_key,
-    launch_env_keys: Object.keys(spec.launch_env ?? {}),
-    args: spec.args,
-  };
+  const summarySpec = summarizeSpec(spec);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;

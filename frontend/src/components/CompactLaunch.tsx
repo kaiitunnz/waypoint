@@ -1,5 +1,6 @@
 "use client";
 
+import { orderPresets } from "@waypoint/web-core/launch/presets";
 import type { Backend, SessionPresetSummary } from "@waypoint/web-core/types";
 
 // Compact launch action that replaces the always-open form on the homepage: a
@@ -30,12 +31,7 @@ export function CompactLaunch({
   onOpenPreset,
   onOpenSheet,
 }: CompactLaunchProps) {
-  // Lead with the default preset, then the rest by recency-of-list order.
-  const ordered = [...presets].sort((a, b) => {
-    if (a.id === defaultPresetId) return -1;
-    if (b.id === defaultPresetId) return 1;
-    return 0;
-  });
+  const ordered = orderPresets(presets, defaultPresetId);
   const visible = ordered.slice(0, MAX_PRESET_CHIPS);
   const overflow = ordered.length - visible.length;
 

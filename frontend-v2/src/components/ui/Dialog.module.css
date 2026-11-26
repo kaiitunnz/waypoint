@@ -58,6 +58,12 @@
   max-width: 560px;
 }
 
+/* A fixed height, so switching what the body shows does not resize the dialog. */
+.modalXl {
+  max-width: 980px;
+  height: min(880px, calc(100dvh - 32px));
+}
+
 .handle {
   flex: none;
   padding: 7px 0 0;

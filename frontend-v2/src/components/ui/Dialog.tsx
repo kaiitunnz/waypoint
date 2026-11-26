@@ -23,7 +23,9 @@ interface DialogProps {
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
   // Modal only.
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
+  // Replaces the title block, for a heading with its own controls; `title` still names the dialog.
+  header?: ReactNode;
 }
 
 // Opaque with a scrim: dialogs carry text, so they are never glass.
@@ -37,6 +39,7 @@ function Surface({
   footer,
   flush,
   size = "md",
+  header,
   variant,
 }: DialogProps & { variant: "sheet" | "modal" }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -73,7 +76,7 @@ function Surface({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={isSheet ? styles.sheet : cx(styles.modal, size === "lg" && styles.modalLg)}
+        className={isSheet ? styles.sheet : cx(styles.modal, size === "lg" && styles.modalLg, size === "xl" && styles.modalXl)}
         style={drag ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
       >
         {isSheet ? (
@@ -88,13 +91,15 @@ function Surface({
           </div>
         ) : null}
         <div className={styles.head}>
-          <div className={styles.heading}>
-            <h2 className={styles.title}>
-              {title}
-              {count !== undefined ? <span className={styles.count}>{count}</span> : null}
-            </h2>
-            {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
-          </div>
+          {header ?? (
+            <div className={styles.heading}>
+              <h2 className={styles.title}>
+                {title}
+                {count !== undefined ? <span className={styles.count}>{count}</span> : null}
+              </h2>
+              {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+            </div>
+          )}
           <IconButton label="Close" size="sm" onClick={onClose}>
             <Icon name="close" size={18} />
           </IconButton>

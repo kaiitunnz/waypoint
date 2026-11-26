@@ -27,6 +27,7 @@ import {
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
+  SessionCreateRequest,
   ScheduledSession,
   SessionLaunchSettings,
   SessionCompletionsResponse,
@@ -364,7 +365,7 @@ export async function fetchEvents(
 export async function createSession(
   host: string,
   token: string,
-  payload: Record<string, unknown>,
+  payload: SessionCreateRequest,
 ): Promise<SessionRecord> {
   const response = await fetch(`${host}/api/sessions`, {
     method: "POST",

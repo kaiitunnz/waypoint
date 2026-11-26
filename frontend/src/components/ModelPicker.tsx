@@ -1,100 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-import { fetchBackendModels, isAuthError } from "@waypoint/web-core/api";
-import { Backend, BackendModelListResponse, BackendModelOption } from "@waypoint/web-core/types";
+import { defaultModelChoiceLabel, modelChoices } from "@waypoint/web-core/launch/models";
+import type { BackendModelOption } from "@waypoint/web-core/types";
 
 interface ModelPickerProps {
-  host: string;
-  token: string;
-  backend: Backend;
-  launchTargetId: string | null;
-  accountProfileId?: string | null;
+  models: BackendModelOption[];
+  defaultModelLabel: string | null;
   value: string;
   onChange: (value: string) => void;
-  onAuthFailure?: () => void;
-  // Fires after each successful discovery response so callers (e.g. an
-  // EffortPicker rendered alongside) can derive their own options without
-  // duplicating the fetch — Codex discovery spawns a transient client per
-  // call.
-  onModelsLoaded?: (response: BackendModelListResponse) => void;
   disabled?: boolean;
-  label?: string;
-  hint?: string;
-  defaultModelLabel?: string | null;
 }
 
-export function ModelPicker({
-  host,
-  token,
-  backend,
-  launchTargetId,
-  accountProfileId,
-  value,
-  onChange,
-  onAuthFailure,
-  onModelsLoaded,
-  disabled,
-  label = "Model",
-  hint,
-  defaultModelLabel,
-}: ModelPickerProps) {
-  const [options, setOptions] = useState<BackendModelOption[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchBackendModels(host, token, backend, { launchTargetId, accountProfileId })
-      .then((response) => {
-        if (cancelled) return;
-        setOptions(response.models);
-        onModelsLoaded?.(response);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        if (isAuthError(error)) {
-          onAuthFailure?.();
-          return;
-        }
-        // Discovery failure leaves the picker as just "Default" — graceful
-        // degradation instead of blocking the form.
-        setOptions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [host, token, backend, launchTargetId, accountProfileId, onAuthFailure, onModelsLoaded]);
-
-  // Surface a custom-named model the caller already has even if it's not in
-  // the curated list — covers schedules / sessions cloned from older state.
-  const entries: BackendModelOption[] =
-    value && !options.some((opt) => opt.id === value)
-      ? [
-          {
-            id: value,
-            label: `Custom · ${value}`,
-            description: null,
-          },
-          ...options,
-        ]
-      : options;
-
+export function ModelPicker({ models, defaultModelLabel, value, onChange, disabled }: ModelPickerProps) {
   return (
     <label className="field">
-      <span>{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-      >
-         <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
-        {entries.map((option) => (
+      <span>Model</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+        <option value="">{defaultModelChoiceLabel(defaultModelLabel)}</option>
+        {modelChoices(models, value).map((option) => (
           <option key={option.id} value={option.id}>
             {option.label}
           </option>
         ))}
       </select>
-      {hint ? <span className="muted field-hint">{hint}</span> : null}
     </label>
   );
 }

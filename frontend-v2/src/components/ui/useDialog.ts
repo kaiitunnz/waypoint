@@ -34,6 +34,17 @@ export function useDialog(open: boolean, onClose: () => void, panel: RefObject<H
 
     function onKeyDown(event: KeyboardEvent) {
       if (stack[stack.length - 1] !== id) return;
+      // A popover opened from the dialog is portaled outside it: it handles
+      // Escape, and Tab cycles within it.
+      const active = document.activeElement;
+      const popover =
+        active instanceof HTMLElement && !panel.current?.contains(active)
+          ? active.closest<HTMLElement>('[role="dialog"]')
+          : null;
+      if (popover) {
+        if (event.key === "Tab") trapTabFocus(event, popover, { preventWhenEmpty: true, tabStopsOnly: true });
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         close.current();

@@ -214,6 +214,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         supports_approval_note=True,
         supports_attachments=True,
         supports_custom_cli_args=True,
+        # The TUI takes neither flag at launch (see launch_flags).
+        supports_terminal_launch_model=False,
+        supports_terminal_launch_effort=False,
         # "Approve for session" is a rule on the session. OpenCode's own
         # "always" allows project-wide, so there is no acceptAlways.
         approval_decisions=APPROVAL_DECISIONS,

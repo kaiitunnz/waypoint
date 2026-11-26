@@ -9,15 +9,20 @@ import {
   useState,
 } from "react";
 
-import {
-  LaunchFormFields,
-  useLaunchForm,
-} from "@/components/LaunchFormFields";
+import { LaunchFormFields } from "@/components/LaunchFormFields";
 import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
 import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
+import { attachRequest, attachTargetError } from "@waypoint/web-core/launch/attach";
+import { useLaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
 import {
-  cronFromState,
+  loadPresetSpec,
+  presetBackendUnsupported,
+  type PresetSelection,
+} from "@waypoint/web-core/launch/presets";
+import { withScheduleTiming } from "@waypoint/web-core/launch/schedule";
+import type { AgentThread, ThreadSummary } from "@waypoint/web-core/launch/threads";
+import {
   defaultRecurrenceState,
   RecurrenceState,
   TimingMode,
@@ -28,36 +33,18 @@ import {
   AccountProfile,
   Backend,
   ScheduleCreateRequest,
+  SessionCreateRequest,
   SessionPreset,
-  SessionPresetSpec,
   SessionPresetSummary,
   SessionPresetWriteRequest,
-  SessionTransport,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
-import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
-import { defaultScheduledAt } from "@waypoint/web-core/session/scheduleMessage";
-
-interface ThreadSummary {
-  id: string;
-  title: string;
-  cwd: string;
-  repo_name?: string | null;
-  branch?: string | null;
-  preview?: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import {
+  defaultScheduledAt,
+  type OneTimeTiming,
+} from "@waypoint/web-core/session/scheduleMessage";
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
-
-// `default` uses the default-preset hydration; `preset` hydrates a specific
-// preset, or clears the selection when `presetId` is null (backend default).
-export type PresetSelection =
-  | { kind: "default" }
-  | { kind: "preset"; presetId: string | null };
-
-type ScheduleTiming = "delay" | "datetime";
 
 interface LaunchPanelProps {
   host: string;
@@ -78,42 +65,17 @@ interface LaunchPanelProps {
   // caller can re-scope the resumable-thread fetch to the selected profile —
   // thread discovery is fetched app-globally, decoupled from this form.
   onDiscoveryScopeChange?: (backend: Backend, accountProfileId: string | null) => void;
-  onCreate: (
-    backend: Backend,
-    cwd: string,
-    title: string,
-    model: string | null,
-    effort: string | null,
-    transport: SessionTransport | null,
-    args: string[],
-    configOverrides: string[],
-    launchEnv: Record<string, string>,
-    permissionMode: string | null,
-    presetId: string | null,
-    accountProfileId: string | null,
-    usageSelection: UsageLimitSourceValue,
-  ) => Promise<void>;
-  onAttach: (
-    target: string,
-    backendHint: Backend,
-    title: string,
-  ) => Promise<void>;
-  onImportThread: (
-    backend: Backend,
-    threadId: string,
-    cwd: string,
-    transport: SessionTransport | null,
-    importHistory: boolean,
-    launchEnv: Record<string, string>,
-    model: string | null,
-  ) => Promise<void>;
+  onCreate: (request: SessionCreateRequest) => Promise<void>;
+  onAttach: (request: Record<string, unknown>) => Promise<void>;
+  onImportThread: (thread: AgentThread, body: Record<string, unknown>) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
     threadId: string,
     launchTargetId?: string,
   ) => Promise<void>;
   onCreateSchedule: (payload: ScheduleCreateRequest) => Promise<void>;
-  onAuthFailure?: () => void;
+  // Must be stable.
+  onAuthFailure: () => void;
   // The cwd the backend rejected as nonexistent on the last New launch, or null.
   cwdError?: string | null;
   onClearCwdError?: () => void;
@@ -171,6 +133,11 @@ export function LaunchPanel({
   const mode = controlledMode ?? internalMode;
   const setMode = onModeChange ?? setInternalMode;
   const form = useLaunchForm({
+    host,
+    token,
+    onAuthFailure,
+    fetchModels: mode === "new" || mode === "schedule",
+    launchableBackends: supportedBackends,
     defaultBackend,
     defaultCwd,
     defaultLaunchEnvByBackend,
@@ -187,22 +154,20 @@ export function LaunchPanel({
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const presetHydratedRef = useRef(false);
 
+  // A preset whose agent this target cannot launch stays selected under its
+  // warning, but fills, sends and updates nothing.
+  const selectedUnsupported =
+    presetBackendUnsupported(presets.find((preset) => preset.id === selectedPresetId) ?? null, supportedBackends) !== null;
+  const appliedPresetId = selectedUnsupported ? null : selectedPresetId;
+
   const applyPresetById = useCallback(
     async (id: string | null) => {
       setSelectedPresetId(id);
       if (!id) return;
       const summary = presets.find((preset) => preset.id === id);
-      if (!summary) return;
+      if (!summary || presetBackendUnsupported(summary, supportedBackends)) return;
       try {
-        // A preset with env vars needs the full (unredacted) spec before hydrating.
-        if ((summary.spec.launch_env_keys?.length ?? 0) > 0) {
-          const full = await onFetchPresetSpec(id);
-          form.applyPreset(full.spec);
-        } else {
-          // No env values to fetch; the redacted summary spec carries every
-          // other field, and applyPreset ignores launch_env_keys.
-          form.applyPreset(summary.spec as unknown as SessionPresetSpec);
-        }
+        form.applyPreset(await loadPresetSpec(summary, onFetchPresetSpec));
       } catch {
         // The full (env-carrying) spec couldn't load. Deselect rather than leave
         // a half-hydrated selection: an Update against it would otherwise
@@ -210,7 +175,7 @@ export function LaunchPanel({
         setSelectedPresetId(null);
       }
     },
-    [presets, onFetchPresetSpec, form],
+    [presets, supportedBackends, onFetchPresetSpec, form],
   );
 
   // Seed the form's preset once per mount: a caller-requested preset wins,
@@ -230,7 +195,7 @@ export function LaunchPanel({
   }, [defaultPresetId, applyPresetById, initialPreset]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");
+  const [scheduleTiming, setScheduleTiming] = useState<OneTimeTiming>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
   const [scheduleError, setScheduleError] = useState("");
@@ -245,22 +210,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      const { args, configOverrides, launchEnv } = form.collectArgs();
-      await onCreate(
-        form.backend,
-        form.cwd,
-        form.title,
-        form.model.trim() || null,
-        form.effortSupported ? form.effort.trim() || null : null,
-        form.transport || null,
-        args,
-        configOverrides,
-        launchEnv,
-        form.permissionMode || null,
-        selectedPresetId,
-        form.accountProfileId || null,
-        form.usageSelection,
-      );
+      await onCreate(form.createRequest(appliedPresetId));
       form.setTitle("");
     } finally {
       setFormBusy(false);
@@ -271,7 +221,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onAttach(tmuxTarget, form.backend, form.title);
+      await onAttach(attachRequest(tmuxTarget, form.backend, form.title));
       setTmuxTarget("");
       form.setTitle("");
     } finally {
@@ -282,57 +232,20 @@ export function LaunchPanel({
   async function submitSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setScheduleError("");
-    const { args, configOverrides, launchEnv } = form.collectArgs();
-    const payload: ScheduleCreateRequest = {
-      backend: form.backend,
-      cwd: form.cwd,
-      // An explicit transport supersedes launch_mode at the API, so pin the
-      // transport and leave the launch mode on "auto", matching the New panel.
-      launch_mode: "auto",
-      transport: form.transport || null,
-      title: form.title.trim() || null,
-      initial_prompt: prompt.trim() || null,
-      permission_mode: form.permissionMode || null,
-      model: form.model.trim() || null,
-      effort: form.effortSupported ? form.effort.trim() || null : null,
-      args,
-      config_overrides: configOverrides,
-      launch_env: launchEnv,
-      // Record which preset seeded this schedule (provenance only; the fields
-      // above are the resolved values the server persists).
-      preset_id: selectedPresetId,
-      account_profile_id: form.accountProfileId || null,
-      usage_limit_source: form.usageSelection.source,
-      usage_provider_id: form.usageSelection.providerId,
-      usage_provider_account_key: form.usageSelection.accountKey,
-    };
-    if (timingMode === "repeat") {
-      const cron = cronFromState(recurrence);
-      if (!cron) {
-        setScheduleError("Enter a valid recurrence.");
-        return;
-      }
-      payload.cron = cron;
-      payload.timezone = recurrence.timezone;
-      payload.start_at = recurrence.startAt || null;
-    } else if (scheduleTiming === "delay") {
-      const minutes = Number.parseFloat(delayMinutes);
-      if (!Number.isFinite(minutes) || minutes < 0) {
-        setScheduleError("Enter a non-negative delay in minutes.");
-        return;
-      }
-      payload.delay_seconds = Math.round(minutes * 60);
-    } else {
-      const local = new Date(scheduledAt);
-      if (Number.isNaN(local.getTime())) {
-        setScheduleError("Enter a valid scheduled time.");
-        return;
-      }
-      payload.scheduled_at = local.toISOString();
+    const built = withScheduleTiming(form.scheduleRequest(prompt, appliedPresetId), {
+      timingMode,
+      recurrence,
+      timing: scheduleTiming,
+      delay: delayMinutes,
+      at: scheduledAt,
+    });
+    if ("error" in built) {
+      setScheduleError(built.error);
+      return;
     }
     setFormBusy(true);
     try {
-      await onCreateSchedule(payload);
+      await onCreateSchedule(built.payload);
       form.setTitle("");
       setPrompt("");
     } catch (createError) {
@@ -381,14 +294,13 @@ export function LaunchPanel({
             supportedBackends={supportedBackends}
             catalog={catalog}
             busy={formBusy}
-            onAuthFailure={onAuthFailure}
             cwdError={cwdError}
             onClearCwdError={onClearCwdError}
           />
           <PresetSaveActions
             form={form}
             presets={presets}
-            selectedPresetId={selectedPresetId}
+            selectedPresetId={appliedPresetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}
@@ -421,7 +333,6 @@ export function LaunchPanel({
             supportedBackends={supportedBackends}
             catalog={catalog}
             busy={formBusy}
-            onAuthFailure={onAuthFailure}
           />
           <label className="field">
             <span>Initial prompt</span>
@@ -491,7 +402,7 @@ export function LaunchPanel({
           <PresetSaveActions
             form={form}
             presets={presets}
-            selectedPresetId={selectedPresetId}
+            selectedPresetId={appliedPresetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}
@@ -524,6 +435,7 @@ export function LaunchPanel({
           onDeleteThread={onDeleteThread}
           catalog={catalog}
           defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
+          onAuthFailure={onAuthFailure}
         />
       ) : null}
 
@@ -561,7 +473,7 @@ export function LaunchPanel({
             <span className="grow muted">Attaches over the Terminal interface — Waypoint streams the live pane and forwards your keystrokes.</span>
             <button
               className="primary"
-              disabled={formBusy || !tmuxTarget.trim()}
+              disabled={formBusy || attachTargetError(tmuxTarget) !== null}
               type="submit"
             >
               Attach

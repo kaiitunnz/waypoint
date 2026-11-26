@@ -9,7 +9,7 @@ import { useClamp } from "./useClamp";
 const FOLD_LINES = 8;
 
 // Text that shows only its start or its end until it is opened. `content` goes on the
-// clamped text and `chip` on the wrapper around its disclosure.
+// element just inside the clamped box, and `chip` on the wrapper around its disclosure.
 export function useFold<T extends HTMLElement>(text: string, keep: "start" | "end") {
   const [open, setOpen] = useState(false);
   const folded = useMemo(() => foldLines(text, FOLD_LINES, keep), [text, keep]);
@@ -20,7 +20,6 @@ export function useFold<T extends HTMLElement>(text: string, keep: "start" | "en
     open,
     toggle: () => setOpen(!open),
     shown: open ? whole : folded.text,
-    // Known only when lines are cut; otherwise the box clips by height alone.
     total: cut ? folded.total : undefined,
     content,
     chip,

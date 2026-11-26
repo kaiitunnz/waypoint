@@ -87,6 +87,15 @@ describe("sortScheduled", () => {
     ];
     expect(sortScheduled(rows).map((row) => row.id)).toEqual(["soon", "late", "idle", "new", "old"]);
   });
+
+  it("places a cancelled record by when it was made and a past recurrence by its last run", () => {
+    const rows = [
+      message({ id: "far", status: "cancelled", created_at: iso(local(1, 9)), scheduled_at: iso(new Date(2030, 0, 1)) }),
+      message({ id: "sent", status: "sent", scheduled_at: iso(local(20, 9)) }),
+      message({ id: "recurring", status: "cancelled", cron: "0 9 * * *", last_run_at: iso(local(25, 9)), scheduled_at: iso(local(27, 9)) }),
+    ];
+    expect(sortScheduled(rows).map((row) => row.id)).toEqual(["recurring", "sent", "far"]);
+  });
 });
 
 describe("launchRowView", () => {

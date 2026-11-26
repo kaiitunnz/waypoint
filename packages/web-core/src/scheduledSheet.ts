@@ -90,13 +90,29 @@ export interface ScheduledMessageView extends ScheduledRowView {
   sessionId: string;
 }
 
+interface Sortable {
+  status: string;
+  created_at: string;
+  scheduled_at?: string | null;
+  last_run_at?: string | null;
+  trigger?: string;
+}
+
+const planned = (item: Sortable) => (item.scheduled_at ? Date.parse(item.scheduled_at) : 0);
+
+// When a finished record last ran. A cancelled one may never have, and its
+// planned time can be far ahead, so it counts from when it was made.
+function settledAt(item: Sortable): number {
+  if (item.last_run_at) return Date.parse(item.last_run_at);
+  return item.status === "cancelled" ? Date.parse(item.created_at) : planned(item);
+}
+
 // Pending first, soonest first with when-idle last; then the rest, newest first.
-export function sortScheduled<T extends { status: string; scheduled_at?: string | null; trigger?: string }>(items: T[]): T[] {
-  const at = (item: T) => (item.scheduled_at ? Date.parse(item.scheduled_at) : 0);
+export function sortScheduled<T extends Sortable>(items: T[]): T[] {
   const pending = items.filter((item) => item.status === "pending");
   const rest = items.filter((item) => item.status !== "pending");
-  pending.sort((a, b) => Number(a.trigger === "idle") - Number(b.trigger === "idle") || at(a) - at(b));
-  rest.sort((a, b) => at(b) - at(a));
+  pending.sort((a, b) => Number(a.trigger === "idle") - Number(b.trigger === "idle") || planned(a) - planned(b));
+  rest.sort((a, b) => settledAt(b) - settledAt(a));
   return [...pending, ...rest];
 }
 

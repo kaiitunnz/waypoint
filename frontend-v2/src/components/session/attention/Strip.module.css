@@ -13,6 +13,11 @@
   text-align: left;
 }
 
+/* Drawn inside, since the scrolling stack clips what falls outside it. */
+.strip:focus-visible {
+  outline-offset: -2px;
+}
+
 .glyph {
   flex: none;
   width: 18px;

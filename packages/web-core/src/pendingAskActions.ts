@@ -210,9 +210,9 @@ export function approvalRequest(
   if (read === null) return { status: "loading" };
   if (typeof read === "string") return { status: "failed" };
   const shown = shownRequest(read, session);
-  if (ask.kind !== "plan_approval") return { status: "ready", ...shown };
-  const { body, whole } = shownPlan(ask.plan.text);
-  return { status: "ready", ...shown, body, whole };
+  if (ask.kind !== "plan_approval" || shown.unverified) return { status: "ready", ...shown };
+  const { body, whole, lockNote } = shownPlan(ask.plan.text);
+  return { status: "ready", ...shown, body, whole, lockNote };
 }
 
 // ─── Responding ───

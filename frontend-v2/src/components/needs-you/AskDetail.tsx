@@ -147,11 +147,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
             ))}
             {view ? <ApprovalBody body={view} whole /> : null}
             <RequestFields fields={shown.fields} />
-            {shown.whole || shown.unverified ? null : (
-              <p className={styles.note}>
-                {shown.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}
-              </p>
-            )}
+            {shown.lockNote ? <p className={styles.note}>{shown.lockNote}</p> : null}
           </>
         ) : request.status === "loading" ? (
           <p className={styles.note}>Loading…</p>
@@ -170,8 +166,8 @@ function AskView({ ask }: { ask: PendingAsk }) {
   const agent = humaniseBackend(ask.session_backend, catalog);
   const askSession = useAskSessions();
   const session = askSession(ask.session_id);
-  // A tool approval read off the screen is not decided here.
-  const terminal = ask.kind === "approval" && session.fromScreen;
+  // An approval read off the screen is not decided here.
+  const terminal = ask.kind !== "question" && session.fromScreen;
   const href = terminal ? sessionTerminalHref(ask.session_id) : sessionHref(ask.session_id);
   const source = (
     <SourceLine

@@ -215,6 +215,7 @@ describe("deciding outside the detail", () => {
     // It would not read as it runs.
     expect(inline("Bash", { command: "ls # \u202e/ fr- mr ;" })).toBeNull();
     expect(inline("Bash", { command: "rm\u200b -rf a" })).toBeNull();
+    for (const blank of ["\ufe0f", "\u{e0100}", "\u034f", "\u3164"]) expect(inline("Bash", { command: `ls${blank}` })).toBeNull();
     expect(inlineCommand(plan("# Plan", "approve"), false)).toBeNull();
   });
 
@@ -252,8 +253,21 @@ describe("deciding outside the detail", () => {
       warnings: [],
       unverified: false,
       whole: true,
+      lockNote: null,
     });
-    expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false });
+    expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false, lockNote: "No plan text" });
+  });
+
+  it("leaves a plan read off the screen undecided, whatever its ask carries", () => {
+    const request = ev(1, "approval_request", "Approve plan", {
+      tool_name: "ExitPlanMode",
+      tool_input: { plan: "# Plan" },
+      interaction: { kind: "plan_approval" },
+    });
+    expect(approvalRequest(plan("# Plan", "approve"), request, { cwd: "/w", fromScreen: true })).toMatchObject({
+      unverified: true,
+      whole: false,
+    });
   });
 });
 

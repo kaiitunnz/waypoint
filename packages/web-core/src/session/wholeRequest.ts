@@ -25,13 +25,15 @@ export interface ShownRequest {
   unverified: boolean;
   // All of what is asked is shown, so it can be decided on.
   whole: boolean;
+  // Why it is not, where the warnings do not say.
+  lockNote: string | null;
 }
 
 // ─── Hidden text ───
 
 // Characters that draw nothing or reorder the text around them; line breaks and tabs
 // are not among them.
-const HIDDEN = /(?![\n\t]|\r\n)[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+const HIDDEN = /(?![\n\t]|\r\n)[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 
 export const hasHiddenText = (text: string) => text.search(HIDDEN) !== -1;
 
@@ -110,6 +112,10 @@ function requestWarnings(event: EventRecord, cwd: string): string[] {
 
 // ─── Whole or locked ───
 
+const NO_PLAN = "No plan text";
+const MISSING = "The whole request isn't available here";
+const HIDDEN_IN_DIFF = "The diff can't show its hidden characters";
+
 // Tools that ask to run a text of their own (a plan, prompt, command or script): without
 // it, what is asked is not on screen.
 const CONTENT_TOOLS = new Set(["ExitPlanMode", "Task", "Agent", "Bash", ...WORKFLOW_TOOLS]);
@@ -151,33 +157,46 @@ function holdsContent(body: ApprovalBody, input: Record<string, unknown> | null,
   }
 }
 
+// A diff is the one view whose text the raw block does not write out.
+const hidesInDiff = (body: ApprovalBody) =>
+  body.kind === "diff" && strings(body.preview.files).some(hasHiddenText);
+
+function lockReason(body: ApprovalBody, input: Record<string, unknown> | null, tool: string | null): string | null {
+  if (!holdsContent(body, input, tool)) return body.kind === "plan" ? NO_PLAN : MISSING;
+  return hidesInDiff(body) ? HIDDEN_IN_DIFF : null;
+}
+
 // A plan with no call behind it: its text is the request.
 export function shownPlan(plan: string): ShownRequest {
+  const whole = plan.trim() !== "";
   return {
     body: { kind: "plan", plan },
     fields: { plan },
     warnings: hasHiddenText(plan) ? [HIDDEN_WARNING] : [],
     unverified: false,
-    whole: plan.trim() !== "",
+    whole,
+    lockNote: whole ? null : NO_PLAN,
   };
 }
 
 const UNVERIFIED = "This call can't be verified from here";
 
-// A pending request as read from its transcript. A dialog read off the screen may name
-// another call than the one a reply would answer, so nothing there is decided.
+// A pending request as read from its transcript. Off the screen, a dialog may name
+// another call than the one a reply would answer, and a plan rebuilt from the transcript
+// may differ from the one in the dialog, so nothing there is decided.
 export function shownRequest(request: EventRecord, session: AskSession): ShownRequest {
   const body = requestedBody(request);
   const fields = requestFields(request);
-  // A plan comes from its plan file, not off the screen.
-  if (session.fromScreen && asRecord(request.metadata?.interaction)?.kind !== "plan_approval") {
-    return { body, fields, warnings: [UNVERIFIED], unverified: true, whole: false };
+  if (session.fromScreen) {
+    return { body, fields, warnings: [UNVERIFIED], unverified: true, whole: false, lockNote: null };
   }
+  const lockNote = lockReason(body, asRecord(request.metadata?.tool_input), readToolName(request));
   return {
     body,
     fields,
     warnings: requestWarnings(request, session.cwd),
     unverified: false,
-    whole: holdsContent(body, asRecord(request.metadata?.tool_input), readToolName(request)),
+    whole: lockNote === null,
+    lockNote,
   };
 }

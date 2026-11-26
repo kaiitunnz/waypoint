@@ -32,15 +32,11 @@ describe("a request read off the screen", () => {
     }
   });
 
-  it("is decided where it is a plan, which comes from its plan file", () => {
-    const plan = (text: string) =>
-      shownRequest(approve("ExitPlanMode", { plan: text }, { interaction: { kind: "plan_approval" } }), screen);
-    expect(plan("# Do it")).toMatchObject({ unverified: false, whole: true });
-    expect(plan("")).toMatchObject({ unverified: false, whole: false });
-    // A tool dialog that only names itself a plan is not one.
-    expect(shownRequest(approve("ExitPlanMode", { plan: "# Do it" }, { interaction: { kind: "approval" } }), screen).whole).toBe(
-      false,
-    );
+  it("is not decided where it is a plan, which may differ from the one in the dialog", () => {
+    for (const text of ["# Do it", ""]) {
+      const request = approve("ExitPlanMode", { plan: text }, { interaction: { kind: "plan_approval" } });
+      expect(shownRequest(request, screen)).toMatchObject({ unverified: true, whole: false, warnings: unverified, lockNote: null });
+    }
   });
 
   it("is otherwise as the agent gave it", () => {
@@ -114,12 +110,40 @@ describe("hidden characters", () => {
     expect(JSON.parse(text)).toEqual(fields);
   });
 
+  it("include what draws nothing without being a control or format character", () => {
+    const fields = { command: "a\ufe0fb\u034fc\u3164d\u{e0100}" };
+    expect(requestText(fields)).toContain("a\\ufe0fb\\u034fc\\u3164d\\udb40\\udd00");
+    expect(asAsked(approve("Bash", { command: "ls\u3164" })).warnings).toEqual([hidden]);
+  });
+
   it("are warned of wherever the request carries them, a diff included", () => {
     expect(asAsked(approve("Bash", { command: "ls \u202e# x" })).warnings).toEqual([hidden]);
     expect(asAsked(approve("Bash", { command: "ls\u001b[8mrm -rf a" })).warnings).toEqual([hidden]);
     const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\u2066\n" }] };
     expect(asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview })).warnings).toEqual([hidden]);
     expect(asAsked(approve("Bash", { command: "a\r\n\tb\nc" })).warnings).toEqual([]);
+  });
+
+  it("lock a diff, whose text the raw request does not write out", () => {
+    const changed = (file: Record<string, unknown>) => {
+      const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\n", ...file }] };
+      return asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview }));
+    };
+    const locked = { whole: false, lockNote: "The diff can't show its hidden characters", warnings: [hidden] };
+    for (const file of [
+      { diff: "@@ -1 +1 @@\n-a\n+if (x) {\u202e} \u2066// admin\u2069\n" },
+      // An unchanged line, which the request itself does not carry.
+      { diff: "@@ -1,2 +1,2 @@\n a\u200b\n-a\n+b\n" },
+      { path: "a\u202egnp.ts" },
+      { old_path: "b\u3164.ts" },
+    ]) {
+      expect([file, changed(file)]).toMatchObject([file, locked]);
+    }
+    expect(changed({ diff: "@@ -1 +1 @@\r\n-a\r\n+\tb\r\n" })).toMatchObject({ whole: true, lockNote: null });
+  });
+
+  it("leave a request the raw block writes out to be decided", () => {
+    expect(asAsked(approve("Bash", { command: "ls \u202e# x" }))).toMatchObject({ whole: true, lockNote: null });
   });
 });
 
@@ -149,6 +173,11 @@ describe("what holds the content", () => {
     expect(whole("mcp__mail__send", { to: "a@b" })).toBe(true);
     // A tool without arguments is its name.
     expect(whole("mcp__x__ping", {})).toBe(true);
+  });
+
+  it("says why it refuses", () => {
+    expect(asAsked(approve("ExitPlanMode", { plan: "" })).lockNote).toBe("No plan text");
+    expect(asAsked(approve("Bash", { command: "" })).lockNote).toBe("The whole request isn't available here");
   });
 
   it("refuses a request with nothing of what it asks", () => {

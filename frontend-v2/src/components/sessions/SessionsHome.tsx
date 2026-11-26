@@ -8,6 +8,7 @@ import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useScheduleTargetSessions } from "@waypoint/web-core/hooks/useScheduleTargetSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
 import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
@@ -38,6 +39,8 @@ import { useSessionMenuActions } from "./useSessionMenuActions";
 import { useSwitcher } from "./SwitcherProvider";
 import { BoardSummaryCard, LimitsReadout, LimitsStrip, ScheduledSummaryList } from "./Summaries";
 import styles from "./SessionsHome.module.css";
+
+const NO_SESSIONS: SessionRecord[] = [];
 
 export function SessionsHome() {
   const phone = usePhoneLayout();
@@ -178,9 +181,10 @@ export function SessionsHome() {
     </>
   );
 
+  const titleSessions = useScheduleTargetSessions(host, token, feed.sessions ?? NO_SESSIONS, feed.messageSchedules);
   const titleById = useMemo(
-    () => new Map((feed.sessions ?? []).map((session) => [session.id, session.title])),
-    [feed.sessions],
+    () => new Map(titleSessions.map((session) => [session.id, session.title])),
+    [titleSessions],
   );
   const scheduled = useMemo(
     () => summarizeScheduled(feed.schedules, feed.messageSchedules, titleById, 3, now),

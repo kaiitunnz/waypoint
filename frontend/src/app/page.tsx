@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { CompactLaunch, type LaunchSheetMode } from "@/components/CompactLaunch";
@@ -44,7 +44,6 @@ import {
   fetchLiveSessions,
   fetchSessionHistory,
   fetchSessionPreset,
-  fetchSessionsByIds,
   fetchUsageDashboard,
   importBackendThread,
   isAuthError,
@@ -70,6 +69,7 @@ import {
 } from "@waypoint/web-core/store";
 import { useBackendCatalog } from "@waypoint/web-core/backends";
 import { useResumableThreads } from "@waypoint/web-core/hooks/useResumableThreads";
+import { useScheduleTargetSessions } from "@waypoint/web-core/hooks/useScheduleTargetSessions";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { launchDefaults } from "@waypoint/web-core/launch/defaults";
 import { classifyLaunchFailure } from "@waypoint/web-core/launch/failure";
@@ -129,8 +129,6 @@ export default function HomePage() {
   const [historyRevision, setHistoryRevision] = useState("");
   // Sessions referenced by message schedules but absent from the live list,
   // fetched by id so schedule rows keep their titles.
-  const [referencedSessions, setReferencedSessions] = useState<Record<string, SessionRecord>>({});
-  const requestedSessionIdsRef = useRef(new Set<string>());
   const [settingsSession, setSettingsSession] = useState<SessionRecord | null>(
     null,
   );
@@ -947,37 +945,7 @@ export default function HomePage() {
     setError("Switched backend. Log in to continue.");
   }
 
-  useEffect(() => {
-    requestedSessionIdsRef.current = new Set();
-    setReferencedSessions({});
-  }, [host]);
-
-  useEffect(() => {
-    if (!host || !token) return;
-    const known = new Set(sessions.map((session) => session.id));
-    const missing = [...new Set(messageSchedules.map((message) => message.session_id))].filter(
-      (sessionId) => !known.has(sessionId) && !requestedSessionIdsRef.current.has(sessionId),
-    );
-    if (!missing.length) return;
-    // Remembered even on failure or when not found (deleted sessions), so a
-    // frequently changing live list never re-requests the same ids.
-    for (const sessionId of missing) requestedSessionIdsRef.current.add(sessionId);
-    fetchSessionsByIds(host, token, missing)
-      .then((found) =>
-        setReferencedSessions((current) => ({
-          ...current,
-          ...Object.fromEntries(found.map((session) => [session.id, session])),
-        })),
-      )
-      .catch(() => {});
-  }, [host, token, sessions, messageSchedules]);
-
-  const titleSessions = [
-    ...sessions,
-    ...Object.values(referencedSessions).filter(
-      (session) => !sessions.some((live) => live.id === session.id),
-    ),
-  ];
+  const titleSessions = useScheduleTargetSessions(host, token, sessions, messageSchedules);
   const filteredSessions = sessions.filter(
     (session) =>
       session.source !== "assistant" && session.source !== "telemetry",

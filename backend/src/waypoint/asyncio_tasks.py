@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from typing import Any
 
 
@@ -34,3 +35,11 @@ async def cancel_and_wait(*tasks: asyncio.Future[Any]) -> None:
         else:
             if caller_cancelled():
                 raise asyncio.CancelledError
+
+
+async def kill_and_reap(proc: asyncio.subprocess.Process) -> None:
+    """Kill *proc* and wait for it, tolerating one that has already exited."""
+    with suppress(ProcessLookupError):
+        proc.kill()
+    with suppress(Exception):
+        await proc.wait()

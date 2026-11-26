@@ -131,8 +131,7 @@ def build_dashboard(
         if snapshot is None:
             continue
         # Provider-origin projections are represented once by the provider's own
-        # account bucket; excluding them here also avoids a ValidationError, since
-        # a provider type is not a valid BackendId for SessionUsageDashboardBucket.
+        # account bucket.
         if snapshot.origin != "plugin":
             continue
         key, label = account_bucket_for(

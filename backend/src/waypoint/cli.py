@@ -2060,7 +2060,7 @@ def sessions_send(
 
     Exits 0 on confirmed delivery or when the server accepted the input.
     Reports ``{"session": {..., "send": "held", "held_message_id": ...}}`` when
-    the target is in Focus.
+    the message is queued: the target is in Focus, on a dialog or being restored.
     On transport timeout, reports ``"send": "delivered"`` when the session
     advanced to running, or ``"send": "unknown"`` when delivery cannot be
     confirmed, and exits 1 in the unknown case.

@@ -464,12 +464,16 @@ class BlockingTransport:
     def __init__(self) -> None:
         self.blocked = False
         self.pending = False
+        self.ready = True
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.pending
 
     async def input_blocked(self, session: SessionRecord) -> bool:
         return self.blocked or self.pending
+
+    async def ready_for_input(self, session: SessionRecord) -> bool:
+        return self.ready
 
 
 def blocking_runtime(tmp_path: Path, monkeypatch) -> tuple[SessionRuntime, Any]:
@@ -532,6 +536,44 @@ async def test_pane_only_block_retries(tmp_path, monkeypatch) -> None:
     await settle(runtime)
     assert sent == []
     transport.blocked = False
+    await asyncio.sleep(0.05)
+    await settle(runtime)
+
+    assert sent == ["one"]
+
+
+@pytest.mark.parametrize("change", ["state", "new message", "dialog"])
+async def test_a_change_restarts_the_wait_for_an_input_box(
+    tmp_path, monkeypatch, change
+) -> None:
+    monkeypatch.setattr("waypoint.held.DEFER_RETRY_SECONDS", 0.01)
+    runtime, transport = blocking_runtime(tmp_path, monkeypatch)
+    runtime.settings.session_restore_timeout_seconds = 0.2
+    sent = record_blocked_dispatches(runtime, transport, monkeypatch)
+    expiry = 0.4
+
+    async def hold_for_a_booting_pane() -> None:
+        transport.blocked, transport.ready = True, False
+        await runtime.held.deliver("s1", agent_send("one"), HeldMessageOrigin.AGENT)
+        transport.blocked = False
+        await asyncio.sleep(0.05)
+
+    await hold_for_a_booting_pane()
+    match change:
+        case "state":
+            await asyncio.sleep(expiry)
+            runtime.held.drain({"s1"})
+        case "new message":
+            await runtime.held.cancel_all("s1")
+            await asyncio.sleep(expiry)
+            await hold_for_a_booting_pane()
+        case "dialog":
+            transport.blocked = True
+            await asyncio.sleep(expiry)
+            transport.blocked = False
+    await asyncio.sleep(0.05)
+    assert sent == []
+    transport.ready = True
     await asyncio.sleep(0.05)
     await settle(runtime)
 

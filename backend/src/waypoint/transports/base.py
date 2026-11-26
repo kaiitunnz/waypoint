@@ -64,6 +64,11 @@ class TransportAdapter(ABC):
         """Whether a dialog on the session would capture sent input."""
         return False
 
+    async def ready_for_input(self, session: SessionRecord) -> bool:
+        """Whether a held message can go out now. A transport that can tell its
+        pane is still booting reports False."""
+        return True
+
     async def resume(self, session: SessionRecord) -> bool:
         """Press Enter in the session's pane. Return whether it submitted
         input, which starts a turn; False when that can't be told."""

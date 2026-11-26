@@ -23,6 +23,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from waypoint.asyncio_tasks import kill_and_reap
 from waypoint.backends.plugin_config import PluginLaunchTargetConfig
 from waypoint.backends.registry import get_registry
 from waypoint.schemas import BackendId
@@ -268,7 +269,11 @@ class SshLaunchTargetConfig(BaseModel):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await proc.communicate()
+        except asyncio.CancelledError:
+            await kill_and_reap(proc)
+            raise
         if proc.returncode != 0:
             return ""
         return stdout.decode("utf-8", errors="ignore")

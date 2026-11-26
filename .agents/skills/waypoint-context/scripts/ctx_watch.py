@@ -594,7 +594,9 @@ def send_queued_pair(
             print(f"grounding: {status}")
             if held or status == "held":
                 # The grounding is queued too, so the lead needs no second one.
-                pair_alert(sid, "pair-held", "the pair is held for the human", False)
+                pair_alert(
+                    sid, "pair-held", "the pair is held in the target's queue", False
+                )
             return
     write_phase(sid, "compacting", grounding, pending=True, sent=True)
     spawn_helper(sid, grounding, "--after-compact")
@@ -798,7 +800,9 @@ def cmd_pair(args: argparse.Namespace) -> None:
             log(sid, f"/compact sent (send: {status})")
             if status == "held":
                 stamp_compacting()
-                pair_alert(sid, "pair-held", "/compact is held for the human", True)
+                pair_alert(
+                    sid, "pair-held", "/compact is held in the target's queue", True
+                )
                 return
         # Some backends read idle for a moment between the steps of a compaction.
         quiet_for = quiet_sec if args.grounding_only else settle_sec
@@ -811,7 +815,9 @@ def cmd_pair(args: argparse.Namespace) -> None:
         log(sid, f"grounding sent (send: {status})")
         if status == "held":
             # The grounding is queued, so the lead needs no second one.
-            pair_alert(sid, "pair-held", "the grounding is held for the human", False)
+            pair_alert(
+                sid, "pair-held", "the grounding is held in the target's queue", False
+            )
     except TargetGone:
         log(sid, "target gone; pair abandoned")
         if phase_record(sid).get("grounding_pending"):

@@ -31,7 +31,8 @@ from typing import Any, TextIO, cast
 from fastapi import HTTPException, status
 
 from waypoint import session_search
-from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
+from waypoint.assistant_assets import ensure_assistant_assets
+from waypoint.assistant_boot import AssistantBoot
 from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import (
     AttachmentStore,
@@ -90,7 +91,9 @@ from waypoint.notifications import (
 from waypoint.pending_asks import PendingAskFeed
 from waypoint.pending_questions import PendingQuestionTracker
 from waypoint.perf import debug_timer
+from waypoint.plugin_availability import PluginAvailability
 from waypoint.presets import PresetManager
+from waypoint.restores import RestoreCoordinator
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
@@ -496,7 +499,9 @@ class SessionRuntime:
         # Started when a session with is_structured=False is created or restored;
         # cancelled on session exit alongside the other per-session tasks.
         self._context_usage_sources: dict[str, asyncio.Task[None]] = {}
-        self._restore_tasks: set[asyncio.Task[None]] = set()
+        self._oneshot_sweep_task: asyncio.Task[None] | None = None
+        self.availability = PluginAvailability(self)
+        self.assistant_boot = AssistantBoot(self)
         # Serializes disruptive per-session lifecycle ops (a launch-settings
         # switch is a terminate→restore sequence that must not interleave with
         # another switch/reattach/terminate on the same session).
@@ -578,12 +583,16 @@ class SessionRuntime:
             if settings.telemetry_enabled
             else None
         )
-        self._transports: dict[str, TransportAdapter] = {
-            plugin.transport_id: plugin.transport_view(self)
-            for plugin in self.registry.all()
-        }
+        self._transports: dict[str, TransportAdapter] = {}
         for plugin in self.registry.all():
-            plugin.setup(self)
+            with self.availability.guard(plugin, "transport_view"):
+                self._transports[plugin.transport_id] = plugin.transport_view(self)
+        for plugin in self.registry.all():
+            with self.availability.guard(plugin, "setup"):
+                plugin.setup(self)
+        self.restores = RestoreCoordinator(
+            self, settings.session_restore_timeout_seconds
+        )
         self.presets = PresetManager(storage)
         self.managers = ManagerRegistry(storage)
         self.scheduler = Scheduler(self)
@@ -628,6 +637,14 @@ class SessionRuntime:
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
         return self._transports[session.transport]
 
+    def require_drivable(self, session_id: str) -> SessionRecord:
+        """Refuse an operation that drives the agent while nothing can take it."""
+        session = self.get_session(session_id)
+        self.availability.require(session)
+        self.assistant_boot.require_not_replaced(session_id)
+        self.restores.require_restored(session_id)
+        return session
+
     async def start(self) -> None:
         self._broadcast_flusher = asyncio.create_task(
             self._session_broadcast_loop(), name="session-broadcast-flusher"
@@ -660,19 +677,24 @@ class SessionRuntime:
                 ),
                 name="instance-bootstrap",
             )
-        # Reap any one-shot session orphaned by a crash before the restore
-        # loop below tries to reconnect it — it has no state worth resuming.
-        await self._sweep_orphaned_oneshot_sessions()
         # Before any restore can finish and kick its session's held items.
         self.held.start()
+        # Before any restore can relaunch the assistant, so it reads them.
+        if self.settings.assistant_backend() is not None:
+            self._refresh_assistant_assets()
         for session in self.storage.list_sessions():
+            # A one-shot has no state worth resuming; the sweep below reaps it.
+            if session.source == SessionSource.TELEMETRY:
+                continue
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
             # back to ERROR if reattach fails, which the auto-reconnect
             # loop (or the user's /reattach button) can then retry.
             # EXITED stays skipped: that's a terminal user choice.
-            if session.status == SessionStatus.EXITED:
+            available = await self.availability.reconcile(session)
+            if available is None or available.status == SessionStatus.EXITED:
                 continue
+            session = available
             # A password-auth target has no live ControlMaster at boot, so a
             # restore would block on an unanswerable password prompt. Leave the
             # session in its stored state for the user to reconnect (prompting
@@ -685,23 +707,21 @@ class SessionRuntime:
             ):
                 continue
             plugin = self.registry.plugin_for(session)
-            task = asyncio.create_task(
+            self.restores.spawn_boot(
+                session.id,
                 self._restore_session_and_warm_completions(plugin, session),
-                name=f"restore-{session.id}",
             )
-            self._restore_tasks.add(task)
-            task.add_done_callback(self._restore_tasks.discard)
-        # Bring up the personal-assistant singleton after scheduling
-        # restores so a still-alive assistant is reused rather than
-        # recreated. A bootstrap failure must never abort startup.
-        try:
-            await self._ensure_assistant_session()
-        except Exception:
-            log.exception("failed to ensure the assistant session")
+        # One turn of the loop, so each restore has marked its session before
+        # anything else is served.
+        await asyncio.sleep(0)
+        self._oneshot_sweep_task = asyncio.create_task(
+            self._sweep_orphaned_oneshot_sessions(), name="oneshot-sweep"
+        )
+        self.assistant_boot.start()
         for plugin in self.registry.all():
             # Optional lifecycle hook; not part of the BackendPlugin protocol.
             hook = getattr(plugin, "start_background_tasks", None)
-            if callable(hook):
+            if callable(hook) and plugin.id not in self.availability.failures:
                 asyncio.create_task(
                     hook(self),
                     name=f"plugin-bg-{plugin.id}",
@@ -772,7 +792,17 @@ class SessionRuntime:
                 )
 
     async def stop(self) -> None:
+        # Whatever delivers messages stops first: a cancelled restore hands its
+        # session a deliverable status that nothing has restored.
+        await self.held.stop()
         await self.scheduler.stop()
+        wake_tasks = list(self._wake_tasks)
+        self._wake_tasks.clear()
+        await cancel_and_wait(*wake_tasks)
+        await self.assistant_boot.stop()
+        if self._oneshot_sweep_task is not None:
+            await cancel_and_wait(self._oneshot_sweep_task)
+            self._oneshot_sweep_task = None
         if self._delete_exited_task is not None:
             # Let the in-flight deletion finish rather than cancel it halfway
             # through its cleanup; the sweep stops before the next one.
@@ -810,18 +840,13 @@ class SessionRuntime:
         self.monitor_tasks.clear()
         await cancel_and_wait(*self._context_usage_sources.values())
         self._context_usage_sources.clear()
-        await cancel_and_wait(*self._restore_tasks)
-        self._restore_tasks.clear()
+        await self.restores.stop()
         completion_tasks = list(self._completion_refresh_tasks.values())
         self._completion_refresh_tasks.clear()
         await cancel_and_wait(*completion_tasks)
         account_probe_tasks = list(self._account_probe_tasks)
         self._account_probe_tasks.clear()
         await cancel_and_wait(*account_probe_tasks)
-        wake_tasks = list(self._wake_tasks)
-        self._wake_tasks.clear()
-        await cancel_and_wait(*wake_tasks)
-        await self.held.stop()
         if self._broadcast_flusher is not None:
             await cancel_and_wait(self._broadcast_flusher)
             self._broadcast_flusher = None
@@ -833,7 +858,10 @@ class SessionRuntime:
                 entry.handle.close()
         self._structured_log_handles.clear()
         for plugin in self.registry.all():
-            await plugin.shutdown(self)
+            try:
+                await plugin.shutdown(self)
+            except Exception:
+                log.exception("backend plugin %s failed to shut down", plugin.id)
         await self.ssh_master.disconnect_all(list(self.ssh_targets.values()))
         self.storage.close()
 
@@ -1657,7 +1685,10 @@ class SessionRuntime:
         preset_id: str | None = None,
         preset_name: str | None = None,
         clone_snapshot: CloneLaunchSnapshot | None = None,
+        launch_timeout: float | None = None,
     ) -> SessionRecord:
+        """Launch a session. ``launch_timeout`` bounds the launch of one without
+        a terminal pane, whose half-started record is then marked ``error``."""
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1839,19 +1870,36 @@ class SessionRuntime:
                 request.account_profile_id,
                 launch_target,
             )
-        session = await plugin.create_session(
-            self,
-            request,
-            session_id=session_id,
-            launch_target=launch_target,
-            title=title,
-            raw_log=raw_log,
-            structured_log=structured_log,
-            git_meta=git_meta,
-            permission_mode=permission_mode,
-            resolved_model=resolved_model,
-            resolved_effort=resolved_effort,
-        )
+        self.availability.require_plugins(plugin.id, request.backend)
+        if plugin.capabilities.has_terminal_pane:
+            # Cancelling a pane launch midway would orphan its agent.
+            launch_timeout = None
+        try:
+            async with asyncio.timeout(launch_timeout):
+                session = await plugin.create_session(
+                    self,
+                    request,
+                    session_id=session_id,
+                    launch_target=launch_target,
+                    title=title,
+                    raw_log=raw_log,
+                    structured_log=structured_log,
+                    git_meta=git_meta,
+                    permission_mode=permission_mode,
+                    resolved_model=resolved_model,
+                    resolved_effort=resolved_effort,
+                )
+        except (TimeoutError, asyncio.CancelledError):
+            if (
+                launch_timeout is not None
+                and self.storage.get_session(session_id) is not None
+            ):
+                await self._record_system_event(
+                    session_id,
+                    "Session launch did not finish",
+                    status=SessionStatus.ERROR,
+                )
+            raise
         if request.worktree_path is not None:
             session = self.storage.update_session(
                 session.id, worktree_path=request.worktree_path
@@ -2011,22 +2059,38 @@ class SessionRuntime:
                 return spawner.permission_mode
         return None
 
-    async def _ensure_assistant_session(self) -> None:
-        """Create / reuse / replace the personal-assistant singleton.
-
-        Reuses a still-alive assistant whose backend matches the
-        configured one. Otherwise demotes any stale assistant rows to
-        ``MANAGED`` (preserving their transcripts as ordinary sessions —
-        never destructive) and creates a fresh assistant. When the
-        assistant is disabled, all assistant rows are released back to
-        ``MANAGED`` and no singleton is tracked.
-        """
-        target_backend = self.settings.assistant_backend()
-        existing = [
+    def _assistant_rows(self) -> list[SessionRecord]:
+        return [
             session
             for session in self.storage.list_sessions()
             if session.source == SessionSource.ASSISTANT
         ]
+
+    def _assistant_is_reusable(self, session: SessionRecord) -> bool:
+        """Whether boot keeps ``session`` as the assistant."""
+        if (
+            session.cwd != str(self._assistant_workspace_dir())
+            or session.status == SessionStatus.EXITED
+        ):
+            return False
+        if session.status != SessionStatus.ERROR:
+            return True
+        # An errored pane session cannot relaunch, so it is replaced.
+        driver = self.availability.driver(session)
+        return driver is None or not driver.capabilities.has_terminal_pane
+
+    async def _ensure_assistant_session(self) -> None:
+        """Create / reuse / replace the personal-assistant singleton.
+
+        Reuses the assistant living in the managed workspace unless it exited,
+        or it errored in a terminal pane. Otherwise creates a fresh assistant
+        and demotes the old rows to ``MANAGED`` (preserving their transcripts as
+        ordinary sessions — never destructive); a failed launch leaves them as
+        they were. When the assistant is disabled, all assistant rows are
+        released back to ``MANAGED`` and no singleton is tracked.
+        """
+        target_backend = self.settings.assistant_backend()
+        existing = self._assistant_rows()
         if target_backend is None:
             for session in existing:
                 self.storage.update_session(
@@ -2034,35 +2098,18 @@ class SessionRuntime:
                 )
             self.assistant_session_id = None
             return
-        # Refresh assistant workspace asset links on every boot so repo
-        # updates to AGENTS.md / CLAUDE.md / skills are visible to backends
-        # without recreating the live thread. If the refresh fails, keep a
-        # healthy live assistant tracked rather than making asset validation a
-        # new availability gate for an existing thread.
-        asset_error: Exception | None = None
-        try:
-            self._prepare_assistant_workspace()
-        except (AssistantAssetError, OSError) as exc:
-            asset_error = exc
-            log.warning("failed to refresh assistant workspace assets", exc_info=True)
-        # Reuse any live assistant that already lives in the managed workspace,
-        # regardless of its backend: the live thread is the source of truth, so
-        # a backend switched from the UI survives a redeploy. ``assistant_backend()``
+        # A failed refresh keeps a healthy live assistant tracked, so that asset
+        # validation gates only a new thread.
+        asset_error = self._refresh_assistant_assets()
+        # Reuse any assistant that already lives in the managed workspace,
+        # regardless of its backend: the thread is the source of truth, so a
+        # backend switched from the UI survives a redeploy. ``assistant_backend()``
         # only seeds the first-ever creation below; later YAML edits to
         # ``assistant.backend`` are ignored while a thread exists (clear context
         # to re-seed). The cwd clause migrates assistants created by older builds
         # (different cwd, bootstrap instructions sent as a visible message) to a fresh,
         # silently-chartered thread.
-        workspace = str(self._assistant_workspace_dir())
-        live = next(
-            (
-                session
-                for session in existing
-                if session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}
-                and session.cwd == workspace
-            ),
-            None,
-        )
+        live = next(filter(self._assistant_is_reusable, existing), None)
         if live is not None:
             self.assistant_session_id = live.id
             for session in existing:
@@ -2073,21 +2120,23 @@ class SessionRuntime:
             return
         if asset_error is not None:
             raise asset_error
+        assistant = self.settings.assistant
+        assert assistant is not None  # guarded by target_backend is not None
+        with self.assistant_boot.launch():
+            created = await self._create_assistant_session(
+                target_backend,
+                model=assistant.model,
+                effort=assistant.effort,
+                permission_mode=assistant.permission_mode,
+                transport=assistant.transport,
+                account_profile_id=assistant.account_profile_id,
+                launch_timeout=self.settings.session_restore_timeout_seconds,
+            )
+        self.assistant_session_id = created.id
         for session in existing:
             self.storage.update_session(
                 session.id, source=SessionSource.MANAGED, pinned_at=None
             )
-        assistant = self.settings.assistant
-        assert assistant is not None  # guarded by target_backend is not None
-        created = await self._create_assistant_session(
-            target_backend,
-            model=assistant.model,
-            effort=assistant.effort,
-            permission_mode=assistant.permission_mode,
-            transport=assistant.transport,
-            account_profile_id=assistant.account_profile_id,
-        )
-        self.assistant_session_id = created.id
 
     async def _create_assistant_session(
         self,
@@ -2099,6 +2148,7 @@ class SessionRuntime:
         transport: str | None,
         account_profile_id: str | None = None,
         usage_selection: UsageSelection = PLUGIN_USAGE_SELECTION,
+        launch_timeout: float | None = None,
     ) -> SessionRecord:
         plugin = self.registry.get(backend)
         validated_mode = (
@@ -2120,7 +2170,7 @@ class SessionRuntime:
             usage_provider_id=usage_selection.provider_id,
             usage_provider_account_key=usage_selection.account_key,
         )
-        session = await self.create_session(request)
+        session = await self.create_session(request, launch_timeout=launch_timeout)
         return self.storage.update_session(
             session.id,
             source=SessionSource.ASSISTANT,
@@ -2140,6 +2190,16 @@ class SessionRuntime:
         workspace = self._assistant_workspace_dir()
         ensure_assistant_assets(workspace, config_path=self.settings.config_path)
         return str(workspace)
+
+    def _refresh_assistant_assets(self) -> Exception | None:
+        """Link the current assets into the assistant's workspace on every boot,
+        so a live thread sees repo updates, and return any failure."""
+        try:
+            self._prepare_assistant_workspace()
+        except Exception as exc:
+            log.warning("failed to refresh assistant workspace assets", exc_info=True)
+            return exc
+        return None
 
     def is_assistant_session(self, session: SessionRecord) -> bool:
         return session.source == SessionSource.ASSISTANT
@@ -2327,16 +2387,18 @@ class SessionRuntime:
         session = self.storage.get_session(session_id)
         if session is None:
             return None
-        plugin = self.registry.plugin_for(session)
+        plugin = self.availability.driver(session)
         return AssistantSummary(
             session_id=session.id,
             backend=session.backend,
             transport=session.transport,
-            native_thread_id=plugin.native_thread_id(session),
+            native_thread_id=plugin.native_thread_id(session) if plugin else None,
             account_profile_id=session.account_profile_id,
             account_profile_label=session.account_profile_label,
             status=session.status,
-            supports_reattach=plugin.capabilities.supports_reattach_after_exit,
+            supports_reattach=bool(
+                plugin and plugin.capabilities.supports_reattach_after_exit
+            ),
         )
 
     def _require_assistant_summary(self) -> AssistantSummary:
@@ -2412,15 +2474,18 @@ class SessionRuntime:
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
-        created = await self._create_assistant_session(
-            chosen,
-            model=model,
-            effort=effort,
-            permission_mode=permission_mode,
-            transport=transport,
-            account_profile_id=selected_profile_id,
-            usage_selection=usage_selection,
-        )
+        # Reset is the way out of a restore that never ends, so it does not wait
+        # for the boot setup.
+        async with self.assistant_boot.replacing():
+            created = await self._create_assistant_session(
+                chosen,
+                model=model,
+                effort=effort,
+                permission_mode=permission_mode,
+                transport=transport,
+                account_profile_id=selected_profile_id,
+                usage_selection=usage_selection,
+            )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)
         return self._require_assistant_summary()
@@ -2475,36 +2540,32 @@ class SessionRuntime:
         transport = getattr(request, "transport", None)
         if transport is not None:
             self._validate_supported_transport(backend, transport)
-            resolved = self.registry.resolve(backend, transport)
-            # The resolved transport owner carries the transport axis (e.g.
-            # has_terminal_pane) for the readiness guard; below it may be swapped
-            # for the agent plugin as the import *mechanism* (a wrapper transport
-            # can't enumerate threads), but the session still runs on ``resolved``.
-            transport_caps = resolved.capabilities
+            # ``runner`` is what the session will run on. A wrapper transport
+            # can't enumerate threads, so the agent plugin is then the import
+            # *mechanism*.
+            runner = self.registry.resolve(backend, transport)
             driver = (
-                resolved
-                if resolved.capabilities.supports_thread_import
-                else agent_plugin
+                runner if runner.capabilities.supports_thread_import else agent_plugin
             )
         else:
             driver = agent_plugin
             # No pinned transport: import resumes over the agent's structured
             # (headless) path unless it falls through to the tmux wrapper — the
             # caller forced it, or AUTO can't use the structured adapter. Mirror
-            # the plugin's own resume-wrapper predicate so the guard sees the
+            # the plugin's own resume-wrapper predicate so the guards see the
             # transport the session will actually run on.
             launch_mode = getattr(request, "launch_mode", None)
             uses_wrapper = launch_mode == LaunchMode.TMUX_WRAPPER or (
                 launch_mode == LaunchMode.AUTO
                 and not agent_plugin.is_available_for_managed_launch(self)
             )
-            if uses_wrapper:
-                fallback = self.registry.fallback_for_managed_launch()
-                transport_caps = (fallback or agent_plugin).capabilities
-            else:
-                transport_caps = agent_plugin.capabilities
+            fallback = (
+                self.registry.fallback_for_managed_launch() if uses_wrapper else None
+            )
+            runner = fallback or agent_plugin
+        self.availability.require_plugins(backend, runner.id, driver.id)
         self._ensure_profile_config_dir_ready(
-            backend, transport_caps, launch_env, account_profile_id, launch_target
+            backend, runner.capabilities, launch_env, account_profile_id, launch_target
         )
         session = await driver.import_thread(self, request, agent=backend)
         # Persist the profile used for listing/import so a later
@@ -2543,6 +2604,7 @@ class SessionRuntime:
         the managed workspace, a redeploy will not re-adopt it and falls back to
         a fresh assistant.
         """
+        self.assistant_boot.require_done()
         if self.settings.assistant_backend() is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2592,23 +2654,25 @@ class SessionRuntime:
         Unlike clearing context, the native thread and transcript are kept so
         ``reattach_assistant`` can resume the same conversation.
         """
+        await self.assistant_boot.cancel_waiting()
         session_id = self.assistant_session_id
         if session_id is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="the assistant is disabled",
             )
-        session = self.get_session(session_id)
-        if session.status != SessionStatus.EXITED:
-            plugin = self.registry.plugin_for(session)
-            await plugin.terminate_session(self, session)
-            await self._record_system_event(
-                session.id, "Assistant terminated", status=SessionStatus.EXITED
-            )
-            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+        async with self.restores.closing(session_id), self._session_lock(session_id):
+            session = self.get_session(session_id)
+            if session.status != SessionStatus.EXITED:
+                await self._terminate_agent(session)
+                await self._record_system_event(
+                    session.id, "Assistant terminated", status=SessionStatus.EXITED
+                )
+                self.storage.update_session(session.id, status=SessionStatus.EXITED)
         return self._require_assistant_summary()
 
     async def reattach_assistant(self) -> AssistantSummary:
+        self.assistant_boot.require_done()
         session_id = self.assistant_session_id
         if session_id is None:
             raise HTTPException(
@@ -2618,10 +2682,18 @@ class SessionRuntime:
         await self.reattach(session_id)
         return self._require_assistant_summary()
 
+    async def dismiss_side_question(
+        self, session_id: str, side_question_id: str
+    ) -> None:
+        session = self.get_session(session_id)
+        self.availability.require(session)
+        plugin = self.registry.plugin_for(session)
+        await plugin.dismiss_side_question(self, session, side_question_id)
+
     async def fork_side_question(
         self, session_id: str, side_question_id: str
     ) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         plugin = self.registry.plugin_for(session)
         usage_selection = self._validate_inherited_usage_selection(session, "fork")
 
@@ -2655,7 +2727,7 @@ class SessionRuntime:
     async def fork_session(
         self, session_id: str, overrides: SessionDeriveRequest | None = None
     ) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         plugin = self.registry.plugin_for(session)
         if not plugin.capabilities.supports_fork:
             raise HTTPException(
@@ -2734,6 +2806,7 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="the persistent personal-assistant session cannot be cloned",
             )
+        self.availability.require(source)
         overrides = overrides or SessionDeriveRequest()
         self._require_spawner(overrides.spawner_session_id)
         usage_selection = self._validate_inherited_usage_selection(
@@ -2779,6 +2852,9 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         backend = request.backend_hint or self._infer_backend(request.tmux_target)
+        self.availability.require_plugins(
+            self.registry.for_transport(TMUX_TRANSPORT_ID).id, backend
+        )
         session_id = self._generate_session_id(backend)
         title = request.title or f"{backend} attached {target.session}"
         session_dir = self._session_dir(session_id)
@@ -2832,7 +2908,7 @@ class SessionRuntime:
     ) -> PreparedInput:
         """Checks that can fail before anything reaches the transcript or agent:
         the session exists (reattached if exited) and every attachment resolves."""
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             session = await self._reattach_session(session)
         attachments = self.resolve_attachments(session.id, request.attachments)
@@ -2935,7 +3011,9 @@ class SessionRuntime:
         force_refresh: bool = False,
     ) -> tuple[list[CommandCompletion], bool]:
         session = self.get_session(session_id)
-        plugin = self.registry.plugin_for(session)
+        plugin = self.availability.driver(session)
+        if plugin is None:
+            return [], False
         key = (session.id, trigger)
         builtins = waypoint_builtin_completions(plugin.capabilities, trigger=trigger)
         if force_refresh:
@@ -2983,37 +3061,43 @@ class SessionRuntime:
     async def _restore_session_and_warm_completions(
         self, plugin: Any, session: SessionRecord
     ) -> None:
-        async with self._keep_read(session.id):
-            await plugin.restore_session(self, session)
+        try:
+            async with self._keep_read(session.id):
+                await self.restores.run(session, plugin.restore_session)
+        except HTTPException:
+            # Closed or deleted: start nothing for this session.
+            return
         refreshed = self.storage.get_session(session.id)
-        if refreshed is not None:
-            # Deliver items a dialog held before the restart, now that the
-            # restored transport can report whether one is still open.
-            self.held.drain({refreshed.id})
-            # Boot-restore warming is fire-and-forget for every persisted
-            # session, so we skip remote targets to avoid fanning out
-            # SSH/plugin-list probes against hosts the user may never
-            # open. New SSH sessions still warm eagerly via
-            # ``create_session`` / fork; reattached ones fall back to
-            # stale-while-revalidate on the first `/` press.
-            self._warm_command_completions(refreshed, include_remote=False)
-            self._start_context_usage_source(refreshed)
-            # Boot-restore re-probe is local-only, mirroring the completion
-            # warming above — remote hosts aren't fanned out to at boot.
-            # Gated on a profile being set, same as launch/thread-import: an
-            # unconditional probe would mass-probe the provider's rate-limit
-            # endpoint for every no-profile session on every restart.
-            if (
-                refreshed.account_profile_id is not None
-                and refreshed.launch_target_id is None
-            ):
-                self._schedule_verified_account_probe(
-                    refreshed.id,
-                    refreshed.backend,
-                    refreshed.launch_env,
-                    launch_target=None,
-                    cwd=refreshed.cwd,
-                )
+        if refreshed is None:
+            return
+        # Deliver items a dialog held before the restart, now that the restored
+        # transport can report whether one is still open.
+        self.held.drain({refreshed.id})
+        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            return
+        # Boot-restore warming is fire-and-forget for every persisted session,
+        # so we skip remote targets to avoid fanning out SSH/plugin-list probes
+        # against hosts the user may never open. New SSH sessions still warm
+        # eagerly via ``create_session`` / fork; reattached ones fall back to
+        # stale-while-revalidate on the first `/` press.
+        self._warm_command_completions(refreshed, include_remote=False)
+        self._start_context_usage_source(refreshed)
+        # Boot-restore re-probe is local-only, mirroring the completion warming
+        # above — remote hosts aren't fanned out to at boot. Gated on a profile
+        # being set, same as launch/thread-import: an unconditional probe would
+        # mass-probe the provider's rate-limit endpoint for every no-profile
+        # session on every restart.
+        if (
+            refreshed.account_profile_id is not None
+            and refreshed.launch_target_id is None
+        ):
+            self._schedule_verified_account_probe(
+                refreshed.id,
+                refreshed.backend,
+                refreshed.launch_env,
+                launch_target=None,
+                cwd=refreshed.cwd,
+            )
 
     def _warm_command_completions(
         self, session: SessionRecord, *, include_remote: bool = True
@@ -3132,7 +3216,7 @@ class SessionRuntime:
         return None
 
     async def interrupt(self, session_id: str) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         await self.transport_for(session).interrupt(session)
         await self._record_system_event(
             session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED
@@ -3140,7 +3224,7 @@ class SessionRuntime:
         return self.storage.update_session(session.id, status=SessionStatus.INTERRUPTED)
 
     async def resume(self, session_id: str) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         # A terminated session has no live pane to wake — sending Enter to the
         # dead target would raise. Relaunch it instead, mirroring handle_input's
         # reattach guard, so "Resume" on an exited session brings it back.
@@ -3161,31 +3245,40 @@ class SessionRuntime:
         return self.get_session(session.id)
 
     async def terminate(self, session_id: str) -> SessionRecord:
+        if self.get_session(session_id).source == SessionSource.ASSISTANT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="the assistant session cannot be terminated",
+            )
         # Serialized with the launch-settings switch and reattach so a terminate
         # can't interleave their terminate→restore window on the same session.
-        async with self._session_lock(session_id):
+        # Either holds the lock while it restores, so restores are stopped first.
+        async with self.restores.closing(session_id), self._session_lock(session_id):
             session = self.get_session(session_id)
-            if session.source == SessionSource.ASSISTANT:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="the assistant session cannot be terminated",
-                )
             if session.status == SessionStatus.EXITED:
                 return session
-            # Route through the plugin (not the transport) so a session whose
-            # adapter slot was never warmed in this process — e.g. an opencode
-            # session terminated while the user's active backend is codex —
-            # cleans up gracefully instead of 503'ing on `_require_adapter`.
-            # Plugin hooks already do soft `.get()` lookups and no-op when the
-            # adapter is missing.
-            plugin = self.registry.plugin_for(session)
-            await plugin.terminate_session(self, session)
+            await self._terminate_agent(session)
             await self._cancel_context_usage_source(session_id)
             await self._record_system_event(
                 session.id, "Session terminated", status=SessionStatus.EXITED
             )
             self._close_structured_log(session.id)
             return self.storage.update_session(session.id, status=SessionStatus.EXITED)
+
+    async def _terminate_agent(self, session: SessionRecord) -> None:
+        # Route through the plugin (not the transport) so a session whose
+        # adapter slot was never warmed in this process — e.g. an opencode
+        # session terminated while the user's active backend is codex —
+        # cleans up gracefully instead of 503'ing on `_require_adapter`.
+        # Plugin hooks already do soft `.get()` lookups and no-op when the
+        # adapter is missing.
+        try:
+            await self.registry.plugin_for(session).terminate_session(self, session)
+        except Exception:
+            # An unavailable plugin must not keep its sessions from being closed.
+            if self.availability.reason(session) is None:
+                raise
+            log.exception("terminate failed for unavailable session %s", session.id)
 
     async def reattach(self, session_id: str) -> SessionRecord:
         # Explicit "reconnect this session" without sending a message.
@@ -3206,7 +3299,9 @@ class SessionRuntime:
                     session.usage_provider_id, force=True
                 )
             return self.get_session(session_id)
-        plugin = self.registry.plugin_for(session)
+        plugin = self.availability.driver(session)
+        if plugin is None:
+            return session
         refresher = getattr(plugin, "refresh_rate_limit_usage", None)
         if callable(refresher):
             await refresher(self, session)
@@ -3354,11 +3449,27 @@ class SessionRuntime:
         )
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
-        # Serialized with terminate and the launch-settings switch.
-        async with self._session_lock(session.id), self._keep_read(session.id):
-            return await self._reattach_locked(session.id)
+        self.require_drivable(session.id)
+        async with self._restarting(session.id) as begin_teardown:
+            return await self._reattach_locked(session.id, begin_teardown)
 
-    async def _reattach_locked(self, session_id: str) -> SessionRecord:
+    @asynccontextmanager
+    async def _restarting(self, session_id: str) -> AsyncIterator[Callable[[], None]]:
+        """Hold the session lock while its process is replaced: sends queue until
+        it is over, and its notes leave the read marker."""
+        try:
+            # Serialized with terminate, reattach and the launch-settings switch.
+            async with self._session_lock(session_id), self._keep_read(session_id):
+                session = self.get_session(session_id)
+                async with self.restores.restarting(session) as begin_teardown:
+                    yield begin_teardown
+        finally:
+            # Release what queued meanwhile.
+            self.held.drain({session_id})
+
+    async def _reattach_locked(
+        self, session_id: str, begin_teardown: Callable[[], None]
+    ) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
         # still be in `_sessions` — the stream/process watchers emit the
         # error event but do not pop the slot. Tear it down explicitly here
@@ -3378,7 +3489,10 @@ class SessionRuntime:
         await self._require_live_master(
             self._find_launch_target(session.launch_target_id)
         )
-        await plugin.terminate_session(self, session)
+        begin_teardown()
+        await self.restores.tear_down(
+            session.id, plugin.terminate_session(self, session)
+        )
         await self._cancel_context_usage_source(session.id)
         # User-initiated retry: bypass any per-target cooldown / circuit
         # breaker so the click takes effect immediately. Plugins without
@@ -3386,12 +3500,11 @@ class SessionRuntime:
         clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
         if clear_cooldown is not None:
             clear_cooldown(self, session)
-        await plugin.restore_session(self, session)
-        # _restore_*_session swallows failures (it tags the session ERROR or
-        # EXITED and emits a system_note instead of raising). Re-read storage
-        # so the caller sees the post-restore status, and translate any
-        # terminal state into a 400 so the frontend surfaces a clear error
-        # rather than silently relaunching into a dead session.
+        failure = await self.restores.run(session, plugin.restore_session)
+        if isinstance(failure, HTTPException):
+            raise failure
+        # A restore may report its failure only through the session's status, so
+        # a terminal one becomes a 400 and the frontend surfaces an error.
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             raise HTTPException(
@@ -3449,6 +3562,9 @@ class SessionRuntime:
                 )
             except KeyError:
                 continue
+            driver_id = self.registry.resolve(session.backend, transport_id).id
+            if driver_id in self.availability.failures:
+                continue
             # Use the same predicate the switch gate enforces, so a projected
             # target can't be rejected with a confusing 400 on apply.
             if not (
@@ -3485,6 +3601,7 @@ class SessionRuntime:
 
     def get_launch_settings(self, session_id: str) -> LaunchSettingsResponse:
         session = self.get_session(session_id)
+        self.availability.require(session)
         caps = self.registry.capabilities_for(session)
         launch_target = self._find_launch_target(session.launch_target_id)
         profiles = redacted_profile_metadata(
@@ -3550,14 +3667,17 @@ class SessionRuntime:
         re-probes and rolls back to the prior settings if the account didn't
         actually change. See the RFC (docs/… issue #230) for the state machine.
         """
+        self.require_drivable(session_id)
         lock = self._session_lock(session_id)
         if lock.locked():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="another lifecycle operation is in progress for this session",
             )
-        async with lock, self._keep_read(session_id):
-            await self._update_launch_settings_locked(session_id, request)
+        async with self._restarting(session_id) as begin_teardown:
+            await self._update_launch_settings_locked(
+                session_id, request, begin_teardown
+            )
         await self.broadcast_session_list()
         return self.get_session(session_id)
 
@@ -3569,7 +3689,10 @@ class SessionRuntime:
         )
 
     async def _update_launch_settings_locked(
-        self, session_id: str, request: LaunchSettingsUpdateRequest
+        self,
+        session_id: str,
+        request: LaunchSettingsUpdateRequest,
+        begin_teardown: Callable[[], None],
     ) -> None:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
@@ -3950,7 +4073,10 @@ class SessionRuntime:
         # the next input with "can't find pane". Native transports (claude_cli,
         # codex) relaunch unconditionally, so this is a no-op for them. The old
         # (current) plugin tears down; the target plugin restores.
-        await plugin.terminate_session(self, session)
+        begin_teardown()
+        await self.restores.tear_down(
+            session.id, plugin.terminate_session(self, session)
+        )
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
             session.id,
@@ -3965,12 +4091,16 @@ class SessionRuntime:
         )
         restored_session = self.get_session(session.id)
         target_plugin = self.registry.resolve(session.backend, target_transport)
-        if fresh_thread_restarter is not None:
-            await fresh_thread_restarter.restart_unpersisted_session(
-                self, restored_session
-            )
-        else:
-            await target_plugin.restore_session(self, restored_session)
+        failure = await self.restores.run(
+            restored_session,
+            (
+                fresh_thread_restarter.restart_unpersisted_session
+                if fresh_thread_restarter is not None
+                else target_plugin.restore_session
+            ),
+        )
+        if isinstance(failure, HTTPException):
+            raise failure
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —
@@ -4079,7 +4209,7 @@ class SessionRuntime:
         await self._cancel_context_usage_source(session_id)
         self._close_structured_log(session_id)
         self.questions.forget(session_id)
-        plugin = self.registry.plugin_for(session)
+        plugin = self.availability.driver(session)
         # Optional async cleanup hook; not part of the BackendPlugin protocol.
         # Run it BEFORE deleting the row so it can read fresh side-question state
         # under lock and honor a concurrent fork-promotion that claimed an aside
@@ -4108,7 +4238,8 @@ class SessionRuntime:
         # Drop any scheduled messages queued for the now-deleted session; the
         # scheduled_messages FK is declarative only (foreign_keys pragma is off).
         await self.scheduler.purge_session_messages(session_id)
-        plugin.on_session_deleted(self, session)
+        if plugin is not None:
+            plugin.on_session_deleted(self, session)
         await self.broadcast_session_list()
         if pruned:
             await self._publish_board_update(None, author_session_id=actor_session_id)
@@ -4682,7 +4813,7 @@ class SessionRuntime:
             return False
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         plugin = self.registry.plugin_for(session)
         caps = plugin.capabilities
         if not (
@@ -4741,7 +4872,7 @@ class SessionRuntime:
         )
 
     async def set_model(self, session_id: str, model: str | None) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         cleaned = model.strip() if isinstance(model, str) and model.strip() else None
         plugin = self.registry.plugin_for(session)
         caps = plugin.capabilities
@@ -4769,7 +4900,7 @@ class SessionRuntime:
         return updated
 
     async def set_effort(self, session_id: str, effort: str | None) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         cleaned = effort.strip() if isinstance(effort, str) and effort.strip() else None
         plugin = self.registry.plugin_for(session)
         # Effort can be applied inline (Codex) or via a session restart
@@ -4881,19 +5012,21 @@ class SessionRuntime:
         tool_use_id: str | None = None,
         answers: list[dict[str, Any]] | None = None,
     ) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         plugin = self.registry.plugin_for(session)
         return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
     async def cancel_question(
         self, session_id: str, tool_use_id: str | None
     ) -> SessionRecord:
-        return await self.questions.cancel(self.get_session(session_id), tool_use_id)
+        return await self.questions.cancel(
+            self.require_drivable(session_id), tool_use_id
+        )
 
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
     ) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         transport = self.transport_for(session)
         if transport.is_structured:
             handled = await transport.respond_to_approval(
@@ -4931,7 +5064,7 @@ class SessionRuntime:
     async def approve_plan(
         self, session_id: str, request: SessionPlanApprovalRequest
     ) -> SessionRecord:
-        session = self.get_session(session_id)
+        session = self.require_drivable(session_id)
         plugin = self.registry.plugin_for(session)
         if not plugin.capabilities.supports_plan_approval:
             raise HTTPException(
@@ -6002,9 +6135,7 @@ class SessionRuntime:
 
     def _start_context_usage_source(self, session: SessionRecord) -> None:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
-            # Boot-restore passes already-terminal sessions through here; a
-            # source started for one would poll until delete with nothing to
-            # cancel it (the terminal transition already fired).
+            # A source started for a terminal session would poll until delete.
             return
         transport = self._transports.get(session.transport)
         if transport is None or transport.is_structured:

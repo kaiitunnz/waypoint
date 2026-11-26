@@ -4,31 +4,46 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+)
 
 from waypoint.launch_env import LaunchEnv
 
+# Validation context for a stored row, which stays readable when it names a
+# plugin that is not loaded, so the runtime can report it.
+STORED_ROW_CONTEXT = {"stored_row": True}
 
-def _validate_backend_id(value: Any) -> str:
+
+def _from_storage(info: ValidationInfo) -> bool:
+    return bool(info.context and info.context.get("stored_row"))
+
+
+def _validate_backend_id(value: Any, info: ValidationInfo) -> str:
     if isinstance(value, StrEnum):
         value = str(value)
     if not isinstance(value, str) or not value:
         raise TypeError(f"backend id must be a non-empty string, got {value!r}")
     from waypoint.backends.registry import get_registry
 
-    if not get_registry().has_backend(value):
+    if not _from_storage(info) and not get_registry().has_backend(value):
         raise ValueError(f"unknown backend: {value!r}")
     return value
 
 
-def _validate_transport_id(value: Any) -> str:
+def _validate_transport_id(value: Any, info: ValidationInfo) -> str:
     if isinstance(value, StrEnum):
         value = str(value)
     if not isinstance(value, str) or not value:
         raise TypeError(f"transport id must be a non-empty string, got {value!r}")
     from waypoint.backends.registry import get_registry
 
-    if not get_registry().has_transport(value):
+    if not _from_storage(info) and not get_registry().has_transport(value):
         raise ValueError(f"unknown transport: {value!r}")
     return value
 
@@ -412,7 +427,7 @@ class UsageLimitSourceUpdateRequest(BaseModel):
 
 class SessionUsageDashboardBucket(BaseModel):
     origin: Literal["session"] = "session"
-    backend: BackendId
+    backend: str
     account_key: str
     account_label: str
     snapshot: SessionRateLimitUsage
@@ -706,10 +721,11 @@ class LaunchTargetConnectResponse(BaseModel):
 
 class AssistantSummary(BaseModel):
     session_id: str
-    backend: BackendId
+    # Plain strings: a stored assistant may name a plugin that is not loaded.
+    backend: str
     # Transport the assistant is driven over, so the UI can label it (Chat /
     # Emulated / Terminal) and preselect it in the settings popover.
-    transport: SessionTransportId
+    transport: str
     # Backend-native conversation id (e.g. the value for `claude --resume`).
     # Surfaced alongside ``session_id`` so a user can recover the thread
     # outside the app. ``None`` when the backend has no resumable id.
@@ -1779,6 +1795,7 @@ class HeldReason(StrEnum):
     FOCUS = "focus"  # the human
     DIALOG = "dialog"  # the session's open dialog clearing
     IDLE = "idle"  # the session going idle
+    RESTORE = "restore"  # the session's restore ending
 
 
 class HeldMessageRecord(BaseModel):

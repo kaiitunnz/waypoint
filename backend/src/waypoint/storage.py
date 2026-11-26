@@ -23,6 +23,7 @@ from waypoint.questions import (
 )
 from waypoint.schemas import (
     AWAITING_ANSWER_KEY,
+    STORED_ROW_CONTEXT,
     BoardChannel,
     BoardEntry,
     EventKind,
@@ -3888,7 +3889,7 @@ class Storage:
                 payload["rate_limit_usage"] = None
         else:
             payload["rate_limit_usage"] = None
-        return SessionRecord.model_validate(payload)
+        return SessionRecord.model_validate(payload, context=STORED_ROW_CONTEXT)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:
         payload = dict(row)
@@ -3920,7 +3921,9 @@ class Storage:
         payload["launch_env"] = (
             parsed_launch_env if isinstance(parsed_launch_env, dict) else {}
         )
-        return ScheduledSessionRecord.model_validate(payload)
+        return ScheduledSessionRecord.model_validate(
+            payload, context=STORED_ROW_CONTEXT
+        )
 
     def _scheduled_message_from_row(self, row: sqlite3.Row) -> ScheduledMessageRecord:
         payload = dict(row)

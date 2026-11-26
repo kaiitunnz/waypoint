@@ -4,6 +4,7 @@ import queue
 import threading
 import weakref
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -2642,3 +2643,98 @@ async def test_approval_event_exposes_the_responder_identity() -> None:
             adapter._cancel_pending_approval(state)
         await asyncio.wait_for(reader, timeout=2)
         await adapter.terminate_session("sess")
+
+
+class StuckCodexClient(FakeCodexClient):
+    """The SDK waits without a timeout; only ``close`` releases a stuck call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.released = threading.Event()
+
+    def stick(self) -> None:
+        self.entered.set()
+        self.released.wait(timeout=10)
+
+    def close(self) -> None:
+        self.released.set()
+
+
+def _adapter_for(client: FakeCodexClient) -> CodexAppServerAdapter:
+    return CodexAppServerAdapter(
+        lambda *_: None,  # type: ignore[arg-type]
+        client_factory=lambda *_: cast(CodexClient, client),
+    )
+
+
+@pytest.mark.asyncio
+async def test_interrupted_launch_closes_the_client() -> None:
+    class StuckInitialize(StuckCodexClient):
+        def initialize(self) -> None:
+            self.stick()
+
+    client = StuckInitialize()
+    adapter = _adapter_for(client)
+    launch = asyncio.create_task(adapter.start_session("sess", "/tmp/work"))
+    await asyncio.to_thread(client.entered.wait, 5)
+    launch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await launch
+
+    assert await asyncio.to_thread(client.released.wait, 5)
+    assert "sess" not in adapter._sessions
+
+
+@pytest.mark.asyncio
+async def test_launch_cancelled_mid_start_closes_the_spawned_process() -> None:
+    class SlowStart(StuckCodexClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proceed = threading.Event()
+            self.running = False
+
+        def start(self) -> None:
+            self.entered.set()
+            self.proceed.wait(timeout=10)
+            self.running = True
+
+        def close(self) -> None:
+            # Like the SDK, close has nothing to do before the process exists.
+            if self.running:
+                self.running = False
+                self.released.set()
+
+    client = SlowStart()
+    launch = asyncio.create_task(_adapter_for(client).start_session("sess", "/tmp/w"))
+    await asyncio.to_thread(client.entered.wait, 5)
+    launch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await launch
+
+    client.proceed.set()
+    assert await asyncio.to_thread(client.released.wait, 5)
+    assert not client.running
+
+
+@pytest.mark.asyncio
+async def test_cancelled_resume_releases_its_thread_when_the_executor_is_full() -> None:
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
+
+    class StuckResume(StuckCodexClient):
+        def thread_resume(self, thread_id: str) -> Any:
+            self.stick()
+            raise RuntimeError("closed")
+
+    client = StuckResume()
+    adapter = _adapter_for(client)
+    restore = asyncio.create_task(adapter.restore_session("sess", "/tmp/work", "t"))
+    async with asyncio.timeout(5):
+        while not client.entered.is_set():
+            await asyncio.sleep(0.01)
+        restore.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await restore
+
+    assert client.released.is_set()
+    assert "sess" not in adapter._sessions

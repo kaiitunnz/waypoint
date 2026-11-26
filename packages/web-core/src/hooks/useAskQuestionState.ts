@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { answerAskQuestion, cancelAskQuestion, isAuthError } from "../api";
-import { isAgentNotReady, retryWhileNotReady } from "../pendingAskActions";
+import { isAgentNotReady, retryWhileNotReady, type RetryOptions } from "../pendingAskActions";
 import {
   EMPTY_ASK_DRAFT,
   indexAskQuestionEvidence,
@@ -69,6 +69,46 @@ export function askFailure(error: unknown, operation: AskOperation, fallback: st
   };
 }
 
+export type AskRequestResult =
+  // A request for this question was already in flight.
+  | { status: "busy" }
+  | { status: "sent" }
+  // `failure` is null when the error went to onRequestError.
+  | { status: "failed"; failure: AskFailure | null };
+
+export interface AskRequestPolicy {
+  operation: AskOperation;
+  fallback: string;
+  retry: boolean;
+  onStart: () => void;
+  onRequestError: (error: unknown, fallback: string) => void;
+  retryOptions?: RetryOptions;
+}
+
+// Sends one request for a question, holding `inFlight` across every retry. With
+// `retry`, a not-ready agent is retried and every failure but an auth error is
+// returned to keep on the question; without it, every failure is reported.
+export async function sendAskRequest(
+  inFlight: Set<string>,
+  toolUseId: string,
+  request: () => Promise<void>,
+  { operation, fallback, retry, onStart, onRequestError, retryOptions }: AskRequestPolicy,
+): Promise<AskRequestResult> {
+  if (inFlight.has(toolUseId)) return { status: "busy" };
+  inFlight.add(toolUseId);
+  onStart();
+  try {
+    await (retry ? retryWhileNotReady(request, retryOptions) : request());
+    return { status: "sent" };
+  } catch (error) {
+    if (retry && !isAuthError(error)) return { status: "failed", failure: askFailure(error, operation, fallback) };
+    onRequestError(error, fallback);
+    return { status: "failed", failure: null };
+  } finally {
+    inFlight.delete(toolUseId);
+  }
+}
+
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
@@ -90,13 +130,13 @@ export function useAskQuestionState({
   const [operations, setOperations] = useState<Record<string, AskOperation>>({});
   const [retrying, setRetrying] = useState<Record<string, boolean>>({});
   const [failures, setFailures] = useState<Record<string, AskFailure>>({});
-  const operationsRef = useRef<Set<string>>(new Set());
+  const inFlight = useRef<Set<string>>(new Set());
   useEffect(() => {
     setDrafts({});
     setOperations({});
     setRetrying({});
     setFailures({});
-    operationsRef.current.clear();
+    inFlight.current.clear();
   }, [sessionId]);
 
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
@@ -108,33 +148,27 @@ export function useAskQuestionState({
       request: () => Promise<void>,
       fallback: string,
     ): Promise<boolean> => {
-      if (operationsRef.current.has(toolUseId)) return false;
-      operationsRef.current.add(toolUseId);
-      setOperations((current) => ({ ...current, [toolUseId]: operation }));
-      setFailures((current) => withoutKey(current, toolUseId));
-      try {
-        if (retry) {
-          await retryWhileNotReady(request, {
-            onRetry: () => setRetrying((current) => ({ ...current, [toolUseId]: true })),
-          });
-        } else {
-          await request();
-        }
+      const result = await sendAskRequest(inFlight.current, toolUseId, request, {
+        operation,
+        fallback,
+        retry,
+        onRequestError,
+        onStart: () => {
+          setOperations((current) => ({ ...current, [toolUseId]: operation }));
+          setFailures((current) => withoutKey(current, toolUseId));
+        },
+        retryOptions: { onRetry: () => setRetrying((current) => ({ ...current, [toolUseId]: true })) },
+      });
+      if (result.status === "busy") return false;
+      setOperations((current) => withoutKey(current, toolUseId));
+      setRetrying((current) => withoutKey(current, toolUseId));
+      if (result.status === "sent") {
         setDrafts((current) => withoutKey(current, toolUseId));
         return true;
-      } catch (requestError) {
-        if (retry && !isAuthError(requestError)) {
-          const failure = askFailure(requestError, operation, fallback);
-          setFailures((current) => ({ ...current, [toolUseId]: failure }));
-        } else {
-          onRequestError(requestError, fallback);
-        }
-        return false;
-      } finally {
-        operationsRef.current.delete(toolUseId);
-        setOperations((current) => withoutKey(current, toolUseId));
-        setRetrying((current) => withoutKey(current, toolUseId));
       }
+      const { failure } = result;
+      if (failure) setFailures((current) => ({ ...current, [toolUseId]: failure }));
+      return false;
     },
     [onRequestError, retry],
   );

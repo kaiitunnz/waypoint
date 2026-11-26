@@ -94,7 +94,6 @@ export function approvalPrompt(body: ApprovalBody): string | null {
   }
 }
 
-// What copying an approval copies: the plan, prompt, command or script, else the event text.
 export function approvalCopyText(body: ApprovalBody, eventText: string): string {
   switch (body.kind) {
     case "plan":

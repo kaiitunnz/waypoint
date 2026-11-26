@@ -188,7 +188,6 @@ describe("streamReducer attention state", () => {
     let state = streamReducer(INITIAL_STREAM_STATE, { type: "clipboard", text: "x" });
     state = streamReducer(state, { type: "clipboard", text: "x" });
     expect(state.clipboard).toEqual({ text: "x", seq: 2 });
-    state = streamReducer(state, { type: "heldMessages", messages: [] });
     expect(streamReducer(state, { type: "reset" })).toBe(INITIAL_STREAM_STATE);
   });
 });

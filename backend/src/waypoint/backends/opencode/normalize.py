@@ -304,6 +304,9 @@ def _historical_tool(
     part: dict[str, Any], fallback: datetime
 ) -> list[tuple[datetime, EventKind, str, dict[str, Any]]]:
     call_id, name = str(part.get("id")), str(part.get("name") or "tool")
+    if name == QUESTION_TOOL:
+        # As live, where the form is the question card.
+        return []
     state = part.get("state")
     state = state if isinstance(state, dict) else {}
     started = _timestamp(part, "created") or fallback

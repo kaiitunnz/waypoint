@@ -172,6 +172,13 @@ def test_history_replays_the_conversation() -> None:
                     "name": "shell",
                     "state": {"status": "running", "input": {}},
                 },
+                # Its form was the question card; history has no card for it.
+                {
+                    "type": "tool",
+                    "id": "c4",
+                    "name": "question",
+                    "state": {"status": "completed", "input": {"questions": []}},
+                },
                 {"type": "text", "text": "done"},
                 {"type": "text", "text": "and more"},
             ],

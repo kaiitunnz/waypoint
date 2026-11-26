@@ -1500,12 +1500,8 @@ class OpenCodePlugin(DefaultLaunchContract):
         await self._reject_account_profile(
             runtime, launch_target_id, account_profile_id
         )
-        # OpenCode keeps sessions in its server's own store, so deletion is a
-        # `DELETE /session/{id}` against that server (the adapter routes it
-        # locally or over SSH) rather than a transcript unlink. A launch target
-        # can have several adapters — distinct cwds / custom args, each its own
-        # server — and the thread lives on exactly one, so try each and report
-        # success on the first that removes it.
+        # A launch target can have several servers (distinct cwds, args or
+        # env), and the thread lives on exactly one: try each.
         adapters = self._adapters_for_launch_target(launch_target_id)
         if not adapters:
             adapters = [
@@ -1580,9 +1576,6 @@ class OpenCodePlugin(DefaultLaunchContract):
             if isinstance(raw_directory, str) and raw_directory
             else (requested_cwd or ".")
         )
-        adapter = await self._get_or_create_adapter(
-            runtime, launch_target_id, cwd, launch_env=process_env
-        )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"
@@ -1609,6 +1602,9 @@ class OpenCodePlugin(DefaultLaunchContract):
             permission_mode="ask",
             launch_env=request_launch_env,
         )
+        # Keyed as every later lookup of the session is, configured CLI args
+        # included.
+        adapter = await self.session_adapter(runtime, session)
         runtime.storage.create_session(session)
         try:
             after = await self._restore_into(

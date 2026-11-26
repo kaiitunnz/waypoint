@@ -1038,6 +1038,39 @@ async def test_import_keys_the_server_by_the_sessions_directory(
 
 
 @pytest.mark.asyncio
+async def test_import_keys_the_server_with_the_configured_cli_args(
+    tmp_path: Path,
+) -> None:
+    plugin = OpenCodePlugin()
+    info = {"id": "ses_1", "title": "T", "location": {"directory": "/repo"}}
+    driver = _restorable(SessionStatus.IDLE)
+    driver.get_session = AsyncMock(return_value=info)
+    build = AsyncMock(return_value=driver)
+    cast(Any, plugin)._get_or_create_adapter = build
+    runtime = _runtime()
+    runtime.settings.plugin_config = lambda _id: OpenCodePluginConfig(
+        cli_args=["--print-logs"]
+    )
+    runtime._agent_process_env = lambda _backend, env: dict(env)
+    runtime._generate_session_id = lambda backend: f"{backend}-1"
+    runtime._session_dir = lambda _sid: tmp_path
+    runtime.seed_thread_history = AsyncMock()
+    request = SimpleNamespace(
+        thread_id="ses_1",
+        launch_target_id=None,
+        cwd=None,
+        import_history=False,
+        launch_env={},
+    )
+
+    session = await plugin.import_thread(runtime, cast(Any, request))
+
+    assert build.await_args is not None
+    assert build.await_args.kwargs["custom_args"] == ("--print-logs",)
+    assert session.launch_target_id is None
+
+
+@pytest.mark.asyncio
 async def test_shutdown_drains_pending_tasks() -> None:
     plugin = OpenCodePlugin()
     started = asyncio.Event()

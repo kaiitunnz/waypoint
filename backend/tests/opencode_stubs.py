@@ -301,7 +301,9 @@ class FakeOpenCode:
 
     def _list_sessions(self, query: dict[str, str]) -> web.Response:
         items = list(self.sessions.values())
-        if parent := query.get("parentID"):
+        if (parent := query.get("parentID")) == "null":
+            items = [item for item in items if not item.get("parentID")]
+        elif parent:
             items = [item for item in items if item.get("parentID") == parent]
         return self._page(items, query)
 

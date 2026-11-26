@@ -1922,7 +1922,9 @@ class OpenCodeAdapter:
         """The server's sessions, newest first, without subagents."""
         await self.start()
         try:
-            sessions = await self._list("/api/session", {"order": "desc"})
+            sessions = await self._list(
+                "/api/session", {"order": "desc", "parentID": "null"}
+            )
         except Exception as exc:  # noqa: BLE001
             log.warning("failed to list opencode sessions: %s", exc)
             return []

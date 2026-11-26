@@ -91,6 +91,7 @@ async def _import(
         return adapter
 
     cast(Any, plugin)._get_or_create_adapter = existing
+    cast(Any, plugin)._effective_args = lambda *_args: []
     runtime = _Runtime(tmp_path)
     request = SimpleNamespace(
         thread_id="ses_1",

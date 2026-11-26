@@ -1242,6 +1242,7 @@ async def test_threads_and_history_follow_every_page() -> None:
         assert not await adapter.delete_session("ses_2")
 
     assert [item["id"] for item in sessions] == ["ses_1", "ses_2"]
+    assert fake.calls("GET", "/api/session")[0]["parentID"] == "null"
     assert [item["id"] for item in messages] == ["msg_1", "msg_2"]
 
 

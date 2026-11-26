@@ -161,11 +161,19 @@ def test_terminal_launch_flags_match_launch_flags() -> None:
     """``supports_terminal_launch_model`` / ``_effort`` say whether the agent's
     ``launch_flags`` pin the selection, which is all a terminal launch passes
     to the CLI."""
-    registry = build_default_registry()
-    for backend in ("claude_code", "codex", "opencode"):
-        plugin = registry.get(backend)
-        assert isinstance(plugin, AgentLaunchContract), backend
+    agents = [
+        plugin
+        for plugin in build_default_registry().all()
+        if isinstance(plugin, AgentLaunchContract)
+    ]
+    assert {plugin.id for plugin in agents} >= {
+        "claude_code",
+        "codex",
+        "opencode",
+    }
+    for plugin in agents:
         caps = plugin.capabilities
+        backend = plugin.id
         bare = plugin.launch_flags(model=None, effort=None, permission_mode=None)
         with_model = plugin.launch_flags(model="m", effort=None, permission_mode=None)
         with_effort = plugin.launch_flags(

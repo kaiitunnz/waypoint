@@ -10,11 +10,9 @@
 // launch panel's `.field input` rule, so its inputs are sized identically in
 // every host regardless of the surrounding form.
 
-export interface EnvEntry {
-  id: number;
-  key: string;
-  value: string;
-}
+import { addEnvEntry, deleteEnvEntry, type EnvEntry, updateEnvEntry } from "@waypoint/web-core/launch/env";
+
+export { entriesToRecord, recordToEntries, type EnvEntry } from "@waypoint/web-core/launch/env";
 
 interface EnvVarRowsProps {
   entries: EnvEntry[];
@@ -25,38 +23,16 @@ interface EnvVarRowsProps {
   valueType?: "text" | "password";
 }
 
-// Assign stable, monotonic ids so React keys survive edits and removals.
-export function recordToEntries(record: Record<string, string> | undefined): EnvEntry[] {
-  return Object.entries(record ?? {}).map(([key, value], index) => ({
-    id: index + 1,
-    key,
-    value,
-  }));
-}
-
-// Trim keys, drop empty keys, last value wins on a duplicate key — matching the
-// prior text-parser semantics.
-export function entriesToRecord(entries: EnvEntry[]): Record<string, string> {
-  const record: Record<string, string> = {};
-  for (const entry of entries) {
-    const key = entry.key.trim();
-    if (!key) continue;
-    record[key] = entry.value;
-  }
-  return record;
-}
-
 export function EnvVarRows({
   entries,
   onChange,
   disabled,
   valueType = "text",
 }: EnvVarRowsProps) {
-  const nextId = () => entries.reduce((max, e) => Math.max(max, e.id), 0) + 1;
-  const add = () => onChange([...entries, { id: nextId(), key: "", value: "" }]);
-  const update = (id: number, patch: Partial<Omit<EnvEntry, "id">>) =>
-    onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-  const remove = (id: number) => onChange(entries.filter((e) => e.id !== id));
+  const add = () => onChange(addEnvEntry(entries));
+  const update = (id: number, patch: Partial<Pick<EnvEntry, "key" | "value">>) =>
+    onChange(updateEnvEntry(entries, id, patch));
+  const remove = (id: number) => onChange(deleteEnvEntry(entries, id));
 
   return (
     <div className="env-editor">

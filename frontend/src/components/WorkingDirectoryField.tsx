@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 
-import { fetchDirectorySuggestions } from "@waypoint/web-core/api";
-
-const SUGGEST_DELAY_MS = 200;
+import { useFolderSuggestions } from "@waypoint/web-core/hooks/useFolderSuggestions";
 
 interface WorkingDirectoryFieldProps {
   host: string;
@@ -38,48 +36,7 @@ export function WorkingDirectoryField({
   const label = targetLabel
     ? `Working directory on ${targetLabel}`
     : "Working directory";
-  // Tagged with the source target; options exclude a previous target's
-  // results while the new fetch is in flight.
-  const [suggested, setSuggested] = useState<{
-    targetId: string | null;
-    dirs: string[];
-  }>({ targetId: null, dirs: [] });
-  const completable = cwd.startsWith("/") || cwd.startsWith("~");
-
-  useEffect(() => {
-    if (!completable || !host || !token) {
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      fetchDirectorySuggestions(
-        host,
-        token,
-        cwd,
-        launchTargetId,
-        controller.signal,
-      )
-        .then((dirs) => {
-          if (!controller.signal.aborted) {
-            setSuggested({ targetId: launchTargetId, dirs });
-          }
-        })
-        .catch(() => undefined);
-    }, SUGGEST_DELAY_MS);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [host, token, cwd, launchTargetId, completable]);
-
-  // Earlier suggestions stay while they still extend the input.
-  const options = useMemo(() => {
-    const dirs =
-      completable && suggested.targetId === launchTargetId
-        ? suggested.dirs.filter((dir) => dir.startsWith(cwd))
-        : [];
-    return [...new Set([...recentCwds, ...dirs])];
-  }, [completable, cwd, launchTargetId, recentCwds, suggested]);
+  const options = useFolderSuggestions(host, token, cwd, launchTargetId, recentCwds);
   const hasOptions = options.length > 0;
 
   // Pull focus to the offending field when a launch fails on the cwd, so the

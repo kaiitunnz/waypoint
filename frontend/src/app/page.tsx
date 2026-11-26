@@ -36,7 +36,6 @@ import {
   deleteSessionPreset,
   deleteThread,
   disconnectLaunchTarget,
-  fetchBackendThreads,
   fetchBoardChannels,
   fetchLaunchTargetStatus,
   fetchMe,
@@ -57,12 +56,9 @@ import {
   setSessionPinned,
   setSessionTitle,
   updateSessionPreset,
-  SSH_MASTER_REQUIRED_DETAIL,
-  CWD_NOT_FOUND_DETAIL,
 } from "@waypoint/web-core/api";
 import {
   clearToken,
-  mergeRecentCwds,
   pushRecentCwd,
   readRecentCwds,
   readHost,
@@ -72,7 +68,14 @@ import {
   writeLaunchTarget,
   writeToken,
 } from "@waypoint/web-core/store";
-import { launchableAgents, useBackendCatalog } from "@waypoint/web-core/backends";
+import { useBackendCatalog } from "@waypoint/web-core/backends";
+import { useResumableThreads } from "@waypoint/web-core/hooks/useResumableThreads";
+import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
+import {
+  launchDefaults,
+  threadDiscoveryBackends,
+} from "@waypoint/web-core/launch/launchDefaults";
+import { classifyLaunchFailure } from "@waypoint/web-core/launch/launchError";
 import { reconnectDelay } from "@waypoint/web-core/session/connection";
 import {
   applySessionState,
@@ -82,7 +85,6 @@ import {
   upsertLiveSession,
 } from "@waypoint/web-core/sessionHistory";
 import {
-  AccountProfile,
   AssistantSummary,
   Backend,
   BackendDescriptor,
@@ -100,21 +102,6 @@ import {
   UsageDashboardBucket,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
-import {
-  PLUGIN_SELECTION,
-  type UsageLimitSourceValue,
-} from "@waypoint/web-core/usageLimitSource";
-
-interface ThreadSummary {
-  id: string;
-  title: string;
-  cwd: string;
-  repo_name?: string | null;
-  branch?: string | null;
-  preview?: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -124,32 +111,6 @@ const RECENT_CWD_HISTORY_LIMIT = 50;
 // Sources the home list never shows (each has its own surface or is ephemeral).
 const HOME_HIDDEN_SOURCES = ["assistant", "telemetry"] as const;
 
-function seedRecentCwdsFromHistory(
-  host: string,
-  sessions: SessionRecord[],
-  schedules: ScheduledSession[],
-): void {
-  const entries: { targetId: string; cwd: string; ts: number }[] = [];
-  for (const session of sessions) {
-    entries.push({
-      targetId: session.launch_target_id ?? "",
-      cwd: session.cwd,
-      ts: Date.parse(session.updated_at || session.created_at) || 0,
-    });
-  }
-  for (const schedule of schedules) {
-    entries.push({
-      targetId: schedule.launch_target_id ?? "",
-      cwd: schedule.cwd,
-      ts: Date.parse(schedule.created_at) || 0,
-    });
-  }
-  entries.sort((a, b) => b.ts - a.ts);
-  mergeRecentCwds(
-    host,
-    entries.map(({ targetId, cwd }) => ({ targetId, cwd })),
-  );
-}
 // Hand-mirrored fallback used until `/api/me` lands. Once the catalog
 // arrives we derive `allBackends` from `me.backends.map(b => b.id)`
 // so adding a backend at the registry shows up here without an edit.
@@ -212,9 +173,6 @@ export default function HomePage() {
   });
   const inboxCount = useInboxCount(host, token);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
-  const [threadsByBackend, setThreadsByBackend] = useState<
-    Record<Backend, ThreadSummary[]>
-  >({});
   // The launch form's live (backend, accountProfileId) selection, reported by
   // LaunchPanel — threads are fetched here app-globally, decoupled from the
   // form, so this is how the active backend's fetch re-scopes to the
@@ -230,16 +188,16 @@ export default function HomePage() {
     },
     [],
   );
-  const [loadingByBackend, setLoadingByBackend] = useState<
-    Record<Backend, boolean>
-  >({});
   const [backendDescriptors, setBackendDescriptors] = useState<
     BackendDescriptor[] | null
   >(null);
-  const registeredBackends: Backend[] =
-    backendDescriptors !== null
-      ? backendDescriptors.map((entry) => entry.id)
-      : FALLBACK_BACKENDS;
+  const registeredBackends = useMemo<Backend[]>(
+    () =>
+      backendDescriptors !== null
+        ? backendDescriptors.map((entry) => entry.id)
+        : FALLBACK_BACKENDS,
+    [backendDescriptors],
+  );
   const catalog = useBackendCatalog(
     host || null,
     token || null,
@@ -257,40 +215,31 @@ export default function HomePage() {
   const activeLaunchTarget =
     launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
   const activeTargetAuth = activeLaunchTarget?.auth ?? null;
-  const supportedBackends = activeLaunchTarget?.supported_backends.length
-    ? activeLaunchTarget.supported_backends
-    : registeredBackends;
-  const launchableBackends = launchableAgents(supportedBackends, catalog);
-  const effectiveDefaultBackend = launchableBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
-    ? (activeLaunchTarget?.default_backend ?? defaultBackend)
-    : launchableBackends[0] ?? supportedBackends[0];
-  const effectiveDefaultCwd = activeLaunchTarget?.default_cwd ?? defaultCwd;
-  const defaultLaunchEnvByBackend = useMemo(() => {
-    const defaults: Record<Backend, Record<string, string>> = {};
-    for (const descriptor of backendDescriptors ?? []) {
-      defaults[descriptor.id] = { ...(descriptor.default_launch_env ?? {}) };
-    }
-    const targetDefaults = activeLaunchTarget?.default_launch_env_by_backend ?? {};
-    for (const [backend, env] of Object.entries(targetDefaults)) {
-      defaults[backend] = { ...env };
-    }
-    return defaults;
-  }, [activeLaunchTarget, backendDescriptors]);
-
-  // Account profiles keyed by backend: the global per-backend catalogue,
-  // overridden by the active launch target's merged profiles (same shape as
-  // defaultLaunchEnvByBackend above).
-  const accountProfilesByBackend = useMemo(() => {
-    const profiles: Record<Backend, AccountProfile[]> = {};
-    for (const descriptor of backendDescriptors ?? []) {
-      profiles[descriptor.id] = descriptor.account_profiles ?? [];
-    }
-    const targetProfiles = activeLaunchTarget?.account_profiles_by_backend ?? {};
-    for (const [backend, list] of Object.entries(targetProfiles)) {
-      profiles[backend] = list;
-    }
-    return profiles;
-  }, [activeLaunchTarget, backendDescriptors]);
+  const {
+    launchableBackends,
+    defaultBackend: effectiveDefaultBackend,
+    defaultCwd: effectiveDefaultCwd,
+    defaultLaunchEnvByBackend,
+    accountProfilesByBackend,
+  } = useMemo(
+    () =>
+      launchDefaults({
+        registeredBackends,
+        descriptors: backendDescriptors ?? [],
+        hostDefaultBackend: defaultBackend,
+        hostDefaultCwd: defaultCwd,
+        activeTarget: activeLaunchTarget,
+        catalog,
+      }),
+    [
+      registeredBackends,
+      backendDescriptors,
+      defaultBackend,
+      defaultCwd,
+      activeLaunchTarget,
+      catalog,
+    ],
+  );
 
   const resetAuthState = useCallback((message: string) => {
     clearToken();
@@ -303,8 +252,6 @@ export default function HomePage() {
     setLaunchTargets([]);
     setActiveLaunchTargetId("");
     setSchedules([]);
-    setThreadsByBackend({});
-    setLoadingByBackend({});
     setError(message);
   }, []);
 
@@ -374,8 +321,6 @@ export default function HomePage() {
   useEffect(() => {
     if (!host || !token) {
       setConnection("idle");
-      setThreadsByBackend({});
-      setLoadingByBackend({});
       return;
     }
     let active = true;
@@ -550,103 +495,30 @@ export default function HomePage() {
     };
   }, [host, token]);
 
-  // The set of backends we should fetch threads for: those that
-  // advertise `supports_thread_discovery=True` AND are listed by the
-  // active launch target (or all registered backends when launching
-  // locally). Computed via JSON for stable dep keys so the effect does
-  // not retrigger on identity-only changes.
-  const discoveryBackends = launchableBackends.filter((id) => {
-    const caps = catalog.byId(id)?.capabilities;
-    // Default to True so a fresh page load (catalog not yet hydrated)
-    // tries the call rather than silently skipping the per-backend
-    // fetch.
-    return caps?.supports_thread_discovery ?? true;
-  });
-  const discoveryBackendsKey = JSON.stringify(discoveryBackends);
-
-  useEffect(() => {
-    if (!host || !token) {
-      setThreadsByBackend({});
-      setLoadingByBackend({});
-      return;
-    }
-    if (
-      activeLaunchTargetId &&
-      !launchTargets.some((target) => target.id === activeLaunchTargetId)
-    ) {
-      return;
-    }
-    let active = true;
-    const ids = JSON.parse(discoveryBackendsKey) as Backend[];
-    setLoadingByBackend((current) => {
-      const next: Record<Backend, boolean> = {};
-      for (const id of ids) {
-        next[id] = current[id] ?? true;
-      }
-      return next;
-    });
-    setThreadsByBackend((current) => {
-      const next: Record<Backend, ThreadSummary[]> = {};
-      for (const id of ids) {
-        // The active form backend is re-scoping to (or away from) a
-        // profile — drop its stale list so a slow request can't show the
-        // previous profile's threads.
-        next[id] = id === activeFormBackend ? [] : current[id] ?? [];
-      }
-      return next;
-    });
-    for (const id of ids) {
-      setLoadingByBackend((current) => ({ ...current, [id]: true }));
-      const accountProfileId =
-        id === activeFormBackend ? activeFormAccountProfileId || undefined : undefined;
-      fetchBackendThreads<ThreadSummary>(
-        host,
-        token,
-        id,
-        {
-          launchTargetId: activeLaunchTargetId || undefined,
-          accountProfileId,
-        },
-      )
-        .then((threads) => {
-          if (!active) {
-            return;
-          }
-          setThreadsByBackend((current) => ({ ...current, [id]: threads }));
-        })
-        .catch((fetchError) => {
-          if (!active) {
-            return;
-          }
-          if (isAuthError(fetchError)) {
-            resetAuthState("Session expired. Log in again.");
-            return;
-          }
-          setError(
-            fetchError instanceof Error
-              ? fetchError.message
-              : `failed to fetch ${id} threads`,
-          );
-        })
-        .finally(() => {
-          if (active) {
-            setLoadingByBackend((current) => ({ ...current, [id]: false }));
-          }
-        });
-    }
-    return () => {
-      active = false;
-    };
-  }, [
-    activeLaunchTargetId,
-    activeFormBackend,
-    activeFormAccountProfileId,
+  const discoveryBackends = useMemo(
+    () => threadDiscoveryBackends(launchableBackends, catalog),
+    [launchableBackends, catalog],
+  );
+  const {
+    threadsByBackend,
+    loadingByBackend,
+    removeThread,
+  } = useResumableThreads({
     host,
-    launchTargets,
-    discoveryBackendsKey,
-    resetAuthState,
     token,
-  ]);
+    backends: discoveryBackends,
+    launchTargetId: activeLaunchTargetId,
+    scopeBackend: activeFormBackend,
+    scopeAccountProfileId: activeFormAccountProfileId,
+    // A stored target the backend no longer lists waits for the list to settle.
+    enabled:
+      !activeLaunchTargetId ||
+      launchTargets.some((target) => target.id === activeLaunchTargetId),
+    // Refetch when a target connects, so a password target lists its threads.
+    revision: launchTargets,
+    onAuthFailure: handleAuthFailure,
+    onError: setError,
+  });
 
   async function handleLogin(nextHost: string, password: string) {
     const nextToken = await login(nextHost, password);
@@ -711,43 +583,11 @@ export default function HomePage() {
     }
   }
 
-  async function handleCreate(
-    backend: Backend,
-    cwd: string,
-    title: string,
-    model: string | null,
-    effort: string | null,
-    transport: SessionTransport | null = null,
-    args: string[] = [],
-    configOverrides: string[] = [],
-    launchEnv: Record<string, string> = {},
-    permissionMode: string | null = null,
-    presetId: string | null = null,
-    accountProfileId: string | null = null,
-    usageSelection: UsageLimitSourceValue = PLUGIN_SELECTION,
-  ) {
+  async function handleCreate(request: Record<string, unknown>) {
     setCwdError(null);
+    const cwd = String(request.cwd ?? "");
     try {
-      const session = await createSession(host, token, {
-        backend,
-        cwd,
-        launch_target_id: activeLaunchTargetId || null,
-        transport,
-        title: title || null,
-        source_mode: "managed",
-        args,
-        config_overrides: configOverrides,
-        launch_env: launchEnv,
-        model,
-        effort,
-        permission_mode: permissionMode,
-        account_profile_id: accountProfileId,
-        usage_limit_source: usageSelection.source,
-        usage_provider_id: usageSelection.providerId,
-        usage_provider_account_key: usageSelection.accountKey,
-        // Provenance only — the fields above are already resolved.
-        preset_id: presetId,
-      });
+      const session = await createSession(host, token, request);
       setSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
@@ -755,52 +595,29 @@ export default function HomePage() {
       setRecentCwds(pushRecentCwd(host, activeLaunchTargetId, cwd));
       router.push(`/session/${session.id}`);
     } catch (createError) {
-      if (isAuthError(createError)) {
+      const failure = classifyLaunchFailure(createError, "failed to create session");
+      if (failure.kind === "auth") {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      if (
-        createError instanceof Error &&
-        createError.message === CWD_NOT_FOUND_DETAIL
-      ) {
+      if (failure.kind === "cwd") {
         // A field-level validation error: surface it inline on the working
         // directory input rather than the global banner.
         setCwdError(cwd);
         return;
       }
-      if (
-        createError instanceof Error &&
-        createError.message === SSH_MASTER_REQUIRED_DETAIL &&
-        activeLaunchTarget
-      ) {
+      if (failure.kind === "ssh" && activeLaunchTarget) {
         // The target needs its password-auth ControlMaster opened first;
         // prompt, then retry this exact launch on success.
         setConnectError("");
         setConnectPrompt({
           target: activeLaunchTarget,
-          retry: () =>
-            handleCreate(
-              backend,
-              cwd,
-              title,
-              model,
-              effort,
-              transport,
-              args,
-              configOverrides,
-              launchEnv,
-              permissionMode,
-              presetId,
-              accountProfileId,
-              usageSelection,
-            ),
+          retry: () => handleCreate(request),
         });
         return;
       }
       setError(
-        createError instanceof Error
-          ? createError.message
-          : "failed to create session",
+        failure.kind === "detail" ? failure.message : "failed to create session",
       );
     }
   }
@@ -855,18 +672,9 @@ export default function HomePage() {
     await refreshPresets();
   }
 
-  async function handleAttach(
-    target: string,
-    backendHint: Backend,
-    title: string,
-  ) {
+  async function handleAttach(request: Record<string, unknown>) {
     try {
-      const trimmedTitle = title.trim();
-      const session = await attachTmux(host, token, {
-        tmux_target: target,
-        backend_hint: backendHint,
-        ...(trimmedTitle ? { title: trimmedTitle } : {}),
-      });
+      const session = await attachTmux(host, token, request);
       setSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
@@ -924,12 +732,7 @@ export default function HomePage() {
         session,
         ...current.filter((item) => item.id !== session.id),
       ]);
-      setThreadsByBackend((current) => ({
-        ...current,
-        [backend]: (current[backend] ?? []).filter(
-          (thread) => thread.id !== threadId,
-        ),
-      }));
+      removeThread(backend, threadId);
       router.push(`/session/${session.id}`);
     } catch (importError) {
       if (isAuthError(importError)) {
@@ -960,12 +763,7 @@ export default function HomePage() {
         // the runtime resolves the default store and no thread matches (404).
         backend === activeFormBackend ? activeFormAccountProfileId || null : null,
       );
-      setThreadsByBackend((current) => ({
-        ...current,
-        [backend]: (current[backend] ?? []).filter(
-          (thread) => thread.id !== threadId,
-        ),
-      }));
+      removeThread(backend, threadId);
     } catch (deleteError) {
       if (isAuthError(deleteError)) {
         resetAuthState("Session expired. Log in again.");
@@ -1180,8 +978,6 @@ export default function HomePage() {
     setSessions([]);
     setLaunchTargets([]);
     setActiveLaunchTargetId(readLaunchTarget(nextHost));
-    setThreadsByBackend({});
-    setLoadingByBackend({});
     setError("Switched backend. Log in to continue.");
   }
 

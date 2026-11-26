@@ -16,8 +16,11 @@ import {
 import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
 import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
+import { attachRequest, attachTargetError } from "@waypoint/web-core/launch/attach";
+import { presetNeedsFullSpec, specFromSummary } from "@waypoint/web-core/launch/presets";
+import { withScheduleTiming } from "@waypoint/web-core/launch/schedule";
+import type { ThreadSummary } from "@waypoint/web-core/launch/threads";
 import {
-  cronFromState,
   defaultRecurrenceState,
   RecurrenceState,
   TimingMode,
@@ -29,25 +32,15 @@ import {
   Backend,
   ScheduleCreateRequest,
   SessionPreset,
-  SessionPresetSpec,
   SessionPresetSummary,
   SessionPresetWriteRequest,
   SessionTransport,
   UsageProviderOption,
 } from "@waypoint/web-core/types";
-import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
-import { defaultScheduledAt } from "@waypoint/web-core/session/scheduleMessage";
-
-interface ThreadSummary {
-  id: string;
-  title: string;
-  cwd: string;
-  repo_name?: string | null;
-  branch?: string | null;
-  preview?: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import {
+  defaultScheduledAt,
+  type OneTimeTiming,
+} from "@waypoint/web-core/session/scheduleMessage";
 
 type PanelMode = "new" | "resume" | "attach" | "schedule";
 
@@ -56,8 +49,6 @@ type PanelMode = "new" | "resume" | "attach" | "schedule";
 export type PresetSelection =
   | { kind: "default" }
   | { kind: "preset"; presetId: string | null };
-
-type ScheduleTiming = "delay" | "datetime";
 
 interface LaunchPanelProps {
   host: string;
@@ -78,26 +69,9 @@ interface LaunchPanelProps {
   // caller can re-scope the resumable-thread fetch to the selected profile —
   // thread discovery is fetched app-globally, decoupled from this form.
   onDiscoveryScopeChange?: (backend: Backend, accountProfileId: string | null) => void;
-  onCreate: (
-    backend: Backend,
-    cwd: string,
-    title: string,
-    model: string | null,
-    effort: string | null,
-    transport: SessionTransport | null,
-    args: string[],
-    configOverrides: string[],
-    launchEnv: Record<string, string>,
-    permissionMode: string | null,
-    presetId: string | null,
-    accountProfileId: string | null,
-    usageSelection: UsageLimitSourceValue,
-  ) => Promise<void>;
-  onAttach: (
-    target: string,
-    backendHint: Backend,
-    title: string,
-  ) => Promise<void>;
+  // The `POST /api/sessions` body, built by the shared launch form.
+  onCreate: (request: Record<string, unknown>) => Promise<void>;
+  onAttach: (request: Record<string, unknown>) => Promise<void>;
   onImportThread: (
     backend: Backend,
     threadId: string,
@@ -195,14 +169,10 @@ export function LaunchPanel({
       if (!summary) return;
       try {
         // A preset with env vars needs the full (unredacted) spec before hydrating.
-        if ((summary.spec.launch_env_keys?.length ?? 0) > 0) {
-          const full = await onFetchPresetSpec(id);
-          form.applyPreset(full.spec);
-        } else {
-          // No env values to fetch; the redacted summary spec carries every
-          // other field, and applyPreset ignores launch_env_keys.
-          form.applyPreset(summary.spec as unknown as SessionPresetSpec);
-        }
+        const spec = presetNeedsFullSpec(summary)
+          ? (await onFetchPresetSpec(id)).spec
+          : specFromSummary(summary.spec);
+        form.applyPreset(spec);
       } catch {
         // The full (env-carrying) spec couldn't load. Deselect rather than leave
         // a half-hydrated selection: an Update against it would otherwise
@@ -230,7 +200,7 @@ export function LaunchPanel({
   }, [defaultPresetId, applyPresetById, initialPreset]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");
+  const [scheduleTiming, setScheduleTiming] = useState<OneTimeTiming>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
   const [scheduleError, setScheduleError] = useState("");
@@ -245,22 +215,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      const { args, configOverrides, launchEnv } = form.collectArgs();
-      await onCreate(
-        form.backend,
-        form.cwd,
-        form.title,
-        form.model.trim() || null,
-        form.effortSupported ? form.effort.trim() || null : null,
-        form.transport || null,
-        args,
-        configOverrides,
-        launchEnv,
-        form.permissionMode || null,
-        selectedPresetId,
-        form.accountProfileId || null,
-        form.usageSelection,
-      );
+      await onCreate(form.createRequest(launchTargetId ?? "", selectedPresetId));
       form.setTitle("");
     } finally {
       setFormBusy(false);
@@ -271,7 +226,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onAttach(tmuxTarget, form.backend, form.title);
+      await onAttach(attachRequest(tmuxTarget, form.backend, form.title));
       setTmuxTarget("");
       form.setTitle("");
     } finally {
@@ -282,57 +237,20 @@ export function LaunchPanel({
   async function submitSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setScheduleError("");
-    const { args, configOverrides, launchEnv } = form.collectArgs();
-    const payload: ScheduleCreateRequest = {
-      backend: form.backend,
-      cwd: form.cwd,
-      // An explicit transport supersedes launch_mode at the API, so pin the
-      // transport and leave the launch mode on "auto", matching the New panel.
-      launch_mode: "auto",
-      transport: form.transport || null,
-      title: form.title.trim() || null,
-      initial_prompt: prompt.trim() || null,
-      permission_mode: form.permissionMode || null,
-      model: form.model.trim() || null,
-      effort: form.effortSupported ? form.effort.trim() || null : null,
-      args,
-      config_overrides: configOverrides,
-      launch_env: launchEnv,
-      // Record which preset seeded this schedule (provenance only; the fields
-      // above are the resolved values the server persists).
-      preset_id: selectedPresetId,
-      account_profile_id: form.accountProfileId || null,
-      usage_limit_source: form.usageSelection.source,
-      usage_provider_id: form.usageSelection.providerId,
-      usage_provider_account_key: form.usageSelection.accountKey,
-    };
-    if (timingMode === "repeat") {
-      const cron = cronFromState(recurrence);
-      if (!cron) {
-        setScheduleError("Enter a valid recurrence.");
-        return;
-      }
-      payload.cron = cron;
-      payload.timezone = recurrence.timezone;
-      payload.start_at = recurrence.startAt || null;
-    } else if (scheduleTiming === "delay") {
-      const minutes = Number.parseFloat(delayMinutes);
-      if (!Number.isFinite(minutes) || minutes < 0) {
-        setScheduleError("Enter a non-negative delay in minutes.");
-        return;
-      }
-      payload.delay_seconds = Math.round(minutes * 60);
-    } else {
-      const local = new Date(scheduledAt);
-      if (Number.isNaN(local.getTime())) {
-        setScheduleError("Enter a valid scheduled time.");
-        return;
-      }
-      payload.scheduled_at = local.toISOString();
+    const built = withScheduleTiming(form.scheduleRequest(prompt, selectedPresetId), {
+      timingMode,
+      recurrence,
+      timing: scheduleTiming,
+      delay: delayMinutes,
+      at: scheduledAt,
+    });
+    if ("error" in built) {
+      setScheduleError(built.error);
+      return;
     }
     setFormBusy(true);
     try {
-      await onCreateSchedule(payload);
+      await onCreateSchedule(built.payload);
       form.setTitle("");
       setPrompt("");
     } catch (createError) {
@@ -561,7 +479,7 @@ export function LaunchPanel({
             <span className="grow muted">Attaches over the Terminal interface — Waypoint streams the live pane and forwards your keystrokes.</span>
             <button
               className="primary"
-              disabled={formBusy || !tmuxTarget.trim()}
+              disabled={formBusy || attachTargetError(tmuxTarget) !== null}
               type="submit"
             >
               Attach

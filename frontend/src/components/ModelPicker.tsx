@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
-import { fetchBackendModels, isAuthError } from "@waypoint/web-core/api";
-import { Backend, BackendModelListResponse, BackendModelOption } from "@waypoint/web-core/types";
+import { useLaunchModels } from "@waypoint/web-core/hooks/useLaunchModels";
+import {
+  defaultModelLabel as defaultModelChoiceLabel,
+  modelChoices,
+} from "@waypoint/web-core/launch/models";
+import { Backend, BackendModelListResponse } from "@waypoint/web-core/types";
 
 interface ModelPickerProps {
   host: string;
@@ -40,44 +44,20 @@ export function ModelPicker({
   hint,
   defaultModelLabel,
 }: ModelPickerProps) {
-  const [options, setOptions] = useState<BackendModelOption[]>([]);
+  const response = useLaunchModels(
+    host,
+    token,
+    backend,
+    launchTargetId,
+    accountProfileId ?? null,
+    onAuthFailure,
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    fetchBackendModels(host, token, backend, { launchTargetId, accountProfileId })
-      .then((response) => {
-        if (cancelled) return;
-        setOptions(response.models);
-        onModelsLoaded?.(response);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        if (isAuthError(error)) {
-          onAuthFailure?.();
-          return;
-        }
-        // Discovery failure leaves the picker as just "Default" — graceful
-        // degradation instead of blocking the form.
-        setOptions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [host, token, backend, launchTargetId, accountProfileId, onAuthFailure, onModelsLoaded]);
+    if (response) onModelsLoaded?.(response);
+  }, [response, onModelsLoaded]);
 
-  // Surface a custom-named model the caller already has even if it's not in
-  // the curated list — covers schedules / sessions cloned from older state.
-  const entries: BackendModelOption[] =
-    value && !options.some((opt) => opt.id === value)
-      ? [
-          {
-            id: value,
-            label: `Custom · ${value}`,
-            description: null,
-          },
-          ...options,
-        ]
-      : options;
+  const entries = modelChoices(response?.models ?? [], value);
 
   return (
     <label className="field">
@@ -87,7 +67,7 @@ export function ModelPicker({
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
       >
-         <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
+        <option value="">{defaultModelChoiceLabel(defaultModelLabel)}</option>
         {entries.map((option) => (
           <option key={option.id} value={option.id}>
             {option.label}

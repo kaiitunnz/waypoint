@@ -18,6 +18,8 @@ interface ResumableThreadsOptions {
   scopeAccountProfileId: string | null;
   // False skips fetching, for a surface that lists threads only when shown.
   enabled?: boolean;
+  // A change refetches, such as a launch target connecting.
+  revision?: unknown;
   // Both must be stable.
   onAuthFailure: () => void;
   onError?: (message: string) => void;
@@ -38,6 +40,7 @@ export function useResumableThreads({
   scopeBackend,
   scopeAccountProfileId,
   enabled = true,
+  revision,
   onAuthFailure,
   onError,
 }: ResumableThreadsOptions): ResumableThreads {
@@ -85,7 +88,18 @@ export function useResumableThreads({
     return () => {
       active = false;
     };
-  }, [host, token, enabled, backendsKey, launchTargetId, scopeBackend, scopeAccountProfileId, onAuthFailure, onError]);
+  }, [
+    host,
+    token,
+    enabled,
+    backendsKey,
+    launchTargetId,
+    scopeBackend,
+    scopeAccountProfileId,
+    revision,
+    onAuthFailure,
+    onError,
+  ]);
 
   const removeThread = useCallback((backend: Backend, threadId: string) => {
     setThreadsByBackend((current) => ({

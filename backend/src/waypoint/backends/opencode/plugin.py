@@ -122,16 +122,19 @@ def _normalize_remote_cwd(cwd: str) -> str:
 
 def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]]:
     # No rules means "let OpenCode decide": its agents' own defaults apply.
-    # The plan agent brings its own permissions too.
     if mode not in OPENCODE_PERMISSION_ACTIONS:
         return []
     return [{"action": "*", "resource": "*", "effect": mode}]
 
 
-def _subagent_ruleset_for_mode(mode: str | None) -> list[dict[str, str]]:
-    # Plan mode is the session's agent, which its subagents do not take: they
-    # ask before acting.
-    return _ruleset_for_mode("ask" if mode == "plan" else mode)
+async def _rules_for_mode(
+    adapter: OpenCodeAdapter, mode: str | None
+) -> list[dict[str, str]]:
+    # In plan mode the session holds the plan agent's own rules, which a
+    # subagent copies when it starts: the whole tree then cannot edit.
+    if mode == "plan":
+        return await adapter.agent_rules("plan")
+    return _ruleset_for_mode(mode)
 
 
 def _sorted_efforts(efforts: tuple[str, ...]) -> list[str]:
@@ -351,9 +354,7 @@ class OpenCodePlugin(DefaultLaunchContract):
 
                 runtime.storage.update_session(session_id, permission_mode=target_mode)
                 if adapter is not None and not await adapter.set_session_permission(
-                    session.id,
-                    _ruleset_for_mode(target_mode),
-                    _subagent_ruleset_for_mode(target_mode),
+                    session.id, _ruleset_for_mode(target_mode)
                 ):
                     await runtime._record_system_event(
                         session_id,
@@ -363,7 +364,11 @@ class OpenCodePlugin(DefaultLaunchContract):
                 # Drop the persisted plan-agent footprint so a later restore
                 # doesn't re-enter plan mode.
                 self._persist_transport_state(
-                    runtime, session, agent=None, pre_plan_mode=None
+                    runtime,
+                    session,
+                    agent=None,
+                    pre_plan_mode=None,
+                    pre_plan_agent=None,
                 )
 
                 await runtime._emit_adapter_event(
@@ -607,8 +612,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         await adapter.restore_session(
             session.id,
             opencode_session_id,
-            permissions=_ruleset_for_mode(session.permission_mode),
-            subagent_permissions=_subagent_ruleset_for_mode(session.permission_mode),
+            permissions=await _rules_for_mode(adapter, session.permission_mode),
             model=session.model,
             agent=session.transport_state.get("agent"),
             effort=session.effort,
@@ -771,32 +775,44 @@ class OpenCodePlugin(DefaultLaunchContract):
         adapter = self._live_adapter(runtime, session)
         try:
             if mode == "plan":
+                in_plan = session.permission_mode == "plan"
                 pre_plan_mode = (
-                    session.permission_mode
-                    if session.permission_mode != "plan"
-                    else session.transport_state.get("pre_plan_mode")
+                    session.transport_state.get("pre_plan_mode")
+                    if in_plan
+                    else session.permission_mode
+                )
+                pre_plan_agent = (
+                    session.transport_state.get("pre_plan_agent")
+                    if in_plan
+                    else adapter.get_agent(session.id)
                 )
                 adapter.set_pre_plan_mode(session.id, pre_plan_mode)
                 success = await adapter.set_agent(session.id, "plan")
                 persisted: dict[str, Any] = {
                     "agent": "plan",
                     "pre_plan_mode": pre_plan_mode,
+                    "pre_plan_agent": pre_plan_agent,
                 }
             else:
                 success = True
                 if adapter.get_agent(session.id) == "plan":
-                    success = await adapter.set_agent(session.id, "build")
-                persisted = {"agent": None, "pre_plan_mode": None}
+                    agent = (
+                        session.transport_state.get("pre_plan_agent")
+                        or await adapter.default_agent()
+                    )
+                    success = await adapter.set_agent(session.id, agent)
+                persisted = {
+                    "agent": None,
+                    "pre_plan_mode": None,
+                    "pre_plan_agent": None,
+                }
+            rules = await _rules_for_mode(adapter, mode)
         except OpenCodeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         if success:
-            success = await adapter.set_session_permission(
-                session.id,
-                _ruleset_for_mode(mode),
-                _subagent_ruleset_for_mode(mode),
-            )
+            success = await adapter.set_session_permission(session.id, rules)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1345,8 +1361,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             new_opencode_session_id = await adapter.fork_session(
                 new_session_id,
                 opencode_session_id,
-                _ruleset_for_mode(session.permission_mode),
-                _subagent_ruleset_for_mode(session.permission_mode),
+                await _rules_for_mode(adapter, session.permission_mode),
             )
             pre_plan_mode = session.transport_state.get("pre_plan_mode")
             if pre_plan_mode is not None:
@@ -1369,6 +1384,8 @@ class OpenCodePlugin(DefaultLaunchContract):
             forked_transport_state["agent"] = agent
         if pre_plan_mode is not None:
             forked_transport_state["pre_plan_mode"] = pre_plan_mode
+        if pre_plan_agent := session.transport_state.get("pre_plan_agent"):
+            forked_transport_state["pre_plan_agent"] = pre_plan_agent
         new_session = SessionRecord(
             id=new_session_id,
             backend=self.id,
@@ -1707,8 +1724,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 effort=resolved_effort,
                 agent=agent,
                 title=title,
-                permissions=_ruleset_for_mode(permission_mode),
-                subagent_permissions=_subagent_ruleset_for_mode(permission_mode),
+                permissions=await _rules_for_mode(adapter, permission_mode),
             )
             session.transport_state = {"opencode_session_id": opencode_session_id}
             if agent is not None:

@@ -117,6 +117,18 @@ class FakeOpenCode:
         self.default_model: dict[str, Any] | None = model_entry()
         self.commands: list[dict[str, Any]] = [{"name": "init"}]
         self.skills: list[dict[str, Any]] = []
+        self.agents: list[dict[str, Any]] = [
+            {"id": "build", "mode": "primary", "hidden": False, "permissions": []},
+            {
+                "id": "plan",
+                "mode": "primary",
+                "hidden": False,
+                "permissions": [
+                    {"action": "*", "resource": "*", "effect": "allow"},
+                    {"action": "edit", "resource": "*", "effect": "deny"},
+                ],
+            },
+        ]
         # How many catalog listings answer empty, as plugins load.
         self.unsettled = 0
         # Migration states in order; the last one stays.
@@ -188,6 +200,8 @@ class FakeOpenCode:
                 return _json({"data": self.default_model})
             case "GET", ["command"]:
                 return self._catalog(self.commands)
+            case "GET", ["agent"]:
+                return self._catalog(self.agents)
             case "GET", ["skill"]:
                 return _json({"data": self.skills})
             case "GET", ["provider"]:

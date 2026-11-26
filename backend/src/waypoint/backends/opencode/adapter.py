@@ -790,8 +790,6 @@ class OpenCodeAdapter:
             return
         state.children.add(child)
         self._routes[child] = state.session_id
-        if state.subagent_permissions is not None:
-            self._spawn(self._write_subagent_rules(state, [child]))
 
     async def _on_execution_ended(
         self, state: SessionState, origin: str, kind: str, data: dict[str, Any]
@@ -1147,14 +1145,8 @@ class OpenCodeAdapter:
             return
         client = self._require_client()
         async with self._ruleset_lock:
-            # The root too, for the subagents it starts, unless they get rules
-            # of their own: then the root's are its agent's (plan mode), which
-            # a subagent's approval must not widen. Read under the lock, which
-            # a mode change holds while it sets them.
-            targets = [permission.session_id]
-            if state.subagent_permissions is None:
-                targets.append(state.root_id)
-            for target in dict.fromkeys(targets):
+            # The asking session, and the root for the subagents it starts.
+            for target in dict.fromkeys((permission.session_id, state.root_id)):
                 try:
                     info = await self._session_info(target)
                     ruleset = list(info.get("permissions") or [])
@@ -1167,11 +1159,6 @@ class OpenCodeAdapter:
                     raise OpenCodeError(
                         f"failed to allow this for the session: {exc}"
                     ) from exc
-            # Subagents started later get these rules too.
-            if (subagent := state.subagent_permissions) is not None:
-                state.subagent_permissions = subagent + [
-                    rule for rule in rules if rule not in subagent
-                ]
 
     async def answer_question(
         self,
@@ -1403,7 +1390,6 @@ class OpenCodeAdapter:
         agent: str | None = None,
         effort: str | None = None,
         permissions: list[dict[str, str]] | None = None,
-        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> str:
         await self.start()
         body: dict[str, Any] = {
@@ -1427,7 +1413,6 @@ class OpenCodeAdapter:
             session_id=session_id,
             root_id=opencode_session_id,
             agent=agent,
-            subagent_permissions=_differing(subagent_permissions, permissions),
         )
         self._adopt_model(state, body.get("model"))
         self._register_session(state)
@@ -1447,7 +1432,6 @@ class OpenCodeAdapter:
         session_id: str,
         source_id: str,
         permissions: list[dict[str, str]],
-        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> str:
         await self.start()
         client = self._require_client()
@@ -1465,7 +1449,6 @@ class OpenCodeAdapter:
             session_id=session_id,
             root_id=opencode_session_id,
             agent=info.get("agent"),
-            subagent_permissions=_differing(subagent_permissions, permissions),
         )
         self._adopt_model(state, info.get("model"))
         self._register_session(state)
@@ -1477,7 +1460,6 @@ class OpenCodeAdapter:
         opencode_session_id: str,
         *,
         permissions: list[dict[str, str]],
-        subagent_permissions: list[dict[str, str]] | None = None,
         model: str | None = None,
         agent: str | None = None,
         effort: str | None = None,
@@ -1508,7 +1490,7 @@ class OpenCodeAdapter:
             await self._adopt_tree(state)
             adopted_permissions, adopted_forms = await self._seed_asks(state)
             # A migrated 1.x session has lost its rules.
-            await self._write_rulesets(state, permissions, subagent_permissions)
+            await self._write_rulesets(state, permissions)
             await self._restore_selection(state, model, agent, effort)
             await self._show_seeded(state, adopted_permissions, adopted_forms)
         except BaseException as exc:
@@ -1682,8 +1664,8 @@ class OpenCodeAdapter:
             return False
         model = state.model or await self.default_model_id()
         if effort and model:
-            entry = await self._model(model)
-            if entry is None or effort not in entry.variants:
+            variants = await self._variants(model)
+            if variants is not None and effort not in variants:
                 raise OpenCodeError(f"{model} has no reasoning effort {effort!r}")
         await self._select_model(state, model, effort)
         return True
@@ -1691,11 +1673,11 @@ class OpenCodeAdapter:
     async def _model_selection(
         self, model: str, effort: str | None
     ) -> dict[str, str] | None:
-        """The reference selecting ``model``, with ``effort`` when the model has
-        that variant: OpenCode fails the turn, not the selection, for one it
-        lacks."""
-        entry = await self._model(model) if effort else None
-        variant = effort if entry and effort in entry.variants else None
+        """The reference selecting ``model``, with ``effort`` unless the catalog
+        shows the model lacks that variant: OpenCode fails the turn, not the
+        selection, for one it lacks."""
+        variants = await self._variants(model) if effort else ()
+        variant = effort if variants is None or effort in variants else None
         return model_ref(model, variant)
 
     async def _select_model(
@@ -1730,6 +1712,27 @@ class OpenCodeAdapter:
             state.agent = previous
             raise OpenCodeError(f"failed to select the agent: {exc}") from exc
 
+    async def agent_rules(self, agent: str) -> list[dict[str, str]]:
+        """The permission rules an agent of the server brings."""
+        await self.start()
+        for item in await self._settled_list("/api/agent"):
+            if isinstance(item, dict) and item.get("id") == agent:
+                return list(item.get("permissions") or [])
+        raise OpenCodeError(f"the opencode server has no {agent} agent")
+
+    async def default_agent(self) -> str:
+        """The server's first primary agent other than plan."""
+        await self.start()
+        for item in await self._settled_list("/api/agent"):
+            if (
+                isinstance(item, dict)
+                and item.get("mode") in ("primary", "all")
+                and not item.get("hidden")
+                and item.get("id") != "plan"
+            ):
+                return str(item["id"])
+        raise OpenCodeError("the opencode server has no primary agent")
+
     def get_agent(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
         return state.agent if state else None
@@ -1754,40 +1757,17 @@ class OpenCodeAdapter:
         self,
         state: SessionState,
         permissions: list[dict[str, str]],
-        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> None:
-        """Replace the rules of the session and of its subagents, which hold
-        their own copy and can be resumed. Only the session's own write can
+        """Replace the rules of the session and of its subagents. A subagent
+        copies its parent's rules when it starts and keeps them, so the ones
+        already running are rewritten too. Only the session's own write can
         fail the change."""
-        if subagent_permissions is None:
-            subagent_permissions = permissions
         async with self._ruleset_lock:
             await self._write_ruleset(state.root_id, permissions)
-            # Before the subagents: one started meanwhile is written too.
-            state.subagent_permissions = _differing(subagent_permissions, permissions)
-        await self._write_subagent_rules(
-            state, sorted(state.children), subagent_permissions
-        )
-
-    async def _write_subagent_rules(
-        self,
-        state: SessionState,
-        children: list[str],
-        permissions: list[dict[str, str]] | None = None,
-    ) -> None:
-        """Write ``permissions``, by default the session's subagent rules as
-        they stand once the lock is held, so a grant in flight is not lost."""
-        for child in children:
+        for child in sorted(state.children):
             try:
                 async with self._ruleset_lock:
-                    rules = (
-                        state.subagent_permissions
-                        if permissions is None
-                        else permissions
-                    )
-                    if rules is None:
-                        continue
-                    await self._write_ruleset(child, rules)
+                    await self._write_ruleset(child, permissions)
             except Exception as exc:  # noqa: BLE001
                 # A subagent that is gone takes no more tools.
                 if http_status(exc) == 404:
@@ -1806,13 +1786,12 @@ class OpenCodeAdapter:
         self,
         session_id: str,
         permissions: list[dict[str, str]],
-        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
         try:
-            await self._write_rulesets(state, permissions, subagent_permissions)
+            await self._write_rulesets(state, permissions)
         except Exception as exc:  # noqa: BLE001
             log.warning("failed to set opencode permissions: %s", exc)
             return False
@@ -1866,6 +1845,19 @@ class OpenCodeAdapter:
 
     def _cached_model(self, model: str) -> Model | None:
         return next((item for item in self._models if item.id == model), None)
+
+    async def _variants(self, model: str) -> tuple[str, ...] | None:
+        """The model's effort variants, or ``None`` when the catalog cannot be
+        read."""
+        if (entry := self._cached_model(model)) is None:
+            try:
+                await self.list_models()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("failed to list opencode models: %s", exc)
+            if not self._models:
+                return None
+            entry = self._cached_model(model)
+        return entry.variants if entry else ()
 
     async def _model(self, model: str) -> Model | None:
         entry = self._cached_model(model)
@@ -1967,14 +1959,6 @@ class OpenCodeAdapter:
         except Exception:  # noqa: BLE001
             return False
         return True
-
-
-def _differing(
-    subagent: list[dict[str, str]] | None, root: list[dict[str, str]] | None
-) -> list[dict[str, str]] | None:
-    """Subagent rules worth writing: ``None`` when a subagent's copy of the
-    root's would do."""
-    return None if subagent is None or subagent == (root or []) else subagent
 
 
 def _decode_sse_payload(lines: list[str]) -> dict[str, Any] | None:

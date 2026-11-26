@@ -95,9 +95,6 @@ class SessionState:
     agent: str | None = None
     # The permission mode leaving plan mode returns to.
     pre_plan_mode: str | None = None
-    # The rules a subagent gets when they differ from the root's, which it
-    # would otherwise copy.
-    subagent_permissions: list[dict[str, str]] | None = None
     # Whether the running turn's steps changed files.
     changed_files: bool = False
     context_usage: SessionContextUsage | None = None

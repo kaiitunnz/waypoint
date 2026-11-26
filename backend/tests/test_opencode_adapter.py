@@ -161,6 +161,31 @@ async def test_a_variant_the_model_lacks_is_not_selected() -> None:
     assert "permissions" not in body and "agent" not in body
 
 
+@pytest.mark.parametrize("failure", [500, None])
+@pytest.mark.asyncio
+async def test_an_effort_is_kept_while_the_catalog_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, failure: int | None
+) -> None:
+    monkeypatch.setattr(adapter_module, "CATALOG_SETTLE_SECONDS", 0.0)
+    fake = FakeOpenCode()
+    if failure:
+        fake.failures[("GET", "/api/model")] = failure
+    else:
+        # Still loading: the listing answers empty.
+        fake.unsettled = 10
+    async with driving(fake) as (adapter, _emitted):
+        remote = await adapter.start_session(
+            "local", model="opencode/big-pickle", effort="high"
+        )
+        # Not refused as missing, and sent as asked.
+        assert await adapter.set_effort("local", "max")
+
+    [body] = fake.calls("POST", "/api/session")
+    assert body["model"]["variant"] == "high"
+    [selected] = fake.calls("POST", f"/api/session/{remote}/model")
+    assert selected["model"]["variant"] == "max"
+
+
 @pytest.mark.asyncio
 async def test_an_effort_without_a_model_goes_to_the_default_model() -> None:
     fake = FakeOpenCode()
@@ -409,93 +434,6 @@ async def test_grants_made_at_once_all_land() -> None:
 
     granted = {rule["resource"] for rule in fake.sessions["ses_root"]["permissions"]}
     assert granted == {"*", "ls *", "cat *"}
-
-
-@pytest.mark.asyncio
-async def test_a_grant_in_plan_mode_reaches_later_subagents() -> None:
-    fake = _fake()
-    fake.sessions["ses_root"]["permissions"] = []
-    grant = {"action": "shell", "resource": "ls *", "effect": "allow"}
-
-    def created(child: str) -> dict[str, Any]:
-        return {
-            "type": "session.created",
-            "data": {"sessionID": child, "parentID": "ses_root"},
-        }
-
-    async with driving(fake) as (adapter, _emitted):
-        _register(adapter)
-        # Plan mode: no rules on the root, ask for its subagents.
-        assert await adapter.set_session_permission("local", [], ASK)
-        fake.add_session("ses_a", parentID="ses_root", permissions=[])
-        await _deliver(adapter, created("ses_a"))
-        await asyncio.gather(*adapter._tasks)
-        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
-        assert await adapter.respond_to_permission("local", "acceptForSession")
-
-        # The plan agent's own rules are not widened by a subagent's approval.
-        assert fake.sessions["ses_root"]["permissions"] == []
-
-        # The server gives a new subagent a copy of the root's rules.
-        root = list(fake.sessions["ses_root"]["permissions"])
-        fake.add_session("ses_b", parentID="ses_root", permissions=root)
-        await _deliver(adapter, created("ses_b"))
-        await asyncio.gather(*adapter._tasks)
-
-    assert fake.sessions["ses_b"]["permissions"] == [*ASK, grant]
-
-
-@pytest.mark.asyncio
-async def test_a_grant_racing_a_switch_to_plan_leaves_the_plan_agent_alone() -> None:
-    fake = _fake()
-    async with driving(fake) as (adapter, _emitted):
-        state = _register(adapter)
-        fake.add_session("ses_a", parentID="ses_root", permissions=list(ASK))
-        state.children.add("ses_a")
-        adapter._routes["ses_a"] = "local"
-        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
-        entering = asyncio.create_task(adapter.set_session_permission("local", [], ASK))
-        while not adapter._ruleset_lock.locked():
-            await asyncio.sleep(0)
-        granting = asyncio.create_task(
-            adapter.respond_to_permission("local", "acceptForSession")
-        )
-        assert await entering
-        assert await granting
-        await asyncio.gather(*adapter._tasks)
-
-    assert fake.sessions["ses_root"]["permissions"] == []
-
-
-@pytest.mark.asyncio
-async def test_a_subagent_seen_during_a_grant_gets_it() -> None:
-    fake = _fake()
-    fake.sessions["ses_root"]["permissions"] = []
-    async with driving(fake) as (adapter, _emitted):
-        state = _register(adapter)
-        assert await adapter.set_session_permission("local", [], ASK)
-        fake.add_session("ses_a", parentID="ses_root", permissions=list(ASK))
-        state.children.add("ses_a")
-        adapter._routes["ses_a"] = "local"
-        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
-        fake.add_session("ses_b", parentID="ses_root", permissions=[])
-        granting = asyncio.create_task(
-            adapter.respond_to_permission("local", "acceptForSession")
-        )
-        while not adapter._ruleset_lock.locked():
-            await asyncio.sleep(0)
-        await _deliver(
-            adapter,
-            {
-                "type": "session.created",
-                "data": {"sessionID": "ses_b", "parentID": "ses_root"},
-            },
-        )
-        await granting
-        await asyncio.gather(*adapter._tasks)
-
-    grant = {"action": "shell", "resource": "ls *", "effect": "allow"}
-    assert fake.sessions["ses_b"]["permissions"] == [*ASK, grant]
 
 
 @pytest.mark.asyncio
@@ -1133,12 +1071,12 @@ async def test_a_mode_change_writes_the_subagents_rules_too() -> None:
     async with driving(fake) as (adapter, emitted):
         # A subagent that has been deleted since is skipped.
         _register(adapter, children={"ses_child", "ses_deleted"})
-        assert await adapter.set_session_permission("local", [], deny)
-        assert fake.sessions["ses_root"]["permissions"] == []
+        assert await adapter.set_session_permission("local", deny)
+        assert fake.sessions["ses_root"]["permissions"] == deny
         assert fake.sessions["ses_child"]["permissions"] == deny
         assert emitted.events == []
         # No rules at all clears the subagents' too.
-        assert await adapter.set_session_permission("local", [], [])
+        assert await adapter.set_session_permission("local", [])
         assert fake.sessions["ses_child"]["permissions"] == []
 
         # A subagent that refuses its rules does not undo the session's.
@@ -1151,12 +1089,15 @@ async def test_a_mode_change_writes_the_subagents_rules_too() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_subagent_started_after_a_switch_gets_the_subagent_rules() -> None:
+async def test_a_new_subagent_keeps_the_rules_it_copied() -> None:
     fake = _fake()
     async with driving(fake) as (adapter, _emitted):
         _register(adapter)
-        assert await adapter.set_session_permission("local", [], ASK)
-        fake.add_session("ses_child", parentID="ses_root", permissions=[])
+        plan = await adapter.agent_rules("plan")
+        assert await adapter.set_session_permission("local", plan)
+        # The server gives a new subagent a copy of its parent's rules.
+        fake.add_session("ses_child", parentID="ses_root", permissions=list(plan))
+        writes = len(fake.writes())
         await _deliver(
             adapter,
             {
@@ -1165,21 +1106,20 @@ async def test_a_subagent_started_after_a_switch_gets_the_subagent_rules() -> No
             },
         )
         await asyncio.gather(*adapter._tasks)
-        assert fake.sessions["ses_child"]["permissions"] == ASK
 
-        # Rules a subagent copies from the session are not written again.
-        assert await adapter.set_session_permission("local", ASK, ASK)
-        fake.add_session("ses_other", parentID="ses_root", permissions=ASK)
-        writes = len(fake.writes())
-        await _deliver(
-            adapter,
-            {
-                "type": "session.created",
-                "data": {"sessionID": "ses_other", "parentID": "ses_root"},
-            },
-        )
-        await asyncio.gather(*adapter._tasks)
         assert len(fake.writes()) == writes
+        assert adapter._sessions["local"].children == {"ses_child"}
+    assert {"action": "edit", "resource": "*", "effect": "deny"} in plan
+
+
+@pytest.mark.asyncio
+async def test_agents_come_from_the_servers_catalog() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        assert await adapter.default_agent() == "build"
+        assert (await adapter.agent_rules("plan"))[-1]["effect"] == "deny"
+        with pytest.raises(OpenCodeError, match="no review agent"):
+            await adapter.agent_rules("review")
 
 
 @pytest.mark.parametrize("ask_id", ["per_1", "frm_1"])

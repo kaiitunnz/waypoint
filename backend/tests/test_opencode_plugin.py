@@ -36,6 +36,10 @@ from waypoint.schemas import (
 )
 
 ASK = [{"action": "*", "resource": "*", "effect": "ask"}]
+PLAN = [
+    {"action": "*", "resource": "*", "effect": "allow"},
+    {"action": "edit", "resource": "*", "effect": "deny"},
+]
 
 
 def _session(**overrides: Any) -> SessionRecord:
@@ -163,7 +167,7 @@ def test_validate_permission_mode_accepts_known_actions() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mode", "agent", "rules"), [("plan", "plan", []), ("ask", None, ASK)]
+    ("mode", "agent", "rules"), [("plan", "plan", PLAN), ("ask", None, ASK)]
 )
 @pytest.mark.asyncio
 async def test_create_session_passes_the_modes_agent_and_rules(
@@ -173,6 +177,7 @@ async def test_create_session_passes_the_modes_agent_and_rules(
     adapter = MagicMock(
         start_session=AsyncMock(return_value="ses_new"),
         selected_model=MagicMock(return_value=(None, None)),
+        agent_rules=AsyncMock(return_value=PLAN),
     )
     cast(Any, plugin)._get_or_create_adapter = AsyncMock(return_value=adapter)
     runtime = _runtime()
@@ -433,6 +438,8 @@ def _mode_adapter(agent: str | None) -> MagicMock:
         set_pre_plan_mode=MagicMock(),
         set_session_permission=AsyncMock(return_value=True),
         get_agent=MagicMock(return_value=agent),
+        agent_rules=AsyncMock(return_value=PLAN),
+        default_agent=AsyncMock(return_value="build"),
     )
 
 
@@ -496,22 +503,18 @@ async def test_thread_discovery_and_import_say_why_the_server_is_unusable() -> N
 
 
 @pytest.mark.parametrize(
-    ("current", "mode", "agent_call", "rules", "subagent_rules"),
+    ("current", "mode", "agent_call", "rules"),
     [
-        # A running subagent does not take the plan agent, so it asks.
-        (None, "plan", "plan", [], ASK),
-        ("plan", "ask", "build", ASK, ASK),
-        ("build", "ask", None, ASK, ASK),
-        (None, "default", None, [], []),
+        # The plan agent's own rules, which subagents copy when they start.
+        ("review", "plan", "plan", PLAN),
+        ("plan", "ask", "build", ASK),
+        ("build", "ask", None, ASK),
+        (None, "default", None, []),
     ],
 )
 @pytest.mark.asyncio
 async def test_a_mode_change_applies_the_agent_and_rules_at_once(
-    current: str | None,
-    mode: str,
-    agent_call: str | None,
-    rules: list[Any],
-    subagent_rules: list[Any],
+    current: str | None, mode: str, agent_call: str | None, rules: list[Any]
 ) -> None:
     plugin = OpenCodePlugin()
     session = _session(permission_mode="allow")
@@ -525,13 +528,29 @@ async def test_a_mode_change_applies_the_agent_and_rules_at_once(
         adapter.set_agent.assert_awaited_once_with("sess", agent_call)
     else:
         adapter.set_agent.assert_not_awaited()
-    adapter.set_session_permission.assert_awaited_once_with(
-        "sess", rules, subagent_rules
-    )
+    adapter.set_session_permission.assert_awaited_once_with("sess", rules)
     assert session.transport_state == {
         "agent": "plan" if mode == "plan" else None,
         "pre_plan_mode": "allow" if mode == "plan" else None,
+        "pre_plan_agent": "review" if mode == "plan" else None,
     }
+
+
+@pytest.mark.asyncio
+async def test_leaving_plan_mode_returns_to_the_agent_used_before_it() -> None:
+    plugin = OpenCodePlugin()
+    session = _session(permission_mode="ask")
+    runtime = _runtime(session)
+    adapter = _mode_adapter("review")
+    _live(plugin, runtime, session, adapter)
+
+    await plugin.apply_permission_mode(runtime, session, "plan")
+    session.permission_mode = "plan"
+    adapter.get_agent.return_value = "plan"
+    await plugin.apply_permission_mode(runtime, session, "ask")
+
+    assert adapter.set_agent.await_args_list[-1].args == ("sess", "review")
+    adapter.default_agent.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -548,7 +567,7 @@ async def test_an_outside_switch_out_of_plan_restores_the_earlier_mode() -> None
     await plugin._handle_agent_changed(runtime, "sess", "plan", "build")
 
     assert session.permission_mode == "ask"
-    adapter.set_session_permission.assert_awaited_once_with("sess", ASK, ASK)
+    adapter.set_session_permission.assert_awaited_once_with("sess", ASK)
     runtime._record_system_event.assert_not_awaited()
 
     adapter.set_session_permission.return_value = False
@@ -881,6 +900,7 @@ def _restorable(status: SessionStatus) -> MagicMock:
         restore_session=AsyncMock(),
         set_pre_plan_mode=MagicMock(),
         session_status=MagicMock(return_value=status),
+        agent_rules=AsyncMock(return_value=PLAN),
     )
 
 
@@ -914,8 +934,7 @@ async def test_restore_records_the_servers_status(path: str) -> None:
     adapter.restore_session.assert_awaited_once_with(
         "sess",
         "ses_1",
-        permissions=[],
-        subagent_permissions=ASK,
+        permissions=PLAN,
         model="opencode/big-pickle",
         agent="plan",
         effort="high",
@@ -948,6 +967,7 @@ async def test_fork_writes_the_modes_rules_and_keeps_plan_state(
     adapter = MagicMock(
         fork_session=AsyncMock(return_value="ses_forked"),
         set_pre_plan_mode=MagicMock(),
+        agent_rules=AsyncMock(return_value=PLAN),
     )
     build = AsyncMock(return_value=adapter)
     cast(Any, plugin)._get_or_create_adapter = build
@@ -961,7 +981,7 @@ async def test_fork_writes_the_modes_rules_and_keeps_plan_state(
         structured_log=tmp_path / "events.jsonl",
     )
 
-    adapter.fork_session.assert_awaited_once_with("forked", "ses_parent", ASK, ASK)
+    adapter.fork_session.assert_awaited_once_with("forked", "ses_parent", ASK)
     adapter.set_pre_plan_mode.assert_called_once_with("forked", "allow")
     assert forked.transport_state == {
         "opencode_session_id": "ses_forked",

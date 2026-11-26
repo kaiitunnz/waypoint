@@ -10,9 +10,9 @@ import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
 import { decideAsk, decidesInline, decisionView } from "@waypoint/web-core/pendingAskActions";
 import {
-  approvalBody,
   approvalBodyForTool,
   approvalCopyText,
+  wholeApprovalBody,
   type ApprovalBody as ApprovalBodyModel,
 } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
@@ -138,7 +138,7 @@ function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { request: Re
         const event = page.events.find(
           (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
         );
-        if (active) setFound({ key, read: event ? approvalBody(event) : "missing" });
+        if (active) setFound({ key, read: event ? wholeApprovalBody(event) : "missing" });
       })
       .catch((error) => {
         if (!active) return;
@@ -188,7 +188,7 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         key={ask.id}
         roomy
         title={ask.title}
-        copyText={body ? approvalCopyText(body, text) : text}
+        copyText={body ? approvalCopyText(body, body.kind === "raw" ? body.text : text) : text}
         copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
         locked={!body}
         actions={actions.map((action) => ({

@@ -62,6 +62,15 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   return approvalBodyForTool(readToolName(event), asRecord(event.metadata?.tool_input), event.text);
 }
 
+// The body as a screen that decides the request shows it. A tool with no body of
+// its own shows its whole input, since its request text may be only the start.
+export function wholeApprovalBody(event: EventRecord): ApprovalBody {
+  const body = approvalBody(event);
+  const input = asRecord(event.metadata?.tool_input);
+  if (body.kind !== "raw" || !input || Object.keys(input).length === 0) return body;
+  return { kind: "raw", text: JSON.stringify(input, null, 2) };
+}
+
 // The body from the tool call alone, for a request whose event is not at hand.
 // `tool` is a normalized tool name; `raw` stands for input no kind matches.
 export function approvalBodyForTool(

@@ -12,12 +12,34 @@ import {
   findPendingApprovals,
   pendingPlanApproval,
   planApprovalActions,
+  wholeApprovalBody,
 } from "./approvals";
 
 const request = (seq: number, approvalId?: string) =>
   ev(seq, "approval_request", "allow?", approvalId ? { approval_id: approvalId } : {});
 const resolved = (seq: number, approvalId?: string, text = "Approval response sent") =>
   ev(seq, "system_note", text, approvalId ? { approval_id: approvalId } : {});
+
+describe("wholeApprovalBody", () => {
+  const input = { to: "a@b.c", body: "x".repeat(400), cc: "d@e.f" };
+
+  it("shows all of a generic tool's input where the request text is cut", () => {
+    const cut = ev(1, "approval_request", `Approve mcp__mail__send: ${JSON.stringify(input).slice(0, 240)}`, {
+      tool_name: "mcp__mail__send",
+      tool_input: input,
+    });
+    const body = wholeApprovalBody(cut);
+    expect(body).toEqual({ kind: "raw", text: JSON.stringify(input, null, 2) });
+    expect(approvalCopyText(body, body.kind === "raw" ? body.text : "")).toContain("d@e.f");
+  });
+
+  it("keeps the request text without input, and every body of its own", () => {
+    const bare = ev(1, "approval_request", "Approve file changes", {});
+    expect(wholeApprovalBody(bare)).toEqual({ kind: "raw", text: "Approve file changes" });
+    const command = ev(2, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command: "ls" } });
+    expect(wholeApprovalBody(command)).toEqual(approvalBody(command));
+  });
+});
 
 describe("findPendingApprovals", () => {
   it("is empty without events", () => {

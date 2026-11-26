@@ -55,6 +55,7 @@ import {
   UsageProviderOption,
 } from "./types";
 import { parseDiffPreviewPayload, type EventDiffPreview } from "./events";
+import { parseTerminalFrame } from "./session/terminal";
 import type { TelemetryFiltersState, TelemetryRangeState } from "./telemetry";
 import { telemetryParams } from "./telemetry";
 
@@ -2339,24 +2340,10 @@ export function connectTerminalSocket(
   const socket = new WebSocket(url);
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
-    // Terminal output is always wrapped in a sync-update escape, so it begins
-    // with ESC; a leading "{" marks an out-of-band control frame (e.g. size).
-    if (event.data.charCodeAt(0) === 0x7b) {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg?.type === "size" && typeof msg.cols === "number" && typeof msg.rows === "number") {
-          handlers.onResize?.(msg.cols, msg.rows);
-          return;
-        }
-        if (msg?.type === "appearance" && (msg.appearance === "light" || msg.appearance === "dark")) {
-          handlers.onAppearance?.(msg.appearance);
-          return;
-        }
-      } catch {
-        // Not a control frame after all — fall through and treat as output.
-      }
-    }
-    handlers.onChunk(event.data);
+    const frame = parseTerminalFrame(event.data);
+    if (frame.kind === "size") handlers.onResize?.(frame.cols, frame.rows);
+    else if (frame.kind === "appearance") handlers.onAppearance?.(frame.appearance);
+    else handlers.onChunk(frame.text);
   };
   socket.onopen = () => {
     handlers.onOpen?.();

@@ -120,3 +120,54 @@ async function withFallback<T>(message: string, run: () => Promise<T>): Promise<
     throw error instanceof Error ? error : new Error(message);
   }
 }
+
+// Outcome of a terminal quick-compose submit. ``ok`` covers a socket send and a
+// handled control command, and clears the draft. ``socket-closed`` keeps the
+// draft for a retry. ``command-error`` keeps it too, after the caller has
+// reported the error.
+export type TerminalSubmitResult = "ok" | "socket-closed" | "command-error";
+
+export interface TerminalSubmitOptions {
+  host: string;
+  token: string;
+  sessionId: string;
+  // Null while the session loads, which skips control commands.
+  session: SessionRecord | null;
+  catalog: BackendCatalog;
+  text: string;
+  attachmentIds: string[];
+  // Sends one whole message over the terminal socket; false when it is closed.
+  sendOverSocket: (text: string) => boolean;
+}
+
+export interface TerminalSubmission {
+  result: Exclude<TerminalSubmitResult, "command-error">;
+  // Set when ``/new`` or ``/fork`` opened another session instead.
+  openSessionId: string | null;
+}
+
+// A message from the terminal compose drawer. Attachments go over HTTP, where
+// the transport appends their host paths for the wrapped CLI; ``/new`` and
+// ``/fork`` run as control commands; anything else is typed into the pane over
+// the socket. Request failures throw.
+export async function submitTerminalMessage({
+  host,
+  token,
+  sessionId,
+  session,
+  catalog,
+  text,
+  attachmentIds,
+  sendOverSocket,
+}: TerminalSubmitOptions): Promise<TerminalSubmission> {
+  if (attachmentIds.length) {
+    await withFallback("failed to send input", () => sendInput(host, token, sessionId, text, undefined, attachmentIds));
+    return { result: "ok", openSessionId: null };
+  }
+  if (session) {
+    const allowFork = canFork(session, catalog);
+    const openSessionId = await runControlCommand({ host, token, sessionId, text, allowFork });
+    if (openSessionId !== null) return { result: "ok", openSessionId };
+  }
+  return { result: sendOverSocket(text) ? "ok" : "socket-closed", openSessionId: null };
+}

@@ -15,7 +15,7 @@ export interface SettingsSectionSpec {
   Component: ComponentType;
 }
 
-// In page order.
+// Each scope's sections show in this order.
 export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
   { id: "appearance", title: "Appearance", scope: "device", Component: Appearance },
   { id: "session-lists", title: "Session lists", scope: "device", Component: SessionLists },

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 
-import { SETTINGS_HREF, settingsSectionHref } from "@waypoint/web-core/shellNav";
+import { usePathname } from "next/navigation";
+
+import { SETTINGS_HREF, settingsSectionHref, settingsSectionOf } from "@waypoint/web-core/shellNav";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LinkRow, SettingsSection } from "@/components/ui/Settings";
@@ -25,8 +27,11 @@ function byScope(sections: SettingsSectionSpec[]): { title?: string; sections: S
 }
 
 const GROUPS = byScope(SETTINGS_SECTIONS);
+const PAGE_ORDER = GROUPS.flatMap((group) => group.sections);
 
-export function SettingsScreen({ sectionId }: { sectionId?: string }) {
+export function SettingsScreen() {
+  // The path, not the route's params: picking from the section list replaces it in place.
+  const sectionId = settingsSectionOf(usePathname());
   const phone = usePhoneLayout();
   const columns = useMultiColumn();
   const section = sectionId === undefined ? undefined : settingsSection(sectionId);
@@ -103,7 +108,7 @@ function scrollToSection(node: Element) {
 
 // A section picked here stays marked even when the page is too short to bring it to the top.
 function SectionList({ opened }: { opened?: string }) {
-  const [current, setCurrent] = useState(opened ?? SETTINGS_SECTIONS[0].id);
+  const [current, setCurrent] = useState(opened ?? PAGE_ORDER[0].id);
   const list = useRef<HTMLElement>(null);
   const picked = useRef(0);
 
@@ -114,11 +119,11 @@ function SectionList({ opened }: { opened?: string }) {
       if (Date.now() - picked.current < 300) return;
       const top = scrollerTop(scroller);
       const atEnd = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1;
-      const reached = SETTINGS_SECTIONS.filter((entry) => {
+      const reached = PAGE_ORDER.filter((entry) => {
         const node = document.getElementById(entry.id);
         return node ? node.getBoundingClientRect().top - top <= 24 : false;
       });
-      setCurrent((atEnd ? SETTINGS_SECTIONS.at(-1) : reached.at(-1))?.id ?? SETTINGS_SECTIONS[0].id);
+      setCurrent((atEnd ? PAGE_ORDER.at(-1) : reached.at(-1))?.id ?? PAGE_ORDER[0].id);
     };
     document.addEventListener("scroll", update, { capture: true, passive: true });
     return () => document.removeEventListener("scroll", update, { capture: true });

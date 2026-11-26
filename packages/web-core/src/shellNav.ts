@@ -44,6 +44,12 @@ export const SETTINGS_HREF = "/settings";
 export const settingsSectionHref = (id: string) => `${SETTINGS_HREF}/${encodeURIComponent(id)}`;
 export const isSettingsPath = (pathname: string) => isUnder(normalize(pathname), SETTINGS_HREF);
 
+// The section a settings path names, if any.
+export function settingsSectionOf(pathname: string): string | undefined {
+  const path = normalize(pathname);
+  return path.startsWith(`${SETTINGS_HREF}/`) ? decodeURIComponent(path.slice(SETTINGS_HREF.length + 1)) : undefined;
+}
+
 // The touch tab bar shows on the top-level screens only. A session, a single
 // needs-you item and the assistant take the whole screen.
 export function showsTabBar(pathname: string): boolean {

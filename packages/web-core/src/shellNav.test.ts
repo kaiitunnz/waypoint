@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NAV_DESTINATIONS, activeNavKey, formatBadgeCount, isSettingsPath, sessionFilesHref, sessionHref, settingsSectionHref, showsTabBar } from "./shellNav";
+import { NAV_DESTINATIONS, activeNavKey, formatBadgeCount, isSettingsPath, sessionFilesHref, sessionHref, settingsSectionHref, settingsSectionOf, showsTabBar } from "./shellNav";
 
 describe("activeNavKey", () => {
   it("maps each route to its destination", () => {
@@ -73,6 +73,13 @@ describe("settings paths", () => {
     expect(isSettingsPath(settingsSectionHref("session-lists"))).toBe(true);
     expect(isSettingsPath("/settingsx")).toBe(false);
     expect(isSettingsPath("/session/settings")).toBe(false);
+  });
+
+  it("reads the section back from its path", () => {
+    expect(settingsSectionOf(settingsSectionHref("session lists"))).toBe("session lists");
+    expect(settingsSectionOf("/settings/appearance/")).toBe("appearance");
+    expect(settingsSectionOf("/settings")).toBeUndefined();
+    expect(settingsSectionOf("/")).toBeUndefined();
   });
 
   it("keeps the page outside the navigation and the tab bar", () => {

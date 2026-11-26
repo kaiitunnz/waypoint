@@ -16,5 +16,5 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function Page({ params }: Props) {
   const { section } = await params;
   if (!settingsSection(section)) notFound();
-  return <SettingsScreen sectionId={section} />;
+  return <SettingsScreen />;
 }

@@ -123,7 +123,16 @@ export function useComposerSend({
         attachments.release(payload.attachmentIds);
         // A control command's text lands in the other session, not this one.
         settle?.(!openSessionId);
-        if (openSessionId) onOpenSession(openSessionId);
+        if (openSessionId) {
+          if (mounted.current) onOpenSession(openSessionId);
+          // The person has moved on: offer the new session instead of taking them there.
+          else {
+            toast({
+              message: `New session from ${session?.title ?? "the session you left"}`,
+              action: { label: "Open session", onSelect: () => onOpenSession(openSessionId) },
+            });
+          }
+        }
       } else {
         await createMessageSchedule(host, token, sessionId, payload.text, {
           submit: true,

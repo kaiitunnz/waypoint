@@ -32,7 +32,8 @@ export function SettingsScreen({ sectionId }: { sectionId?: string }) {
   const section = SETTINGS_SECTIONS.find((entry) => entry.id === sectionId);
   // Every section is on the page, so a section's path opens the page at it.
   useEffect(() => {
-    if (!phone && sectionId) document.getElementById(sectionId)?.scrollIntoView();
+    const node = !phone && sectionId ? document.getElementById(sectionId) : null;
+    if (node) scrollTo(node);
   }, [phone, sectionId]);
 
   if (phone && section) {
@@ -85,6 +86,13 @@ function scrollerOf(node: Element): Element {
     if (overflowY === "auto" || overflowY === "scroll") return parent;
   }
   return document.scrollingElement ?? document.documentElement;
+}
+
+// Moves only the page's own scroller; scrollIntoView would also move the clipped shell.
+function scrollTo(node: Element) {
+  const scroller = scrollerOf(node);
+  const top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+  scroller.scrollTop += node.getBoundingClientRect().top - top - parseFloat(getComputedStyle(node).scrollMarginTop);
 }
 
 // The sections, the one in view marked with a fill. A section picked here stays marked

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { PasswordInput } from "@/components/PasswordInput";
 import { probeBackend } from "@waypoint/web-core/api";
@@ -20,6 +20,8 @@ interface LoginFormProps {
 }
 
 const CUSTOM_VALUE = "__custom__";
+// The page's hostname never changes while it is open.
+const subscribeNever = () => () => {};
 
 type ProbeStatus = "idle" | "checking" | "reachable" | "unreachable";
 
@@ -37,7 +39,13 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
   // they've interacted with the dropdown.
   const userTouchedRef = useRef(false);
 
-  const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
+  // The server can't know the page's hostname. Hydrating with the placeholder it
+  // rendered avoids a mismatch; React then re-renders with the real name.
+  const pageHost = useSyncExternalStore(
+    subscribeNever,
+    () => window.location.hostname || "localhost",
+    () => "localhost",
+  );
 
   const backendPort = backendPortFromUrl(defaultHost) ?? DEFAULT_BACKEND_PORT;
   const options = useMemo<BackendOption[]>(

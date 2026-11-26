@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ev } from "../test-helpers";
-import { deriveTranscript } from "./transcriptView";
+import { ev, planMetadata } from "../test-helpers";
+import { deriveTranscript, dockedPlanEvent } from "./transcriptView";
 
 const events = [
   ev(1, "user_input", "go"),
@@ -31,5 +31,18 @@ describe("deriveTranscript", () => {
     const view = deriveTranscript(events, "full");
     expect(view.hiddenCount).toBe(0);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "rule", "agent"]);
+  });
+});
+
+describe("docked plan", () => {
+  const withPlan = [ev(1, "user_input", "plan it"), ev(2, "agent_output", "plan", planMetadata("p1")), ev(3, "agent_output", "ready")];
+
+  it("finds the undecided plan and leaves it out of the transcript", () => {
+    const docked = dockedPlanEvent(withPlan);
+    expect(docked?.sequence).toBe(2);
+    const shown = deriveTranscript(withPlan, "full", docked?.sequence ?? null);
+    const sequences = shown.turns.flatMap((turn) => JSON.stringify(turn).match(/"sequence":\d+/g) ?? []);
+    expect(sequences).not.toContain('"sequence":2');
+    expect(deriveTranscript(withPlan, "full").turns).not.toEqual(shown.turns);
   });
 });

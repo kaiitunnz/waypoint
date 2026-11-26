@@ -1,0 +1,7 @@
+.lead {
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted);
+}

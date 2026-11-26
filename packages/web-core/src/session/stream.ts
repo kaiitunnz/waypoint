@@ -1,6 +1,8 @@
-import type { EventRecord, EventsPage, PendingQuestionsSnapshot, SessionRecord } from "../types";
+import type { EventRecord, EventsPage, HeldMessage, PendingQuestionsSnapshot, SessionRecord } from "../types";
 import { mergePendingQuestionSnapshot } from "./askQuestion";
 import type { ConnectionState } from "./connection";
+import type { ModelNotice } from "./modelNotice";
+import { applySideQuestionFrame, EMPTY_SIDE_QUESTIONS, type SideQuestionFrame, type SideQuestionState } from "./sideQuestions";
 import { foldOlderEvents, mergeEvents, minRawSequence, sanitizeEvent } from "./transcript";
 
 export interface StreamState {
@@ -15,6 +17,14 @@ export interface StreamState {
   // The newest task snapshot as of the tail page, which may predate the loaded events.
   latestTodo: EventRecord | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
+  heldMessages: HeldMessage[];
+  sideQuestions: SideQuestionState;
+  // Bumped when a live side question first arrives, which opens its panel.
+  sideQuestionArrivals: number;
+  // From a live model.change only; cleared when the session's resolved model clears.
+  modelNotice: ModelNotice | null;
+  // The latest `/copy` result for the clipboard; `seq` tells a repeat from a standing one.
+  clipboard: { text: string; seq: number } | null;
   connection: ConnectionState;
   error: string | null;
   // The HTTP status behind `error`, when it came from one.
@@ -31,6 +41,11 @@ export const INITIAL_STREAM_STATE: StreamState = {
   loaded: false,
   latestTodo: null,
   pendingQuestions: null,
+  heldMessages: [],
+  sideQuestions: EMPTY_SIDE_QUESTIONS,
+  sideQuestionArrivals: 0,
+  modelNotice: null,
+  clipboard: null,
   connection: "connecting",
   error: null,
   errorStatus: null,
@@ -46,6 +61,10 @@ export type StreamAction =
   | { type: "session"; session: SessionRecord }
   // `replace` for a socket's first frame, which restarts the server's revision counter.
   | { type: "pendingQuestions"; snapshot: PendingQuestionsSnapshot; replace: boolean }
+  | { type: "heldMessages"; messages: HeldMessage[] }
+  | { type: "sideQuestion"; frame: SideQuestionFrame }
+  | { type: "modelNotice"; notice: ModelNotice | null }
+  | { type: "clipboard"; text: string }
   | { type: "connection"; connection: ConnectionState }
   | { type: "error"; message: string | null; status?: number };
 
@@ -109,7 +128,26 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
       };
     }
     case "session":
-      return { ...state, session: action.session };
+      return {
+        ...state,
+        session: action.session,
+        modelNotice: action.session.resolved_model ? state.modelNotice : null,
+      };
+    case "heldMessages":
+      return { ...state, heldMessages: action.messages };
+    case "sideQuestion": {
+      const { state: sideQuestions, expand } = applySideQuestionFrame(state.sideQuestions, action.frame);
+      if (sideQuestions === state.sideQuestions) return state;
+      return {
+        ...state,
+        sideQuestions,
+        sideQuestionArrivals: state.sideQuestionArrivals + (expand ? 1 : 0),
+      };
+    }
+    case "modelNotice":
+      return { ...state, modelNotice: action.notice };
+    case "clipboard":
+      return { ...state, clipboard: { text: action.text, seq: (state.clipboard?.seq ?? 0) + 1 } };
     case "pendingQuestions":
       return {
         ...state,

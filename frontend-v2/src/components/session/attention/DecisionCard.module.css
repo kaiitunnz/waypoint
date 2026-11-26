@@ -1,0 +1,73 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--attention-line);
+  border-radius: var(--r-card);
+  background: var(--attention);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lamp {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  /* Centred on the title's first line. */
+  margin-top: 7px;
+  border-radius: var(--r-pill);
+  background: var(--brass);
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--f-body);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.body {
+  min-width: 0;
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.actions > :first-child {
+  margin-right: 6px;
+}
+
+.end {
+  margin-left: auto;
+}
+
+.status {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--f-meta);
+  color: var(--error);
+}

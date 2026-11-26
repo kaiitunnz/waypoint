@@ -1,0 +1,22 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.stack:empty {
+  padding: 0;
+}
+
+.strips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@container (min-width: 600px) {
+  .stack {
+    padding: 8px 0 0;
+  }
+}

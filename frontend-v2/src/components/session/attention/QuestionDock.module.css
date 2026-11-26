@@ -1,0 +1,111 @@
+.card {
+  min-width: 0;
+  border: 1px solid var(--attention-line);
+  border-radius: var(--r-card);
+  background: var(--attention);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 10px 0 12px;
+  text-align: left;
+}
+
+.lamp {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: var(--brass);
+  font-size: var(--f-meta);
+  font-weight: 700;
+  color: var(--on-action);
+}
+
+.prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Open, the question wraps: its options follow, and a cut question would hide what they answer. */
+.expanded .prompt {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.expanded .toggle {
+  align-items: flex-start;
+  padding-top: 14px;
+  padding-bottom: 6px;
+}
+
+.count {
+  flex: none;
+  font-size: var(--f-meta);
+  color: var(--brass-text);
+}
+
+.chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 22px;
+  color: var(--muted);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(55vh, 520px);
+  padding: 0 14px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.pager {
+  display: inline-flex;
+  align-items: center;
+  margin: -8px 0;
+}
+
+.reveal {
+  margin-left: auto;
+}
+
+.fallback {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toggle {
+    min-height: 44px;
+  }
+
+  .toggle:hover .chevron {
+    color: var(--text-strong);
+  }
+}

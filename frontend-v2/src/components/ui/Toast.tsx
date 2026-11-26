@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -14,12 +15,18 @@ import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
 
+import { Icon } from "./Icon";
 import styles from "./Toast.module.css";
 
 export interface ToastOptions {
-  message: string;
+  message: ReactNode;
   tone?: "default" | "error";
-  action?: { label: string; onSelect: () => void };
+  // An action that returns false leaves its toast up.
+  action?: { label: string; onSelect: () => boolean | void };
+  // A toast with a key replaces the one showing under the same key.
+  key?: string;
+  // Milliseconds on screen; null keeps it until it is dismissed.
+  duration?: number | null;
 }
 
 interface ToastEntry extends ToastOptions {
@@ -27,35 +34,81 @@ interface ToastEntry extends ToastOptions {
 }
 
 interface ToastContextValue {
-  toast: (options: ToastOptions) => void;
+  // Returns the toast's id.
+  toast: (options: ToastOptions) => number;
+  // Takes a toast's id or key.
+  dismiss: (target: number | string) => void;
 }
 
 const TOAST_DURATION_MS = 4000;
+const MAX_TOASTS = 4;
 
-const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
+const ToastContext = createContext<ToastContextValue>({ toast: () => -1, dismiss: () => {} });
 
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
 }
 
+// The oldest timed toasts give way first; a sticky one waits for its dismissal.
+function capped(entries: ToastEntry[]): ToastEntry[] {
+  const next = [...entries];
+  while (next.length > MAX_TOASTS) {
+    const oldest = next.findIndex((entry) => entry.duration !== null);
+    if (oldest === -1) break;
+    next.splice(oldest, 1);
+  }
+  return next;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ToastEntry[]>([]);
   const next = useRef(0);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const dismiss = useCallback((id: number) => {
-    setEntries((current) => current.filter((entry) => entry.id !== id));
+  const clearTimer = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.current.delete(id);
   }, []);
+
+  const dismiss = useCallback(
+    (target: number | string) => {
+      setEntries((current) => {
+        const gone = current.filter((entry) => entry.id === target || entry.key === target);
+        if (gone.length === 0) return current;
+        gone.forEach((entry) => clearTimer(entry.id));
+        return current.filter((entry) => !gone.includes(entry));
+      });
+    },
+    [clearTimer],
+  );
 
   const toast = useCallback(
     (options: ToastOptions) => {
       const id = next.current++;
-      setEntries((current) => [...current.slice(-2), { ...options, id }]);
-      setTimeout(() => dismiss(id), TOAST_DURATION_MS);
+      const duration = options.duration === undefined ? TOAST_DURATION_MS : options.duration;
+      setEntries((current) => {
+        const replaced = options.key === undefined ? [] : current.filter((entry) => entry.key === options.key);
+        replaced.forEach((entry) => clearTimer(entry.id));
+        return capped([...current.filter((entry) => !replaced.includes(entry)), { ...options, duration, id }]);
+      });
+      if (duration !== null) {
+        timers.current.set(
+          id,
+          setTimeout(() => dismiss(id), duration),
+        );
+      }
+      return id;
     },
-    [dismiss],
+    [clearTimer, dismiss],
   );
 
-  const value = useMemo(() => ({ toast }), [toast]);
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((timer) => clearTimeout(timer));
+  }, []);
+
+  const value = useMemo(() => ({ toast, dismiss }), [toast, dismiss]);
   // The portal waits for the browser, so hydration never sees it.
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -77,13 +130,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       type="button"
                       className={styles.action}
                       onClick={() => {
-                        entry.action?.onSelect();
-                        dismiss(entry.id);
+                        if (entry.action?.onSelect() !== false) dismiss(entry.id);
                       }}
                     >
                       {entry.action.label}
                     </button>
                   ) : null}
+                  <button type="button" className={styles.close} aria-label="Dismiss" title="Dismiss" onClick={() => dismiss(entry.id)}>
+                    <Icon name="close" size={16} />
+                  </button>
                 </div>
               ))}
             </div>,

@@ -1,0 +1,24 @@
+.ln {
+  display: block;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mono {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* A narrow conversation gives the indent back to the text. */
+@container (max-width: 440px) {
+  .ln {
+    padding-left: 1ch;
+    text-indent: -1ch;
+  }
+}

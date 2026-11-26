@@ -274,8 +274,8 @@ describe("reading a request's transcript", () => {
   const later = ev(8, "tool_result", "done", {});
   const page = (events: ReturnType<typeof ev>[]) => ({ events, has_more: false, latest_todo: null, pending_questions: null });
 
-  it("reads from before the request to the present", async () => {
-    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier, request])).mockResolvedValueOnce(page([later]));
+  it("reads from before the request to the present, each event once", async () => {
+    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier, request])).mockResolvedValueOnce(page([later, request]));
     expect(await readTranscript("h", "t", "s1", "a1", 7)).toEqual({ request, events: [earlier, request, later] });
     expect(api.fetchEvents).toHaveBeenNthCalledWith(1, "h", "t", "s1", { beforeSequence: 8, messages: 20 });
     expect(api.fetchEvents).toHaveBeenNthCalledWith(2, "h", "t", "s1", { afterId: 7 });

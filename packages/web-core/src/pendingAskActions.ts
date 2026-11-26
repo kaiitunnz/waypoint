@@ -233,7 +233,9 @@ export async function readTranscript(
   );
   if (request?.id === undefined) return "missing";
   const since = await fetchEvents(host, token, sessionId, { afterId: request.id });
-  return { request, events: [...page.events, ...since.events] };
+  // Each event once, in sequence: the latest call of a file decides.
+  const events = new Map([...page.events, ...since.events].map((event) => [event.id, event]));
+  return { request, events: [...events.values()].sort((a, b) => a.sequence - b.sequence) };
 }
 
 export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);

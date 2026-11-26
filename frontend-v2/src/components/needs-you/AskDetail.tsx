@@ -15,6 +15,7 @@ import {
   approvalCopyText,
   type ApprovalBody as ApprovalBodyModel,
 } from "@waypoint/web-core/session/approvals";
+import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { PendingApprovalAsk, PendingAsk, PendingPlanAsk, PendingQuestionAsk } from "@waypoint/web-core/types";
@@ -75,16 +76,18 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
     };
   }, [controller, locks, ask.id]);
   const questions = useMemo(() => askUserQuestions(ask), [ask]);
-  const single = questions.length === 1;
+  const toolUseId = ask.question.tool_use_id;
+  const { entry } = askFormView(questions, controller.draft(toolUseId));
   const held = locks?.phase(ask.id);
 
   return (
     <section className={styles.card} aria-label={ask.title}>
-      <h1 className={styles.headline}>{single ? questions[0].question : ask.title}</h1>
+      <h1 className={styles.headline}>{entry?.question ?? ask.title}</h1>
       <AskControllerProvider value={shared}>
         <AskFormView
-          toolUseId={ask.question.tool_use_id}
+          toolUseId={toolUseId}
           questions={questions}
+          headed
           formState={ask.availability}
           held={held}
           submitKey

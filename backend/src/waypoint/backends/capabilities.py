@@ -58,10 +58,8 @@ class AgentCapabilities(_FrozenModel):
     supports_custom_cli_args: bool = False
     supports_config_overrides: bool = False
     supports_slash_compact: bool = False
-    # The agent's ``launch_flags`` pin the model / the effort at process start,
-    # so a launch over the terminal (tmux) transport carries the selection.
-    # Structured transports set both per session, so these gate only terminal
-    # launches.
+    # Whether ``launch_flags`` carry the model / the effort. A terminal (tmux)
+    # launch passes only those flags; structured transports set both per session.
     supports_terminal_launch_model: bool = True
     supports_terminal_launch_effort: bool = True
     cli_binary: str | None = None
@@ -239,8 +237,7 @@ class BackendCapabilities(_FrozenModel):
     # whose entries are wrapped (e.g. as ``--config K=V`` for codex) rather than
     # passed through as raw flags. Only codex sets this today.
     supports_config_overrides: bool = False
-    # The agent's launch flags carry the model / the effort, so a terminal
-    # (tmux) launch honours them (see AgentCapabilities for the full note).
+    # Mirrors AgentCapabilities.
     supports_terminal_launch_model: bool = True
     supports_terminal_launch_effort: bool = True
     cli_binary: str | None = None

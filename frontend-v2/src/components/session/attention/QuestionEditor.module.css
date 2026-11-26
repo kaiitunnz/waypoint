@@ -53,8 +53,6 @@
   color: var(--muted);
 }
 
-/* Options wrap their text, so a long one grows instead of overflowing. */
-
 .note {
   display: flex;
   flex-direction: column;

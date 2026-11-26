@@ -11,6 +11,7 @@ export function TaskChecklist({ progress }: { progress: TodoProgress }) {
       <Meter
         value={progress.total ? (progress.completed / progress.total) * 100 : 0}
         label={`${progress.completed} of ${progress.total} tasks done`}
+        className={styles.meter}
       />
       <TodoItems todos={progress.todos} className={styles.list} />
     </div>

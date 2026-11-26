@@ -355,9 +355,10 @@ class OpenCodePlugin(DefaultLaunchContract):
                     _ruleset_for_mode(target_mode),
                     _subagent_ruleset_for_mode(target_mode),
                 ):
-                    log.warning(
-                        "failed to apply the rules of %s after leaving plan mode",
-                        target_mode,
+                    await runtime._record_system_event(
+                        session_id,
+                        f"Could not apply the {target_mode} permission mode after "
+                        "leaving plan mode; set the mode again",
                     )
                 # Drop the persisted plan-agent footprint so a later restore
                 # doesn't re-enter plan mode.

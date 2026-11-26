@@ -1183,13 +1183,14 @@ class OpenCodeAdapter:
         if not rules:
             return
         client = self._require_client()
-        # The root too, for the subagents it starts, unless they get rules of
-        # their own: then the root's are its agent's (plan mode), which a
-        # subagent's approval must not widen.
-        targets = [permission.session_id]
-        if state.subagent_permissions is None:
-            targets.append(state.root_id)
         async with self._ruleset_lock:
+            # The root too, for the subagents it starts, unless they get rules
+            # of their own: then the root's are its agent's (plan mode), which
+            # a subagent's approval must not widen. Read under the lock, which
+            # a mode change holds while it sets them.
+            targets = [permission.session_id]
+            if state.subagent_permissions is None:
+                targets.append(state.root_id)
             for target in dict.fromkeys(targets):
                 try:
                     info = await self._session_info(target)

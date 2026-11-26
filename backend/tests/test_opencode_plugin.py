@@ -549,6 +549,14 @@ async def test_an_outside_switch_out_of_plan_restores_the_earlier_mode() -> None
 
     assert session.permission_mode == "ask"
     adapter.set_session_permission.assert_awaited_once_with("sess", ASK, ASK)
+    runtime._record_system_event.assert_not_awaited()
+
+    adapter.set_session_permission.return_value = False
+    session.permission_mode = "plan"
+    await plugin._handle_agent_changed(runtime, "sess", "plan", "build")
+    assert "Could not apply the ask permission mode" in (
+        runtime._record_system_event.await_args.args[1]
+    )
     assert session.transport_state["agent"] is None
     assert runtime._emit_adapter_event.await_args.args[2] == "Exited plan mode"
 

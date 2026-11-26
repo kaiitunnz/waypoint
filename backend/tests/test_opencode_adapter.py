@@ -449,6 +449,28 @@ async def test_a_grant_in_plan_mode_reaches_later_subagents() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_grant_racing_a_switch_to_plan_leaves_the_plan_agent_alone() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        state = _register(adapter)
+        fake.add_session("ses_a", parentID="ses_root", permissions=list(ASK))
+        state.children.add("ses_a")
+        adapter._routes["ses_a"] = "local"
+        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
+        entering = asyncio.create_task(adapter.set_session_permission("local", [], ASK))
+        while not adapter._ruleset_lock.locked():
+            await asyncio.sleep(0)
+        granting = asyncio.create_task(
+            adapter.respond_to_permission("local", "acceptForSession")
+        )
+        assert await entering
+        assert await granting
+        await asyncio.gather(*adapter._tasks)
+
+    assert fake.sessions["ses_root"]["permissions"] == []
+
+
+@pytest.mark.asyncio
 async def test_a_subagent_seen_during_a_grant_gets_it() -> None:
     fake = _fake()
     fake.sessions["ses_root"]["permissions"] = []

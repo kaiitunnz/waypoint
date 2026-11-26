@@ -6,7 +6,10 @@ import { ActivityLoader, deriveActivity, type SessionActivity } from "../activit
 import { fetchEvents, isAuthError } from "../api";
 import type { EventsPage, SessionRecord } from "../types";
 
-const NO_ACTIVITY_MAP: ReadonlyMap<string, SessionActivity> = new Map();
+// A session's activity, null when it could not be loaded; no entry while it loads.
+export type SessionActivities = ReadonlyMap<string, SessionActivity | null>;
+
+const NO_ACTIVITY_MAP: SessionActivities = new Map();
 // A streamed reply or a tool pair is one message, so three reach past a bare system note.
 const ACTIVITY_MESSAGES = 3;
 
@@ -19,27 +22,28 @@ interface CachedActivity {
 // at once and fetches only the sessions whose `last_event_at` has moved.
 const cache = new Map<string, Map<string, CachedActivity>>();
 
-function cachedActivities(host: string): ReadonlyMap<string, SessionActivity> {
+function cachedActivities(host: string): SessionActivities {
   const held = cache.get(host);
   if (!held) return NO_ACTIVITY_MAP;
   return new Map([...held].map(([id, { activity }]) => [id, activity]));
 }
 
 // The one-line activity and task progress for each session given, loaded from its
-// latest events when its `last_event_at` moves. Pass only the rows on screen.
-// `onAuthFailure` must be stable.
+// latest events when its `last_event_at` moves. Pass only the rows on screen; when
+// not `enabled`, nothing is fetched. `onAuthFailure` must be stable.
 export function useSessionActivity(
   host: string,
   token: string,
   sessions: SessionRecord[],
   onAuthFailure?: () => void,
-): ReadonlyMap<string, SessionActivity> {
+  enabled = true,
+): SessionActivities {
   const [activities, setActivities] = useState(() => cachedActivities(host));
   const loader = useRef<ActivityLoader<EventsPage> | null>(null);
   const statuses = useRef(new Map<string, SessionRecord["status"]>());
 
   useEffect(() => {
-    if (!host || !token) return;
+    if (!host || !token || !enabled) return;
     const created = new ActivityLoader<EventsPage>({
       fetch: (id, signal) =>
         fetchEvents(host, token, id, { messages: ACTIVITY_MESSAGES, signal }).catch((error) => {
@@ -52,13 +56,15 @@ export function useSessionActivity(
         cache.set(host, held.set(id, { lastEventAt, activity }));
         setActivities((current) => new Map(current).set(id, activity));
       },
+      // A preview already shown stays; one never loaded falls back.
+      onFailure: (id) => setActivities((current) => (current.has(id) ? current : new Map(current).set(id, null))),
     });
     loader.current = created;
     return () => {
       created.dispose();
       loader.current = null;
     };
-  }, [host, token, onAuthFailure]);
+  }, [host, token, onAuthFailure, enabled]);
 
   useEffect(() => {
     statuses.current = new Map(sessions.map((session) => [session.id, session.status]));
@@ -69,7 +75,7 @@ export function useSessionActivity(
       }
       loader.current?.request(session.id, session.last_event_at);
     }
-  }, [sessions, host, token]);
+  }, [sessions, host, token, enabled]);
 
   return activities;
 }

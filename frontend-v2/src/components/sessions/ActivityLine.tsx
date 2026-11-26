@@ -8,7 +8,8 @@ import styles from "./ActivityLine.module.css";
 
 interface ActivityLineProps {
   fallback: string;
-  activity?: SessionActivity;
+  // Still loading when undefined; null when it could not be loaded.
+  activity: SessionActivity | null | undefined;
   // A finished turn reads brighter than a running step.
   bright?: boolean;
   // "4/7" on a row, "4 of 7" on a tile.
@@ -16,6 +17,13 @@ interface ActivityLineProps {
 }
 
 export function ActivityLine({ fallback, activity, bright, progressStyle = "short" }: ActivityLineProps) {
+  if (activity === undefined) {
+    return (
+      <span className={styles.line}>
+        <span className={styles.placeholder} aria-hidden="true" />
+      </span>
+    );
+  }
   const progress = activity?.progress ?? null;
   return (
     <span className={bright ? styles.bright : styles.line}>

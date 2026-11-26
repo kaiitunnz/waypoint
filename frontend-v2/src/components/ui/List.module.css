@@ -119,6 +119,17 @@
   height: 22px;
 }
 
+.single {
+  align-items: center;
+  min-height: 44px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.single .lamp {
+  margin-top: 0;
+}
+
 .dimmed .title {
   color: var(--muted);
 }

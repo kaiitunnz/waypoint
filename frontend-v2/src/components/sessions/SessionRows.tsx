@@ -23,6 +23,12 @@ interface RowProps {
   menu: ReactNode;
 }
 
+// A row's conversation preview: off by the person's choice, or its activity, undefined while it loads.
+interface PreviewProps {
+  previews: boolean;
+  activity: SessionActivity | null | undefined;
+}
+
 const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
@@ -32,21 +38,17 @@ export function LiveRow({
   word,
   now,
   menu,
+  previews,
   activity,
-}: Omit<RowProps, "agent"> & { activity?: SessionActivity }) {
+}: Omit<RowProps, "agent"> & PreviewProps) {
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
       lampLabel={word}
       title={session.title}
-      status={
-        <ActivityLine
-          fallback={word}
-          activity={activity}
-          bright={lamp === "done"}
-        />
-      }
+      single={!previews}
+      status={previews ? <ActivityLine fallback={word} activity={activity} bright={lamp === "done"} /> : undefined}
       trailing={time(session, now)}
       actions={menu}
     />
@@ -92,8 +94,9 @@ export function LiveTile({
   now,
   agent,
   menu,
+  previews,
   activity,
-}: RowProps & { activity?: SessionActivity }) {
+}: RowProps & PreviewProps) {
   return (
     <li className={styles.tileItem}>
       <Link href={href(session)} className={styles.tile}>
@@ -103,12 +106,11 @@ export function LiveTile({
         </span>
         <span className={styles.step}>
           <StatusLamp state={lamp} size="sm" label={word} />
-          <ActivityLine
-            fallback={word}
-            activity={activity}
-            bright={lamp === "done"}
-            progressStyle="long"
-          />
+          {previews ? (
+            <ActivityLine fallback={word} activity={activity} bright={lamp === "done"} progressStyle="long" />
+          ) : (
+            word
+          )}
         </span>
         <span className={styles.agentLine}>{agent}</span>
       </Link>

@@ -9,7 +9,6 @@ import type { SessionStatus } from "@waypoint/web-core/types";
 
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
-import { cx } from "@/lib/cx";
 
 import { EmptyTranscript } from "./EmptyTranscript";
 import { PendingTurn } from "./PendingTurn";
@@ -49,7 +48,7 @@ export function Transcript({
   return (
     <div className={styles.frame}>
       <div ref={scroller} className={styles.scroller} onScroll={onScroll}>
-        <div ref={content} className={cx(styles.col, Boolean(override) && styles.top)}>
+        <div ref={content} className={styles.col}>
           {override ?? (
             <>
               {hasOlder ? (
@@ -59,15 +58,17 @@ export function Transcript({
                   </ActionChip>
                 </div>
               ) : null}
-              <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
-                {turns.map((turn, index) => (
-                  <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
-                ))}
+              <div className={styles.messages}>
+                <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
+                  {turns.map((turn, index) => (
+                    <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
+                  ))}
+                </div>
+                {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
+                {!loading && turns.length === 0 && pending.length === 0 ? (
+                  <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
+                ) : null}
               </div>
-              {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
-              {!loading && turns.length === 0 && pending.length === 0 ? (
-                <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
-              ) : null}
             </>
           )}
         </div>

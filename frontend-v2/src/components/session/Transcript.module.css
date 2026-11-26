@@ -18,16 +18,20 @@
   overscroll-behavior: contain;
 }
 
-/* A short transcript sits at the bottom, like a messenger. */
+/* The column fills the view, so "Load older" stays at its top. */
 .col {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
   width: 100%;
   max-width: var(--session-col);
-  margin: auto auto 0;
+  margin: 0 auto;
   padding: 0 12px 10px;
 }
 
-.top {
-  margin-top: 0;
+/* A short transcript sits at the bottom, like a messenger. */
+.messages {
+  margin-top: auto;
 }
 
 .turns {

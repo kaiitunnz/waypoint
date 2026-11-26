@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
 import type { LaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
@@ -51,9 +51,22 @@ export function openingPreset(
   return { id: summary ? id : null, spec: summary && !presetNeedsFullSpec(summary) ? specFromSummary(summary.spec) : null };
 }
 
-export function usePresetControls(launch: LaunchContext, form: LaunchForm, initialId: string | null): PresetControls {
+export function usePresetControls(
+  launch: LaunchContext,
+  form: LaunchForm,
+  initialId: string | null,
+  launchTargetId: string,
+): PresetControls {
   const { toast } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
+  // Another target clears the agent's settings, so the form no longer holds the preset.
+  const [presetTarget, setPresetTarget] = useState(launchTargetId);
+  if (presetTarget !== launchTargetId) {
+    setPresetTarget(launchTargetId);
+    setSelectedId(null);
+  }
+  // Only the latest choice fills the form; a slower fetch for an earlier one is dropped.
+  const latest = useRef(0);
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [saving, setSaving] = useState<{ asDefault: boolean } | null>(null);
@@ -68,12 +81,14 @@ export function usePresetControls(launch: LaunchContext, form: LaunchForm, initi
   }
 
   // Fills the form from a preset, fetching its variables' values first when it has any.
-  async function apply(id: string) {
+  async function apply(id: string, request: number) {
     const summary = presets.find((preset) => preset.id === id);
     if (!summary) return;
     try {
-      form.applyPreset(presetNeedsFullSpec(summary) ? (await launch.fetchPreset(summary.id)).spec : specFromSummary(summary.spec));
+      const spec = presetNeedsFullSpec(summary) ? (await launch.fetchPreset(summary.id)).spec : specFromSummary(summary.spec);
+      if (request === latest.current) form.applyPreset(spec);
     } catch (error) {
+      if (request !== latest.current) return;
       // Half-filled, an Update would overwrite the preset's variables with none.
       setSelectedId(null);
       fail(error, "failed to load preset");
@@ -84,10 +99,14 @@ export function usePresetControls(launch: LaunchContext, form: LaunchForm, initi
   const applyInitial = useEffectEvent(() => {
     const summary = presets.find((preset) => preset.id === initialId);
     if (!summary || !presetNeedsFullSpec(summary)) return;
+    const request = latest.current;
     launch
       .fetchPreset(summary.id)
-      .then((full) => form.applyPreset(full.spec))
+      .then((full) => {
+        if (request === latest.current) form.applyPreset(full.spec);
+      })
       .catch((error) => {
+        if (request !== latest.current) return;
         setSelectedId(null);
         fail(error, "failed to load preset");
       });
@@ -114,8 +133,9 @@ export function usePresetControls(launch: LaunchContext, form: LaunchForm, initi
     selected: presets.find((preset) => preset.id === selectedId) ?? null,
     busy,
     select: (id) => {
+      const request = ++latest.current;
       setSelectedId(id);
-      if (id) void apply(id);
+      if (id) void apply(id, request);
     },
     update: (preset) =>
       void run(async () => {

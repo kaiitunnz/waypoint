@@ -162,3 +162,7 @@
     top: 6px;
   }
 }
+
+.more {
+  align-self: flex-start;
+}

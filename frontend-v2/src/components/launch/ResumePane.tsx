@@ -2,11 +2,13 @@
 
 import { useId, useState } from "react";
 
+import { isAuthError } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { humaniseBackend, transportPresentation } from "@waypoint/web-core/backends";
 import { envSummary } from "@waypoint/web-core/launch/env";
 import { deleteThreadMessage, formatThreadTime, threadEmptyHint, threadFilterOptions, type AgentThread } from "@waypoint/web-core/launch/threads";
 
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Button } from "@/components/ui/Button";
 import { ChoiceField } from "@/components/ui/Choice";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -15,6 +17,7 @@ import { SearchInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { SettingsRow, SwitchRow } from "@/components/ui/Settings";
+import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { usePointerUI } from "@/lib/layout";
 
@@ -174,9 +177,9 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
         })}
       </ul>
       {pointer && resume.more > 0 ? (
-        <Button variant="text" size="sm" onClick={resume.showMore}>
+        <ActionChip icon="chevron-down" onClick={resume.showMore} className={styles.more}>
           {resume.more} more threads
-        </Button>
+        </ActionChip>
       ) : null}
       {pointer ? null : (
         <Sheet
@@ -202,7 +205,8 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
           try {
             await resume.remove(deleting);
           } catch (error) {
-            onDeleteFailed(error instanceof Error ? error.message : "failed to delete the transcript");
+            if (isAuthError(error)) handleAuthFailure();
+            else onDeleteFailed(error instanceof Error ? error.message : "failed to delete the transcript");
           }
         }}
         onClose={() => setDeleting(null)}

@@ -124,34 +124,27 @@ export function useLaunchForm({
 
   // A new default agent (another target, or the catalog arriving) restarts the
   // form on it; so does the target's environment changing under the same agent.
-  // Keyed on the values, so a new object with the same defaults (a target's
-  // connect state changing) keeps what the person filled in.
+  // Each reset compares with the values it last saw, so a new object with the
+  // same defaults (a target's connect state changing) keeps what the person
+  // filled in, and an effect run twice resets nothing.
   const envKey = JSON.stringify(defaultLaunchEnvByBackend);
-  const firstRun = useRef(true);
+  const seen = useRef({ defaultBackend, envKey, launchTargetId, defaultCwd });
   useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
-      return;
-    }
+    if (seen.current.defaultBackend === defaultBackend && seen.current.envKey === envKey) return;
+    seen.current = { ...seen.current, defaultBackend, envKey };
     setState((current) => changeAgent(current, defaultBackend, contextRef.current));
   }, [defaultBackend, envKey]);
 
-  const firstTargetRun = useRef(true);
   useEffect(() => {
-    if (firstTargetRun.current) {
-      firstTargetRun.current = false;
-      return;
-    }
+    if (seen.current.launchTargetId === launchTargetId) return;
+    seen.current = { ...seen.current, launchTargetId };
     setState((current) => resetAgentScope(current, contextRef.current));
     setModelInfo(null);
   }, [launchTargetId]);
 
-  const firstCwdRun = useRef(true);
   useEffect(() => {
-    if (firstCwdRun.current) {
-      firstCwdRun.current = false;
-      return;
-    }
+    if (seen.current.defaultCwd === defaultCwd) return;
+    seen.current = { ...seen.current, defaultCwd };
     patch({ cwd: defaultCwd });
   }, [defaultCwd, patch]);
 

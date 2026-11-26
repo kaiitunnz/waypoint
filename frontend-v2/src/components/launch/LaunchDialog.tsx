@@ -109,7 +109,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
   useEffect(() => {
     if (models) handleModelsLoaded(models);
   }, [models, handleModelsLoaded]);
-  const presets = usePresetControls(launch, form, opening.id);
+  const presets = usePresetControls(launch, form, opening.id, targetId);
 
   // Folders the server knows join the recent folders once, as the form opens.
   const [seeded] = useState(() => {
@@ -119,7 +119,9 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
   const recents = useMemo(() => (seeded ? readRecentCwds(host, targetId) : []), [seeded, host, targetId]);
 
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  // What went wrong; a failed launch can be retried, a failed list or delete only dismissed.
+  const [failure, setFailure] = useState<{ message: string; retry: boolean } | null>(null);
+  const reportError = useCallback((message: string) => setFailure({ message, retry: false }), []);
   const [rejectedCwd, setCwdError] = useState<string | null>(null);
   // The folder error belongs to the folder the server rejected.
   const cwdError = rejectedCwd !== null && form.cwd === rejectedCwd ? rejectedCwd : null;
@@ -146,7 +148,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
     formAccountProfileId: form.accountProfileId,
     defaultLaunchEnvByBackend: defaults.defaultLaunchEnvByBackend,
     revision: launchTargets.targets,
-    onError: setFailure,
+    onError: reportError,
   });
 
   const changeMode = (next: LaunchMode) => {
@@ -157,7 +159,9 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
 
   // Runs a launch. A password-auth target that is not connected asks for its
   // password and then replays this same request.
-  async function run(action: () => Promise<void>, fallback: string, cwd?: string) {
+  // `cwd` is the folder the launch uses; `folderField` says the form shows it, so a
+  // rejection marks the field rather than the notice.
+  async function run(action: () => Promise<void>, fallback: string, cwd?: string, folderField = false) {
     setBusy(true);
     setFailure(null);
     try {
@@ -165,9 +169,10 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
     } catch (error) {
       const outcome = classifyLaunchFailure(error, fallback);
       if (outcome.kind === "auth") handleAuthFailure();
-      else if (outcome.kind === "cwd" && cwd !== undefined) setCwdError(cwd);
-      else if (outcome.kind === "ssh" && activeTarget) setSshRetry(() => () => void run(action, fallback, cwd));
-      else setFailure(outcome.kind === "detail" ? outcome.message : fallback);
+      else if (outcome.kind === "cwd" && folderField && cwd !== undefined) setCwdError(cwd);
+      else if (outcome.kind === "cwd") setFailure({ message: cwd ? `Folder not found: ${cwd}` : "Folder not found", retry: true });
+      else if (outcome.kind === "ssh" && activeTarget) setSshRetry(() => () => void run(action, fallback, cwd, folderField));
+      else setFailure({ message: outcome.kind === "detail" ? outcome.message : fallback, retry: true });
     } finally {
       setBusy(false);
     }
@@ -194,11 +199,12 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
         },
         "failed to create session",
         cwd,
+        true,
       );
     } else if (mode === "schedule") {
       const built = withScheduleTiming(form.scheduleRequest(schedule.prompt, presets.selectedId), schedule);
       if ("error" in built) {
-        setFailure(built.error);
+        setFailure({ message: built.error, retry: false });
         return;
       }
       const payload = { ...built.payload, launch_target_id: targetId || null };
@@ -207,7 +213,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
         pushRecentCwd(host, targetId, payload.cwd);
         toast({ message: payload.cron ? "Recurring launch scheduled" : "Launch scheduled" });
         onClose();
-      }, "failed to schedule");
+      }, "failed to schedule", payload.cwd, true);
     } else if (mode === "attach") {
       if (attachTargetError(attach.target)) return;
       const payload = attachRequest(attach.target, attach.agent, attach.title);
@@ -216,10 +222,14 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
         open(session.id);
       }, "failed to attach");
     } else {
-      void run(async () => {
-        const session = await resume.resume();
-        if (session) open(session.id);
-      }, "failed to resume the thread");
+      void run(
+        async () => {
+          const session = await resume.resume();
+          if (session) open(session.id);
+        },
+        "failed to resume the thread",
+        resume.selected?.cwd,
+      );
     }
   }
 
@@ -283,10 +293,14 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
       <span className={styles.noticeGlyph}>
         <Icon name="alert" size={16} />
       </span>
-      <p className={styles.noticeText}>{failure}</p>
-      <ActionChip icon="refresh" disabled={busy || blocked} onClick={submit}>
-        Retry
-      </ActionChip>
+      <p className={styles.noticeText}>{failure.message}</p>
+      {failure.retry ? (
+        <ActionChip icon="refresh" disabled={busy || blocked} onClick={submit}>
+          Retry
+        </ActionChip>
+      ) : (
+        <span />
+      )}
       <IconButton label="Dismiss" size="sm" onClick={() => setFailure(null)}>
         <Icon name="close" size={16} />
       </IconButton>
@@ -298,9 +312,9 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
       {notice}
       <div className={styles.actions}>
         {mode === "resume" && !pointer && resume.more > 0 ? (
-          <Button variant="text" onClick={resume.showMore}>
+          <ActionChip icon="chevron-down" onClick={resume.showMore}>
             {resume.more} more threads
-          </Button>
+          </ActionChip>
         ) : null}
         <span className={styles.grow} />
         {pointer ? (
@@ -335,7 +349,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
                 catalog={catalog}
                 targetLabel={activeTarget?.name ?? null}
                 busy={busy}
-                onDeleteFailed={setFailure}
+                onDeleteFailed={reportError}
               />
             ) : null}
             {mode === "attach" ? (

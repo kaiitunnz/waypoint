@@ -3,6 +3,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
 import { useFolderSuggestions } from "@waypoint/web-core/hooks/useFolderSuggestions";
+import { splitPath } from "@waypoint/web-core/workspacePaths";
+
+import { PathLabel } from "@/components/session/cards/PathLabel";
 
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Dialog";
@@ -24,6 +27,11 @@ interface FolderFieldProps {
   // The folder the server said does not exist.
   error: string | null;
   disabled?: boolean;
+}
+
+// A folder on one line, cut from the left so its last part stays; hover or a long press shows it whole.
+function FolderPath({ path }: { path: string }) {
+  return <PathLabel {...splitPath(path)} full={path} />;
 }
 
 const machine = { spellCheck: false, autoCapitalize: "none", autoComplete: "off", autoCorrect: "off" } as const;
@@ -140,7 +148,7 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => pick(option)}
               >
-                {option}
+                <FolderPath path={option} />
               </li>
             ))}
           </ul>
@@ -175,8 +183,7 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
     <>
       <SettingsRow
         label="Folder"
-        detail={value || "~"}
-        mono
+        detail={<FolderPath path={value || "~"} />}
         disabled={disabled}
         onPress={() => {
           setDraft(value);
@@ -226,7 +233,7 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
                     setOpen(false);
                   }}
                 >
-                  {option}
+                  <FolderPath path={option} />
                 </button>
               </li>
             ))}

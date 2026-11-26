@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import {
   humaniseBackend,
   permissionModeLabel,
 } from "@waypoint/web-core/backends";
-import { fetchBackendModels } from "@waypoint/web-core/api";
 import { Pager } from "@/components/Pager";
 import { usePagination } from "@waypoint/web-core/hooks/usePagination";
+import { useScheduleModels } from "@waypoint/web-core/hooks/useScheduleModels";
 import { formatClock, formatRelative } from "@waypoint/web-core/scheduleTime";
 import {
   cronToLabel,
@@ -17,11 +17,7 @@ import {
   isRecurring,
   timezoneAbbrev,
 } from "@waypoint/web-core/recurrence";
-import {
-  Backend,
-  BackendModelOption,
-  ScheduledSession,
-} from "@waypoint/web-core/types";
+import { ScheduledSession } from "@waypoint/web-core/types";
 
 const PAGE_SIZE = 5;
 
@@ -46,37 +42,9 @@ export function ScheduledSessionsGroup({
   onCancel,
   onClearHistory,
 }: ScheduledSessionsGroupProps) {
-  const [modelsByBackend, setModelsByBackend] = useState<Record<string, BackendModelOption[]>>({});
+  const modelLabel = useScheduleModels(host, token, schedules);
   const [clearing, setClearing] = useState(false);
 
-  useEffect(() => {
-    const modelCatalogs = new Map(
-      schedules.map((schedule) => [
-        scheduleModelCacheKey(
-          schedule.backend,
-          schedule.launch_target_id ?? null,
-          schedule.account_profile_id ?? null,
-        ),
-        {
-          backend: schedule.backend,
-          launchTargetId: schedule.launch_target_id ?? null,
-          accountProfileId: schedule.account_profile_id ?? null,
-        },
-      ]),
-    );
-    for (const [cacheKey, target] of modelCatalogs) {
-      if (!modelsByBackend[cacheKey]) {
-        fetchBackendModels(host, token, target.backend, {
-          launchTargetId: target.launchTargetId,
-          accountProfileId: target.accountProfileId,
-        })
-          .then((response) => {
-            setModelsByBackend((prev) => ({ ...prev, [cacheKey]: response.models }));
-          })
-          .catch(() => {});
-      }
-    }
-  }, [host, token, schedules, modelsByBackend]);
 
   const upcoming = schedules.filter((schedule) => schedule.status === "pending");
   const recent = schedules.filter((schedule) => schedule.status !== "pending");
@@ -128,7 +96,7 @@ export function ScheduledSessionsGroup({
           schedule={schedule}
           onCancel={onCancel}
           catalog={catalog}
-          modelsByBackend={modelsByBackend}
+          modelName={modelLabel(schedule)}
         />
       ))}
       <Pager
@@ -148,12 +116,13 @@ function ScheduleRow({
   schedule,
   onCancel,
   catalog,
-  modelsByBackend,
+  modelName,
 }: {
   schedule: ScheduledSession;
   onCancel: (id: string) => Promise<void>;
   catalog: BackendCatalog;
-  modelsByBackend: Record<string, BackendModelOption[]>;
+  // The pinned model's display name, or null when the schedule pins none.
+  modelName: string | null;
 }) {
   const when = new Date(schedule.scheduled_at);
   const recurring = isRecurring(schedule);
@@ -163,11 +132,6 @@ function ScheduleRow({
     : formatClock(when);
   const relative = schedule.status === "pending" ? formatRelative(when) : null;
   const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
-  const modelCacheKey = scheduleModelCacheKey(
-    schedule.backend,
-    schedule.launch_target_id ?? null,
-    schedule.account_profile_id ?? null,
-  );
   const modeLabel = permissionModeLabel(
     schedule.backend,
     schedule.permission_mode,
@@ -190,7 +154,7 @@ function ScheduleRow({
         ) : null}
         {schedule.model ? (
           <span className="badge model" title={`Model: ${schedule.model}`}>
-            {modelsByBackend[modelCacheKey]?.find((opt) => opt.id === schedule.model)?.label ?? schedule.model}
+            {modelName}
           </span>
         ) : null}
         {schedule.effort ? (
@@ -254,12 +218,4 @@ function ScheduleRow({
       ) : null}
     </article>
   );
-}
-
-function scheduleModelCacheKey(
-  backend: Backend,
-  launchTargetId: string | null,
-  accountProfileId: string | null,
-): string {
-  return `${backend}::${launchTargetId ?? "local"}::${accountProfileId ?? "default"}`;
 }

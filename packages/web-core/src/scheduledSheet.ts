@@ -1,5 +1,5 @@
+import { CWD_NOT_FOUND_DETAIL, SSH_MASTER_REQUIRED_DETAIL } from "./api";
 import { humaniseBackend, permissionModeLabel, type BackendCatalog } from "./backends";
-import { modelLabelFor } from "./modelDisplay";
 import { cronCadence } from "./recurrence";
 import { messageText } from "./session/heldMessages";
 import type { MessageSchedule, ScheduledSession } from "./types";
@@ -52,6 +52,14 @@ export function recurrenceSentence(cron: string, timezone: string | null | undef
   }
 }
 
+// The server records an HTTP refusal as "400: <detail>"; known details read as words.
+export function failureText(reason: string | null | undefined): string {
+  const detail = (reason ?? "").replace(/^\d{3}: /, "");
+  if (detail === CWD_NOT_FOUND_DETAIL) return "folder not found";
+  if (detail === SSH_MASTER_REQUIRED_DETAIL) return "SSH password required";
+  return detail || "unknown error";
+}
+
 export type ScheduledAction = "open" | "openLast" | "sendNow" | "cancel" | "dismiss";
 
 export interface ScheduledRowView {
@@ -95,7 +103,7 @@ export function sortScheduled<T extends { status: string; scheduled_at?: string 
 function lastRun(record: { cron?: string | null; last_run_at?: string | null; last_run_status?: string | null; last_failure_reason?: string | null }, now: Date) {
   if (!record.cron || !record.last_run_at) return null;
   if (record.last_run_status === "failed") {
-    return { text: `Last run failed: ${record.last_failure_reason || "unknown error"}`, failed: true };
+    return { text: `Last run failed: ${failureText(record.last_failure_reason)}`, failed: true };
   }
   return { text: `Last run ${dayClock(new Date(record.last_run_at), now)}, ${record.last_run_status ?? "done"}`, failed: false };
 }
@@ -107,18 +115,19 @@ export function launchRowView(
   catalog: BackendCatalog,
   now: Date,
   localZone: string,
+  model: string | null,
 ): ScheduledLaunchView {
   const recurring = Boolean(schedule.cron);
   const at = new Date(schedule.scheduled_at);
   const pending = schedule.status === "pending";
   let state: string;
-  if (schedule.status === "failed") state = `Failed: ${schedule.failure_reason || "unknown error"}`;
+  if (schedule.status === "failed") state = `Failed: ${failureText(schedule.failure_reason)}`;
   else if (schedule.status === "cancelled") state = "Cancelled";
   else if (schedule.status === "launched") state = `Launched ${dayClock(at, now)}`;
   else state = recurring ? recurrenceSentence(schedule.cron ?? "", schedule.timezone, localZone) : capitalize(dayClock(at, now));
   const agent = [
     humaniseBackend(schedule.backend, catalog),
-    schedule.model ? modelLabelFor(schedule.model, []) : null,
+    model,
     schedule.permission_mode ? (permissionModeLabel(schedule.backend, schedule.permission_mode, catalog) ?? schedule.permission_mode) : null,
   ]
     .filter(Boolean)
@@ -154,7 +163,7 @@ export function messageRowView(
   const pending = message.status === "pending";
   const at = message.scheduled_at ? new Date(message.scheduled_at) : null;
   let state: string;
-  if (message.status === "failed") state = `Failed: ${message.failure_reason || "unknown error"}`;
+  if (message.status === "failed") state = `Failed: ${failureText(message.failure_reason)}`;
   else if (message.status === "cancelled") state = "Cancelled";
   else if (message.status === "sent") state = idle ? "Sent when idle" : at && !recurring ? `Sent ${dayClock(at, now)}` : "Sent";
   else if (idle) state = "When idle";

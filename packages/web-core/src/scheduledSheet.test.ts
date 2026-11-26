@@ -4,6 +4,7 @@ import { buildCatalog } from "./backends";
 import {
   countdown,
   dayClock,
+  failureText,
   launchRowView,
   messageRowView,
   recurrenceSentence,
@@ -66,6 +67,15 @@ describe("time labels", () => {
   });
 });
 
+describe("failureText", () => {
+  it("reads an HTTP refusal as words and keeps other reasons", () => {
+    expect(failureText("400: cwd-not-found")).toBe("folder not found");
+    expect(failureText("409: ssh-master-required")).toBe("SSH password required");
+    expect(failureText("session not found")).toBe("session not found");
+    expect(failureText(null)).toBe("unknown error");
+  });
+});
+
 describe("sortScheduled", () => {
   it("puts pending first, soonest first and when-idle last, then history newest first", () => {
     const rows = [
@@ -95,6 +105,7 @@ describe("launchRowView", () => {
       catalog,
       now,
       "UTC",
+      "Sonnet 5.5",
     );
     expect(view).toMatchObject({
       title: "dependabot sweep",
@@ -106,7 +117,7 @@ describe("launchRowView", () => {
       lastRun: { text: "Last run Tue 02:00, launched", failed: false },
       folder: "/home/me/waypoint",
     });
-    expect(view.agent).toMatch(/^Claude Code, .+, Auto$/);
+    expect(view.agent).toBe("Claude Code, Sonnet 5.5, Auto");
   });
 
   it("shows a launched one-time row and a failed one", () => {
@@ -115,9 +126,10 @@ describe("launchRowView", () => {
       catalog,
       now,
       "UTC",
+      null,
     );
     expect(launched).toMatchObject({ title: "waypoint", state: "Launched today at 07:00", countdown: null, actions: ["open", "dismiss"], resolved: true });
-    const failed = launchRowView(launch({ status: "failed", failure_reason: "folder not found" }), catalog, now, "UTC");
+    const failed = launchRowView(launch({ status: "failed", failure_reason: "400: cwd-not-found" }), catalog, now, "UTC", null);
     expect(failed).toMatchObject({ state: "Failed: folder not found", failed: true, actions: ["dismiss"] });
   });
 });

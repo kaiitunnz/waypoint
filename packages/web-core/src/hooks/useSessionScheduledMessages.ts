@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { deleteMessageSchedule, fetchMessageSchedules } from "../api";
+import { deleteMessageSchedule, fetchMessageSchedules, sendMessageScheduleNow } from "../api";
 import {
   pendingSchedulesSorted,
   sameSchedules,
@@ -62,5 +62,18 @@ export function useSessionScheduledMessages(
     [host, token, refresh],
   );
 
-  return { messages, refresh, cancel };
+  // Delivers one now and resolves to whether the session held it; a failure is
+  // thrown for the caller to report.
+  const sendNow = useCallback(
+    async (scheduleId: string): Promise<boolean> => {
+      try {
+        return (await sendMessageScheduleNow(host, token, scheduleId)).held;
+      } finally {
+        void refresh();
+      }
+    },
+    [host, token, refresh],
+  );
+
+  return { messages, refresh, cancel, sendNow };
 }

@@ -164,6 +164,25 @@ export function formatInZone(
 
 const HHMM = /^(\d{1,2}) (\d{1,2})$/;
 
+export type CronCadence =
+  | { kind: "daily" | "weekdays"; clock: string }
+  | { kind: "weekly"; clock: string; weekday: number }
+  | { kind: "monthly"; clock: string; day: number };
+
+/** The preset cadence a cron expresses, or null for any other shape. */
+export function cronCadence(cron: string): CronCadence | null {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const [minute, hour, dom, month, dow] = fields;
+  if (!HHMM.exec(`${minute} ${hour}`) || month !== "*") return null;
+  const clock = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+  if (dom === "*" && dow === "*") return { kind: "daily", clock };
+  if (dom === "*" && dow === "1-5") return { kind: "weekdays", clock };
+  if (dom === "*" && /^[0-6]$/.test(dow)) return { kind: "weekly", clock, weekday: Number(dow) };
+  if (/^\d{1,2}$/.test(dom) && dow === "*") return { kind: "monthly", clock, day: Number(dom) };
+  return null;
+}
+
 /**
  * A compact, uppercase cadence label for a stored cron + timezone, recognizing
  * the canonical preset shapes and otherwise showing the raw expression. Shape:
@@ -175,23 +194,20 @@ export function cronToLabel(
 ): string {
   if (!cron) return "";
   const zone = timezone ? ` · ${timezone}` : "";
-  const fields = cron.trim().split(/\s+/);
-  if (fields.length !== 5) return `CRON ${cron}${zone}`;
-  const [minute, hour, dom, month, dow] = fields;
-  const clock = HHMM.exec(`${minute} ${hour}`)
-    ? `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`
-    : null;
-  if (clock && month === "*") {
-    if (dom === "*" && dow === "*") return `DAILY · ${clock}${zone}`;
-    if (dom === "*" && dow === "1-5") return `WEEKDAYS · ${clock}${zone}`;
-    if (dom === "*" && /^[0-6]$/.test(dow)) {
-      return `WEEKLY ${WEEKDAY_LABELS[Number(dow)].toUpperCase()} · ${clock}${zone}`;
-    }
-    if (/^\d{1,2}$/.test(dom) && dow === "*") {
-      return `MONTHLY ${dom} · ${clock}${zone}`;
-    }
+  if (cron.trim().split(/\s+/).length !== 5) return `CRON ${cron}${zone}`;
+  const cadence = cronCadence(cron);
+  switch (cadence?.kind) {
+    case "daily":
+      return `DAILY · ${cadence.clock}${zone}`;
+    case "weekdays":
+      return `WEEKDAYS · ${cadence.clock}${zone}`;
+    case "weekly":
+      return `WEEKLY ${WEEKDAY_LABELS[cadence.weekday].toUpperCase()} · ${cadence.clock}${zone}`;
+    case "monthly":
+      return `MONTHLY ${cadence.day} · ${cadence.clock}${zone}`;
+    default:
+      return `CUSTOM ${cron}${zone}`;
   }
-  return `CUSTOM ${cron}${zone}`;
 }
 
 export function isRecurring(

@@ -1372,6 +1372,24 @@ export async function deleteMessageSchedule(
   return payload.message_schedule as MessageSchedule;
 }
 
+// Delivers a pending scheduled message now; a recurring one keeps its next run.
+// `held` says the session held it (Focus, a dialog, a restore) instead.
+export async function sendMessageScheduleNow(
+  host: string,
+  token: string,
+  scheduleId: string,
+): Promise<{ message_schedule: MessageSchedule; held: boolean }> {
+  const response = await fetch(
+    `${host}/api/message-schedules/${encodeURIComponent(scheduleId)}/send-now`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to send the scheduled message");
+  return (await response.json()) as { message_schedule: MessageSchedule; held: boolean };
+}
+
 export async function clearMessageScheduleHistory(
   host: string,
   token: string,

@@ -30,6 +30,7 @@
     "./recentHosts": "./src/recentHosts.ts",
     "./recurrence": "./src/recurrence.ts",
     "./scheduleTime": "./src/scheduleTime.ts",
+    "./scheduledSheet": "./src/scheduledSheet.ts",
     "./search": "./src/search.ts",
     "./sessionActions": "./src/sessionActions.ts",
     "./sessionDelivery": "./src/sessionDelivery.ts",

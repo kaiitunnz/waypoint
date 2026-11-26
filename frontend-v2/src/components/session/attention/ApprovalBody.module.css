@@ -7,6 +7,13 @@
   white-space: pre-wrap;
 }
 
+.warn {
+  margin-bottom: 6px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--warn);
+}
+
 .block {
   padding: 6px 9px;
   border-radius: 8px;

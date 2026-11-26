@@ -1,6 +1,12 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
-import { approvalBodyForTool, holdsWholeRequest, type ApprovalBody, type ShownRequest } from "./session/approvals";
+import {
+  approvalBodyForTool,
+  holdsWholeRequest,
+  runsOutsideSandbox,
+  type ApprovalBody,
+  type ShownRequest,
+} from "./session/approvals";
 import { toggleSelection } from "./session/askQuestion";
 import type {
   PendingApprovalAsk,
@@ -188,16 +194,18 @@ const LISTED_MAX_LINES = 3;
 export const fitsListing = (text: string) =>
   text.length <= LISTED_MAX_LENGTH && text.split("\n").length <= LISTED_MAX_LINES;
 
-// The ask holds the whole of what is approved: the shell command or the edited file's path.
+// The ask holds a shell command or an edited file's path, uncut by the server.
 function carriesRequest(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
   return ask.kind === "approval" && !ask.approval.tool_input_truncated && decisionView(ask).preview !== null;
 }
 
 // A decision is live only while the whole request is on screen. A row or card can show
-// a command whole; an edit's request is its change, which only a detail shows.
+// a command whole; an edit's request is its change, and a command that leaves the sandbox
+// says so, both only in a detail.
 export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
   const { preview } = decisionView(ask);
-  return preview?.kind === "command" && carriesRequest(ask) && fitsListing(preview.text);
+  if (preview?.kind !== "command" || !carriesRequest(ask) || !fitsListing(preview.text)) return false;
+  return ask.kind === "approval" && !runsOutsideSandbox(ask.approval.tool_input);
 }
 
 // What a read of the transcript turned up for a pending approval.

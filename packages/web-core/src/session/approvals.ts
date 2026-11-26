@@ -11,7 +11,8 @@ import {
   type PlanViewModel,
 } from "../events";
 import type { EventRecord, SessionRecord } from "../types";
-import { resolveFromCwd } from "../workspacePaths";
+import { resolveFromCwd, splitPath } from "../workspacePaths";
+import { hunksAddUp } from "../highlight";
 import { toolInputForEvent } from "./toolPresentation";
 import { collapseSupersededPlanEvents, latestActionablePlanEvent } from "./transcript";
 
@@ -49,13 +50,14 @@ export type ApprovalBody =
   | { kind: "diff"; prompt: string; preview: EventDiffPreview }
   | { kind: "plan"; plan: string }
   | { kind: "task"; prompt: string; description: string; subagent: string }
-  | { kind: "command"; description: string; command: string }
+  | { kind: "command"; description: string; command: string; outsideSandbox?: boolean }
   | { kind: "workflow"; script: string }
   | { kind: "edit"; tool: string; path: string | null }
   | { kind: "raw"; text: string };
 
 const WORKFLOW_TOOLS = new Set(["Workflow", "RunWorkflow"]);
-// Tools whose body is one argument, so without it a request shows nothing of itself.
+// Tools that ask to run a text of their own (a plan, prompt, command or script): without
+// it, what is asked is not on screen.
 const CONTENT_TOOLS = new Set(["ExitPlanMode", "Task", "Agent", "Bash", ...WORKFLOW_TOOLS]);
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -79,15 +81,19 @@ export function wholeApprovalBody(event: EventRecord): ApprovalBody {
   return typeof command === "string" && command ? { kind: "command", description: "", command } : body;
 }
 
-// Lines show only under a numbered hunk header, so a diff without one shows nothing.
+// Lines show only under a numbered hunk header, so a diff without one shows nothing, and
+// one whose hunks do not add up shows something other than the change.
 const hasWholeDiff = (file: EventDiffPreview["files"][number]) =>
-  !file.truncated && !file.binary && !file.unavailableReason && /^@@ -\d/m.test(file.diff);
+  !file.truncated && !file.binary && !file.unavailableReason && /^@@ -\d/m.test(file.diff) && hunksAddUp(file.diff);
 
 const callId = (event: EventRecord) => event.metadata?.tool_use_id ?? event.metadata?.item_id;
 
+const fileName = (path: string | null) => (path === null ? null : splitPath(path).base);
+
 // A pending Write's content, only when it is certain: from the request itself, else from
-// the one Write of that very file the transcript holds unanswered since the human last
-// spoke.
+// the transcript's one unanswered Write since the human last spoke that has this file
+// name, if it is of this very path. A request may name the file without its folder, so a
+// second file of that name leaves it unknown. An empty write has nothing to show.
 function pendingWrite(
   request: EventRecord,
   events: readonly EventRecord[],
@@ -96,7 +102,7 @@ function pendingWrite(
   const input = asRecord(request.metadata?.tool_input);
   const path = toolFilePath(input);
   if (readToolName(request) !== "Write" || !path) return null;
-  if (typeof input?.content === "string") return { path, content: input.content };
+  if (typeof input?.content === "string") return input.content ? { path, content: input.content } : null;
   const asked = resolveFromCwd(path, cwd);
   if (!asked) return null;
   const before = events.filter((event) => event.sequence < request.sequence);
@@ -107,15 +113,16 @@ function pendingWrite(
       event.kind === "tool_call" &&
       readToolName(event) === "Write" &&
       !answered.has(callId(event)) &&
-      toolFilePath(toolInputForEvent(event)) === asked,
+      fileName(toolFilePath(toolInputForEvent(event))) === fileName(asked),
   );
-  const content = calls.length === 1 ? toolInputForEvent(calls[0])?.content : undefined;
-  return typeof content === "string" ? { path: asked, content } : null;
+  if (calls.length !== 1 || toolFilePath(toolInputForEvent(calls[0])) !== asked) return null;
+  const content = toolInputForEvent(calls[0])?.content;
+  return typeof content === "string" && content ? { path: asked, content } : null;
 }
 
 // A write replaces the file, so its whole content is the change.
 function writeDiff(path: string, content: string): EventDiffPreview {
-  const lines = content === "" ? [] : content.replace(/\n$/, "").split("\n");
+  const lines = content.replace(/\n$/, "").split("\n");
   const diff = [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((line) => `+${line}`), ""].join("\n");
   const file = { path, changeType: "unknown" as const, diff, additions: lines.length, deletions: 0 };
   return {
@@ -176,6 +183,8 @@ export function holdsWholeRequest(
   }
 }
 
+export const runsOutsideSandbox = (input: Record<string, unknown> | null) => input?.dangerouslyDisableSandbox === true;
+
 // `tool` is a normalized tool name; `raw` is the text where no kind matches.
 export function approvalBodyForTool(
   tool: string | null,
@@ -187,7 +196,8 @@ export function approvalBodyForTool(
     return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
   }
   if (tool === "Bash" && typeof input?.command === "string") {
-    return { kind: "command", description: text(input.description), command: input.command };
+    const command = { kind: "command" as const, description: text(input.description), command: input.command };
+    return runsOutsideSandbox(input) ? { ...command, outsideSandbox: true } : command;
   }
   if (tool && WORKFLOW_TOOLS.has(tool) && typeof input?.script === "string") {
     return { kind: "workflow", script: input.script };

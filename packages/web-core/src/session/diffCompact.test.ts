@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPlainDiffLines } from "../highlight";
+import { buildPlainDiffLines, hunksAddUp } from "../highlight";
 import { compactDiff, fullDiff, reachableLines } from "./diffCompact";
 
 const DIFF = [
@@ -90,12 +90,23 @@ describe("buildPlainDiffLines", () => {
     fullDiff(buildPlainDiffLines(diff)).map((row) => (row.kind === "line" ? `${row.line.kind}:${row.line.tokens[0].text}` : row.kind));
 
   it("keeps hunk lines that look like file headers", () => {
-    const diff = "--- a/x.sql\n+++ b/x.sql\n@@ -1,3 +1,3 @@\n keep\n--- old comment\n+++i;\n+ok\n tail\n";
+    const diff = "--- a/x.sql\n+++ b/x.sql\n@@ -1,3 +1,4 @@\n keep\n--- old comment\n+++i;\n+ok\n tail\n";
+    expect(hunksAddUp(diff)).toBe(true);
     expect(shown(diff)).toEqual(["context:keep", "del:-- old comment", "add:++i;", "add:ok", "context:tail"]);
+  });
+
+  it("tells hunks that do not hold what their header counts", () => {
+    // Two lines run together for want of a final newline.
+    expect(hunksAddUp("--- a\n+++ a\n@@ -1 +1 @@\n-a = 1+a = 2\n")).toBe(false);
+    expect(hunksAddUp("@@ -1,2 +1,2 @@\n x\n-a+b\n")).toBe(false);
+    expect(hunksAddUp("@@ -1 +1 @@\n-a\n+b\n+c\n")).toBe(false);
+    expect(hunksAddUp("@@ -1,2 +1,2 @@\n x\n@@ -9 +9 @@\n-a\n+b\n")).toBe(false);
+    expect(hunksAddUp("Index: a\n====\n--- a\n+++ a\n@@ -1,2 +1,2 @@\n\n-a\n+b\n\\ No newline at end of file\n")).toBe(true);
   });
 
   it("reads the next file's headers once a hunk is done", () => {
     const diff = "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-one\n+two\n\\ No newline at end of file\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+three\n";
+    expect(hunksAddUp(diff)).toBe(true);
     expect(shown(diff)).toEqual(["del:one", "add:two", "add:three"]);
   });
 });

@@ -54,6 +54,14 @@ describe("wholeApprovalBody of a request with a command beside its title", () =>
   });
 });
 
+describe("a command that leaves the sandbox", () => {
+  it("says so in its body", () => {
+    const input = { command: "ls", dangerouslyDisableSandbox: true };
+    expect(approvalBodyForTool("Bash", input, "")).toMatchObject({ kind: "command", outsideSandbox: true });
+    expect(approvalBodyForTool("Bash", { command: "ls" }, "")).not.toHaveProperty("outsideSandbox");
+  });
+});
+
 describe("holdsWholeRequest", () => {
   const diff = (file: Record<string, unknown>, truncated = false): ApprovalBody =>
     approvalBody(
@@ -95,6 +103,7 @@ describe("holdsWholeRequest", () => {
     // Nothing of these would show.
     expect(holdsWholeRequest(diff({ diff: "rename from a\nrename to b\n" }), null)).toBe(false);
     expect(holdsWholeRequest(diff({ diff: "@@ fn\n-a\n+b\n" }), null)).toBe(false);
+    expect(holdsWholeRequest(diff({ diff: "@@ -1 +1 @@\n-a = 1+a = 2\n" }), null)).toBe(false);
   });
 });
 
@@ -126,6 +135,8 @@ describe("shownRequest", () => {
       ["another directory", [spoke, call(2, "t1", "/w/other/a.txt", "x")], "/w"],
       ["answered", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), result], "/w"],
       ["two candidates", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), call(3, "t2", "/w/sub/a.txt", "y")], "/w"],
+      ["another file of that name", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), call(3, "t2", "/w/a.txt", "y")], "/w"],
+      ["empty content", [spoke, call(2, "t1", "/w/sub/a.txt", "")], "/w"],
       ["from before the human spoke", [call(1, "t1", "/w/sub/a.txt", "x"), ev(2, "user_input", "next")], "/w"],
       ["after the request", [spoke, call(10, "t1", "/w/sub/a.txt", "x")], "/w"],
       ["unknown cwd", [spoke, call(2, "t1", "/w/sub/a.txt", "x")], ""],
@@ -135,6 +146,14 @@ describe("shownRequest", () => {
       const shown = shownRequest(pending, events, cwd);
       expect([name, shown.body.kind, shown.whole]).toEqual([name, "edit", false]);
     }
+  });
+
+  it("locks a request that names only the file when another folder has one too", () => {
+    const named = approve({ file_path: "a.txt" });
+    const events = [spoke, call(2, "t1", "/w/sub/a.txt", "long"), call(3, "t2", "/w/a.txt", "short")];
+    expect(shownRequest(named, events, "/w").whole).toBe(false);
+    expect(shownRequest(named, [spoke, call(2, "t1", "/w/sub/a.txt", "long")], "/w").whole).toBe(false);
+    expect(shownRequest(approve({ file_path: "/w/a.txt", content: "" }), [], "/w").whole).toBe(false);
   });
 
   it("locks an edit, and a request known by its title", () => {

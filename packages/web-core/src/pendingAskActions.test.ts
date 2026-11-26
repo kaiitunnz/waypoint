@@ -236,6 +236,11 @@ describe("deciding outside the detail", () => {
     expect(decidesInline(approval("bash", { command: "git push" }))).toBe(true);
   });
 
+  it("opens a command that leaves the sandbox first", () => {
+    expect(decidesInline(approval("Bash", { command: "ls", dangerouslyDisableSandbox: true }))).toBe(false);
+    expect(decidesInline(approval("Bash", { command: "ls", dangerouslyDisableSandbox: false }))).toBe(true);
+  });
+
   it("opens an edit first, whose change no row shows", () => {
     expect(decidesInline(approval("Edit", { file_path: "/srv/a.ts" }))).toBe(false);
     expect(decidesInline(approval("Write", { file_path: "README.md", content: "x" }))).toBe(false);

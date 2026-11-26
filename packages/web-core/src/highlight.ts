@@ -222,6 +222,36 @@ function classifyHunkLine(line: string): DiffLineKind {
   return line.startsWith("@@") ? "hunk" : "context";
 }
 
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+// Whether each numbered hunk holds exactly the lines its header counts. A diff that
+// does not has lines missing, merged or left outside their hunk.
+export function hunksAddUp(diff: string): boolean {
+  let oldLeft = 0;
+  let newLeft = 0;
+  let seen = false;
+  for (const line of diff.replace(/\n$/, "").split("\n")) {
+    if (oldLeft === 0 && newLeft === 0) {
+      const hunk = HUNK_HEADER.exec(line);
+      if (hunk) {
+        seen = true;
+        oldLeft = Number(hunk[2] ?? 1);
+        newLeft = Number(hunk[4] ?? 1);
+      } else if (seen && line !== "" && classifyDiffLine(line) !== "meta") {
+        return false;
+      }
+      continue;
+    }
+    const kind = classifyHunkLine(line);
+    if (kind === "hunk" || line.startsWith("diff --git")) return false;
+    if (kind === "meta") continue;
+    if (kind !== "add") oldLeft -= 1;
+    if (kind !== "del") newLeft -= 1;
+    if (oldLeft < 0 || newLeft < 0) return false;
+  }
+  return oldLeft === 0 && newLeft === 0;
+}
+
 interface DiffStructRow {
   kind: DiffLineKind;
   oldNo: number | null;
@@ -245,7 +275,7 @@ function parseDiffStructure(diff: string): DiffStructRow[] {
   for (const line of body.split("\n")) {
     const kind = oldLeft > 0 || newLeft > 0 ? classifyHunkLine(line) : classifyDiffLine(line);
     if (kind === "hunk") {
-      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      const match = HUNK_HEADER.exec(line);
       if (match) {
         oldLine = Number(match[1]);
         newLine = Number(match[3]);

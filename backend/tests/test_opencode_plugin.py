@@ -1058,6 +1058,7 @@ async def test_agent_launch_contract() -> None:
     assert isinstance(plugin, AgentLaunchContract)
     # The TUI runs its own server, so its tools see the session's environment.
     assert plugin.launch_flags(model="foo", permission_mode="ask") == ["--standalone"]
+    assert plugin.required_launch_flags() == ["--standalone"]
     assert plugin.pregenerate_thread_id() is None
     assert plugin.resume_args("123", ["a", "b"]) == ["a", "b"]
     assert await plugin.conversation_exists("thread", "/cwd", None) is False

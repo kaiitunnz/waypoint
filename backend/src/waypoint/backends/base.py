@@ -840,10 +840,14 @@ class AgentLaunchContract(Protocol):
 
         Mirrors the structured-launch flag set the user picks in the launch
         panel, for the interactive CLI a pane wrapper spawns. Omit flags the
-        CLI does not accept (e.g. codex has no ``--effort``). What it returns
-        with every argument ``None`` is needed on every launch: single-token
-        flags that a reconnect adds to stored launch args that lack them.
+        CLI does not accept (e.g. codex has no ``--effort``). Includes
+        :meth:`required_launch_flags`.
         """
+        ...
+
+    def required_launch_flags(self) -> list[str]:
+        """Single-token flags every launch needs, whatever it pins. A
+        reconnect adds the ones stored launch args lack."""
         ...
 
     def pregenerate_thread_id(self) -> str | None:
@@ -923,6 +927,9 @@ class DefaultLaunchContract:
         effort: str | None = None,
         permission_mode: str | None = None,
     ) -> list[str]:
+        return []
+
+    def required_launch_flags(self) -> list[str]:
         return []
 
     def pregenerate_thread_id(self) -> str | None:

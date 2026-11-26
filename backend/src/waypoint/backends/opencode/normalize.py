@@ -23,6 +23,7 @@ from waypoint.backends.events import (
     question_interaction,
 )
 from waypoint.backends.opencode.forms import Form
+from waypoint.backends.opencode.sessions import Permission
 from waypoint.questions import ASK_QUESTION_CLOSED, QuestionCloseReason
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -53,13 +54,18 @@ def note(text: str, method: str, **metadata: Any) -> Emission:
     return (EventKind.SYSTEM_NOTE, text, {"method": method, **metadata})
 
 
+def part_id(message_id: str, ordinal: int, *, reasoning: bool) -> str:
+    """The Waypoint item id of one text or reasoning part."""
+    return f"{message_id}:{'reasoning' if reasoning else 'text'}:{ordinal}"
+
+
 def text_delta(
     message_id: str, ordinal: int, delta: str, *, reasoning: bool
 ) -> Emission:
     part = "reasoning" if reasoning else "text"
     metadata: dict[str, Any] = {
         "method": f"session.{part}.delta",
-        "item_id": f"{message_id}:{part}:{ordinal}",
+        "item_id": part_id(message_id, ordinal, reasoning=reasoning),
     }
     if reasoning:
         metadata["item_kind"] = "reasoning"
@@ -119,18 +125,15 @@ def tool_result(
 
 
 def approval_request(
-    request: dict[str, Any],
+    permission: Permission,
     *,
     name: str | None,
     raw_input: Any,
     from_subagent: bool,
 ) -> Emission:
     """A permission request, with the tool call it came from when known."""
-    request_id = str(request.get("id") or "")
-    action = str(request.get("action") or "permission")
-    resources = [str(item) for item in request.get("resources") or () if item]
-    details = request.get("metadata")
-    source = request.get("source")
+    request_id, action = permission.id, permission.action
+    resources = list(permission.resources)
 
     shown = tool_name(name) if name else action.replace("_", " ").title()
     values = tool_input(name or "", raw_input) or {
@@ -161,12 +164,10 @@ def approval_request(
         "tool_name": shown,
         "tool_input": values,
         INTERACTION_METADATA_KEY: interaction.to_metadata(),
-        **_diff_metadata(
-            "proposed", details.get("files") if isinstance(details, dict) else None
-        ),
+        **_diff_metadata("proposed", permission.files),
     }
-    if isinstance(source, dict) and isinstance(call_id := source.get("id"), str):
-        metadata["item_id"] = call_id
+    if permission.call_id:
+        metadata["item_id"] = permission.call_id
     return (EventKind.APPROVAL_REQUEST, title, metadata)
 
 

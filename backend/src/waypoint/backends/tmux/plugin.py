@@ -479,11 +479,8 @@ class TmuxPlugin:
                 *session.args,
             ]
         else:
-            # A launch stored by an earlier version may lack a flag the agent
-            # now needs every time.
-            required = inner.launch_flags(model=None, effort=None, permission_mode=None)
             stored_args = [
-                *(flag for flag in required if flag not in stored_args),
+                *(f for f in inner.required_launch_flags() if f not in stored_args),
                 *stored_args,
             ]
         # A captured thread_id is only useful if the inner CLI has

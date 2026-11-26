@@ -617,7 +617,7 @@ class OpenCodeAdapter:
                     async for raw_line in client.stream_events("/api/event"):
                         line = raw_line.rstrip("\r\n")
                         if not line:
-                            payload = self._decode_sse_payload(buffer)
+                            payload = _decode_sse_payload(buffer)
                             buffer.clear()
                             if payload is not None:
                                 delivered_any = True
@@ -627,7 +627,7 @@ class OpenCodeAdapter:
                             buffer.append(line[5:].lstrip())
 
                     # Handle last bit of decoder state on clean EOF.
-                    payload = self._decode_sse_payload(buffer)
+                    payload = _decode_sse_payload(buffer)
                     if payload is not None:
                         delivered_any = True
                         await self._handle_event(payload)
@@ -682,15 +682,6 @@ class OpenCodeAdapter:
         except asyncio.CancelledError:
             pass
 
-    def _decode_sse_payload(self, lines: list[str]) -> dict[str, Any] | None:
-        if not lines:
-            return None
-        try:
-            payload = json.loads("\n".join(lines))
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
-
     async def _handle_event(self, event: dict[str, Any]) -> None:
         """Dispatch one event. A failure to handle it does not end the stream."""
         try:
@@ -736,7 +727,9 @@ class OpenCodeAdapter:
                 await self._on_text(state, data, kind, data.get("delta"))
             case "session.text.ended" | "session.reasoning.ended" if root:
                 # The whole text, for a part no delta carried.
-                if self._part_key(data, kind) not in state.streamed:
+                message_id, ordinal, reasoning = _part(data, kind)
+                part = normalize.part_id(message_id, ordinal, reasoning=reasoning)
+                if part not in state.streamed:
                     await self._on_text(state, data, kind, data.get("text"))
             case "session.step.started":
                 if model := model_id(data.get("model")):
@@ -878,24 +871,15 @@ class OpenCodeAdapter:
             kind, text, metadata = emission
             await self._emit_event(state.session_id, kind, text, metadata, None)
 
-    def _part_key(self, data: dict[str, Any], kind: str) -> str:
-        part = kind.split(".")[1]
-        return f"{data.get('assistantMessageID')}:{part}:{data.get('ordinal')}"
-
     async def _on_text(
         self, state: SessionState, data: dict[str, Any], kind: str, text: Any
     ) -> None:
         if not isinstance(text, str) or not text:
             return
-        state.streamed.add(self._part_key(data, kind))
+        message_id, ordinal, reasoning = _part(data, kind)
+        state.streamed.add(normalize.part_id(message_id, ordinal, reasoning=reasoning))
         await self._emit(
-            state,
-            normalize.text_delta(
-                str(data.get("assistantMessageID")),
-                data.get("ordinal") or 0,
-                text,
-                reasoning=kind.startswith("session.reasoning"),
-            ),
+            state, normalize.text_delta(message_id, ordinal, text, reasoning=reasoning)
         )
 
     async def _on_tool_called(
@@ -1038,16 +1022,14 @@ class OpenCodeAdapter:
         if permission is None or permission.id in state.permissions:
             return
         state.add_permission(permission)
-        await self._emit_approval(state, permission, data)
+        await self._emit_approval(state, permission)
 
-    async def _emit_approval(
-        self, state: SessionState, permission: Permission, data: dict[str, Any]
-    ) -> None:
+    async def _emit_approval(self, state: SessionState, permission: Permission) -> None:
         call = state.tools.get(permission.call_id or "")
         await self._emit(
             state,
             normalize.approval_request(
-                data,
+                permission,
                 name=call.name if call else None,
                 raw_input=call.input if call else None,
                 from_subagent=permission.session_id != state.root_id,
@@ -1275,12 +1257,12 @@ class OpenCodeAdapter:
 
     async def _seed_asks(
         self, state: SessionState
-    ) -> tuple[list[tuple[Permission, dict[str, Any]]], list[Form]]:
+    ) -> tuple[list[Permission], list[Form]]:
         """Adopt the server's pending asks of the session's tree, returning the
         ones the stream had not delivered."""
         state.asks_seed_attempted_at = time.monotonic()
         mark = state.mark()
-        permissions: list[tuple[Permission, dict[str, Any]]] = []
+        permissions: list[Permission] = []
         forms: list[Form] = []
         # Only a running session has anything pending, and the root is asked
         # whether or not it is listed as running.
@@ -1296,7 +1278,7 @@ class OpenCodeAdapter:
                 and permission.id not in state.permissions
             ):
                 state.add_permission(permission)
-                permissions.append((permission, item))
+                permissions.append(permission)
         for item in listed[1]:
             form = parse_form(item) if isinstance(item, dict) else None
             if (
@@ -1349,7 +1331,7 @@ class OpenCodeAdapter:
     async def _show_seeded(
         self,
         state: SessionState,
-        permissions: list[tuple[Permission, dict[str, Any]]],
+        permissions: list[Permission],
         forms: list[Form],
     ) -> bool:
         """Once the server's asks are listed, show those the transcript lacks and
@@ -1361,9 +1343,9 @@ class OpenCodeAdapter:
         shown, state.open_approvals = state.open_approvals, set()
         asked, state.open_questions = state.open_questions, set()
         emitted = False
-        for permission, item in permissions:
+        for permission in permissions:
             if permission.id not in shown:
-                await self._emit_approval(state, permission, item)
+                await self._emit_approval(state, permission)
                 emitted = True
         for form in forms:
             if form.id not in asked and (card := normalize.question(form)):
@@ -2009,6 +1991,25 @@ def _differing(
     """Subagent rules worth writing: ``None`` when a subagent's copy of the
     root's would do."""
     return None if subagent is None or subagent == (root or []) else subagent
+
+
+def _decode_sse_payload(lines: list[str]) -> dict[str, Any] | None:
+    if not lines:
+        return None
+    try:
+        payload = json.loads("\n".join(lines))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _part(data: dict[str, Any], kind: str) -> tuple[str, int, bool]:
+    """The message, ordinal and kind of the text part an event is about."""
+    return (
+        str(data.get("assistantMessageID")),
+        data.get("ordinal") or 0,
+        kind.startswith("session.reasoning"),
+    )
 
 
 def _path_id(opencode_session_id: str) -> str:

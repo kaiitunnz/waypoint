@@ -25,6 +25,7 @@ class Permission:
     # The OpenCode session that asked, which the reply goes to.
     session_id: str
     action: str
+    resources: tuple[str, ...]
     # The patterns an approval for the session allows.
     save: tuple[str, ...]
     # The tool call that asked, and the diffs the request proposes.
@@ -43,7 +44,10 @@ class Permission:
         return cls(
             id=request_id,
             session_id=session_id,
-            action=str(payload.get("action") or ""),
+            action=str(payload.get("action") or "permission"),
+            resources=tuple(
+                str(item) for item in payload.get("resources") or () if item
+            ),
             save=tuple(str(item) for item in payload.get("save") or () if item),
             call_id=call_id if isinstance(call_id, str) else None,
             files=metadata.get("files") if isinstance(metadata, dict) else None,

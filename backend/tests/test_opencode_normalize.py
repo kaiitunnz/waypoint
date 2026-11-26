@@ -5,6 +5,7 @@ from typing import Any
 
 from waypoint.backends.opencode import normalize
 from waypoint.backends.opencode.forms import parse_form
+from waypoint.backends.opencode.sessions import Permission
 from waypoint.schemas import EventKind, SessionStatus
 
 PATCH = {
@@ -69,8 +70,10 @@ def _request(**extra: Any) -> dict[str, Any]:
 
 
 def test_an_approval_without_its_tool_call_describes_the_request() -> None:
+    permission = Permission.parse(_request())
+    assert permission is not None
     kind, text, metadata = normalize.approval_request(
-        _request(), name=None, raw_input=None, from_subagent=False
+        permission, name=None, raw_input=None, from_subagent=False
     )
 
     assert kind == EventKind.APPROVAL_REQUEST

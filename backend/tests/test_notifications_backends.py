@@ -10,6 +10,7 @@ from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessio
 from waypoint.backends.events import INTERACTION_METADATA_KEY
 from waypoint.backends.opencode import normalize
 from waypoint.backends.opencode.forms import parse_form
+from waypoint.backends.opencode.sessions import Permission
 from waypoint.notifications.render import intent_from_event
 from waypoint.schemas import EventKind, EventRecord
 
@@ -129,8 +130,12 @@ async def test_claude_ask_user_question_envelope() -> None:
 
 
 def test_opencode_permission_envelope() -> None:
+    permission = Permission.parse(
+        {"id": "perm-1", "sessionID": "ses_1", "action": "shell", "resources": ["ls"]}
+    )
+    assert permission is not None
     _kind, _text, metadata = normalize.approval_request(
-        {"id": "perm-1", "action": "shell", "resources": ["ls"]},
+        permission,
         name="shell",
         raw_input={"command": "ls"},
         from_subagent=False,

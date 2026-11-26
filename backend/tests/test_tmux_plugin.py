@@ -74,7 +74,7 @@ class _FakeAgentPlugin:
         effort: str | None = None,
         permission_mode: str | None = None,
     ) -> list[str]:
-        flags: list[str] = list(self._required)
+        flags = self.required_launch_flags()
         if self._pregenerates:  # claude-style
             if model:
                 flags += ["--model", model]
@@ -90,6 +90,9 @@ class _FakeAgentPlugin:
             elif permission_mode == "full_access":
                 flags += ["--dangerously-bypass-approvals-and-sandbox"]
         return flags
+
+    def required_launch_flags(self) -> list[str]:
+        return list(self._required)
 
     def pregenerate_thread_id(self) -> str | None:
         return self._PREGEN_ID if self._pregenerates else None

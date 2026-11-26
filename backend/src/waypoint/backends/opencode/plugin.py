@@ -236,6 +236,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         effort: str | None = None,
         permission_mode: str | None = None,
     ) -> list[str]:
+        return self.required_launch_flags()
+
+    def required_launch_flags(self) -> list[str]:
         # Without it the TUI's tools run in a shared background service, which
         # has neither the session's launch env nor its WAYPOINT_SESSION_ID.
         return ["--standalone"]
@@ -730,7 +733,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         if self._shutting_down:
             return
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is not None:
             task = asyncio.create_task(adapter.terminate_session(session.id))
             self._pending_tasks.add(task)
@@ -1198,7 +1201,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         tool_use_ids: list[str],
     ) -> dict[str, QuestionLiveness]:
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is None:
             return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
         return adapter.question_liveness(session.id, tool_use_ids)
@@ -1206,7 +1209,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def decline_question(
         self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
     ) -> QuestionDecline:
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is None:
             return QuestionDecline.FAILED
         return await adapter.reject_question(session.id, tool_use_id)
@@ -1230,7 +1233,11 @@ class OpenCodePlugin(DefaultLaunchContract):
         """The adapter serving ``session``, created if there is none."""
         launch_target_id, _, args, env = self._session_adapter_key(runtime, session)
         return await self._get_or_create_adapter(
-            runtime, launch_target_id, session.cwd, args, dict(env)
+            runtime,
+            launch_target_id,
+            session.cwd,
+            custom_args=args,
+            launch_env=dict(env),
         )
 
     def existing_session_adapter(
@@ -1271,17 +1278,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         key = self._session_adapter_key(runtime, session)
         try:
-            adapter = await self._get_or_create_adapter(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                custom_args=tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
-                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
-            )
+            adapter = await self.session_adapter(runtime, session)
         except Exception as exc:
             self._health_for(key).record_failure()
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -1331,24 +1328,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
-        effective_args = tuple(
-            self._effective_args(runtime, session.launch_target_id, session.args)
-        )
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            effective_args,
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         try:
-            adapter = await self._get_or_create_adapter(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                custom_args=effective_args,
-                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
-            )
+            adapter = await self.session_adapter(runtime, session)
         except Exception as exc:
             self._health_for(key).record_failure()
             raise HTTPException(

@@ -204,6 +204,7 @@ the `AgentLaunchContract` Protocol (also in
 
 ```python
 def launch_flags(self, *, model, effort, permission_mode) -> list[str]: ...
+def required_launch_flags(self) -> list[str]: ...
 def pregenerate_thread_id(self) -> str | None: ...
 def resume_args(self, thread_id: str, prior_args: list[str]) -> list[str]: ...
 async def conversation_exists(self, thread_id, cwd, launch_target) -> bool: ...
@@ -212,9 +213,10 @@ async def capture_thread_id(self, runtime, session_id, cwd, since, launch_target
 
 - `launch_flags` returns the CLI flags that pin model/effort/permission at
   process start, mirroring the structured-launch flag set. Omit flags the CLI
-  doesn't accept (Codex has no `--effort`). What it returns with every argument
-  `None` is needed on every launch: single-token flags that a `tmux` reconnect
-  adds to stored launch args that lack them.
+  doesn't accept (Codex has no `--effort`).
+- `required_launch_flags` returns the single-token flags every launch needs;
+  `launch_flags` includes them, and a `tmux` reconnect adds the ones stored
+  launch args lack.
 - `pregenerate_thread_id` returns an id to pass at launch, or `None`. Claude
   accepts `--session-id <uuid>` so the id is known up front; Codex only
   reveals its id after the first persist, so it returns `None`.
@@ -233,7 +235,7 @@ Agents satisfy the contract by mixing in `DefaultLaunchContract` and
 overriding the methods their CLI actually supports. The defaults are correct
 for an agent with no pane-wrapper launch knobs and no resumable thread: no
 extra flags, no pregenerated id, verbatim resume args, no on-disk thread to
-find. OpenCode overrides only `launch_flags`. The generic transport calls
+find. OpenCode overrides only `launch_flags` and `required_launch_flags`. The generic transport calls
 `registry.get(session.backend)` and dispatches through these methods, so
 `tmux/plugin.py` holds no agent literals: it decides whether to spawn the
 post-launch id watcher by asking `pregenerate_thread_id() is None`, and

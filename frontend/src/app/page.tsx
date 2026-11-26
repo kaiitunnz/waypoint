@@ -76,6 +76,10 @@ import {
   threadDiscoveryBackends,
 } from "@waypoint/web-core/launch/launchDefaults";
 import { classifyLaunchFailure } from "@waypoint/web-core/launch/launchError";
+import {
+  threadImportRequest,
+  threadProfileScope,
+} from "@waypoint/web-core/launch/threads";
 import { reconnectDelay } from "@waypoint/web-core/session/connection";
 import {
   applySessionState,
@@ -703,30 +707,20 @@ export default function HomePage() {
     model: string | null,
   ) {
     try {
-      const payload = {
-        thread_id: threadId,
-        launch_target_id: activeLaunchTargetId || null,
-        // Import under the same account profile that scoped the resumable-thread
-        // list the user picked from — otherwise the runtime reads the default
-        // store and 404s on a profile-scoped thread. The runtime overlays the
-        // profile's config dir onto launch_env from this id (profile-wins).
-        account_profile_id:
-          backend === activeFormBackend
-            ? activeFormAccountProfileId || null
-            : null,
-        cwd,
-        // An explicit transport supersedes launch_mode at the import API, so
-        // pin the chosen transport and leave the launch mode on "auto".
-        launch_mode: "auto",
-        transport: transport || null,
-        launch_env: launchEnv,
-        // Replay the thread's prior conversation into the new session's
-        // transcript; false starts empty and only resumes the agent's context.
-        import_history: importHistory,
-        // Durable model selection (single-agent Resume view only); null lets the
-        // backend resolve its configured default.
-        model,
-      };
+      // Import under the same account profile that scoped the resumable-thread
+      // list the user picked from — otherwise the runtime reads the default
+      // store and 404s on a profile-scoped thread.
+      const payload = threadImportRequest({
+        thread: { id: threadId, cwd },
+        launchTargetId: activeLaunchTargetId,
+        accountProfileId: threadProfileScope(
+          backend,
+          activeFormBackend,
+          activeFormAccountProfileId,
+        ),
+        choices: { transport, launchEnv, model },
+        importHistory,
+      });
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [
         session,
@@ -761,7 +755,7 @@ export default function HomePage() {
         launchTargetId ?? activeLaunchTargetId ?? null,
         // Delete from the same profile store the list was scoped to; without it
         // the runtime resolves the default store and no thread matches (404).
-        backend === activeFormBackend ? activeFormAccountProfileId || null : null,
+        threadProfileScope(backend, activeFormBackend, activeFormAccountProfileId),
       );
       removeThread(backend, threadId);
     } catch (deleteError) {

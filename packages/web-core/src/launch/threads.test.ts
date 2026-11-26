@@ -15,6 +15,8 @@ import {
   threadFilterOptions,
   threadFormAgent,
   threadImportChoices,
+  threadImportRequest,
+  threadProfileScope,
   type ThreadSummary,
 } from "./threads";
 
@@ -66,6 +68,31 @@ describe("threads", () => {
     expect(threadImportChoices(all[1], "all", chosen, defaults, catalog)).toEqual({
       transport: "codex_app_server",
       launchEnv: { CODEX_HOME: "/x" },
+      model: null,
+    });
+  });
+
+  it("scopes import to the form's profile for the form's agent only", () => {
+    expect(threadProfileScope("codex", "codex", "work")).toBe("work");
+    expect(threadProfileScope("claude_code", "codex", "work")).toBeNull();
+    expect(threadProfileScope("codex", "codex", "")).toBeNull();
+    expect(
+      threadImportRequest({
+        thread: all[1],
+        launchTargetId: "",
+        accountProfileId: null,
+        choices: { transport: "", launchEnv: {}, model: null },
+        importHistory: false,
+      }),
+    ).toEqual({
+      thread_id: "x1",
+      launch_target_id: null,
+      account_profile_id: null,
+      cwd: "/w",
+      launch_mode: "auto",
+      transport: null,
+      launch_env: {},
+      import_history: false,
       model: null,
     });
   });

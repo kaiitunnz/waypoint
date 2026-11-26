@@ -40,6 +40,8 @@ export interface UseLaunchFormParams {
   accountProfilesByBackend: Record<Backend, AccountProfile[]>;
   usageProviderOptions: UsageProviderOption[];
   catalog: BackendCatalog;
+  // Fills the form as it opens, for a preset whose spec is at hand.
+  initialPreset?: SessionPresetSpec | null;
 }
 
 // The launch form behind New and Schedule, over the pure state in launch/form.
@@ -96,6 +98,7 @@ export function useLaunchForm({
   accountProfilesByBackend,
   usageProviderOptions,
   catalog,
+  initialPreset,
 }: UseLaunchFormParams): LaunchForm {
   const context = useMemo<LaunchFormContext>(
     () => ({ catalog, defaultLaunchEnvByBackend, accountProfilesByBackend }),
@@ -105,8 +108,17 @@ export function useLaunchForm({
   useEffect(() => {
     contextRef.current = context;
   });
-  const [state, setState] = useState<LaunchFormState>(() => initialLaunchForm(defaultBackend, defaultCwd, context));
-  const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
+  const [state, setState] = useState<LaunchFormState>(() => {
+    const initial = initialLaunchForm(defaultBackend, defaultCwd, context);
+    return initialPreset ? applyPresetSpec(initial, initialPreset, context) : initial;
+  });
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  // A model list belongs to the agent it was loaded for; another agent has none yet.
+  const [loadedModels, setModelInfo] = useState<{ backend: Backend; response: BackendModelListResponse } | null>(null);
+  const modelInfo = loadedModels?.backend === state.backend ? loadedModels.response : null;
 
   const patch = useCallback((next: Partial<LaunchFormState>) => setState((current) => ({ ...current, ...next })), []);
 
@@ -122,7 +134,6 @@ export function useLaunchForm({
       return;
     }
     setState((current) => changeAgent(current, defaultBackend, contextRef.current));
-    setModelInfo(null);
   }, [defaultBackend, envKey]);
 
   const firstTargetRun = useRef(true);
@@ -154,18 +165,17 @@ export function useLaunchForm({
 
   const changeBackend = useCallback((backend: Backend) => {
     setState((current) => changeAgent(current, backend, contextRef.current));
-    setModelInfo(null);
   }, []);
 
   const applyPreset = useCallback((spec: SessionPresetSpec) => {
-    setState((current) => {
-      const next = applyPresetSpec(current, spec, contextRef.current);
-      if (next.backend !== current.backend) setModelInfo(null);
-      return next;
-    });
+    setState((current) => applyPresetSpec(current, spec, contextRef.current));
   }, []);
 
-  const handleModelsLoaded = useCallback((response: BackendModelListResponse) => setModelInfo(response), []);
+  // The list arrives for the agent selected when it was asked for.
+  const handleModelsLoaded = useCallback(
+    (response: BackendModelListResponse) => setModelInfo({ backend: stateRef.current.backend, response }),
+    [],
+  );
   const setCwd = useCallback((cwd: string) => patch({ cwd }), [patch]);
   const setTitle = useCallback((title: string) => patch({ title }), [patch]);
   const setModel = useCallback((model: string) => patch({ model }), [patch]);

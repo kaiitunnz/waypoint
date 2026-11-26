@@ -100,6 +100,47 @@ export function threadImportChoices(
   };
 }
 
+// The account profile a thread's store is scoped to: the form's profile, for the
+// form's own agent only. Import and delete need it, or a profile-scoped thread is
+// not found.
+export function threadProfileScope(
+  backend: Backend,
+  scopeBackend: Backend | null,
+  scopeAccountProfileId: string | null,
+): string | null {
+  return backend === scopeBackend ? scopeAccountProfileId || null : null;
+}
+
+// The body of `POST /api/backends/{id}/sessions/import`.
+export function threadImportRequest({
+  thread,
+  launchTargetId,
+  accountProfileId,
+  choices,
+  importHistory,
+}: {
+  thread: Pick<ThreadSummary, "id" | "cwd">;
+  launchTargetId: string;
+  accountProfileId: string | null;
+  choices: ThreadImportChoices;
+  importHistory: boolean;
+}): Record<string, unknown> {
+  return {
+    thread_id: thread.id,
+    launch_target_id: launchTargetId || null,
+    account_profile_id: accountProfileId,
+    cwd: thread.cwd,
+    // An explicit transport supersedes launch_mode, so the mode stays "auto".
+    launch_mode: "auto",
+    transport: choices.transport || null,
+    launch_env: choices.launchEnv,
+    // Replays the thread's conversation into the new session's transcript.
+    import_history: importHistory,
+    // Null lets the agent resolve its configured default.
+    model: choices.model,
+  };
+}
+
 export function canDeleteThread(backend: Backend, catalog: BackendCatalog): boolean {
   return Boolean(catalog.byId(backend)?.agent_capabilities?.supports_thread_delete);
 }

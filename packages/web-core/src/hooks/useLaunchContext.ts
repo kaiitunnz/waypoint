@@ -23,7 +23,7 @@ import type {
 } from "../types";
 
 export interface LaunchContext {
-  // False until `/api/me` has answered once.
+  // False until `/api/me` has answered once and the catalog holds its agents.
   ready: boolean;
   catalog: BackendCatalog;
   defaults: LaunchDefaults;
@@ -130,7 +130,8 @@ export function useLaunchContext(
   );
 
   return {
-    ready: me !== null,
+    // The catalog fills from the response a render later; launching waits for both.
+    ready: me !== null && (catalog.ids().length > 0 || !me.backends?.length),
     catalog,
     defaults,
     presets: me?.session_presets ?? NO_PRESETS,

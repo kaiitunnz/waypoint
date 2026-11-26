@@ -64,6 +64,7 @@ describe("cronToLabel", () => {
     ["5 18 * * 0", null, "WEEKLY SUN · 18:05"],
     ["0 9 * * 6", undefined, "WEEKLY SAT · 09:00"],
     ["0 9 15 * *", "UTC", "MONTHLY 15 · 09:00 · UTC"],
+    ["0 9 05 * *", "UTC", "MONTHLY 05 · 09:00 · UTC"],
   ])("labels the preset shape %j", (cron, zone, label) => {
     expect(cronToLabel(cron, zone)).toBe(label);
   });
@@ -97,6 +98,7 @@ describe("recurrenceSentence", () => {
     expect(recurrenceSentence("30 9 * * 1-5", "Asia/Singapore", "UTC")).toBe("Weekdays at 09:30 (Asia/Singapore)");
     expect(recurrenceSentence("0 9 * * 1", null, "UTC")).toBe("Mondays at 09:00");
     expect(recurrenceSentence("0 9 3 * *", null, "UTC")).toBe("Monthly on day 3 at 09:00");
+    expect(recurrenceSentence("0 9 05 * *", null, "UTC")).toBe("Monthly on day 5 at 09:00");
     expect(recurrenceSentence("*/5 * * * *", null, "UTC")).toBe("Cron */5 * * * *");
   });
 });

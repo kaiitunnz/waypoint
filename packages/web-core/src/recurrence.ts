@@ -167,7 +167,7 @@ const HHMM = /^(\d{1,2}) (\d{1,2})$/;
 type CronCadence =
   | { kind: "daily" | "weekdays"; clock: string }
   | { kind: "weekly"; clock: string; weekday: number }
-  | { kind: "monthly"; clock: string; day: number };
+  | { kind: "monthly"; clock: string; day: string };
 
 /** The preset cadence a cron expresses, or null for any other shape. */
 function cronCadence(cron: string): CronCadence | null {
@@ -179,7 +179,7 @@ function cronCadence(cron: string): CronCadence | null {
   if (dom === "*" && dow === "*") return { kind: "daily", clock };
   if (dom === "*" && dow === "1-5") return { kind: "weekdays", clock };
   if (dom === "*" && /^[0-6]$/.test(dow)) return { kind: "weekly", clock, weekday: Number(dow) };
-  if (/^\d{1,2}$/.test(dom) && dow === "*") return { kind: "monthly", clock, day: Number(dom) };
+  if (/^\d{1,2}$/.test(dom) && dow === "*") return { kind: "monthly", clock, day: dom };
   return null;
 }
 
@@ -227,7 +227,7 @@ export function recurrenceSentence(cron: string, timezone: string | null | undef
     case "weekly":
       return `${WEEKDAY_NAMES[cadence.weekday]} at ${cadence.clock}${zone}`;
     case "monthly":
-      return `Monthly on day ${cadence.day} at ${cadence.clock}${zone}`;
+      return `Monthly on day ${Number(cadence.day)} at ${cadence.clock}${zone}`;
     default:
       return `Cron ${cron}${zone}`;
   }

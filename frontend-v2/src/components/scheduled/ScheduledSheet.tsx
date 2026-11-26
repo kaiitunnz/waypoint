@@ -11,7 +11,6 @@ import {
   sendMessageScheduleNow,
 } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useScheduleModels } from "@waypoint/web-core/hooks/useScheduleModels";
 import { browserTimezone } from "@waypoint/web-core/recurrence";
 import {
@@ -23,13 +22,14 @@ import {
   type ScheduledMessageView,
 } from "@waypoint/web-core/scheduledSheet";
 import { sendNowOutcome } from "@waypoint/web-core/session/messageQueue";
+import { shortSessionId } from "@waypoint/web-core/session/scheduledMessages";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { MessageSchedule, ScheduledSession } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { Clamped } from "@/components/session/cards/Clamped";
+import { Disclosure } from "@/components/session/cards/Disclosure";
 import { PathLabel } from "@/components/session/cards/PathLabel";
-import { ActionChip } from "@/components/ui/ActionChip";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dialog } from "@/components/ui/Dialog";
@@ -41,7 +41,7 @@ import { useFailureToast } from "@/lib/useFailureToast";
 
 import styles from "./ScheduledSheet.module.css";
 
-// Finished rows shown before "N more".
+// Finished rows shown while the history is folded.
 const HISTORY_SHOWN = 5;
 
 const GROUPS = {
@@ -65,13 +65,15 @@ interface ScheduledSheetProps {
   messages: MessageSchedule[];
   titleById: ReadonlyMap<string, string>;
   catalog: BackendCatalog;
+  // The home's clock, so the sheet and the summary behind it count down alike.
+  now: number;
 }
 
 // Rows update from the schedule broadcast, so the actions only call the server.
-export function ScheduledSheet({ onClose, schedules, messages, titleById, catalog }: ScheduledSheetProps) {
+export function ScheduledSheet({ onClose, schedules, messages, titleById, catalog, now: clock }: ScheduledSheetProps) {
   const { host, token } = useShellData();
   const modelLabel = useScheduleModels(host, token, schedules);
-  const now = new Date(useNow(30_000));
+  const now = new Date(clock);
   const zone = browserTimezone();
   const launches = sortScheduled(schedules);
   const sends = sortScheduled(messages);
@@ -115,7 +117,6 @@ function Group({ kind, rows, onClose }: GroupProps) {
   const pending = rows.filter((row) => !row.resolved);
   const history = rows.filter((row) => row.resolved);
   const shown = expanded ? rows : [...pending, ...history.slice(0, HISTORY_SHOWN)];
-  const hidden = rows.length - shown.length;
   const { title, one, many, clear: clearHistory } = GROUPS[kind];
 
   async function clear() {
@@ -143,10 +144,8 @@ function Group({ kind, rows, onClose }: GroupProps) {
           <Row key={row.id} row={row} onClose={onClose} />
         ))}
       </ul>
-      {hidden > 0 ? (
-        <ActionChip icon="chevron-down" onClick={() => setExpanded(true)}>
-          {hidden} more
-        </ActionChip>
+      {history.length > HISTORY_SHOWN ? (
+        <Disclosure open={expanded} label={`${history.length - HISTORY_SHOWN} more`} onToggle={() => setExpanded(!expanded)} />
       ) : null}
       <ConfirmDialog
         open={confirming}
@@ -165,7 +164,11 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
   const router = useRouter();
   const { toast } = useToast();
   const fail = useFailureToast();
-  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  // `resolved` as it stood when a cancel or dismiss went through. The list changes with
+  // the broadcast that follows, and a second cancel before then would dismiss the record.
+  const [removedWhen, setRemovedWhen] = useState<boolean | null>(null);
+  const busy = sending || removedWhen === row.resolved;
   const launch = row.kind === "launch" ? row : null;
   const message = row.kind === "message" ? row : null;
 
@@ -177,20 +180,20 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
       router.push(sessionHref(sessionId));
       return;
     }
-    setBusy(true);
+    setSending(true);
     try {
       if (action === "sendNow") {
         const { held } = await sendMessageScheduleNow(host, token, row.id);
         toast({ message: sendNowOutcome(held) });
-      } else if (row.kind === "launch") {
-        await cancelSchedule(host, token, row.id);
       } else {
-        await deleteMessageSchedule(host, token, row.id);
+        if (row.kind === "launch") await cancelSchedule(host, token, row.id);
+        else await deleteMessageSchedule(host, token, row.id);
+        setRemovedWhen(row.resolved);
       }
     } catch (error) {
       fail(error, "Could not update the schedule");
     } finally {
-      setBusy(false);
+      setSending(false);
     }
   }
 
@@ -212,7 +215,15 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
         </div>
         {message ? (
           <p className={styles.target}>
-            to <span className={styles.targetName}>{message.target}</span>
+            {message.target ? (
+              <>
+                to <span className={styles.targetName}>{message.target}</span>
+              </>
+            ) : (
+              <>
+                to session <code className={styles.targetId}>{shortSessionId(message.sessionId)}</code>
+              </>
+            )}
           </p>
         ) : null}
         <p className={cx(styles.state, row.failed && styles.failed)}>{row.state}</p>

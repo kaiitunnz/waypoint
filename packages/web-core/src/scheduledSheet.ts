@@ -3,7 +3,6 @@ import { humaniseBackend, permissionModeLabel, type BackendCatalog } from "./bac
 import { isIdle, isRecurring, recurrenceSentence } from "./recurrence";
 import { countdown, dayClock } from "./scheduleTime";
 import { messageText } from "./session/heldMessages";
-import { shortSessionId } from "./session/scheduledMessages";
 import type { MessageSchedule, ScheduledSession } from "./types";
 import { splitPath } from "./workspacePaths";
 
@@ -43,7 +42,9 @@ export interface ScheduledLaunchView extends ScheduledRowView {
 
 export interface ScheduledMessageView extends ScheduledRowView {
   kind: "message";
-  target: string;
+  // The target session's title, or null when it isn't known.
+  target: string | null;
+  sessionId: string;
 }
 
 interface Sortable {
@@ -160,7 +161,7 @@ export function messageRowView(
     lastRun: lastRun(message, now),
     actions: pending ? ["sendNow", "cancel"] : message.status === "sent" ? ["open", "dismiss"] : ["dismiss"],
     resolved: !pending,
-    target: sessionTitle || `session ${shortSessionId(message.session_id)}`,
+    target: sessionTitle || null,
     sessionId: message.session_id,
   };
 }

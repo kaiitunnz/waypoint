@@ -27,9 +27,11 @@ export function useScheduleTargetSessions(
     // frequently changing live list never re-requests the same ids.
     for (const id of missing) ids.add(id);
     fetchSessionsByIds(host, token, missing)
-      .then((found) =>
-        setFetched((current) => ({ host, sessions: [...(current.host === host ? current.sessions : []), ...found] })),
-      )
+      .then((found) => {
+        // An answer for a host since left would replace the current host's sessions.
+        if (requested.current.host !== host) return;
+        setFetched((current) => ({ host, sessions: [...(current.host === host ? current.sessions : []), ...found] }));
+      })
       .catch(() => {});
   }, [host, token, sessions, messages]);
 

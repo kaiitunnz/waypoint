@@ -208,7 +208,7 @@ export function SessionsHome() {
       {sectionsView}
       {phone && !searching ? (
         <div className={styles.summaries}>
-          <ScheduledSummaryList summary={scheduled} onOpen={openScheduled} />
+          <ScheduledSummaryList summary={scheduled} now={now} onOpen={openScheduled} />
           <BoardSummaryCard summary={board} hideEmpty />
         </div>
       ) : null}
@@ -230,7 +230,7 @@ export function SessionsHome() {
               />
             ) : null}
             <LimitsReadout usage={usage} now={now} />
-            <ScheduledSummaryList summary={scheduled} onOpen={openScheduled} />
+            <ScheduledSummaryList summary={scheduled} now={now} onOpen={openScheduled} />
             <BoardSummaryCard summary={board} />
           </div>
         </aside>
@@ -244,6 +244,7 @@ export function SessionsHome() {
           messages={feed.messageSchedules}
           titleById={titleById}
           catalog={catalog}
+          now={now}
         />
       ) : null}
       {dialogs}

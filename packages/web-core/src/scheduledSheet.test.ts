@@ -127,7 +127,7 @@ describe("messageRowView", () => {
     expect(messageRowView(message({ trigger: "idle" }), null, now, "UTC")).toMatchObject({
       state: "When idle",
       countdown: null,
-      target: "session abc123",
+      target: null,
     });
     expect(messageRowView(message({ trigger: "idle", status: "sent" }), "t", now, "UTC")).toMatchObject({
       state: "Sent when idle, today at 14:41",

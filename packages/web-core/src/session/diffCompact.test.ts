@@ -104,9 +104,29 @@ describe("buildPlainDiffLines", () => {
     expect(hunksAddUp("Index: a\n====\n--- a\n+++ a\n@@ -1,2 +1,2 @@\n\n-a\n+b\n\\ No newline at end of file\n")).toBe(true);
   });
 
-  it("reads the next file's headers once a hunk is done", () => {
+  it("refuses a second file under the first's name", () => {
     const diff = "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-one\n+two\n\\ No newline at end of file\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+three\n";
-    expect(hunksAddUp(diff)).toBe(true);
+    expect(hunksAddUp(diff)).toBe(false);
+    // Both still read, for a screen that only shows them.
     expect(shown(diff)).toEqual(["del:one", "add:two", "add:three"]);
+    expect(hunksAddUp("--- a/a\n+++ b/a\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-one\n+two\n")).toBe(false);
+    expect(hunksAddUp("diff --git a/a b/a\ndiff --git a/b b/b\n@@ -1 +1 @@\n-one\n+two\n")).toBe(false);
+  });
+
+  it("takes only headers that say no more than the path before the first hunk", () => {
+    const hunk = "@@ -1 +1 @@\n-one\n+two\n";
+    expect(hunksAddUp(`diff --git a/a b/a\nnew file mode 100644\nindex 1..2\n--- a/a\n+++ b/a\n${hunk}`)).toBe(true);
+    // None of these would show.
+    for (const before of ["+rm -rf /", "-x", " x", "old mode 100644", "new mode 100755", "new file mode 100755", "note"]) {
+      expect([before, hunksAddUp(`${before}\n${hunk}`)]).toEqual([before, false]);
+    }
+  });
+
+  it("takes only further hunks after the first", () => {
+    const hunk = "@@ -1 +1 @@\n-one\n+two\n";
+    expect(hunksAddUp(`${hunk}@@ -9 +9 @@\n-a\n+b\n`)).toBe(true);
+    for (const after of ["--- a/b\n", "+++ b/b\n", "index 1..2\n", "rename to b\n", "\n"]) {
+      expect([after, hunksAddUp(`${hunk}${after}\n`)]).toEqual([after, false]);
+    }
   });
 });

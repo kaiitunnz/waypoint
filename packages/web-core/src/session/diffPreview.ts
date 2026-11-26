@@ -7,6 +7,20 @@ export const PHASE_LABEL: Record<EventDiffPreview["phase"], string> = {
   aggregate: "Turn changes",
 };
 
+const RENAME_HEADER = /^(?:diff --git .*|similarity index 100%|rename (?:from|to) .*|--- .*|\+\+\+ .*)?$/;
+
+// A file that only moved: no line changed, so its two paths are the whole change.
+export function isBareRename(file: EventDiffPreviewFile): boolean {
+  return (
+    Boolean(file.oldPath) &&
+    file.oldPath !== file.path &&
+    file.additions === 0 &&
+    file.deletions === 0 &&
+    // Codex names the new path under the diff.
+    file.diff.split("\n").every((line) => RENAME_HEADER.test(line) || line === `Moved to: ${file.path}`)
+  );
+}
+
 // A file's change in a word. A backend that could not tell leaves it "unknown",
 // so it is read off the diff, else called an edit.
 export function displayChangeType(file: EventDiffPreviewFile): {

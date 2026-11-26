@@ -224,12 +224,21 @@ function classifyHunkLine(line: string): DiffLineKind {
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
-// Whether each numbered hunk holds exactly the lines its header counts. A diff that
-// does not has lines missing, merged or left outside their hunk.
+// One file's own headers, which come once each.
+const FILE_HEADER = /^(?:diff --git |--- |\+\+\+ )/;
+// What may come before the first hunk. A diff view draws none of it, so no line here can
+// say more than the file's path and change do.
+const PREAMBLE =
+  /^(?:diff --git |index |--- |\+\+\+ |Index: |={4,}$|new file mode 100644$|deleted file mode |similarity index |rename (?:from|to) |$)/;
+
+// Whether a file's diff is its headers and hunks and no more: each hunk holds the lines
+// its header counts, and only further hunks follow the first. Another diff has lines
+// missing, merged or left outside their hunk, or holds a second file under this one's name.
 export function hunksAddUp(diff: string): boolean {
   let oldLeft = 0;
   let newLeft = 0;
   let seen = false;
+  const headers = new Set<string>();
   for (const line of diff.replace(/\n$/, "").split("\n")) {
     if (oldLeft === 0 && newLeft === 0) {
       const hunk = HUNK_HEADER.exec(line);
@@ -237,8 +246,12 @@ export function hunksAddUp(diff: string): boolean {
         seen = true;
         oldLeft = Number(hunk[2] ?? 1);
         newLeft = Number(hunk[4] ?? 1);
-      } else if (seen && line !== "" && classifyDiffLine(line) !== "meta") {
-        return false;
+      } else if (!line.startsWith("\\ ")) {
+        // "\ No newline at end of file" aside, nothing but a hunk follows a hunk.
+        if (seen || !PREAMBLE.test(line)) return false;
+        const header = FILE_HEADER.exec(line)?.[0];
+        if (header && headers.has(header)) return false;
+        if (header) headers.add(header);
       }
       continue;
     }

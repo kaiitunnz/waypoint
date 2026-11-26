@@ -6,7 +6,7 @@ import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/
 import { DIFF_MARKER, type DiffLine } from "@waypoint/web-core/highlight";
 import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
 import { compactDiff, fullDiff, reachableLines } from "@waypoint/web-core/session/diffCompact";
-import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
+import { displayChangeType, diffFilePathLabel, isBareRename } from "@waypoint/web-core/session/diffPreview";
 import { relativeToCwd, splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
@@ -54,6 +54,8 @@ function FileDiff({ file, showHeader, whole }: { file: EventDiffPreviewFile; sho
   const folded = !whole && reachableLines(compact) < full.length;
   const rows = whole || open ? full : compact;
   const change = displayChangeType(file);
+  // A file that only moved has no lines: its paths say it all.
+  const renamed = isBareRename(file);
   const { cwd } = useSessionContext();
   const shown = diffFilePathLabel(file, cwd);
   const from = file.oldPath && file.oldPath !== file.path ? file.oldPath : null;
@@ -65,7 +67,7 @@ function FileDiff({ file, showHeader, whole }: { file: EventDiffPreviewFile; sho
     <div className={styles.file}>
       {showHeader ? (
         <div className={styles.head}>
-          <span className={styles.change}>{change.label}</span>
+          <span className={styles.change}>{renamed ? "rename" : change.label}</span>
           {from ? (
             <span className={styles.moved}>
               {label(from)}
@@ -86,7 +88,7 @@ function FileDiff({ file, showHeader, whole }: { file: EventDiffPreviewFile; sho
       ) : null}
       {file.unavailableReason ? (
         <p className={styles.note}>{file.unavailableReason}</p>
-      ) : full.length > 0 ? (
+      ) : !renamed && full.length > 0 ? (
         <div className={cx(styles.code, whole && styles.wrap, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
           {rows.map((row, index) => {
             if (row.kind === "line") return <Line key={index} line={row.line} />;
@@ -99,7 +101,7 @@ function FileDiff({ file, showHeader, whole }: { file: EventDiffPreviewFile; sho
           })}
         </div>
       ) : (
-        <p className={styles.note}>{file.diff ? "No line changes." : "No diff content available."}</p>
+        <p className={styles.note}>{file.diff || renamed ? "No line changes." : "No diff content available."}</p>
       )}
       {folded ? (
         <div className={styles.foot}>

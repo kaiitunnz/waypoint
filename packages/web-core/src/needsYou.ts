@@ -3,7 +3,7 @@
 
 import { gateHeadline, gateKey, isGateAnswered, type BoardGate } from "./board";
 import type { InboxStatusFilter } from "./inbox";
-import { decisionView, isRecommendedLabel, planPreview, stripRecommendedSuffix } from "./pendingAskActions";
+import { decidesInline, decisionView, isRecommendedLabel, planPreview, stripRecommendedSuffix } from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
 import type { InboxItem, PendingAsk, PendingQuestionAsk } from "./types";
 
@@ -145,8 +145,7 @@ export function decodeNeedsId(segment: string): string {
 
 // A row or card can answer these itself; the others need the detail.
 export function askNeedsDetail(ask: PendingAsk): boolean {
-  if (ask.kind === "plan_approval") return true;
-  if (ask.kind === "approval") return ask.approval.tool_input_truncated;
+  if (ask.kind !== "question") return !decidesInline(ask);
   const [prompt, ...rest] = ask.question.questions;
   return rest.length > 0 || !prompt || prompt.multi_select || prompt.options.length === 0;
 }
@@ -183,15 +182,16 @@ export interface AskRow extends AskSummary {
 
 export function askRow(ask: PendingAsk): AskRow {
   const summary = askSummary(ask);
-  const inline = ask.kind !== "plan_approval" && !askNeedsDetail(ask);
+  const inline = !askNeedsDetail(ask);
   if (ask.kind === "question") {
     return { ...summary, path: null, answers: inline && fitsRow(ask.question.questions[0].question) };
   }
   const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
   if (preview?.kind === "path") return { ...summary, path: preview.path, answers: inline };
-  const whole = preview?.kind === "command" ? preview.text : summary.text;
-  const answers = inline && fitsRow(whole);
-  return { ...summary, text: answers ? whole : summary.text, path: null, answers };
+  if (inline && preview?.kind === "command" && fitsRow(preview.text)) {
+    return { ...summary, text: preview.text, path: null, answers: true };
+  }
+  return { ...summary, path: null, answers: false };
 }
 
 // The line under a row's headline.

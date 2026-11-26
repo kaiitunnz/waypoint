@@ -16,9 +16,10 @@ export function OpenHeadline({ href, children }: { href: string; children: strin
   );
 }
 
-export function OpenLink({ href, label }: { href: string; label: string }) {
+// `replace` for a link beside the open item, which keeps the history and scroll.
+export function OpenLink({ href, label, replace }: { href: string; label: string; replace?: boolean }) {
   return (
-    <Link href={href} className={styles.go}>
+    <Link href={href} replace={replace} scroll={!replace} className={styles.go}>
       {label}
       <Icon name="chevron-right" size={15} strokeWidth={2} />
     </Link>

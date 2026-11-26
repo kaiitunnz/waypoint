@@ -3,7 +3,7 @@
 import { useState, type KeyboardEvent } from "react";
 
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { askRow } from "@waypoint/web-core/needsYou";
+import { askRow, needsHref } from "@waypoint/web-core/needsYou";
 import {
   answerQuestion,
   decideAsk,
@@ -14,6 +14,7 @@ import {
 } from "@waypoint/web-core/pendingAskActions";
 import type { PendingAsk, PendingApprovalAsk, PendingQuestionAsk } from "@waypoint/web-core/types";
 
+import { OpenLink } from "@/components/sessions/AskOpen";
 import { AskStatus } from "@/components/sessions/AskStatus";
 import { OptionChips } from "@/components/sessions/OptionChips";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
@@ -60,7 +61,7 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
   const { actions, supportsNote } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const { phase, send, busy } = useAskResponder(ask.id);
+  const { phase, send, busy, dismiss } = useAskResponder(ask.id);
   const disabled = busy || ask.availability !== "actionable";
 
   const decide = (decision: string) => {
@@ -82,7 +83,10 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
           disabled={disabled}
           aria-label="Note"
           placeholder="Note"
-          onChange={(event) => setNote(event.target.value)}
+          onChange={(event) => {
+            setNote(event.target.value);
+            dismiss();
+          }}
           onKeyDown={onNoteKey}
         />
       ) : null}
@@ -110,12 +114,26 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
   );
 }
 
-// The answer a row can take itself; one it cannot show whole has none.
+// The answer a row can take itself. A request it cannot show whole offers Review
+// for an approval, and nothing for a question.
 export function AskRowActions({ ask }: { ask: PendingAsk }) {
-  if (!askRow(ask).answers || ask.kind === "plan_approval") return null;
+  const { answers } = askRow(ask);
+  if (ask.kind === "question") {
+    return answers ? (
+      <div className={styles.actions}>
+        <QuestionActions ask={ask} />
+      </div>
+    ) : null;
+  }
   return (
     <div className={styles.actions}>
-      {ask.kind === "question" ? <QuestionActions ask={ask} /> : <ApprovalActions ask={ask} />}
+      {answers && ask.kind === "approval" ? (
+        <ApprovalActions ask={ask} />
+      ) : (
+        <div className={styles.buttons}>
+          <OpenLink href={needsHref(ask.id)} label="Review" replace />
+        </div>
+      )}
     </div>
   );
 }

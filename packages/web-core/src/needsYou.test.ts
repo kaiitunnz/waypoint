@@ -186,7 +186,8 @@ describe("asks", () => {
     expect(askNeedsDetail(question(1, [], false))).toBe(true);
     expect(askNeedsDetail(question(1, ["A"], true))).toBe(true);
     expect(askNeedsDetail(approval(1))).toBe(false);
-    expect(askNeedsDetail(approval(1, {}, true))).toBe(true);
+    expect(askNeedsDetail(approval(1, {}))).toBe(true);
+    expect(askNeedsDetail(approval(1, { command: "ls" }, true))).toBe(true);
     expect(askNeedsDetail(plan)).toBe(true);
   });
 

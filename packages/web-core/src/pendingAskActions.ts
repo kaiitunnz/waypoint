@@ -184,6 +184,13 @@ export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): Decision
   };
 }
 
+// Whether an approval may be decided outside its detail: only where the ask
+// carries what is approved, as the whole shell command or the edited file's path.
+// A plan, a request known by its title alone and any other tool open first.
+export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
+  return ask.kind === "approval" && !ask.approval.tool_input_truncated && decisionView(ask).preview !== null;
+}
+
 // ─── Responding ───
 
 export const NOT_READY_MESSAGE = "The agent isn't ready for a reply yet. Try again in a moment.";

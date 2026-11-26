@@ -3,18 +3,17 @@
 import { useState, type KeyboardEvent } from "react";
 
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { askNeedsDetail } from "@waypoint/web-core/needsYou";
+import { needsHref } from "@waypoint/web-core/needsYou";
 import {
   decideAsk,
+  decidesInline,
   decisionView,
   planPreview,
-  type DecisionAction,
   type DecisionKind,
 } from "@waypoint/web-core/pendingAskActions";
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
 import { TextInput } from "@/components/ui/Field";
 
 import { AskCard } from "./AskCard";
@@ -27,7 +26,7 @@ interface DecisionAskProps {
   ask: PendingApprovalAsk | PendingPlanAsk;
   agent: string;
   now: number;
-  // Where the ask opens; a long one is decided there instead of on the card.
+  // Set where the headline opens the ask, as in the queue.
   openHref?: string;
 }
 
@@ -36,43 +35,35 @@ const VARIANT = { approve: "primary", session: "text", decline: "danger" } as co
   string
 >;
 
-// A tool approval or a plan approval.
+// A tool approval or a plan approval. One whose request the card cannot show is
+// decided in its detail.
 export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   const { actions, supportsNote, preview, planBody } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [reading, setReading] = useState(false);
-  const { phase, send, busy } = useAskResponder(ask.id);
+  const { phase, send, busy, dismiss } = useAskResponder(ask.id);
   const disabled = busy || ask.availability !== "actionable";
-  const long = openHref !== undefined && askNeedsDetail(ask);
 
-  const decide = async (decision: string) => {
-    if (await send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision)) setReading(false);
-  };
+  const decide = (decision: string) =>
+    void send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision);
   const onNoteKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isModifiedEnterShortcut(event)) return;
     event.preventDefault();
     const primary = actions.find((action) => action.kind === "approve");
-    if (primary && !disabled) void decide(primary.decision);
+    if (primary && !disabled) decide(primary.decision);
   };
-  const button = (action: DecisionAction, size: "sm" | "md" = "sm") => (
-    <Button
-      key={action.decision}
-      variant={VARIANT[action.kind]}
-      size={size}
-      disabled={disabled}
-      busy={phase.state === "sending"}
-      onClick={() => void decide(action.decision)}
-    >
-      {action.label}
-    </Button>
-  );
   const status = <AskStatus availability={ask.availability} phase={phase} />;
   const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
   const command = preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null;
   const path = preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null;
+  const summary =
+    planBody !== null ? (
+      <p className={styles.clamp}>{planPreview(planBody)}</p>
+    ) : ask.body && !command ? (
+      <p className={styles.clamp}>{ask.body}</p>
+    ) : null;
 
-  if (long) {
+  if (!decidesInline(ask)) {
     return (
       <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
         {headline}
@@ -80,9 +71,9 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
           <div>
             {command}
             {path}
-            {planBody !== null ? <p className={styles.clamp}>{planPreview(planBody)}</p> : null}
+            {summary}
           </div>
-          <OpenLink href={openHref} label="Review" />
+          <OpenLink href={openHref ?? needsHref(ask.id)} label="Review" />
         </div>
         {status}
       </AskCard>
@@ -94,11 +85,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
       {headline}
       {command}
       {path}
-      {planBody !== null ? (
-        <p className={styles.clamp}>{planPreview(planBody)}</p>
-      ) : ask.body && preview?.kind !== "command" ? (
-        <p className={styles.clamp}>{ask.body}</p>
-      ) : null}
+      {summary}
       {noteOpen ? (
         <div className={styles.note}>
           <TextInput
@@ -107,18 +94,27 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
             disabled={disabled}
             aria-label="Note"
             placeholder="Note"
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => {
+              setNote(event.target.value);
+              dismiss();
+            }}
             onKeyDown={onNoteKey}
           />
         </div>
       ) : null}
       <div className={styles.actions}>
-        {actions.map((action) => button(action))}
-        {planBody !== null ? (
-          <Button variant="text" size="sm" onClick={() => setReading(true)}>
-            Read plan
+        {actions.map((action) => (
+          <Button
+            key={action.decision}
+            variant={VARIANT[action.kind]}
+            size="sm"
+            disabled={disabled}
+            busy={phase.state === "sending" && phase.action === action.decision}
+            onClick={() => decide(action.decision)}
+          >
+            {action.label}
           </Button>
-        ) : null}
+        ))}
         {supportsNote && !noteOpen ? (
           <Button variant="text" size="sm" className={styles.end} onClick={() => setNoteOpen(true)}>
             Add note
@@ -126,17 +122,6 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
         ) : null}
       </div>
       {status}
-      {planBody !== null ? (
-        <Dialog
-          open={reading}
-          onClose={() => setReading(false)}
-          title={ask.title}
-          subtitle={ask.session_title}
-          footer={<>{actions.map((action) => button(action, "md"))}</>}
-        >
-          <p className={styles.plan}>{planBody}</p>
-        </Dialog>
-      ) : null}
     </AskCard>
   );
 }

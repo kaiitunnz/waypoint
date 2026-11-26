@@ -5,6 +5,7 @@ import {
   answerQuestion,
   buildAnswer,
   decideAsk,
+  decidesInline,
   decisionView,
   emptyPicks,
   isAnswerable,
@@ -164,6 +165,60 @@ describe("decisions", () => {
   it("reads the note support from the approval or the plan", () => {
     expect(decisionView(approval({ supports_note: false })).supportsNote).toBe(false);
     expect(decisionView(approval()).supportsNote).toBe(true);
+  });
+});
+
+describe("deciding outside the detail", () => {
+  const approval = (
+    tool_name: string | null,
+    tool_input: Record<string, unknown> | null,
+    tool_input_truncated = false,
+  ): PendingApprovalAsk => ({
+    id: "approval:s:a",
+    session_id: "s",
+    session_title: "Session",
+    session_backend: "x",
+    spawner_session_id: null,
+    created_at: "2026-11-27T08:00:00Z",
+    sequence: 1,
+    availability: "actionable",
+    title: "Approve",
+    body: null,
+    kind: "approval",
+    approval: {
+      approval_id: "a",
+      tool_name,
+      tool_input,
+      tool_input_truncated,
+      decisions: ["accept", "decline"],
+      supports_note: false,
+    },
+  });
+
+  it("allows a whole command or an edited path", () => {
+    expect(decidesInline(approval("Bash", { command: "git push" }))).toBe(true);
+    expect(decidesInline(approval("bash", { command: "git push" }))).toBe(true);
+    expect(decidesInline(approval("Edit", { file_path: "/srv/a.ts" }))).toBe(true);
+    expect(decidesInline(approval("Write", { file_path: "README.md" }))).toBe(true);
+  });
+
+  it("opens everything else first", () => {
+    // Cut by the server.
+    expect(decidesInline(approval("Bash", { command: "git pu" }, true))).toBe(false);
+    // Known by its title alone.
+    expect(decidesInline(approval(null, null))).toBe(false);
+    expect(decidesInline(approval("ExitPlanMode", { plan: "" }))).toBe(false);
+    expect(decidesInline(approval("Task", { prompt: "Do it", description: "x" }))).toBe(false);
+    expect(decidesInline(approval("Workflow", { script: "run()" }))).toBe(false);
+    expect(decidesInline(approval("mcp__mail__send", { to: "a@b" }))).toBe(false);
+    expect(decidesInline(approval("Edit", {}))).toBe(false);
+    expect(
+      decidesInline({
+        ...approval(null, null),
+        kind: "plan_approval",
+        plan: { plan_id: "p", text: "Do it", decisions: ["accept"], supports_note: false, resolve_via: "approve" },
+      }),
+    ).toBe(false);
   });
 });
 

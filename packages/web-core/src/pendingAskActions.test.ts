@@ -4,7 +4,6 @@ import * as api from "./api";
 import {
   answerQuestion,
   approvalRequest,
-  askedCall,
   buildAnswer,
   decideAsk,
   decisionView,
@@ -13,7 +12,6 @@ import {
   isAnswerable,
   isAgentNotReady,
   planPreview,
-  readTranscript,
   retryWhileNotReady,
   showsSend,
   stripRecommendedSuffix,
@@ -40,7 +38,6 @@ vi.mock("./api", async (importOriginal) => {
     answerAskQuestion: vi.fn(),
     approveSession: vi.fn(),
     approvePlan: vi.fn(),
-    fetchEvents: vi.fn(),
   };
 });
 
@@ -179,13 +176,14 @@ describe("deciding outside the detail", () => {
   const plan = (text: string, resolve_via: PendingAskPlan["resolve_via"]) =>
     ({ kind: "plan_approval", plan: { plan_id: "p", text, resolve_via } }) as unknown as PendingPlanAsk;
   const session = { cwd: "/w", fromScreen: false };
+  const inline = (tool: string | null, input: Record<string, unknown> | null) => inlineCommand(approval(tool, input), false);
 
   it("decides a plain shell command that lists whole", () => {
-    expect(inlineCommand("Bash", { command: "git push" })).toBe("git push");
-    expect(inlineCommand("bash", { command: "a\nb\nc", description: "x", timeout: 5, run_in_background: true })).toBe("a\nb\nc");
-    expect(inlineCommand("Bash", { command: "x".repeat(160) })).toBe("x".repeat(160));
-    expect(inlineCommand("Bash", { command: "x".repeat(161) })).toBeNull();
-    expect(inlineCommand("Bash", { command: "a\nb\nc\nd" })).toBeNull();
+    expect(inline("Bash", { command: "git push" })).toBe("git push");
+    expect(inline("bash", { command: "a\nb\nc", description: "x", timeout: 5, run_in_background: true })).toBe("a\nb\nc");
+    expect(inline("Bash", { command: "x".repeat(160) })).toBe("x".repeat(160));
+    expect(inline("Bash", { command: "x".repeat(161) })).toBeNull();
+    expect(inline("Bash", { command: "a\nb\nc\nd" })).toBeNull();
   });
 
   it("opens a call that carries anything else", () => {
@@ -196,38 +194,25 @@ describe("deciding outside the detail", () => {
       { cwd: "/w" },
       { anything: 1 },
     ]) {
-      expect(inlineCommand("Bash", { command: "ls", ...extra })).toBeNull();
+      expect(inline("Bash", { command: "ls", ...extra })).toBeNull();
     }
+  });
+
+  it("opens a command read off the screen, which may not be the one asked", () => {
+    expect(inlineCommand(approval("Bash", { command: "ls" }), true)).toBeNull();
   });
 
   it("opens everything else", () => {
-    expect(inlineCommand("Bash", null)).toBeNull();
-    expect(inlineCommand("Bash", {})).toBeNull();
-    expect(inlineCommand("Bash", { command: " " })).toBeNull();
-    expect(inlineCommand("Bash", { command: ["ls"] })).toBeNull();
-    expect(inlineCommand(null, { command: "ls" })).toBeNull();
-    expect(inlineCommand("Edit", { file_path: "/srv/a.ts" })).toBeNull();
-    expect(inlineCommand("mcp__sh__run", { command: "ls" })).toBeNull();
-  });
-
-  it("takes the ask's own input as the call, unless the server cut it", () => {
-    const input = { command: "git push" };
-    expect(askedCall(approval("Bash", input), false)).toEqual({ input, reading: false });
-    expect(askedCall(approval("Bash", input, true), false)).toEqual({ input: null, reading: false });
-    expect(askedCall(plan("# Plan", "approve"), false)).toEqual({ input: null, reading: false });
-  });
-
-  it("asks the transcript for a short command read off the screen", () => {
-    expect(askedCall(approval("Bash", { command: "git push" }), true)).toBeNull();
-    // Padding and wrapped rows do not count against it.
-    expect(askedCall(approval("Bash", { command: `ls${" ".repeat(200)}\n-a` }), true)).toBeNull();
-    for (const ask of [
-      approval("Bash", { command: "x".repeat(161) }),
-      approval("Write", { file_path: "a.txt" }),
-      approval("mcp__mail__send", { description: "Send" }),
-    ]) {
-      expect(askedCall(ask, true)).toEqual({ input: null, reading: false });
-    }
+    expect(inline("Bash", null)).toBeNull();
+    expect(inline("Bash", {})).toBeNull();
+    expect(inline("Bash", { command: " " })).toBeNull();
+    expect(inline("Bash", { command: ["ls"] })).toBeNull();
+    expect(inline(null, { command: "ls" })).toBeNull();
+    expect(inline("Edit", { file_path: "/srv/a.ts" })).toBeNull();
+    expect(inline("mcp__sh__run", { command: "ls" })).toBeNull();
+    // Cut by the server.
+    expect(inlineCommand(approval("Bash", { command: "git pu" }, true), false)).toBeNull();
+    expect(inlineCommand(plan("# Plan", "approve"), false)).toBeNull();
   });
 
   it("shows a request from its transcript", () => {
@@ -236,7 +221,7 @@ describe("deciding outside the detail", () => {
     expect(approvalRequest(ask, null, session)).toEqual({ status: "loading" });
     expect(approvalRequest(ask, "missing", session)).toEqual({ status: "failed" });
     expect(approvalRequest(ask, "failed", session)).toEqual({ status: "failed" });
-    expect(approvalRequest(ask, { request, events: [request] }, session)).toMatchObject({
+    expect(approvalRequest(ask, request, session)).toMatchObject({
       status: "ready",
       body: { kind: "command", command: "ls" },
       fields: { tool_name: "Bash", tool_input: { command: "ls" } },
@@ -250,7 +235,7 @@ describe("deciding outside the detail", () => {
       tool_input: { plan: "# Plan", allowedPrompts: [{ tool: "Bash", prompt: "run tests" }] },
     });
     expect(approvalRequest(plan("# Plan", "approve"), null, session)).toEqual({ status: "loading" });
-    expect(approvalRequest(plan("# Plan", "approve"), { request, events: [request] }, session)).toMatchObject({
+    expect(approvalRequest(plan("# Plan", "approve"), request, session)).toMatchObject({
       body: { kind: "plan", plan: "# Plan" },
       warnings: ["Extra permissions or network access"],
       whole: true,
@@ -261,29 +246,10 @@ describe("deciding outside the detail", () => {
       body: { kind: "plan", plan: "# Plan" },
       fields: null,
       warnings: [],
-      input: null,
+      unverified: false,
       whole: true,
     });
     expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false });
-  });
-});
-
-describe("reading a request's transcript", () => {
-  const request = ev(7, "approval_request", "Approve Bash", { approval_id: "a1" });
-  const earlier = ev(6, "tool_call", "Bash", {});
-  const later = ev(8, "tool_result", "done", {});
-  const page = (events: ReturnType<typeof ev>[]) => ({ events, has_more: false, latest_todo: null, pending_questions: null });
-
-  it("reads from before the request to the present, each event once", async () => {
-    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier, request])).mockResolvedValueOnce(page([later, request]));
-    expect(await readTranscript("h", "t", "s1", "a1", 7)).toEqual({ request, events: [earlier, request, later] });
-    expect(api.fetchEvents).toHaveBeenNthCalledWith(1, "h", "t", "s1", { beforeSequence: 8, messages: 20 });
-    expect(api.fetchEvents).toHaveBeenNthCalledWith(2, "h", "t", "s1", { afterId: 7 });
-  });
-
-  it("says when the request is not there", async () => {
-    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier]));
-    expect(await readTranscript("h", "t", "s1", "a1", 7)).toBe("missing");
   });
 });
 

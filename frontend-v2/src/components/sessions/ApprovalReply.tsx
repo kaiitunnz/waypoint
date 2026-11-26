@@ -13,13 +13,12 @@ import { useAskResponder } from "./useAskResponder";
 const VARIANT = { accept: "primary", decline: "danger" } as const satisfies Record<Decision, string>;
 
 // An approval decided where it is listed: its reply and the note that goes with it.
-// `held` keeps the buttons off while what they would decide is still being read.
-export function useApprovalReply(ask: PendingApprovalAsk | PendingPlanAsk, held = false) {
+export function useApprovalReply(ask: PendingApprovalAsk | PendingPlanAsk) {
   const { actions, supportsNote } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const { phase, send, busy, dismiss } = useAskResponder(ask.id);
-  const disabled = held || busy || ask.availability !== "actionable";
+  const disabled = busy || ask.availability !== "actionable";
 
   const decide = (decision: Decision) =>
     void send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision);

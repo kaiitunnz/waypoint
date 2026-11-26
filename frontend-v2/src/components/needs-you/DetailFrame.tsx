@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { sessionHref } from "@waypoint/web-core/shellNav";
+import { sessionHref, sessionTerminalHref } from "@waypoint/web-core/shellNav";
 
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -19,6 +19,8 @@ interface DetailFrameProps {
   // Who is asking: in the header on a pointer client, else above the content.
   source?: ReactNode;
   sessionId?: string;
+  // Open session goes to the Terminal view, where a dialog read off the screen shows.
+  terminal?: boolean;
   onDelete?: () => void;
   children: ReactNode;
 }
@@ -33,7 +35,7 @@ function Back() {
   );
 }
 
-export function DetailFrame({ source, sessionId, onDelete, children }: DetailFrameProps) {
+export function DetailFrame({ source, sessionId, terminal, onDelete, children }: DetailFrameProps) {
   const { columns } = useNeedsYou();
   const pointer = usePointerUI();
 
@@ -44,7 +46,7 @@ export function DetailFrame({ source, sessionId, onDelete, children }: DetailFra
         {pointer && source ? <div className={styles.source}>{source}</div> : null}
         <span className={styles.grow} />
         {sessionId ? (
-          <Link className={styles.action} href={sessionHref(sessionId)}>
+          <Link className={styles.action} href={terminal ? sessionTerminalHref(sessionId) : sessionHref(sessionId)}>
             Open session
           </Link>
         ) : null}

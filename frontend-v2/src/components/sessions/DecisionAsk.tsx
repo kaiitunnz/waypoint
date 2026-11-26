@@ -15,7 +15,7 @@ import { AskCard } from "./AskCard";
 import { OpenHeadline, OpenLink } from "./AskOpen";
 import { AskStatus } from "./AskStatus";
 import styles from "./Ask.module.css";
-import { useAskCall } from "./useAskCall";
+import { useAskSessions } from "./useAskSessions";
 
 interface DecisionAskProps {
   ask: PendingApprovalAsk | PendingPlanAsk;
@@ -27,19 +27,16 @@ interface DecisionAskProps {
 // A tool approval or a plan approval.
 export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   const { preview, planBody } = decisionView(ask);
-  const call = useAskCall(ask);
-  const reply = useApprovalReply(ask, call.reading);
-  // Only a command is decided here, and then the card shows it whole, as the call has
-  // it. While the call is read the card keeps that shape.
-  const decidable = ask.kind === "approval" ? inlineCommand(ask.approval.tool_name, call.input) : null;
-  const inline = decidable !== null || call.reading;
-  const text = decidable ?? (preview?.kind === "command" ? preview.text : null);
+  const reply = useApprovalReply(ask);
+  const askSession = useAskSessions();
+  // Only a command is decided here, and then the card shows it whole.
+  const inline = inlineCommand(ask, askSession(ask.session_id).fromScreen) !== null;
   const status = <AskStatus availability={ask.availability} phase={reply.phase} />;
   const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
   const command =
-    text !== null ? (
+    preview?.kind === "command" ? (
       <div className={styles.command}>
-        <CommandText text={text} whole={inline} />
+        <CommandText text={preview.text} whole={inline} />
       </div>
     ) : null;
   const path =

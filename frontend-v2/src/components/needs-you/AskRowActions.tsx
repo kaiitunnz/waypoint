@@ -1,7 +1,7 @@
 "use client";
 
 import { askRow, needsHref } from "@waypoint/web-core/needsYou";
-import { answerQuestion, emptyPicks, tapOption, type AskCall } from "@waypoint/web-core/pendingAskActions";
+import { answerQuestion, emptyPicks, tapOption } from "@waypoint/web-core/pendingAskActions";
 import type { PendingAsk, PendingApprovalAsk, PendingQuestionAsk } from "@waypoint/web-core/types";
 
 import { DecisionButtons, useApprovalReply } from "@/components/sessions/ApprovalReply";
@@ -9,6 +9,7 @@ import { OpenLink } from "@/components/sessions/AskOpen";
 import { AskStatus } from "@/components/sessions/AskStatus";
 import { OptionChips } from "@/components/sessions/OptionChips";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
+import { useAskSessions } from "@/components/sessions/useAskSessions";
 import { TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -42,8 +43,8 @@ function QuestionActions({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-function ApprovalActions({ ask, held }: { ask: PendingApprovalAsk; held: boolean }) {
-  const reply = useApprovalReply(ask, held);
+function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
+  const reply = useApprovalReply(ask);
 
   return (
     <>
@@ -62,8 +63,9 @@ function ApprovalActions({ ask, held }: { ask: PendingApprovalAsk; held: boolean
 }
 
 // A row takes the reply to a request it shows whole. Another approval offers Review.
-export function AskRowActions({ ask, call }: { ask: PendingAsk; call: AskCall }) {
-  const { answers } = askRow(ask, call);
+export function AskRowActions({ ask }: { ask: PendingAsk }) {
+  const askSession = useAskSessions();
+  const { answers } = askRow(ask, askSession(ask.session_id).fromScreen);
   if (ask.kind === "question") {
     return answers ? (
       <div className={styles.actions}>
@@ -74,7 +76,7 @@ export function AskRowActions({ ask, call }: { ask: PendingAsk; call: AskCall })
   return (
     <div className={styles.actions}>
       {answers && ask.kind === "approval" ? (
-        <ApprovalActions ask={ask} held={call.reading} />
+        <ApprovalActions ask={ask} />
       ) : (
         <div className={styles.buttons}>
           <OpenLink href={needsHref(ask.id)} label="Review" replace />

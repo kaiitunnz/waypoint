@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { gateHeadline, gateView } from "@waypoint/web-core/board";
 import { inboxBlockChips } from "@waypoint/web-core/inbox";
 import { askRow, type QueueEntry } from "@waypoint/web-core/needsYou";
-import type { AskCall } from "@waypoint/web-core/pendingAskActions";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { Lines } from "@/components/session/cards/CommandText";
@@ -28,10 +27,14 @@ export interface EntryView {
   whole?: boolean;
 }
 
-export function entryView(entry: QueueEntry, agentName: (backend: string) => string, call: AskCall): EntryView {
+export function entryView(
+  entry: QueueEntry,
+  agentName: (backend: string) => string,
+  fromScreen: (sessionId: string) => boolean,
+): EntryView {
   if (entry.source === "sessions") {
     const { ask } = entry;
-    const request = askRow(ask, call);
+    const request = askRow(ask, fromScreen(ask.session_id));
     const headline = ask.kind === "question" && ask.question.questions.length === 1 ? ask.question.questions[0].question : ask.title;
     return {
       lead: <StatusLamp state="needs" size="sm" flat />,

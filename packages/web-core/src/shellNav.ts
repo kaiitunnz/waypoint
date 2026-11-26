@@ -1,5 +1,8 @@
 export const sessionHref = (id: string) => `/session/${encodeURIComponent(id)}`;
 
+// The session opened on its Terminal view; one without a terminal pane opens as usual.
+export const sessionTerminalHref = (id: string) => `${sessionHref(id)}?view=terminal`;
+
 // The session's workspace explorer, opened at `path` when given.
 export const sessionFilesHref = (id: string, path?: string) =>
   `${sessionHref(id)}/files${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`;

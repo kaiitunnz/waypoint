@@ -7,7 +7,6 @@ import {
   isRecommendedLabel,
   planPreview,
   stripRecommendedSuffix,
-  type AskCall,
 } from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
 import type { InboxItem, PendingAsk, PendingQuestionAsk } from "./types";
@@ -176,19 +175,16 @@ export interface AskRow extends AskSummary {
 }
 
 // A row takes a reply only where it shows everything asked.
-export function askRow(ask: PendingAsk, call: AskCall): AskRow {
+export function askRow(ask: PendingAsk, fromScreen: boolean): AskRow {
   const summary = askSummary(ask);
   if (ask.kind === "question") {
     const answers = !askNeedsDetail(ask) && fitsListing(ask.question.questions[0].question);
     return { ...summary, path: null, answers };
   }
-  if (ask.kind === "plan_approval") return { ...summary, path: null, answers: false };
-  const command = inlineCommand(ask.approval.tool_name, call.input);
-  if (command !== null) return { text: command, mono: true, path: null, answers: true };
-  const { preview } = decisionView(ask);
+  const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
   if (preview?.kind === "path") return { ...summary, path: preview.path, answers: false };
-  // While the call is read the row keeps the shape it will answer in.
-  if (call.reading && preview?.kind === "command") return { text: preview.text, mono: true, path: null, answers: true };
+  const command = inlineCommand(ask, fromScreen);
+  if (command !== null) return { ...summary, text: command, path: null, answers: true };
   return { ...summary, path: null, answers: false };
 }
 

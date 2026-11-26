@@ -242,8 +242,8 @@ export function hasTerminalPane(
   return caps ? caps.has_terminal_pane : FALLBACK_HAS_TERMINAL_PANE.has(transport);
 }
 
-// Whether the transport reads its agent's dialogs off a terminal pane, so a request
-// there says only what the screen showed. Taken as so for a transport that is unknown.
+// Whether the transport reads its agent's dialogs off a terminal pane, where what a
+// dialog names may not be what a reply answers. Taken as so for an unknown transport.
 export function readsDialogsFromScreen(
   transport: SessionTransport | undefined,
   catalog?: BackendCatalog,

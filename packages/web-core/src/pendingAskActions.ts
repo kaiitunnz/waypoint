@@ -1,4 +1,4 @@
-import { answerAskQuestion, ApiError, approvePlan, approveSession, fetchEvents, type AskAnswerPayload } from "./api";
+import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
 import { shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
@@ -179,64 +179,20 @@ export const fitsListing = (text: string) =>
 // All a shell call may carry for a row to decide it.
 const INLINE_INPUT = new Set(["command", "description", "timeout", "run_in_background"]);
 
-// The command a row or card takes a decision on, or null: a shell call that carries
-// nothing else of consequence and whose command lists whole. `input` is the call's own,
-// uncut, or null where that is not known.
-export function inlineCommand(tool: string | null, input: Record<string, unknown> | null): string | null {
-  if (normalizeToolName(tool) !== "Bash" || !input) return null;
+// The command a row or card takes a decision on, or null: a shell call whose input the
+// ask carries whole, with nothing else of consequence, and whose command lists whole.
+// `fromScreen` is `readsDialogsFromScreen` of the ask's session.
+export function inlineCommand(ask: PendingAsk, fromScreen: boolean): string | null {
+  if (ask.kind !== "approval" || fromScreen) return null;
+  const { tool_name: tool, tool_input: input, tool_input_truncated: cut } = ask.approval;
+  if (normalizeToolName(tool) !== "Bash" || !input || cut) return null;
   if (!Object.keys(input).every((key) => INLINE_INPUT.has(key))) return null;
   const { command } = input;
   return typeof command === "string" && command.trim() !== "" && fitsListing(command) ? command : null;
 }
 
-// What a row or card knows of the call behind an ask.
-export interface AskCall {
-  input: Record<string, unknown> | null;
-  // The transcript is being read for it.
-  reading: boolean;
-}
-
-export const NO_CALL: AskCall = { input: null, reading: false };
-
-// What the ask alone says of its call, or null where the transcript has to say: a shell
-// command read off the screen that may be short enough to list.
-export function askedCall(ask: PendingAsk, fromScreen: boolean): AskCall | null {
-  if (ask.kind !== "approval") return NO_CALL;
-  const { tool_name: tool, tool_input: input, tool_input_truncated: cut } = ask.approval;
-  if (!fromScreen) return { input: cut ? null : input, reading: false };
-  if (normalizeToolName(tool) !== "Bash" || typeof input?.command !== "string") return NO_CALL;
-  // The screen's rows and padding only ever add to the command.
-  return input.command.replace(/\s+/g, " ").trim().length <= LISTED_MAX_LENGTH ? null : NO_CALL;
-}
-
-// The transcript around a pending request, up to the present.
-export type TranscriptRead = { request: EventRecord; events: EventRecord[] } | "missing" | "failed";
-
-// How far back from a request the call behind it is looked for.
-const TRANSCRIPT_MESSAGES = 20;
-
-// The page ending at the request, since a pending ask can be many messages old, then
-// everything recorded since.
-export async function readTranscript(
-  host: string,
-  token: string,
-  sessionId: string,
-  requestId: string,
-  sequence: number,
-): Promise<TranscriptRead> {
-  const page = await fetchEvents(host, token, sessionId, {
-    beforeSequence: sequence + 1,
-    messages: TRANSCRIPT_MESSAGES,
-  });
-  const request = page.events.find(
-    (event) => event.kind === "approval_request" && event.metadata?.approval_id === requestId,
-  );
-  if (request?.id === undefined) return "missing";
-  const since = await fetchEvents(host, token, sessionId, { afterId: request.id });
-  // Each event once, in sequence: the latest call of a file decides.
-  const events = new Map([...page.events, ...since.events].map((event) => [event.id, event]));
-  return { request, events: [...events.values()].sort((a, b) => a.sequence - b.sequence) };
-}
+// A pending approval's request event, as read from the transcript.
+export type RequestRead = EventRecord | "missing" | "failed";
 
 export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
 
@@ -246,15 +202,15 @@ const planView = (plan: string) => ({ body: { kind: "plan" as const, plan }, who
 // from Waypoint's own plan mode has no call behind it, so the text is all of it.
 export function approvalRequest(
   ask: PendingApprovalAsk | PendingPlanAsk,
-  read: TranscriptRead | null,
-  session: Pick<AskSession, "cwd" | "fromScreen">,
+  read: RequestRead | null,
+  session: AskSession,
 ): ApprovalRequest {
   if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
-    return { status: "ready", ...planView(ask.plan.text), fields: null, warnings: [], input: null };
+    return { status: "ready", ...planView(ask.plan.text), fields: null, warnings: [], unverified: false };
   }
   if (read === null) return { status: "loading" };
   if (typeof read === "string") return { status: "failed" };
-  const shown = shownRequest(read.request, read.events, session);
+  const shown = shownRequest(read, session);
   return { status: "ready", ...shown, ...(ask.kind === "plan_approval" ? planView(ask.plan.text) : null) };
 }
 

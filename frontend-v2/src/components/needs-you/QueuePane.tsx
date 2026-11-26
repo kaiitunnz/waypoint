@@ -8,10 +8,10 @@ import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSelection } from "@waypoint/web-core/hooks/useSelection";
 import type { InboxStatusFilter } from "@waypoint/web-core/inbox";
 import type { QueueEntry, SourceFilter } from "@waypoint/web-core/needsYou";
-import { NO_CALL } from "@waypoint/web-core/pendingAskActions";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 
 import { useAskLocks } from "@/components/sessions/AskLocks";
+import { useAskSessions } from "@/components/sessions/useAskSessions";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -103,6 +103,8 @@ export function QueuePane() {
   }, [searchOpen]);
 
   const agentName = useCallback((backend: string) => humaniseBackend(backend, catalog), [catalog]);
+  const askSession = useAskSessions();
+  const fromScreen = (sessionId: string) => askSession(sessionId).fromScreen;
 
   const closeSearch = () => {
     setQ("");
@@ -131,19 +133,20 @@ export function QueuePane() {
   }
 
   const row = (entry: QueueEntry) => {
+    const view = entryView(entry, agentName, fromScreen);
     const common = {
       entry,
+      view,
       time: formatSessionTime(entry.time, now),
       selecting: selection.selecting,
       checked: selection.selected.has(entry.key),
       onToggle: selection.toggle,
       onDelete: (id: string) => setDeletion({ kind: "one", id }),
     };
-    // A card of an ask is its own component, so its view only names the agent.
     return columns ? (
-      <QueueRow key={entry.key} {...common} agentName={agentName} selected={selected === entry.routeId} />
+      <QueueRow key={entry.key} {...common} selected={selected === entry.routeId} />
     ) : (
-      <QueueCard key={entry.key} {...common} view={entryView(entry, agentName, NO_CALL)} now={now} />
+      <QueueCard key={entry.key} {...common} now={now} />
     );
   };
 

@@ -11,7 +11,8 @@ import { decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
 import { approvalCopyText } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
-import { sessionHref } from "@waypoint/web-core/shellNav";
+import type { AskSession } from "@waypoint/web-core/session/wholeRequest";
+import { sessionHref, sessionTerminalHref } from "@waypoint/web-core/shellNav";
 import type { PendingApprovalAsk, PendingAsk, PendingPlanAsk, PendingQuestionAsk } from "@waypoint/web-core/types";
 
 import { ApprovalBody } from "@/components/session/attention/ApprovalBody";
@@ -20,8 +21,8 @@ import { DecisionCard } from "@/components/session/attention/DecisionCard";
 import { AskControllerProvider, SessionContextProvider } from "@/components/session/SessionContext";
 import { useAskLocks } from "@/components/sessions/AskLocks";
 import { SourceLine } from "@/components/sessions/SourceLine";
-import { useAskSession } from "@/components/sessions/useAskCall";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
+import { useAskSessions } from "@/components/sessions/useAskSessions";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
@@ -98,13 +99,20 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-function RequestDetail({ ask, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; agent: string }) {
+interface RequestDetailProps {
+  ask: PendingApprovalAsk | PendingPlanAsk;
+  session: AskSession;
+  agent: string;
+}
+
+function RequestDetail({ ask, session, agent }: RequestDetailProps) {
   const { host, token } = useShellData();
-  const session = useAskSession(ask.session_id);
   const { request, retry } = useApprovalRequest(host, token, ask, session, handleAuthFailure);
   const shown = request.status === "ready" ? request : null;
-  // A tool without a view of its own is shown by its fields.
-  const view = shown && !(shown.body.kind === "raw" && shown.fields?.tool_input) ? shown.body : null;
+  // A tool without a view of its own is shown by its fields, and so is what was only
+  // read off the screen.
+  const view =
+    shown && !shown.unverified && !(shown.body.kind === "raw" && shown.fields?.tool_input) ? shown.body : null;
   const fields = shown?.fields ? <RequestFields fields={shown.fields} /> : null;
   const { actions, supportsNote } = decisionView(ask);
   const context = useDetailContext(ask.session_id, session.cwd, agent);
@@ -144,7 +152,7 @@ function RequestDetail({ ask, agent }: { ask: PendingApprovalAsk | PendingPlanAs
             ))}
             {view ? <ApprovalBody body={view} whole /> : null}
             {fields}
-            {shown.whole ? null : (
+            {shown.whole || shown.unverified ? null : (
               <p className={styles.note}>
                 {shown.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}
               </p>
@@ -165,18 +173,27 @@ function AskView({ ask }: { ask: PendingAsk }) {
   const now = useNow(30_000);
   const pointer = usePointerUI();
   const agent = humaniseBackend(ask.session_backend, catalog);
+  const askSession = useAskSessions();
+  const session = askSession(ask.session_id);
+  // A tool approval read off the screen is not decided here.
+  const terminal = ask.kind === "approval" && session.fromScreen;
+  const href = terminal ? sessionTerminalHref(ask.session_id) : sessionHref(ask.session_id);
   const source = (
     <SourceLine
       lead={<StatusLamp state="needs" size="sm" flat />}
       name={ask.session_title}
-      href={pointer ? sessionHref(ask.session_id) : undefined}
+      href={pointer ? href : undefined}
       kind={agent}
       time={<time dateTime={ask.created_at}>{formatSessionTime(ask.created_at, now)}</time>}
     />
   );
   return (
-    <DetailFrame source={source} sessionId={ask.session_id}>
-      {ask.kind === "question" ? <QuestionDetail ask={ask} /> : <RequestDetail ask={ask} agent={agent} />}
+    <DetailFrame source={source} sessionId={ask.session_id} terminal={terminal}>
+      {ask.kind === "question" ? (
+        <QuestionDetail ask={ask} />
+      ) : (
+        <RequestDetail ask={ask} session={session} agent={agent} />
+      )}
     </DetailFrame>
   );
 }

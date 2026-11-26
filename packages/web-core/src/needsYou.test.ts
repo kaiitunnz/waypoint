@@ -204,31 +204,24 @@ describe("asks", () => {
   });
 
   it("lets a row answer only what it can show whole", () => {
-    const none = { input: null, reading: false };
-    const called = (input: Record<string, unknown>) => ({ input, reading: false });
-    expect(askRow(question(1), none)).toMatchObject({ answers: true, path: null });
-    expect(askRow(question(1, ["A"], true), none).answers).toBe(false);
-    expect(askRow(plan, none).answers).toBe(false);
+    expect(askRow(question(1), false)).toMatchObject({ answers: true, path: null });
+    // A question read off the screen is still answered.
+    expect(askRow(question(1), true).answers).toBe(true);
+    expect(askRow(question(1, ["A"], true), false).answers).toBe(false);
+    expect(askRow(plan, false).answers).toBe(false);
     const long = question(1);
     long.question.questions[0].question = `Which ${"very ".repeat(40)}fix?`;
-    expect(askRow(long, none).answers).toBe(false);
+    expect(askRow(long, false).answers).toBe(false);
 
-    // The command shown is the call's, not the ask's.
-    expect(askRow(approval(1), called({ command: "git push\nls" }))).toMatchObject({
-      text: "git push\nls",
-      mono: true,
-      answers: true,
-    });
-    expect(askRow(approval(1, { command: "echo a\nb" }), called({ command: "echo a b" })).text).toBe("echo a b");
-    expect(askRow(approval(1), none)).toMatchObject({ text: "git push …", answers: false });
-    expect(askRow(approval(1, { command: "ls" }), called({ command: "ls", workdir: "/etc" })).answers).toBe(false);
-    // Held while the call is read.
-    expect(askRow(approval(1), { input: null, reading: true })).toMatchObject({ text: "git push\nls", answers: true });
+    expect(askRow(approval(1), false)).toMatchObject({ text: "git push\nls", mono: true, answers: true });
+    expect(askRow(approval(1), true)).toMatchObject({ text: "git push …", answers: false });
+    expect(askRow(approval(1, { command: "ls", workdir: "/etc" }), false).answers).toBe(false);
+    expect(askRow(approval(1, { command: "ls" }, true), false).answers).toBe(false);
 
     const edit = approval(1);
     edit.approval.tool_name = "Edit";
     edit.approval.tool_input = { file_path: "/srv/app/secrets.env" };
-    expect(askRow(edit, none)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
+    expect(askRow(edit, false)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
   });
 
   it("shapes a question for the editor", () => {

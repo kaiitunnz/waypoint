@@ -224,6 +224,8 @@ export function AttachmentTray({
                 className="attachment-retry"
                 aria-label={`Retry ${item.name}`}
                 title="Retry upload"
+                // Focus inside the composer collapses its buttons, which moves this one.
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onRetry(item.localId)}
               >
                 ↻
@@ -233,6 +235,7 @@ export function AttachmentTray({
               type="button"
               className="attachment-remove"
               aria-label={`Remove ${item.name}`}
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => onRemove(item.localId)}
             >
               ×

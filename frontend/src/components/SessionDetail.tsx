@@ -2636,10 +2636,10 @@ const ReplyComposer = memo(function ReplyComposer({
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
-  // CSS (:focus-within) so focusing the field never triggers a React re-render
-  // that could drop focus mid-gesture. The chevron re-opens them by forcing
-  // `lead-forced`, which overrides the focus-within collapse; typing or
-  // blurring clears it.
+  // CSS (:focus-within on the pill) so focusing the field never triggers a React
+  // re-render that could drop focus mid-gesture. The chevron re-opens them by
+  // forcing `lead-forced`, which overrides the collapse; typing or blurring
+  // clears it.
   const [leadForced, setLeadForced] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -3426,6 +3426,8 @@ const ReplyComposer = memo(function ReplyComposer({
       <button
         type="button"
         className="composer-lead-expand"
+        // The chevron hides once the field blurs, so the press must not blur it.
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           setLeadForced(true);
           textareaRef.current?.focus();

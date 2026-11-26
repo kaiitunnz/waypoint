@@ -258,6 +258,8 @@ export function TerminalCompose({
             <button
               type="button"
               className="term-compose-lead-expand"
+              // The chevron hides once the field blurs, so the press must not blur it.
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 setLeadForced(true);
                 textareaRef.current?.focus();

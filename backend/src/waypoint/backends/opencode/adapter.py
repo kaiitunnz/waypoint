@@ -815,8 +815,8 @@ class OpenCodeAdapter:
             return
         state.children.add(child)
         self._routes[child] = state.session_id
-        if (rules := state.subagent_permissions) is not None:
-            self._spawn(self._write_subagent_rules(state, [child], rules))
+        if state.subagent_permissions is not None:
+            self._spawn(self._write_subagent_rules(state, [child]))
 
     async def _on_execution_ended(
         self, state: SessionState, origin: str, kind: str, data: dict[str, Any]
@@ -1183,9 +1183,14 @@ class OpenCodeAdapter:
         if not rules:
             return
         client = self._require_client()
+        # The root too, for the subagents it starts, unless they get rules of
+        # their own: then the root's are its agent's (plan mode), which a
+        # subagent's approval must not widen.
+        targets = [permission.session_id]
+        if state.subagent_permissions is None:
+            targets.append(state.root_id)
         async with self._ruleset_lock:
-            # The asking session, and the root for the subagents it starts.
-            for target in dict.fromkeys((permission.session_id, state.root_id)):
+            for target in dict.fromkeys(targets):
                 try:
                     info = await self._session_info(target)
                     ruleset = list(info.get("permissions") or [])
@@ -1812,12 +1817,21 @@ class OpenCodeAdapter:
         self,
         state: SessionState,
         children: list[str],
-        permissions: list[dict[str, str]],
+        permissions: list[dict[str, str]] | None = None,
     ) -> None:
+        """Write ``permissions``, by default the session's subagent rules as
+        they stand once the lock is held, so a grant in flight is not lost."""
         for child in children:
             try:
                 async with self._ruleset_lock:
-                    await self._write_ruleset(child, permissions)
+                    rules = (
+                        state.subagent_permissions
+                        if permissions is None
+                        else permissions
+                    )
+                    if rules is None:
+                        continue
+                    await self._write_ruleset(child, rules)
             except Exception as exc:  # noqa: BLE001
                 # A subagent that is gone takes no more tools.
                 if http_status(exc) == 404:

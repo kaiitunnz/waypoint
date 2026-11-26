@@ -350,6 +350,15 @@ class OpenCodePlugin(DefaultLaunchContract):
                     target_mode = "default"
 
                 runtime.storage.update_session(session_id, permission_mode=target_mode)
+                if adapter is not None and not await adapter.set_session_permission(
+                    session.id,
+                    _ruleset_for_mode(target_mode),
+                    _subagent_ruleset_for_mode(target_mode),
+                ):
+                    log.warning(
+                        "failed to apply the rules of %s after leaving plan mode",
+                        target_mode,
+                    )
                 # Drop the persisted plan-agent footprint so a later restore
                 # doesn't re-enter plan mode.
                 self._persist_transport_state(

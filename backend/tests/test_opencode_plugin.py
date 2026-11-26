@@ -539,16 +539,16 @@ async def test_an_outside_switch_out_of_plan_restores_the_earlier_mode() -> None
     plugin = OpenCodePlugin()
     session = _session(permission_mode="plan", transport_state={"agent": "plan"})
     runtime = _runtime(session)
-    _live(
-        plugin,
-        runtime,
-        session,
-        MagicMock(get_pre_plan_mode=MagicMock(return_value="ask")),
+    adapter = MagicMock(
+        get_pre_plan_mode=MagicMock(return_value="ask"),
+        set_session_permission=AsyncMock(return_value=True),
     )
+    _live(plugin, runtime, session, adapter)
 
     await plugin._handle_agent_changed(runtime, "sess", "plan", "build")
 
     assert session.permission_mode == "ask"
+    adapter.set_session_permission.assert_awaited_once_with("sess", ASK, ASK)
     assert session.transport_state["agent"] is None
     assert runtime._emit_adapter_event.await_args.args[2] == "Exited plan mode"
 

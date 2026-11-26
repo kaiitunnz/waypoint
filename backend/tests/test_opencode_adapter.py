@@ -436,12 +436,46 @@ async def test_a_grant_in_plan_mode_reaches_later_subagents() -> None:
         await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
         assert await adapter.respond_to_permission("local", "acceptForSession")
 
+        # The plan agent's own rules are not widened by a subagent's approval.
+        assert fake.sessions["ses_root"]["permissions"] == []
+
         # The server gives a new subagent a copy of the root's rules.
         root = list(fake.sessions["ses_root"]["permissions"])
         fake.add_session("ses_b", parentID="ses_root", permissions=root)
         await _deliver(adapter, created("ses_b"))
         await asyncio.gather(*adapter._tasks)
 
+    assert fake.sessions["ses_b"]["permissions"] == [*ASK, grant]
+
+
+@pytest.mark.asyncio
+async def test_a_subagent_seen_during_a_grant_gets_it() -> None:
+    fake = _fake()
+    fake.sessions["ses_root"]["permissions"] = []
+    async with driving(fake) as (adapter, _emitted):
+        state = _register(adapter)
+        assert await adapter.set_session_permission("local", [], ASK)
+        fake.add_session("ses_a", parentID="ses_root", permissions=list(ASK))
+        state.children.add("ses_a")
+        adapter._routes["ses_a"] = "local"
+        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
+        fake.add_session("ses_b", parentID="ses_root", permissions=[])
+        granting = asyncio.create_task(
+            adapter.respond_to_permission("local", "acceptForSession")
+        )
+        while not adapter._ruleset_lock.locked():
+            await asyncio.sleep(0)
+        await _deliver(
+            adapter,
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_b", "parentID": "ses_root"},
+            },
+        )
+        await granting
+        await asyncio.gather(*adapter._tasks)
+
+    grant = {"action": "shell", "resource": "ls *", "effect": "allow"}
     assert fake.sessions["ses_b"]["permissions"] == [*ASK, grant]
 
 
@@ -1080,6 +1114,9 @@ async def test_a_mode_change_writes_the_subagents_rules_too() -> None:
         assert fake.sessions["ses_root"]["permissions"] == []
         assert fake.sessions["ses_child"]["permissions"] == deny
         assert emitted.events == []
+        # No rules at all clears the subagents' too.
+        assert await adapter.set_session_permission("local", [], [])
+        assert fake.sessions["ses_child"]["permissions"] == []
 
         # A subagent that refuses its rules does not undo the session's.
         fake.failures[("PATCH", "/api/session/ses_child")] = 500

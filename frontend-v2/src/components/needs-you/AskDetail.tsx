@@ -98,7 +98,7 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
 
 function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; cwd: string; agent: string }) {
   const { host, token } = useShellData();
-  const { request, retry } = useApprovalRequest(host, token, ask, handleAuthFailure);
+  const { request, retry } = useApprovalRequest(host, token, ask, cwd, handleAuthFailure);
   const body = request.status === "ready" ? request.body : null;
   const { actions, supportsNote } = decisionView(ask);
   const context = useDetailContext(ask.session_id, cwd, agent);
@@ -111,7 +111,8 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         title={ask.title}
         copyText={body ? approvalCopyText(body, text) : text}
         copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
-        locked={!body}
+        // Nothing is decided on part of a request.
+        locked={!(request.status === "ready" && request.whole)}
         actions={actions.map((action) => ({
           id: action.decision,
           label: action.label,
@@ -124,13 +125,17 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         decide={(decision, note) => decideAsk(host, token, ask, decision, note, { attempts: 1 })}
       >
         {body ? (
-          <ApprovalBody body={body} />
+          <ApprovalBody body={body} whole />
         ) : request.status === "loading" ? (
           <p className={styles.note}>Loading…</p>
         ) : (
           <LoadFailed message={"Couldn't load the request"} onRetry={retry} />
         )}
-        {body?.kind === "plan" && !body.plan.trim() ? <p className={styles.note}>No plan text</p> : null}
+        {request.status === "ready" && !request.whole ? (
+          <p className={styles.note}>
+            {request.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}
+          </p>
+        ) : null}
       </DecisionCard>
     </SessionContextProvider>
   );

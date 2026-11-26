@@ -199,26 +199,53 @@ describe("deciding outside the detail", () => {
   it("shows what the transcript holds, and a plan from its ask", () => {
     const body = { kind: "command" as const, description: "", command: "git push" };
     expect(approvalRequest(approval("Bash", { command: "git push" }), null)).toEqual({ status: "loading" });
-    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), body)).toEqual({ status: "ready", body });
-    const plan = { kind: "plan_approval", plan: { text: "# Plan" } } as unknown as PendingPlanAsk;
-    expect(approvalRequest(plan, null)).toEqual({ status: "ready", body: { kind: "plan", plan: "# Plan" } });
+    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), { body, whole: true })).toEqual({
+      status: "ready",
+      body,
+      whole: true,
+    });
+    const plan = (text: string) => ({ kind: "plan_approval", plan: { text } }) as unknown as PendingPlanAsk;
+    expect(approvalRequest(plan("# Plan"), null)).toEqual({
+      status: "ready",
+      body: { kind: "plan", plan: "# Plan" },
+      whole: true,
+    });
+    expect(approvalRequest(plan(" "), null)).toMatchObject({ status: "ready", whole: false });
   });
 
   it("stands the ask's own input in only for a missing event it carries in full", () => {
     expect(approvalRequest(approval("Bash", { command: "git push" }), "missing")).toEqual({
       status: "ready",
       body: { kind: "command", description: "", command: "git push" },
+      whole: true,
+    });
+    // Too long to list, and still whole.
+    const long = `echo ${"x".repeat(300)}`;
+    expect(approvalRequest(approval("Bash", { command: long }), "missing")).toEqual({
+      status: "ready",
+      body: { kind: "command", description: "", command: long },
+      whole: true,
     });
     expect(approvalRequest(approval("Bash", { command: "git pu" }, true), "missing")).toEqual({ status: "failed" });
     expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), "missing")).toEqual({ status: "failed" });
     expect(approvalRequest(approval("Bash", { command: "git push" }), "failed")).toEqual({ status: "failed" });
   });
 
-  it("allows a whole command or an edited path", () => {
+  it("allows a whole command", () => {
     expect(decidesInline(approval("Bash", { command: "git push" }))).toBe(true);
     expect(decidesInline(approval("bash", { command: "git push" }))).toBe(true);
-    expect(decidesInline(approval("Edit", { file_path: "/srv/a.ts" }))).toBe(true);
-    expect(decidesInline(approval("Write", { file_path: "README.md" }))).toBe(true);
+  });
+
+  it("opens an edit first, whose change no row shows", () => {
+    expect(decidesInline(approval("Edit", { file_path: "/srv/a.ts" }))).toBe(false);
+    expect(decidesInline(approval("Write", { file_path: "README.md", content: "x" }))).toBe(false);
+  });
+
+  it("takes a command only as long as a card lists whole", () => {
+    expect(decidesInline(approval("Bash", { command: "a\nb\nc" }))).toBe(true);
+    expect(decidesInline(approval("Bash", { command: "a\nb\nc\nd" }))).toBe(false);
+    expect(decidesInline(approval("Bash", { command: "x".repeat(160) }))).toBe(true);
+    expect(decidesInline(approval("Bash", { command: "x".repeat(161) }))).toBe(false);
   });
 
   it("opens everything else first", () => {

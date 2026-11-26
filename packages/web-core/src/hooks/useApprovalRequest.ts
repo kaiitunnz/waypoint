@@ -4,15 +4,19 @@ import { useCallback, useEffect, useState } from "react";
 
 import { fetchEvents, isAuthError } from "../api";
 import { approvalRequest, type ApprovalRead, type ApprovalRequest } from "../pendingAskActions";
-import { wholeApprovalBody } from "../session/approvals";
+import { shownRequest } from "../session/approvals";
 import type { PendingApprovalAsk, PendingPlanAsk } from "../types";
 
+// How far back from the request the call behind it is looked for.
+const MESSAGES = 20;
+
 // A pending approval's request, read from the session's transcript. One instance
-// serves one ask. `onAuthFailure` must be stable.
+// serves one ask. `cwd` is the session's, and `onAuthFailure` must be stable.
 export function useApprovalRequest(
   host: string,
   token: string,
   ask: PendingApprovalAsk | PendingPlanAsk,
+  cwd: string,
   onAuthFailure: () => void,
 ): { request: ApprovalRequest; retry: () => void } {
   const sessionId = ask.session_id;
@@ -25,12 +29,12 @@ export function useApprovalRequest(
     if (approvalId === null) return;
     let active = true;
     // The page ending at the request: a pending ask can be many messages old.
-    fetchEvents(host, token, sessionId, { beforeSequence: sequence + 1, messages: 1 })
+    fetchEvents(host, token, sessionId, { beforeSequence: sequence + 1, messages: MESSAGES })
       .then((page) => {
         const event = page.events.find(
           (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
         );
-        if (active) setRead(event ? wholeApprovalBody(event) : "missing");
+        if (active) setRead(event ? shownRequest(event, page.events, cwd) : "missing");
       })
       .catch((error) => {
         if (!active) return;
@@ -40,7 +44,7 @@ export function useApprovalRequest(
     return () => {
       active = false;
     };
-  }, [host, token, sessionId, approvalId, sequence, attempt, onAuthFailure]);
+  }, [host, token, sessionId, approvalId, sequence, cwd, attempt, onAuthFailure]);
 
   const retry = useCallback(() => {
     setRead(null);

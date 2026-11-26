@@ -16,10 +16,17 @@ interface PathLabelProps {
   // The whole path, shown on hover and when a long press opens it.
   full: string;
   className?: string;
+  // All of `full`, wrapped, where nothing may be cut.
+  whole?: boolean;
 }
 
-// One line: the folder gives way first, from its left, then the middle of the name.
-export function PathLabel({ dir, base, full, className }: PathLabelProps) {
+// One line, unless `whole`: the folder gives way first, from its left, then the middle
+// of the name.
+export function PathLabel({ whole, ...props }: PathLabelProps) {
+  return whole ? <span className={cx(styles.path, styles.open, props.className)}>{props.full}</span> : <CutPath {...props} />;
+}
+
+function CutPath({ dir, base, full, className }: Omit<PathLabelProps, "whole">) {
   const [open, setOpen] = useState(false);
   const hold = useTranscriptHold();
   const press = useLongPress((element) => {

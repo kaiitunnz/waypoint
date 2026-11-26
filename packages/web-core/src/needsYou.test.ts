@@ -225,8 +225,8 @@ describe("asks", () => {
 
     const edit = approval(1);
     edit.approval.tool_name = "Edit";
-    edit.approval.tool_input = { file_path: `/srv/${"deep/".repeat(50)}secrets.env` };
-    expect(askRow(edit)).toMatchObject({ answers: true, path: edit.approval.tool_input.file_path });
+    edit.approval.tool_input = { file_path: "/srv/app/secrets.env" };
+    expect(askRow(edit)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
   });
 
   it("shapes a question for the editor", () => {

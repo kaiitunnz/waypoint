@@ -1,6 +1,13 @@
 import { gateHeadline, gateKey, gateTime, isGateAnswered, type BoardGate } from "./board";
 import type { InboxStatusFilter } from "./inbox";
-import { decidesInline, decisionView, isRecommendedLabel, planPreview, stripRecommendedSuffix } from "./pendingAskActions";
+import {
+  decidesInline,
+  decisionView,
+  fitsListing,
+  isRecommendedLabel,
+  planPreview,
+  stripRecommendedSuffix,
+} from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
 import type { InboxItem, PendingAsk, PendingQuestionAsk } from "./types";
 
@@ -160,12 +167,6 @@ export interface AskSummary {
   mono: boolean;
 }
 
-// A row takes a reply only where it shows everything asked.
-const ROW_MAX_LENGTH = 160;
-const ROW_MAX_LINES = 3;
-
-const fitsRow = (text: string) => text.length <= ROW_MAX_LENGTH && text.split("\n").length <= ROW_MAX_LINES;
-
 export interface AskRow extends AskSummary {
   // Shown in place of `text`: a path keeps its file name on one line.
   path: string | null;
@@ -173,17 +174,16 @@ export interface AskRow extends AskSummary {
   answers: boolean;
 }
 
+// A row takes a reply only where it shows everything asked.
 export function askRow(ask: PendingAsk): AskRow {
   const summary = askSummary(ask);
   const inline = !askNeedsDetail(ask);
   if (ask.kind === "question") {
-    return { ...summary, path: null, answers: inline && fitsRow(ask.question.questions[0].question) };
+    return { ...summary, path: null, answers: inline && fitsListing(ask.question.questions[0].question) };
   }
   const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
-  if (preview?.kind === "path") return { ...summary, path: preview.path, answers: inline };
-  if (inline && preview?.kind === "command" && fitsRow(preview.text)) {
-    return { ...summary, text: preview.text, path: null, answers: true };
-  }
+  if (preview?.kind === "path") return { ...summary, path: preview.path, answers: false };
+  if (inline && preview?.kind === "command") return { ...summary, text: preview.text, path: null, answers: true };
   return { ...summary, path: null, answers: false };
 }
 

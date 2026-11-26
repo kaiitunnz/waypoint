@@ -27,12 +27,14 @@ interface DecisionAskProps {
 export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   const { preview, planBody } = decisionView(ask);
   const reply = useApprovalReply(ask);
+  // Only a command is decided here, and then the card shows it whole.
+  const inline = decidesInline(ask);
   const status = <AskStatus availability={ask.availability} phase={reply.phase} />;
   const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
   const command =
     preview?.kind === "command" ? (
       <div className={styles.command}>
-        <CommandText text={preview.text} />
+        <CommandText text={preview.text} whole={inline} />
       </div>
     ) : null;
   const path =
@@ -48,7 +50,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
       <p className={styles.clamp}>{ask.body}</p>
     ) : null;
 
-  if (!decidesInline(ask)) {
+  if (!inline) {
     return (
       <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
         {headline}
@@ -69,8 +71,6 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
     <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
       {headline}
       {command}
-      {path}
-      {summary}
       {reply.noteOpen ? (
         <div className={styles.note}>
           <TextInput autoFocus {...reply.noteProps} />

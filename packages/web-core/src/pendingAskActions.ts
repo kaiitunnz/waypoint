@@ -1,6 +1,6 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
-import { approvalBodyForTool, type ApprovalBody } from "./session/approvals";
+import { approvalBodyForTool, holdsWholeRequest, type ApprovalBody, type ShownRequest } from "./session/approvals";
 import { toggleSelection } from "./session/askQuestion";
 import type {
   PendingApprovalAsk,
@@ -180,27 +180,46 @@ export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): Decision
   };
 }
 
-// An approval is decided outside its detail only where the ask carries what is
-// approved: the whole shell command or the edited file's path.
-export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
+// What a row or card lists whole beside its actions: a command or question of a few
+// short lines.
+const LISTED_MAX_LENGTH = 160;
+const LISTED_MAX_LINES = 3;
+
+export const fitsListing = (text: string) =>
+  text.length <= LISTED_MAX_LENGTH && text.split("\n").length <= LISTED_MAX_LINES;
+
+// The ask holds the whole of what is approved: the shell command or the edited file's path.
+function carriesRequest(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
   return ask.kind === "approval" && !ask.approval.tool_input_truncated && decisionView(ask).preview !== null;
 }
 
-// What a read of the transcript turned up for a pending approval.
-export type ApprovalRead = ApprovalBody | "missing" | "failed";
+// A decision is live only while the whole request is on screen. A row or card can show
+// a command whole; an edit's request is its change, which only a detail shows.
+export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
+  const { preview } = decisionView(ask);
+  return preview?.kind === "command" && carriesRequest(ask) && fitsListing(preview.text);
+}
 
-export type ApprovalRequest = { status: "loading" } | { status: "failed" } | { status: "ready"; body: ApprovalBody };
+// What a read of the transcript turned up for a pending approval.
+export type ApprovalRead = ShownRequest | "missing" | "failed";
+
+export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
 
 // A plan travels in its ask. A tool approval shows what the transcript holds; when
-// the transcript has no such event, the ask's own input is used only where
-// `decidesInline` allows.
+// the transcript has no such event, the ask's own input is used only where it is
+// the whole request.
 export function approvalRequest(ask: PendingApprovalAsk | PendingPlanAsk, read: ApprovalRead | null): ApprovalRequest {
-  if (ask.kind === "plan_approval") return { status: "ready", body: { kind: "plan", plan: ask.plan.text } };
+  if (ask.kind === "plan_approval") {
+    const body: ApprovalBody = { kind: "plan", plan: ask.plan.text };
+    return { status: "ready", body, whole: holdsWholeRequest(body, null) };
+  }
   if (read === null) return { status: "loading" };
-  if (typeof read !== "string") return { status: "ready", body: read };
-  if (read === "failed" || !decidesInline(ask)) return { status: "failed" };
+  if (typeof read !== "string") return { status: "ready", ...read };
+  if (read === "failed" || !carriesRequest(ask)) return { status: "failed" };
   const { tool_name: tool, tool_input: input } = ask.approval;
-  return { status: "ready", body: approvalBodyForTool(normalizeToolName(tool), input, ask.body ?? ask.title) };
+  const name = normalizeToolName(tool);
+  const body = approvalBodyForTool(name, input, ask.body ?? ask.title);
+  return { status: "ready", body, whole: holdsWholeRequest(body, input, name) };
 }
 
 // ─── Responding ───

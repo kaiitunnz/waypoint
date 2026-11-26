@@ -212,6 +212,9 @@ describe("deciding outside the detail", () => {
     expect(inline("mcp__sh__run", { command: "ls" })).toBeNull();
     // Cut by the server.
     expect(inlineCommand(approval("Bash", { command: "git pu" }, true), false)).toBeNull();
+    // It would not read as it runs.
+    expect(inline("Bash", { command: "ls # \u202e/ fr- mr ;" })).toBeNull();
+    expect(inline("Bash", { command: "rm\u200b -rf a" })).toBeNull();
     expect(inlineCommand(plan("# Plan", "approve"), false)).toBeNull();
   });
 
@@ -241,10 +244,11 @@ describe("deciding outside the detail", () => {
       whole: true,
     });
     // A plan from Waypoint's own plan mode has no call to read.
+    // Its source shows under the rendered view.
     expect(approvalRequest(plan("# Plan", "approve_plan"), null, session)).toEqual({
       status: "ready",
       body: { kind: "plan", plan: "# Plan" },
-      fields: null,
+      fields: { plan: "# Plan" },
       warnings: [],
       unverified: false,
       whole: true,

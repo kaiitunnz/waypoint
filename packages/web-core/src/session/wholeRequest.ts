@@ -17,8 +17,8 @@ export interface AskSession {
 export interface ShownRequest {
   // The typed view.
   body: ApprovalBody;
-  // Every field of the request, shown raw below the view; null where the view is all of it.
-  fields: Record<string, unknown> | null;
+  // Every field of the request, shown raw below the view.
+  fields: Record<string, unknown>;
   // What the request asks for beyond the call it names, or why it cannot be decided.
   warnings: string[];
   // Read off the agent's screen, so what it names may not be what is asked.
@@ -26,6 +26,27 @@ export interface ShownRequest {
   // All of what is asked is shown, so it can be decided on.
   whole: boolean;
 }
+
+// ─── Hidden text ───
+
+// Characters that draw nothing or reorder the text around them; line breaks and tabs
+// are not among them.
+const HIDDEN = /(?![\n\t]|\r\n)[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+
+export const hasHiddenText = (text: string) => text.search(HIDDEN) !== -1;
+
+const escaped = (character: string) =>
+  Array.from({ length: character.length }, (_, i) => `\\u${character.charCodeAt(i).toString(16).padStart(4, "0")}`).join("");
+
+// The whole request as JSON, with hidden characters written out.
+export const requestText = (fields: Record<string, unknown>) => JSON.stringify(fields, null, 2).replace(HIDDEN, escaped);
+
+const strings = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  return value && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
+};
+
+const HIDDEN_WARNING = "Hidden or direction-changing characters";
 
 // ─── The view ───
 
@@ -82,6 +103,7 @@ function requestWarnings(event: EventRecord, cwd: string): string[] {
     ["Write access for the whole session", isSet(input.grantRoot) || isSet(request.grantRoot)],
     ["Replaces every occurrence", everywhere],
     ["Different working directory", isSet(input.isolation) || elsewhere],
+    [HIDDEN_WARNING, strings(event.metadata).some(hasHiddenText)],
   ];
   return checks.filter(([, applies]) => applies).map(([warning]) => warning);
 }
@@ -112,8 +134,9 @@ function holdsContent(body: ApprovalBody, input: Record<string, unknown> | null,
       return body.prompt.trim() !== "";
     case "command":
       return body.command.trim() !== "";
+    // A script named by file or by name runs in place of the one given.
     case "workflow":
-      return body.script.trim() !== "";
+      return body.script.trim() !== "" && !input?.scriptPath && !input?.name;
     case "diff":
       return !body.preview.truncated && body.preview.files.length > 0 && body.preview.files.every(hasWholeDiff);
     // The path alone: the change is what is asked.
@@ -126,6 +149,17 @@ function holdsContent(body: ApprovalBody, input: Record<string, unknown> | null,
       return values.length === 0 || values.some((value) => value !== "");
     }
   }
+}
+
+// A plan with no call behind it: its text is the request.
+export function shownPlan(plan: string): ShownRequest {
+  return {
+    body: { kind: "plan", plan },
+    fields: { plan },
+    warnings: hasHiddenText(plan) ? [HIDDEN_WARNING] : [],
+    unverified: false,
+    whole: plan.trim() !== "",
+  };
 }
 
 const UNVERIFIED = "This call can't be verified from here";

@@ -11,7 +11,7 @@ import { decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
 import { approvalCopyText } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
-import type { AskSession } from "@waypoint/web-core/session/wholeRequest";
+import { requestText, type AskSession } from "@waypoint/web-core/session/wholeRequest";
 import { sessionHref, sessionTerminalHref } from "@waypoint/web-core/shellNav";
 import type { PendingApprovalAsk, PendingAsk, PendingPlanAsk, PendingQuestionAsk } from "@waypoint/web-core/types";
 
@@ -112,16 +112,11 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
   // A tool without a view of its own is shown by its fields, and so is what was only
   // read off the screen.
   const view =
-    shown && !shown.unverified && !(shown.body.kind === "raw" && shown.fields?.tool_input) ? shown.body : null;
-  const fields = shown?.fields ? <RequestFields fields={shown.fields} /> : null;
+    shown && !shown.unverified && !(shown.body.kind === "raw" && shown.fields.tool_input) ? shown.body : null;
   const { actions, supportsNote } = decisionView(ask);
   const context = useDetailContext(ask.session_id, session.cwd, agent);
   const text = ask.body ?? ask.title;
-  const copyText = view
-    ? approvalCopyText(view, text)
-    : shown?.fields
-      ? JSON.stringify(shown.fields, null, 2)
-      : text;
+  const copyText = view ? approvalCopyText(view, text) : shown ? requestText(shown.fields) : text;
 
   return (
     <SessionContextProvider value={context}>
@@ -151,7 +146,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
               </p>
             ))}
             {view ? <ApprovalBody body={view} whole /> : null}
-            {fields}
+            <RequestFields fields={shown.fields} />
             {shown.whole || shown.unverified ? null : (
               <p className={styles.note}>
                 {shown.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}

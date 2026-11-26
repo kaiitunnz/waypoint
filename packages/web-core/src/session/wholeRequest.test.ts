@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
 import type { EventRecord } from "../types";
-import { shownRequest } from "./wholeRequest";
+import { requestText, shownRequest } from "./wholeRequest";
 
 const ownInput = { cwd: "/w", fromScreen: false };
 const screen = { cwd: "/w", fromScreen: true };
@@ -101,6 +101,33 @@ describe("the whole request", () => {
   it("says nothing of an ordinary call", () => {
     expect(warnings({ command: "ls", replace_all: false, workdir: "/w/" })).toEqual([]);
     expect(warnings(null, { command: "ls", cwd: "/w", additionalPermissions: null, allowedPrompts: [] })).toEqual([]);
+  });
+});
+
+describe("hidden characters", () => {
+  const hidden = "Hidden or direction-changing characters";
+
+  it("are written out, so the JSON still reads as the request", () => {
+    const fields = { command: "echo a\u202eb\u200bc\u{e0001} # d\u2028e", note: "tab\there\nnext" };
+    const text = requestText(fields);
+    expect(text).toContain("a\\u202eb\\u200bc\\udb40\\udc01 # d\\u2028e");
+    expect(JSON.parse(text)).toEqual(fields);
+  });
+
+  it("are warned of wherever the request carries them, a diff included", () => {
+    expect(asAsked(approve("Bash", { command: "ls \u202e# x" })).warnings).toEqual([hidden]);
+    expect(asAsked(approve("Bash", { command: "ls\u001b[8mrm -rf a" })).warnings).toEqual([hidden]);
+    const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\u2066\n" }] };
+    expect(asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview })).warnings).toEqual([hidden]);
+    expect(asAsked(approve("Bash", { command: "a\r\n\tb\nc" })).warnings).toEqual([]);
+  });
+});
+
+describe("a workflow", () => {
+  it("is locked where another script runs in place of the one given", () => {
+    expect(asAsked(approve("Workflow", { script: "run()" })).whole).toBe(true);
+    expect(asAsked(approve("Workflow", { script: "run()", scriptPath: "/tmp/w.js" })).whole).toBe(false);
+    expect(asAsked(approve("Workflow", { script: "run()", name: "saved" })).whole).toBe(false);
   });
 });
 

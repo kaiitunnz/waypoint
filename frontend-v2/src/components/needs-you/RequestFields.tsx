@@ -1,3 +1,5 @@
+import { requestText } from "@waypoint/web-core/session/wholeRequest";
+
 import { CommandText } from "@/components/session/cards/CommandText";
 
 import styles from "./RequestFields.module.css";
@@ -6,7 +8,7 @@ import styles from "./RequestFields.module.css";
 export function RequestFields({ fields }: { fields: Record<string, unknown> }) {
   return (
     <div className={styles.fields} role="group" aria-label="Whole request" tabIndex={0}>
-      <CommandText text={JSON.stringify(fields, null, 2)} whole />
+      <CommandText text={requestText(fields)} whole />
     </div>
   );
 }

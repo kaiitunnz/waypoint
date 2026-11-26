@@ -1,7 +1,7 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
-import { shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
+import { hasHiddenText, shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
   EventRecord,
   PendingApprovalAsk,
@@ -188,15 +188,14 @@ export function inlineCommand(ask: PendingAsk, fromScreen: boolean): string | nu
   if (normalizeToolName(tool) !== "Bash" || !input || cut) return null;
   if (!Object.keys(input).every((key) => INLINE_INPUT.has(key))) return null;
   const { command } = input;
-  return typeof command === "string" && command.trim() !== "" && fitsListing(command) ? command : null;
+  if (typeof command !== "string" || command.trim() === "" || hasHiddenText(command)) return null;
+  return fitsListing(command) ? command : null;
 }
 
 // A pending approval's request event, as read from the transcript.
 export type RequestRead = EventRecord | "missing" | "failed";
 
 export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
-
-const planView = (plan: string) => ({ body: { kind: "plan" as const, plan }, whole: plan.trim() !== "" });
 
 // A request is shown from its transcript. A plan's text travels in its ask, and one
 // from Waypoint's own plan mode has no call behind it, so the text is all of it.
@@ -206,12 +205,14 @@ export function approvalRequest(
   session: AskSession,
 ): ApprovalRequest {
   if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
-    return { status: "ready", ...planView(ask.plan.text), fields: null, warnings: [], unverified: false };
+    return { status: "ready", ...shownPlan(ask.plan.text) };
   }
   if (read === null) return { status: "loading" };
   if (typeof read === "string") return { status: "failed" };
   const shown = shownRequest(read, session);
-  return { status: "ready", ...shown, ...(ask.kind === "plan_approval" ? planView(ask.plan.text) : null) };
+  if (ask.kind !== "plan_approval") return { status: "ready", ...shown };
+  const { body, whole } = shownPlan(ask.plan.text);
+  return { status: "ready", ...shown, body, whole };
 }
 
 // ─── Responding ───

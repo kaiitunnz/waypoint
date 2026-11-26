@@ -8,8 +8,30 @@ import { MenuButton, type MenuButtonItem } from "@/components/ui/MenuButton";
 
 export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
 
-interface ScreenAction extends MenuButtonItem {
+export interface ScreenAction extends MenuButtonItem {
   run: () => void;
+}
+
+interface ActionMenuProps {
+  label: string;
+  title: string;
+  subtitle: string;
+  items: ScreenAction[];
+  header?: ReactNode;
+}
+
+export function ActionMenu({ label, title, subtitle, items, header }: ActionMenuProps) {
+  return (
+    <MenuButton
+      label={label}
+      title={title}
+      subtitle={subtitle}
+      items={items}
+      size="sm"
+      header={header}
+      onSelect={(id) => items.find((item) => item.id === id)?.run()}
+    />
+  );
 }
 
 interface SessionMenuProps {
@@ -23,27 +45,24 @@ interface SessionMenuProps {
 }
 
 export function SessionMenu({ session, subtitle, onAction, header, extra = [] }: SessionMenuProps) {
-  const items: MenuButtonItem[] = [
-    { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
-    { id: "rename", label: "Rename" },
-    ...extra,
+  const act = (action: SessionAction): ScreenAction["run"] => () => onAction(action, session);
+  const pin: SessionAction = session.pinned_at ? "unpin" : "pin";
+  const end: ScreenAction =
     session.status === "exited"
-      ? { id: "delete", label: "Delete", tone: "danger" }
-      : { id: "terminate", label: "Terminate", tone: "danger" },
-  ];
+      ? { id: "delete", label: "Delete", tone: "danger", run: act("delete") }
+      : { id: "terminate", label: "Terminate", tone: "danger", run: act("terminate") };
   return (
-    <MenuButton
+    <ActionMenu
       label={`Actions for ${session.title}`}
       title={session.title}
       subtitle={subtitle}
-      items={items}
-      size="sm"
       header={header}
-      onSelect={(id) => {
-        const own = extra.find((item) => item.id === id);
-        if (own) own.run();
-        else onAction(id as SessionAction, session);
-      }}
+      items={[
+        { id: pin, label: session.pinned_at ? "Unpin" : "Pin", run: act(pin) },
+        { id: "rename", label: "Rename", run: act("rename") },
+        ...extra,
+        end,
+      ]}
     />
   );
 }

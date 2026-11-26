@@ -13,9 +13,11 @@ interface FocusPillProps {
   onTurnOff: () => Promise<boolean>;
   // Takes the focus once the pill is gone.
   returnFocusRef: RefObject<HTMLElement | null>;
+  // Where the panel opens, away from the edge the pill sits on.
+  side?: "top" | "bottom";
 }
 
-export function FocusPill({ busy, onTurnOff, returnFocusRef }: FocusPillProps) {
+export function FocusPill({ busy, onTurnOff, returnFocusRef, side = "top" }: FocusPillProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
 
@@ -48,7 +50,7 @@ export function FocusPill({ busy, onTurnOff, returnFocusRef }: FocusPillProps) {
         triggerRef={trigger}
         title="Focus is on"
         width={280}
-        side="top"
+        side={side}
         align="right"
       >
         <div className={styles.focusPanel}>

@@ -19,7 +19,8 @@ import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { terminalResizable, useBackendCatalog } from "@waypoint/web-core/backends";
-import type { TerminalSubmitResult } from "@/lib/composer";
+import { TERMINAL_KEYS } from "@waypoint/web-core/session/terminal";
+import type { TerminalSubmitResult } from "@waypoint/web-core/sessionDelivery";
 import { SessionRecord } from "@waypoint/web-core/types";
 import { usePopoverAnchor } from "@waypoint/web-core/hooks/use-popover-anchor";
 
@@ -58,17 +59,7 @@ interface SessionTerminalViewProps {
   // session's height; the is-locked rule reserves the composer when present.
   locked: boolean;
   onTerminalInput: (data: string) => void;
-  // Resolves a ``TerminalSubmitResult`` so the composer can keep the draft
-  // and surface a retry hint when the WS is closed, stay silent when a
-  // control command reported its own error, or clear it on success. Async
-  // because Waypoint control commands (e.g. ``/new``) are handled here.
-  onTerminalSubmit: (text: string) => Promise<TerminalSubmitResult>;
-  // Attachment-bearing submits route through the HTTP input endpoint (which
-  // appends the host file path for tmux) rather than the terminal WS.
-  onTerminalSubmitWithAttachments: (
-    text: string,
-    attachmentIds: string[],
-  ) => Promise<TerminalSubmitResult>;
+  onTerminalSubmit: (text: string, attachmentIds: string[]) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
   workspacePreviewEnabled: boolean;
   onRequestPaste: () => void;
@@ -118,7 +109,6 @@ export function SessionTerminalView({
   locked,
   onTerminalInput,
   onTerminalSubmit,
-  onTerminalSubmitWithAttachments,
   attachmentsEnabled,
   workspacePreviewEnabled,
   onRequestPaste,
@@ -439,7 +429,6 @@ export function SessionTerminalView({
             ref={terminalRef}
             readOnly={!paneTypable}
             autoFit={!fixedGrid}
-            appearance={terminalAppearance}
             onData={paneTypable ? onTerminalInput : undefined}
             onResize={onTerminalResize}
             onScrollChange={interactive ? onTerminalScrollChange : undefined}
@@ -478,7 +467,6 @@ export function SessionTerminalView({
           token={token}
           sessionId={sessionId}
           onSubmit={onTerminalSubmit}
-          onSubmitWithAttachments={onTerminalSubmitWithAttachments}
           attachmentsEnabled={attachmentsEnabled}
           onError={onError}
           expanded={composeOpen}
@@ -503,49 +491,11 @@ export function SessionTerminalView({
   );
 }
 
-// Common terminal control bytes that are awkward to type on touch
-// keyboards but routine for TUI agents. Each entry sends the literal
-// bytes to the pane via the existing input handler — Ctrl-* combinations
-// are encoded directly so the toolbar works even when the OS keyboard
-// doesn't expose a Ctrl modifier. ``backends`` (when set) restricts a
-// key to those backend ids; entries without it are universal. An entry
-// with ``action`` instead of ``data`` dispatches a richer handler (e.g.
-// reading the system clipboard) provided by the keybar host.
-type KeyBarEntry = {
-  label: string;
-  title: string;
-  backends?: string[];
-  backendOnly?: boolean;
-} & ({ data: string } | { action: "paste" });
-
-const TERMINAL_KEY_BAR: KeyBarEntry[] = [
-  { label: "Esc", data: "\x1b", title: "Escape" },
-  { label: "Tab", data: "\t", title: "Tab" },
-  {
-    label: "⇧Tab",
-    data: "\x1b[Z",
-    title: "Shift-Tab (cycle modes)",
-    // CC uses Shift-Tab for permission-mode cycling; Codex's TUI also
-    // wires shift-tab → cycle mode in ``bottom_pane/footer.rs``. Other
-    // backends don't use this key on their primary surface, so we
-    // keep the chip out of their toolbar.
-    backends: ["claude_code", "codex"],
-    backendOnly: true,
-  },
-  { label: "Enter", data: "\r", title: "Enter (submit / select)" },
-  // ``⇧↵`` instead of plain ``↵`` so the glyph reads as "the
-  // shift-modified return key" — i.e. insert a newline in the composer
-  // rather than submit. CC and Codex both wire Ctrl-J (\n) to a
-  // soft-newline; the dedicated Enter chip above carries the submit
-  // semantics.
-  { label: "⇧↵", data: "\n", title: "Shift+Enter (newline)" },
-  { label: "↑", data: "\x1b[A", title: "Up" },
-  { label: "↓", data: "\x1b[B", title: "Down" },
-  { label: "←", data: "\x1b[D", title: "Left" },
-  { label: "→", data: "\x1b[C", title: "Right" },
-  { label: "Paste", action: "paste", title: "Paste from clipboard" },
-  { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
-];
+// Keys shown only on the agents that bind them: Claude Code and the Codex TUI
+// cycle modes on Shift-Tab.
+const KEY_BACKENDS: Partial<Record<string, readonly string[]>> = {
+  "⇧Tab": ["claude_code", "codex"],
+};
 
 export function TerminalKeyBar({
   onSend,
@@ -556,16 +506,17 @@ export function TerminalKeyBar({
   onRequestPaste: () => void;
   backend: string | null | undefined;
 }) {
-  const keys = TERMINAL_KEY_BAR.filter(
-    (key) => !key.backends || (backend ? key.backends.includes(backend) : false),
-  );
+  const keys = TERMINAL_KEYS.filter((key) => {
+    const only = KEY_BACKENDS[key.label];
+    return !only || (backend ? only.includes(backend) : false);
+  });
   return (
     <div className="term-keys" role="group" aria-label="Send terminal keys">
       {keys.map((key) => (
         <button
           key={key.label}
           type="button"
-          className={key.backendOnly ? "is-backend-only" : undefined}
+          className={KEY_BACKENDS[key.label] ? "is-backend-only" : undefined}
           title={key.title}
           aria-label={key.title}
           // preventDefault on mousedown prevents the button from stealing

@@ -1,0 +1,8 @@
+/* The floating session bar sits over the top, so the view starts below it. */
+.view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: calc(var(--safe-top) + var(--bar-height));
+}

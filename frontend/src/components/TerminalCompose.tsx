@@ -18,7 +18,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
-import { type TerminalSubmitResult } from "@/lib/composer";
+import { type TerminalSubmitResult } from "@waypoint/web-core/sessionDelivery";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
@@ -29,18 +29,10 @@ interface TerminalComposeProps {
   host: string;
   token: string;
   sessionId: string;
-  // Resolves a ``TerminalSubmitResult``: ``socket-closed`` keeps the draft
-  // and surfaces a retry hint, ``command-error`` keeps it silently (the host
-  // already reported the error), ``ok`` clears it. Async because Waypoint
-  // control commands (``/new``) are handled by the host rather than the
-  // socket, so a submit can succeed even while the WS is reconnecting.
-  onSubmit: (text: string) => Promise<TerminalSubmitResult>;
-  // Used instead of ``onSubmit`` when the draft carries attachments — routes
-  // through the HTTP input endpoint so the server appends the file paths.
-  onSubmitWithAttachments: (
-    text: string,
-    attachmentIds: string[],
-  ) => Promise<TerminalSubmitResult>;
+  // ``socket-closed`` keeps the draft and surfaces a retry hint,
+  // ``command-error`` keeps it silently (the host already reported the
+  // error), ``ok`` clears it.
+  onSubmit: (text: string, attachmentIds: string[]) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
   onError: (message: string) => void;
   expanded: boolean;
@@ -59,7 +51,6 @@ export function TerminalCompose({
   token,
   sessionId,
   onSubmit,
-  onSubmitWithAttachments,
   attachmentsEnabled,
   onError,
   expanded,
@@ -159,9 +150,7 @@ export function TerminalCompose({
     // WS was actually required.
     setSending(true);
     try {
-      const result = attachmentIds.length
-        ? await onSubmitWithAttachments(text, attachmentIds)
-        : await onSubmit(text);
+      const result = await onSubmit(text, attachmentIds);
       if (result === "ok") {
         setDraft("");
         setHint(null);
@@ -179,7 +168,7 @@ export function TerminalCompose({
       // Briefly hold the disabled state so the user gets feedback.
       window.setTimeout(() => setSending(false), 120);
     }
-  }, [draft, connected, onSubmit, onSubmitWithAttachments, attachments, resetCompletions]);
+  }, [draft, connected, onSubmit, attachments, resetCompletions]);
 
   const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];

@@ -1,0 +1,30 @@
+.prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 8px 0;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: var(--f-meta);
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-strong);
+}
+
+.meta {
+  color: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .prompt {
+    margin: 6px 0 0;
+  }
+}

@@ -1,34 +1,6 @@
 import { ITheme } from "@xterm/xterm";
 
-// The light/dark surface a terminal pane adopts, resolved from the running
-// agent's own theme preference and delivered over the terminal websocket. This
-// is independent of Waypoint's app theme toggle: the pane hosts an opaque TUI,
-// so it follows the TUI's ground, not the web chrome's.
-export type TerminalAppearance = "light" | "dark";
-
-// The fixed xterm 256-colour palette for indices 16-255 (the 6×6×6 colour cube
-// then the 24-step grayscale ramp). These indices carry no light/dark
-// semantics — they are absolute colours a TUI addresses directly — so both
-// themes share them, and we set them explicitly rather than leaning on xterm's
-// renderer-specific defaults.
-function buildExtendedAnsi(): string[] {
-  const hex = (n: number) => n.toString(16).padStart(2, "0");
-  const rgb = (r: number, g: number, b: number) => `#${hex(r)}${hex(g)}${hex(b)}`;
-  const levels = [0, 95, 135, 175, 215, 255];
-  const out: string[] = [];
-  for (let r = 0; r < 6; r++) {
-    for (let g = 0; g < 6; g++) {
-      for (let b = 0; b < 6; b++) {
-        out.push(rgb(levels[r], levels[g], levels[b]));
-      }
-    }
-  }
-  for (let i = 0; i < 24; i++) {
-    const v = 8 + i * 10;
-    out.push(rgb(v, v, v));
-  }
-  return out;
-}
+import { buildExtendedAnsi, type TerminalAppearance } from "@waypoint/web-core/session/terminal";
 
 const EXTENDED_ANSI = buildExtendedAnsi();
 

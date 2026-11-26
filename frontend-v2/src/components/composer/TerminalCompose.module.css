@@ -1,0 +1,35 @@
+/* Collapsed, the drawer is its handle. */
+.closed {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.handle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 44px;
+  border-radius: var(--r-sm);
+}
+
+.handle i {
+  width: 40px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+}
+
+.handle:active i {
+  background: var(--faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .handle {
+    height: 20px;
+  }
+
+  .handle:hover i {
+    background: var(--faint);
+  }
+}

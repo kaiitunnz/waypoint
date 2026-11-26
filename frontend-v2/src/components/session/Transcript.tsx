@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type MouseEvent, type ReactNode } from "react";
+import { useEffect, type MouseEvent } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
@@ -27,8 +27,6 @@ interface TranscriptProps {
   hiddenCount: number;
   onShowAll: () => void;
   pending: PendingSend[];
-  // The transcript's own content when it is not a conversation, such as a placeholder.
-  override?: ReactNode;
   // A question card to scroll to and mark; `seq` makes a repeat a new request.
   reveal?: { toolUseId: string; seq: number } | null;
   // Whether the card was on the page.
@@ -49,14 +47,13 @@ export function Transcript({
   hiddenCount,
   onShowAll,
   pending,
-  override,
   reveal,
   onRevealed,
 }: TranscriptProps) {
   const { scroller, content, log, away, onScroll, hold, jumpToEnd, reveal: bringIntoView } = useTranscriptScroll(turns, pending.length);
 
   useEffect(() => {
-    if (!reveal || override) return;
+    if (!reveal) return;
     let frame = 0;
     let attempts = 0;
     const find = () => {
@@ -77,7 +74,7 @@ export function Transcript({
     };
     frame = requestAnimationFrame(find);
     return () => cancelAnimationFrame(frame);
-  }, [reveal, override, scroller, bringIntoView, onRevealed]);
+  }, [reveal, scroller, bringIntoView, onRevealed]);
   const working = isWorkingStatus(status);
   // Every fold control carries aria-expanded; captured here, before the fold changes.
   const onFold = (event: MouseEvent) => {
@@ -89,31 +86,29 @@ export function Transcript({
     <div className={styles.frame}>
       <div ref={scroller} className={styles.scroller} onScroll={onScroll} onClickCapture={onFold}>
         <div ref={content} className={styles.col}>
-          {override ?? (
-            <TranscriptHoldProvider value={hold}>
-              <div className={styles.messages}>
-                {hasOlder ? (
-                  <div className={styles.older}>
-                    <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
-                      {loadingOlder ? "Loading older messages…" : "Load older messages"}
-                    </ActionChip>
-                  </div>
-                ) : null}
-                <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
-                  {turns.map((turn, index) => (
-                    <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
-                  ))}
+          <TranscriptHoldProvider value={hold}>
+            <div className={styles.messages}>
+              {hasOlder ? (
+                <div className={styles.older}>
+                  <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
+                    {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                  </ActionChip>
                 </div>
-                {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
-                {!loading && turns.length === 0 && pending.length === 0 ? (
-                  <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
-                ) : null}
+              ) : null}
+              <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
+                {turns.map((turn, index) => (
+                  <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
+                ))}
               </div>
-            </TranscriptHoldProvider>
-          )}
+              {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
+              {!loading && turns.length === 0 && pending.length === 0 ? (
+                <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
+              ) : null}
+            </div>
+          </TranscriptHoldProvider>
         </div>
       </div>
-      {away && !override ? (
+      {away ? (
         <button type="button" className={styles.jump} onClick={jumpToEnd}>
           <Icon name="arrow-down" size={16} />
           Jump to latest

@@ -21,7 +21,6 @@ import {
   approveSession,
   cancelHeldMessages,
   connectSessionSocket,
-  connectTerminalSocket,
   createMessageSchedule,
   deleteSession as deleteSessionRequest,
   fetchEvents,
@@ -31,7 +30,6 @@ import {
   refreshSessionRateLimitUsage,
   releaseHeldMessages,
   resolveWorkspacePath,
-  sendInput,
   setSessionFocus,
   setSessionPinned,
   setSessionTitle,
@@ -51,9 +49,6 @@ import {
   supportsApprovalNote,
   supportsAttachments,
   supportsStructuredApproval,
-  terminalInteractive,
-  terminalKeyInjection,
-  terminalResizable,
   transportLabel,
   transportPresentation,
   useBackendCatalog,
@@ -68,15 +63,14 @@ import {
   type SideQuestionState,
 } from "@waypoint/web-core/session/sideQuestions";
 import { clearToken } from "@waypoint/web-core/store";
-import { type TerminalSubmitResult } from "@/lib/composer";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { useHoldMenu } from "@waypoint/web-core/hooks/useHoldMenu";
 import { useSessionModels } from "@waypoint/web-core/hooks/useSessionModels";
 import { useSessionTuning } from "@waypoint/web-core/hooks/useSessionTuning";
 import { useTuningDraft } from "@waypoint/web-core/hooks/useTuningDraft";
-import { canFork, composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
-import { deliverInput, runControlCommand } from "@waypoint/web-core/sessionDelivery";
+import { composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
+import { deliverInput, submitTerminalMessage, type TerminalSubmitResult } from "@waypoint/web-core/sessionDelivery";
 import { SEND_MODES, type SendMode } from "@waypoint/web-core/session/sendModes";
 import {
   interruptPrompt,
@@ -106,7 +100,9 @@ import {
 } from "@waypoint/web-core/session/connection";
 import { isImportantEvent } from "@waypoint/web-core/session/importance";
 import { toolNamesOfRun } from "@waypoint/web-core/session/toolRun";
-import { wrapBracketedPaste } from "@waypoint/web-core/session/terminalText";
+import { type ScrollDirection, wheelSequence } from "@waypoint/web-core/session/terminal";
+import { useTerminalPane } from "@waypoint/web-core/hooks/useTerminalPane";
+import { useTerminalPaste } from "@waypoint/web-core/hooks/useTerminalPaste";
 import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";
 import {
   buildTranscriptItems,
@@ -141,7 +137,6 @@ import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
-import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import { AssistantMark } from "@/components/AssistantMark";
 import {
@@ -223,23 +218,6 @@ function SessionCwdCopy({ cwd }: { cwd: string }) {
       <span aria-hidden>{copied ? "✓" : "⎘"}</span>
     </button>
   );
-}
-
-// WebKit (desktop Safari + every iOS browser, since the App Store
-// requires WebKit) gates ``navigator.clipboard.readText()`` behind a
-// system "Paste" banner that the user must click to authorize. Other
-// browsers either cache the permission (Chromium) or expose it via a
-// URL-bar affordance (Firefox), so the one-tap path Just Works there.
-// We use this flag to decide whether to short-circuit straight to
-// sending or to stage the text behind a tap-to-confirm pill.
-function isSafariFamily(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  const iOS =
-    /\b(iPad|iPhone|iPod)\b/.test(ua) ||
-    (ua.includes("Mac") && (navigator.maxTouchPoints ?? 0) > 1);
-  if (iOS) return true;
-  return /Safari\//.test(ua) && !/Chrome|Chromium|Edg\/|OPR\//.test(ua);
 }
 
 // An existing backend-native thread the assistant can adopt.
@@ -386,13 +364,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // per element, so consecutive /copies on the same DOM node would
   // otherwise silently swap text with no visible motion.
   const [clipboardSeq, setClipboardSeq] = useState(0);
-  // Paste-side mirror of the copy flow. On WebKit the readText prompt
-  // is a system-level "Paste" banner the user must approve, so even
-  // after we have the bytes we stage them behind a second tap-to-send
-  // pill that previews the char count. On Chromium/Firefox we skip
-  // the pill and send straight through.
-  const [pendingPaste, setPendingPaste] = useState<string | null>(null);
-  const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<SideQuestionState>(EMPTY_SIDE_QUESTIONS);
   // The socket handler reads the latest state here, so it applies each frame once.
   const sideQuestionStateRef = useRef<SideQuestionState>(EMPTY_SIDE_QUESTIONS);
@@ -1238,25 +1209,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canShowTerminal = session
     ? hasTerminalPane(session.transport, catalog)
     : false;
-  // Whether the user can type into the terminal pane.
-  const canTerminalInteract = session
-    ? terminalInteractive(session.transport, catalog)
-    : false;
-  // Whether the terminal pane accepts resize frames.
-  const canTerminalResize = session
-    ? terminalResizable(session.transport, catalog)
-    : false;
-  // Whether the pane accepts key-bar / scroll-wheel injection (true for the
-  // fully interactive tmux pane and the claude_tty escape hatch).
-  const canInjectKeys = session
-    ? terminalKeyInjection(session.transport, catalog)
-    : false;
-  const [unlockedSessionId, setUnlockedSessionId] = useState<string | null>(null);
-  if (unlockedSessionId !== null && unlockedSessionId !== sessionId) {
-    setUnlockedSessionId(null);
-  }
-  const paneUnlocked =
-    canInjectKeys && !canTerminalInteract && unlockedSessionId === sessionId;
   const activeView: ViewMode = terminalOnly
     ? "terminal"
     : !canShowTerminal
@@ -1288,228 +1240,62 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     !taskDockDismissed;
   const canShowTasks =
     activeView === "chat" && taskProgress !== null && taskDockDismissed;
-  const terminalRef = useRef<XTerminalHandle | null>(null);
-  const terminalSocketRef = useRef<WebSocket | null>(null);
-  // Bumped to reconnect the terminal WS: on EXITED → live transitions and
-  // when the pane target (tmux_pane) changes under a running session.
-  const [terminalEpoch, setTerminalEpoch] = useState(0);
-  // The light/dark surface the connected pane should show, resolved from the
-  // agent's own TUI theme by the server. Connection state, not app state:
-  // dark until the appearance frame arrives, reset to dark on each reconnect.
-  const [terminalAppearance, setTerminalAppearance] = useState<
-    "light" | "dark"
-  >("dark");
-  const prevSessionExitedRef = useRef(sessionExited);
-  useEffect(() => {
-    if (prevSessionExitedRef.current && !sessionExited) {
-      setTerminalEpoch((e) => e + 1);
-    }
-    prevSessionExitedRef.current = sessionExited;
-  }, [sessionExited]);
-  const tmuxPane =
-    typeof session?.transport_state?.tmux_pane === "string"
-      ? session.transport_state.tmux_pane
-      : null;
-  const prevTmuxPaneRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      prevTmuxPaneRef.current !== null &&
-      tmuxPane !== null &&
-      tmuxPane !== prevTmuxPaneRef.current
-    ) {
-      setTerminalEpoch((e) => e + 1);
-    }
-    prevTmuxPaneRef.current = tmuxPane;
-  }, [tmuxPane]);
+  const {
+    term: terminalRef,
+    interactive: canTerminalInteract,
+    keyInjection: canInjectKeys,
+    unlocked: paneUnlocked,
+    toggleLock: toggleInputUnlocked,
+    appearance: terminalAppearance,
+    input: handleTerminalInput,
+    submit: submitOverSocket,
+    resize: resizeTerminal,
+    refresh: handleTerminalRefresh,
+  } = useTerminalPane({
+    host,
+    token,
+    sessionId,
+    session,
+    catalog,
+    active: activeView === "terminal",
+    onAuthFailure: handleAuthFailure,
+  });
 
-  // Terminal pane: connect a WebSocket when the terminal tab is open and the
-  // transport has a pane (lazy — defers connection until the tab is visible).
-  // Write streamed bytes into xterm; for interactive transports forward
-  // keystrokes and resize frames back. Reconnects with capped exponential
-  // backoff on transient drops.
-  //
-  // Deliberately does NOT depend on the full ``session`` object — the
-  // session-state WS pushes updated SessionRecord references on every change
-  // (effort/model/etc.), and re-running this effect would close the terminal
-  // socket and ``term.reset()`` xterm on every push, which the user sees as
-  // the whole pane blanking out and re-painting.
-  const paneTransport = session?.transport ?? null;
-  useEffect(() => {
-    if (activeView !== "terminal") return;
-    if (!paneTransport || !hasTerminalPane(paneTransport, catalog)) return;
-    let active = true;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    function connect() {
-      terminalRef.current?.reset();
-      // Baseline the surface to dark before every (re)connect so a prior light
-      // session, transport, or profile can never bleed into a new one — the
-      // server re-sends the appearance frame if this connection is light.
-      terminalRef.current?.setAppearance("dark");
-      setTerminalAppearance("dark");
-      const resizable = !!paneTransport && terminalResizable(paneTransport, catalog);
-      socket = connectTerminalSocket(host, token, sessionId, {
-        onOpen: () => {
-          attempt = 0;
-          // Opt into terminal protocol v2 with a universal hello so the server
-          // sends the appearance frame. Resizable panes carry their viewport so
-          // tmux resizes the pane to match; fixed-grid panes (claude_tty) own
-          // their geometry server-side and send the hello without dimensions.
-          // Read the live ref because the term may not have mounted at
-          // connect() time.
-          if (socket?.readyState !== WebSocket.OPEN) return;
-          const term = terminalRef.current;
-          const cols = resizable ? term?.cols() : undefined;
-          const rows = resizable ? term?.rows() : undefined;
-          socket.send(
-            JSON.stringify({
-              type: "hello",
-              terminal_protocol: 2,
-              ...(cols && rows ? { cols, rows } : {}),
-              ...(paneUnlocked ? { interactive: true } : {}),
-            }),
-          );
-        },
-        onChunk: (text) => {
-          terminalRef.current?.write(text);
-        },
-        onAppearance: (appearance) => {
-          // Applied imperatively before the seed write (ordering guarantees the
-          // seed renders on the right surface), plus stored so re-renders and
-          // the stage background stay consistent.
-          terminalRef.current?.setAppearance(appearance);
-          setTerminalAppearance(appearance);
-        },
-        onResize: (cols, rows) => {
-          // Fixed-grid panes (claude_tty) are pinned server-side; match our
-          // grid so the cell-positioned stream aligns instead of rewrapping.
-          terminalRef.current?.resize(cols, rows);
-        },
-        onAuthFailure: () => {
-          handleAuthFailure();
-        },
-        onSessionExited: () => {
-          // The pane is gone (terminate / /exit / Codex crashed). Drop
-          // out of the auto-reconnect loop; the UI's Reconnect button
-          // is what spins up a fresh tmux session.
-          active = false;
-        },
-        onClose: () => {
-          if (!active) return;
-          const delay = reconnectDelay(attempt);
-          attempt += 1;
-          reconnectTimer = setTimeout(() => {
-            if (active) connect();
-          }, delay);
-        },
-      });
-      terminalSocketRef.current = socket;
-    }
-
-    connect();
-    return () => {
-      active = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      socket?.close();
-      terminalSocketRef.current = null;
-    };
-  }, [activeView, paneTransport, catalog, host, token, sessionId, handleAuthFailure, terminalEpoch, paneUnlocked]);
-
-  const toggleInputUnlocked = useCallback(() => {
-    const next = !paneUnlocked;
-    setUnlockedSessionId(next ? sessionId : null);
-    const term = terminalRef.current;
-    term?.setInputEnabled(next);
-    if (next) term?.focus();
-    else term?.blur();
-  }, [paneUnlocked, sessionId]);
-
-  const handleTerminalInput = useCallback((data: string) => {
-    const socket = terminalSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "input", data }));
-    }
-  }, []);
-
-  // Whole-message submission from the quick-compose drawer — the backend
-  // appends Enter when ``submit`` is true so each call lands as one
-  // logical message rather than a stream of keystrokes. ``/new`` is caught
-  // here as a Waypoint control command instead of being typed into the
-  // wrapped CLI; ``/fork`` follows the agent's fork capability.
-  const handleTerminalSubmit = useCallback(async (text: string): Promise<TerminalSubmitResult> => {
-    if (session) {
-      try {
-        const allowFork = canFork(session, catalog);
-        const opened = await runControlCommand({ host, token, sessionId, text, allowFork });
-        if (opened !== null) {
-          router.push(`/session/${opened}`);
-          return "ok";
-        }
-      } catch (e) {
-        if (isAuthError(e)) handleAuthFailure();
-        else setError(e instanceof Error ? e.message : "failed to create session");
-        return "command-error";
-      }
-    }
-    const socket = terminalSocketRef.current;
-    if (socket?.readyState !== WebSocket.OPEN) return "socket-closed";
-    socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
-    return "ok";
-  }, [session, catalog, host, token, sessionId, router, handleAuthFailure]);
-
-  // Attachment-bearing terminal submits go over HTTP, not the terminal WS:
-  // handle_input routes them through the tmux transport, which appends the
-  // host file paths to the message so the wrapped CLI can read them.
-  const handleTerminalSubmitWithAttachments = useCallback(
+  const handleTerminalSubmit = useCallback(
     async (text: string, attachmentIds: string[]): Promise<TerminalSubmitResult> => {
       try {
-        await sendInput(host, token, sessionId, text, undefined, attachmentIds);
-        return "ok";
+        const { result, openSessionId } = await submitTerminalMessage({
+          host,
+          token,
+          sessionId,
+          session,
+          catalog,
+          text,
+          attachmentIds,
+          sendOverSocket: submitOverSocket,
+        });
+        if (openSessionId) router.push(`/session/${openSessionId}`);
+        return result;
       } catch (e) {
         if (isAuthError(e)) handleAuthFailure();
         else setError(e instanceof Error ? e.message : "failed to send input");
         return "command-error";
       }
     },
-    [host, token, sessionId, handleAuthFailure],
+    [host, token, sessionId, session, catalog, submitOverSocket, router, handleAuthFailure],
   );
 
-  const requestPaste = useCallback(async () => {
+  const {
+    pending: pendingPaste,
+    seq: pasteSeq,
+    sendPending: sendPendingPaste,
+    dismiss: dismissPendingPaste,
+    request: readPaste,
+  } = useTerminalPaste(handleTerminalInput, setError);
+  const requestPaste = useCallback(() => {
     setError("");
-    if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
-      setError("Clipboard read is unavailable in this browser");
-      return;
-    }
-    let text: string;
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      setError("Clipboard access blocked — approve the paste prompt and retry");
-      return;
-    }
-    if (!text) return;
-    if (isSafariFamily()) {
-      // Stash the raw text so the preview char count reflects what the
-      // user actually pasted; bracketed-paste wrapping happens at send
-      // time inside ``sendPendingPaste``.
-      setPendingPaste(text);
-      setPasteSeq((s) => s + 1);
-    } else {
-      handleTerminalInput(wrapBracketedPaste(text));
-    }
-  }, [handleTerminalInput]);
-
-  const sendPendingPaste = useCallback(() => {
-    if (pendingPaste === null) return;
-    handleTerminalInput(wrapBracketedPaste(pendingPaste));
-    setPendingPaste(null);
-  }, [pendingPaste, handleTerminalInput]);
-
-  const dismissPendingPaste = useCallback(() => {
-    setPendingPaste(null);
-  }, []);
+    void readPaste();
+  }, [readPaste]);
 
   const dismissClipboardPill = useCallback(() => {
     setPendingClipboard(null);
@@ -1520,29 +1306,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
       setTerminalDims({ cols, rows });
-      if (!canTerminalResize) return;
-      const socket = terminalSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
+      resizeTerminal(cols, rows);
     },
-    [canTerminalResize],
+    [resizeTerminal],
   );
   const handleTerminalScrollChip = useCallback(
-    (direction: "up" | "down") => {
-      // Synthesize a wheel event as terminal input so the inner TUI scrolls
-      // its own view (both tmux and the claude_tty escape hatch accept this).
-      // SGR mouse encoding (mode 1006). Button 64 = wheel up, 65 = wheel
-      // down. Column/row are the cursor position the inner app attributes the
-      // wheel event to; centering on the viewport is a safe stand-in for
-      // "user's eye" without coupling to xterm's actual mouse position.
-      const cols = terminalDims?.cols ?? 80;
-      const rows = terminalDims?.rows ?? 24;
-      const col = Math.max(1, Math.floor(cols / 2));
-      const row = Math.max(1, Math.floor(rows / 2));
-      const button = direction === "up" ? 64 : 65;
-      handleTerminalInput(`\x1b[<${button};${col};${row}M`);
-    },
+    (direction: ScrollDirection) => handleTerminalInput(wheelSequence(direction, terminalDims)),
     [terminalDims, handleTerminalInput],
   );
   const [termMenuOpen, setTermMenuOpen] = useState(false);
@@ -1575,12 +1344,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, [termMenuOpen]);
   const handleJumpToLive = useCallback(() => {
     terminalRef.current?.scrollToBottom();
-  }, []);
+  }, [terminalRef]);
   const handleTerminalScrollChange = useCallback((atBottom: boolean) => {
     setTermAtBottom(atBottom);
-  }, []);
-  const handleTerminalRefresh = useCallback(() => {
-    setTerminalEpoch((e) => e + 1);
   }, []);
   const interruptSession = useCallback(() => runAction("interrupt"), [runAction]);
   const resumeSession = useCallback(() => {
@@ -2171,7 +1937,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
           onTerminalSubmit={handleTerminalSubmit}
-          onTerminalSubmitWithAttachments={handleTerminalSubmitWithAttachments}
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
           }

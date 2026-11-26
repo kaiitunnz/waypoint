@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, AuthError, cloneSession, forkSession, postAction, sendInput } from "./api";
 import { buildCatalog } from "./backends";
-import { deliverInput, FollowUpError } from "./sessionDelivery";
+import { deliverInput, FollowUpError, submitTerminalMessage } from "./sessionDelivery";
 import type { BackendDescriptor, SessionRecord } from "./types";
 
 vi.mock("./api", async (original) => ({
@@ -114,5 +114,65 @@ describe("deliverInput", () => {
   it("keeps an expired token's error", async () => {
     vi.mocked(sendInput).mockRejectedValueOnce(new AuthError());
     await expect(deliver("/new do it")).rejects.toBeInstanceOf(AuthError);
+  });
+});
+
+describe("submitTerminalMessage", () => {
+  const submit = (text: string, patch: Partial<Parameters<typeof submitTerminalMessage>[0]> = {}) =>
+    submitTerminalMessage({
+      host: "h",
+      token: "t",
+      sessionId: "s1",
+      session: session({ transport: "tmux", backend: "tmux" }),
+      catalog,
+      text,
+      attachmentIds: [],
+      sendOverSocket: () => true,
+      ...patch,
+    });
+
+  it("types plain text into the pane over the socket", async () => {
+    const sendOverSocket = vi.fn(() => true);
+    await expect(submit("ls", { sendOverSocket })).resolves.toEqual({ result: "ok", openSessionId: null });
+    expect(sendOverSocket).toHaveBeenCalledWith("ls");
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
+  it("reports a closed socket so the draft stays", async () => {
+    await expect(submit("ls", { sendOverSocket: () => false })).resolves.toEqual({
+      result: "socket-closed",
+      openSessionId: null,
+    });
+  });
+
+  it("sends attachments over HTTP, never as a control command", async () => {
+    const sendOverSocket = vi.fn(() => true);
+    await expect(submit("/new x", { attachmentIds: ["a"], sendOverSocket })).resolves.toEqual({
+      result: "ok",
+      openSessionId: null,
+    });
+    expect(sendInput).toHaveBeenCalledWith("h", "t", "s1", "/new x", undefined, ["a"]);
+    expect(cloneSession).not.toHaveBeenCalled();
+    expect(sendOverSocket).not.toHaveBeenCalled();
+  });
+
+  it("runs /new as a control command", async () => {
+    const sendOverSocket = vi.fn(() => true);
+    await expect(submit("/new go", { sendOverSocket })).resolves.toEqual({ result: "ok", openSessionId: "child" });
+    expect(sendOverSocket).not.toHaveBeenCalled();
+  });
+
+  it("types /fork where the agent cannot fork, and skips commands while loading", async () => {
+    const sendOverSocket = vi.fn(() => true);
+    await submit("/fork", { sendOverSocket });
+    await submit("/new", { session: null, sendOverSocket });
+    expect(forkSession).not.toHaveBeenCalled();
+    expect(cloneSession).not.toHaveBeenCalled();
+    expect(sendOverSocket).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws request failures", async () => {
+    vi.mocked(sendInput).mockRejectedValueOnce(new Error("boom"));
+    await expect(submit("x", { attachmentIds: ["a"] })).rejects.toThrow("boom");
   });
 });

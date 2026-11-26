@@ -47,7 +47,7 @@ export function SendControl({ canSend, sending, dormant, onSend, keepFocus }: Se
         onContextMenu={(event) => event.preventDefault()}
         {...triggerProps}
       >
-        {sending ? <span className={styles.spinner} aria-hidden="true" /> : <Icon name="arrow-up" size={20} strokeWidth={2.2} />}
+        <SendGlyph sending={sending} />
       </button>
       {open ? (
         <div className={styles.menu} role="menu" aria-label="Send options" {...menuProps}>
@@ -75,6 +75,25 @@ export function SendControl({ canSend, sending, dormant, onSend, keepFocus }: Se
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SendGlyph({ sending }: { sending: boolean }) {
+  return sending ? <span className={styles.spinner} aria-hidden="true" /> : <Icon name="arrow-up" size={20} strokeWidth={2.2} />;
+}
+
+// Where a message can only go now: no send menu.
+export function SendButton({ canSend, sending, onSend }: { canSend: boolean; sending: boolean; onSend: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cx(styles.send, canSend && styles.ready)}
+      disabled={!canSend}
+      aria-label={sending ? "Sending…" : "Send"}
+      onClick={onSend}
+    >
+      <SendGlyph sending={sending} />
+    </button>
   );
 }
 

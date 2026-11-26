@@ -9,6 +9,7 @@ import {
   remarkLinkifyPaths,
   splitFileName,
   splitPath,
+  textColumns,
 } from "./workspacePaths";
 
 describe("isWorkspacePathHref", () => {
@@ -206,5 +207,18 @@ describe("splitFileName", () => {
     expect(splitFileName("a.py")).toEqual({ head: "", tail: "a.py" });
     expect(splitFileName(".gitignore")).toEqual({ head: ".git", tail: "ignore" });
     expect(splitFileName("notes.somethingverylong")).toEqual({ head: "notes.somethingve", tail: "rylong" });
+  });
+
+  it("never splits a character outside the basic plane", () => {
+    expect(splitFileName("report_😀abcde.md")).toEqual({ head: "report_", tail: "😀abcde.md" });
+  });
+});
+
+describe("textColumns", () => {
+  it("counts CJK and emoji as two columns and other characters as one", () => {
+    expect(textColumns("notes.md")).toBe(8);
+    expect(textColumns("設計メモ.md")).toBe(11);
+    expect(textColumns("a😀b")).toBe(4);
+    expect(textColumns("café→.txt")).toBe(9);
   });
 });

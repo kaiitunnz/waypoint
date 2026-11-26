@@ -1,44 +1,41 @@
 .path {
-  display: flex;
+  display: block;
   min-width: 0;
   max-width: 100%;
+  overflow: clip;
   font-family: var(--mono);
   font-size: var(--f-code);
   letter-spacing: -0.01em;
-  white-space: nowrap;
+  white-space: pre;
 }
 
-/* The far larger shrink factor spends the folder before the name gives anything up.
-   Right-to-left puts the ellipsis on the left; the isolate keeps the path's order. */
-.dir {
-  flex: 0 1000000 auto;
-  min-width: 0;
-  overflow: hidden;
+/* Inline blocks, so a selection copies as one unbroken path; flex items would copy as
+   separate lines. `--name` and `--tail` are their widths in monospace columns. */
+.dir,
+.head,
+.tail {
+  display: inline-block;
+}
+
+.dir,
+.head {
+  overflow: clip;
   text-overflow: ellipsis;
+}
+
+/* The folder takes what the name leaves. Right-to-left puts the ellipsis on the left;
+   the isolate keeps the path's order. */
+.dir {
+  max-width: calc(100% - var(--name) * (1ch - 0.01em));
   direction: rtl;
   color: var(--faint);
 }
 
-.base {
-  display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
 .head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: pre;
-}
-
-.tail {
-  flex: none;
-  white-space: pre;
+  max-width: calc(100% - var(--tail) * (1ch - 0.01em));
 }
 
 .open {
-  display: block;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

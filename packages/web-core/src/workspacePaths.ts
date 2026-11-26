@@ -118,10 +118,19 @@ const MAX_EXTENSION = 10;
 // A file name as a head that may be cut short and a tail that stays: the extension
 // and the characters before it.
 export function splitFileName(name: string): { head: string; tail: string } {
-  const dot = name.lastIndexOf(".");
-  const extension = dot > 0 && name.length - dot <= MAX_EXTENSION ? name.length - dot : 0;
-  const at = Math.max(0, name.length - extension - NAME_TAIL);
-  return { head: name.slice(0, at), tail: name.slice(at) };
+  // By code point, so no character is cut in half.
+  const chars = Array.from(name);
+  const dot = chars.lastIndexOf(".");
+  const extension = dot > 0 && chars.length - dot <= MAX_EXTENSION ? chars.length - dot : 0;
+  const at = Math.max(0, chars.length - extension - NAME_TAIL);
+  return { head: chars.slice(0, at).join(""), tail: chars.slice(at).join("") };
+}
+
+// CJK and emoji take two columns of a monospace font.
+const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Emoji_Presentation}\u3000-\u303f\uff00-\uff60\uffe0-\uffe6]/u;
+
+export function textColumns(text: string): number {
+  return Array.from(text).reduce((columns, char) => columns + (WIDE.test(char) ? 2 : 1), 0);
 }
 
 // A path as the session's own files read: relative to `cwd` when it lies inside it,

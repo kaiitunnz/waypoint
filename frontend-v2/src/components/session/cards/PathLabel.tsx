@@ -1,9 +1,9 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useState, type CSSProperties } from "react";
 
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
-import { splitFileName } from "@waypoint/web-core/workspacePaths";
+import { splitFileName, textColumns } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
 
@@ -27,8 +27,9 @@ export function PathLabel({ dir, base, full, className }: PathLabelProps) {
     setOpen(!open);
   });
   const name = splitFileName(base);
+  const columns = { "--name": textColumns(base), "--tail": textColumns(name.tail) } as CSSProperties;
   return (
-    <span className={cx(styles.path, open && styles.open, className)} title={full} {...press}>
+    <span className={cx(styles.path, open && styles.open, className)} style={columns} title={full} {...press}>
       {open ? (
         full
       ) : (
@@ -38,10 +39,8 @@ export function PathLabel({ dir, base, full, className }: PathLabelProps) {
               <bdi dir="ltr">{dir}</bdi>
             </span>
           ) : null}
-          <span className={styles.base}>
-            <span className={styles.head}>{name.head}</span>
-            <span className={styles.tail}>{name.tail}</span>
-          </span>
+          {name.head ? <span className={styles.head}>{name.head}</span> : null}
+          <span className={styles.tail}>{name.tail}</span>
         </>
       )}
     </span>

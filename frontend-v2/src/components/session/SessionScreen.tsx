@@ -48,7 +48,7 @@ export function SessionScreen({ id }: { id: string }) {
   const { toast } = useToast();
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
-  const { session, events, connection, pendingQuestions } = stream;
+  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder } = stream;
   const [filesOpen, setFilesOpen] = useState(false);
   // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
@@ -95,7 +95,11 @@ export function SessionScreen({ id }: { id: string }) {
     };
   }, [session, agentName]);
 
-  const rendered = useDeferredValue(events);
+  // The chip's state is deferred with the turns: the transcript keeps its place only across a
+  // change of turns, so a chip leaving on its own would shift the view.
+  const live = useMemo(() => ({ events, hasOlder, loadingOlder }), [events, hasOlder, loadingOlder]);
+  const shown = useDeferredValue(live);
+  const rendered = shown.events;
   const optimistic = useOptimisticSends(rendered);
   const transcript = useMemo(() => deriveTranscript(rendered, density), [rendered, density]);
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
@@ -161,8 +165,8 @@ export function SessionScreen({ id }: { id: string }) {
       turns={transcript.turns}
       status={session?.status ?? null}
       loading={stream.loading || rendered !== events}
-      hasOlder={stream.hasOlder}
-      loadingOlder={stream.loadingOlder}
+      hasOlder={shown.hasOlder}
+      loadingOlder={shown.loadingOlder}
       onLoadOlder={stream.loadOlder}
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}

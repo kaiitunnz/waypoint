@@ -192,6 +192,21 @@ export function managerGates(manager: ManagerSummary, state: ManagerStateRespons
   }));
 }
 
+// One read of the managers: the gates it saw, and the managers it could not read.
+export interface GateRead {
+  gates: BoardGate[];
+  failed: string[];
+}
+
+// A manager that could not be read keeps the gates it had. Null while nothing is
+// known: no gate seen yet, and a manager unread.
+export function mergeGates(previous: BoardGate[] | null, read: GateRead): BoardGate[] | null {
+  if (read.failed.length === 0) return read.gates;
+  const kept = (previous ?? []).filter((gate) => read.failed.includes(gate.managerId));
+  const merged = [...read.gates, ...kept];
+  return previous === null && merged.length === 0 ? null : merged;
+}
+
 export function gateKey(gate: BoardGate): string {
   return `gate:${gate.managerId}:${gate.ticket.id}`;
 }

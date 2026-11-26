@@ -20,6 +20,7 @@ import {
   kindTone,
   laneForState,
   managerGates,
+  mergeGates,
   priorityTone,
   stateLabel,
   stateTone,
@@ -258,6 +259,16 @@ describe("gates", () => {
     expect(managerGates(summary, state)).toEqual([
       { managerId: "mgr-1", project: "waypoint", channelPrefix: "p-ticket-", ticket: state.tickets[0], item: null },
     ]);
+  });
+
+  it("keeps the gates of a manager that could not be read", () => {
+    const mine = gate();
+    const other = { ...gate(), managerId: "mgr-2" };
+    expect(mergeGates([mine, other], { gates: [mine], failed: [] })).toEqual([mine]);
+    expect(mergeGates([mine, other], { gates: [mine], failed: ["mgr-2"] })).toEqual([mine, other]);
+    expect(mergeGates([mine], { gates: [], failed: ["mgr-2"] })).toEqual([]);
+    expect(mergeGates(null, { gates: [other], failed: ["mgr-1"] })).toEqual([other]);
+    expect(mergeGates(null, { gates: [], failed: ["mgr-1"] })).toBeNull();
   });
 
   it("keys and links a gate", () => {

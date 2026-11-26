@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, fetchInboxItem, fetchManagers, fetchManagerState, isAuthError } from "../api";
-import { managerGates, type BoardGate } from "../board";
+import { managerGates, mergeGates, type BoardGate, type GateRead } from "../board";
 
 const DEBOUNCE_MS = 300;
 // A manager files its gate item before it records the item on the ticket, and a
@@ -12,38 +12,59 @@ const DEBOUNCE_MS = 300;
 const SETTLE_MS = 10_000;
 const POLL_MS = 60_000;
 
-async function loadGates(host: string, token: string): Promise<BoardGate[]> {
+async function gateWithItem(host: string, token: string, gate: BoardGate): Promise<BoardGate> {
+  const id = gate.ticket.inbox_item_id;
+  if (!id) return gate;
+  try {
+    return { ...gate, item: await fetchInboxItem(host, token, id) };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return gate;
+    throw error;
+  }
+}
+
+// Each manager is read on its own, so one that fails hides no other's gates.
+async function loadGates(host: string, token: string): Promise<GateRead> {
   const managers = (await fetchManagers(host, token)).filter((manager) => manager.attention_count > 0);
-  const states = await Promise.all(
-    managers.map(async (manager) => managerGates(manager, await fetchManagerState(host, token, manager.id))),
-  );
-  return Promise.all(
-    states.flat().map(async (gate) => {
-      const id = gate.ticket.inbox_item_id;
-      if (!id) return gate;
-      try {
-        return { ...gate, item: await fetchInboxItem(host, token, id) };
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return gate;
-        throw error;
-      }
+  const reads = await Promise.allSettled(
+    managers.map(async (manager) => {
+      const gates = managerGates(manager, await fetchManagerState(host, token, manager.id));
+      return Promise.all(gates.map((gate) => gateWithItem(host, token, gate)));
     }),
   );
+  const rejected = reads.flatMap((read) => (read.status === "rejected" ? [read.reason] : []));
+  const auth = rejected.find(isAuthError);
+  if (auth) throw auth;
+  return {
+    gates: reads.flatMap((read) => (read.status === "fulfilled" ? read.value : [])),
+    failed: managers.filter((_, index) => reads[index].status === "rejected").map((manager) => manager.id),
+  };
+}
+
+export interface BoardGates {
+  // Null until a read succeeds.
+  gates: BoardGate[] | null;
+  // The latest read did not reach every manager.
+  failed: boolean;
+  retry: () => void;
 }
 
 // The tickets waiting on the human across managers, each with its inbox item.
-// Null until the first read. Re-reads when `revision` moves and when the page is
-// shown again. `onAuthFailure` must be stable.
+// Re-reads when `revision` moves and when the page is shown again.
+// `onAuthFailure` must be stable.
 export function useBoardGates(
   host: string,
   token: string,
   revision: number,
   onAuthFailure?: () => void,
-): BoardGate[] | null {
+): BoardGates {
   const [gates, setGates] = useState<BoardGate[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(0);
   const read = useRef<(() => void) | null>(null);
   const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const retry = useCallback(() => setTick((value) => value + 1), []);
 
   useEffect(() => {
     const bump = () => {
@@ -53,8 +74,8 @@ export function useBoardGates(
     return () => document.removeEventListener("visibilitychange", bump);
   }, []);
 
-  // Until a first read lands, try again sooner.
-  const interval = gates === null ? SETTLE_MS : gates.length > 0 ? POLL_MS : null;
+  // Until every manager has been read, try again sooner.
+  const interval = gates === null || failed ? SETTLE_MS : gates.length > 0 ? POLL_MS : null;
   useEffect(() => {
     if (interval === null) return;
     const timer = setInterval(() => {
@@ -67,6 +88,7 @@ export function useBoardGates(
   // later one already is, so a busy board cannot keep every read from landing.
   useEffect(() => {
     setGates(null);
+    setFailed(false);
     if (!host || !token) return;
     let active = true;
     let started = 0;
@@ -77,10 +99,13 @@ export function useBoardGates(
         .then((next) => {
           if (!active || mine < shown) return;
           shown = mine;
-          setGates(next);
+          setGates((previous) => mergeGates(previous, next));
+          setFailed(next.failed.length > 0);
         })
         .catch((error) => {
-          if (active && isAuthError(error)) onAuthFailure?.();
+          if (!active || mine < shown) return;
+          if (isAuthError(error)) onAuthFailure?.();
+          else setFailed(true);
         });
     };
     return () => {
@@ -102,5 +127,5 @@ export function useBoardGates(
     return () => clearTimeout(settled);
   }, [host, token, revision, tick, onAuthFailure]);
 
-  return gates;
+  return { gates, failed, retry };
 }

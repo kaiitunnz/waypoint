@@ -78,7 +78,7 @@ export function QueuePane() {
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const queue = useQueue(status, source, q, now);
-  const { entries, todayEntries, list, resolved, counts, loaded, awaiting } = queue;
+  const { entries, todayEntries, list, resolved, counts, loaded, awaiting, boardFailed, retryGates } = queue;
 
   // Select-all and bulk delete act on the rows shown, never on a hidden item.
   const shownToday = showToday ? todayEntries : NO_ENTRIES;
@@ -151,7 +151,7 @@ export function QueuePane() {
   const loading = (list.loading && !loaded) || (awaiting && entries.length === 0);
   const failed = !loaded && !list.loading && list.error !== null;
   const pageable = list.hasMore && loaded && (source === "all" || source === "inbox");
-  const empty = entries.length === 0 && loaded && !awaiting;
+  const empty = entries.length === 0 && loaded && !awaiting && !boardFailed;
   const confirm = deletion ? CONFIRM[deletion.kind](deletion.kind === "selected" ? deletion.ids.length : 1) : null;
 
   return (
@@ -222,6 +222,14 @@ export function QueuePane() {
           <div className={styles.failed} role="alert">
             <p>{list.error}</p>
             <ActionChip icon="refresh" onClick={list.retry}>
+              Retry
+            </ActionChip>
+          </div>
+        ) : null}
+        {boardFailed ? (
+          <div className={styles.failed} role="alert">
+            <p>{"Couldn't load board gates"}</p>
+            <ActionChip icon="refresh" onClick={retryGates}>
               Retry
             </ActionChip>
           </div>

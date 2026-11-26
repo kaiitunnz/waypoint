@@ -17,7 +17,7 @@ const NO_ITEMS: InboxItem[] = [];
 
 // The queue for a status, source and search, and what was resolved today.
 export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: string, now: number) {
-  const { host, token, waiting, gates: loadedGates } = useShellData();
+  const { host, token, waiting, gates: loadedGates, gatesFailed, retryGates } = useShellData();
   const { pendingAsks, subscribeInbox } = useSessionsData();
   const asks = pendingAsks?.items ?? NO_ASKS;
   const gates = loadedGates ?? NO_GATES;
@@ -41,11 +41,12 @@ export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: str
   });
 
   // Asks and gates arrive apart from the items: until they have, an empty queue
-  // may not be one.
+  // may not be one. A failed gate read is reported rather than waited for.
+  const listsGates = status !== "resolved" && (source === "all" || source === "board");
+  const boardFailed = listsGates && gatesFailed;
   const awaiting =
-    status !== "resolved" &&
-    (((source === "all" || source === "sessions") && !pendingAsks) ||
-      ((source === "all" || source === "board") && !loadedGates));
+    (status !== "resolved" && (source === "all" || source === "sessions") && !pendingAsks) ||
+    (listsGates && !loadedGates && !gatesFailed);
 
   // Items of an earlier status or search are not shown while the next ones load.
   const loaded = list.loadedFor === inboxListKey(status, list.query);
@@ -71,6 +72,8 @@ export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: str
     todayMore,
     counts: waiting,
     awaiting,
+    boardFailed,
+    retryGates,
     loaded,
     list,
     resolved,

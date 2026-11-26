@@ -23,6 +23,9 @@ export interface ShellData {
   waiting: NeedsCounts;
   // Null until first read.
   gates: BoardGate[] | null;
+  // The latest read of the gates did not reach every manager.
+  gatesFailed: boolean;
+  retryGates: () => void;
   connection: ConnectionState;
   launchTargets: LaunchTargetsState;
 }
@@ -68,15 +71,19 @@ export function ShellDataProvider({
   const inboxCount = useInboxCount(host, token, handleAuthFailure);
   const feed = useSessionsFeed(host, token, handleAuthFailure);
   const launchTargets = useLaunchTargets(host, token, handleAuthFailure);
-  const gates = useBoardGates(host, token, feed.boardRevision + feed.inboxRevision, handleAuthFailure);
+  const {
+    gates,
+    failed: gatesFailed,
+    retry: retryGates,
+  } = useBoardGates(host, token, feed.boardRevision + feed.inboxRevision, handleAuthFailure);
   const asks = pendingAsksCount(feed.pendingAsks);
   const waiting = useMemo(() => needsCounts(asks, inboxCount, gates ?? []), [asks, inboxCount, gates]);
   const needsYou = waiting.all;
   const { connection } = feed;
 
   const shell = useMemo(
-    () => ({ host, token, needsYou, waiting, gates, connection, launchTargets }),
-    [host, token, needsYou, waiting, gates, connection, launchTargets],
+    () => ({ host, token, needsYou, waiting, gates, gatesFailed, retryGates, connection, launchTargets }),
+    [host, token, needsYou, waiting, gates, gatesFailed, retryGates, connection, launchTargets],
   );
   const sessions = useMemo<SessionsData>(
     () => ({

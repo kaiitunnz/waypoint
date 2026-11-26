@@ -16,11 +16,13 @@ import styles from "./GateDetail.module.css";
 
 // A gate with no inbox item of its own: what is asked, and where to act.
 export function GateDetail({ id }: { id: string }) {
-  const { gates } = useShellData();
+  const { gates, gatesFailed } = useShellData();
   const pointer = usePointerUI();
   const now = useNow(30_000);
+  const gate = gates?.find((entry) => gateKey(entry) === id);
+  // A gate that was not read may well be waiting still.
+  if (!gate && gatesFailed) return <DetailState title={"Couldn't load board gates"} />;
   if (!gates) return <DetailState title="Loading…" />;
-  const gate = gates.find((entry) => gateKey(entry) === id);
   if (!gate) return <DetailState title="No longer waiting" />;
 
   const { ticket } = gate;

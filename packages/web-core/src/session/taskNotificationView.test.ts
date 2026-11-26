@@ -85,8 +85,8 @@ describe("summarizeNotificationRun", () => {
     expect(summarizeNotificationRun(["agent", "agent", "background_command"])).toEqual({
       phrase: "Reports from 2 subagents, 1 background command",
       glyphs: [
-        { glyph: "◇", count: 2 },
-        { glyph: "›_", count: 1 },
+        { glyph: "◇", label: "Subagents", count: 2 },
+        { glyph: "›_", label: "Background commands", count: 1 },
       ],
     });
     expect(summarizeNotificationRun(["unknown"]).phrase).toBe("Reports from 1 task");

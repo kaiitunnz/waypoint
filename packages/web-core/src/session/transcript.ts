@@ -19,8 +19,14 @@ export interface ToolPair {
   sequence: number;
 }
 
+// Identical notes folded into one: how many there were, and when the last came.
+export interface Repeat {
+  count: number;
+  until: string;
+}
+
 export type LeafItem =
-  | { kind: "single"; event: EventRecord }
+  | { kind: "single"; event: EventRecord; repeat?: Repeat }
   | { kind: "pair"; event: EventRecord; pair: ToolPair };
 
 export type TranscriptItem =

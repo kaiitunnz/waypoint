@@ -120,3 +120,24 @@
 .todoNow .mark {
   color: var(--working);
 }
+
+/* A narrow conversation gives the indents back to the text. */
+@container (max-width: 440px) {
+  .head {
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    column-gap: 4px;
+  }
+
+  .ln {
+    padding-left: 1ch;
+    text-indent: -1ch;
+  }
+
+  .inset {
+    margin-left: 16px;
+  }
+
+  .todos {
+    padding-left: 16px;
+  }
+}

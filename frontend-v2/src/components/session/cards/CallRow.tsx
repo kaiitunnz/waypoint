@@ -6,6 +6,7 @@ import { TODO_MARKER, TODO_STATUS_LABEL, type TodoEntry } from "@waypoint/web-co
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
+import clamp from "./Clamp.module.css";
 import { Disclosure } from "./Disclosure";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
@@ -13,9 +14,6 @@ import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { PathLabel } from "./PathLabel";
 import { useFold } from "./useFold";
-
-const COMMAND_LINES = 6;
-const OUTPUT_LINES = 4;
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
   return (
@@ -45,13 +43,17 @@ function Lines({ text }: { text: string }) {
 }
 
 function Command({ text }: { text: string }) {
-  const fold = useFold(text, COMMAND_LINES, "start");
+  const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text, "start");
   return (
     <>
-      <div className={cx(styles.text, styles.mono)}>
-        <Lines text={fold.shown} />
+      <div className={cx(styles.text, styles.mono, !open && clamp.clamp)}>
+        <div ref={content}>
+          <Lines text={shown} />
+        </div>
       </div>
-      {fold.foldable ? <Disclosure open={fold.open} total={fold.total} onToggle={fold.toggle} /> : null}
+      <div ref={chip}>
+        <Disclosure open={open} total={total} onToggle={toggle} />
+      </div>
     </>
   );
 }
@@ -82,12 +84,12 @@ export function CallRow({ row }: { row: CallView }) {
         <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
           {row.glyph}
         </span>
-        <div className={styles.subject} title={command ? undefined : row.title}>
+        <div className={styles.subject} title={command || row.path ? undefined : row.title}>
           {command ? (
             <Command text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>
-              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} /> : <Lines text={row.label} />}
+              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} full={row.title} /> : <Lines text={row.label} />}
             </div>
           )}
         </div>
@@ -101,7 +103,7 @@ export function CallRow({ row }: { row: CallView }) {
       ) : null}
       {row.output ? (
         <div className={styles.inset}>
-          <FoldedText text={row.output} lines={OUTPUT_LINES} keep="end" className={styles.out} />
+          <FoldedText text={row.output} keep="end" className={styles.out} />
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

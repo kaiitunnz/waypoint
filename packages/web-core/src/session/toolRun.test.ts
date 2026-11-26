@@ -66,8 +66,8 @@ describe("summarizeToolRun", () => {
     const summary = summarizeToolRun(items);
     expect(summary.phrase).toBe("Read 3 files, searched 2 patterns, ran 1 command");
     expect(summary.glyphs).toEqual([
-      { glyph: "▤", count: 5 },
-      { glyph: "›_", count: 1 },
+      { glyph: "▤", label: "Reads and searches", count: 5 },
+      { glyph: "›_", label: "Commands", count: 1 },
     ]);
   });
 
@@ -108,13 +108,13 @@ describe("summarizeToolRun", () => {
     ]);
     const summary = summarizeToolRun(items);
     expect(summary.phrase).toBe("Ran 1 subagent");
-    expect(summary.glyphs).toEqual([{ glyph: "◇", count: 1 }]);
+    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 1 }]);
   });
 
   it("names a run of follow-ups alone", () => {
     const summary = summarizeToolRun(run([call(1, "a", "Wait"), call(2, "b", "Wait")]));
     expect(summary.phrase).toBe("Followed up on 2 subagents");
-    expect(summary.glyphs).toEqual([{ glyph: "◇", count: 2 }]);
+    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 2 }]);
   });
 
   it("counts a todo list with no tool name", () => {

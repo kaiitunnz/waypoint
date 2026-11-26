@@ -74,16 +74,18 @@ export function useTerminalConnection({
     lastPane.current = tmuxPane;
   }, [tmuxPane]);
 
-  // Keyed on the transport, not the session record: every settings push brings
-  // a new record, and reconnecting on each would blank and repaint the pane.
+  // Keyed on what the transport offers, not the session record or the catalog:
+  // a new reference of either would reconnect, blanking and repainting the pane.
   const transport = session?.transport ?? null;
+  const hasPane = transport !== null && hasTerminalPane(transport, catalog);
+  const resizable = transport !== null && terminalResizable(transport, catalog);
   useEffect(() => {
-    if (!active || !transport || !hasTerminalPane(transport, catalog)) return;
+    if (!active || !hasPane) return;
     const opened = openTerminalConnection({
       host,
       token,
       sessionId,
-      resizable: terminalResizable(transport, catalog),
+      resizable,
       interactive,
       sink: () => sink.current,
       onState: setState,
@@ -96,7 +98,7 @@ export function useTerminalConnection({
       if (connection.current === opened) connection.current = null;
       setState(null);
     };
-  }, [active, transport, catalog, host, token, sessionId, interactive, sink, epoch]);
+  }, [active, hasPane, resizable, host, token, sessionId, interactive, sink, epoch]);
 
   const input = useCallback((data: string) => connection.current?.input(data) ?? false, []);
   const submit = useCallback((text: string) => connection.current?.submit(text) ?? false, []);

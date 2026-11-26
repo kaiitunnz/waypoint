@@ -28,6 +28,8 @@ export interface XTerminalOptions {
   // stream, so the host scrolls instead. Read once, at mount.
   autoFit?: boolean;
   fontSize?: number;
+  // A CSS font-family list. Read once, at mount.
+  fontFamily?: string;
   themeFor: (appearance: TerminalAppearance) => ITheme;
   appearance?: TerminalAppearance;
   onData?: (data: string) => void;
@@ -35,6 +37,8 @@ export interface XTerminalOptions {
   // Fires when the view enters or leaves the scrollback.
   onScrollChange?: (atBottom: boolean) => void;
 }
+
+const DEFAULT_FONT = '"JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace';
 
 function refitOnResize(host: HTMLElement, fit: FitAddon): () => void {
   const observer = new ResizeObserver(() => {
@@ -100,9 +104,9 @@ export function useXTerminal(host: RefObject<HTMLElement | null>, options: XTerm
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const { autoFit = true, fontSize: initialFontSize = 13, themeFor } = latest.current;
+    const { autoFit = true, fontSize: initialFontSize = 13, fontFamily = DEFAULT_FONT, themeFor } = latest.current;
     const terminal = new Terminal({
-      fontFamily: '"JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace',
+      fontFamily,
       fontSize: initialFontSize,
       lineHeight: 1.25,
       // Every frame positions the cursor explicitly, so a still underline

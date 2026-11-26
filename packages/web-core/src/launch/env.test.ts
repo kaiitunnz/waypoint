@@ -7,6 +7,7 @@ import {
   envRowState,
   envSummary,
   envValueDisplay,
+  isSecretEnvKey,
   recordToEntries,
   stageEnvRemoval,
   undoEnvEntry,
@@ -56,5 +57,11 @@ describe("env rows", () => {
     expect(envValueDisplay("UV_CACHE_DIR", "/mnt/uv")).toBe("/mnt/uv");
     expect(envValueDisplay("PATHS", "x".repeat(40))).toHaveLength(28);
     expect(envValueDisplay("EMPTY", "")).toBe("");
+  });
+
+  it("tells secret-looking keys apart", () => {
+    expect(isSecretEnvKey("GH_TOKEN")).toBe(true);
+    expect(isSecretEnvKey("OPENAI_API_KEY")).toBe(true);
+    expect(isSecretEnvKey("UV_CACHE_DIR")).toBe(false);
   });
 });

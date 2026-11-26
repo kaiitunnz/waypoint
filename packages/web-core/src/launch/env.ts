@@ -84,11 +84,15 @@ const SECRET_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH|CREDENTIAL|PRIVAT
 const MASK = "••••••••";
 const SHORT_LIMIT = 28;
 
+export function isSecretEnvKey(key: string): boolean {
+  return SECRET_KEY.test(key);
+}
+
 // What a row shows for its value: secret-looking keys are masked, keeping a short
 // prefix such as `ghp_`; other values are cut to a short form.
 export function envValueDisplay(key: string, value: string): string {
   if (!value) return "";
-  if (SECRET_KEY.test(key)) {
+  if (isSecretEnvKey(key)) {
     const prefix = /^[A-Za-z]{2,5}[_-]/.exec(value)?.[0] ?? "";
     return `${prefix}${MASK}`;
   }

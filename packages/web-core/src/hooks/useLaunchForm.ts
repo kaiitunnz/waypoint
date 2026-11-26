@@ -36,6 +36,9 @@ export interface UseLaunchFormParams {
   token: string;
   // Must be stable.
   onAuthFailure: () => void;
+  // False skips the model list, for a view that does not show the form.
+  fetchModels: boolean;
+  launchableBackends: Backend[];
   defaultBackend: Backend;
   defaultCwd: string;
   launchTargetId: string | null;
@@ -86,6 +89,8 @@ export function useLaunchForm({
   host,
   token,
   onAuthFailure,
+  fetchModels,
+  launchableBackends,
   defaultBackend,
   defaultCwd,
   launchTargetId,
@@ -96,8 +101,8 @@ export function useLaunchForm({
   initialPreset,
 }: UseLaunchFormParams): LaunchForm {
   const context = useMemo<LaunchFormContext>(
-    () => ({ catalog, defaultLaunchEnvByBackend, accountProfilesByBackend }),
-    [catalog, defaultLaunchEnvByBackend, accountProfilesByBackend],
+    () => ({ catalog, launchableBackends, defaultBackend, defaultLaunchEnvByBackend, accountProfilesByBackend }),
+    [catalog, launchableBackends, defaultBackend, defaultLaunchEnvByBackend, accountProfilesByBackend],
   );
   const contextRef = useRef(context);
   useEffect(() => {
@@ -114,6 +119,7 @@ export function useLaunchForm({
     launchTargetId,
     state.accountProfileId || null,
     onAuthFailure,
+    fetchModels,
   );
 
   const patch = useCallback((next: Partial<LaunchFormState>) => setState((current) => ({ ...current, ...next })), []);

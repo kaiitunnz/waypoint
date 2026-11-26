@@ -20,6 +20,8 @@ import {
 const catalog = buildCatalog(launchCatalogDescriptors());
 const context: LaunchFormContext = {
   catalog,
+  launchableBackends: ["claude_code", "codex", "opencode"],
+  defaultBackend: "claude_code",
   defaultLaunchEnvByBackend: {
     claude_code: { CLAUDE_HOME: "/c" },
     codex: { CODEX_HOME: "/x" },
@@ -127,9 +129,9 @@ describe("clampLaunchForm", () => {
     expect(clampLaunchForm(state, context, models).effort).toBe("");
   });
 
-  it("leaves an agent the catalog does not know untouched", () => {
+  it("leaves an agent untouched until the catalog describes it", () => {
     const state = { ...initialLaunchForm("claude_code", "~", context), backend: "future", permissionMode: "odd" };
-    expect(clampLaunchForm(state, context, null)).toBe(state);
+    expect(clampLaunchForm(state, { ...context, launchableBackends: [] }, null)).toBe(state);
   });
 });
 
@@ -175,6 +177,22 @@ describe("launchCapabilities", () => {
     const oldContext = { ...context, catalog: buildCatalog(old) };
     const state = { ...initialLaunchForm("opencode", "~", oldContext), transport: "tmux" };
     expect(launchCapabilities(state, oldContext, null)).toMatchObject({ modelSupported: true, effortSupported: true });
+  });
+});
+
+describe("launchable agents", () => {
+  it("moves an agent the target cannot launch back to the default", () => {
+    const opencode = changeAgent(initialLaunchForm("claude_code", "/w", context), "opencode", context);
+    const target = { ...context, launchableBackends: ["claude_code", "codex"], defaultBackend: "codex" };
+    const clamped = clampLaunchForm({ ...opencode, title: "T" }, target, null);
+    expect(clamped).toMatchObject({ backend: "codex", transport: "codex_app_server", title: "T" });
+    expect(clamped.envEntries.map((entry) => entry.key)).toEqual(["CODEX_HOME"]);
+    expect(clampLaunchForm(clamped, target, null)).toBe(clamped);
+  });
+
+  it("waits while the launchable list is empty", () => {
+    const state = changeAgent(initialLaunchForm("claude_code", "/w", context), "opencode", context);
+    expect(clampLaunchForm(state, { ...context, launchableBackends: [] }, null).backend).toBe("opencode");
   });
 });
 

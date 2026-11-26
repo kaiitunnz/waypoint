@@ -132,6 +132,8 @@ export function LaunchPanel({
     host,
     token,
     onAuthFailure,
+    fetchModels: mode === "new" || mode === "schedule",
+    launchableBackends: supportedBackends,
     defaultBackend,
     defaultCwd,
     defaultLaunchEnvByBackend,

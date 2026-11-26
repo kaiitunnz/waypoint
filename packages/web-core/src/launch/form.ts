@@ -33,6 +33,9 @@ export interface LaunchFormState {
 // What the selected host or launch target offers.
 export interface LaunchFormContext {
   catalog: BackendCatalog;
+  // The agents the host or target can launch, and the one it starts on.
+  launchableBackends: Backend[];
+  defaultBackend: Backend;
   defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
   // Target-merged when a launch target is active.
   accountProfilesByBackend: Record<Backend, AccountProfile[]>;
@@ -165,6 +168,11 @@ export function clampLaunchForm(
   context: LaunchFormContext,
   modelInfo: BackendModelListResponse | null,
 ): LaunchFormState {
+  const { launchableBackends, defaultBackend } = context;
+  if (launchableBackends.length > 0 && !launchableBackends.includes(state.backend)) {
+    const next = launchableBackends.includes(defaultBackend) ? defaultBackend : launchableBackends[0];
+    return clampLaunchForm(changeAgent(state, next, context), context, null);
+  }
   // An agent the catalog does not describe yet has unknown options: keep its
   // values until the catalog arrives.
   if (!context.catalog.byId(state.backend)) return state;

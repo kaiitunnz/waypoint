@@ -2,8 +2,12 @@
 
 import { RefObject, useEffect } from "react";
 
+// Open popover panels, innermost last.
+const openPanels: RefObject<HTMLElement | null>[] = [];
+
 // Closes a popover on an outside mousedown or Escape. The panel is checked
-// separately from the wrapper because a portaled panel isn't its descendant.
+// separately from the wrapper because a portaled panel isn't its descendant, and
+// a popover opened from inside this one counts as inside it.
 export function usePopoverDismiss(
   open: boolean,
   setOpen: (open: boolean) => void,
@@ -16,11 +20,13 @@ export function usePopoverDismiss(
 ): void {
   useEffect(() => {
     if (!open) return;
+    openPanels.push(panelRef);
     function onDocClick(event: MouseEvent) {
       const target = event.target as Node | null;
       if (!target) return;
       if (wrapRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
+      const inner = openPanels.slice(openPanels.indexOf(panelRef));
+      if (inner.some((panel) => panel.current?.contains(target))) return;
       // Focus returns to the trigger only from inside the panel, so a click
       // on another control keeps its own focus.
       const restoreFocus = panelRef.current?.contains(document.activeElement);
@@ -36,6 +42,7 @@ export function usePopoverDismiss(
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
     return () => {
+      openPanels.splice(openPanels.indexOf(panelRef), 1);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };

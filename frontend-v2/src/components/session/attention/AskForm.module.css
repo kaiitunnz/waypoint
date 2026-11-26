@@ -1,0 +1,23 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.reattach {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.actions {
+  composes: actions from "../../../styles/attention.module.css";
+}
+
+.end {
+  composes: end from "../../../styles/attention.module.css";
+}

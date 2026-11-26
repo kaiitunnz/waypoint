@@ -18,6 +18,7 @@ import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/compose
 import { filesFromDataTransfer, pasteAttaches } from "@waypoint/web-core/fileDrop";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
+import { useTaskDismissal } from "@waypoint/web-core/hooks/useTaskDismissal";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
@@ -28,6 +29,7 @@ import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 import { useToast } from "@/components/ui/Toast";
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { AttachmentTray } from "./AttachmentTray";
 import styles from "./Composer.module.css";
@@ -39,6 +41,7 @@ import { SendControl, StopButton } from "./SendControl";
 import { SendError } from "./SendError";
 import { SessionFilesDialog } from "./SessionFilesDialog";
 import { CommandMenu, MentionMenu, suggestionId } from "./SuggestionMenu";
+import { TasksControl } from "./TasksControl";
 import { TuneControl } from "./TuneControl";
 import { UsageControl } from "./UsageControl";
 import { useComposerSend } from "./useComposerSend";
@@ -60,6 +63,7 @@ interface ComposerProps {
   filesOpen: boolean;
   onFilesOpenChange: (open: boolean) => void;
   onPending: OptimisticSends["add"];
+  onScheduled: () => void;
 }
 
 export function Composer({
@@ -74,6 +78,7 @@ export function Composer({
   filesOpen,
   onFilesOpenChange,
   onPending,
+  onScheduled,
 }: ComposerProps) {
   const { host, token } = useShellData();
   const { toast } = useToast();
@@ -159,12 +164,15 @@ export function Composer({
     resetCompletions,
     onPending,
     onOpenSession: openSession,
+    onScheduled,
   });
 
   const tuning = useComposerTuning({ host, token, session, catalog, onSession, onError: reportError });
 
   const todo = useMemo(() => currentTodoEvent(events, latestTodo), [events, latestTodo]);
   const tasks = useMemo(() => summarizeTodos(readTodoEntries(todo)), [todo]);
+  const reportFailure = useFailureToast();
+  const taskDock = useTaskDismissal({ host, token, sessionId, session, todo, onSession, onError: reportFailure });
 
   const focus = useSessionFocus({ host, token, sessionId, session, onSession });
   useComposerSizing(root, field, draft, pointer);
@@ -221,6 +229,7 @@ export function Composer({
         ]
       : []),
     { id: "schedule", label: "Schedule message", icon: "clock", disabled: session === null, run: () => setScheduleOpen(true) },
+    ...(tasks && taskDock.dismissed ? [{ id: "tasks", label: "Show tasks", icon: "check" as const, run: taskDock.show }] : []),
     ...(structured ? [{ id: "command", label: "Insert command", icon: "slash" as const, disabled, run: () => insert("/") }] : []),
     ...(attachmentsEnabled ? [{ id: "mention", label: "Insert mention", icon: "at" as const, disabled, run: () => insert("@") }] : []),
   ];
@@ -288,11 +297,7 @@ export function Composer({
       {focus.on ? (
         <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={tuneTrigger} />
       ) : null}
-      {tasks ? (
-        <span className={styles.tasks} aria-label={`Tasks: ${tasks.completed} of ${tasks.total} done`} role="img">
-          ☑ {tasks.completed}/{tasks.total}
-        </span>
-      ) : null}
+      {tasks && !taskDock.dismissed ? <TasksControl tasks={tasks} onDismiss={taskDock.dismiss} /> : null}
       <UsageControl session={session} catalog={catalog} onSession={onSession} />
     </div>
   );
@@ -391,6 +396,7 @@ export function Composer({
           initialText={draft}
           canQueue={!isExitedSession(session)}
           onClose={() => setScheduleOpen(false)}
+          onScheduled={onScheduled}
         />
       ) : null}
       {dragging && dropRoot

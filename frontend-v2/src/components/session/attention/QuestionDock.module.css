@@ -1,0 +1,129 @@
+/* In the capped stack its body gives up height first; past that the card scrolls. */
+.card {
+  composes: card from "../../../styles/attention.module.css";
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 10px 0 12px;
+  text-align: left;
+}
+
+/* Drawn inside, since the scrolling card clips what falls outside it. */
+.toggle:focus-visible {
+  outline-offset: -2px;
+}
+
+.lamp {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: var(--brass);
+  font-size: var(--f-meta);
+  font-weight: 700;
+  color: var(--on-action);
+}
+
+.prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--f-body);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+}
+
+.promptText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Open, the question wraps up to four lines, then folds. */
+.expanded .promptText {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.clamped {
+  max-height: calc(4 * 1lh);
+  overflow: hidden;
+}
+
+.more {
+  flex: none;
+  padding: 0 14px 6px 44px;
+}
+
+.expanded .toggle {
+  align-items: flex-start;
+  padding-top: 14px;
+  padding-bottom: 6px;
+}
+
+.count {
+  flex: none;
+  font-size: var(--f-meta);
+  color: var(--brass-text);
+}
+
+.chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 22px;
+  color: var(--muted);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(55vh, 520px);
+  padding: 0 14px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.reveal {
+  margin-left: auto;
+}
+
+.fallback {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toggle {
+    min-height: 44px;
+  }
+
+  .toggle:hover .chevron {
+    color: var(--text-strong);
+  }
+}

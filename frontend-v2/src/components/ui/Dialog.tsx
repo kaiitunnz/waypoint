@@ -15,6 +15,8 @@ interface DialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  // Shown beside the title.
+  count?: ReactNode;
   subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
@@ -29,6 +31,7 @@ function Surface({
   open,
   onClose,
   title,
+  count,
   subtitle,
   children,
   footer,
@@ -86,7 +89,10 @@ function Surface({
         ) : null}
         <div className={styles.head}>
           <div className={styles.heading}>
-            <h2 className={styles.title}>{title}</h2>
+            <h2 className={styles.title}>
+              {title}
+              {count !== undefined ? <span className={styles.count}>{count}</span> : null}
+            </h2>
             {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
           </div>
           <IconButton label="Close" size="sm" onClick={onClose}>

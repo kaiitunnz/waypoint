@@ -35,6 +35,7 @@ interface ScheduleMessageDialogProps {
   // False on a stopped session, which cannot queue an idle message.
   canQueue: boolean;
   onClose: () => void;
+  onScheduled: () => void;
 }
 
 export function ScheduleMessageDialog({
@@ -44,6 +45,7 @@ export function ScheduleMessageDialog({
   initialText,
   canQueue,
   onClose,
+  onScheduled,
 }: ScheduleMessageDialogProps) {
   const id = useId();
   const pointer = usePointerUI();
@@ -87,6 +89,7 @@ export function ScheduleMessageDialog({
     setSaving(true);
     try {
       await createMessageSchedule(host, token, sessionId, message, built.options);
+      onScheduled();
       toast({
         message:
           trigger === "idle"

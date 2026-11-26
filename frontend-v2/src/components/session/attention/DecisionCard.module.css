@@ -1,0 +1,52 @@
+/* In the capped stack its body gives up height first; past that the card scrolls. */
+.card {
+  composes: card from "../../../styles/attention.module.css";
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  padding: 10px 14px 12px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Centres the lamp on the title's first line. */
+.lamp {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--f-body);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.body {
+  min-width: 0;
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.actions {
+  composes: actions from "../../../styles/attention.module.css";
+}
+
+.end {
+  composes: end from "../../../styles/attention.module.css";
+}

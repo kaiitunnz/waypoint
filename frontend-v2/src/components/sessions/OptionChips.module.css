@@ -1,0 +1,38 @@
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A described option wraps, so a long one grows instead of overflowing. */
+.chips .described {
+  height: auto;
+  min-height: 44px;
+  max-width: 100%;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  white-space: normal;
+  text-align: left;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.description {
+  font-size: var(--f-meta);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chips .described {
+    min-height: 36px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}

@@ -1,0 +1,20 @@
+.markdown {
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.block {
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--sunken);
+}
+
+.path {
+  font-size: var(--f-code);
+}
+
+.note {
+  margin-top: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}

@@ -127,3 +127,26 @@ export function currentTodoEvent(events: readonly EventRecord[], loaded: EventRe
   if (!inWindow) return loaded;
   return loaded && loaded.sequence > inWindow.sequence ? loaded : inWindow;
 }
+
+// A task-progress dismissal the client sent but the server has not confirmed.
+export interface PendingTaskDismissal {
+  sessionId: string;
+  // Null shows the tasks again.
+  sequence: number | null;
+}
+
+// The dismissal lives on the session record, so it follows the session across
+// tabs and devices; an in-flight request wins until it settles, so a session
+// frame read before the write commits does not flash the tasks back.
+export function dismissedTaskSequence(
+  pending: PendingTaskDismissal | null,
+  sessionId: string,
+  recorded: number | null | undefined,
+): number | null {
+  return pending?.sessionId === sessionId ? pending.sequence : (recorded ?? null);
+}
+
+// Dismissed for this snapshot only: any newer todo shows the tasks again.
+export function isTaskProgressDismissed(current: EventRecord | null, dismissedSequence: number | null): boolean {
+  return current !== null && current.sequence === dismissedSequence;
+}

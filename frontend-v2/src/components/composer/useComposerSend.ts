@@ -49,6 +49,7 @@ interface Options {
   resetCompletions: () => void;
   onPending: OptimisticSends["add"];
   onOpenSession: (sessionId: string) => void;
+  onScheduled: () => void;
 }
 
 const IDLE_QUEUED: Record<Exclude<SendMode, "now">, string> = {
@@ -69,6 +70,7 @@ export function useComposerSend({
   resetCompletions,
   onPending,
   onOpenSession,
+  onScheduled,
 }: Options) {
   const { toast } = useToast();
   const reportFailure = useFailureToast();
@@ -145,6 +147,7 @@ export function useComposerSend({
         resetCompletions();
         attachments.release(payload.attachmentIds);
         toast({ message: IDLE_QUEUED[payload.mode] });
+        onScheduled();
       }
     } catch (error) {
       settle?.(false);

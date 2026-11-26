@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -14,12 +15,18 @@ import { createPortal } from "react-dom";
 
 import { cx } from "@/lib/cx";
 
+import { Icon } from "./Icon";
 import styles from "./Toast.module.css";
 
 export interface ToastOptions {
-  message: string;
+  message: ReactNode;
   tone?: "default" | "error";
-  action?: { label: string; onSelect: () => void };
+  // An action that returns false leaves its toast up.
+  action?: { label: string; onSelect: () => boolean | void };
+  // A toast with a key replaces the one showing under the same key.
+  key?: string;
+  // Milliseconds on screen; null keeps it until it is dismissed, as an error does by default.
+  duration?: number | null;
 }
 
 interface ToastEntry extends ToastOptions {
@@ -28,34 +35,85 @@ interface ToastEntry extends ToastOptions {
 
 interface ToastContextValue {
   toast: (options: ToastOptions) => void;
+  // Closes the toast showing under a key.
+  dismiss: (key: string) => void;
 }
 
 const TOAST_DURATION_MS = 4000;
+const MAX_TOASTS = 4;
 
-const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
+const ToastContext = createContext<ToastContextValue>({ toast: () => {}, dismiss: () => {} });
 
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
 }
 
+// The oldest timed toasts give way first, then the oldest sticky ones.
+function overflow(entries: ToastEntry[]): ToastEntry[] {
+  const kept = [...entries];
+  const dropped: ToastEntry[] = [];
+  while (kept.length > MAX_TOASTS) {
+    const timed = kept.findIndex((entry) => entry.duration !== null);
+    dropped.push(...kept.splice(timed === -1 ? 0 : timed, 1));
+  }
+  return dropped;
+}
+
+// A toast with a key replaces its key's; an unkeyed error replaces the same error.
+function replaces(entry: ToastEntry, options: ToastOptions): boolean {
+  if (options.key !== undefined) return entry.key === options.key;
+  return options.tone === "error" && entry.tone === "error" && entry.key === undefined && entry.message === options.message;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ToastEntry[]>([]);
   const next = useRef(0);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const dismiss = useCallback((id: number) => {
-    setEntries((current) => current.filter((entry) => entry.id !== id));
+  const clearTimer = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.current.delete(id);
   }, []);
+
+  const remove = useCallback(
+    (match: (entry: ToastEntry) => boolean) => {
+      setEntries((current) => {
+        const gone = current.filter(match);
+        if (gone.length === 0) return current;
+        gone.forEach((entry) => clearTimer(entry.id));
+        return current.filter((entry) => !gone.includes(entry));
+      });
+    },
+    [clearTimer],
+  );
+  const dismissId = useCallback((id: number) => remove((entry) => entry.id === id), [remove]);
+  const dismiss = useCallback((key: string) => remove((entry) => entry.key === key), [remove]);
 
   const toast = useCallback(
     (options: ToastOptions) => {
       const id = next.current++;
-      setEntries((current) => [...current.slice(-2), { ...options, id }]);
-      setTimeout(() => dismiss(id), TOAST_DURATION_MS);
+      // An error waits for the person to dismiss it.
+      const duration = options.duration !== undefined ? options.duration : options.tone === "error" ? null : TOAST_DURATION_MS;
+      setEntries((current) => {
+        const kept = [...current.filter((entry) => !replaces(entry, options)), { ...options, duration, id }];
+        const gone = [...current.filter((entry) => !kept.includes(entry)), ...overflow(kept)];
+        gone.forEach((entry) => clearTimer(entry.id));
+        return kept.filter((entry) => !gone.includes(entry));
+      });
+      if (duration !== null) {
+        timers.current.set(id, setTimeout(() => dismissId(id), duration));
+      }
     },
-    [dismiss],
+    [clearTimer, dismissId],
   );
 
-  const value = useMemo(() => ({ toast }), [toast]);
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((timer) => clearTimeout(timer));
+  }, []);
+
+  const value = useMemo(() => ({ toast, dismiss }), [toast, dismiss]);
   // The portal waits for the browser, so hydration never sees it.
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -77,13 +135,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       type="button"
                       className={styles.action}
                       onClick={() => {
-                        entry.action?.onSelect();
-                        dismiss(entry.id);
+                        if (entry.action?.onSelect() !== false) dismissId(entry.id);
                       }}
                     >
                       {entry.action.label}
                     </button>
                   ) : null}
+                  <button type="button" className={styles.close} aria-label="Dismiss" title="Dismiss" onClick={() => dismissId(entry.id)}>
+                    <Icon name="close" size={16} />
+                  </button>
                 </div>
               ))}
             </div>,

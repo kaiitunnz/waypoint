@@ -9,10 +9,3 @@
   font-weight: 600;
   color: var(--text-strong);
 }
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}

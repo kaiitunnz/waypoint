@@ -18,6 +18,7 @@ import {
   toggleOption,
   visibleOptions,
   type PromptPick,
+  isRecommendedLabel,
 } from "./pendingAskActions";
 import type {
   PendingApprovalAsk,
@@ -321,5 +322,13 @@ describe("answering and deciding", () => {
     } as unknown as PendingApprovalAsk;
     await decideAsk("h", "t", ask, "accept", undefined, { sleep: async () => {} });
     expect(api.approveSession).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("isRecommendedLabel", () => {
+  it("spots the trailing marker in any case", () => {
+    expect(isRecommendedLabel("A (Recommended)")).toBe(true);
+    expect(isRecommendedLabel("A (recommended) ")).toBe(true);
+    expect(isRecommendedLabel("Recommended A")).toBe(false);
   });
 });

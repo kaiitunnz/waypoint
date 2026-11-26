@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useRouter } from "next/navigation";
 
 import { dismissSideQuestion, forkSideQuestion } from "@waypoint/web-core/api";
+import { sideQuestionStripLabel, sortedSideQuestions } from "@waypoint/web-core/session/sideQuestions";
 import { type SideQuestion } from "@waypoint/web-core/types";
 
 // Single up-chevron; orientation handled with a CSS rotation, matching the
@@ -205,12 +206,10 @@ export function SideQuestionDock({
 
   if (questions.length === 0) return null;
 
-  const sorted = [...questions].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  const sorted = sortedSideQuestions(questions);
   const pendingCount = sorted.filter((s) => s.status === "pending").length;
   const count = questions.length;
-  const label = pendingCount > 0 ? "Asking…" : sorted[0].question;
+  const label = sideQuestionStripLabel(sorted);
 
   return (
     <div className={`sq-dock${pendingCount > 0 ? " active" : ""}${expanded ? " expanded" : ""}`}>

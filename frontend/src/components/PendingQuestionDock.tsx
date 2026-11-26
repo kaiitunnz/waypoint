@@ -3,7 +3,11 @@
 import { useEffect, useId, useState } from "react";
 
 import { AskQuestionForm } from "@/components/AskQuestion";
-import { parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
+import {
+  parseAskUserQuestion,
+  pendingQuestionPrompt,
+  pendingQuestionsCountLabel,
+} from "@waypoint/web-core/session/askQuestion";
 import type { PendingQuestion } from "@waypoint/web-core/types";
 
 // Single up-chevron; orientation handled with a CSS rotation, matching the
@@ -32,14 +36,6 @@ function formatTime(ts: string): string {
     minute: "2-digit",
     hour12: false,
   });
-}
-
-function promptFor(question: PendingQuestion): string {
-  return parseAskUserQuestion(question.event)?.[0]?.question ?? question.event.text;
-}
-
-function countLabel(count: number): string {
-  return count === 1 ? "Question waiting" : `${count} questions waiting`;
 }
 
 // Every open AskUserQuestion of the session, oldest first: a strip above the
@@ -107,7 +103,7 @@ export function PendingQuestionDock({
             </div>
             <div className="qd-dock-entries">
               {questions.map((question) => {
-                const prompt = promptFor(question);
+                const prompt = pendingQuestionPrompt(question);
                 if (question.tool_use_id !== activeId) {
                   return (
                     <button
@@ -176,15 +172,15 @@ export function PendingQuestionDock({
           className="qd-dock-toggle"
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
-          aria-label={`${countLabel(count)}: ${promptFor(oldest)}`}
+          aria-label={`${pendingQuestionsCountLabel(count)}: ${pendingQuestionPrompt(oldest)}`}
           onClick={() => setExpanded((value) => !value)}
         >
           <span className="qd-dock-glyph" aria-hidden>
             ?
           </span>
           <span className="qd-dock-label">
-            <span className="qd-dock-kicker">{countLabel(count)}</span>
-            <span className="qd-dock-prompt">{promptFor(oldest)}</span>
+            <span className="qd-dock-kicker">{pendingQuestionsCountLabel(count)}</span>
+            <span className="qd-dock-prompt">{pendingQuestionPrompt(oldest)}</span>
           </span>
           <span className="qd-dock-count" aria-hidden>
             {count}
@@ -195,7 +191,7 @@ export function PendingQuestionDock({
         </button>
       </div>
       <span className="sr-only" aria-live="polite">
-        {countLabel(count)}
+        {pendingQuestionsCountLabel(count)}
       </span>
     </div>
   );

@@ -1,0 +1,31 @@
+.panel {
+  padding: 10px 14px 6px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin-bottom: 4px;
+}
+
+.title {
+  flex: 1 1 auto;
+  font-size: var(--f-head);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.count {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 4px;
+}

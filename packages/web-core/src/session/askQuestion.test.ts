@@ -16,6 +16,13 @@ import {
   toggleLabel,
   type AskDraft,
   type AskUserQuestion,
+  askFormView,
+  clearAskAnswers,
+  pendingQuestionPrompt,
+  pendingQuestionsCountLabel,
+  setAskNote,
+  setAskNoteOpen,
+  stepAskQuestion,
 } from "./askQuestion";
 
 const askEvent = (questions: unknown, toolName = "AskUserQuestion") =>
@@ -311,5 +318,47 @@ describe("askCardState", () => {
   it("is not answered once a snapshot that covers it no longer lists it", () => {
     const snapshot = { as_of_sequence: 10, revision: 1, questions: [] } as unknown as PendingQuestionsSnapshot;
     expect(state([ask], snapshot)).toMatchObject({ waiting: false, outcome: "not answered" });
+  });
+});
+
+describe("answer form helpers", () => {
+  const questions = [
+    { question: "Which?", options: [{ label: "A (Recommended)" }, { label: "B" }] },
+    { question: "Why?", options: [] },
+  ];
+
+  it("reads the form's page, fill and free-text state", () => {
+    let draft = { ...EMPTY_ASK_DRAFT, activeIndex: 5 };
+    let view = askFormView(questions, draft);
+    expect(view.index).toBe(1);
+    expect(view.freeText).toBe(true);
+    expect(view.paginated).toBe(true);
+    expect(view.hasAnswer).toBe(false);
+    draft = setAskNote(draft, 1, "  because ");
+    view = askFormView(questions, draft);
+    expect(view.filled).toEqual([false, true]);
+    expect(view.hasAnswer).toBe(true);
+  });
+
+  it("steps within the questions and clears answers but keeps the page", () => {
+    let draft = stepAskQuestion(EMPTY_ASK_DRAFT, "next", 2);
+    expect(draft.activeIndex).toBe(1);
+    expect(stepAskQuestion(draft, "next", 2).activeIndex).toBe(1);
+    expect(stepAskQuestion(draft, "prev", 2).activeIndex).toBe(0);
+    draft = setAskNoteOpen(setAskNote(draft, 0, "n"), 0, true);
+    const cleared = clearAskAnswers({ ...draft, picked: { 0: ["B"] } });
+    expect(cleared).toEqual({ ...draft, picked: {}, notes: {} });
+  });
+
+  it("heads a waiting question by the prompt on its page", () => {
+    const event = askEvent([
+      { question: "First?", options: [] },
+      { question: "Second?", options: [] },
+    ]);
+    expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never)).toBe("First?");
+    expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never, 1)).toBe("Second?");
+    expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never, 5)).toBe("Second?");
+    expect(pendingQuestionsCountLabel(1)).toBe("Question waiting");
+    expect(pendingQuestionsCountLabel(3)).toBe("3 questions waiting");
   });
 });

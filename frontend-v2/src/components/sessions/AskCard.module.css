@@ -1,9 +1,6 @@
 .card {
-  min-width: 0;
+  composes: card from "../../styles/attention.module.css";
   padding: 10px 14px 12px;
-  border: 1px solid var(--attention-line);
-  border-radius: var(--r-card);
-  background: var(--attention);
 }
 
 .source {

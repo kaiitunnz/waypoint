@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 
-import { stripRecommendedSuffix, visibleOptions, type PromptPick } from "@waypoint/web-core/pendingAskActions";
+import { visibleOptions, type PromptPick } from "@waypoint/web-core/pendingAskActions";
 import type { PendingAskPrompt } from "@waypoint/web-core/types";
 
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Chip } from "@/components/ui/Chip";
 import { TextInput } from "@/components/ui/Field";
 
+import { OptionChips } from "./OptionChips";
 import styles from "./PromptField.module.css";
 
 interface PromptFieldProps {
@@ -42,19 +43,7 @@ export function PromptField({
   return (
     <div className={styles.field}>
       {showQuestion ? <p className={styles.question}>{prompt.question}</p> : null}
-      <div className={styles.chips} role="group" aria-label={prompt.multi_select ? "Choose any" : "Options"}>
-        {shown.map((option) => (
-          <Chip
-            key={option.label}
-            recommended={option.recommended}
-            selected={pick.labels.includes(option.label)}
-            disabled={disabled}
-            title={option.description ?? undefined}
-            onClick={() => onOption(option.label)}
-          >
-            {stripRecommendedSuffix(option.label)}
-          </Chip>
-        ))}
+      <OptionChips options={shown} selected={pick.labels} multi={prompt.multi_select} disabled={disabled} onOption={onOption}>
         {limited ? (
           <ActionChip icon="chevron-down" onClick={() => setExpanded(true)}>
             More
@@ -65,7 +54,7 @@ export function PromptField({
             Other…
           </Chip>
         )}
-      </div>
+      </OptionChips>
       {otherOpen ? (
         <TextInput
           autoFocus

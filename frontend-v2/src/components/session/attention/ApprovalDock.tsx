@@ -10,7 +10,7 @@ import {
   approvalId,
   approvalPrompt,
 } from "@waypoint/web-core/session/approvals";
-import { pageOf, stepPage } from "@waypoint/web-core/session/paging";
+import { pageOfKey, stepPage } from "@waypoint/web-core/session/paging";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { useSessionContext } from "../SessionContext";
@@ -24,10 +24,13 @@ interface ApprovalDockProps {
   supportsNote: boolean;
 }
 
+// The pager follows the opened approval, not its index, as earlier ones resolve.
+const keyOf = (approval: EventRecord) => approvalId(approval) ?? String(approval.sequence);
+
 export function ApprovalDock({ approvals, decisions, supportsNote }: ApprovalDockProps) {
   const { host, token, sessionId } = useSessionContext();
-  const [pageIndex, setPageIndex] = useState(0);
-  const { count, page, current } = pageOf(approvals, pageIndex);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const { count, page, current } = pageOfKey(approvals, openKey, keyOf);
   if (!current) return null;
   const body = approvalBody(current);
   const id = approvalId(current);
@@ -35,10 +38,20 @@ export function ApprovalDock({ approvals, decisions, supportsNote }: ApprovalDoc
   return (
     <DecisionCard
       // Each approval starts unlocked and without a note.
-      key={id ?? current.sequence}
+      key={keyOf(current)}
       title={approvalPrompt(body) ?? "Approve this request"}
       pager={
-        count > 1 ? <Pager page={page} count={count} noun="approval" onStep={(direction) => setPageIndex(stepPage(page, direction, count))} /> : null
+        count > 1
+          ? (locked) => (
+              <Pager
+                page={page}
+                count={count}
+                noun="approval"
+                disabled={locked}
+                onStep={(direction) => setOpenKey(keyOf(approvals[stepPage(page, direction, count)]))}
+              />
+            )
+          : undefined
       }
       copyText={approvalCopyText(body, current.text)}
       copyLabel="Copy request"

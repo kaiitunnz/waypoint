@@ -350,9 +350,14 @@ describe("answer form helpers", () => {
     expect(cleared).toEqual({ ...draft, picked: {}, notes: {} });
   });
 
-  it("heads a waiting question by its first prompt", () => {
-    const event = askEvent([{ question: "First?", options: [] }]);
+  it("heads a waiting question by the prompt on its page", () => {
+    const event = askEvent([
+      { question: "First?", options: [] },
+      { question: "Second?", options: [] },
+    ]);
     expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never)).toBe("First?");
+    expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never, 1)).toBe("Second?");
+    expect(pendingQuestionPrompt({ tool_use_id: "t", event } as never, 5)).toBe("Second?");
     expect(pendingQuestionsCountLabel(1)).toBe("Question waiting");
     expect(pendingQuestionsCountLabel(3)).toBe("3 questions waiting");
   });

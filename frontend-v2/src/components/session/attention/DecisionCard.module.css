@@ -1,8 +1,13 @@
+/* In the capped stack its body gives up height first; past that the card scrolls. */
 .card {
   composes: card from "../../../styles/attention.module.css";
   display: flex;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px 14px 12px;
 }
 

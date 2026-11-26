@@ -14,3 +14,9 @@ export function pageOf<T>(items: readonly T[], index: number): Page<T> {
 export function stepPage(index: number, direction: "prev" | "next", count: number): number {
   return direction === "prev" ? Math.max(0, index - 1) : Math.min(count - 1, index + 1);
 }
+
+// The page of the item under `key`, else the first, so the view stays on the item the
+// human opened as others leave the list.
+export function pageOfKey<T>(items: readonly T[], key: string | null, keyOf: (item: T) => string): Page<T> {
+  return pageOf(items, Math.max(0, items.findIndex((item) => keyOf(item) === key)));
+}

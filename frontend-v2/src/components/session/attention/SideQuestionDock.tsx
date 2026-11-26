@@ -18,10 +18,12 @@ import { Strip } from "./Strip";
 interface SideQuestionDockProps {
   questions: Iterable<SideQuestion>;
   open: boolean;
+  // False keeps the focus where it is, for a panel that opened by itself.
+  autoFocus: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function SideQuestionDock({ questions, open, onOpenChange }: SideQuestionDockProps) {
+export function SideQuestionDock({ questions, open, autoFocus, onOpenChange }: SideQuestionDockProps) {
   const { host, token, sessionId } = useSessionContext();
   const router = useRouter();
   const fail = useFailureToast();
@@ -75,6 +77,7 @@ export function SideQuestionDock({ questions, open, onOpenChange }: SideQuestion
         triggerRef={trigger}
         title={title}
         count={count}
+        autoFocus={autoFocus}
         actions={
           count >= 2 ? (
             <Button variant="text" size="sm" onClick={() => sorted.forEach((aside) => void dismiss(aside.id))}>

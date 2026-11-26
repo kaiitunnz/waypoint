@@ -8,6 +8,7 @@ import {
   hasTerminalPane,
   liveTerminal,
   supportsAttachments,
+  supportsStructuredApproval,
   useBackendCatalog,
 } from "@waypoint/web-core/backends";
 import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionState";
@@ -15,7 +16,7 @@ import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends"
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
-import { pendingPlanApproval } from "@waypoint/web-core/session/approvals";
+import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
 import { composerAvailability } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
@@ -122,12 +123,6 @@ export function SessionScreen({ id }: { id: string }) {
   const shown = useDeferredValue(live);
   const rendered = shown.events;
   const optimistic = useOptimisticSends(rendered);
-  const pendingPlan = useMemo(() => pendingPlanApproval(session, catalog, events), [session, catalog, events]);
-  const dockedPlanSequence = pendingPlan?.event.sequence ?? null;
-  const transcript = useMemo(
-    () => deriveTranscript(rendered, density, dockedPlanSequence),
-    [rendered, density, dockedPlanSequence],
-  );
   const cwd = session?.cwd ?? "";
 
   const terminalOnly = session ? liveTerminal(session.transport, catalog) : false;
@@ -137,6 +132,19 @@ export function SessionScreen({ id }: { id: string }) {
   const full = density === "full";
   // A terminal-only transport takes its input in the pane.
   const composing = !loadFailed && !terminalOnly;
+
+  const approvals = useMemo(
+    () => (session && supportsStructuredApproval(session.transport, catalog) ? findPendingApprovals(events) : []),
+    [session, catalog, events],
+  );
+  const pendingPlan = useMemo(() => pendingPlanApproval(session, catalog, events), [session, catalog, events]);
+  // The dock shows the plan only while no approval waits; until then it stays in the transcript.
+  const dockedPlan = composing && approvals.length === 0 ? pendingPlan : null;
+  const dockedPlanSequence = dockedPlan?.event.sequence ?? null;
+  const transcript = useMemo(
+    () => deriveTranscript(rendered, density, dockedPlanSequence),
+    [rendered, density, dockedPlanSequence],
+  );
   const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
   const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
@@ -265,8 +273,8 @@ export function SessionScreen({ id }: { id: string }) {
                   <AttentionStack
                     session={session}
                     catalog={catalog}
-                    events={events}
-                    plan={pendingPlan?.plan ?? null}
+                    approvals={approvals}
+                    plan={dockedPlan?.plan ?? null}
                     pendingQuestions={pendingQuestions}
                     heldMessages={stream.heldMessages}
                     scheduled={scheduled}

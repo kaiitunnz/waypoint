@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pageOf, stepPage } from "./paging";
+import { pageOf, pageOfKey, stepPage } from "./paging";
 
 describe("pageOf", () => {
   const approvals = ["a", "b", "c"];
@@ -31,5 +31,20 @@ describe("stepPage", () => {
   it("steps from the raw index, so a stale index past the end only moves down by one", () => {
     expect(stepPage(5, "prev", 2)).toBe(4);
     expect(stepPage(5, "next", 2)).toBe(1);
+  });
+});
+
+describe("pageOfKey", () => {
+  const keyOf = (item: string) => item;
+
+  it("stays on the opened item when an earlier one leaves", () => {
+    expect(pageOfKey(["a", "b", "c"], "b", keyOf)).toEqual({ count: 3, page: 1, current: "b" });
+    expect(pageOfKey(["b", "c"], "b", keyOf)).toEqual({ count: 2, page: 0, current: "b" });
+  });
+
+  it("falls back to the first item when the opened one is gone or none is", () => {
+    expect(pageOfKey(["a", "c"], "b", keyOf).current).toBe("a");
+    expect(pageOfKey(["a", "c"], null, keyOf).current).toBe("a");
+    expect(pageOfKey([], "b", keyOf)).toEqual({ count: 0, page: 0, current: null });
   });
 });

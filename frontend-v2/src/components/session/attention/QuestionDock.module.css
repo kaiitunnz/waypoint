@@ -1,5 +1,12 @@
+/* In the capped stack its body gives up height first; past that the card scrolls. */
 .card {
   composes: card from "../../../styles/attention.module.css";
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .toggle {
@@ -28,18 +35,33 @@
 .prompt {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
   font-size: var(--f-body);
   font-weight: 600;
+  line-height: 22px;
   color: var(--text-strong);
+}
+
+.promptText {
+  display: block;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Open, the question wraps: its options follow, and a cut question would hide what they answer. */
-.expanded .prompt {
+/* Open, the question wraps up to four lines, then folds. */
+.expanded .promptText {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.clamped {
+  max-height: calc(4 * 1lh);
+  overflow: hidden;
+}
+
+.more {
+  flex: none;
+  padding: 0 14px 6px 44px;
 }
 
 .expanded .toggle {

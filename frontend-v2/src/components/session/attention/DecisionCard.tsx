@@ -17,7 +17,8 @@ import styles from "./DecisionCard.module.css";
 
 interface DecisionCardProps<Id extends string> {
   title: ReactNode;
-  pager?: ReactNode;
+  // Locked while a decision is in flight or just sent, so it cannot go out twice.
+  pager?: (locked: boolean) => ReactNode;
   copyText: string;
   copyLabel: string;
   actions: ApprovalAction<Id>[];
@@ -65,7 +66,7 @@ export function DecisionCard<Id extends string>({
           <StatusLamp state="needs" size="sm" flat />
         </span>
         <h3 className={styles.title}>{title}</h3>
-        {pager}
+        {pager?.(busy)}
         <CopyButton text={copyText} label={copyLabel} />
       </div>
       <div className={styles.body}>{children}</div>

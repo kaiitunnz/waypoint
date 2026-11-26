@@ -18,6 +18,8 @@ export function QueueDock({ items, focus, ...handlers }: QueueDockProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const shown = queueStripItem(items);
+  // Closed with the last message, so the next one does not open it.
+  if (!shown && open) setOpen(false);
   if (!shown) return null;
   const view = queueItemView(shown, { focus });
   const count = items.length;

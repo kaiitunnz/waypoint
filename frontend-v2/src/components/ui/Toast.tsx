@@ -49,13 +49,14 @@ export function useToast(): ToastContextValue {
 }
 
 // The oldest timed toasts give way first, then the oldest sticky ones.
-function capped(entries: ToastEntry[]): ToastEntry[] {
-  const next = [...entries];
-  while (next.length > MAX_TOASTS) {
-    const timed = next.findIndex((entry) => entry.duration !== null);
-    next.splice(timed === -1 ? 0 : timed, 1);
+function overflow(entries: ToastEntry[]): ToastEntry[] {
+  const kept = [...entries];
+  const dropped: ToastEntry[] = [];
+  while (kept.length > MAX_TOASTS) {
+    const timed = kept.findIndex((entry) => entry.duration !== null);
+    dropped.push(...kept.splice(timed === -1 ? 0 : timed, 1));
   }
-  return next;
+  return dropped;
 }
 
 // A toast with a key replaces its key's; an unkeyed error replaces the same error.
@@ -95,9 +96,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       // An error waits for the person to dismiss it.
       const duration = options.duration !== undefined ? options.duration : options.tone === "error" ? null : TOAST_DURATION_MS;
       setEntries((current) => {
-        const replaced = current.filter((entry) => replaces(entry, options));
-        replaced.forEach((entry) => clearTimer(entry.id));
-        return capped([...current.filter((entry) => !replaced.includes(entry)), { ...options, duration, id }]);
+        const kept = [...current.filter((entry) => !replaces(entry, options)), { ...options, duration, id }];
+        const gone = [...current.filter((entry) => !kept.includes(entry)), ...overflow(kept)];
+        gone.forEach((entry) => clearTimer(entry.id));
+        return kept.filter((entry) => !gone.includes(entry));
       });
       if (duration !== null) {
         timers.current.set(id, setTimeout(() => dismissId(id), duration));

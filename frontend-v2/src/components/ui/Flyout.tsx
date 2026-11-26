@@ -82,7 +82,7 @@ export function Flyout({
       )}
     </Popover>
   ) : (
-    <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle} flush={flush}>
+    <Sheet open={open} onClose={onClose} title={title} count={count} subtitle={subtitle} flush={flush}>
       {actions ? <div className={styles.actions}>{actions}</div> : null}
       {children}
     </Sheet>

@@ -331,8 +331,10 @@ export function askFormView(questions: AskUserQuestion[], draft: AskDraft): AskF
   };
 }
 
-export function pendingQuestionPrompt(question: PendingQuestion): string {
-  return parseAskUserQuestion(question.event)?.[0]?.question ?? question.event.text;
+// The question on `page` of a multi-question ask.
+export function pendingQuestionPrompt(question: PendingQuestion, page = 0): string {
+  const questions = parseAskUserQuestion(question.event);
+  return questions?.[Math.min(page, questions.length - 1)]?.question ?? question.event.text;
 }
 
 export function pendingQuestionsCountLabel(count: number): string {

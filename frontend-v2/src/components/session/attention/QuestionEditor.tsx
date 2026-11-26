@@ -24,6 +24,8 @@ import styles from "./QuestionEditor.module.css";
 
 interface QuestionEditorProps {
   questions: AskUserQuestion[];
+  // The card's heading shows the current question.
+  headed: boolean;
   draft: AskDraft;
   onDraft: (update: (draft: AskDraft) => AskDraft) => void;
   disabled: boolean;
@@ -33,7 +35,7 @@ interface QuestionEditorProps {
 }
 
 // "Other…" opens a note kept beside the picked options, as Claude Code sends it.
-export function QuestionEditor({ questions, draft, onDraft, disabled, locked, onSubmit }: QuestionEditorProps) {
+export function QuestionEditor({ questions, headed, draft, onDraft, disabled, locked, onSubmit }: QuestionEditorProps) {
   const { index, total, entry, paginated, filled, freeText } = askFormView(questions, draft);
   if (!entry) return null;
   const noteOpen = freeText || Boolean(draft.notesOpen[index]);
@@ -61,7 +63,7 @@ export function QuestionEditor({ questions, draft, onDraft, disabled, locked, on
         </div>
       ) : null}
       {/* A lone question is the card's headline already. */}
-      {paginated ? (
+      {paginated && !headed ? (
         <p className={styles.question}>
           {entry.header ? <span className={styles.header}>{entry.header}</span> : null}
           {entry.question}

@@ -3,14 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cancelHeldMessages, releaseHeldMessages } from "@waypoint/web-core/api";
-import {
-  approvalDecisionsFor,
-  supportsApprovalNote,
-  supportsStructuredApproval,
-  type BackendCatalog,
-} from "@waypoint/web-core/backends";
+import { approvalDecisionsFor, supportsApprovalNote, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { PlanViewModel } from "@waypoint/web-core/events";
-import { findPendingApprovals } from "@waypoint/web-core/session/approvals";
 import { buildMessageQueue, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
 import type { SideQuestionState } from "@waypoint/web-core/session/sideQuestions";
 import type {
@@ -34,7 +28,8 @@ import { SideQuestionDock } from "./SideQuestionDock";
 interface AttentionStackProps {
   session: SessionRecord;
   catalog: BackendCatalog;
-  events: EventRecord[];
+  approvals: EventRecord[];
+  // Shown only while no approval waits.
   plan: PlanViewModel | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
   heldMessages: HeldMessage[];
@@ -51,7 +46,7 @@ interface AttentionStackProps {
 export function AttentionStack({
   session,
   catalog,
-  events,
+  approvals,
   plan,
   pendingQuestions,
   heldMessages,
@@ -65,18 +60,14 @@ export function AttentionStack({
   const report = useFailureToast();
   const root = useRef<HTMLDivElement>(null);
   // Held here, where it survives the side-question strip mounting with its first aside:
-  // a live aside's arrival opens the panel.
-  const [asidesOpen, setAsidesOpen] = useState(false);
+  // a live aside's arrival opens the panel, leaving the focus where the human is typing.
+  const [asides, setAsides] = useState<"closed" | "arrived" | "opened">("closed");
   const [seenArrivals, setSeenArrivals] = useState(sideQuestionArrivals);
   if (sideQuestionArrivals !== seenArrivals) {
     setSeenArrivals(sideQuestionArrivals);
-    if (sideQuestionArrivals > seenArrivals) setAsidesOpen(true);
+    if (sideQuestionArrivals > seenArrivals && asides === "closed") setAsides("arrived");
   }
-
-  const approvals = useMemo(
-    () => (supportsStructuredApproval(session.transport, catalog) ? findPendingApprovals(events) : []),
-    [session.transport, catalog, events],
-  );
+  if (sideQuestions.items.size === 0 && asides !== "closed") setAsides("closed");
   const questions = pendingQuestions?.questions ?? [];
   const queue = useMemo(() => buildMessageQueue(heldMessages, scheduled.messages), [heldMessages, scheduled.messages]);
 
@@ -100,12 +91,15 @@ export function AttentionStack({
       report(error, fallback);
     }
   };
-  const onAction = (item: QueueItem, action: QueueAction) => {
-    if (item.kind === "scheduled") return scheduled.cancel(item.id);
+  const onAction = async (item: QueueItem, action: QueueAction) => {
+    if (item.kind === "scheduled") {
+      // Delivering a schedule on request has no endpoint, so queueItemView does not offer it.
+      if (action === "cancel") await scheduled.cancel(item.id);
+      return;
+    }
     const target = { heldId: item.id };
-    return action === "release"
-      ? run(() => releaseHeldMessages(host, token, target), "Could not release the message")
-      : run(() => cancelHeldMessages(host, token, target), "Could not cancel the message");
+    if (action === "release") await run(() => releaseHeldMessages(host, token, target), "Could not release the message");
+    if (action === "cancel") await run(() => cancelHeldMessages(host, token, target), "Could not cancel the message");
   };
 
   const decision =
@@ -134,7 +128,12 @@ export function AttentionStack({
             onReleaseAll={() => run(() => releaseHeldMessages(host, token, { sessionId }), "Could not release the messages")}
             onCancelAll={() => run(() => cancelHeldMessages(host, token, { sessionId }), "Could not cancel the messages")}
           />
-          <SideQuestionDock questions={sideQuestions.items.values()} open={asidesOpen} onOpenChange={setAsidesOpen} />
+          <SideQuestionDock
+            questions={sideQuestions.items.values()}
+            open={asides !== "closed"}
+            autoFocus={asides === "opened"}
+            onOpenChange={(open) => setAsides(open ? "opened" : "closed")}
+          />
         </div>
       ) : null}
     </div>

@@ -23,9 +23,11 @@ import { QuestionEditor } from "./QuestionEditor";
 interface AskFormProps {
   event: EventRecord;
   questions: AskUserQuestion[];
+  // The card's heading shows the current question.
+  headed?: boolean;
 }
 
-export function AskForm({ event, questions }: AskFormProps) {
+export function AskForm({ event, questions, headed = false }: AskFormProps) {
   const controller = useAskController();
   const toolUseId = askToolUseId(event);
   if (!toolUseId) return null;
@@ -58,6 +60,7 @@ export function AskForm({ event, questions }: AskFormProps) {
     <div className={styles.form}>
       <QuestionEditor
         questions={questions}
+        headed={headed}
         draft={draft}
         onDraft={(update) => controller.updateDraft(toolUseId, update)}
         disabled={!actionable || busy}

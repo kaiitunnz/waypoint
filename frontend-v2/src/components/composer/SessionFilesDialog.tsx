@@ -14,6 +14,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
+import { useToast } from "@/components/ui/Toast";
 
 import styles from "./SessionFilesDialog.module.css";
 
@@ -50,6 +51,7 @@ export function SessionFilesDialog({
     open,
   );
 
+  const { toast } = useToast();
   const content = useRef<HTMLDivElement>(null);
   // A control about to go or be disabled hands its focus to a row's link, or to
   // the list when no row is left.
@@ -57,8 +59,10 @@ export function SessionFilesDialog({
     (row?.querySelector("a") ?? content.current)?.focus();
   }
 
-  async function removeFile(id: string) {
+  async function removeFile(id: string, filename: string) {
     if (await remove(id)) onDeleted([id]);
+    // The hook reloads the list, which brings the row back.
+    else toast({ message: `Failed to delete ${filename}`, tone: "error" });
   }
   async function removeAll() {
     const ids = (items ?? []).map((file) => file.id);
@@ -138,7 +142,7 @@ export function SessionFilesDialog({
                     onClick={(event) => {
                       const row = event.currentTarget.closest("li");
                       keepFocus(row?.nextElementSibling ?? row?.previousElementSibling);
-                      void removeFile(file.id);
+                      void removeFile(file.id, file.filename);
                     }}
                   >
                     <Icon name="trash" size={18} />

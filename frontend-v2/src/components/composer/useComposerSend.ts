@@ -145,8 +145,13 @@ export function useComposerSend({
       }
       const message = error instanceof Error ? error.message : "failed to send input";
       if (!mounted.current) {
-        // The person has left this session: name it.
-        toast({ message: `Not sent to ${session?.title ?? "the session"}: ${message}`, tone: "error" });
+        // The person has left this session: name where the message was going.
+        const opened = error instanceof FollowUpError ? error.sessionId : undefined;
+        toast({
+          message: `Not sent to ${opened ? "the new session" : (session?.title ?? "the session")}: ${message}`,
+          tone: "error",
+          action: opened ? { label: "Open session", onSelect: () => onOpenSession(opened) } : undefined,
+        });
         return;
       }
       const current = latest.current.draft;

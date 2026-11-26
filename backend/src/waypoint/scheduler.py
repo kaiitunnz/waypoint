@@ -500,7 +500,15 @@ class Scheduler:
                 storage.arm_wait_for_oldest_idle_batch(record.session_id)
         return updated, held
 
-    def _still_pending(self, message_id: str) -> bool:
+    def _launch_still_pending(self, schedule_id: str) -> bool:
+        """Whether a one-time launch listed at the start of a pass is still due:
+        not cancelled or dismissed since, and not already run by the loop."""
+        if schedule_id in self._attempted:
+            return False
+        current = self._runtime.storage.get_schedule(schedule_id)
+        return current is not None and current.status == ScheduleStatus.PENDING
+
+    def _message_still_pending(self, message_id: str) -> bool:
         """Whether a record listed at the start of a pass is still due to fire:
         not resolved since, not being sent, and not already run by the loop."""
         if message_id in self._sending or message_id in self._attempted:
@@ -644,7 +652,7 @@ class Scheduler:
                         self._fire_recurring,
                         "schedule_id",
                     )
-                elif schedule.id not in self._attempted:
+                elif self._launch_still_pending(schedule.id):
                     self._attempted.add(schedule.id)
                     await self._fire(schedule)
         pending_msgs = self._runtime.storage.list_scheduled_messages(
@@ -656,7 +664,7 @@ class Scheduler:
             if msg.trigger == ScheduledMessageTrigger.IDLE:
                 continue
             with self._isolated(msg_id=msg.id):
-                if msg.scheduled_at > now or not self._still_pending(msg.id):
+                if msg.scheduled_at > now or not self._message_still_pending(msg.id):
                     continue
                 with self._claim(msg.id):
                     if msg.cron is not None:
@@ -717,7 +725,7 @@ class Scheduler:
         fired = False
         for record in batch:
             with self._isolated(msg_id=record.id):
-                if not self._still_pending(record.id):
+                if not self._message_still_pending(record.id):
                     continue
                 fired = True
                 self._attempted.add(record.id)

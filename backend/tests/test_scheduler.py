@@ -736,6 +736,32 @@ async def test_one_launch_failing_does_not_stop_the_pass(tmp_path, monkeypatch) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("dismissed", [False, True], ids=["cancelled", "dismissed"])
+async def test_a_launch_cancelled_before_its_turn_does_not_launch(
+    tmp_path, monkeypatch, dismissed
+) -> None:
+    runtime = make_runtime(tmp_path)
+    earlier = _due_launch(runtime, seconds_ago=2, delay_seconds=60)
+    later = _due_launch(runtime, delay_seconds=60)
+    launched: list[str] = []
+
+    async def launch(schedule) -> str:
+        launched.append(schedule.id)
+        runtime.scheduler.cancel_schedule(later.id)
+        if dismissed:
+            runtime.scheduler.cancel_schedule(later.id)
+        return "codex-new"
+
+    monkeypatch.setattr(runtime.scheduler, "_launch_session", launch)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert launched == [earlier.id]
+    left = runtime.storage.get_schedule(later.id)
+    assert (left and left.status) == (None if dismissed else ScheduleStatus.CANCELLED)
+
+
+@pytest.mark.asyncio
 async def test_the_loop_survives_a_failed_pass(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     passed_again = asyncio.Event()

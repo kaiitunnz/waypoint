@@ -235,12 +235,12 @@ Agents satisfy the contract by mixing in `DefaultLaunchContract` and
 overriding the methods their CLI actually supports. The defaults are correct
 for an agent with no pane-wrapper launch knobs and no resumable thread: no
 extra flags, no pregenerated id, verbatim resume args, no on-disk thread to
-find. OpenCode overrides only `launch_flags` and `required_launch_flags`. The generic transport calls
-`registry.get(session.backend)` and dispatches through these methods, so
-`tmux/plugin.py` holds no agent literals: it decides whether to spawn the
-post-launch id watcher by asking `pregenerate_thread_id() is None`, and
-derives which control values to persist on the `SessionRecord` from whether
-`launch_flags` actually pins them.
+find. OpenCode overrides only `launch_flags` and `required_launch_flags`. The
+generic transport calls `registry.get(session.backend)` and dispatches through
+these methods, so `tmux/plugin.py` holds no agent literals: it decides whether
+to spawn the post-launch id watcher by asking `pregenerate_thread_id() is
+None`, and derives which control values to persist on the `SessionRecord` from
+whether `launch_flags` actually pins them.
 
 ### Transport view
 
@@ -801,8 +801,9 @@ password Waypoint generates. A 1.x server is refused with an upgrade message.
   When a subagent's rules cannot be written, the session gets a note and the
   mode change stands.
 - "Approve for session" adds allow rules, which a mode change, restore or fork
-  resets; in plan mode they reach the subagents, not the plan agent. OpenCode's
-  own `always` reply allows for the whole project and is not used.
+  resets; in plan mode a subagent's approval reaches the subagents, not the
+  plan agent. OpenCode's own `always` reply allows for the whole project and is
+  not used.
 - Model, effort (a model variant) and agent are selected on the session when
   they change. An effort the model has no variant for is refused, or dropped
   with a note when a session is launched with it.

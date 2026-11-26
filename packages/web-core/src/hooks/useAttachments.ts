@@ -84,7 +84,8 @@ export function useAttachments({
         if (sendingRef.current.has(id)) continue;
         void deleteAttachment(h, t, s, id, { keepalive: true }).catch(() => {});
       }
-      orphanRef.current = [];
+      // A held file stays tracked: the page may come back and its send fail.
+      orphanRef.current = orphanRef.current.filter((id) => sendingRef.current.has(id));
     };
     goneRef.current = false;
     window.addEventListener("pagehide", flush);

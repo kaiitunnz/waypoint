@@ -218,6 +218,7 @@ interface ComposerDialogsProps {
   onFilesOpenChange: (open: boolean) => void;
   scheduleOpen: boolean;
   onScheduleOpenChange: (open: boolean) => void;
+  onScheduled: () => void;
   // The conversation, where a file dropped anywhere attaches.
   dropRoot: HTMLElement | null;
   // Runs before a file from outside the composer lands in the tray.
@@ -235,6 +236,7 @@ export function ComposerDialogs({
   onFilesOpenChange,
   scheduleOpen,
   onScheduleOpenChange,
+  onScheduled,
   dropRoot,
   onReveal,
 }: ComposerDialogsProps) {
@@ -289,6 +291,7 @@ export function ComposerDialogs({
           initialText={draft}
           canQueue={!exited}
           onClose={() => onScheduleOpenChange(false)}
+          onScheduled={onScheduled}
         />
       ) : null}
       {dragging && dropRoot

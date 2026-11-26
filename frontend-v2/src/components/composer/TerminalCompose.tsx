@@ -37,6 +37,7 @@ interface TerminalComposeProps {
   onFilesOpenChange: (open: boolean) => void;
   scheduleOpen: boolean;
   onScheduleOpenChange: (open: boolean) => void;
+  onScheduled: () => void;
 }
 
 // A terminal-only session's composer: a drawer that types whole messages into
@@ -53,6 +54,7 @@ export function TerminalCompose({
   onFilesOpenChange,
   scheduleOpen,
   onScheduleOpenChange,
+  onScheduled,
 }: TerminalComposeProps) {
   const { host, token } = useShellData();
   const router = useRouter();
@@ -200,6 +202,7 @@ export function TerminalCompose({
         onFilesOpenChange={onFilesOpenChange}
         scheduleOpen={scheduleOpen}
         onScheduleOpenChange={onScheduleOpenChange}
+        onScheduled={onScheduled}
         dropRoot={dropRoot}
         onReveal={() => setOpen(true)}
       />

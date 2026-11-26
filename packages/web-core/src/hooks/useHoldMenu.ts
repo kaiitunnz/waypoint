@@ -72,9 +72,11 @@ export function useHoldMenu(
   }
 
   const close = useCallback((refocusTrigger = false) => {
+    // Or a pending hover reopens the menu that was just closed.
+    clearTimer();
     setOpen(false);
     if (refocusTrigger) triggerRef.current?.focus();
-  }, []);
+  }, [clearTimer]);
 
   // A touch-opened menu has no pointerleave, so an outside press closes it.
   useEffect(() => {

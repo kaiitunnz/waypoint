@@ -255,21 +255,6 @@ export function TerminalCompose({
           <div
             className={`term-compose-field${leadForced ? " lead-forced" : ""}`}
           >
-            <button
-              type="button"
-              className="term-compose-lead-expand"
-              // The chevron hides once the field blurs, so the press must not blur it.
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                setLeadForced(true);
-                textareaRef.current?.focus();
-              }}
-              aria-label="Show actions"
-              title="Show actions"
-              tabIndex={expanded ? 0 : -1}
-            >
-              ›
-            </button>
             {attachmentsEnabled ? (
               <>
                 <input
@@ -307,45 +292,62 @@ export function TerminalCompose({
                 </button>
               </>
             ) : null}
-            <div className="term-compose-input">
-              {attachmentsEnabled ? (
-                <AttachmentTray
-                  items={attachments.items}
-                  onRemove={attachments.remove}
-                  onRetry={attachments.retry}
-                  onClear={attachments.discardAll}
-                />
-              ) : null}
-              <textarea
-                ref={textareaRef}
-                className="composer-textarea term-compose-textarea"
-                rows={1}
-                value={draft}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                  setLeadForced(false);
-                  if (hint) setHint(null);
-                }}
-                onBlur={() => setLeadForced(false)}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                placeholder="Type a message"
-                aria-label="Message to send to terminal"
-                tabIndex={expanded ? 0 : -1}
-              />
+            <div className="term-compose-entry">
               <button
                 type="button"
-                className="term-compose-send"
-                onClick={send}
-                disabled={!canSend}
-                aria-label="Send"
-                title="Send"
+                className="term-compose-lead-expand"
+                // Keeps the field focused where a press doesn't focus the button itself.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setLeadForced(true);
+                  textareaRef.current?.focus();
+                }}
+                aria-label="Show actions"
+                title="Show actions"
                 tabIndex={expanded ? 0 : -1}
               >
-                <span className="composer-send-glyph" aria-hidden>
-                  {sending ? "…" : "↑"}
-                </span>
+                ›
               </button>
+              <div className="term-compose-input">
+                {attachmentsEnabled ? (
+                  <AttachmentTray
+                    items={attachments.items}
+                    onRemove={attachments.remove}
+                    onRetry={attachments.retry}
+                    onClear={attachments.discardAll}
+                  />
+                ) : null}
+                <textarea
+                  ref={textareaRef}
+                  className="composer-textarea term-compose-textarea"
+                  rows={1}
+                  value={draft}
+                  onChange={(event) => {
+                    setDraft(event.target.value);
+                    setLeadForced(false);
+                    if (hint) setHint(null);
+                  }}
+                  onBlur={() => setLeadForced(false)}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  placeholder="Type a message"
+                  aria-label="Message to send to terminal"
+                  tabIndex={expanded ? 0 : -1}
+                />
+                <button
+                  type="button"
+                  className="term-compose-send"
+                  onClick={send}
+                  disabled={!canSend}
+                  aria-label="Send"
+                  title="Send"
+                  tabIndex={expanded ? 0 : -1}
+                >
+                  <span className="composer-send-glyph" aria-hidden>
+                    {sending ? "…" : "↑"}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

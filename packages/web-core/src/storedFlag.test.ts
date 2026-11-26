@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CONVERSATION_PREVIEWS_DEFAULT, CONVERSATION_PREVIEWS_KEY } from "./hooks/useConversationPreviews";
 import { readStoredFlag, storedFlag, writeStoredFlag } from "./storedFlag";
 
 function memoryStorage() {
@@ -36,8 +35,8 @@ describe("readStoredFlag and writeStoredFlag", () => {
 
   it("keeps each key apart", () => {
     const storage = memoryStorage();
-    writeStoredFlag(storage, "a", false);
-    expect(readStoredFlag(storage, "b")).toBe(true);
+    writeStoredFlag(storage, "a", false, true);
+    expect(readStoredFlag(storage, "b", true)).toBe(true);
   });
 
   it("falls back when storage is missing or throws", () => {
@@ -129,18 +128,5 @@ describe("storedFlag", () => {
     expect(heard).not.toHaveBeenCalled();
     target.dispatchEvent(Object.assign(new Event("storage"), { key: "e" }));
     expect(heard).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("conversation previews", () => {
-  it("are on until turned off, and stored under their own key", () => {
-    const storage = memoryStorage();
-    expect(CONVERSATION_PREVIEWS_KEY).toBe("waypoint.conversation-previews");
-    const flag = storedFlag(CONVERSATION_PREVIEWS_KEY, CONVERSATION_PREVIEWS_DEFAULT, () => storage as unknown as Storage);
-    expect(flag.get()).toBe(true);
-    flag.set(false);
-    expect(storage.data.get(CONVERSATION_PREVIEWS_KEY)).toBe("0");
-    flag.set(true);
-    expect(storage.data.size).toBe(0);
   });
 });

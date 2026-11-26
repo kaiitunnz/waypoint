@@ -2,7 +2,7 @@ type ReadableStorage = Pick<Storage, "getItem">;
 type WritableStorage = Pick<Storage, "removeItem" | "setItem">;
 
 // Only a choice that differs from `fallback` is stored, so a stored "0" always means off and "1" on.
-export function readStoredFlag(storage: ReadableStorage | null, key: string, fallback = true): boolean {
+export function readStoredFlag(storage: ReadableStorage | null, key: string, fallback: boolean): boolean {
   try {
     const stored = storage?.getItem(key);
     if (stored === "0") return false;
@@ -14,7 +14,7 @@ export function readStoredFlag(storage: ReadableStorage | null, key: string, fal
 }
 
 // Whether the choice was stored; storage can be unavailable (private windows, a full quota).
-export function writeStoredFlag(storage: WritableStorage | null, key: string, value: boolean, fallback = true): boolean {
+export function writeStoredFlag(storage: WritableStorage | null, key: string, value: boolean, fallback: boolean): boolean {
   if (!storage) return false;
   try {
     if (value === fallback) storage.removeItem(key);

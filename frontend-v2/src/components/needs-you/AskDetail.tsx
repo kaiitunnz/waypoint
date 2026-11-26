@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchEvents, isAuthError } from "@waypoint/web-core/api";
 import { humaniseBackend, useBackendCatalog } from "@waypoint/web-core/backends";
@@ -61,12 +61,21 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
     onRequestError,
     retry: true,
   });
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // The row of this ask waits while the form sends, and the other way round.
   const shared = useMemo<AskQuestionController>(() => {
     const report = async (request: Promise<boolean>) => {
       locks?.setPhase(ask.id, { state: "sending", retrying: false });
       const sent = await request;
       locks?.setPhase(ask.id, sent ? { state: "sent" } : { state: "idle" });
+      // The form shows its own failure; once it is gone, nothing else would.
+      if (!sent && !mounted.current) toastFailure(null, `Could not reply to ${ask.session_title}`);
       return sent;
     };
     return {
@@ -74,7 +83,7 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
       answer: (toolUseId, text, answers) => report(controller.answer(toolUseId, text, answers)),
       cancel: (toolUseId) => report(controller.cancel(toolUseId)),
     };
-  }, [controller, locks, ask.id]);
+  }, [controller, locks, ask.id, ask.session_title, toastFailure]);
   const questions = useMemo(() => askUserQuestions(ask), [ask]);
   const toolUseId = ask.question.tool_use_id;
   const { entry } = askFormView(questions, controller.draft(toolUseId));
@@ -189,7 +198,7 @@ function AskView({ ask }: { ask: PendingAsk }) {
     <SourceLine
       lead={<StatusLamp state="needs" size="sm" flat />}
       name={ask.session_title}
-      href={sessionHref(ask.session_id)}
+      href={pointer ? sessionHref(ask.session_id) : undefined}
       kind={agent}
       time={<time dateTime={ask.created_at}>{formatSessionTime(ask.created_at, now)}</time>}
     />

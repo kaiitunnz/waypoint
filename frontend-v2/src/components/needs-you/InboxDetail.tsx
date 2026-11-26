@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { gateBoardHref, gateView, isGateAnswered, type BoardGate } from "@waypoint/web-core/board";
 import { useInboxItem } from "@waypoint/web-core/hooks/useInboxItem";
@@ -18,6 +18,7 @@ import { cx } from "@/lib/cx";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { DetailFrame, DetailState } from "./DetailFrame";
 import { InboxBlockView } from "./InboxBlock";
@@ -80,7 +81,15 @@ export function InboxDetail({ id }: { id: string }) {
   const { leave } = useNeedsYou();
   const pointer = usePointerUI();
   const now = useNow(30_000);
-  const { item, gone, error, remove } = useInboxItem({ host, token, itemId: id, onAuthFailure: handleAuthFailure });
+  const toastFailure = useFailureToast();
+  const onRemoveError = useCallback((reason: unknown) => toastFailure(reason, "Could not delete"), [toastFailure]);
+  const { item, gone, error, remove } = useInboxItem({
+    host,
+    token,
+    itemId: id,
+    onAuthFailure: handleAuthFailure,
+    onRemoveError,
+  });
   const [confirming, setConfirming] = useState(false);
   const gate = gates?.find((entry) => entry.item?.id === id);
   // Inbox text has no session behind it, so its paths stay text.

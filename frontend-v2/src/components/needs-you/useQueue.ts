@@ -44,7 +44,8 @@ export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: str
   // may not be one.
   const awaiting =
     status !== "resolved" &&
-    (((source === "all" || source === "sessions") && !pendingAsks) || (source === "board" && !loadedGates));
+    (((source === "all" || source === "sessions") && !pendingAsks) ||
+      ((source === "all" || source === "board") && !loadedGates));
 
   // Items of an earlier status or search are not shown while the next ones load.
   const loaded = list.loadedFor === inboxListKey(status, list.query);

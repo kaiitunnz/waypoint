@@ -25,7 +25,8 @@ const QUEUE_WIDTH: PaneWidthConfig = {
 };
 
 // The queue and the open item. Both stay mounted in every layout, only shown or
-// hidden, so a half-written answer survives a resize and the queue keeps its place.
+// hidden, so an item's half-written answer survives a resize and the queue keeps
+// its place.
 export function NeedsYouScreen({ children }: { children: ReactNode }) {
   const router = useRouter();
   const segment = useSelectedLayoutSegment();
@@ -39,14 +40,15 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
     detail.current?.scrollTo(0, 0);
   }, [selected]);
 
-  // Whether the item was opened from the queue, so that "back" is a history step.
+  // Whether opening the item added a history entry, so that "back" can step over
+  // it. Only the single column pushes; a row beside the item replaces.
   const previous = useRef<string | null | undefined>(undefined);
   const opened = useRef(false);
   useEffect(() => {
     if (selected === null) opened.current = false;
-    else if (previous.current === null) opened.current = true;
+    else if (previous.current === null) opened.current = !columns;
     previous.current = selected;
-  }, [selected]);
+  }, [selected, columns]);
 
   const leave = useCallback(() => {
     if (!columns && opened.current) router.back();

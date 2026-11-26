@@ -217,7 +217,7 @@ export function QueuePane() {
         </div>
       ) : null}
 
-      <div className={styles.scroll}>
+      <div className={cx(styles.scroll, selection.selecting && styles.selecting)}>
         {failed ? (
           <div className={styles.failed} role="alert">
             <p>{list.error}</p>

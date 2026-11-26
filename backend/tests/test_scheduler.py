@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -664,3 +666,93 @@ async def test_cancel_recurring_stops_future_claims(tmp_path) -> None:
         datetime.now(UTC) + timedelta(minutes=1),
     )
     assert claimed is None
+
+
+def _due_launch(runtime: SessionRuntime, seconds_ago: float = 1, **timing: Any):
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(backend="codex", cwd="/tmp/project", **timing)
+    )
+    runtime.storage.update_schedule(
+        schedule.id,
+        scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago),
+    )
+    return schedule
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "timing",
+    [{"delay_seconds": 60}, {"cron": "* * * * *", "timezone": "UTC"}],
+    ids=["one-shot", "recurring"],
+)
+async def test_a_launch_dismissed_while_launching_ends_cleanly(
+    tmp_path, monkeypatch, caplog, timing
+) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = _due_launch(runtime, **timing)
+
+    async def cancel_then_dismiss(_schedule) -> str:
+        runtime.scheduler.cancel_schedule(schedule.id)
+        runtime.scheduler.cancel_schedule(schedule.id)
+        return "codex-new"
+
+    monkeypatch.setattr(runtime.scheduler, "_launch_session", cancel_then_dismiss)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert runtime.storage.get_schedule(schedule.id) is None
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.asyncio
+async def test_one_launch_failing_does_not_stop_the_pass(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    broken = _due_launch(runtime, seconds_ago=2, delay_seconds=60)
+    healthy = _due_launch(runtime, delay_seconds=60)
+    launched: list[str] = []
+
+    async def launch(schedule) -> str:
+        launched.append(schedule.id)
+        return "codex-new"
+
+    update = runtime.storage.update_schedule
+
+    def update_unless_broken(schedule_id: str, **fields: Any):
+        if schedule_id == broken.id:
+            raise RuntimeError("disk I/O error")
+        return update(schedule_id, **fields)
+
+    monkeypatch.setattr(runtime.scheduler, "_launch_session", launch)
+    monkeypatch.setattr(runtime.storage, "update_schedule", update_unless_broken)
+
+    await runtime.scheduler._fire_due_schedules()
+    await runtime.scheduler._fire_due_schedules()
+
+    # The one whose outcome was lost stays pending without launching again.
+    assert launched == [broken.id, healthy.id]
+    done = runtime.storage.get_schedule(healthy.id)
+    assert done is not None
+    assert done.status == ScheduleStatus.LAUNCHED
+
+
+@pytest.mark.asyncio
+async def test_the_loop_survives_a_failed_pass(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    passed_again = asyncio.Event()
+    passes = 0
+
+    async def fail_once() -> None:
+        nonlocal passes
+        passes += 1
+        if passes == 1:
+            raise RuntimeError("database is locked")
+        passed_again.set()
+
+    monkeypatch.setattr(runtime.scheduler, "_fire_due_schedules", fail_once)
+    monkeypatch.setattr("waypoint.scheduler.POLL_INTERVAL_SECONDS", 0.01)
+
+    await runtime.scheduler.start()
+    try:
+        await asyncio.wait_for(passed_again.wait(), 5)
+    finally:
+        await runtime.scheduler.stop()

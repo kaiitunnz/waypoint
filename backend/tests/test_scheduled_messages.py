@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -1350,6 +1351,55 @@ async def test_a_refused_send_now_keeps_a_due_occurrence_due(
     assert kept is not None
     assert kept.scheduled_at == due
     assert kept.last_run_at is None
+
+
+@pytest.mark.parametrize(
+    "timing",
+    [
+        {"delay_seconds": 60},
+        {
+            "trigger": ScheduledMessageTrigger.IDLE,
+            "idle_batch_mode": IdleMessageBatchMode.WITH_PREVIOUS,
+        },
+    ],
+    ids=["timed", "idle"],
+)
+async def test_one_message_failing_does_not_stop_the_pass(
+    tmp_path, monkeypatch, timing
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _capture_sends(runtime, monkeypatch)
+    broken, healthy = (
+        runtime.scheduler.create_message_schedule(
+            "sess-1", ScheduledMessageCreateRequest(text=text, **timing)
+        )
+        for text in ("broken", "healthy")
+    )
+    if "delay_seconds" in timing:
+        for record, seconds_ago in ((broken, 2), (healthy, 1)):
+            runtime.storage.update_scheduled_message(
+                record.id,
+                scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago),
+            )
+    update = runtime.storage.update_scheduled_message
+
+    def update_unless_broken(message_id: str, **fields: Any):
+        if message_id == broken.id:
+            raise RuntimeError("disk I/O error")
+        return update(message_id, **fields)
+
+    monkeypatch.setattr(
+        runtime.storage, "update_scheduled_message", update_unless_broken
+    )
+
+    await runtime.scheduler._fire_due_schedules()
+    await runtime.scheduler._fire_due_schedules()
+
+    # The one whose outcome was lost stays pending without being sent again.
+    assert [text for _, text, _ in sends] == ["broken", "healthy"]
+    done = runtime.storage.get_scheduled_message(healthy.id)
+    assert done is not None
+    assert done.status == ScheduledMessageStatus.SENT
 
 
 async def test_send_now_reports_a_message_held_by_focus(tmp_path, monkeypatch) -> None:

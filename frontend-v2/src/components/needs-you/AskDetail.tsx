@@ -114,9 +114,6 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-// How far back the request is looked for.
-const REQUEST_WINDOW = 20;
-
 type RequestState = { status: "loading" } | { status: "failed" } | { status: "ready"; body: ApprovalBodyModel };
 
 // The request as the transcript has it, so an edit shows its diff and any request
@@ -126,15 +123,17 @@ function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { request: Re
   const { host, token } = useShellData();
   const sessionId = ask.session_id;
   const approvalId = ask.kind === "approval" ? ask.approval.approval_id : null;
+  const sequence = ask.sequence;
   const [attempt, setAttempt] = useState(0);
-  // What one read turned up: the request, none among the recent events, or no read.
+  // What one read turned up: the request, no such event, or no read.
   const [found, setFound] = useState<{ key: string; read: ApprovalBodyModel | "missing" | "failed" } | null>(null);
   const key = `${approvalId} ${attempt}`;
 
   useEffect(() => {
     if (approvalId === null) return;
     let active = true;
-    fetchEvents(host, token, sessionId, { messages: REQUEST_WINDOW })
+    // The page ending at the request: a pending ask can be many messages old.
+    fetchEvents(host, token, sessionId, { beforeSequence: sequence + 1, messages: 1 })
       .then((page) => {
         const event = page.events.find(
           (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
@@ -149,7 +148,7 @@ function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { request: Re
     return () => {
       active = false;
     };
-  }, [host, token, sessionId, approvalId, key]);
+  }, [host, token, sessionId, approvalId, sequence, key]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   const resolve = (): RequestState => {

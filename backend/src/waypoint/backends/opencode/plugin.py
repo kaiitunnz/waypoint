@@ -1281,6 +1281,20 @@ class OpenCodePlugin(DefaultLaunchContract):
             _agent_process_env(runtime, self.id, session.launch_env),
         )
 
+    async def session_adapter(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapter:
+        """The adapter serving ``session``, created if there is none."""
+        launch_target_id, _, args, env = self._session_adapter_key(runtime, session)
+        return await self._get_or_create_adapter(
+            runtime, launch_target_id, session.cwd, args, dict(env)
+        )
+
+    def existing_session_adapter(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapter | None:
+        return self._adapters.get(self._session_adapter_key(runtime, session))
+
     async def approve_plan(
         self,
         runtime: "SessionRuntime",

@@ -512,6 +512,36 @@ class _FakeAdapter:
 
 
 @pytest.mark.asyncio
+async def test_transport_reaches_the_server_of_a_session_with_launch_env() -> None:
+    plugin = OpenCodePlugin()
+    adapter = _FakeAdapter()
+    runtime = cast(
+        Any,
+        SimpleNamespace(
+            _find_launch_target=lambda _id: None,
+            _agent_process_env=_passthrough_agent_process_env,
+            settings=SimpleNamespace(plugin_config=lambda _id: OpenCodePluginConfig()),
+        ),
+    )
+    session = _session(cwd="/tmp", launch_env={"OPENCODE_CONFIG_DIR": "/cfg"})
+    plugin._adapters[plugin._session_adapter_key(runtime, session)] = cast(Any, adapter)
+    transport = OpenCodeTransport(runtime=runtime, plugin=plugin)
+
+    await transport.send_input(session, "hello")
+    await transport.interrupt(session)
+    await transport.respond_to_approval(session, "approve", None)
+
+    assert transport.has_pending_approval(session)
+    assert [call[0] for call in adapter.calls] == [
+        "send_input",
+        "interrupt",
+        "respond_to_permission",
+        "has_pending_approval",
+    ]
+    assert len(plugin._adapters) == 1
+
+
+@pytest.mark.asyncio
 async def test_transport_routes_calls_by_session_launch_target() -> None:
     plugin = OpenCodePlugin()
     default_adapter = _FakeAdapter()

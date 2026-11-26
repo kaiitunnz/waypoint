@@ -1042,15 +1042,53 @@ async def test_a_mode_change_writes_the_subagents_rules_too() -> None:
     fake = _fake()
     fake.add_session("ses_child", permissions=[])
     deny = [{"action": "*", "resource": "*", "effect": "deny"}]
-    async with driving(fake) as (adapter, _emitted):
+    async with driving(fake) as (adapter, emitted):
         # A subagent that has been deleted since is skipped.
         _register(adapter, children={"ses_child", "ses_deleted"})
         assert await adapter.set_session_permission("local", [], deny)
         assert fake.sessions["ses_root"]["permissions"] == []
         assert fake.sessions["ses_child"]["permissions"] == deny
+        assert emitted.events == []
 
+        # A subagent that refuses its rules does not undo the session's.
         fake.failures[("PATCH", "/api/session/ses_child")] = 500
-        assert not await adapter.set_session_permission("local", ASK)
+        assert await adapter.set_session_permission("local", ASK)
+        assert fake.sessions["ses_root"]["permissions"] == ASK
+    assert emitted.texts()[-1].startswith(
+        "Could not apply the permission mode to subagent ses_child"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_subagent_started_after_a_switch_gets_the_subagent_rules() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        assert await adapter.set_session_permission("local", [], ASK)
+        fake.add_session("ses_child", parentID="ses_root", permissions=[])
+        await _deliver(
+            adapter,
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_child", "parentID": "ses_root"},
+            },
+        )
+        await asyncio.gather(*adapter._tasks)
+        assert fake.sessions["ses_child"]["permissions"] == ASK
+
+        # Rules a subagent copies from the session are not written again.
+        assert await adapter.set_session_permission("local", ASK, ASK)
+        fake.add_session("ses_other", parentID="ses_root", permissions=ASK)
+        writes = len(fake.writes())
+        await _deliver(
+            adapter,
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_other", "parentID": "ses_root"},
+            },
+        )
+        await asyncio.gather(*adapter._tasks)
+        assert len(fake.writes()) == writes
 
 
 @pytest.mark.parametrize("ask_id", ["per_1", "frm_1"])

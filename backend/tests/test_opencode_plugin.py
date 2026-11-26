@@ -969,7 +969,9 @@ async def test_fork_writes_the_modes_rules_and_keeps_plan_state(
         structured_log=tmp_path / "events.jsonl",
     )
 
-    adapter.fork_session.assert_awaited_once_with("forked", "/repo", "ses_parent", ASK)
+    adapter.fork_session.assert_awaited_once_with(
+        "forked", "/repo", "ses_parent", ASK, ASK
+    )
     adapter.set_pre_plan_mode.assert_awaited_once_with("forked", "allow")
     assert forked.transport_state == {
         "opencode_session_id": "ses_forked",

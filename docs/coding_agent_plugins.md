@@ -796,7 +796,9 @@ Servers of a launch target start one at a time until the first has migrated a
   results, and the session stays interrupted until new input.
 - Permission modes are the permission rulesets of the session and its
   subagents, rewritten on a mode change and on restore. In plan mode the session
-  switches to the plan agent and its subagents ask. "Approve for session" adds
+  switches to the plan agent and its subagents, including ones started later,
+  ask. A subagent that refuses its rules gets a note and leaves the change in
+  place. "Approve for session" adds
   allow rules, which a mode change, restore or fork resets. OpenCode's own
   `always` reply allows for the whole project and is not used.
 - Model, effort (a model variant) and agent are selected on the session when

@@ -1363,6 +1363,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 session.cwd,
                 opencode_session_id,
                 _ruleset_for_mode(session.permission_mode),
+                _subagent_ruleset_for_mode(session.permission_mode),
             )
             pre_plan_mode = session.transport_state.get("pre_plan_mode")
             if pre_plan_mode is not None:
@@ -1725,6 +1726,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 agent=agent,
                 title=title,
                 permissions=_ruleset_for_mode(permission_mode),
+                subagent_permissions=_subagent_ruleset_for_mode(permission_mode),
             )
             session.transport_state = {"opencode_session_id": opencode_session_id}
             if agent is not None:

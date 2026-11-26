@@ -815,6 +815,8 @@ class OpenCodeAdapter:
             return
         state.children.add(child)
         self._routes[child] = state.session_id
+        if (rules := state.subagent_permissions) is not None:
+            self._spawn(self._write_subagent_rules(state, [child], rules))
 
     async def _on_execution_ended(
         self, state: SessionState, origin: str, kind: str, data: dict[str, Any]
@@ -1426,6 +1428,7 @@ class OpenCodeAdapter:
         agent: str | None = None,
         effort: str | None = None,
         permissions: list[dict[str, str]] | None = None,
+        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> str:
         await self.start()
         body: dict[str, Any] = {
@@ -1450,6 +1453,7 @@ class OpenCodeAdapter:
             cwd=cwd,
             root_id=opencode_session_id,
             agent=agent,
+            subagent_permissions=_differing(subagent_permissions, permissions),
         )
         self._adopt_model(state, body.get("model"))
         self._register_session(state)
@@ -1470,6 +1474,7 @@ class OpenCodeAdapter:
         cwd: str,
         source_id: str,
         permissions: list[dict[str, str]],
+        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> str:
         await self.start()
         client = self._require_client()
@@ -1488,6 +1493,7 @@ class OpenCodeAdapter:
             cwd=cwd,
             root_id=opencode_session_id,
             agent=info.get("agent"),
+            subagent_permissions=_differing(subagent_permissions, permissions),
         )
         self._adopt_model(state, info.get("model"))
         self._register_session(state)
@@ -1785,18 +1791,41 @@ class OpenCodeAdapter:
         subagent_permissions: list[dict[str, str]] | None = None,
     ) -> None:
         """Replace the rules of the session and of its subagents, which hold
-        their own copy and can be resumed."""
+        their own copy and can be resumed. Only the session's own write can
+        fail the change."""
         if subagent_permissions is None:
             subagent_permissions = permissions
         async with self._ruleset_lock:
-            # The root first: a subagent started meanwhile copies its rules.
             await self._write_ruleset(state.root_id, permissions)
-            for child in sorted(state.children):
-                try:
-                    await self._write_ruleset(child, subagent_permissions)
-                except Exception as exc:
-                    if http_status(exc) != 404:
-                        raise
+            # Before the subagents: one started meanwhile is written too.
+            state.subagent_permissions = _differing(subagent_permissions, permissions)
+        await self._write_subagent_rules(
+            state, sorted(state.children), subagent_permissions
+        )
+
+    async def _write_subagent_rules(
+        self,
+        state: SessionState,
+        children: list[str],
+        permissions: list[dict[str, str]],
+    ) -> None:
+        for child in children:
+            try:
+                async with self._ruleset_lock:
+                    await self._write_ruleset(child, permissions)
+            except Exception as exc:  # noqa: BLE001
+                # A subagent that is gone takes no more tools.
+                if http_status(exc) == 404:
+                    continue
+                log.warning("failed to set subagent %s permissions: %s", child, exc)
+                await self._emit(
+                    state,
+                    normalize.note(
+                        f"Could not apply the permission mode to subagent {child}: "
+                        f"{exc}",
+                        "session.subagent.permissions.failed",
+                    ),
+                )
 
     async def set_session_permission(
         self,
@@ -1965,6 +1994,14 @@ class OpenCodeAdapter:
         except Exception:  # noqa: BLE001
             return False
         return True
+
+
+def _differing(
+    subagent: list[dict[str, str]] | None, root: list[dict[str, str]] | None
+) -> list[dict[str, str]] | None:
+    """Subagent rules worth writing: ``None`` when a subagent's copy of the
+    root's would do."""
+    return None if subagent is None or subagent == (root or []) else subagent
 
 
 def _path_id(opencode_session_id: str) -> str:

@@ -841,25 +841,28 @@ class OpenCodeAdapter:
             await self._emit(state, normalize.note(f"Error: {_reason(data)}", kind))
         elif kind == "session.execution.interrupted":
             await self._emit(state, normalize.note("Turn interrupted", kind))
-        elif state.status() == SessionStatus.IDLE:
-            await self._emit(state, normalize.note("Session idle", kind))
-        elif state.status() == SessionStatus.INTERRUPTED:
-            await self._emit(state, normalize.note("Turn interrupted", kind))
+        else:
+            await self._emit_resting(state, kind)
+
+    async def _emit_resting(self, state: SessionState, method: str) -> None:
+        """Report a session at rest. Nothing is said of one still running or
+        waiting."""
+        match state.status():
+            case SessionStatus.IDLE:
+                await self._emit(state, normalize.note("Session idle", method))
+            case SessionStatus.INTERRUPTED:
+                await self._emit(state, normalize.note("Turn interrupted", method))
 
     async def _settle_after_subagent(self, state: SessionState, mark: int) -> None:
         """A finished subagent hands its result to the parent, which runs again.
-        When it does not, report that the session is idle."""
+        When it does not, report that the session is at rest."""
         await asyncio.sleep(SUBAGENT_SETTLE_SECONDS)
         if (
             self._sessions.get(state.session_id) is state
-            and not state.closing
             # A parent that ran since has reported its own ending.
             and not state.touched_since(state.root_id, mark)
-            and state.status() == SessionStatus.IDLE
         ):
-            await self._emit(
-                state, normalize.note("Session idle", "session.subagents.ended")
-            )
+            await self._emit_resting(state, "session.subagents.ended")
 
     async def _emit_changes(self, state: SessionState) -> None:
         try:
@@ -1093,23 +1096,34 @@ class OpenCodeAdapter:
                 state, normalize.question_closed(ask_id, answered=False), status
             )
 
-    async def _list_asks(self) -> tuple[list[Any], list[Any]] | None:
-        """The server's pending permissions and forms, or ``None`` when it could
-        not be asked."""
+    async def _list_asks(
+        self, opencode_session_ids: Collection[str]
+    ) -> tuple[list[Any], list[Any]] | None:
+        """The pending permissions and forms of those sessions, or ``None`` when
+        the server could not be asked."""
         client = self._require_client()
-        params = self._location()
-        try:
-            permissions = await client.get("/api/permission/request", params=params)
-            forms = await client.get("/api/form", params=params)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("failed to list opencode asks: %s", exc)
-            return None
-        return permissions.get("data") or [], forms.get("data") or []
+        permissions: list[Any] = []
+        forms: list[Any] = []
+        for session_id in sorted(opencode_session_ids):
+            try:
+                path = f"/api/session/{session_id}"
+                permissions += (await client.get(f"{path}/permission")).get(
+                    "data"
+                ) or []
+                forms += (await client.get(f"{path}/form")).get("data") or []
+            except Exception as exc:  # noqa: BLE001
+                # A session that is gone has nothing pending.
+                if http_status(exc) != 404:
+                    log.warning("failed to list opencode asks: %s", exc)
+                    return None
+        return permissions, forms
 
     async def _reconcile(self, state: SessionState) -> None:
         """Drop the asks the server has ended without saying so."""
         pending = [*state.permissions, *state.forms]
-        if not pending or (listed := await self._list_asks()) is None:
+        asking = {ask.session_id for ask in state.permissions.values()}
+        asking |= {form.session_id for form in state.forms.values()}
+        if not pending or (listed := await self._list_asks(asking)) is None:
             return
         ids = {item.get("id") for group in listed for item in group}
         for ask_id in pending:
@@ -1241,6 +1255,11 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         return tuple(state.permissions) if state else ()
 
+    def selected_model(self, session_id: str) -> tuple[str | None, str | None]:
+        """The session's model and effort as the server holds them."""
+        state = self._sessions.get(session_id)
+        return (state.model, state.effort) if state else (None, None)
+
     def session_status(self, session_id: str) -> SessionStatus | None:
         state = self._sessions.get(session_id)
         return state.status() if state else None
@@ -1254,7 +1273,9 @@ class OpenCodeAdapter:
         mark = state.mark()
         permissions: list[tuple[Permission, dict[str, Any]]] = []
         forms: list[Form] = []
-        listed = await self._list_asks()
+        # Only a running session has anything pending, and the root is asked
+        # whether or not it is listed as running.
+        listed = await self._list_asks({state.root_id, *state.running})
         if listed is None:
             return permissions, forms
         for item in listed[0]:
@@ -1310,16 +1331,68 @@ class OpenCodeAdapter:
         if elapsed < QUESTION_SEED_RETRY_SECONDS:
             return
 
-        async def reseed() -> None:
-            await self._seed_asks(state)
-            if state.forms_seeded and self._on_questions_changed is not None:
-                self._on_questions_changed(state.session_id)
-
-        task = asyncio.create_task(reseed())
+        task = asyncio.create_task(self._reseed(state))
         self._question_seed_tasks[state.session_id] = task
         task.add_done_callback(
             lambda _: self._question_seed_tasks.pop(state.session_id, None)
         )
+
+    async def _show_seeded(
+        self,
+        state: SessionState,
+        permissions: list[tuple[Permission, dict[str, Any]]],
+        forms: list[Form],
+    ) -> bool:
+        """Once the server's asks are listed, show those the transcript lacks and
+        close the approval cards it no longer has. Returns whether anything was
+        emitted."""
+        if not state.forms_seeded:
+            # A listing that failed says nothing about which cards are stale.
+            return False
+        shown, state.open_approvals = state.open_approvals, set()
+        asked, state.open_questions = state.open_questions, set()
+        emitted = False
+        for permission, item in permissions:
+            if permission.id not in shown:
+                await self._emit_approval(state, permission, item)
+                emitted = True
+        for form in forms:
+            if form.id not in asked and (card := normalize.question(form)):
+                await self._emit(state, card)
+                emitted = True
+        for approval_id in sorted(shown):
+            if approval_id not in state.permissions:
+                await self._emit(state, normalize.approval_invalidated(approval_id))
+                emitted = True
+        return emitted
+
+    async def _reseed(self, state: SessionState) -> None:
+        """List the asks a restore could not."""
+        if state.forms_seeded:
+            return
+        permissions, forms = await self._seed_asks(state)
+        if not state.forms_seeded:
+            return
+        emitted = await self._show_seeded(state, permissions, forms)
+        # The restore recorded a status without these.
+        if not emitted and state.status() == SessionStatus.WAITING_INPUT:
+            await self._emit(
+                state, normalize.note("Waiting for your input", "session.asks.listed")
+            )
+        if self._on_questions_changed is not None:
+            self._on_questions_changed(state.session_id)
+
+    async def _repair_seed(self, state: SessionState) -> None:
+        """Retry until the asks are listed: until then, the cards a restore left
+        open cannot be answered."""
+        while not state.forms_seeded:
+            await asyncio.sleep(QUESTION_SEED_RETRY_SECONDS)
+            if state.closing or self._sessions.get(state.session_id) is not state:
+                return
+            # Through the one seed task: two at once would repeat cards.
+            self._schedule_question_seed(state)
+            if task := self._question_seed_tasks.get(state.session_id):
+                await asyncio.wait({task})
 
     # ── Session lifecycle ───────────────────────────────────────────────
 
@@ -1404,7 +1477,8 @@ class OpenCodeAdapter:
             data = await client.post(f"/api/session/{source_id}/fork", json_data={})
             info = data["data"]
             opencode_session_id = str(info["id"])
-            await self._write_ruleset(opencode_session_id, permissions)
+            async with self._ruleset_lock:
+                await self._write_ruleset(opencode_session_id, permissions)
         except Exception as exc:
             log.error("failed to fork session: %s", exc)
             raise OpenCodeError(f"failed to fork session: {exc}") from exc
@@ -1426,6 +1500,7 @@ class OpenCodeAdapter:
         opencode_session_id: str,
         *,
         permissions: list[dict[str, str]],
+        subagent_permissions: list[dict[str, str]] | None = None,
         model: str | None = None,
         agent: str | None = None,
         effort: str | None = None,
@@ -1449,6 +1524,8 @@ class OpenCodeAdapter:
             root_id=opencode_session_id,
             agent=info.get("agent"),
             forms_seeded=False,
+            open_approvals=set(open_approvals),
+            open_questions=set(open_questions),
         )
         self._adopt_model(state, info.get("model"))
         self._register_session(state)
@@ -1456,22 +1533,18 @@ class OpenCodeAdapter:
             await self._adopt_tree(state)
             adopted_permissions, adopted_forms = await self._seed_asks(state)
             # A migrated 1.x session has lost its rules.
-            await self._write_ruleset(opencode_session_id, permissions)
-        except Exception as exc:
+            await self._write_rulesets(state, permissions, subagent_permissions)
+            await self._restore_selection(state, model, agent, effort)
+            await self._show_seeded(state, adopted_permissions, adopted_forms)
+        except BaseException as exc:
+            # Includes cancellation: a restore that timed out must not leave a
+            # session behind for events to revive.
             self._forget_session(state)
-            raise OpenCodeError(f"failed to restore session: {exc}") from exc
-
-        await self._restore_selection(state, model, agent, effort)
-        for permission, item in adopted_permissions:
-            if permission.id not in open_approvals:
-                await self._emit_approval(state, permission, item)
-        for form in adopted_forms:
-            if form.id not in open_questions and (card := normalize.question(form)):
-                await self._emit(state, card)
-        # A listing that failed says nothing about which cards are stale.
-        for approval_id in open_approvals if state.forms_seeded else ():
-            if approval_id not in state.permissions:
-                await self._emit(state, normalize.approval_invalidated(approval_id))
+            if isinstance(exc, Exception):
+                raise OpenCodeError(f"failed to restore session: {exc}") from exc
+            raise
+        if not state.forms_seeded:
+            self._spawn(self._repair_seed(state))
 
     async def _adopt_tree(self, state: SessionState) -> None:
         """Find the session's subagents, and which of its tree is running."""
@@ -1700,20 +1773,42 @@ class OpenCodeAdapter:
     async def _write_ruleset(
         self, opencode_session_id: str, permissions: list[dict[str, str]]
     ) -> None:
+        await self._require_client().patch(
+            f"/api/session/{opencode_session_id}",
+            json_data={"permissions": permissions},
+        )
+
+    async def _write_rulesets(
+        self,
+        state: SessionState,
+        permissions: list[dict[str, str]],
+        subagent_permissions: list[dict[str, str]] | None = None,
+    ) -> None:
+        """Replace the rules of the session and of its subagents, which hold
+        their own copy and can be resumed."""
+        if subagent_permissions is None:
+            subagent_permissions = permissions
         async with self._ruleset_lock:
-            await self._require_client().patch(
-                f"/api/session/{opencode_session_id}",
-                json_data={"permissions": permissions},
-            )
+            # The root first: a subagent started meanwhile copies its rules.
+            await self._write_ruleset(state.root_id, permissions)
+            for child in sorted(state.children):
+                try:
+                    await self._write_ruleset(child, subagent_permissions)
+                except Exception as exc:
+                    if http_status(exc) != 404:
+                        raise
 
     async def set_session_permission(
-        self, session_id: str, permissions: list[dict[str, str]]
+        self,
+        session_id: str,
+        permissions: list[dict[str, str]],
+        subagent_permissions: list[dict[str, str]] | None = None,
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
         try:
-            await self._write_ruleset(state.root_id, permissions)
+            await self._write_rulesets(state, permissions, subagent_permissions)
         except Exception as exc:  # noqa: BLE001
             log.warning("failed to set opencode permissions: %s", exc)
             return False

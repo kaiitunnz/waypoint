@@ -212,7 +212,9 @@ async def capture_thread_id(self, runtime, session_id, cwd, since, launch_target
 
 - `launch_flags` returns the CLI flags that pin model/effort/permission at
   process start, mirroring the structured-launch flag set. Omit flags the CLI
-  doesn't accept (Codex has no `--effort`).
+  doesn't accept (Codex has no `--effort`). What it returns with every argument
+  `None` is needed on every launch: single-token flags that a `tmux` reconnect
+  adds to stored launch args that lack them.
 - `pregenerate_thread_id` returns an id to pass at launch, or `None`. Claude
   accepts `--session-id <uuid>` so the id is known up front; Codex only
   reveals its id after the first persist, so it returns `None`.
@@ -792,12 +794,14 @@ Servers of a launch target start one at a time until the first has migrated a
   them finish. Their transcripts are not shown.
 - Interrupt stops the subagents too. OpenCode then runs the session to take their
   results, and the session stays interrupted until new input.
-- Permission modes are the session's permission ruleset, rewritten on restore.
-  "Approve for session" adds allow rules to that ruleset, which a mode change,
-  restore or fork resets. OpenCode's own `always` reply allows for the whole
-  project and is not used.
+- Permission modes are the permission rulesets of the session and its
+  subagents, rewritten on a mode change and on restore. In plan mode the session
+  switches to the plan agent and its subagents ask. "Approve for session" adds
+  allow rules, which a mode change, restore or fork resets. OpenCode's own
+  `always` reply allows for the whole project and is not used.
 - Model, effort (a model variant) and agent are selected on the session when
-  they change. An effort the model has no variant for is refused.
+  they change. An effort the model has no variant for is refused, or dropped
+  with a note when a session is launched with it.
 - A skill runs as a prompt, a slash command through the command endpoint.
 - The tmux transport passes `--standalone`, so the TUI's tools see the session's
   environment. A custom `--server` argument conflicts with it.

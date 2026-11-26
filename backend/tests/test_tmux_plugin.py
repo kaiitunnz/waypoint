@@ -46,9 +46,16 @@ class _FakeAgentPlugin:
 
     _PREGEN_ID = "00000000-0000-0000-0000-0000000000ff"
 
-    def __init__(self, *, pregenerates: bool, exists: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        pregenerates: bool,
+        exists: bool = False,
+        required: tuple[str, ...] = (),
+    ) -> None:
         self._pregenerates = pregenerates
         self.exists = exists
+        self._required = list(required)
         # The reconnect path reads the agent's config-dir env key (via the
         # registry plugin's capabilities) to scope the resume-existence check
         # to a switched profile's config dir.
@@ -67,7 +74,7 @@ class _FakeAgentPlugin:
         effort: str | None = None,
         permission_mode: str | None = None,
     ) -> list[str]:
-        flags: list[str] = []
+        flags: list[str] = list(self._required)
         if self._pregenerates:  # claude-style
             if model:
                 flags += ["--model", model]
@@ -529,6 +536,42 @@ async def test_restore_session_codex_drops_phantom_thread_id(
     state = runtime.updates[-1]["transport_state"]
     assert "thread_id" not in state, state
     assert runtime.command_calls[-1]["allocate_tty"] is True
+
+
+@pytest.mark.asyncio
+async def test_restore_adds_a_required_flag_a_stored_launch_lacks(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+) -> None:
+    agent = _FakeAgentPlugin(pregenerates=False, required=("--standalone",))
+    runtime = _FakeRuntime(inner_plugin=agent)
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-old",
+        backend="opencode",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={"launch_args": ["--foo"]},
+        raw_log_path=str(tmp_path / "s.raw.log"),
+        structured_log_path=str(tmp_path / "s.events.jsonl"),
+    )
+
+    await plugin.restore_session(cast(Any, runtime), session)
+    state = runtime.updates[-1]["transport_state"]
+    assert state["launch_args"] == ["--standalone", "--foo"]
+
+    session.transport_state = state
+    await plugin.restore_session(cast(Any, runtime), session)
+    assert runtime.updates[-1]["transport_state"]["launch_args"] == [
+        "--standalone",
+        "--foo",
+    ]
 
 
 def _exited_attached_session(sid: str, tmp_path: Path) -> SessionRecord:

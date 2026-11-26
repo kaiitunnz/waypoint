@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Any
 
-# Fields whose answer is text, a pick from ``options`` or both.
 _NUMBERS: dict[str, type[int] | type[float]] = {"integer": int, "number": float}
 _BOOLEANS = {"yes": True, "true": True, "no": False, "false": False}
 

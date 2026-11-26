@@ -5,7 +5,7 @@ it: their executions and pending asks are its own.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
 from waypoint.backends.opencode.forms import Form
 from waypoint.schemas import SessionContextUsage, SessionStatus
@@ -32,7 +32,7 @@ class Permission:
     files: Any = None
 
     @classmethod
-    def parse(cls, payload: Any) -> "Permission | None":
+    def parse(cls, payload: Any) -> Self | None:
         if not isinstance(payload, dict):
             return None
         request_id, session_id = payload.get("id"), payload.get("sessionID")
@@ -74,6 +74,10 @@ class SessionState:
     # question may still be live.
     forms_seeded: bool = True
     forms_seed_attempted_at: float = 0.0
+    # Cards the transcript still showed at restore, until a listing of the
+    # server's asks says which of them it has.
+    open_approvals: set[str] = field(default_factory=set)
+    open_questions: set[str] = field(default_factory=set)
     # Tool calls still running, by call id.
     tools: dict[str, ToolCall] = field(default_factory=dict)
     # The diffs a call's permission request showed, by call id.

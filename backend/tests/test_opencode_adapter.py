@@ -571,6 +571,33 @@ async def test_interrupting_a_subagent_the_turn_left_running_stays_interrupted(
 
 
 @pytest.mark.asyncio
+async def test_a_root_interrupted_before_its_subagent_ends_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "SUBAGENT_SETTLE_SECONDS", 0.0)
+    fake = _fake()
+    fake.add_session("ses_child", parentID="ses_root")
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter, children={"ses_child"})
+        adapter._routes["ses_child"] = "local"
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.execution.started", "ses_child"),
+        )
+        await adapter.interrupt("local")
+        await _deliver(
+            adapter,
+            event("session.execution.interrupted", reason="user"),
+            event("session.execution.interrupted", "ses_child", reason="user"),
+        )
+        await asyncio.gather(*adapter._tasks)
+
+    assert emitted.texts()[-1] == "Turn interrupted"
+    assert emitted.statuses[-1] == SessionStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
 async def test_a_superseded_execution_does_not_end_the_turn() -> None:
     fake = _fake()
     async with driving(fake) as (adapter, emitted):
@@ -610,7 +637,7 @@ async def test_an_execution_that_ends_reconciles_what_is_pending() -> None:
             _asked(fake, _permission()),
             _form_created(fake, _form()),
         )
-        fake.failures[("GET", "/api/form")] = 500
+        fake.failures[("GET", "/api/session/ses_root/form")] = 500
         await _deliver(adapter, event("session.execution.succeeded"))
         # A failed listing is not an empty one.
         assert adapter.pending_approval_ids("local") == ("per_1",)
@@ -797,7 +824,7 @@ async def test_unlisted_questions_stay_unknown_until_a_listing_succeeds(
 ) -> None:
     fake = _fake()
     fake.forms.append(_form("frm_open"))
-    fake.failures[("GET", "/api/form")] = 500
+    fake.failures[("GET", "/api/session/ses_root/form")] = 500
     changed: list[str] = []
     async with driving(fake, on_questions_changed=changed.append) as (adapter, _):
         state = _register(adapter, forms_seeded=False)
@@ -832,7 +859,8 @@ async def test_restore_adopts_subagents_running_state_and_pending_asks() -> None
     )
     fake.add_session("ses_child", parentID="ses_root")
     fake.add_session("ses_grandchild", parentID="ses_child")
-    fake.active = {"ses_grandchild"}
+    # A subagent waiting on a request is listed as running.
+    fake.active = {"ses_child", "ses_grandchild"}
     fake.permissions = [
         _permission("per_new", "ses_child"),
         _permission("per_shown"),
@@ -853,7 +881,7 @@ async def test_restore_adopts_subagents_running_state_and_pending_asks() -> None
         state = adapter._sessions["local"]
 
         assert state.children == {"ses_child", "ses_grandchild"}
-        assert state.running == {"ses_grandchild"}
+        assert state.running == {"ses_child", "ses_grandchild"}
         assert adapter.session_status("local") == SessionStatus.WAITING_INPUT
         assert adapter.pending_approval_ids("local") == ("per_new", "per_shown")
 
@@ -863,15 +891,20 @@ async def test_restore_adopts_subagents_running_state_and_pending_asks() -> None
     ]
     assert [m["tool_use_id"] for _, m in emitted.of(EventKind.TOOL_CALL)] == ["frm_new"]
     assert emitted.events[-1][2]["approval_id"] == "per_gone"
-    # The same model is not selected again; the rules are written back.
-    assert fake.writes() == [("PATCH", "/api/session/ses_root")]
-    assert fake.sessions["ses_root"]["permissions"] == ASK
+    # The same model is not selected again; the rules are written back, to the
+    # subagents too.
+    assert fake.writes() == [
+        ("PATCH", "/api/session/ses_root"),
+        ("PATCH", "/api/session/ses_child"),
+        ("PATCH", "/api/session/ses_grandchild"),
+    ]
+    assert fake.sessions["ses_grandchild"]["permissions"] == ASK
 
 
 @pytest.mark.asyncio
 async def test_restore_keeps_open_cards_when_it_cannot_list_asks() -> None:
     fake = _fake()
-    fake.failures[("GET", "/api/permission/request")] = 500
+    fake.failures[("GET", "/api/session/ses_root/permission")] = 500
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
             "local", WORKDIR, "ses_root", permissions=ASK, open_approvals=["per_1"]
@@ -932,6 +965,94 @@ async def test_restore_fails_without_the_session_or_its_rules(
         assert adapter._sessions == {} and adapter._routes == {}
 
 
+@pytest.mark.asyncio
+async def test_asks_a_restore_could_not_list_are_repaired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "QUESTION_SEED_RETRY_SECONDS", 0.01)
+    fake = _fake()
+    fake.active = {"ses_root"}
+    fake.permissions = [_permission("per_live"), _permission("per_new")]
+    fake.failures[("GET", "/api/session/ses_root/permission")] = 500
+    async with driving(fake) as (adapter, emitted):
+        await adapter.restore_session(
+            "local",
+            WORKDIR,
+            "ses_root",
+            permissions=ASK,
+            open_approvals=["per_live", "per_gone"],
+        )
+        assert emitted.events == []
+
+        fake.failures.clear()
+        await asyncio.gather(*adapter._tasks)
+
+        assert adapter.pending_approval_ids("local") == ("per_live", "per_new")
+    # The card the transcript has is not repeated; the stale one is closed.
+    assert [m["approval_id"] for _, m in emitted.of(EventKind.APPROVAL_REQUEST)] == [
+        "per_new"
+    ]
+    assert emitted.events[-1][2]["approval_id"] == "per_gone"
+
+
+@pytest.mark.asyncio
+async def test_a_late_listing_reports_a_wait_it_has_no_card_to_show(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "QUESTION_SEED_RETRY_SECONDS", 0.01)
+    fake = _fake()
+    fake.active = {"ses_root"}
+    fake.permissions = [_permission()]
+    fake.failures[("GET", "/api/session/ses_root/permission")] = 500
+    async with driving(fake) as (adapter, emitted):
+        await adapter.restore_session(
+            "local", WORKDIR, "ses_root", permissions=ASK, open_approvals=["per_1"]
+        )
+        fake.failures.clear()
+        await asyncio.gather(*adapter._tasks)
+
+    assert emitted.texts() == ["Waiting for your input"]
+    assert emitted.statuses == [SessionStatus.WAITING_INPUT]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_restore_leaves_no_session_behind() -> None:
+    fake = _fake()
+    listing = asyncio.Event()
+    async with driving(fake) as (adapter, _emitted):
+
+        async def stuck(state: SessionState) -> None:
+            listing.set()
+            await asyncio.Event().wait()
+
+        adapter._adopt_tree = stuck  # type: ignore[method-assign]
+        restoring = asyncio.create_task(
+            adapter.restore_session("local", WORKDIR, "ses_root", permissions=ASK)
+        )
+        await listing.wait()
+        restoring.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await restoring
+
+        assert adapter._sessions == {} and adapter._routes == {}
+
+
+@pytest.mark.asyncio
+async def test_a_mode_change_writes_the_subagents_rules_too() -> None:
+    fake = _fake()
+    fake.add_session("ses_child", permissions=[])
+    deny = [{"action": "*", "resource": "*", "effect": "deny"}]
+    async with driving(fake) as (adapter, _emitted):
+        # A subagent that has been deleted since is skipped.
+        _register(adapter, children={"ses_child", "ses_deleted"})
+        assert await adapter.set_session_permission("local", [], deny)
+        assert fake.sessions["ses_root"]["permissions"] == []
+        assert fake.sessions["ses_child"]["permissions"] == deny
+
+        fake.failures[("PATCH", "/api/session/ses_child")] = 500
+        assert not await adapter.set_session_permission("local", ASK)
+
+
 @pytest.mark.parametrize("ask_id", ["per_1", "frm_1"])
 @pytest.mark.asyncio
 async def test_an_ask_answered_during_the_listing_is_not_brought_back(
@@ -944,12 +1065,12 @@ async def test_an_ask_answered_during_the_listing_is_not_brought_back(
         state = _register(adapter)
         listing = adapter._list_asks
 
-        async def answered_meanwhile() -> Any:
-            result = await listing()
+        async def answered_meanwhile(owners: Any) -> Any:
+            result = await listing(owners)
             state.forget_ask(ask_id)
             return result
 
-        adapter._list_asks = answered_meanwhile  # type: ignore[method-assign]
+        adapter._list_asks = answered_meanwhile  # type: ignore[method-assign,assignment]
         await adapter._seed_asks(state)
 
         assert {*state.permissions, *state.forms} == {"per_1", "frm_1"} - {ask_id}

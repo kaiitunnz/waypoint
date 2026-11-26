@@ -840,7 +840,9 @@ class AgentLaunchContract(Protocol):
 
         Mirrors the structured-launch flag set the user picks in the launch
         panel, for the interactive CLI a pane wrapper spawns. Omit flags the
-        CLI does not accept (e.g. codex has no ``--effort``).
+        CLI does not accept (e.g. codex has no ``--effort``). What it returns
+        with every argument ``None`` is needed on every launch: single-token
+        flags that a reconnect adds to stored launch args that lack them.
         """
         ...
 

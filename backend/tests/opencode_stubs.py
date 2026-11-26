@@ -192,10 +192,6 @@ class FakeOpenCode:
                 return _json({"data": self.skills})
             case "GET", ["provider"]:
                 return _json({"data": [{"id": "opencode", "name": "OpenCode Zen"}]})
-            case "GET", ["permission", "request"]:
-                return _json({"data": self.permissions})
-            case "GET", ["form"]:
-                return _json({"data": self.forms})
             case "GET", ["session", "active"]:
                 return _json(
                     {"data": {item: {"type": "running"} for item in self.active}}
@@ -229,6 +225,10 @@ class FakeOpenCode:
         match method, rest:
             case "GET", []:
                 return _json({"data": info})
+            case "GET", ["permission"]:
+                return _json({"data": _asked_by(self.permissions, session_id)})
+            case "GET", ["form"]:
+                return _json({"data": _asked_by(self.forms, session_id)})
             case "PATCH", []:
                 info.update(body)
             case "DELETE", []:
@@ -306,6 +306,10 @@ class FakeOpenCode:
             await response.write(f"data: {json.dumps(event)}\n\n".encode())
             event = await queue.get()
         return response
+
+
+def _asked_by(asks: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
+    return [item for item in asks if item["sessionID"] == session_id]
 
 
 def _json(payload: Any) -> web.Response:

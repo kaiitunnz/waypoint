@@ -15,6 +15,7 @@ from waypoint.backends.opencode.plugin import (
     OPENCODE_SLASH_COMMANDS,
     OpenCodePlugin,
     OpenCodePluginConfig,
+    OpenCodeThreadImportRequest,
     _ruleset_for_mode,
 )
 from waypoint.backends.opencode.transport import OpenCodeTransport
@@ -169,7 +170,10 @@ async def test_create_session_passes_the_modes_agent_and_rules(
     tmp_path: Path, mode: str, agent: str | None, rules: list[dict[str, str]]
 ) -> None:
     plugin = OpenCodePlugin()
-    adapter = MagicMock(start_session=AsyncMock(return_value="ses_new"))
+    adapter = MagicMock(
+        start_session=AsyncMock(return_value="ses_new"),
+        selected_model=MagicMock(return_value=(None, None)),
+    )
     cast(Any, plugin)._get_or_create_adapter = AsyncMock(return_value=adapter)
     runtime = _runtime()
 
@@ -433,17 +437,81 @@ def _mode_adapter(agent: str | None) -> MagicMock:
 
 
 @pytest.mark.parametrize(
-    ("current", "mode", "agent_call", "rules"),
+    ("asked", "selected", "noted"),
+    [("max", None, True), ("high", "high", False), ("default", None, False)],
+)
+@pytest.mark.asyncio
+async def test_a_launch_effort_the_model_lacks_is_not_recorded(
+    tmp_path: Path, asked: str, selected: str | None, noted: bool
+) -> None:
+    plugin = OpenCodePlugin()
+    adapter = MagicMock(
+        start_session=AsyncMock(return_value="ses_new"),
+        selected_model=MagicMock(return_value=("opencode/big-pickle", selected)),
+    )
+    cast(Any, plugin)._get_or_create_adapter = AsyncMock(return_value=adapter)
+    runtime = _runtime()
+
+    session = await plugin.create_session(
+        runtime,
+        SessionCreateRequest(backend="opencode", cwd="/repo"),
+        session_id="sess",
+        launch_target=None,
+        title="T",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+        git_meta=GitMeta(repo_name="repo", branch="main"),
+        permission_mode="default",
+        resolved_model="opencode/big-pickle",
+        resolved_effort=asked,
+    )
+
+    assert session.effort == (None if noted else asked)
+    assert runtime._record_system_event.await_count == int(noted)
+
+
+@pytest.mark.asyncio
+async def test_thread_discovery_and_import_say_why_the_server_is_unusable() -> None:
+    plugin = OpenCodePlugin()
+    refused = OpenCodeError("OpenCode 1.x is not supported; upgrade OpenCode to 2.x")
+    adapter = MagicMock(
+        list_sessions=AsyncMock(side_effect=refused),
+        get_session=AsyncMock(side_effect=refused),
+        workdir="/repo",
+    )
+    cast(Any, plugin)._get_or_create_adapter = AsyncMock(return_value=adapter)
+    cast(Any, plugin)._adapters_for_launch_target = MagicMock(return_value=[adapter])
+    cast(Any, plugin)._find_adapter_for_launch_target = MagicMock(return_value=adapter)
+    runtime = _runtime()
+
+    with pytest.raises(HTTPException, match="upgrade OpenCode") as listing:
+        await plugin.list_threads(runtime)
+    assert listing.value.status_code == 503
+
+    with pytest.raises(HTTPException, match="upgrade OpenCode") as importing:
+        await plugin.import_thread(
+            runtime, OpenCodeThreadImportRequest(thread_id="ses_1")
+        )
+    assert importing.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("current", "mode", "agent_call", "rules", "subagent_rules"),
     [
-        (None, "plan", "plan", []),
-        ("plan", "ask", "build", ASK),
-        ("build", "ask", None, ASK),
-        (None, "default", None, []),
+        # A running subagent does not take the plan agent, so it asks.
+        (None, "plan", "plan", [], ASK),
+        ("plan", "ask", "build", ASK, ASK),
+        ("build", "ask", None, ASK, ASK),
+        (None, "default", None, [], []),
     ],
 )
 @pytest.mark.asyncio
 async def test_a_mode_change_applies_the_agent_and_rules_at_once(
-    current: str | None, mode: str, agent_call: str | None, rules: list[Any]
+    current: str | None,
+    mode: str,
+    agent_call: str | None,
+    rules: list[Any],
+    subagent_rules: list[Any],
 ) -> None:
     plugin = OpenCodePlugin()
     session = _session(permission_mode="allow")
@@ -457,7 +525,9 @@ async def test_a_mode_change_applies_the_agent_and_rules_at_once(
         adapter.set_agent.assert_awaited_once_with("sess", agent_call)
     else:
         adapter.set_agent.assert_not_awaited()
-    adapter.set_session_permission.assert_awaited_once_with("sess", rules)
+    adapter.set_session_permission.assert_awaited_once_with(
+        "sess", rules, subagent_rules
+    )
     assert session.transport_state == {
         "agent": "plan" if mode == "plan" else None,
         "pre_plan_mode": "allow" if mode == "plan" else None,
@@ -853,6 +923,7 @@ async def test_restore_records_the_servers_status(path: str) -> None:
         "/repo",
         "ses_1",
         permissions=[],
+        subagent_permissions=ASK,
         model="opencode/big-pickle",
         agent="plan",
         effort="high",

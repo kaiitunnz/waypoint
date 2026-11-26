@@ -124,6 +124,12 @@ def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]]:
     return [{"action": "*", "resource": "*", "effect": mode}]
 
 
+def _subagent_ruleset_for_mode(mode: str | None) -> list[dict[str, str]]:
+    # Plan mode is the session's agent, which its subagents do not take: they
+    # ask before acting.
+    return _ruleset_for_mode("ask" if mode == "plan" else mode)
+
+
 def _sorted_efforts(efforts: tuple[str, ...]) -> list[str]:
     def key(effort: str) -> tuple[int, int | float, str]:
         level = OPENCODE_REASONING_EFFORT_LEVELS.get(effort.lower())
@@ -208,8 +214,8 @@ class OpenCodePlugin(DefaultLaunchContract):
         supports_approval_note=True,
         supports_attachments=True,
         supports_custom_cli_args=True,
-        # OpenCode's "always" reply is surfaced as "approve for session"; it
-        # has no decision distinct from that, so no acceptAlways.
+        # "Approve for session" is a rule on the session. OpenCode's own
+        # "always" allows project-wide, so there is no acceptAlways.
         approval_decisions=("approve", "acceptForSession", "decline"),
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
@@ -594,6 +600,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             session.cwd,
             opencode_session_id,
             permissions=_ruleset_for_mode(session.permission_mode),
+            subagent_permissions=_subagent_ruleset_for_mode(session.permission_mode),
             model=session.model,
             agent=session.transport_state.get("agent"),
             effort=session.effort,
@@ -778,7 +785,9 @@ class OpenCodePlugin(DefaultLaunchContract):
             ) from exc
         if success:
             success = await adapter.set_session_permission(
-                session.id, _ruleset_for_mode(mode)
+                session.id,
+                _ruleset_for_mode(mode),
+                _subagent_ruleset_for_mode(mode),
             )
         if not success:
             raise HTTPException(
@@ -1432,18 +1441,22 @@ class OpenCodePlugin(DefaultLaunchContract):
         }
         result = []
         seen: set[str] = set()
+        failure: Exception | None = None
+        listed = False
         for adapter in adapters:
             # One bad adapter (e.g. an ERROR session restored at boot whose
             # persisted cwd no longer resolves) must not take down thread
             # discovery for the rest. Skip and log.
             try:
                 sessions = await adapter.list_sessions()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
                 log.exception(
                     "opencode list_sessions failed for adapter; skipping",
                     extra={"workdir": adapter.workdir},
                 )
+                failure = exc
                 continue
+            listed = True
             for sess in sessions:
                 sess_id = sess.get("id")
                 if not sess_id or sess_id in seen:
@@ -1461,6 +1474,11 @@ class OpenCodePlugin(DefaultLaunchContract):
                         updated_at=time_data.get("updated"),
                     )
                 )
+        if failure is not None and not listed:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"failed to list opencode threads: {failure}",
+            ) from failure
         result.sort(
             key=lambda thread: (
                 thread.updated_at if thread.updated_at is not None else -1,
@@ -1544,7 +1562,12 @@ class OpenCodePlugin(DefaultLaunchContract):
                 requested_cwd,
                 launch_env=process_env,
             )
-        sess = await fetch_adapter.get_session(opencode_session_id)
+        try:
+            sess = await fetch_adapter.get_session(opencode_session_id)
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         if not sess:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1718,6 +1741,14 @@ class OpenCodePlugin(DefaultLaunchContract):
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         # The adapter already emits "OpenCode session started ({session_id})"
         # with the remote id; re-recording here would duplicate the note.
+        model, effort = adapter.selected_model(session_id)
+        if resolved_effort not in (None, "default", effort):
+            runtime.storage.update_session(session.id, effort=None)
+            await runtime._record_system_event(
+                session.id,
+                f"{model or 'The default model'} has no reasoning effort "
+                f"{resolved_effort!r}; running without one",
+            )
         return runtime.get_session(session.id)
 
 

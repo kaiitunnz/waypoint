@@ -50,7 +50,7 @@ export function SessionsHome() {
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
-  const now = useNow();
+  const now = useNow(30_000);
   const usage = useUsageSummary(host, token, handleAuthFailure);
   const board = useBoardSummary(host, token, feed.boardRevision, handleAuthFailure);
 

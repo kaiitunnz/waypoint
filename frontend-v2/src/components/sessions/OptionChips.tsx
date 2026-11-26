@@ -21,18 +21,20 @@ interface OptionChipsProps {
   disabled: boolean;
   // Descriptions under the labels; otherwise each is the chip's tooltip.
   describe?: boolean;
+  compact?: boolean;
   onOption: (label: string) => void;
   // Chips after the options, such as Other….
   children?: ReactNode;
 }
 
-export function OptionChips({ options, selected, multi, disabled, describe, onOption, children }: OptionChipsProps) {
+export function OptionChips({ options, selected, multi, disabled, describe, compact, onOption, children }: OptionChipsProps) {
   return (
     <div className={styles.chips} role="group" aria-label={multi ? "Choose any" : "Options"}>
       {options.map((option) => (
         <Chip
           key={option.label}
           className={cx(describe && styles.described)}
+          compact={compact}
           recommended={option.recommended}
           selected={selected.includes(option.label)}
           disabled={disabled}

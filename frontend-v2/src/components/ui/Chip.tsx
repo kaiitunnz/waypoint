@@ -10,16 +10,25 @@ interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   // A text-only chip for the escape hatch ("Other…").
   quiet?: boolean;
   selected?: boolean;
+  // Smaller on a pointer client, for a list row.
+  compact?: boolean;
   children: ReactNode;
 }
 
-export function Chip({ recommended, quiet, selected, className, children, type = "button", ...rest }: ChipProps) {
+export function Chip({ recommended, quiet, selected, compact, className, children, type = "button", ...rest }: ChipProps) {
   return (
     <button
       {...rest}
       type={type}
       aria-pressed={selected}
-      className={cx(styles.chip, recommended && styles.rec, quiet && styles.quiet, selected && styles.selected, className)}
+      className={cx(
+        styles.chip,
+        recommended && styles.rec,
+        quiet && styles.quiet,
+        selected && styles.selected,
+        compact && styles.compact,
+        className,
+      )}
     >
       {children}
       {recommended ? <span className={styles.label}>Recommended</span> : null}

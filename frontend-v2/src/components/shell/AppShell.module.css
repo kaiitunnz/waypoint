@@ -12,6 +12,8 @@
 }
 
 .withTabBar {
+  /* For a screen that sizes itself to the space above the bar. */
+  --tabbar-inset: calc(var(--tabbar-height) + var(--safe-bottom));
   padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom));
 }
 
@@ -32,6 +34,7 @@
   }
 
   .withTabBar {
+    --tabbar-inset: 0px;
     padding-bottom: 0;
   }
 }

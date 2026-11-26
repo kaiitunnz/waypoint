@@ -77,3 +77,46 @@
 .end {
   composes: end from "../../styles/attention.module.css";
 }
+
+/* A headline that opens the ask. */
+.open {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.open > svg {
+  margin: 3px 0 0 auto;
+  color: var(--faint);
+}
+
+.review {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.review > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-bottom: -6px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .go {
+    min-height: 32px;
+    margin-bottom: 0;
+    font-size: var(--f-meta);
+  }
+}

@@ -44,7 +44,7 @@ const NO_SESSIONS: SessionRecord[] = [];
 
 export function SessionsHome() {
   const phone = usePhoneLayout();
-  const { host, token, needsYou, inboxCount, launchTargets } = useShellData();
+  const { host, token, needsYou, waiting, launchTargets } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
@@ -155,7 +155,14 @@ export function SessionsHome() {
 
   const sectionsView = searching ? null : (
     <>
-      <NeedsYouSection asks={asks} inbox={inboxCount} phone={phone} agentLabel={agentLabel} now={now} />
+      <NeedsYouSection
+        asks={asks}
+        inbox={waiting.inbox}
+        board={waiting.board}
+        phone={phone}
+        agentLabel={agentLabel}
+        now={now}
+      />
       {previewGroup("Pinned", sections.pinned)}
       {previewGroup("Live", sections.live)}
       {exitedCount > 0 ? (

@@ -39,6 +39,7 @@ export type IconName =
   | "moon"
   | "settings"
   | "sessions"
+  | "mail"
   | "needs-you"
   | "board"
   | "usage"
@@ -177,6 +178,12 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   sessions: (
     <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+  ),
+  mail: (
+    <>
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+      <path d="M4 7l8 6 8-6" />
+    </>
   ),
   "needs-you": (
     <>

@@ -5,10 +5,12 @@ import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { retryWhileNotReady } from "@waypoint/web-core/pendingAskActions";
 import type { ApprovalAction } from "@waypoint/web-core/session/approvals";
+import type { PendingAsk } from "@waypoint/web-core/types";
 
 import { AskStatus } from "@/components/sessions/AskStatus";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
 import { Button } from "@/components/ui/Button";
+import { cx } from "@/lib/cx";
 import { TextArea } from "@/components/ui/Field";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
@@ -26,6 +28,12 @@ interface DecisionCardProps<Id extends string> {
   // Sends one decision; a not-ready agent is retried.
   decide: (id: Id, note: string | undefined) => Promise<void>;
   children: ReactNode;
+  // Whether the agent can take a reply now.
+  availability?: PendingAsk["availability"];
+  // Shares the reply's phase with the ask's other surfaces.
+  lockId?: string;
+  // On its own screen: the body takes its full height.
+  roomy?: boolean;
 }
 
 // Every action locks while one is in flight.
@@ -38,12 +46,16 @@ export function DecisionCard<Id extends string>({
   supportsNote,
   decide,
   children,
+  availability = "actionable",
+  lockId,
+  roomy,
 }: DecisionCardProps<Id>) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [last, setLast] = useState<Id | null>(null);
-  const { phase, send, busy } = useAskResponder();
+  const { phase, send, busy: pending } = useAskResponder(lockId);
   const sending = phase.state === "sending";
+  const busy = pending || availability !== "actionable";
 
   const run = (id: Id) => {
     if (busy) return;
@@ -60,13 +72,13 @@ export function DecisionCard<Id extends string>({
   };
 
   return (
-    <section className={styles.card} aria-label="Needs your decision">
+    <section className={cx(styles.card, roomy && styles.roomy)} aria-label="Needs your decision">
       <div className={styles.head}>
         <span className={styles.lamp}>
           <StatusLamp state="needs" size="sm" flat />
         </span>
         <h3 className={styles.title}>{title}</h3>
-        {pager?.(busy)}
+        {pager?.(pending)}
         <CopyButton text={copyText} label={copyLabel} />
       </div>
       <div className={styles.body}>{children}</div>
@@ -101,7 +113,7 @@ export function DecisionCard<Id extends string>({
           </Button>
         ) : null}
       </div>
-      <AskStatus availability="actionable" phase={phase} onRetry={last ? () => run(last) : undefined} />
+      <AskStatus availability={availability} phase={phase} onRetry={last ? () => run(last) : undefined} />
     </section>
   );
 }

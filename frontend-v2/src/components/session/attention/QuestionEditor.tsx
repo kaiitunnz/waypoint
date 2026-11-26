@@ -20,6 +20,7 @@ import { Chip } from "@/components/ui/Chip";
 import { TextArea } from "@/components/ui/Field";
 import { cx } from "@/lib/cx";
 
+import { OptionRows } from "./OptionRows";
 import styles from "./QuestionEditor.module.css";
 
 interface QuestionEditorProps {
@@ -32,10 +33,22 @@ interface QuestionEditorProps {
   // Locks paging too, while a request is in flight.
   locked: boolean;
   onSubmit: () => void;
+  // `rows` lists the options as radio rows with the Other field always shown, for
+  // one question shown on its own.
+  variant?: "chips" | "rows";
 }
 
 // "Other…" opens a note kept beside the picked options, as Claude Code sends it.
-export function QuestionEditor({ questions, headed, draft, onDraft, disabled, locked, onSubmit }: QuestionEditorProps) {
+export function QuestionEditor({
+  questions,
+  headed,
+  draft,
+  onDraft,
+  disabled,
+  locked,
+  onSubmit,
+  variant = "chips",
+}: QuestionEditorProps) {
   const { index, total, entry, paginated, filled, freeText } = askFormView(questions, draft);
   if (!entry) return null;
   const noteOpen = freeText || Boolean(draft.notesOpen[index]);
@@ -46,6 +59,35 @@ export function QuestionEditor({ questions, headed, draft, onDraft, disabled, lo
     event.preventDefault();
     onSubmit();
   };
+
+  if (variant === "rows") {
+    return (
+      <div className={styles.editor}>
+        {entry.options.length > 0 ? (
+          <OptionRows
+            options={entry.options}
+            selected={draft.picked[index] ?? []}
+            multi={multi}
+            disabled={disabled}
+            label={entry.question}
+            onOption={(label) => onDraft((current) => toggleLabel(current, index, label, multi))}
+          />
+        ) : null}
+        <TextArea
+          rows={1}
+          value={draft.notes[index] ?? ""}
+          disabled={disabled}
+          aria-label="Other answer"
+          placeholder="Other answer"
+          onChange={(event) => {
+            const value = event.target.value;
+            onDraft((current) => setAskNote(current, index, value));
+          }}
+          onKeyDown={onNoteKey}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.editor}>

@@ -1,0 +1,112 @@
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+
+.option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--plane);
+  text-align: left;
+}
+
+.option:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.on {
+  border-color: color-mix(in srgb, var(--text-strong) 55%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, var(--plane));
+}
+
+/* Level with the label's first line. */
+.mark {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1.5px solid var(--line-strong);
+}
+
+.radio {
+  border-radius: 50%;
+}
+
+.box {
+  border-radius: 4px;
+}
+
+.on .mark {
+  border-color: var(--text-strong);
+}
+
+.on .radio::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-strong);
+}
+
+.on .box::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border-bottom: 2px solid var(--text-strong);
+  border-left: 2px solid var(--text-strong);
+  transform: rotate(-45deg);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.label {
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.recommended {
+  margin-left: 6px;
+  font-size: var(--f-meta);
+  font-weight: 400;
+  color: var(--brass-text);
+  white-space: nowrap;
+}
+
+.description {
+  margin-top: 1px;
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .option {
+    min-height: 36px;
+    padding: 8px 12px;
+  }
+}

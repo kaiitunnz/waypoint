@@ -1,0 +1,171 @@
+.row {
+  position: relative;
+  overflow: hidden;
+  margin-left: 8px;
+  border-radius: var(--r) 0 0 var(--r);
+}
+
+/* Hairlines between rows, none beside a filled one. */
+.row + .row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 28px;
+  z-index: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.selected::before,
+.selected + .row::before {
+  display: none;
+}
+
+.slide {
+  position: relative;
+  background: var(--ground);
+  touch-action: pan-y;
+  transition: transform 140ms ease-out;
+}
+
+.swiping .slide {
+  transition: none;
+}
+
+.selected .slide {
+  background: var(--plane);
+}
+
+.behind {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 18px;
+  font-weight: 600;
+  color: var(--on-action);
+  background: var(--error);
+}
+
+.swiping .behind {
+  display: flex;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px 10px 8px;
+  text-align: left;
+}
+
+/* Level with the source line. */
+.lead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+}
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.name {
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.kind {
+  flex: none;
+}
+
+.time {
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--faint);
+}
+
+.headline,
+.detail {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headline {
+  margin-top: 1px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.strong .headline {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.detail {
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--faint);
+}
+
+.quiet .name,
+.quiet .headline {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.inert {
+  opacity: 0.45;
+}
+
+.actions {
+  padding: 0 12px 10px 28px;
+  margin-top: -6px;
+}
+
+.actions:empty {
+  display: none;
+}
+
+.trash {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  z-index: 2;
+  background: var(--ground);
+  opacity: 0;
+}
+
+.selected .trash {
+  background: var(--plane);
+}
+
+.row:hover .trash,
+.trash:focus-visible {
+  opacity: 1;
+}
+
+/* The trash takes the time's place while it shows. */
+.row:hover:has(> .trash) .time {
+  visibility: hidden;
+}

@@ -41,4 +41,11 @@
   .chip {
     height: 36px;
   }
+
+  .chip.compact {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    font-size: var(--f-meta);
+  }
 }

@@ -1,0 +1,50 @@
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  color: var(--brass-text);
+}
+
+.headline {
+  margin-top: 6px;
+  font-size: var(--f-title);
+  font-weight: 600;
+  line-height: 26px;
+  color: var(--text-strong);
+}
+
+.title {
+  margin-top: 6px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.summary {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .link {
+    min-height: 32px;
+    font-size: var(--f-meta);
+  }
+}

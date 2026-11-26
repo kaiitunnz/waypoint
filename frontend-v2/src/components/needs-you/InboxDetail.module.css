@@ -1,0 +1,107 @@
+.glyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--brass-text);
+}
+
+.done {
+  color: var(--faint);
+}
+
+.subject {
+  margin-top: 6px;
+  font-size: var(--f-title);
+  font-weight: 600;
+  line-height: 26px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.waiting {
+  color: var(--brass-text);
+}
+
+.gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 4px 12px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.gateKind {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.gateTitle {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gateLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.blocks {
+  margin-top: 4px;
+}
+
+.group + .group {
+  border-top: 1px solid var(--line);
+}
+
+.files {
+  margin-top: 14px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Each file keeps its own reply, side by side where there is room. */
+.grid > * + * {
+  border-top: 0;
+}
+
+@media (min-width: 900px) {
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+    align-items: start;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .gateLink {
+    min-height: 32px;
+  }
+}

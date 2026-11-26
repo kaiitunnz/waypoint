@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
+import { askNeedsDetail } from "@waypoint/web-core/needsYou";
 import {
   decideAsk,
   decisionView,
@@ -16,6 +18,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { TextInput } from "@/components/ui/Field";
 
 import { AskCard } from "./AskCard";
+import { OpenHeadline, OpenLink } from "./AskOpen";
 import { AskStatus } from "./AskStatus";
 import styles from "./Ask.module.css";
 import { useAskResponder } from "./useAskResponder";
@@ -24,6 +27,8 @@ interface DecisionAskProps {
   ask: PendingApprovalAsk | PendingPlanAsk;
   agent: string;
   now: number;
+  // Where the ask opens; a long one is decided there instead of on the card.
+  openHref?: string;
 }
 
 const VARIANT = { approve: "primary", session: "text", decline: "danger" } as const satisfies Record<
@@ -32,16 +37,25 @@ const VARIANT = { approve: "primary", session: "text", decline: "danger" } as co
 >;
 
 // A tool approval or a plan approval.
-export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
+export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   const { actions, supportsNote, preview, planBody } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [last, setLast] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
-  const { phase, send, busy } = useAskResponder();
+  const { phase, send, busy } = useAskResponder(ask.id);
   const disabled = busy || ask.availability !== "actionable";
+  const long = openHref !== undefined && askNeedsDetail(ask);
 
   const decide = async (decision: string) => {
+    setLast(decision);
     if (await send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry))) setReading(false);
+  };
+  const onNoteKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!isModifiedEnterShortcut(event)) return;
+    event.preventDefault();
+    const primary = actions.find((action) => action.kind === "approve");
+    if (primary && !disabled) void decide(primary.decision);
   };
   const button = (action: DecisionAction, size: "sm" | "md" = "sm") => (
     <Button
@@ -55,12 +69,35 @@ export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
       {action.label}
     </Button>
   );
+  const status = (
+    <AskStatus availability={ask.availability} phase={phase} onRetry={last ? () => void decide(last) : undefined} />
+  );
+  const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
+  const command = preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null;
+  const path = preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null;
+
+  if (long) {
+    return (
+      <AskCard ask={ask} agent={agent} now={now}>
+        {headline}
+        <div className={styles.review}>
+          <div>
+            {command}
+            {path}
+            {planBody !== null ? <p className={styles.clamp}>{planPreview(planBody)}</p> : null}
+          </div>
+          <OpenLink href={openHref} label="Review" />
+        </div>
+        {status}
+      </AskCard>
+    );
+  }
 
   return (
     <AskCard ask={ask} agent={agent} now={now}>
-      <h3 className={styles.headline}>{ask.title}</h3>
-      {preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null}
-      {preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null}
+      {headline}
+      {command}
+      {path}
       {planBody !== null ? (
         <p className={styles.clamp}>{planPreview(planBody)}</p>
       ) : ask.body && preview?.kind !== "command" ? (
@@ -75,6 +112,7 @@ export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
             aria-label="Note"
             placeholder="Note"
             onChange={(event) => setNote(event.target.value)}
+            onKeyDown={onNoteKey}
           />
         </div>
       ) : null}
@@ -91,7 +129,7 @@ export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
           </Button>
         ) : null}
       </div>
-      <AskStatus availability={ask.availability} phase={phase} />
+      {status}
       {planBody !== null ? (
         <Dialog
           open={reading}

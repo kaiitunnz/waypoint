@@ -19,22 +19,36 @@ const PHONE_LIMIT = 3;
 
 interface NeedsYouSectionProps {
   asks: PendingAsk[];
-  // Open inbox items, which have no card here.
+  // Open inbox items and board gates, which have no card here.
   inbox: number;
+  board: number;
   phone: boolean;
   agentLabel: (ask: PendingAsk) => string;
   now: number;
 }
 
-export function NeedsYouSection({ asks, inbox, phone, agentLabel, now }: NeedsYouSectionProps) {
+function QueueLink({ count, place }: { count: number; place: string }) {
+  if (count === 0) return null;
+  return (
+    <div className={styles.inboxWrap}>
+      <Link href="/inbox" className={styles.inbox} aria-label={`${count} ${place}`}>
+        <Badge count={count} />
+        <span aria-hidden="true">{place}</span>
+        <Icon name="chevron-right" size={16} strokeWidth={2} />
+      </Link>
+    </div>
+  );
+}
+
+export function NeedsYouSection({ asks, inbox, board, phone, agentLabel, now }: NeedsYouSectionProps) {
   const [all, setAll] = useState(false);
-  if (asks.length === 0 && inbox === 0) return null;
+  if (asks.length === 0 && inbox === 0 && board === 0) return null;
   const folded = phone && !all && asks.length > PHONE_LIMIT;
   const shown = folded ? asks.slice(0, PHONE_LIMIT) : asks;
 
   return (
     <section className={cx(styles.section, !phone && styles.full)}>
-      <SectionHeading title="Needs you" count={asks.length + inbox} dense={phone} />
+      <SectionHeading title="Needs you" count={asks.length + inbox + board} dense={phone} />
       <div className={styles.cards}>
         {shown.map((ask) => {
           const agent = agentLabel(ask);
@@ -52,15 +66,8 @@ export function NeedsYouSection({ asks, inbox, phone, agentLabel, now }: NeedsYo
           </ActionChip>
         </div>
       ) : null}
-      {inbox > 0 ? (
-        <div className={styles.inboxWrap}>
-          <Link href="/inbox" className={styles.inbox} aria-label={`${inbox} in inbox`}>
-            <Badge count={inbox} />
-            <span aria-hidden="true">in inbox</span>
-            <Icon name="chevron-right" size={16} strokeWidth={2} />
-          </Link>
-        </div>
-      ) : null}
+      <QueueLink count={inbox} place="in inbox" />
+      <QueueLink count={board} place="on board" />
     </section>
   );
 }

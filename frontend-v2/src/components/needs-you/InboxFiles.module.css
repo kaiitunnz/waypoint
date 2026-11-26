@@ -1,0 +1,78 @@
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  min-width: 0;
+}
+
+.thumb {
+  --thumb-size: 44px;
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.type {
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.open {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 10px 0 6px;
+  border-radius: 8px;
+  background: var(--fill-quiet);
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text);
+}
+
+.chip > :last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.small {
+  --thumb-size: 24px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chip {
+    min-height: 28px;
+  }
+}

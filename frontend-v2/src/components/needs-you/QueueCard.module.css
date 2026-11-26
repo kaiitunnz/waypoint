@@ -1,0 +1,115 @@
+.item {
+  position: relative;
+  border-radius: var(--r-card);
+}
+
+.slide {
+  position: relative;
+  touch-action: pan-y;
+  transition: transform 140ms ease-out;
+}
+
+.swiping .slide {
+  transition: none;
+}
+
+.behind {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 18px;
+  border-radius: var(--r-card);
+  background: var(--error);
+  color: var(--on-action);
+  font-weight: 600;
+}
+
+.swiping .behind {
+  display: flex;
+}
+
+/* A card that only opens: the attention fill with no brass hairline. */
+.card {
+  display: block;
+  width: 100%;
+  padding: 10px 14px 11px;
+  border-radius: var(--r-card);
+  background: var(--attention);
+  text-align: left;
+}
+
+.quiet {
+  background: var(--plane-raised);
+}
+
+.body {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.headline {
+  line-height: 22px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.strong .headline {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.quiet .headline {
+  color: var(--muted);
+}
+
+.detail {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.inert {
+  opacity: 0.45;
+}
+
+.trash {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--attention);
+  opacity: 0;
+}
+
+.item:hover .trash,
+.trash:focus-visible {
+  opacity: 1;
+}
+
+/* The trash takes the time's place while it shows. */
+.item:hover:has(> .trash) .time {
+  visibility: hidden;
+}

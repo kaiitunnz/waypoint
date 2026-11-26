@@ -125,6 +125,7 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     notes,
     setNotes,
     selected,
+    setSelected,
     toggle,
     other,
     setOther,

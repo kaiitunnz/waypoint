@@ -1,0 +1,38 @@
+/* A glyph in place of a lamp: brass while it waits on the human. */
+.glyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  color: var(--brass-text);
+}
+
+.done {
+  color: var(--faint);
+}
+
+.chips {
+  display: inline-flex;
+  gap: 10px;
+}
+
+.pending {
+  color: var(--brass-text);
+}
+
+.gate {
+  display: inline-flex;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.gate > :last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.answered {
+  flex: none;
+  color: var(--muted);
+}

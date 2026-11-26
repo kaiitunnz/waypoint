@@ -3,7 +3,7 @@
 import { useState, type KeyboardEvent } from "react";
 
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { askNeedsDetail } from "@waypoint/web-core/needsYou";
+import { askRow } from "@waypoint/web-core/needsYou";
 import {
   answerQuestion,
   decideAsk,
@@ -31,15 +31,14 @@ const VARIANT = { approve: "primary", session: "text", decline: "danger" } as co
 
 function QuestionActions({ ask }: { ask: PendingQuestionAsk }) {
   const { phase, send, busy } = useAskResponder(ask.id);
-  const [picked, setPicked] = useState<string | null>(null);
   const prompts = ask.question.questions;
   const prompt = prompts[0];
   const disabled = busy || ask.availability !== "actionable";
+  const picked = phase.state === "sending" || phase.state === "sent" ? phase.action : undefined;
 
   const answer = (label: string) => {
-    setPicked(label);
     const tapped = tapOption(prompts, emptyPicks(prompts), 0, label);
-    void send((host, token, retry) => answerQuestion(host, token, ask, tapped.picks, retry));
+    void send((host, token, retry) => answerQuestion(host, token, ask, tapped.picks, retry), label);
   };
 
   return (
@@ -47,12 +46,12 @@ function QuestionActions({ ask }: { ask: PendingQuestionAsk }) {
       <OptionChips
         compact
         options={prompt.options}
-        selected={picked && busy ? [picked] : []}
+        selected={picked ? [picked] : []}
         multi={false}
         disabled={disabled}
         onOption={answer}
       />
-      <AskStatus availability={ask.availability} phase={phase} onRetry={picked ? () => answer(picked) : undefined} />
+      <AskStatus availability={ask.availability} phase={phase} />
     </>
   );
 }
@@ -61,13 +60,11 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
   const { actions, supportsNote } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [last, setLast] = useState<string | null>(null);
   const { phase, send, busy } = useAskResponder(ask.id);
   const disabled = busy || ask.availability !== "actionable";
 
   const decide = (decision: string) => {
-    setLast(decision);
-    void send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry));
+    void send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision);
   };
   const onNoteKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isModifiedEnterShortcut(event)) return;
@@ -96,7 +93,7 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
             variant={VARIANT[action.kind]}
             size="sm"
             disabled={disabled}
-            busy={phase.state === "sending" && last === action.decision}
+            busy={phase.state === "sending" && phase.action === action.decision}
             onClick={() => decide(action.decision)}
           >
             {action.label}
@@ -108,14 +105,14 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
           </IconButton>
         ) : null}
       </div>
-      <AskStatus availability={ask.availability} phase={phase} onRetry={last ? () => decide(last) : undefined} />
+      <AskStatus availability={ask.availability} phase={phase} />
     </>
   );
 }
 
-// The answer a row can take itself; a long ask has none.
+// The answer a row can take itself; one it cannot show whole has none.
 export function AskRowActions({ ask }: { ask: PendingAsk }) {
-  if (askNeedsDetail(ask) || ask.kind === "plan_approval") return null;
+  if (!askRow(ask).answers || ask.kind === "plan_approval") return null;
   return (
     <div className={styles.actions}>
       {ask.kind === "question" ? <QuestionActions ask={ask} /> : <ApprovalActions ask={ask} />}

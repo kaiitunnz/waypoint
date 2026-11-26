@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 
 import { gateHeadline, gateView } from "@waypoint/web-core/board";
 import { inboxBlockChips } from "@waypoint/web-core/inbox";
-import { askSummary, type QueueEntry } from "@waypoint/web-core/needsYou";
+import { askRow, type QueueEntry } from "@waypoint/web-core/needsYou";
+import { splitPath } from "@waypoint/web-core/workspacePaths";
 
+import { PathLabel } from "@/components/session/cards/PathLabel";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
@@ -22,20 +24,27 @@ export interface EntryView {
   strong: boolean;
   // Nothing left for the human to do here.
   quiet: boolean;
+  // The headline and detail wrap rather than being cut: a row answers from them.
+  whole?: boolean;
 }
 
 export function entryView(entry: QueueEntry, agentName: (backend: string) => string): EntryView {
   if (entry.source === "sessions") {
     const { ask } = entry;
-    const summary = askSummary(ask);
+    const request = askRow(ask);
     return {
       lead: <StatusLamp state="needs" size="sm" flat />,
       name: ask.session_title,
       kind: agentName(ask.session_backend),
       headline: ask.kind === "question" && ask.question.questions.length === 1 ? ask.question.questions[0].question : ask.title,
-      detail: summary.text ? <span className={cx(summary.mono && "mono")}>{summary.text}</span> : null,
+      detail: request.path ? (
+        <PathLabel {...splitPath(request.path)} full={request.path} />
+      ) : request.text ? (
+        <span className={cx(request.mono && "mono")}>{request.text}</span>
+      ) : null,
       strong: true,
       quiet: false,
+      whole: request.answers,
     };
   }
   if (entry.source === "inbox") {

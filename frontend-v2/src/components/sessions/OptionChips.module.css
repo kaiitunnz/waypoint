@@ -5,8 +5,9 @@
   gap: 8px;
 }
 
-/* A described option wraps, so a long one grows instead of overflowing. */
-.chips .described {
+/* An option wraps, so a long one grows instead of being cut. */
+.chips > button {
+  overflow-wrap: anywhere;
   height: auto;
   min-height: 44px;
   max-width: 100%;
@@ -30,7 +31,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .chips .described {
+  .chips > button {
     min-height: 36px;
     padding-top: 4px;
     padding-bottom: 4px;

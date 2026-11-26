@@ -52,16 +52,14 @@ export function DecisionCard<Id extends string>({
 }: DecisionCardProps<Id>) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [last, setLast] = useState<Id | null>(null);
   const { phase, send, busy: pending } = useAskResponder(lockId);
-  const sending = phase.state === "sending";
+  const sending = (id: Id) => phase.state === "sending" && phase.action === id;
   const busy = pending || availability !== "actionable";
 
   const run = (id: Id) => {
     if (busy) return;
-    setLast(id);
     const text = note.trim() || undefined;
-    void send((_host, _token, retry) => retryWhileNotReady(() => decide(id, text), retry));
+    void send((_host, _token, retry) => retryWhileNotReady(() => decide(id, text), retry), id);
   };
   const primary = actions.find((action) => action.primary) ?? actions[0];
 
@@ -101,10 +99,10 @@ export function DecisionCard<Id extends string>({
             variant={action.primary ? "primary" : "text"}
             size="sm"
             disabled={busy}
-            busy={sending && last === action.id}
+            busy={sending(action.id)}
             onClick={() => run(action.id)}
           >
-            {sending && last === action.id && action.loadingLabel ? action.loadingLabel : action.label}
+            {sending(action.id) && action.loadingLabel ? action.loadingLabel : action.label}
           </Button>
         ))}
         {supportsNote && !noteOpen ? (
@@ -113,7 +111,7 @@ export function DecisionCard<Id extends string>({
           </Button>
         ) : null}
       </div>
-      <AskStatus availability={availability} phase={phase} onRetry={last ? () => run(last) : undefined} />
+      <AskStatus availability={availability} phase={phase} />
     </section>
   );
 }

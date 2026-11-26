@@ -64,6 +64,11 @@
   text-align: left;
 }
 
+/* The row clips what overflows it, so its focus ring sits inside. */
+.main:focus-visible {
+  outline-offset: -2px;
+}
+
 /* Level with the source line. */
 .lead {
   display: flex;
@@ -115,6 +120,13 @@
   margin-top: 1px;
   line-height: 20px;
   color: var(--text);
+}
+
+.whole .headline,
+.whole .detail {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .strong .headline {

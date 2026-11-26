@@ -59,12 +59,10 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
   }
 
   const headline = single ? single.question : ask.title;
-  const status = (
-    <AskStatus availability={ask.availability} phase={phase} onRetry={answerable ? () => void submit() : undefined} />
-  );
+  const status = <AskStatus availability={ask.availability} phase={phase} />;
 
   return (
-    <AskCard ask={ask} agent={agent} now={now}>
+    <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
       {openHref ? <OpenHeadline href={openHref}>{headline}</OpenHeadline> : <h3 className={styles.headline}>{headline}</h3>}
       {long ? (
         <div className={styles.review}>

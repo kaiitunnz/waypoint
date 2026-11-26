@@ -43,8 +43,9 @@
   }
 
   .chip.compact {
-    height: 28px;
-    padding: 0 10px;
+    height: auto;
+    min-height: 28px;
+    padding: 3px 10px;
     border-radius: var(--r-sm);
     font-size: var(--f-meta);
   }

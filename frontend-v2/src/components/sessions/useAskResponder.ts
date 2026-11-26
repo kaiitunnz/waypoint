@@ -10,12 +10,14 @@ import { useShellData } from "@/lib/shell-data";
 
 import { SENT_HOLD_MS, useAskLocks } from "./AskLocks";
 
+// `action` names which reply is in flight or went through.
 export type AskPhase =
   | { state: "idle" }
   // `retrying`: the agent is not ready yet and the reply is being retried.
-  | { state: "sending"; retrying: boolean }
-  | { state: "sent" }
-  | { state: "error"; message: string };
+  | { state: "sending"; retrying: boolean; action?: string }
+  | { state: "sent"; action?: string }
+  // `retry` sends the very reply that failed, whichever surface shows it.
+  | { state: "error"; message: string; retry?: () => void };
 
 // Runs one response to an ask. A failure keeps the card as it was, with the reason.
 // With a `lockId` under an AskLocksProvider, every surface of the ask shares the phase.
@@ -49,11 +51,14 @@ export function useAskResponder(lockId?: string) {
   );
 
   const send = useCallback(
-    async (run: (host: string, token: string, retry: RetryOptions) => Promise<void>): Promise<boolean> => {
-      setPhase({ state: "sending", retrying: false });
+    async function attempt(
+      run: (host: string, token: string, retry: RetryOptions) => Promise<void>,
+      action?: string,
+    ): Promise<boolean> {
+      setPhase({ state: "sending", retrying: false, action });
       try {
-        await run(host, token, { onRetry: () => setPhase({ state: "sending", retrying: true }) });
-        setPhase({ state: "sent" });
+        await run(host, token, { onRetry: () => setPhase({ state: "sending", retrying: true, action }) });
+        setPhase({ state: "sent", action });
         return true;
       } catch (error) {
         if (isAuthError(error)) {
@@ -66,6 +71,7 @@ export function useAskResponder(lockId?: string) {
               : error instanceof Error
                 ? error.message
                 : "Could not send",
+            retry: () => void attempt(run, action),
           });
         }
         return false;

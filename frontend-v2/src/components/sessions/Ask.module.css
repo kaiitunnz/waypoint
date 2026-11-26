@@ -91,6 +91,19 @@
   color: var(--faint);
 }
 
+/* 44px to tap, taken from the space around the line rather than added to it where
+   there is some below. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .open {
+    margin: -4px 0 -8px;
+    padding: 11px 0;
+  }
+
+  .open > svg {
+    margin-top: 3px;
+  }
+}
+
 .review {
   display: flex;
   align-items: flex-end;

@@ -13,16 +13,19 @@ interface AskCardProps {
   ask: PendingAsk;
   agent: string;
   now: number;
+  // Whether the source name goes to the session. A card that opens the ask keeps
+  // one target at its top.
+  linked: boolean;
   children: ReactNode;
 }
 
-export function AskCard({ ask, agent, now, children }: AskCardProps) {
+export function AskCard({ ask, agent, now, linked, children }: AskCardProps) {
   return (
     <section className={styles.card} aria-label={`${ask.session_title}: ${ask.title}`}>
       <SourceLine
         lead={<StatusLamp state="needs" size="sm" flat />}
         name={ask.session_title}
-        href={sessionHref(ask.session_id)}
+        href={linked ? sessionHref(ask.session_id) : undefined}
         kind={agent}
         time={<time dateTime={ask.created_at}>{formatSessionTime(ask.created_at, now)}</time>}
       />

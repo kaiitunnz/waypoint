@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { stripRecommendedSuffix } from "@waypoint/web-core/pendingAskActions";
 
 import { Chip } from "@/components/ui/Chip";
-import { cx } from "@/lib/cx";
 
 import styles from "./OptionChips.module.css";
 
@@ -33,7 +32,6 @@ export function OptionChips({ options, selected, multi, disabled, describe, comp
       {options.map((option) => (
         <Chip
           key={option.label}
-          className={cx(describe && styles.described)}
           compact={compact}
           recommended={option.recommended}
           selected={selected.includes(option.label)}

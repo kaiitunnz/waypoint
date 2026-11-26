@@ -51,7 +51,7 @@ export function QueueRow({ entry, view, time, selected, selecting, checked, onTo
       {view.detail ? <span className={styles.detail}>{view.detail}</span> : null}
     </>
   );
-  const classes = cx(styles.main, view.strong && styles.strong);
+  const classes = cx(styles.main, view.strong && styles.strong, view.whole && styles.whole);
 
   return (
     <li

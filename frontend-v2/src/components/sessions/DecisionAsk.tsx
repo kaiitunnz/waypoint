@@ -41,15 +41,13 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   const { actions, supportsNote, preview, planBody } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [last, setLast] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const { phase, send, busy } = useAskResponder(ask.id);
   const disabled = busy || ask.availability !== "actionable";
   const long = openHref !== undefined && askNeedsDetail(ask);
 
   const decide = async (decision: string) => {
-    setLast(decision);
-    if (await send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry))) setReading(false);
+    if (await send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision)) setReading(false);
   };
   const onNoteKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isModifiedEnterShortcut(event)) return;
@@ -69,16 +67,14 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
       {action.label}
     </Button>
   );
-  const status = (
-    <AskStatus availability={ask.availability} phase={phase} onRetry={last ? () => void decide(last) : undefined} />
-  );
+  const status = <AskStatus availability={ask.availability} phase={phase} />;
   const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
   const command = preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null;
   const path = preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null;
 
   if (long) {
     return (
-      <AskCard ask={ask} agent={agent} now={now}>
+      <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
         {headline}
         <div className={styles.review}>
           <div>
@@ -94,7 +90,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   }
 
   return (
-    <AskCard ask={ask} agent={agent} now={now}>
+    <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
       {headline}
       {command}
       {path}

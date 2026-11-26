@@ -25,6 +25,14 @@ _kill_proc() {
 OPENCODE_BIN=${0:-opencode}
 TARGET_CWD=${1:-}
 shift || true
+
+# The first stdin line is the server password: sent this way it is on no
+# command line. 2.x reads either password variable; 1.x reads
+# OPENCODE_SERVER_PASSWORD, so it is secured while it is identified.
+IFS= read -r SERVER_PASSWORD
+export OPENCODE_SERVER_USERNAME=opencode
+export OPENCODE_SERVER_PASSWORD="$SERVER_PASSWORD"
+export OPENCODE_PASSWORD="$SERVER_PASSWORD"
 LOG=$(mktemp)
 PID=""
 
@@ -54,6 +62,8 @@ if [ -n "$TARGET_CWD" ]; then
     esac
     cd "$TARGET_CWD"
 fi
+# The server API takes absolute directories.
+echo "__WP_DIR__=${PWD}"
 
 "$OPENCODE_BIN" serve --hostname=127.0.0.1 --port=0 "$@" >"$LOG" 2>&1 &
 PID=$!

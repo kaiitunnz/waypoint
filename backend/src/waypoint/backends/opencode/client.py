@@ -13,6 +13,7 @@ from waypoint.backends.opencode.connection_config import (
     http_control_timeout,
     with_ssh_keepalive,
 )
+from waypoint.backends.opencode.server_auth import ServerAuth
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 log = logging.getLogger("waypoint.opencode.client")
@@ -31,6 +32,16 @@ _LONG_RUNNING_TIMEOUT = aiohttp.ClientTimeout(
 )
 
 
+# Runs curl on the remote host with the Basic token taken from the first stdin
+# line and handed over as a config file, so it is on no command line. The rest
+# of stdin is the request body.
+_AUTHED_CURL = (
+    "IFS= read -r token; "
+    'exec curl -K <(printf \'header = "Authorization: Basic %s"\\n\' "$token") '
+    '"$@"'
+)
+
+
 def _control_timeout() -> aiohttp.ClientTimeout:
     seconds = http_control_timeout()
     if seconds <= 0:
@@ -44,20 +55,20 @@ class OpenCodeHttpClient(Protocol):
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any: ...
     async def patch(
         self, path: str, json_data: dict[str, Any] | None = None
     ) -> Any: ...
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any: ...
+    async def delete(self, path: str) -> Any: ...
     def stream_events(self, path: str) -> AsyncGenerator[str, None]: ...
     async def close(self) -> None: ...
 
 
 class LocalOpenCodeClient:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, auth: ServerAuth) -> None:
         self.base_url = base_url
+        self._headers = {"Authorization": f"Basic {auth.basic_token}"}
         self._session: aiohttp.ClientSession | None = None
 
     def _require_session(self) -> aiohttp.ClientSession:
@@ -67,6 +78,7 @@ class LocalOpenCodeClient:
                 max_field_size=_SSE_BUFFER_BYTES,
                 read_bufsize=_SSE_BUFFER_BYTES,
                 timeout=_control_timeout(),
+                headers=self._headers,
             )
         return self._session
 
@@ -87,7 +99,6 @@ class LocalOpenCodeClient:
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
         client = self._require_session()
@@ -95,7 +106,6 @@ class LocalOpenCodeClient:
         async with client.post(
             f"{self.base_url}{path}",
             json=json_data,
-            params=params,
             timeout=timeout,
         ) as resp:
             resp.raise_for_status()
@@ -111,9 +121,9 @@ class LocalOpenCodeClient:
                 return {}
             return await resp.json()
 
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any:
+    async def delete(self, path: str) -> Any:
         client = self._require_session()
-        async with client.delete(f"{self.base_url}{path}", params=params) as resp:
+        async with client.delete(f"{self.base_url}{path}") as resp:
             resp.raise_for_status()
             if resp.status == 204:
                 return {}
@@ -145,25 +155,28 @@ class RemoteOpenCodeClient:
         self,
         target: SshLaunchTargetConfig,
         remote_port: int,
+        auth: ServerAuth,
         cwd: str | None = None,
     ) -> None:
         self.target = target
         self.remote_port = remote_port
+        self._auth_line = f"{auth.basic_token}\n".encode()
         self.cwd = cwd
         self.base_url = f"http://127.0.0.1:{remote_port}"
         # For SSE streaming, we need a long-lived subprocess
         self._sse_process: asyncio.subprocess.Process | None = None
         self._sse_stderr_task: asyncio.Task[None] | None = None
 
-    def _build_ssh_argv(self, command: list[str]) -> tuple[str, ...]:
+    def _curl_argv(self, curl_args: list[str]) -> tuple[str, ...]:
+        command = ["bash", "-c", _AUTHED_CURL, "curl", *curl_args]
         return with_ssh_keepalive(self.target.build_remote_exec_args(command, self.cwd))
 
     async def _run_curl(
         self,
         method: str,
         path: str,
-        json_data: dict[str, Any] | None,
-        params: dict[str, str] | None,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
         url = f"{self.base_url}{path}"
@@ -174,22 +187,21 @@ class RemoteOpenCodeClient:
         # response body so we can surface 4xx/5xx as failures (curl's own
         # exit code is 0 for any HTTP response when `-f` is not set, and
         # `-f` would swallow the response body we want to log).
-        curl_args = ["curl", "-s", "-X", method, "-w", "\\n%{http_code}"]
+        curl_args = ["-s", "-X", method, "-w", "\\n%{http_code}"]
+        input_data = self._auth_line
         if json_data is not None:
             curl_args.extend(["-H", "Content-Type: application/json"])
             # Pass data via stdin to avoid command line length limits or escaping issues
-            input_data = json.dumps(json_data).encode("utf-8")
+            input_data += json.dumps(json_data).encode("utf-8")
             curl_args.extend(["-d", "@-"])
-        else:
-            input_data = None
 
         curl_args.append(url)
 
-        args = self._build_ssh_argv(curl_args)
+        args = self._curl_argv(curl_args)
 
         proc = await asyncio.create_subprocess_exec(
             *args,
-            stdin=asyncio.subprocess.PIPE if input_data else None,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -250,42 +262,42 @@ class RemoteOpenCodeClient:
             ) from exc
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
-        return await self._run_curl("GET", path, None, params)
+        return await self._run_curl("GET", path, params=params)
 
     async def post(
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
-        return await self._run_curl(
-            "POST", path, json_data, params, long_running=long_running
-        )
+        return await self._run_curl("POST", path, json_data, long_running=long_running)
 
     async def patch(self, path: str, json_data: dict[str, Any] | None = None) -> Any:
-        return await self._run_curl("PATCH", path, json_data, None)
+        return await self._run_curl("PATCH", path, json_data)
 
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any:
-        return await self._run_curl("DELETE", path, None, params)
+    async def delete(self, path: str) -> Any:
+        return await self._run_curl("DELETE", path)
 
     async def stream_events(self, path: str) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}{path}"
-        curl_args = ["curl", "-s", "-N", url]
-        args = self._build_ssh_argv(curl_args)
+        args = self._curl_argv(["-s", "-N", url])
 
         # `limit=` raises the StreamReader's per-read cap so a single
         # tool.output frame larger than 64 KiB doesn't bring the SSE
         # connection down with `LimitOverrunError`.
         self._sse_process = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=_SSE_BUFFER_BYTES,
         )
 
+        assert self._sse_process.stdin is not None
         assert self._sse_process.stdout is not None
         assert self._sse_process.stderr is not None
+        self._sse_process.stdin.write(self._auth_line)
+        self._sse_process.stdin.close()
         self._sse_stderr_task = asyncio.create_task(
             _drain_stream(self._sse_process.stderr, "opencode sse stderr")
         )
@@ -318,12 +330,12 @@ class RemoteOpenCodeClient:
             await cancel_and_wait(self._sse_stderr_task)
             self._sse_stderr_task = None
         if self._sse_process is not None:
-            try:
+            # The stream's process may already have exited.
+            with suppress(ProcessLookupError):
                 self._sse_process.terminate()
-                with suppress(ProcessLookupError):
+                try:
                     await asyncio.wait_for(self._sse_process.wait(), timeout=2.0)
-            except TimeoutError:
-                with suppress(ProcessLookupError):
+                except TimeoutError:
                     self._sse_process.kill()
             self._sse_process = None
 
@@ -340,6 +352,15 @@ class OpenCodeHttpError(RuntimeError):
 
 class OpenCodeNonJsonError(RuntimeError):
     """Raised when a successful OpenCode HTTP response is not JSON."""
+
+
+def http_status(exc: BaseException) -> int | None:
+    """The status of a failed request from either client."""
+    if isinstance(exc, OpenCodeHttpError):
+        return exc.status
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status
+    return None
 
 
 def _split_curl_status(out_text: str) -> tuple[str, int]:

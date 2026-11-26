@@ -8,7 +8,9 @@ from typing import Any
 
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessionState
 from waypoint.backends.events import INTERACTION_METADATA_KEY
-from waypoint.backends.opencode.normalize import map_event
+from waypoint.backends.opencode import normalize
+from waypoint.backends.opencode.forms import parse_form
+from waypoint.backends.opencode.sessions import Permission
 from waypoint.notifications.render import intent_from_event
 from waypoint.schemas import EventKind, EventRecord
 
@@ -128,24 +130,41 @@ async def test_claude_ask_user_question_envelope() -> None:
 
 
 def test_opencode_permission_envelope() -> None:
-    _kind, _text, metadata = map_event(
-        "permission.asked",
-        {"id": "perm-1", "type": "bash", "permission": "run command"},
+    permission = Permission.parse(
+        {"id": "perm-1", "sessionID": "ses_1", "action": "shell", "resources": ["ls"]}
+    )
+    assert permission is not None
+    _kind, _text, metadata = normalize.approval_request(
+        permission,
+        name="shell",
+        raw_input={"command": "ls"},
+        from_subagent=False,
     )
     assert metadata[INTERACTION_METADATA_KEY]["kind"] == "approval"
     assert metadata[INTERACTION_METADATA_KEY]["request_id"] == "perm-1"
 
 
 def test_opencode_question_envelope() -> None:
-    _kind, _text, metadata = map_event(
-        "question.asked",
+    form = parse_form(
         {
             "id": "q-1",
-            "questions": [
-                {"question": "Pick one", "options": [{"label": "a"}, {"label": "b"}]}
+            "sessionID": "ses-1",
+            "fields": [
+                {
+                    "key": "q0",
+                    "type": "string",
+                    "description": "Pick one",
+                    "options": [
+                        {"value": "a", "label": "a"},
+                        {"value": "b", "label": "b"},
+                    ],
+                }
             ],
-        },
+        }
     )
-    interaction = metadata[INTERACTION_METADATA_KEY]
+    assert form is not None
+    emission = normalize.question(form)
+    assert emission is not None
+    interaction = emission[2][INTERACTION_METADATA_KEY]
     assert interaction["kind"] == "question"
     assert [c["label"] for c in interaction["choices"]] == ["a", "b"]

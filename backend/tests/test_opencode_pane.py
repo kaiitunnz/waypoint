@@ -1,9 +1,10 @@
 """Offline validation of OpenCode composer-submit detection used by the tmux
-submit-confirm loop. Captured from a live OpenCode 1.17.7 pane: the composer is
-the run of ``┃`` lines directly above the *only* ``╹▀▀`` border (its bottom),
-with the typed message at the top of the box and the model/status footer at the
-bottom. Submitted messages echo in ``┃`` boxes higher up, but those carry no
-``╹`` border, so submission is keyed on the sent text leaving the composer box."""
+submit-confirm loop. Captured from live OpenCode 1.17.7 and 2.4.1 panes: the
+composer is the run of ``┃`` lines directly above the *only* ``╹▀▀`` border
+(its bottom), with the typed message at the top of the box and the model/status
+footer at the bottom. Submitted messages echo in ``┃`` boxes higher up, but
+those carry no ``╹`` border, so submission is keyed on the sent text leaving the
+composer box."""
 
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 
@@ -124,3 +125,46 @@ def test_composer_ready_when_box_drawn() -> None:
 
 def test_composer_not_ready_while_booting() -> None:
     assert composer_ready("starting opencode...\nno box yet") is False
+
+
+# OpenCode 2.4.1, typed but not yet sent, then just after Enter while the turn
+# runs: the echo sits above a non-box status line, the composer below it empty.
+V2_SENT = "Reply with exactly the token X and nothing else."
+V2_TYPED = "\n".join(
+    [
+        "             ┃",
+        "             ┃  Reply with exactly the token X and nothing else.",
+        "             ┃",
+        "             ┃  Build · Seaglass Alpha Free OpenCode",
+        "             ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "             /tmp/oce2e/work/b:master                  shift+tab agents  ctrl+p commands",
+        "",
+        "                                                                                             2.4.1",
+    ]
+)
+
+V2_SUBMITTED = "\n".join(
+    [
+        "  ┃",
+        "  ┃  Reply with exactly the token X and nothing else.",
+        "  ┃",
+        "",
+        "     ⠼ Thinking…",
+        "",
+        "  ┃",
+        "  ┃",
+        "  ┃",
+        "  ┃  Build · Seaglass Alpha Free OpenCode",
+        "  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                        shift+tab agents  ctrl+p commands",
+    ]
+)
+
+
+def test_a_2x_composer_holds_the_typed_message() -> None:
+    assert composer_ready(V2_TYPED) is True
+    assert composer_submitted(V2_TYPED, V2_SENT) is False
+
+
+def test_a_2x_composer_is_empty_once_sent() -> None:
+    assert composer_submitted(V2_SUBMITTED, V2_SENT) is True

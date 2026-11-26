@@ -415,6 +415,37 @@ async def test_grants_made_at_once_all_land() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_grant_in_plan_mode_reaches_later_subagents() -> None:
+    fake = _fake()
+    fake.sessions["ses_root"]["permissions"] = []
+    grant = {"action": "shell", "resource": "ls *", "effect": "allow"}
+
+    def created(child: str) -> dict[str, Any]:
+        return {
+            "type": "session.created",
+            "data": {"sessionID": child, "parentID": "ses_root"},
+        }
+
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        # Plan mode: no rules on the root, ask for its subagents.
+        assert await adapter.set_session_permission("local", [], ASK)
+        fake.add_session("ses_a", parentID="ses_root", permissions=[])
+        await _deliver(adapter, created("ses_a"))
+        await asyncio.gather(*adapter._tasks)
+        await _deliver(adapter, _asked(fake, _permission(session_id="ses_a")))
+        assert await adapter.respond_to_permission("local", "acceptForSession")
+
+        # The server gives a new subagent a copy of the root's rules.
+        root = list(fake.sessions["ses_root"]["permissions"])
+        fake.add_session("ses_b", parentID="ses_root", permissions=root)
+        await _deliver(adapter, created("ses_b"))
+        await asyncio.gather(*adapter._tasks)
+
+    assert fake.sessions["ses_b"]["permissions"] == [*ASK, grant]
+
+
+@pytest.mark.asyncio
 async def test_a_failed_grant_leaves_the_request_unanswered() -> None:
     fake = _fake()
     fake.failures[("PATCH", "/api/session/ses_root")] = 500

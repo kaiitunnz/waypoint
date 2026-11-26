@@ -1198,6 +1198,11 @@ class OpenCodeAdapter:
                     raise OpenCodeError(
                         f"failed to allow this for the session: {exc}"
                     ) from exc
+            # Subagents started later get these rules rather than the root's.
+            if (subagent := state.subagent_permissions) is not None:
+                state.subagent_permissions = subagent + [
+                    rule for rule in rules if rule not in subagent
+                ]
 
     async def answer_question(
         self,

@@ -15,7 +15,7 @@ import { createPortal } from "react-dom";
 
 import { fidelityFor, supportsAttachments, type BackendCatalog } from "@waypoint/web-core/backends";
 import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/composer-completions";
-import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
+import { filesFromDataTransfer, pasteAttaches } from "@waypoint/web-core/fileDrop";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
@@ -186,10 +186,9 @@ export function Composer({
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    // Office apps put a picture of the selection beside its text: the text wins.
-    if (!attachmentsEnabled || event.clipboardData.getData("text/plain")) return;
+    if (!attachmentsEnabled) return;
     const files = filesFromDataTransfer(event.clipboardData);
-    if (files.length === 0) return;
+    if (!pasteAttaches(files, event.clipboardData.getData("text/plain"))) return;
     event.preventDefault();
     attachments.addFiles(files);
   }

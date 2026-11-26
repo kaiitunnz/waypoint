@@ -59,3 +59,23 @@ export function filesFromDataTransfer(data: DataTransfer | null): File[] {
   }
   return out;
 }
+
+// Whether a paste attaches its files rather than pasting its text. A file manager
+// copies a file with its name, path or URI as text; an office app puts a picture
+// of the selection beside text that names no file.
+export function pasteAttaches(files: readonly File[], text: string): boolean {
+  if (files.length === 0) return false;
+  const names = new Set(files.map((file) => file.name.normalize("NFC")));
+  return text.split(/[\r\n]+/).every((line) => !line.trim() || names.has(namedBy(line.trim()).normalize("NFC")));
+}
+
+// The file name a clipboard line ends in.
+function namedBy(line: string): string {
+  const name = line.slice(line.lastIndexOf("/") + 1);
+  if (!line.startsWith("file://")) return name;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}

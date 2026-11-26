@@ -7,6 +7,7 @@ import { useElementFileDrop } from "@waypoint/web-core/hooks/useElementFileDrop"
 import { useInboxBlock, type InboxBlockController } from "@waypoint/web-core/hooks/useInboxBlock";
 import { blockAnswerEcho, blockEditLabel, isDecisionBlock } from "@waypoint/web-core/inbox";
 import { isComposingKeyEvent, isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
+import { stripRecommendedSuffix } from "@waypoint/web-core/pendingAskActions";
 import type { AskDraft, AskUserQuestion } from "@waypoint/web-core/session/askQuestion";
 import type { InboxApprovalBlock, InboxBlock, InboxItem, InboxQuestionBlock } from "@waypoint/web-core/types";
 
@@ -156,7 +157,7 @@ function Committed({ block, controller }: { block: InboxBlock; controller: Inbox
       {answered ? (
         <p className={styles.echo}>
           <span className={styles.echoLabel}>Your answer</span>
-          <span className={styles.echoAnswer}>{blockAnswerEcho(block)}</span>
+          <span className={styles.echoAnswer}>{blockAnswerEcho(block, stripRecommendedSuffix)}</span>
         </p>
       ) : null}
       {block.reply ? (

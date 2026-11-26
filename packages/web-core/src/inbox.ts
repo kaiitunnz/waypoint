@@ -190,10 +190,11 @@ export function requiredAnswersLeft(item: InboxItem): number {
 }
 
 // What was answered, as one line.
-export function blockAnswerEcho(block: InboxBlock): string {
-  if (block.type === "approval") return block.answer?.decision ?? "";
+// `label` shows an option as the surface lists it.
+export function blockAnswerEcho(block: InboxBlock, label: (option: string) => string = (option) => option): string {
+  if (block.type === "approval") return block.answer ? label(block.answer.decision) : "";
   if (block.type === "question" && block.answer) {
-    return [...block.answer.selected, ...(block.answer.other ? [block.answer.other] : [])].join(", ");
+    return [...block.answer.selected.map(label), ...(block.answer.other ? [block.answer.other] : [])].join(", ");
   }
   return "";
 }

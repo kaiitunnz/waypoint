@@ -214,6 +214,7 @@ describe("display", () => {
     expect(blockAnswerEcho(answered)).toBe("A, B, also C");
     expect(blockAnswerEcho(approval({ answer: { decision: "Reject" } }))).toBe("Reject");
     expect(blockAnswerEcho(markdown)).toBe("");
+    expect(blockAnswerEcho(answered, (option) => option.toLowerCase())).toBe("a, b, also C");
     expect(blockEditLabel(question())).toBe("Answer");
     expect(blockEditLabel(answered)).toBe("Edit");
     expect(blockEditLabel(markdown)).toBe("Reply");

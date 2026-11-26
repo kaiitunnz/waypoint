@@ -95,7 +95,12 @@ export function SessionScreen({ id }: { id: string }) {
     };
   }, [session, agentName]);
 
-  const rendered = useDeferredValue(events);
+  // The older-messages chip is deferred with the turns below it, so it goes in the same commit
+  // as the older turns arrive and the transcript keeps the reader's place.
+  const { hasOlder, loadingOlder } = stream;
+  const live = useMemo(() => ({ events, hasOlder, loadingOlder }), [events, hasOlder, loadingOlder]);
+  const shown = useDeferredValue(live);
+  const rendered = shown.events;
   const optimistic = useOptimisticSends(rendered);
   const transcript = useMemo(() => deriveTranscript(rendered, density), [rendered, density]);
   const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
@@ -161,8 +166,8 @@ export function SessionScreen({ id }: { id: string }) {
       turns={transcript.turns}
       status={session?.status ?? null}
       loading={stream.loading || rendered !== events}
-      hasOlder={stream.hasOlder}
-      loadingOlder={stream.loadingOlder}
+      hasOlder={shown.hasOlder}
+      loadingOlder={shown.loadingOlder}
       onLoadOlder={stream.loadOlder}
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}

@@ -32,14 +32,15 @@ export function entryView(entry: QueueEntry, agentName: (backend: string) => str
   if (entry.source === "sessions") {
     const { ask } = entry;
     const request = askRow(ask);
+    const headline = ask.kind === "question" && ask.question.questions.length === 1 ? ask.question.questions[0].question : ask.title;
     return {
       lead: <StatusLamp state="needs" size="sm" flat />,
       name: ask.session_title,
       kind: agentName(ask.session_backend),
-      headline: ask.kind === "question" && ask.question.questions.length === 1 ? ask.question.questions[0].question : ask.title,
+      headline,
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
-      ) : request.text ? (
+      ) : request.text && request.text !== headline ? (
         <span className={cx(request.mono && "mono")}>{request.text}</span>
       ) : null,
       strong: true,

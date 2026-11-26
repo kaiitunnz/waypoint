@@ -32,6 +32,7 @@ export function OptionChips({ options, selected, multi, disabled, describe, comp
       {options.map((option) => (
         <Chip
           key={option.label}
+          className={styles.option}
           compact={compact}
           recommended={option.recommended}
           selected={selected.includes(option.label)}

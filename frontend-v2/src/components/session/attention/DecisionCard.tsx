@@ -52,7 +52,7 @@ export function DecisionCard<Id extends string>({
 }: DecisionCardProps<Id>) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const { phase, send, busy: pending } = useAskResponder(lockId);
+  const { phase, send, busy: pending, dismiss } = useAskResponder(lockId);
   const sending = (id: Id) => phase.state === "sending" && phase.action === id;
   const busy = pending || availability !== "actionable";
 
@@ -88,7 +88,10 @@ export function DecisionCard<Id extends string>({
           disabled={busy}
           aria-label="Note"
           placeholder="Note"
-          onChange={(event) => setNote(event.target.value)}
+          onChange={(event) => {
+            setNote(event.target.value);
+            dismiss();
+          }}
           onKeyDown={onNoteKey}
         />
       ) : null}

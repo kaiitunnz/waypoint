@@ -38,24 +38,31 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
   const single = prompts.length === 1 ? prompts[0] : null;
   const [picks, setPicks] = useState<PromptPick[]>(() => emptyPicks(prompts));
   const [open, setOpen] = useState(false);
-  const { phase, send, busy } = useAskResponder(ask.id);
+  const { phase, send, busy, dismiss } = useAskResponder(ask.id);
   const actionable = ask.availability === "actionable";
   const disabled = busy || !actionable;
   const answerable = isAnswerable(prompts, picks);
   const long = openHref !== undefined && askNeedsDetail(ask);
 
-  const update = (index: number, change: (pick: PromptPick) => PromptPick) =>
+  const update = (index: number, change: (pick: PromptPick) => PromptPick) => {
     setPicks((current) => current.map((pick, i) => (i === index ? change(pick) : pick)));
+    dismiss();
+  };
 
-  async function submit(next: PromptPick[] = picks) {
+  function submit(next: PromptPick[] = picks) {
     if (!isAnswerable(prompts, next)) return;
-    if (await send((host, token, retry) => answerQuestion(host, token, ask, next, retry))) setOpen(false);
+    void send(async (host, token, retry) => {
+      await answerQuestion(host, token, ask, next, retry);
+      // Inside the reply, so that a retry that goes through closes it too.
+      setOpen(false);
+    });
   }
 
   function pickOption(index: number, label: string) {
     const tapped = tapOption(prompts, picks, index, label);
     setPicks(tapped.picks);
-    if (tapped.send) void submit(tapped.picks);
+    if (tapped.send) submit(tapped.picks);
+    else dismiss();
   }
 
   const headline = single ? single.question : ask.title;

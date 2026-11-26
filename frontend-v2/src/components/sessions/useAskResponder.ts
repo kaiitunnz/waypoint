@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
 import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint/web-core/pendingAskActions";
@@ -16,13 +16,20 @@ export type AskPhase =
   // `retrying`: the agent is not ready yet and the reply is being retried.
   | { state: "sending"; retrying: boolean; action?: string }
   | { state: "sent"; action?: string }
-  // `retry` sends the very reply that failed, whichever surface shows it.
-  | { state: "error"; message: string; retry?: () => void };
+  // `retry` sends the very reply that failed. `owner` names the surface that sent
+  // it, the only one to offer the retry.
+  | { state: "error"; message: string; owner?: string; retry?: () => void };
+
+// A failure as a surface that did not send the reply shows it.
+export function withoutRetry(phase: AskPhase): AskPhase {
+  return phase.state === "error" ? { state: "error", message: phase.message } : phase;
+}
 
 // Runs one response to an ask. A failure keeps the card as it was, with the reason.
 // With a `lockId` under an AskLocksProvider, every surface of the ask shares the phase.
 export function useAskResponder(lockId?: string) {
   const { host, token } = useShellData();
+  const owner = useId();
   const locks = useAskLocks();
   const shared = lockId !== undefined && locks ? { id: lockId, locks } : null;
   const [local, setLocal] = useState<AskPhase>({ state: "idle" });
@@ -66,6 +73,7 @@ export function useAskResponder(lockId?: string) {
         } else {
           setPhase({
             state: "error",
+            owner,
             message: isAgentNotReady(error)
               ? NOT_READY_MESSAGE
               : error instanceof Error
@@ -77,9 +85,15 @@ export function useAskResponder(lockId?: string) {
         return false;
       }
     },
-    [host, token, setPhase],
+    [host, token, owner, setPhase],
   );
 
+  // A reply that has been edited since makes the failed one stale.
+  const dismiss = useCallback(() => {
+    if (phase.state === "error") setPhase({ state: "idle" });
+  }, [phase.state, setPhase]);
+
   const busy = phase.state === "sending" || phase.state === "sent";
-  return { phase, send, busy };
+  const own = phase.state !== "error" || phase.owner === owner;
+  return { phase: own ? phase : withoutRetry(phase), send, busy, dismiss };
 }

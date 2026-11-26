@@ -26,6 +26,7 @@ import { DecisionCard } from "@/components/session/attention/DecisionCard";
 import { AskControllerProvider, SessionContextProvider } from "@/components/session/SessionContext";
 import { useAskLocks } from "@/components/sessions/AskLocks";
 import { SourceLine } from "@/components/sessions/SourceLine";
+import { withoutRetry } from "@/components/sessions/useAskResponder";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
@@ -80,6 +81,11 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
     };
     return {
       ...controller,
+      updateDraft: (toolUseId, update) => {
+        // A row's failed reply is stale once the form says something else.
+        if (locks?.phase(ask.id).state === "error") locks.setPhase(ask.id, { state: "idle" });
+        controller.updateDraft(toolUseId, update);
+      },
       answer: (toolUseId, text, answers) => report(controller.answer(toolUseId, text, answers)),
       cancel: (toolUseId) => report(controller.cancel(toolUseId)),
     };
@@ -87,7 +93,8 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   const questions = useMemo(() => askUserQuestions(ask), [ask]);
   const toolUseId = ask.question.tool_use_id;
   const { entry } = askFormView(questions, controller.draft(toolUseId));
-  const held = locks?.phase(ask.id);
+  // A row's failure shows here without its Retry: the form has a reply of its own.
+  const held = locks ? withoutRetry(locks.phase(ask.id)) : undefined;
 
   return (
     <section className={styles.card} aria-label={ask.title}>

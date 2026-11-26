@@ -23,6 +23,7 @@ import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Select } from "@/components/ui/Select";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { LinkRow, PickerRow, SettingsRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useToast } from "@/components/ui/Toast";
 import { Toggle } from "@/components/ui/Toggle";
@@ -197,6 +198,22 @@ export function Gallery() {
         />
         <ListRow lamp="exited" title="597 exited" titleFont="sans" compact dimmed selected trailing="" />
       </List>
+
+      <SectionHeading title="Settings rows" dense />
+      <SettingsSection title="Group">
+        <SwitchRow label="Conversation previews" checked={on} onChange={setOn} />
+        <PickerRow
+          label="Summary"
+          value={density}
+          onChange={setDensity}
+          options={[
+            { value: "summary", label: "Summary" },
+            { value: "full", label: "Full" },
+          ]}
+        />
+        <SettingsRow label="Host" detail={<span className="mono">127.0.0.1:8787</span>} />
+        <LinkRow label="Appearance" detail="Dark" href="/gallery" />
+      </SettingsSection>
 
       <SectionHeading title="File thumbnails" dense />
       <div className={styles.row}>

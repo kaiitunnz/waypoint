@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useCallback, useId } from "react";
 
 import { defaultRecurrenceState, type RecurrenceState, type TimingMode } from "@waypoint/web-core/recurrence";
 import {
@@ -43,12 +43,14 @@ interface ScheduleWhenProps {
   host: string;
   token: string;
   value: ScheduleState;
+  // Must be stable: the recurrence preview reports validity from an effect.
   onChange: (patch: Partial<ScheduleState>) => void;
 }
 
 export function ScheduleWhen({ host, token, value, onChange }: ScheduleWhenProps) {
   const id = useId();
   const preview = schedulePreview(value.timing, value.delay, value.at);
+  const onValidChange = useCallback((recurrenceValid: boolean) => onChange({ recurrenceValid }), [onChange]);
   return (
     <>
       <section className={styles.stack}>
@@ -60,7 +62,7 @@ export function ScheduleWhen({ host, token, value, onChange }: ScheduleWhenProps
           onTimingChange={(timingMode) => onChange({ timingMode })}
           state={value.recurrence}
           onStateChange={(recurrence) => onChange({ recurrence })}
-          onValidChange={(recurrenceValid) => onChange({ recurrenceValid })}
+          onValidChange={onValidChange}
         >
           <SegmentedControl
             label="Launch"

@@ -5,6 +5,7 @@ import {
   editEnvValue,
   envRowState,
   envValueDisplay,
+  isSecretEnvKey,
   stageEnvRemoval,
   undoEnvEntry,
   updateEnvEntry,
@@ -25,7 +26,8 @@ interface EnvRowsProps {
   disabled?: boolean;
 }
 
-// Replacing or removing a value is staged on the row until undone.
+// Replacing or removing a value is staged on the row until undone. A secret is
+// replaced from empty and typed masked, so its value never shows.
 export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
   return (
     <div className={styles.editor}>
@@ -34,6 +36,7 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
           {entries.map((entry) => {
             const state = envRowState(entry);
             const label = entry.key || "variable";
+            const secret = isSecretEnvKey(entry.key);
             return (
               <li key={entry.id} className={cx(styles.row, state === "add" && styles.added)}>
                 {state === "add" ? (
@@ -63,6 +66,7 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                     mono
                     autoComplete="off"
                     aria-label={`Value of ${label}`}
+                    type={secret ? "password" : "text"}
                     placeholder="value"
                     autoFocus={state === "edit"}
                     disabled={disabled}
@@ -78,7 +82,7 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                         label={`Replace ${label}`}
                         size="sm"
                         disabled={disabled}
-                        onClick={() => onChange(editEnvValue(entries, entry.id, entry.value))}
+                        onClick={() => onChange(editEnvValue(entries, entry.id, secret ? "" : entry.value))}
                       >
                         <Icon name="pencil" size={16} />
                       </IconButton>

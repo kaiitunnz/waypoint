@@ -254,7 +254,7 @@ function PresetPicker({
               {selected ? (
                 <div className={styles.inlineActions}>
                   <Button variant="text" size="sm" disabled={controls.busy} onClick={() => controls.update(preset)}>
-                    Update with current settings
+                    Update with these settings
                   </Button>
                   {preset.is_default ? null : (
                     <Button variant="text" size="sm" disabled={controls.busy} onClick={() => controls.setDefault(preset)}>

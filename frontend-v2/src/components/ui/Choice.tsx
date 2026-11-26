@@ -89,7 +89,7 @@ function ChoiceSheet({ open, title, subtitle, value, options, onClose, onChange 
         {options.map((option) => {
           const selected = option.value === value;
           return (
-            <li key={option.value}>
+            <li key={option.value} role="none">
               <button
                 type="button"
                 role="option"

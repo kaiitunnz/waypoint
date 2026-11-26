@@ -14,7 +14,8 @@
 
 .row {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
+  /* A long key wraps within its share and stays whole. */
+  grid-template-columns: fit-content(45%) minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
   min-height: 48px;
@@ -34,7 +35,7 @@
   font-family: var(--mono);
   font-size: var(--f-code);
   color: var(--text-strong);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .struck {

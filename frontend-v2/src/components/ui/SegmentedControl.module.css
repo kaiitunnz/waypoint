@@ -29,6 +29,11 @@
   justify-content: center;
 }
 
+.segment:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .on {
   background: var(--fill-raised);
   color: var(--text-strong);

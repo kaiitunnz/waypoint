@@ -25,6 +25,7 @@ import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useMultiColumn, usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useMountedRef } from "@/lib/useMountedRef";
 
 import { AttachPane, type AttachState } from "./AttachPane";
 import { LaunchFields } from "./LaunchFields";
@@ -101,6 +102,8 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
     host,
     token,
     onAuthFailure: handleAuthFailure,
+    fetchModels: mode === "new" || mode === "schedule",
+    launchableBackends: defaults.launchableBackends,
     defaultBackend: defaults.defaultBackend,
     defaultCwd: defaults.defaultCwd,
     launchTargetId: targetId || null,
@@ -124,7 +127,16 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
   const [sshRetry, setSshRetry] = useState<(() => void) | null>(null);
   const [attach, setAttach] = useState<AttachState>({ target: "", agent: form.backend, title: "" });
   const [schedule, setSchedule] = useState<ScheduleState>(initialScheduleState);
-  const updateSchedule = useCallback((patch: Partial<ScheduleState>) => setSchedule((current) => ({ ...current, ...patch })), []);
+  // Keeps the state object when nothing changes, so a repeated report renders nothing.
+  const updateSchedule = useCallback(
+    (patch: Partial<ScheduleState>) =>
+      setSchedule((current) =>
+        (Object.keys(patch) as (keyof ScheduleState)[]).every((key) => current[key] === patch[key])
+          ? current
+          : { ...current, ...patch },
+      ),
+    [],
+  );
   const resume = useResume({
     host,
     token,
@@ -165,7 +177,10 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
     }
   }
 
+  // A launch cancelled while in flight stays where the person is.
+  const mounted = useMountedRef();
   function open(sessionId: string) {
+    if (!mounted.current) return;
     onClose();
     router.push(sessionHref(sessionId));
   }
@@ -244,6 +259,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
       onChange={changeMode}
       segments={MODES.map((value) => ({ value, label: MODE_LABELS[value][pointer ? 0 : 1] }))}
       block={!pointer}
+      disabled={busy}
     />
   );
 

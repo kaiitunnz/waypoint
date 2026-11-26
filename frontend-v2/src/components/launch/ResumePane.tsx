@@ -117,7 +117,7 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
         {resume.shown.map((thread) => {
           const selected = resume.selected === thread;
           return (
-            <li key={threadKey(thread)} className={cx(styles.thread, selected && styles.selected)}>
+            <li key={threadKey(thread)} role="none" className={cx(styles.thread, selected && styles.selected)}>
               <button
                 type="button"
                 role="radio"

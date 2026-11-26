@@ -23,6 +23,7 @@ interface SegmentedControlProps<T extends string> {
   size?: "sm" | "icon";
   // Spans its container in equal segments.
   block?: boolean;
+  disabled?: boolean;
 }
 
 export function SegmentedControl<T extends string>({
@@ -32,11 +33,12 @@ export function SegmentedControl<T extends string>({
   label,
   size,
   block,
+  disabled,
 }: SegmentedControlProps<T>) {
   const group = useRef<HTMLDivElement>(null);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (disabled || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     if (!step) return;
     event.preventDefault();
@@ -63,6 +65,7 @@ export function SegmentedControl<T extends string>({
           aria-label={segment.ariaLabel}
           data-value={segment.value}
           tabIndex={segment.value === value ? 0 : -1}
+          disabled={disabled}
           className={cx(styles.segment, segment.value === value && styles.on)}
           onClick={() => onChange(segment.value)}
         >

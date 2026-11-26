@@ -70,7 +70,7 @@ export function TargetChip({ disabled }: { disabled?: boolean }) {
             const selected = row.key === launchTargets.activeTargetId;
             const rowLamp = lampFor(row.target);
             return (
-              <li key={row.key || "host"}>
+              <li key={row.key || "host"} role="none">
                 <button
                   type="button"
                   role="option"

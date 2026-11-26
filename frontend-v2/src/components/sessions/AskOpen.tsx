@@ -15,7 +15,7 @@ export function OpenHeadline({ href, children }: { href: string; children: strin
   );
 }
 
-// `replace` keeps the history entry and the scroll position.
+// `replace` adds no history entry and keeps the scroll position.
 export function OpenLink({ href, label, replace }: { href: string; label: string; replace?: boolean }) {
   return (
     <Link href={href} replace={replace} scroll={!replace} className={styles.go}>

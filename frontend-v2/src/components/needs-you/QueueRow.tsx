@@ -7,7 +7,6 @@ import { CheckMark } from "./CheckMark";
 import { QueueItemShell, type QueueItemProps } from "./QueueItemShell";
 import styles from "./QueueRow.module.css";
 
-// A compact row of the queue beside the open item. A selected row takes a fill.
 export function QueueRow({ selected, ...props }: QueueItemProps & { selected: boolean }) {
   const { entry, view, time, selecting, checked } = props;
 

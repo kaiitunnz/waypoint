@@ -13,7 +13,6 @@ import { QueueItemShell, type QueueItemProps } from "./QueueItemShell";
 import shell from "./QueueItemShell.module.css";
 import styles from "./QueueCard.module.css";
 
-// A card of the queue on its own column: asks answer in place, and the rest open.
 export function QueueCard({ now, ...props }: QueueItemProps & { now: number }) {
   const { entry, view, time, selecting, checked } = props;
 

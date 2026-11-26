@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { filesFromDataTransfer, installFileDropGuard, isExternalFileDrag, pasteAttaches } from "./fileDrop";
+import { attachFromPaste, filesFromDataTransfer, installFileDropGuard, isExternalFileDrag, pasteAttaches } from "./fileDrop";
 
 function dragEvent(type: string, types: string[] = ["Files"]) {
   const event = new Event(type, { cancelable: true }) as Event & { dataTransfer: unknown };
@@ -120,5 +120,29 @@ describe("pasteAttaches", () => {
     expect(pasteAttaches(files("a.txt"), "a.txt\nand a note")).toBe(false);
     expect(pasteAttaches([], "a.txt")).toBe(false);
     expect(pasteAttaches([], "")).toBe(false);
+  });
+});
+
+describe("attachFromPaste", () => {
+  const paste = (files: File[], text: string) => ({
+    clipboardData: { items: [], files, getData: () => text } as unknown as DataTransfer,
+    preventDefault: vi.fn(),
+  });
+
+  it("attaches a pasted file in place of its text", () => {
+    const file = { name: "a.txt" } as File;
+    const event = paste([file], "a.txt");
+    const add = vi.fn();
+    attachFromPaste(event, add);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(add).toHaveBeenCalledWith([file]);
+  });
+
+  it("leaves a text paste alone", () => {
+    const event = paste([], "some text");
+    const add = vi.fn();
+    attachFromPaste(event, add);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
   });
 });

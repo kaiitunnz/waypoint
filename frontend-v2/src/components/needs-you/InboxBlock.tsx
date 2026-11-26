@@ -200,7 +200,7 @@ export function InboxBlockView({ item, block }: { item: InboxItem; block: InboxB
       controller.cancel();
       return;
     }
-    if (event.defaultPrevented || !isModifiedEnterShortcut(event)) return;
+    if (!isModifiedEnterShortcut(event)) return;
     // A focused option must not toggle.
     event.preventDefault();
     void controller.save();

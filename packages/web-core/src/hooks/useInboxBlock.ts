@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { submitInboxBlock } from "../api";
 import {
@@ -39,6 +39,11 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
   const [decision, setDecision] = useState(() => committed().decision);
   const [submitting, setSubmitting] = useState(false);
   const saving = useRef(false);
+  // The tray as it is now, for a save to see what was added while it ran.
+  const tray = useRef(attachments.items);
+  useEffect(() => {
+    tray.current = attachments.items;
+  }, [attachments.items]);
   // The reply's files as of the last save, so a re-submit that lands before the
   // update arrives (while `block.reply` is stale) cannot drop just-sent files.
   const sentFiles = useRef<InboxAttachmentRef[] | null>(null);
@@ -79,7 +84,8 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
 
   async function save() {
     if (saving.current || attachments.uploading) return;
-    const uploaded = attachments.readyIds.map((attachmentId) => ({
+    const sent = attachments.readyIds;
+    const uploaded = sent.map((attachmentId) => ({
       session_id: item.from_session_id,
       attachment_id: attachmentId,
     }));
@@ -93,14 +99,15 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     setSubmitting(true);
     setError(null);
     // Leaving mid-save must not delete the files the reply is naming.
-    const letGo = attachments.hold(attachments.readyIds);
+    const letGo = attachments.hold(sent);
     try {
       await submitInboxBlock(host, token, item.id, block.id, body);
       if (body.reply) sentFiles.current = body.reply.attachments ?? [];
-      // Empties the tray and keeps the files the saved reply names.
-      attachments.clear();
+      // Takes the sent files off the tray and keeps them stored. A file added while
+      // saving stays, with the editor open to send it.
+      attachments.release(sent);
       setNotes(notes.trim());
-      setEditing(false);
+      setEditing(tray.current.some((file) => !file.spec || !sent.includes(file.spec.id)));
     } catch (reason) {
       letGo();
       setError(reason instanceof Error ? reason.message : "failed to submit");

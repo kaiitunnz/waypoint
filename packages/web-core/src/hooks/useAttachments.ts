@@ -48,6 +48,8 @@ export function useAttachments({
   const orphanRef = useRef<string[]>([]);
   // Uploads a send in flight refers to, which leaving must not delete.
   const sendingRef = useRef<Set<string>>(new Set());
+  // Set once the leave cleanup has run for the last time.
+  const goneRef = useRef(false);
   const credsRef = useRef({ host, token, sessionId });
 
   const revoke = useCallback((url?: string) => {
@@ -84,10 +86,12 @@ export function useAttachments({
       }
       orphanRef.current = [];
     };
+    goneRef.current = false;
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
+      goneRef.current = true;
     };
   }, []);
 
@@ -245,11 +249,16 @@ export function useAttachments({
   );
 
   // Keeps the page-leave cleanup off files a request in flight names. Call what it
-  // returns if the request fails.
+  // returns if the request fails: files that cleanup has already passed over are freed
+  // then.
   const hold = useCallback((ids: readonly string[]) => {
+    const uploaded = ids.filter((id) => orphanRef.current.includes(id));
     for (const id of ids) sendingRef.current.add(id);
     return () => {
       for (const id of ids) sendingRef.current.delete(id);
+      if (!goneRef.current) return;
+      const { host: h, token: t, sessionId: s } = credsRef.current;
+      for (const id of uploaded) void deleteAttachment(h, t, s, id).catch(() => {});
     };
   }, []);
 

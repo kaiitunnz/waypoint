@@ -17,8 +17,9 @@ class ServerAuth:
         return cls(secrets.token_urlsafe(32))
 
     def server_env(self) -> dict[str, str]:
-        # OpenCode 1.x reads OPENCODE_SERVER_PASSWORD and lets the user name be
-        # changed; 2.x reads either password variable and fixes the name.
+        # 2.x reads either password variable and fixes the user name. 1.x reads
+        # OPENCODE_SERVER_PASSWORD and a user name, so a 1.x server is secured
+        # while it is being identified.
         return {
             "OPENCODE_SERVER_USERNAME": USERNAME,
             "OPENCODE_SERVER_PASSWORD": self.password,

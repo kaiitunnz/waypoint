@@ -1,3 +1,6 @@
+"""One ``opencode serve`` process and the Waypoint sessions it drives, over the
+2.x server API."""
+
 import asyncio
 import json
 import logging
@@ -6,22 +9,30 @@ import re
 import shutil
 import signal
 import time
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
-from dataclasses import dataclass, field
+import urllib.parse
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+)
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.opencode import normalize
+from waypoint.backends.opencode.catalog import Model, model_id, model_ref, parse_models
 from waypoint.backends.opencode.client import (
     LocalOpenCodeClient,
     OpenCodeHttpClient,
     RemoteOpenCodeClient,
     http_status,
 )
-from waypoint.backends.opencode.normalize import map_event
+from waypoint.backends.opencode.forms import Form, parse_form
 from waypoint.backends.opencode.probe import (
     IncompatibleServerError,
     ServerInfo,
@@ -29,6 +40,7 @@ from waypoint.backends.opencode.probe import (
 )
 from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.backends.opencode.server_auth import ServerAuth
+from waypoint.backends.opencode.sessions import Permission, SessionState, ToolCall
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
@@ -42,28 +54,38 @@ log = logging.getLogger("waypoint.opencode")
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
-DEFAULT_TIMEOUT_SECONDS = 60.0
-CONTEXT_WINDOW_LOOKUP_RETRY_SECONDS = 60.0
 
-PERMISSION_REPLIES = {"once", "always", "reject"}
-# OpenCode's reply schema is strictly {once|always|reject}. Waypoint and the
-# frontend speak a richer alias vocabulary (e.g. capability descriptors
-# advertise camelCase decisions). Normalizing through this single map keeps
-# the translation explicit instead of relying on case-folding rescues.
+# How long a server has to open its event stream, and to migrate a 1.x history.
+CONNECT_TIMEOUT_SECONDS = 30.0
+MIGRATION_TIMEOUT_SECONDS = 900.0
+# A server answers its catalogs empty until its plugins have loaded.
+CATALOG_SETTLE_SECONDS = 10.0
+# Minimum gap between retries of a failed listing.
+CATALOG_RETRY_SECONDS = 60.0
+QUESTION_SEED_RETRY_SECONDS = 30.0
+# How long a finished subagent has to wake its parent before the session is
+# reported idle.
+SUBAGENT_SETTLE_SECONDS = 5.0
+_LIST_PAGE = 200
+_LIST_LIMIT = 500
+_MAX_SSE_FAILURES = 10
+
+# Waypoint's decision spellings. ``session`` is not a reply OpenCode takes: its
+# own ``always`` saves the rule for the whole project, so an approval for the
+# session is a rule on the session itself and a ``once`` reply.
 _DECISION_ALIASES: dict[str, str] = {
     "once": "once",
-    "always": "always",
-    "reject": "reject",
     "approve": "once",
     "accept": "once",
-    "acceptforsession": "always",
     "yes": "once",
+    "always": "session",
+    "acceptforsession": "session",
+    "reject": "reject",
     "decline": "reject",
     "deny": "reject",
     "cancel": "reject",
     "no": "reject",
 }
-_MAX_SSE_FAILURES = 10
 
 
 def _normalize_decision(decision: str) -> str:
@@ -74,8 +96,9 @@ def _normalize_decision(decision: str) -> str:
     return reply
 
 
+# A status of ``None`` leaves the session's status as it is.
 EmitEvent = Callable[
-    [str, EventKind, str, dict[str, Any], SessionStatus],
+    [str, EventKind, str, dict[str, Any], SessionStatus | None],
     Any,
 ]
 SessionUpdateCallback = Callable[
@@ -83,10 +106,34 @@ SessionUpdateCallback = Callable[
     Awaitable[Any],
 ]
 TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
+AgentChangedCallback = Callable[[str, str | None, str | None], Any]
+ServerDiedCallback = Callable[[list[str]], Any]
+QuestionsChangedCallback = Callable[[str], Any]
 
 
 class OpenCodeError(RuntimeError):
     pass
+
+
+class MigrationGate:
+    """Lets one server at a time start until one has seen its history migrated:
+    servers migrating one database at once fail."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self.migrated = False
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncIterator[None]:
+        await self._lock.acquire()
+        held = not self.migrated
+        if not held:
+            self._lock.release()
+        try:
+            yield
+        finally:
+            if held:
+                self._lock.release()
 
 
 _LISTENING_LINE = re.compile(r"listening on http://[^:\s]+:(\d+)")
@@ -97,48 +144,6 @@ async def _drain_output(reader: asyncio.StreamReader) -> None:
     """Read a server's output to its end: an unread pipe blocks the server."""
     while chunk := await reader.read(_OUTPUT_CHUNK_BYTES):
         log.debug("opencode server: %s", chunk.decode(errors="replace").rstrip())
-
-
-@dataclass
-class OpenCodeSessionState:
-    session_id: str
-    cwd: str
-    opencode_session_id: str
-    pending_permission_ids: list[str] = field(default_factory=list)
-    pending_question_ids: list[str] = field(default_factory=list)
-    # Whether ``pending_question_ids`` is authoritative. A live session tracks
-    # questions from birth; a restored one only after listing the server's
-    # open questions, so until then an untracked question may still be live.
-    questions_seeded: bool = True
-    questions_seed_attempted_at: float = 0.0
-    # partID -> part type (text|reasoning|tool|step-start|step-finish).
-    # Populated on message.part.updated *-start, consulted to tag
-    # message.part.delta events whose payload only carries field="text".
-    part_types: dict[str, str] = field(default_factory=dict)
-    model: str | None = None
-    agent: str | None = None
-    effort: str | None = None
-    pre_plan_mode: str | None = None
-    context_window_by_model: dict[tuple[str, str], int] = field(default_factory=dict)
-    context_usage_pending_tokens: dict[tuple[str, str], dict[str, Any]] = field(
-        default_factory=dict
-    )
-    context_window_lookup_pending: set[tuple[str, str]] = field(default_factory=set)
-    context_window_lookup_failed: dict[tuple[str, str], float] = field(
-        default_factory=dict
-    )
-    context_usage_signature: (
-        tuple[int, int | None, tuple[tuple[str, int], ...]] | None
-    ) = None
-    closing: bool = False
-
-
-AgentChangedCallback = Callable[[str, str | None, str | None], Any]
-ServerDiedCallback = Callable[[list[str]], Any]
-QuestionsChangedCallback = Callable[[str], Any]
-
-# Minimum gap between retries of a failed open-question listing.
-QUESTION_SEED_RETRY_SECONDS = 30.0
 
 
 class OpenCodeAdapter:
@@ -157,6 +162,7 @@ class OpenCodeAdapter:
         extra_args: tuple[str, ...] = (),
         launch_env: dict[str, str] | None = None,
         on_questions_changed: QuestionsChangedCallback | None = None,
+        migration_gate: MigrationGate | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._on_questions_changed = on_questions_changed
@@ -171,19 +177,34 @@ class OpenCodeAdapter:
         self._workdir = workdir
         self._extra_args = extra_args
         self._launch_env = dict(launch_env or {})
-        self._sessions: dict[str, OpenCodeSessionState] = {}
-        self._remote_sessions: dict[str, str] = {}
-        self._part_sessions: dict[str, str] = {}
-        self._context_window_lookup_tasks: set[asyncio.Task[None]] = set()
+        self._migration_gate = migration_gate or MigrationGate()
+
+        self._sessions: dict[str, SessionState] = {}
+        # OpenCode session id (a root or a subagent) -> Waypoint session id.
+        self._routes: dict[str, str] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
         self._question_seed_tasks: dict[str, asyncio.Task[None]] = {}
+        # Serializes writes to session rulesets, which replace the whole list.
+        self._ruleset_lock = asyncio.Lock()
+        self._models: list[Model] = []
+        self._models_failed_at: float | None = None
 
         self._server_process: asyncio.subprocess.Process | None = None
         self._output_tasks: list[asyncio.Task[None]] = []
         self._sse_task: asyncio.Task[None] | None = None
+        self._connected = asyncio.Event()
         self._client: OpenCodeHttpClient | None = None
+        # The absolute directory the server runs in.
+        self._directory: str | None = None
         self.server_info: ServerInfo | None = None
         self._started = False
         self._start_lock = asyncio.Lock()
+
+    @property
+    def workdir(self) -> str | None:
+        return self._workdir
+
+    # ── Server lifecycle ────────────────────────────────────────────────
 
     async def start(self) -> None:
         if self._started:
@@ -192,17 +213,21 @@ class OpenCodeAdapter:
             if self._started:
                 return
             try:
-                if self._launch_target is not None:
-                    await self._start_remote()
-                else:
-                    await self._start_local()
+                async with self._migration_gate.hold():
+                    if self._launch_target is not None:
+                        await self._start_remote()
+                    else:
+                        await self._start_local()
+                    await self._await_migration()
+                    self._migration_gate.migrated = True
+                await self._connect_events()
             except BaseException:
                 # Includes cancellation: a timed-out restore must not leave a
                 # server running.
+                await self._stop_events()
                 await self._discard_server()
                 raise
             self._started = True
-            self._sse_task = asyncio.create_task(self._listen_events())
             log.info("opencode server started successfully")
 
     async def _start_local(self) -> None:
@@ -210,6 +235,7 @@ class OpenCodeAdapter:
         if binary is None:
             raise OpenCodeError("opencode binary not found on PATH")
         cwd = str(Path(self._workdir).expanduser()) if self._workdir else None
+        self._directory = os.path.abspath(cwd) if cwd else os.getcwd()
 
         log.info("starting local opencode server on %s:%d", self._host, self._port)
         auth = ServerAuth.generate()
@@ -309,7 +335,8 @@ class OpenCodeAdapter:
         self._server_process.stdin.write(f"{auth.password}\n".encode())
         await self._server_process.stdin.drain()
 
-        # Wait for the port sentinel
+        # Wait for the port sentinel, which follows the directory one.
+        self._directory = None
         remote_port = None
         start_time = time.monotonic()
         while time.monotonic() - start_time < 30:
@@ -330,7 +357,9 @@ class OpenCodeAdapter:
                 if not line_bytes:
                     continue
                 line = line_bytes.decode("utf-8").strip()
-                if line.startswith("__WP_PORT__="):
+                if line.startswith("__WP_DIR__="):
+                    self._directory = line.partition("=")[2]
+                elif line.startswith("__WP_PORT__="):
                     remote_port = int(line.split("=")[1])
                     break
             except TimeoutError:
@@ -416,13 +445,9 @@ class OpenCodeAdapter:
                 proc.pid,
                 timeout,
             )
-            if self._launch_target is not None:
-                # SSH child got its own process group via start_new_session.
-                with suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                with suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)
+            # The server, or the SSH child, leads its own process group.
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGKILL)
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
 
@@ -443,27 +468,83 @@ class OpenCodeAdapter:
                 pass
             await asyncio.sleep(0.5)
 
+    async def _await_migration(self) -> None:
+        """Wait until the server has migrated a 1.x history: until then, the
+        sessions in it read as missing."""
+        deadline = time.monotonic() + MIGRATION_TIMEOUT_SECONDS
+        logged_at = 0.0
+        while True:
+            try:
+                data = await self._require_client().get(
+                    "/api/experimental/migration/v1"
+                )
+            except Exception as exc:
+                if http_status(exc) == 404:
+                    return
+                raise OpenCodeError(f"failed to read migration status: {exc}") from exc
+            state = data.get("status") if isinstance(data, dict) else None
+            if state == "error":
+                raise OpenCodeError(
+                    f"OpenCode history migration failed: {data.get('error')}"
+                )
+            if state not in ("required", "running"):
+                return
+            now = time.monotonic()
+            if now > deadline:
+                raise OpenCodeError("timeout waiting for the history migration")
+            if now - logged_at > 10:
+                log.info("waiting for opencode to migrate its history: %s", data)
+                logged_at = now
+            await asyncio.sleep(0.5)
+
+    async def _connect_events(self) -> None:
+        """Start the event loop and wait for the stream to open: events are not
+        replayed, and session status follows them."""
+        self._connected = asyncio.Event()
+        self._sse_task = asyncio.create_task(self._listen_events())
+        connected = asyncio.create_task(self._connected.wait())
+        try:
+            await asyncio.wait(
+                {connected, self._sse_task},
+                timeout=CONNECT_TIMEOUT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            connected.cancel()
+        if not self._connected.is_set() or self._sse_task.done():
+            raise OpenCodeError("failed to open the opencode event stream")
+
+    async def _stop_events(self) -> None:
+        if self._sse_task is not None:
+            task, self._sse_task = self._sse_task, None
+            with suppress(Exception):
+                await cancel_and_wait(task)
+
     def _require_client(self) -> OpenCodeHttpClient:
         if self._client is None:
             raise OpenCodeError("opencode http client not initialized")
         return self._client
 
     async def _on_server_died(self) -> None:
-        active_sessions = [
-            state for state in self._sessions.values() if not state.closing
-        ]
+        if not self._started:
+            # ``start`` sees the event task end, and fails.
+            return
+        active = [state for state in self._sessions.values() if not state.closing]
         # Snapshot ids before we clear `_sessions` so the plugin's
         # auto-reconnect loop knows which sessions to restore once the
         # remote comes back.
-        active_session_ids = [state.session_id for state in active_sessions]
+        active_session_ids = [state.session_id for state in active]
 
-        for state in active_sessions:
+        for state in active:
             try:
-                await self._emit_event(
-                    state.session_id,
-                    EventKind.SYSTEM_NOTE,
-                    "OpenCode server disconnected — connection lost",
-                    {"status": SessionStatus.ERROR},
+                for ask_id in [*state.permissions, *state.forms]:
+                    await self._drop_ask(state, ask_id, SessionStatus.ERROR)
+                await self._emit(
+                    state,
+                    normalize.note(
+                        "OpenCode server disconnected — connection lost",
+                        "server.disconnected",
+                    ),
                     SessionStatus.ERROR,
                 )
             except Exception:
@@ -472,8 +553,7 @@ class OpenCodeAdapter:
                 )
 
         self._sessions.clear()
-        self._remote_sessions.clear()
-        self._part_sessions.clear()
+        self._routes.clear()
 
         if self._client is not None:
             try:
@@ -496,16 +576,39 @@ class OpenCodeAdapter:
             except Exception:
                 log.exception("on_server_died callback failed")
 
+    async def shutdown(self) -> None:
+        for task in [*self._question_seed_tasks.values(), *self._tasks]:
+            with suppress(Exception):
+                await cancel_and_wait(task)
+        self._question_seed_tasks.clear()
+        self._tasks.clear()
+        await self._stop_events()
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
+        if self._server_process is not None:
+            self._terminate_server_process()
+            await self._await_server_process_exit()
+            self._server_process = None
+        await self._stop_draining_output()
+        self._sessions.clear()
+        self._routes.clear()
+        self._started = False
+
+    def _spawn(self, work: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.create_task(work)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    # ── Event stream ────────────────────────────────────────────────────
+
     async def _listen_events(self) -> None:
-        # OpenCode's /event stream does not support resume: events are emitted
-        # with `id: undefined`, so a reconnect cannot pick up where it left
-        # off. That means any mid-session disconnect is unrecoverable — events
-        # generated while the connection was down would be silently dropped.
-        # The retry budget below is therefore only spent on *pre-first-event*
-        # failures (server still warming up). Once we've delivered at least
-        # one event, any error or clean EOF promotes straight to
-        # `_on_server_died`, which surfaces the disconnect to the user
-        # instead of pretending the transcript is still live.
+        # The stream does not support resume, so a mid-session disconnect is
+        # unrecoverable: events generated while the connection was down would be
+        # silently dropped. The retry budget is therefore only spent before the
+        # first event (server still warming up). Once one has arrived, any error
+        # or clean EOF is a server death, which surfaces the disconnect instead
+        # of pretending the transcript is still live.
         consecutive_failures = 0
         delivered_any = False
         try:
@@ -513,16 +616,14 @@ class OpenCodeAdapter:
                 try:
                     client = self._require_client()
                     buffer: list[str] = []
-                    async for raw_line in client.stream_events("/event"):
+                    async for raw_line in client.stream_events("/api/event"):
                         line = raw_line.rstrip("\r\n")
                         if not line:
                             payload = self._decode_sse_payload(buffer)
                             buffer.clear()
                             if payload is not None:
-                                await self._dispatch_event(payload)
                                 delivered_any = True
-                            continue
-                        if line.startswith(":"):
+                                await self._handle_event(payload)
                             continue
                         if line.startswith("data:"):
                             buffer.append(line[5:].lstrip())
@@ -530,8 +631,8 @@ class OpenCodeAdapter:
                     # Handle last bit of decoder state on clean EOF.
                     payload = self._decode_sse_payload(buffer)
                     if payload is not None:
-                        await self._dispatch_event(payload)
                         delivered_any = True
+                        await self._handle_event(payload)
 
                     if delivered_any:
                         log.warning(
@@ -592,604 +693,423 @@ class OpenCodeAdapter:
             return None
         return payload if isinstance(payload, dict) else None
 
+    async def _handle_event(self, event: dict[str, Any]) -> None:
+        """Dispatch one event. A failure to handle it does not end the stream."""
+        try:
+            await self._dispatch_event(event)
+        except Exception:
+            log.exception("failed to handle opencode event %s", event.get("type"))
+
     async def _dispatch_event(self, event: dict[str, Any]) -> None:
-        event_type = event.get("type")
-        properties = event.get("properties", {})
-        if not isinstance(properties, dict):
+        kind, data = event.get("type"), event.get("data")
+        if kind == "server.connected":
+            self._connected.set()
             return
-        state = self._resolve_state_for_event(event_type, properties)
+        if not isinstance(kind, str) or not isinstance(data, dict):
+            return
+        if kind == "session.created":
+            self._adopt_child(data.get("parentID"), data.get("sessionID"))
+            return
+        form = data.get("form")
+        origin = data.get("sessionID") or (
+            form.get("sessionID") if isinstance(form, dict) else None
+        )
+        if not isinstance(origin, str):
+            return
+        state = self._sessions.get(self._routes.get(origin, ""))
+        # ``closing`` drops a late event that would re-populate state being
+        # torn down.
         if state is None or state.closing:
-            # Short-circuit on `closing` so a late SSE event can't re-add
-            # entries to `_part_sessions` after `terminate_session` cleared
-            # them but before its emit_event await returned.
             return
-        session_id = state.session_id
-        if "sessionID" not in properties:
-            properties = {**properties, "sessionID": state.opencode_session_id}
-        self._update_pending_state(state, event_type, properties)
-        if event_type == "message.updated":
-            await self._maybe_update_context_usage(state, properties)
-        properties = self._tag_part_type(state, event_type, properties)
+        root = origin == state.root_id
 
-        kind, text, metadata = map_event(event_type, properties)
-        if not text and not metadata.get("payload"):
+        match kind:
+            case "session.execution.started":
+                state.execution_started(origin)
+                if root:
+                    await self._emit(state, normalize.note("Session busy", kind))
+            case (
+                "session.execution.succeeded"
+                | "session.execution.failed"
+                | "session.execution.interrupted"
+            ):
+                await self._on_execution_ended(state, origin, kind, data)
+            case "session.text.delta" | "session.reasoning.delta" if root:
+                await self._on_text(state, data, kind, data.get("delta"))
+            case "session.text.ended" | "session.reasoning.ended" if root:
+                # The whole text, for a part no delta carried.
+                if self._part_key(data, kind) not in state.streamed:
+                    await self._on_text(state, data, kind, data.get("text"))
+            case "session.step.started":
+                if model := model_id(data.get("model")):
+                    state.message_models[str(data.get("assistantMessageID"))] = model
+            case "session.step.ended" | "session.step.failed":
+                await self._on_step_ended(state, origin, data)
+            case "session.tool.input.started":
+                state.tools[str(data.get("id"))] = ToolCall(str(data.get("name")), {})
+            case "session.tool.called":
+                await self._on_tool_called(state, data, root=root)
+            case "session.tool.progress":
+                if isinstance(metadata := data.get("metadata"), dict):
+                    self._adopt_child(origin, metadata.get("sessionID"))
+            case "session.tool.success" | "session.tool.failed":
+                await self._on_tool_ended(state, data, kind, root=root)
+            case "permission.asked":
+                await self._on_permission_asked(state, data)
+            case "permission.replied":
+                await self._on_permission_replied(state, data)
+            case "form.created":
+                await self._on_form_created(state, data)
+            case "form.replied" | "form.cancelled":
+                form_id = str(data.get("id"))
+                state.forget_ask(form_id)
+                await self._emit(
+                    state,
+                    normalize.question_closed(form_id, answered=kind == "form.replied"),
+                )
+            case "session.retry.scheduled" if root:
+                error = data.get("error")
+                message = error.get("message") if isinstance(error, dict) else None
+                await self._emit(
+                    state,
+                    normalize.note(
+                        f"Retrying (attempt {data.get('attempt')}): {message or ''}",
+                        kind,
+                    ),
+                )
+            case "session.compaction.ended" if root:
+                await self._emit(state, normalize.note("Session compacted", kind))
+            case "session.compaction.failed" if root:
+                await self._emit(
+                    state,
+                    normalize.note(f"Error: compaction failed: {_reason(data)}", kind),
+                )
+            case "session.agent.selected" if root:
+                self._on_agent_selected(state, data.get("agent"))
+            case "session.model.selected" if root:
+                self._adopt_model(state, data.get("model"))
+
+    async def _emit(
+        self,
+        state: SessionState,
+        emission: normalize.Emission,
+        status: SessionStatus | None = None,
+    ) -> None:
+        """Emit with ``status``, by default the one the session's state gives.
+        Nothing is emitted for a session being closed."""
+        # Handling that awaited the server may resume after the close, and its
+        # event would revive the session.
+        if state.closing:
             return
-
-        if event_type == "question.asked":
-            for q in properties.get("questions", []):
-                q_text = q.get("question", "")
-                if q_text.startswith("Plan at ") and " is complete." in q_text:
-                    path = q_text[len("Plan at ") : q_text.find(" is complete.")]
-                    try:
-                        client = self._require_client()
-                        resp = await client.get("/file/content", params={"path": path})
-                        content = resp.get("content")
-                        if content:
-                            await self._emit_event(
-                                session_id,
-                                EventKind.AGENT_OUTPUT,
-                                f"## Plan\n{content}",
-                                {"status": SessionStatus.RUNNING},
-                                SessionStatus.RUNNING,
-                            )
-                    except Exception as exc:
-                        log.warning("failed to fetch plan file content: %s", exc)
-
+        kind, text, metadata = emission
+        status = status or state.status()
         await self._emit_event(
-            session_id,
-            kind,
-            text,
-            metadata,
-            metadata.get("status", SessionStatus.RUNNING),
+            state.session_id, kind, text, {**metadata, "status": status}, status
         )
 
-    def _resolve_state_for_event(
-        self,
-        event_type: str | None,
-        properties: dict[str, Any],
-    ) -> OpenCodeSessionState | None:
-        remote_session_id = self._extract_session_id(properties)
-        if remote_session_id:
-            session_id = self._remote_sessions.get(remote_session_id)
-            if session_id:
-                return self._sessions.get(session_id)
+    def _adopt_child(self, parent: Any, child: Any) -> None:
+        if not isinstance(parent, str) or not isinstance(child, str):
+            return
+        state = self._sessions.get(self._routes.get(parent, ""))
+        if state is None or state.owns(child):
+            return
+        state.children.add(child)
+        self._routes[child] = state.session_id
 
-        # SSE deltas may arrive keyed only by partID while the stream stays
-        # open; fall back to the last known part->session mapping so output
-        # still routes to the right transcript.
-        if event_type and event_type.startswith("message.part."):
-            part_id = properties.get("partID")
-            if isinstance(part_id, str):
-                session_id = self._part_sessions.get(part_id)
-                if session_id:
-                    return self._sessions.get(session_id)
-        return None
-
-    def _extract_session_id(self, properties: Any) -> str | None:
-        # Only consult the known carriers OpenCode uses, in priority order.
-        # Recursing through arbitrary nested dicts/lists would let a stray
-        # field (e.g. an unrelated `sessionID` inside a tool's `metadata`)
-        # mis-route an event.
-        if not isinstance(properties, dict):
-            return None
-        direct = properties.get("sessionID")
-        if isinstance(direct, str) and direct:
-            return direct
-        for key in ("info", "part"):
-            nested = properties.get(key)
-            if isinstance(nested, dict):
-                nested_id = nested.get("sessionID")
-                if isinstance(nested_id, str) and nested_id:
-                    return nested_id
-        return None
-
-    def _update_pending_state(
-        self,
-        state: OpenCodeSessionState,
-        event_type: str | None,
-        properties: dict[str, Any],
+    async def _on_execution_ended(
+        self, state: SessionState, origin: str, kind: str, data: dict[str, Any]
     ) -> None:
-        if event_type == "message.updated":
-            info = properties.get("info")
-            if isinstance(info, dict):
-                agent = info.get("agent")
-                if isinstance(agent, str) and agent != state.agent:
-                    old_agent = state.agent
-                    state.agent = agent
-                    if self._on_agent_changed:
-                        self._on_agent_changed(state.session_id, old_agent, agent)
+        reason = data.get("reason")
+        if reason == "superseded":
+            # Another execution takes over.
+            return
+        state.execution_ended(origin, by_human=reason == "user")
+        if origin != state.root_id:
+            await self._reconcile(state)
+            if not state.running:
+                self._spawn(self._settle_after_subagent(state))
             return
 
-        if event_type == "permission.asked":
-            permission_id = properties.get("id")
-            if (
-                isinstance(permission_id, str)
-                and permission_id
-                and permission_id not in state.pending_permission_ids
-            ):
-                state.pending_permission_ids.append(permission_id)
+        if state.changed_files:
+            # Before the ending note: an idle status releases queued messages,
+            # and the diff is of the newest turn.
+            state.changed_files = False
+            await self._emit_changes(state)
+        await self._reconcile(state)
+        if kind == "session.execution.failed":
+            await self._emit(state, normalize.note(f"Error: {_reason(data)}", kind))
+        elif kind == "session.execution.interrupted":
+            await self._emit(state, normalize.note("Turn interrupted", kind))
+        elif state.status() == SessionStatus.IDLE:
+            await self._emit(state, normalize.note("Session idle", kind))
+
+    async def _settle_after_subagent(self, state: SessionState) -> None:
+        """A finished subagent hands its result to the parent, which runs again.
+        When it does not, report that the session is idle."""
+        await asyncio.sleep(SUBAGENT_SETTLE_SECONDS)
+        if (
+            self._sessions.get(state.session_id) is state
+            and not state.closing
+            and state.status() == SessionStatus.IDLE
+        ):
+            await self._emit(
+                state, normalize.note("Session idle", "session.subagents.ended")
+            )
+
+    async def _emit_changes(self, state: SessionState) -> None:
+        try:
+            data = await self._require_client().get(
+                f"/api/session/{state.root_id}/diff", params={"context": "3"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to read opencode turn diff: %s", exc)
             return
+        emission = normalize.turn_changes(data.get("data"))
+        if emission and not state.closing:
+            # The note says nothing about the session's status.
+            kind, text, metadata = emission
+            await self._emit_event(state.session_id, kind, text, metadata, None)
 
-        if event_type == "permission.replied":
-            permission_id = properties.get("requestID")
-            if isinstance(permission_id, str):
-                state.pending_permission_ids = [
-                    item
-                    for item in state.pending_permission_ids
-                    if item != permission_id
-                ]
-            return
+    def _part_key(self, data: dict[str, Any], kind: str) -> str:
+        part = kind.split(".")[1]
+        return f"{data.get('assistantMessageID')}:{part}:{data.get('ordinal')}"
 
-        if event_type == "question.asked":
-            request_id = properties.get("id")
-            if (
-                isinstance(request_id, str)
-                and request_id
-                and request_id not in state.pending_question_ids
-            ):
-                state.pending_question_ids.append(request_id)
-            return
-
-        if event_type in {"question.replied", "question.rejected"}:
-            request_id = properties.get("requestID")
-            if isinstance(request_id, str):
-                state.pending_question_ids = [
-                    item for item in state.pending_question_ids if item != request_id
-                ]
-
-    async def _maybe_update_context_usage(
-        self,
-        state: OpenCodeSessionState,
-        properties: dict[str, Any],
+    async def _on_text(
+        self, state: SessionState, data: dict[str, Any], kind: str, text: Any
     ) -> None:
-        info = properties.get("info")
-        if not isinstance(info, dict):
+        if not isinstance(text, str) or not text:
             return
-        if info.get("role") != "assistant":
-            return
-        tokens = info.get("tokens")
-        if not isinstance(tokens, dict):
-            return
-        if _positive_int(tokens.get("output")) is None:
-            return
+        state.streamed.add(self._part_key(data, kind))
+        await self._emit(
+            state,
+            normalize.text_delta(
+                str(data.get("assistantMessageID")),
+                data.get("ordinal") or 0,
+                text,
+                reasoning=kind.startswith("session.reasoning"),
+            ),
+        )
 
-        provider_id = info.get("providerID")
-        model_id = info.get("modelID")
-        if not isinstance(provider_id, str) or not provider_id:
+    async def _on_tool_called(
+        self, state: SessionState, data: dict[str, Any], *, root: bool
+    ) -> None:
+        call_id = str(data.get("id"))
+        call = state.tools.get(call_id)
+        if call is None:
             return
-        if not isinstance(model_id, str) or not model_id:
-            return
+        state.tools[call_id] = ToolCall(call.name, data.get("input"))
+        if root and call.name != normalize.QUESTION_TOOL:
+            await self._emit(
+                state, normalize.tool_call(call_id, call.name, data.get("input"))
+            )
 
-        # Feed the ledger keyed on the upstream session + message id, so
-        # redelivery is idempotent, independent of the context-window lookup.
-        message_id = info.get("id")
-        if self._on_token_usage is not None and isinstance(message_id, str):
+    async def _on_tool_ended(
+        self, state: SessionState, data: dict[str, Any], kind: str, *, root: bool
+    ) -> None:
+        call_id = str(data.get("id"))
+        call = state.tools.pop(call_id, None)
+        proposed = state.proposed_files.pop(call_id, None)
+        if call is None or not root or call.name == normalize.QUESTION_TOOL:
+            return
+        metadata = data.get("metadata")
+        applied = metadata.get("files") if isinstance(metadata, dict) else None
+        failed = kind == "session.tool.failed"
+        await self._emit(
+            state,
+            normalize.tool_result(
+                call_id,
+                call.name,
+                call.input,
+                content=data.get("content"),
+                error=(data.get("error") or "Unknown error") if failed else None,
+                # A write reports no diff; the one its approval showed stands.
+                files=applied or proposed,
+            ),
+        )
+
+    async def _on_step_ended(
+        self, state: SessionState, origin: str, data: dict[str, Any]
+    ) -> None:
+        if data.get("files"):
+            state.changed_files = True
+        tokens = data.get("tokens")
+        message_id = data.get("assistantMessageID")
+        if not isinstance(tokens, dict) or not isinstance(message_id, str):
+            return
+        model = state.message_models.pop(message_id, None)
+        root = origin == state.root_id
+        if self._on_token_usage is not None:
             record = opencode_token_usage_record(
-                f"{state.opencode_session_id}:{message_id}",
+                f"{origin}:{message_id}",
                 tokens,
-                model=f"{provider_id}/{model_id}",
-                effort=state.effort,
+                model=model,
+                effort=state.effort if root else None,
             )
             if record is not None:
                 await self._on_token_usage(state.session_id, record, False)
-
-        key = (provider_id, model_id)
-        state.context_usage_pending_tokens[key] = tokens
-
-        context_window_tokens = state.context_window_by_model.get(key)
-        if context_window_tokens is not None:
-            state.context_window_lookup_failed.pop(key, None)
+        # A subagent has a context of its own.
+        if not root or model is None:
+            return
+        entry = next((item for item in self._models if item.id == model), None)
+        if entry is not None:
             await self._publish_context_usage(
-                state,
-                provider_id,
-                model_id,
-                tokens,
-                context_window_tokens,
-                publish=False,
+                state, tokens, entry.context_window, publish=False
             )
-            return
+        else:
+            self._spawn(self._look_up_context_usage(state, tokens, model))
 
-        failed_at = state.context_window_lookup_failed.get(key)
-        if failed_at is not None:
-            if time.monotonic() - failed_at < CONTEXT_WINDOW_LOOKUP_RETRY_SECONDS:
-                return
-            state.context_window_lookup_failed.pop(key, None)
-
-        if key in state.context_window_lookup_pending:
-            return
-
-        state.context_window_lookup_pending.add(key)
-        task = asyncio.create_task(
-            self._resolve_context_window_and_publish(
-                state,
-                provider_id,
-                model_id,
-            )
-        )
-        self._context_window_lookup_tasks.add(task)
-        task.add_done_callback(self._context_window_lookup_tasks.discard)
-
-    async def _resolve_context_window_and_publish(
-        self,
-        state: OpenCodeSessionState,
-        provider_id: str,
-        model_id: str,
+    async def _look_up_context_usage(
+        self, state: SessionState, tokens: dict[str, Any], model: str
     ) -> None:
-        key = (provider_id, model_id)
-        try:
-            context_window_tokens = await self._context_window_for_model(
-                state, provider_id, model_id
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.debug(
-                "failed to fetch opencode context window",
-                extra={"session_id": state.session_id, "error": str(exc)},
-            )
-            context_window_tokens = None
-        finally:
-            state.context_window_lookup_pending.discard(key)
-
-        if context_window_tokens is None:
-            state.context_window_lookup_failed[key] = time.monotonic()
+        # The listing would restart a server that has since died.
+        if not self._started:
             return
-
-        current_state = self._sessions.get(state.session_id)
-        if current_state is not state or state.closing:
-            return
-
-        state.context_window_by_model[key] = context_window_tokens
-        state.context_window_lookup_failed.pop(key, None)
-        tokens = state.context_usage_pending_tokens.get(key)
-        if tokens is None:
+        entry = await self._model(model)
+        if (
+            entry is None
+            or self._sessions.get(state.session_id) is not state
+            or state.closing
+        ):
             return
         await self._publish_context_usage(
-            state,
-            provider_id,
-            model_id,
-            tokens,
-            context_window_tokens,
-            publish=True,
+            state, tokens, entry.context_window, publish=True
         )
-
-    async def _context_window_for_model(
-        self, state: OpenCodeSessionState, provider_id: str, model_id: str
-    ) -> int | None:
-        client = self._require_client()
-        payload = await client.get("/config/providers", params={"directory": state.cwd})
-
-        if not isinstance(payload, dict):
-            return None
-        providers = payload.get("providers")
-        if not isinstance(providers, list):
-            return None
-
-        for provider in providers:
-            if not isinstance(provider, dict):
-                continue
-            if provider.get("id") != provider_id:
-                continue
-            models = provider.get("models")
-            if not isinstance(models, dict):
-                continue
-            model = models.get(model_id)
-            if not isinstance(model, dict):
-                continue
-            limit = model.get("limit")
-            if not isinstance(limit, dict):
-                continue
-            context = _positive_int(limit.get("context"))
-            if context is not None:
-                return context
-        return None
 
     async def _publish_context_usage(
         self,
-        state: OpenCodeSessionState,
-        provider_id: str,
-        model_id: str,
+        state: SessionState,
         tokens: dict[str, Any],
-        context_window_tokens: int,
+        context_window: int | None,
         *,
         publish: bool,
     ) -> None:
-        snapshot = _context_usage_snapshot_from_message(
-            provider_id,
-            model_id,
-            tokens,
-            context_window_tokens,
-        )
+        if context_window is None or self._on_session_update is None:
+            return
+        snapshot = _context_usage_snapshot(tokens, context_window)
         if snapshot is None:
             return
-
-        # Key on the breakdown too, so a same-total/different-split turn refreshes.
-        signature = (
+        # Compared with the breakdown, so a same-total/different-split turn
+        # refreshes.
+        previous = state.context_usage
+        if previous is not None and (
+            previous.used_tokens,
+            previous.context_window_tokens,
+            previous.breakdown,
+        ) == (
             snapshot.used_tokens,
             snapshot.context_window_tokens,
-            tuple(sorted(snapshot.breakdown.items())),
-        )
-        if state.context_usage_signature == signature:
-            state.context_usage_pending_tokens.pop((provider_id, model_id), None)
+            snapshot.breakdown,
+        ):
             return
-        state.context_usage_signature = signature
-        state.context_usage_pending_tokens.pop((provider_id, model_id), None)
-        if self._on_session_update is None:
-            return
+        state.context_usage = snapshot
         await self._on_session_update(
             state.session_id,
             {"context_usage": snapshot.model_dump(mode="json")},
             publish,
         )
 
-    def _tag_part_type(
-        self,
-        state: OpenCodeSessionState,
-        event_type: str | None,
-        properties: dict[str, Any],
-    ) -> dict[str, Any]:
-        # message.part.updated arrives on each *-start before any deltas, so
-        # by the time deltas land we know whether the part is reasoning or
-        # text. message.part.delta only carries field="text" for both, so we
-        # decorate it with the recorded type for downstream rendering.
-        if event_type == "message.part.updated":
-            part = properties.get("part")
-            if isinstance(part, dict):
-                part_id = part.get("id")
-                part_type = part.get("type")
-                if isinstance(part_id, str) and isinstance(part_type, str):
-                    state.part_types[part_id] = part_type
-                    self._part_sessions[part_id] = state.session_id
-            return properties
-        if event_type == "message.part.delta":
-            part_id = properties.get("partID")
-            if isinstance(part_id, str):
-                part_type = state.part_types.get(part_id)
-                if part_type:
-                    return {**properties, "_waypoint_part_type": part_type}
-        return properties
-
-    def _register_session(self, state: OpenCodeSessionState) -> None:
-        self._sessions[state.session_id] = state
-        self._remote_sessions[state.opencode_session_id] = state.session_id
-
-    async def start_session(
-        self,
-        session_id: str,
-        cwd: str,
-        model: str | None = None,
-        agent: str | None = None,
-        effort: str | None = None,
-        title: str = "New Session",
-        permission: list[dict[str, str]] | None = None,
-    ) -> str:
-        if not self._started:
-            await self.start()
-
-        real_session_id = await self._create_session(cwd, title, permission)
-        state = OpenCodeSessionState(
-            session_id=session_id,
-            cwd=cwd,
-            opencode_session_id=real_session_id,
-            model=model,
-            agent=agent,
-            effort=effort,
-        )
-        self._register_session(state)
-        await self._emit_event(
-            session_id,
-            EventKind.SYSTEM_NOTE,
-            f"OpenCode session started ({real_session_id})",
-            {"status": SessionStatus.IDLE},
-            SessionStatus.IDLE,
-        )
-        return real_session_id
-
-    async def _create_session(
-        self,
-        directory: str,
-        title: str,
-        permission: list[dict[str, str]] | None = None,
-    ) -> str:
-        client = self._require_client()
-        payload: dict[str, Any] = {"title": title}
-        if permission:
-            payload["permission"] = permission
-
-        try:
-            data = await client.post(
-                "/session",
-                json_data=payload,
-                params={"directory": directory} if directory else None,
-            )
-        except Exception as exc:
-            log.error("failed to create session: %s", exc)
-            raise OpenCodeError(f"failed to create session: {exc}") from exc
-
-        session_id = data.get("id", "")
-        if not session_id:
-            log.error("invalid session ID returned: %s", data)
-            raise OpenCodeError(f"invalid session ID returned: {session_id}")
-        return session_id
-
-    async def fork_session(
-        self,
-        session_id: str,
-        cwd: str,
-        opencode_session_id: str,
-        model: str | None = None,
-        agent: str | None = None,
-        effort: str | None = None,
-    ) -> str:
-        if not self._started:
-            await self.start()
-
-        client = self._require_client()
-        try:
-            data = await client.post(
-                f"/session/{opencode_session_id}/fork", json_data={}
-            )
-        except Exception as exc:
-            log.error("failed to fork session: %s", exc)
-            raise OpenCodeError(f"failed to fork session: {exc}") from exc
-
-        new_real_session_id = data.get("id", "")
-        if not new_real_session_id:
-            log.error("invalid session ID returned on fork: %s", data)
-            raise OpenCodeError(
-                f"invalid session ID returned on fork: {new_real_session_id}"
-            )
-
-        state = OpenCodeSessionState(
-            session_id=session_id,
-            cwd=cwd,
-            opencode_session_id=new_real_session_id,
-            model=model,
-            agent=agent,
-            effort=effort,
-        )
-        self._register_session(state)
-        return new_real_session_id
-
-    async def restore_session(
-        self,
-        session_id: str,
-        cwd: str,
-        opencode_session_id: str,
-        model: str | None = None,
-        agent: str | None = None,
-        effort: str | None = None,
-    ) -> None:
-        if not self._started:
-            await self.start()
-
-        remote = await self.get_session(opencode_session_id)
-        if remote is None:
-            raise OpenCodeError(
-                f"opencode session {opencode_session_id} not found on server"
-            )
-
-        state = OpenCodeSessionState(
-            session_id=session_id,
-            cwd=cwd,
-            opencode_session_id=opencode_session_id,
-            model=model,
-            agent=agent,
-            effort=effort,
-            questions_seeded=False,
-        )
-        self._register_session(state)
-        await self._seed_pending_questions(state)
-        # The plugin records the user-facing restore/import note; the adapter
-        # stays silent here so the transcript only shows one entry.
-
-    async def send_input(
-        self,
-        session_id: str,
-        text: str,
-        attachments: list[ResolvedAttachment] | None = None,
-    ) -> None:
-        state = self._sessions.get(session_id)
-        if state is None:
-            raise OpenCodeError(f"session not found: {session_id}")
-        model = self._split_model_ref(state.model)
-        client = self._require_client()
-        # Omit the text part on an attachment-only turn so the server doesn't
-        # receive a blank prompt part.
-        parts: list[dict[str, Any]] = [{"type": "text", "text": text}] if text else []
-        # Embed every attachment as a data-url file part rather than a host
-        # path: the OpenCode server may run on a remote host (SSH launch
-        # target) that can't see the local attachments directory.
-        for attachment in attachments or []:
-            parts.append(
-                {
-                    "type": "file",
-                    "mime": attachment.spec.mime,
-                    "filename": attachment.spec.filename,
-                    "url": attachment.to_data_url(),
-                }
-            )
-        payload: dict[str, Any] = {"parts": parts}
-        if model is not None:
-            payload["model"] = model
-        if state.effort:
-            payload["variant"] = state.effort
-        if state.agent:
-            payload["agent"] = state.agent
-
-        try:
-            # `prompt_async` returns once the server has accepted the work —
-            # results stream back via SSE. The accept itself is cheap, but
-            # mark long_running so a slow-link burst of work tokens past
-            # the control timeout doesn't cause us to spuriously kill it.
-            await client.post(
-                f"/session/{state.opencode_session_id}/prompt_async",
-                json_data=payload,
-                long_running=True,
-            )
-        except Exception as exc:
-            raise OpenCodeError(f"failed to send message: {exc}") from exc
-
-    async def list_commands(self, session_id: str) -> list[dict[str, Any]]:
-        if not self._started:
-            await self.start()
-        state = self._sessions.get(session_id)
-        if state is None:
-            raise OpenCodeError(f"session not found: {session_id}")
-        client = self._require_client()
-        try:
-            # Scope discovery to the session's directory so project-local
-            # skills and commands resolve; without it the server falls back to
-            # its own process cwd and misses project-scoped skills.
-            data = await client.get("/command", params={"directory": state.cwd})
-        except Exception as exc:
-            raise OpenCodeError(f"failed to list commands: {exc}") from exc
-        return data if isinstance(data, list) else []
-
-    async def execute_command(
-        self,
-        session_id: str,
-        command: str,
-        arguments: str,
-    ) -> None:
-        state = self._sessions.get(session_id)
-        if state is None:
-            raise OpenCodeError(f"session not found: {session_id}")
-        client = self._require_client()
-        payload: dict[str, Any] = {
-            "command": command,
-            "arguments": arguments,
-        }
-        if state.model:
-            payload["model"] = state.model
-        if state.agent:
-            payload["agent"] = state.agent
-        if state.effort:
-            payload["variant"] = state.effort
-        try:
-            await client.post(
-                f"/session/{state.opencode_session_id}/command",
-                json_data=payload,
-                long_running=True,
-            )
-        except Exception as exc:
-            raise OpenCodeError(f"failed to execute command: {exc}") from exc
-
-    def _split_model_ref(self, model: str | None) -> dict[str, str] | None:
-        if not model or "/" not in model:
-            return None
-        provider_id, model_id = model.split("/", 1)
-        if not provider_id or not model_id:
-            return None
-        return {"providerID": provider_id, "modelID": model_id}
-
-    async def interrupt(self, session_id: str) -> None:
-        state = self._sessions.get(session_id)
-        if state is None:
+    def _on_agent_selected(self, state: SessionState, agent: Any) -> None:
+        if not isinstance(agent, str) or agent == state.agent:
             return
+        old, state.agent = state.agent, agent
+        if self._on_agent_changed:
+            self._on_agent_changed(state.session_id, old, agent)
+
+    def _adopt_model(self, state: SessionState, ref: Any) -> None:
+        if model := model_id(ref):
+            variant = ref.get("variant")
+            state.model = model
+            # ``default`` names no variant.
+            state.effort = variant if variant != "default" else None
+
+    # ── Asks ────────────────────────────────────────────────────────────
+
+    async def _on_permission_asked(
+        self, state: SessionState, data: dict[str, Any]
+    ) -> None:
+        permission = Permission.parse(data)
+        if permission is None or permission.id in state.permissions:
+            return
+        state.add_permission(permission)
+        await self._emit_approval(state, permission, data)
+
+    async def _emit_approval(
+        self, state: SessionState, permission: Permission, data: dict[str, Any]
+    ) -> None:
+        call = state.tools.get(permission.call_id or "")
+        await self._emit(
+            state,
+            normalize.approval_request(
+                data,
+                name=call.name if call else None,
+                raw_input=call.input if call else None,
+                from_subagent=permission.session_id != state.root_id,
+            ),
+        )
+
+    async def _on_permission_replied(
+        self, state: SessionState, data: dict[str, Any]
+    ) -> None:
+        request_id = str(data.get("requestID"))
+        if request_id not in state.replying:
+            await self._drop_ask(state, request_id)
+            return
+        state.replying.discard(request_id)
+        state.forget_ask(request_id)
+        await self._emit(
+            state,
+            normalize.note(f"Permission {data.get('reply')}", "permission.replied"),
+        )
+
+    async def _on_form_created(self, state: SessionState, data: dict[str, Any]) -> None:
+        payload = data.get("form")
+        form = parse_form(payload) if isinstance(payload, dict) else None
+        if form is None or form.id in state.forms:
+            return
+        if (emission := normalize.question(form)) is None:
+            return
+        state.add_form(form)
+        await self._emit(state, emission)
+
+    async def _drop_ask(
+        self,
+        state: SessionState,
+        ask_id: str,
+        status: SessionStatus | None = None,
+    ) -> None:
+        """Forget an ask that ended other than by Waypoint's reply, and close
+        its card."""
+        if ask_id in state.permissions:
+            state.forget_ask(ask_id)
+            await self._emit(state, normalize.approval_invalidated(ask_id), status)
+        elif ask_id in state.forms:
+            state.forget_ask(ask_id)
+            await self._emit(
+                state, normalize.question_closed(ask_id, answered=False), status
+            )
+
+    async def _list_asks(self) -> tuple[list[Any], list[Any]] | None:
+        """The server's pending permissions and forms, or ``None`` when it could
+        not be asked."""
         client = self._require_client()
+        params = self._location()
         try:
-            await client.post(f"/session/{state.opencode_session_id}/abort")
-        except Exception:
-            pass
+            permissions = await client.get("/api/permission/request", params=params)
+            forms = await client.get("/api/form", params=params)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to list opencode asks: %s", exc)
+            return None
+        return permissions.get("data") or [], forms.get("data") or []
+
+    async def _reconcile(self, state: SessionState) -> None:
+        """Drop the asks the server has ended without saying so."""
+        pending = [*state.permissions, *state.forms]
+        if not pending or (listed := await self._list_asks()) is None:
+            return
+        ids = {item.get("id") for group in listed for item in group}
+        for ask_id in pending:
+            if ask_id not in ids and ask_id not in state.replying:
+                await self._drop_ask(state, ask_id)
 
     async def respond_to_permission(
         self,
@@ -1199,53 +1119,558 @@ class OpenCodeAdapter:
         approval_id: str | None = None,
     ) -> bool:
         state = self._sessions.get(session_id)
-        if state is None:
+        if state is None or not state.permissions:
             return False
-        if not state.pending_permission_ids:
+        reply = _normalize_decision(decision)
+        permission = (
+            state.permissions.get(approval_id)
+            if approval_id
+            else next(iter(state.permissions.values()))
+        )
+        if permission is None:
             return False
-        reply = self._map_decision_to_reply(decision)
+        if reply == "session":
+            await self._grant(state, permission)
+            reply = "once"
 
-        if approval_id:
-            if approval_id not in state.pending_permission_ids:
-                return False
-            permission_id = approval_id
-        else:
-            permission_id = state.pending_permission_ids[0]
-
-        client = self._require_client()
+        body: dict[str, Any] = {"decision": reply}
+        if text is not None:
+            body["message"] = text
+        state.replying.add(permission.id)
         try:
-            payload: dict[str, Any] = {"reply": reply}
-            if text is not None:
-                payload["message"] = text
-            await client.post(f"/permission/{permission_id}/reply", json_data=payload)
-        except Exception:
-            return False
-        state.pending_permission_ids.remove(permission_id)
+            await self._require_client().post(
+                f"/api/session/{permission.session_id}/permission/{permission.id}/reply",
+                json_data=body,
+            )
+        except Exception as exc:
+            state.replying.discard(permission.id)
+            if http_status(exc) == 404:
+                await self._drop_ask(state, permission.id)
+                return False
+            raise OpenCodeError(f"failed to reply to the permission: {exc}") from exc
+        # It stays in ``replying`` until its event, which then reads as
+        # Waypoint's own.
+        state.forget_ask(permission.id)
         return True
 
-    def _map_decision_to_reply(self, decision: str) -> str:
-        return _normalize_decision(decision)
+    async def _grant(self, state: SessionState, permission: Permission) -> None:
+        """Allow what the request offers to save, for this session only."""
+        rules = [
+            {"action": permission.action, "resource": pattern, "effect": "allow"}
+            for pattern in permission.save
+        ]
+        if not rules:
+            return
+        client = self._require_client()
+        async with self._ruleset_lock:
+            # The asking session, and the root for the subagents it starts.
+            for target in dict.fromkeys((permission.session_id, state.root_id)):
+                try:
+                    info = await self._session_info(target)
+                    ruleset = list(info.get("permissions") or [])
+                    if missing := [rule for rule in rules if rule not in ruleset]:
+                        await client.patch(
+                            f"/api/session/{target}",
+                            json_data={"permissions": ruleset + missing},
+                        )
+                except Exception as exc:
+                    raise OpenCodeError(
+                        f"failed to allow this for the session: {exc}"
+                    ) from exc
 
-    async def set_model(self, session_id: str, model: str) -> bool:
+    async def answer_question(
+        self,
+        session_id: str,
+        request_id: str,
+        answer: str,
+        answers: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None or (form := state.forms.get(request_id)) is None:
+            return False
+        try:
+            await self._require_client().post(
+                f"/api/session/{form.session_id}/form/{form.id}/reply",
+                json_data={"answer": form.reply(answer, answers)},
+            )
+        except Exception as exc:
+            log.warning("opencode question reply failed: %s", exc)
+            if http_status(exc) in (404, 409):
+                await self._drop_ask(state, form.id)
+            return False
+        state.forget_ask(form.id)
+        return True
+
+    async def reject_question(
+        self, session_id: str, request_id: str
+    ) -> Literal["ok", "missing", "error"]:
+        """Decline one question request; ``missing`` means the server no
+        longer has it."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return "error"
+        form = state.forms.get(request_id)
+        origin = form.session_id if form else state.root_id
+        try:
+            await self._require_client().delete(
+                f"/api/session/{origin}/form/{request_id}"
+            )
+        except Exception as exc:
+            log.warning("opencode question reject failed: %s", exc)
+            if http_status(exc) not in (404, 409):
+                return "error"
+            state.forget_ask(request_id)
+            return "missing"
+        state.forget_ask(request_id)
+        return "ok"
+
+    def current_question_id(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return next(iter(state.forms), None) if state else None
+
+    def has_pending_approval(self, session_id: str) -> bool:
+        state = self._sessions.get(session_id)
+        return bool(state and state.permissions)
+
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        state = self._sessions.get(session_id)
+        return tuple(state.permissions) if state else ()
+
+    def session_status(self, session_id: str) -> SessionStatus | None:
+        state = self._sessions.get(session_id)
+        return state.status() if state else None
+
+    async def _seed_asks(
+        self, state: SessionState
+    ) -> tuple[list[tuple[Permission, dict[str, Any]]], list[Form]]:
+        """Adopt the server's pending asks of the session's tree, returning the
+        ones the stream had not delivered."""
+        state.forms_seed_attempted_at = time.monotonic()
+        mark = state.mark()
+        permissions: list[tuple[Permission, dict[str, Any]]] = []
+        forms: list[Form] = []
+        listed = await self._list_asks()
+        if listed is None:
+            return permissions, forms
+        for item in listed[0]:
+            permission = Permission.parse(item)
+            if (
+                permission is not None
+                and state.owns(permission.session_id)
+                and not state.touched_since(permission.id, mark)
+                and permission.id not in state.permissions
+            ):
+                state.add_permission(permission)
+                permissions.append((permission, item))
+        for item in listed[1]:
+            form = parse_form(item) if isinstance(item, dict) else None
+            if (
+                form is not None
+                and state.owns(form.session_id)
+                and not state.touched_since(form.id, mark)
+                and form.id not in state.forms
+                and form.questions()
+            ):
+                state.add_form(form)
+                forms.append(form)
+        state.forms_seeded = True
+        return permissions, forms
+
+    def question_liveness(
+        self, session_id: str, request_ids: list[str]
+    ) -> dict[str, QuestionLiveness]:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return dict.fromkeys(request_ids, QuestionLiveness.UNAVAILABLE)
+        if not state.forms_seeded:
+            # Questions the stream delivered since restore are known live; the
+            # rest wait for a successful listing.
+            self._schedule_question_seed(state)
+        untracked = (
+            QuestionLiveness.CLOSED
+            if state.forms_seeded
+            else QuestionLiveness.UNAVAILABLE
+        )
+        return {
+            request_id: (
+                QuestionLiveness.ACTIONABLE if request_id in state.forms else untracked
+            )
+            for request_id in request_ids
+        }
+
+    def _schedule_question_seed(self, state: SessionState) -> None:
+        if state.session_id in self._question_seed_tasks:
+            return
+        elapsed = time.monotonic() - state.forms_seed_attempted_at
+        if elapsed < QUESTION_SEED_RETRY_SECONDS:
+            return
+
+        async def reseed() -> None:
+            await self._seed_asks(state)
+            if state.forms_seeded and self._on_questions_changed is not None:
+                self._on_questions_changed(state.session_id)
+
+        task = asyncio.create_task(reseed())
+        self._question_seed_tasks[state.session_id] = task
+        task.add_done_callback(
+            lambda _: self._question_seed_tasks.pop(state.session_id, None)
+        )
+
+    # ── Session lifecycle ───────────────────────────────────────────────
+
+    def _location(self) -> dict[str, str]:
+        return {"location[directory]": self._directory} if self._directory else {}
+
+    def _register_session(self, state: SessionState) -> None:
+        self._sessions[state.session_id] = state
+        self._routes[state.root_id] = state.session_id
+
+    def _forget_session(self, state: SessionState) -> None:
+        self._sessions.pop(state.session_id, None)
+        for route, owner in list(self._routes.items()):
+            if owner == state.session_id:
+                del self._routes[route]
+
+    async def _session_info(self, opencode_session_id: str) -> dict[str, Any]:
+        data = await self._require_client().get(f"/api/session/{opencode_session_id}")
+        info = data.get("data")
+        if not isinstance(info, dict):
+            raise OpenCodeError(f"opencode session {opencode_session_id} not found")
+        return info
+
+    async def start_session(
+        self,
+        session_id: str,
+        cwd: str,
+        *,
+        title: str = "New Session",
+        model: str | None = None,
+        agent: str | None = None,
+        effort: str | None = None,
+        permissions: list[dict[str, str]] | None = None,
+    ) -> str:
+        await self.start()
+        body: dict[str, Any] = {
+            "location": {"directory": self._directory},
+            "title": title,
+        }
+        if agent:
+            body["agent"] = agent
+        if permissions:
+            body["permissions"] = permissions
+        if model and (ref := await self._model_selection(model, effort)):
+            body["model"] = ref
+        try:
+            data = await self._require_client().post("/api/session", json_data=body)
+            opencode_session_id = str(data["data"]["id"])
+        except Exception as exc:
+            log.error("failed to create session: %s", exc)
+            raise OpenCodeError(f"failed to create session: {exc}") from exc
+
+        state = SessionState(
+            session_id=session_id,
+            cwd=cwd,
+            root_id=opencode_session_id,
+            agent=agent,
+        )
+        self._adopt_model(state, body.get("model"))
+        self._register_session(state)
+        if effort and not model:
+            # A variant travels only with a model.
+            await self.set_effort(session_id, effort)
+        await self._emit(
+            state,
+            normalize.note(
+                f"OpenCode session started ({opencode_session_id})", "session.created"
+            ),
+        )
+        return opencode_session_id
+
+    async def fork_session(
+        self,
+        session_id: str,
+        cwd: str,
+        source_id: str,
+        permissions: list[dict[str, str]],
+    ) -> str:
+        await self.start()
+        client = self._require_client()
+        try:
+            data = await client.post(f"/api/session/{source_id}/fork", json_data={})
+            info = data["data"]
+            opencode_session_id = str(info["id"])
+            await self._write_ruleset(opencode_session_id, permissions)
+        except Exception as exc:
+            log.error("failed to fork session: %s", exc)
+            raise OpenCodeError(f"failed to fork session: {exc}") from exc
+
+        state = SessionState(
+            session_id=session_id,
+            cwd=cwd,
+            root_id=opencode_session_id,
+            agent=info.get("agent"),
+        )
+        self._adopt_model(state, info.get("model"))
+        self._register_session(state)
+        return opencode_session_id
+
+    async def restore_session(
+        self,
+        session_id: str,
+        cwd: str,
+        opencode_session_id: str,
+        *,
+        permissions: list[dict[str, str]],
+        model: str | None = None,
+        agent: str | None = None,
+        effort: str | None = None,
+        open_approvals: Collection[str] = (),
+        open_questions: Collection[str] = (),
+    ) -> None:
+        """Drive an existing OpenCode session. ``open_approvals`` and
+        ``open_questions`` are the ids of the cards the transcript still shows.
+        The caller records the restore note."""
+        await self.start()
+        try:
+            info = await self._session_info(opencode_session_id)
+        except Exception as exc:
+            raise OpenCodeError(
+                f"opencode session {opencode_session_id} not found on server: {exc}"
+            ) from exc
+
+        state = SessionState(
+            session_id=session_id,
+            cwd=cwd,
+            root_id=opencode_session_id,
+            agent=info.get("agent"),
+            forms_seeded=False,
+        )
+        self._adopt_model(state, info.get("model"))
+        self._register_session(state)
+        try:
+            await self._adopt_tree(state)
+            adopted_permissions, adopted_forms = await self._seed_asks(state)
+            # A migrated 1.x session has lost its rules.
+            await self._write_ruleset(opencode_session_id, permissions)
+        except Exception as exc:
+            self._forget_session(state)
+            raise OpenCodeError(f"failed to restore session: {exc}") from exc
+
+        await self._restore_selection(state, model, agent, effort)
+        for permission, item in adopted_permissions:
+            if permission.id not in open_approvals:
+                await self._emit_approval(state, permission, item)
+        for form in adopted_forms:
+            if form.id not in open_questions and (card := normalize.question(form)):
+                await self._emit(state, card)
+        # A listing that failed says nothing about which cards are stale.
+        for approval_id in open_approvals if state.forms_seeded else ():
+            if approval_id not in state.permissions:
+                await self._emit(state, normalize.approval_invalidated(approval_id))
+
+    async def _adopt_tree(self, state: SessionState) -> None:
+        """Find the session's subagents, and which of its tree is running."""
+        parents = [state.root_id]
+        while parents:
+            for child in await self._list("/api/session", {"parentID": parents.pop()}):
+                child_id = child.get("id")
+                if isinstance(child_id, str) and not state.owns(child_id):
+                    state.children.add(child_id)
+                    self._routes[child_id] = state.session_id
+                    parents.append(child_id)
+        mark = state.mark()
+        active = await self._require_client().get("/api/session/active")
+        state.seed_running(set(active.get("data") or {}), mark)
+
+    async def _restore_selection(
+        self,
+        state: SessionState,
+        model: str | None,
+        agent: str | None,
+        effort: str | None,
+    ) -> None:
+        """Apply what Waypoint recorded where the session differs; what it did
+        not record is left to the session."""
+        try:
+            if (model and model != state.model) or (effort and effort != state.effort):
+                await self._select_model(
+                    state,
+                    model or state.model or await self.default_model_id(),
+                    effort or state.effort,
+                )
+            if agent and agent != state.agent:
+                await self._select_agent(state, agent)
+        except Exception as exc:  # noqa: BLE001
+            # The session is usable; a model it cannot take must not lose it.
+            await self._emit(
+                state,
+                normalize.note(
+                    f"Could not restore the session's model or agent: {exc}",
+                    "session.selection.failed",
+                ),
+            )
+
+    async def terminate_session(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        state.model = model
+        # Flip `closing` before the mutations below so an in-flight event
+        # short-circuits and cannot re-populate state being torn down.
+        state.closing = True
+        self._forget_session(state)
+        kind, text, metadata = normalize.note(
+            "OpenCode session terminated", "session.terminated"
+        )
+        await self._emit_event(
+            session_id,
+            kind,
+            text,
+            {**metadata, "status": SessionStatus.EXITED},
+            SessionStatus.EXITED,
+        )
+        return True
+
+    # ── Turns ───────────────────────────────────────────────────────────
+
+    def _require_session(self, session_id: str) -> SessionState:
+        state = self._sessions.get(session_id)
+        if state is None:
+            raise OpenCodeError(f"session not found: {session_id}")
+        return state
+
+    async def send_input(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+        skills: list[str] | None = None,
+    ) -> None:
+        state = self._require_session(session_id)
+        body: dict[str, Any] = {"text": text}
+        if files := _files(attachments):
+            body["files"] = files
+        if skills:
+            body["skills"] = [{"id": skill} for skill in skills]
+        try:
+            # The reply only admits the prompt; results arrive as events.
+            await self._require_client().post(
+                f"/api/session/{state.root_id}/prompt",
+                json_data=body,
+                long_running=True,
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to send message: {exc}") from exc
+
+    async def execute_command(
+        self,
+        session_id: str,
+        command: str,
+        arguments: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
+        state = self._require_session(session_id)
+        body: dict[str, Any] = {"name": command, "text": arguments}
+        if files := _files(attachments):
+            body["files"] = files
+        try:
+            await self._require_client().post(
+                f"/api/session/{state.root_id}/command",
+                json_data=body,
+                long_running=True,
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to execute command: {exc}") from exc
+
+    async def compact_session(self, session_id: str) -> None:
+        state = self._require_session(session_id)
+        try:
+            await self._require_client().post(
+                f"/api/session/{state.root_id}/compact", json_data={}
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to compact session: {exc}") from exc
+
+    async def interrupt(self, session_id: str) -> None:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        client = self._require_client()
+        # Subagents run on their own: interrupting the root leaves them running.
+        subagents = state.running - {state.root_id}
+        if state.running or state.permissions or state.forms:
+            state.interrupted = True
+        for target in [*subagents, state.root_id]:
+            try:
+                await client.post(f"/api/session/{target}/interrupt")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("opencode interrupt failed: %s", exc)
+        await self._reconcile(state)
+
+    # ── Model, agent, permissions ───────────────────────────────────────
+
+    async def set_model(self, session_id: str, model: str | None) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return False
+        await self._select_model(
+            state, model or await self.default_model_id(), state.effort
+        )
         return True
 
     async def set_effort(self, session_id: str, effort: str | None) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        state.effort = effort
+        await self._select_model(
+            state, state.model or await self.default_model_id(), effort
+        )
         return True
 
-    async def set_agent(self, session_id: str, agent: str | None) -> bool:
+    async def _model_selection(
+        self, model: str, effort: str | None
+    ) -> dict[str, str] | None:
+        """The reference selecting ``model``, with ``effort`` when the model has
+        that variant: OpenCode fails the turn, not the selection, for one it
+        lacks."""
+        entry = await self._model(model) if effort else None
+        variant = effort if entry and effort in entry.variants else None
+        return model_ref(model, variant)
+
+    async def _select_model(
+        self, state: SessionState, model: str | None, effort: str | None
+    ) -> None:
+        ref = await self._model_selection(model, effort) if model else None
+        if ref is None:
+            raise OpenCodeError(f"unknown model: {model}")
+        try:
+            await self._require_client().post(
+                f"/api/session/{state.root_id}/model", json_data={"model": ref}
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to select the model: {exc}") from exc
+        self._adopt_model(state, ref)
+
+    async def set_agent(self, session_id: str, agent: str) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        state.agent = agent
+        await self._select_agent(state, agent)
         return True
+
+    async def _select_agent(self, state: SessionState, agent: str) -> None:
+        # Recorded first, so the event reads as Waypoint's own switch.
+        previous, state.agent = state.agent, agent
+        try:
+            await self._require_client().post(
+                f"/api/session/{state.root_id}/agent", json_data={"agent": agent}
+            )
+        except Exception as exc:
+            state.agent = previous
+            raise OpenCodeError(f"failed to select the agent: {exc}") from exc
+
+    def get_agent(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.agent if state else None
 
     async def set_pre_plan_mode(self, session_id: str, mode: str | None) -> bool:
         state = self._sessions.get(session_id)
@@ -1258,395 +1683,209 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         return state.pre_plan_mode if state is not None else None
 
+    async def _write_ruleset(
+        self, opencode_session_id: str, permissions: list[dict[str, str]]
+    ) -> None:
+        async with self._ruleset_lock:
+            await self._require_client().patch(
+                f"/api/session/{opencode_session_id}",
+                json_data={"permissions": permissions},
+            )
+
     async def set_session_permission(
-        self, session_id: str, permission: list[dict[str, str]]
+        self, session_id: str, permissions: list[dict[str, str]]
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        client = self._require_client()
         try:
-            await client.patch(
-                f"/session/{state.opencode_session_id}",
-                json_data={"permission": permission},
-            )
-            return True
-        except Exception:
+            await self._write_ruleset(state.root_id, permissions)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to set opencode permissions: %s", exc)
             return False
+        return True
 
-    async def compact_session(self, session_id: str) -> None:
-        state = self._sessions.get(session_id)
-        if state is None:
-            raise OpenCodeError(f"session not found: {session_id}")
-        model = self._split_model_ref(state.model)
-        if model is None:
-            # Sessions created without an explicit model still have a model
-            # attached server-side; re-fetch and use whatever it reports.
-            sess = await self.get_session(state.opencode_session_id)
-            if isinstance(sess, dict):
-                sess_model = sess.get("model")
-                if isinstance(sess_model, str):
-                    model = self._split_model_ref(sess_model)
-        if model is None:
-            raise OpenCodeError("unable to resolve model for compaction")
-        payload = {
-            "providerID": model["providerID"],
-            "modelID": model["modelID"],
-            "auto": False,
-        }
+    # ── Catalogs and threads ────────────────────────────────────────────
+
+    async def _settled_list(self, path: str) -> list[Any]:
+        """A catalog listing, once the server has loaded it."""
         client = self._require_client()
-        try:
-            # Summarization can take minutes on large transcripts; let
-            # SSH/TCP keepalive be the only liveness signal.
-            await client.post(
-                f"/session/{state.opencode_session_id}/summarize",
-                json_data=payload,
-                long_running=True,
-            )
-        except Exception as exc:
-            raise OpenCodeError(f"failed to compact session: {exc}") from exc
+        deadline = time.monotonic() + CATALOG_SETTLE_SECONDS
+        while True:
+            data = (await client.get(path, params=self._location())).get("data")
+            if data or time.monotonic() >= deadline:
+                return data or []
+            await asyncio.sleep(0.5)
 
-    async def list_sessions(self, directory: str | None = None) -> list[dict[str, Any]]:
-        if not self._started:
-            await self.start()
-        client = self._require_client()
-        params = {"directory": directory} if directory else None
-        try:
-            return await client.get("/session", params=params)
-        except Exception:
-            return []
-
-    async def get_session(self, session_id: str) -> dict[str, Any] | None:
-        client = self._require_client()
-        try:
-            return await client.get(f"/session/{session_id}")
-        except Exception:
-            return None
-
-    async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Fetch the full message history for a session (thread import).
-
-        Unlike ``get_session``/``list_sessions``, failures are raised rather
-        than swallowed: ``runtime.seed_thread_history``'s reader contract
-        expects a raise to signal "history unavailable" so it can degrade to
-        a plain resume with a system note instead of silently seeding an
-        empty transcript.
-        """
-        if not self._started:
-            await self.start()
-        client = self._require_client()
-        try:
-            result = await client.get(f"/session/{session_id}/message")
-        except Exception as exc:
-            raise OpenCodeError(f"failed to fetch session messages: {exc}") from exc
-        return result if isinstance(result, list) else []
-
-    async def delete_session(self, session_id: str) -> bool:
-        if not self._started:
-            await self.start()
-        client = self._require_client()
-        try:
-            result = await client.delete(f"/session/{session_id}")
-        except Exception:
-            return False
-        # `DELETE /session/{id}` returns a JSON boolean; a missing session is a
-        # 4xx (raised above) or a `false` body. Treat only an explicit `false`
-        # as "nothing deleted"; an empty 204 counts as success.
-        return result is not False
-
-    async def list_providers(self) -> dict[str, Any]:
-        if not self._started:
-            await self.start()
-        client = self._require_client()
-        try:
-            return await client.get("/provider")
-        except Exception:
-            return {"all": [], "default": {}, "connected": []}
-
-    async def _seed_pending_questions(self, state: OpenCodeSessionState) -> None:
-        """Adopt the server's open questions for a restored session.
-
-        Merged with any ``question.asked`` the SSE stream delivered meanwhile; a
-        failed listing leaves the session unseeded rather than wrongly empty.
-        """
-        state.questions_seed_attempted_at = time.monotonic()
-        try:
-            data = await self._require_client().get(
-                "/question", params={"directory": state.cwd}
-            )
-        except Exception as exc:
-            log.warning(
-                "failed to list opencode questions: %s",
-                exc,
-                extra={"session_id": state.session_id},
-            )
-            return
-        if not isinstance(data, list):
-            return
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            request_id = item.get("id")
-            if (
-                item.get("sessionID") == state.opencode_session_id
-                and isinstance(request_id, str)
-                and request_id
-                and request_id not in state.pending_question_ids
-            ):
-                state.pending_question_ids.append(request_id)
-        state.questions_seeded = True
-
-    def question_liveness(
-        self, session_id: str, request_ids: list[str]
-    ) -> dict[str, QuestionLiveness]:
-        state = self._sessions.get(session_id)
-        if state is None:
-            return dict.fromkeys(request_ids, QuestionLiveness.UNAVAILABLE)
-        if not state.questions_seeded:
-            # Questions the stream delivered since restore are known live; the
-            # rest wait for a successful listing.
-            self._schedule_question_seed(state)
-            return {
-                request_id: (
-                    QuestionLiveness.ACTIONABLE
-                    if request_id in state.pending_question_ids
-                    else QuestionLiveness.UNAVAILABLE
-                )
-                for request_id in request_ids
-            }
-        return {
-            request_id: (
-                QuestionLiveness.ACTIONABLE
-                if request_id in state.pending_question_ids
-                else QuestionLiveness.CLOSED
-            )
-            for request_id in request_ids
-        }
-
-    def _schedule_question_seed(self, state: OpenCodeSessionState) -> None:
-        if state.session_id in self._question_seed_tasks:
-            return
-        if (
-            time.monotonic() - state.questions_seed_attempted_at
-            < QUESTION_SEED_RETRY_SECONDS
-        ):
-            return
-
-        async def reseed() -> None:
-            await self._seed_pending_questions(state)
-            if state.questions_seeded and self._on_questions_changed is not None:
-                self._on_questions_changed(state.session_id)
-
-        task = asyncio.create_task(reseed())
-        self._question_seed_tasks[state.session_id] = task
-        task.add_done_callback(
-            lambda _: self._question_seed_tasks.pop(state.session_id, None)
+    async def list_models(self, *, include_deprecated: bool = False) -> list[Model]:
+        await self.start()
+        models = parse_models(
+            await self._settled_list("/api/model"),
+            include_deprecated=include_deprecated,
         )
+        if models:
+            self._models = models
+        return models
 
-    async def reject_question(
-        self, session_id: str, request_id: str
-    ) -> Literal["ok", "missing", "error"]:
-        """Decline one question request; ``missing`` means the server no
-        longer has it."""
-        state = self._sessions.get(session_id)
-        if state is None:
-            return "error"
-        client = self._require_client()
+    async def provider_names(self) -> dict[str, str]:
+        await self.start()
+        data = await self._require_client().get(
+            "/api/provider", params=self._location()
+        )
+        return {
+            str(item["id"]): str(item.get("name") or item["id"])
+            for item in data.get("data") or []
+            if isinstance(item, dict) and item.get("id")
+        }
+
+    async def default_model_id(self) -> str | None:
+        await self.start()
+        models = self._models or await self.list_models()
+        data = await self._require_client().get(
+            "/api/model/default", params=self._location()
+        )
+        entry = data.get("data")
+        if isinstance(entry, dict):
+            ref = {"providerID": entry.get("providerID"), "id": entry.get("id")}
+            if default := model_id(ref):
+                return default
+        return models[0].id if models else None
+
+    async def _model(self, model: str) -> Model | None:
+        entry = next((item for item in self._models if item.id == model), None)
+        if entry is not None:
+            return entry
+        failed_at = self._models_failed_at
+        if failed_at and time.monotonic() - failed_at < CATALOG_RETRY_SECONDS:
+            return None
         try:
-            await client.post(
-                f"/question/{request_id}/reject",
-                params={"directory": state.cwd},
+            await self.list_models()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("failed to list opencode models: %s", exc)
+        entry = next((item for item in self._models if item.id == model), None)
+        self._models_failed_at = None if entry else time.monotonic()
+        return entry
+
+    async def list_commands(self) -> list[dict[str, Any]]:
+        """The server's slash commands and skills, each with its ``source``."""
+        await self.start()
+        try:
+            commands = await self._settled_list("/api/command")
+            skills = await self._require_client().get(
+                "/api/skill", params=self._location()
             )
         except Exception as exc:
-            log.warning("opencode question reject failed: %s", exc)
-            return "missing" if http_status(exc) == 404 else "error"
-        self._forget_question(state, request_id)
-        return "ok"
-
-    @staticmethod
-    def _forget_question(state: OpenCodeSessionState, request_id: str) -> None:
-        state.pending_question_ids = [
-            item for item in state.pending_question_ids if item != request_id
+            raise OpenCodeError(f"failed to list commands: {exc}") from exc
+        # A skill is invoked by its id.
+        return [
+            {
+                "name": item.get(key),
+                "description": item.get("description"),
+                "source": source,
+            }
+            for source, key, items in (
+                ("command", "name", commands),
+                ("skill", "id", skills.get("data") or []),
+            )
+            for item in items
+            if isinstance(item, dict)
         ]
 
-    async def answer_question(
+    async def _list(
         self,
-        session_id: str,
-        request_id: str,
-        answers: list[list[str]],
-    ) -> bool:
-        state = self._sessions.get(session_id)
-        if state is None:
-            return False
+        path: str,
+        params: dict[str, str] | None = None,
+        limit: int | None = _LIST_LIMIT,
+    ) -> list[dict[str, Any]]:
+        """A paginated listing, up to ``limit`` entries."""
         client = self._require_client()
+        query = {"limit": str(_LIST_PAGE), **(params or {})}
+        items: list[dict[str, Any]] = []
+        while True:
+            page = await client.get(path, params=query)
+            data = page.get("data") or []
+            items.extend(data)
+            cursor = (page.get("cursor") or {}).get("next")
+            if not data or not cursor or (limit and len(items) >= limit):
+                return items[:limit]
+            query = {"limit": str(_LIST_PAGE), "cursor": cursor}
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """The server's sessions, newest first, without subagents."""
+        await self.start()
         try:
-            await client.post(
-                f"/question/{request_id}/reply",
-                json_data={"answers": answers},
-            )
-        except Exception:
-            return False
-        self._forget_question(state, request_id)
-        return True
+            sessions = await self._list("/api/session", {"order": "desc"})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to list opencode sessions: %s", exc)
+            return []
+        return [item for item in sessions if not item.get("parentID")]
 
-    def current_question_id(self, session_id: str) -> str | None:
-        state = self._sessions.get(session_id)
-        if state is None or not state.pending_question_ids:
+    async def get_session(self, opencode_session_id: str) -> dict[str, Any] | None:
+        await self.start()
+        try:
+            return await self._session_info(_path_id(opencode_session_id))
+        except Exception:  # noqa: BLE001
             return None
-        return state.pending_question_ids[0]
 
-    async def terminate_session(self, session_id: str) -> bool:
-        state = self._sessions.get(session_id)
-        if state is None:
+    async def get_session_messages(
+        self, opencode_session_id: str
+    ) -> list[dict[str, Any]]:
+        """The full message history of a session, oldest first.
+
+        Unlike ``get_session``/``list_sessions``, failures are raised:
+        ``runtime.seed_thread_history``'s reader contract expects a raise to
+        signal "history unavailable" so it can degrade to a plain resume with a
+        system note instead of seeding an empty transcript.
+        """
+        await self.start()
+        try:
+            return await self._list(
+                f"/api/session/{_path_id(opencode_session_id)}/message",
+                {"order": "asc"},
+                limit=None,
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to fetch session messages: {exc}") from exc
+
+    async def delete_session(self, opencode_session_id: str) -> bool:
+        await self.start()
+        try:
+            await self._require_client().delete(
+                f"/api/session/{_path_id(opencode_session_id)}"
+            )
+        except Exception:  # noqa: BLE001
             return False
-        # Flip `closing` before any of the mutations below so an in-flight
-        # `_dispatch_event` short-circuits and cannot re-populate state
-        # while we're tearing it down.
-        state.closing = True
-        self._sessions.pop(session_id, None)
-        self._remote_sessions.pop(state.opencode_session_id, None)
-        state.pending_permission_ids.clear()
-        state.pending_question_ids.clear()
-        state.context_usage_pending_tokens.clear()
-        state.context_window_lookup_pending.clear()
-        state.context_window_lookup_failed.clear()
-        for part_id, owner in list(self._part_sessions.items()):
-            if owner == session_id:
-                self._part_sessions.pop(part_id, None)
-        await self._emit_event(
-            session_id,
-            EventKind.SYSTEM_NOTE,
-            "OpenCode session terminated",
-            {"status": SessionStatus.EXITED},
-            SessionStatus.EXITED,
-        )
         return True
 
-    async def shutdown(self) -> None:
-        for task in list(self._question_seed_tasks.values()):
-            with suppress(Exception):
-                await cancel_and_wait(task)
-        self._question_seed_tasks.clear()
-        lookups = list(self._context_window_lookup_tasks)
-        for task in lookups:
-            task.cancel()
-        for task in lookups:
-            with suppress(Exception):
-                await cancel_and_wait(task)
-        self._context_window_lookup_tasks.clear()
-        if self._sse_task is not None:
-            await cancel_and_wait(self._sse_task)
-            self._sse_task = None
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
-        if self._server_process is not None:
-            self._terminate_server_process()
-            await self._await_server_process_exit()
-            self._server_process = None
-        await self._stop_draining_output()
-        for state in self._sessions.values():
-            state.context_usage_pending_tokens.clear()
-            state.context_window_lookup_pending.clear()
-            state.context_window_lookup_failed.clear()
-        self._sessions.clear()
-        self._remote_sessions.clear()
-        self._part_sessions.clear()
-        self._started = False
 
-    def has_pending_approval(self, session_id: str) -> bool:
-        state = self._sessions.get(session_id)
-        return bool(state and state.pending_permission_ids)
-
-    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
-        state = self._sessions.get(session_id)
-        return tuple(state.pending_permission_ids) if state else ()
+def _path_id(opencode_session_id: str) -> str:
+    """An id from outside the server, as one path segment."""
+    return urllib.parse.quote(opencode_session_id, safe="")
 
 
-def build_adapter(
-    emit_event: EmitEvent,
-    binary: str | None = None,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    workdir: str | None = None,
-) -> OpenCodeAdapter:
-    return OpenCodeAdapter(
-        emit_event,
-        binary=binary,
-        host=host,
-        port=port,
-        workdir=workdir,
-    )
+def _files(attachments: list[ResolvedAttachment] | None) -> list[dict[str, str]]:
+    # Inline data URLs rather than host paths: the server may run on a remote
+    # host that can't see the local attachments directory.
+    return [
+        {"uri": attachment.to_data_url(), "name": attachment.spec.filename}
+        for attachment in attachments or []
+    ]
 
 
-def _context_usage_snapshot_from_message(
-    _provider_id: str,
-    _model_id: str,
-    tokens: dict[str, Any],
-    context_window_tokens: int,
-) -> SessionContextUsage | None:
-    input_tokens = _non_negative_int(tokens.get("input"))
-    output_tokens = _non_negative_int(tokens.get("output"))
-    reasoning_tokens = _non_negative_int(tokens.get("reasoning"))
+def _reason(data: dict[str, Any]) -> str:
+    error = data.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("type") or "unknown error")
+    return str(error or "unknown error")
+
+
+def _token_counts(tokens: dict[str, Any]) -> dict[str, int]:
+    """Waypoint's token totals. OpenCode's ``output`` excludes reasoning, which
+    Waypoint's includes."""
     cache = tokens.get("cache")
     if not isinstance(cache, dict):
         cache = {}
-    cache_read_tokens = _non_negative_int(cache.get("read"))
-    cache_write_tokens = _non_negative_int(cache.get("write"))
-
-    used_tokens = sum(
-        value
-        for value in (
-            input_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-        )
-        if value is not None
-    )
-    if used_tokens <= 0:
-        return None
-
-    breakdown = {
-        key: value
-        for key, value in {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "reasoning_tokens": reasoning_tokens,
-            "cache_read_tokens": cache_read_tokens,
-            "cache_write_tokens": cache_write_tokens,
-        }.items()
-        if value is not None
-    }
-    return SessionContextUsage(
-        used_tokens=used_tokens,
-        context_window_tokens=context_window_tokens,
-        updated_at=datetime.now(UTC),
-        source="opencode",
-        breakdown=breakdown,
-    )
-
-
-def opencode_token_usage_record(
-    record_id: str,
-    tokens: dict[str, Any],
-    *,
-    model: str | None = None,
-    effort: str | None = None,
-) -> TokenUsageRecord | None:
-    """Per-turn ledger record from an OpenCode assistant token dict.
-
-    No ``display_total``: ``reasoning`` is a subset of ``output`` for some
-    providers, so a summed grand total isn't safe. ``model``/``effort`` are
-    the resolved values in effect for this turn (telemetry's "actual model at
-    turn time"); callers pass ``None`` when they can't be resolved, never a
-    guess.
-    """
-    if not record_id:
-        return None
-    cache = tokens.get("cache")
-    if not isinstance(cache, dict):
-        cache = {}
-    totals = {
+    counts = {
         key: value
         for key, value in {
             "input_tokens": _non_negative_int(tokens.get("input")),
@@ -1657,11 +1896,50 @@ def opencode_token_usage_record(
         }.items()
         if value is not None
     }
+    if "output_tokens" in counts:
+        counts["output_tokens"] += counts.get("reasoning_tokens", 0)
+    return counts
+
+
+def _context_usage_snapshot(
+    tokens: dict[str, Any], context_window_tokens: int
+) -> SessionContextUsage | None:
+    counts = _token_counts(tokens)
+    used = sum(
+        counts.get(key, 0)
+        for key in ("input_tokens", "cache_read_tokens", "cache_write_tokens")
+    )
+    if used <= 0:
+        return None
+    return SessionContextUsage(
+        used_tokens=used,
+        context_window_tokens=context_window_tokens,
+        updated_at=datetime.now(UTC),
+        source="opencode",
+        breakdown=counts,
+    )
+
+
+def opencode_token_usage_record(
+    record_id: str,
+    tokens: dict[str, Any],
+    *,
+    model: str | None = None,
+    effort: str | None = None,
+) -> TokenUsageRecord | None:
+    """Per-step ledger record from an OpenCode token dict.
+
+    ``model``/``effort`` are the resolved values in effect for the step
+    (telemetry's "actual model at turn time"); callers pass ``None`` when they
+    can't be resolved, never a guess.
+    """
+    if not record_id:
+        return None
     return TokenUsageRecord(
         record_id=record_id,
         source="opencode",
         observed_at=datetime.now(UTC),
-        totals=totals,
+        totals=_token_counts(tokens),
         display_total_tokens=None,
         model=model,
         effort=effort,
@@ -1675,15 +1953,4 @@ def _non_negative_int(value: Any) -> int | None:
         return max(0, value)
     if isinstance(value, float) and value.is_integer():
         return max(0, int(value))
-    return None
-
-
-def _positive_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float) and value.is_integer():
-        int_value = int(value)
-        return int_value if int_value > 0 else None
     return None

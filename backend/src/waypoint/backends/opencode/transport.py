@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException, status
+
 from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.opencode.adapter import OpenCodeError
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -46,9 +49,14 @@ class OpenCodeTransport(TransportAdapter):
         approval_id: str | None = None,
     ) -> bool:
         adapter = await self._plugin.session_adapter(self._runtime, session)
-        return await adapter.respond_to_permission(
-            session.id, decision, text, approval_id
-        )
+        try:
+            return await adapter.respond_to_permission(
+                session.id, decision, text, approval_id
+            )
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         # Pure introspection — must not provoke an SSH server start on a

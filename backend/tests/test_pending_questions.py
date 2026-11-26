@@ -449,7 +449,12 @@ async def test_opencode_cancel_rejects_then_records(tmp_path, monkeypatch) -> No
     updated = await runtime.cancel_question("s1", "q1")
 
     assert runtime.storage.open_question_tool_use_ids("s1") == []
-    assert updated.status is SessionStatus.RUNNING
+    # Declining ends the turn, and the turn's own events set the status.
+    assert updated.status is SessionStatus.WAITING_INPUT
+    await runtime._emit_adapter_event(
+        "s1", EventKind.SYSTEM_NOTE, "Turn interrupted", {}, SessionStatus.IDLE
+    )
+    assert runtime.get_session("s1").status is SessionStatus.IDLE
 
 
 async def test_cancel_settles_when_the_other_open_questions_are_closed(

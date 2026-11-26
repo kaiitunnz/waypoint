@@ -908,10 +908,10 @@ class DefaultLaunchContract:
 
     Agent plugins mix this in and override the methods their CLI supports.
     The defaults are the correct behaviour for an agent with no pane-wrapper
-    launch knobs and no resumable thread (the opencode case today): no extra
-    flags, no pregenerated id, verbatim resume args, no on-disk thread to
-    find. ``claude_code`` and ``codex`` override every method with their real
-    logic.
+    launch knobs and no resumable thread: no extra flags, no pregenerated id,
+    verbatim resume args, no on-disk thread to find. ``claude_code`` and
+    ``codex`` override every method with their real logic; ``opencode`` only
+    ``launch_flags``.
     """
 
     def launch_flags(

@@ -39,14 +39,14 @@ def model_id(ref: Any) -> str | None:
     return f"{provider_id}/{name}"
 
 
-def parse_models(data: Any) -> list[Model]:
+def parse_models(data: Any, *, include_deprecated: bool = False) -> list[Model]:
     """The chat models a session can select."""
     models: list[Model] = []
     for raw in data if isinstance(data, list) else ():
         if (
             not isinstance(raw, dict)
             or not raw.get("enabled", True)
-            or raw.get("status") == "deprecated"
+            or (raw.get("status") == "deprecated" and not include_deprecated)
             or raw.get("type") not in (None, "chat")
         ):
             continue

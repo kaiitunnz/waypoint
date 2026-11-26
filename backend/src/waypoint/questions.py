@@ -44,6 +44,9 @@ class QuestionDecline(StrEnum):
 
     # The provider took the decline and the asking turn continues.
     TURN_RESUMES = "turn_resumes"
+    # The provider took the decline and the asking turn ends; its events set
+    # the session's status.
+    TURN_ENDS = "turn_ends"
     # Nothing was sent: the agent is no longer waiting on this question.
     AGENT_IDLE = "agent_idle"
     # The provider no longer has the request.

@@ -8,7 +8,7 @@ from waypoint.backends.opencode.client import (
     http_status,
 )
 
-SUPPORTED_MAJOR_VERSIONS = frozenset({1})
+SUPPORTED_MAJOR_VERSIONS = frozenset({2})
 
 # Statuses that mean the server is up but does not serve this API.
 _REFUSALS = frozenset({401, 403, 404})
@@ -29,9 +29,13 @@ async def probe_server(client: OpenCodeHttpClient) -> ServerInfo:
     """Identify the server, raising ``IncompatibleServerError`` if it is not one
     Waypoint can drive. Any other error means it is not answering yet."""
     info = await _identify(client)
-    if info.major not in SUPPORTED_MAJOR_VERSIONS:
-        raise IncompatibleServerError(f"OpenCode {info.version} is not supported")
-    return info
+    if info.major in SUPPORTED_MAJOR_VERSIONS:
+        return info
+    if info.major == 1:
+        raise IncompatibleServerError(
+            "OpenCode 1.x is not supported; upgrade OpenCode to 2.x"
+        )
+    raise IncompatibleServerError(f"OpenCode {info.version} is not supported")
 
 
 async def _identify(client: OpenCodeHttpClient) -> ServerInfo:

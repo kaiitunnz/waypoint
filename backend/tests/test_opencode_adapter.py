@@ -1,945 +1,1087 @@
+"""The OpenCode adapter against a 2.x server."""
+
 import asyncio
 import signal
-import time
-from datetime import UTC, datetime
-from types import SimpleNamespace
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from waypoint.backends.approvals import approval_request_id
+from opencode_stubs import (
+    WORKDIR,
+    Emitted,
+    FakeOpenCode,
+    driving,
+    event,
+    model_entry,
+)
+from waypoint.attachments import ResolvedAttachment
+from waypoint.backends.opencode import adapter as adapter_module
 from waypoint.backends.opencode.adapter import (
+    MigrationGate,
     OpenCodeAdapter,
     OpenCodeError,
-    OpenCodeSessionState,
-    _context_usage_snapshot_from_message,
 )
-from waypoint.backends.opencode.client import OpenCodeHttpError
-from waypoint.backends.opencode.transport import OpenCodeTransport
+from waypoint.backends.opencode.client import LocalOpenCodeClient
+from waypoint.backends.opencode.server_auth import ServerAuth
+from waypoint.backends.opencode.sessions import SessionState
 from waypoint.questions import QuestionLiveness
-from waypoint.schemas import EventRecord
-
-
-def _build_adapter() -> OpenCodeAdapter:
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    return OpenCodeAdapter(emit_event=_emit)
-
-
-def test_split_model_ref_handles_missing_or_malformed() -> None:
-    adapter = _build_adapter()
-
-    assert adapter._split_model_ref("opencode/minimax-m2.5-free") == {
-        "providerID": "opencode",
-        "modelID": "minimax-m2.5-free",
-    }
-    # A bare model id (no provider/) cannot be sent as the OpenCode model ref.
-    assert adapter._split_model_ref("flat") is None
-    assert adapter._split_model_ref("/no-provider") is None
-    assert adapter._split_model_ref("no-model/") is None
-    # No hardcoded fallback in the adapter — empty input returns None so the
-    # prompt-without-model path lets OpenCode pick its own default.
-    assert adapter._split_model_ref(None) is None
-    assert adapter._split_model_ref("") is None
-
-
-@pytest.mark.asyncio
-async def test_compact_session_refetches_model_when_unpinned() -> None:
-    adapter = _build_adapter()
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-        model=None,
-    )
-    adapter._register_session(state)
-
-    posted: dict[str, object] = {}
-
-    class _FakeClient:
-        async def get(self, path, params=None):
-            assert path == "/session/ses_1"
-            return {"model": "opencode/auto-default"}
-
-        async def post(self, path, json_data=None, params=None, long_running=False):
-            posted["path"] = path
-            posted["json_data"] = json_data
-            posted["long_running"] = long_running
-            return {}
-
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-
-    await adapter.compact_session("local-1")
-
-    assert posted["path"] == "/session/ses_1/summarize"
-    assert posted["json_data"] == {
-        "providerID": "opencode",
-        "modelID": "auto-default",
-        "auto": False,
-    }
-
-
-def test_map_decision_to_reply_accepts_native_replies() -> None:
-    adapter = _build_adapter()
-
-    assert adapter._map_decision_to_reply("once") == "once"
-    assert adapter._map_decision_to_reply("always") == "always"
-    assert adapter._map_decision_to_reply("reject") == "reject"
-
-
-def test_map_decision_to_reply_translates_aliases() -> None:
-    adapter = _build_adapter()
-
-    assert adapter._map_decision_to_reply("approve") == "once"
-    assert adapter._map_decision_to_reply("accept") == "once"
-    assert adapter._map_decision_to_reply("acceptForSession") == "always"
-    assert adapter._map_decision_to_reply("decline") == "reject"
-    assert adapter._map_decision_to_reply("deny") == "reject"
-
-
-def test_map_decision_to_reply_rejects_unknown() -> None:
-    adapter = _build_adapter()
-
-    with pytest.raises(
-        OpenCodeError, match="unsupported permission decision: surrender"
-    ):
-        adapter._map_decision_to_reply("surrender")
-
-
-def test_extract_session_id_consults_known_fields_only() -> None:
-    adapter = _build_adapter()
-
-    assert adapter._extract_session_id({"sessionID": "ses_1"}) == "ses_1"
-    assert adapter._extract_session_id({"info": {"sessionID": "ses_2"}}) == "ses_2"
-    assert adapter._extract_session_id({"part": {"sessionID": "ses_3"}}) == "ses_3"
-    assert adapter._extract_session_id({"unrelated": True}) is None
-    # An unrelated nested sessionID (e.g. inside tool metadata) must not
-    # mis-route the event.
-    assert adapter._extract_session_id({"metadata": {"sessionID": "ses_other"}}) is None
-
-
-@pytest.mark.asyncio
-async def test_list_commands_reads_server_command_registry() -> None:
-    adapter = _build_adapter()
-    adapter._started = True
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    adapter._register_session(state)
-
-    class _FakeClient:
-        async def get(self, path, params=None):
-            assert path == "/command"
-            assert params == {"directory": "/tmp"}
-            return [{"name": "review", "description": "Review changes"}]
-
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-
-    assert await adapter.list_commands("local-1") == [
-        {"name": "review", "description": "Review changes"}
-    ]
-
-
-@pytest.mark.asyncio
-async def test_execute_command_uses_native_session_command_endpoint() -> None:
-    adapter = _build_adapter()
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-        model="opencode/test-model",
-        agent="build",
-        effort="high",
-    )
-    adapter._register_session(state)
-    posted: dict[str, object] = {}
-
-    class _FakeClient:
-        async def post(self, path, json_data=None, params=None, long_running=False):
-            posted["path"] = path
-            posted["json_data"] = json_data
-            posted["long_running"] = long_running
-            return {}
-
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-
-    await adapter.execute_command("local-1", "review", "the auth changes")
-
-    assert posted == {
-        "path": "/session/ses_1/command",
-        "json_data": {
-            "command": "review",
-            "arguments": "the auth changes",
-            "model": "opencode/test-model",
-            "agent": "build",
-            "variant": "high",
-        },
-        "long_running": True,
-    }
-
-
-def test_tag_part_type_propagates_reasoning_to_subsequent_deltas() -> None:
-    adapter = _build_adapter()
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-
-    # *-start arrives first carrying the part type.
-    adapter._tag_part_type(
-        state,
-        "message.part.updated",
-        {"sessionID": "ses_1", "part": {"id": "p_reason", "type": "reasoning"}},
-    )
-    adapter._tag_part_type(
-        state,
-        "message.part.updated",
-        {"sessionID": "ses_1", "part": {"id": "p_text", "type": "text"}},
-    )
-
-    assert state.part_types == {"p_reason": "reasoning", "p_text": "text"}
-
-    reasoning_delta = adapter._tag_part_type(
-        state,
-        "message.part.delta",
-        {"partID": "p_reason", "field": "text", "delta": "thinking…"},
-    )
-    text_delta = adapter._tag_part_type(
-        state,
-        "message.part.delta",
-        {"partID": "p_text", "field": "text", "delta": "answer"},
-    )
-    untracked_delta = adapter._tag_part_type(
-        state,
-        "message.part.delta",
-        {"partID": "p_unknown", "field": "text", "delta": "?"},
-    )
-
-    assert reasoning_delta["_waypoint_part_type"] == "reasoning"
-    assert text_delta["_waypoint_part_type"] == "text"
-    assert "_waypoint_part_type" not in untracked_delta
-
-
-def test_resolve_state_for_part_delta_without_session_id() -> None:
-    adapter = _build_adapter()
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    adapter._register_session(state)
-    adapter._tag_part_type(
-        state,
-        "message.part.updated",
-        {"sessionID": "ses_1", "part": {"id": "p_text", "type": "text"}},
-    )
-
-    resolved = adapter._resolve_state_for_event(
-        "message.part.delta",
-        {"partID": "p_text", "field": "text", "delta": "answer"},
-    )
-
-    assert resolved is state
-
-
-@pytest.mark.asyncio
-async def test_dispatch_event_short_circuits_on_closing_state() -> None:
-    adapter = _build_adapter()
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    state.closing = True
-    adapter._register_session(state)
-
-    emitted: list[tuple[str, object]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        emitted.append(("emit", args))
-
-    adapter._emit_event = _emit
-
-    await adapter._dispatch_event(
-        {
-            "type": "message.part.updated",
-            "properties": {
-                "sessionID": "ses_1",
-                "part": {"id": "p1", "type": "text"},
-            },
-        }
-    )
-
-    assert emitted == []
-    # _tag_part_type should not have populated _part_sessions for a closing state
-    assert adapter._part_sessions == {}
-
-
-@pytest.mark.asyncio
-async def test_live_approval_ids_match_the_emitted_request() -> None:
-    emitted: list[tuple[Any, ...]] = []
-
-    async def _emit(*args: Any) -> None:
-        emitted.append(args)
-
-    adapter = OpenCodeAdapter(emit_event=_emit)
-    adapter._register_session(
-        OpenCodeSessionState(
-            session_id="local-1", cwd="/tmp", opencode_session_id="ses_1"
-        )
-    )
-
-    await adapter._dispatch_event(
-        {
-            "type": "permission.asked",
-            "properties": {
-                "id": "per_1",
-                "sessionID": "ses_1",
-                "permission": "bash",
-                "patterns": ["ls"],
-                "metadata": {"command": "ls"},
-            },
-        }
-    )
-
-    [(session_id, kind, text, metadata, _)] = emitted
-    request = EventRecord(
-        session_id=session_id,
-        ts=datetime.now(UTC),
-        kind=kind,
-        text=text,
-        metadata=metadata,
-        sequence=1,
-    )
-    plugin = SimpleNamespace(existing_session_adapter=lambda *_: adapter)
-    transport = OpenCodeTransport(None, plugin)  # type: ignore[arg-type]
-    session: Any = SimpleNamespace(
-        id="local-1", launch_target_id=None, cwd="/tmp", args=[]
-    )
-
-    # The id lives only in ``approval`` / ``interaction``, not at the top level.
-    assert "approval_id" not in metadata
-    assert approval_request_id(request) == "per_1"
-    assert transport.pending_approval_ids(session) == ("per_1",)
-    assert transport.has_pending_approval(session)
-
-    await adapter._dispatch_event(
-        {
-            "type": "permission.replied",
-            "properties": {"sessionID": "ses_1", "requestID": "per_1", "reply": "once"},
-        }
-    )
-    assert transport.pending_approval_ids(session) == ()
-
-
-@pytest.mark.asyncio
-async def test_listen_events_flushes_on_blank_sse_separator() -> None:
-    adapter = _build_adapter()
-    seen: list[dict[str, object]] = []
-
-    class _FakeClient:
-        async def stream_events(self, path: str):
-            assert path == "/event"
-            yield 'data: {"type":"server.connected","properties":{"sessionID":"ses_1"}}\n'
-            yield "\n"
-            await asyncio.sleep(1)
-
-    async def _dispatch(event: dict[str, object]) -> None:
-        seen.append(event)
-        raise asyncio.CancelledError
-
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-    adapter._dispatch_event = _dispatch  # type: ignore[method-assign]
-
-    await adapter._listen_events()
-
-    assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]
-
-
-@pytest.mark.asyncio
-async def test_listen_events_treats_mid_session_eof_as_server_death() -> None:
-    # Once we've delivered any event, a clean EOF must promote to
-    # `_on_server_died` instead of silently retrying — OpenCode has no
-    # SSE resume so any reconnect would skip events.
-    adapter = _build_adapter()
-    seen: list[dict[str, object]] = []
-    died = asyncio.Event()
-
-    class _FakeClient:
-        async def stream_events(self, path: str):
-            yield 'data: {"type":"server.connected","properties":{"sessionID":"ses_1"}}\n'
-            yield "\n"
-            return
-
-    async def _dispatch(event: dict[str, object]) -> None:
-        seen.append(event)
-
-    async def _on_died() -> None:
-        died.set()
-
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-    adapter._dispatch_event = _dispatch  # type: ignore[method-assign]
-    adapter._on_server_died = _on_died  # type: ignore[method-assign]
-
-    await asyncio.wait_for(adapter._listen_events(), timeout=2)
-
-    assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]
-    assert died.is_set()
-
-
-def test_context_usage_snapshot_aggregates_token_categories() -> None:
-    snapshot = _context_usage_snapshot_from_message(
-        "opencode",
-        "opencode/minimax-m2.5-free",
-        {
-            "input": 120,
-            "output": 30,
-            "reasoning": 20,
-            "cache": {"read": 15, "write": 5},
-        },
-        4096,
-    )
-
-    assert snapshot is not None
-    assert snapshot.used_tokens == 140
-    assert snapshot.context_window_tokens == 4096
-    assert snapshot.source == "opencode"
-    assert snapshot.breakdown == {
-        "input_tokens": 120,
-        "output_tokens": 30,
-        "reasoning_tokens": 20,
-        "cache_read_tokens": 15,
-        "cache_write_tokens": 5,
-    }
-
-
-@pytest.mark.asyncio
-async def test_context_usage_snapshot_deduplicates_cached_updates() -> None:
-    calls: list[tuple[str, dict[str, object], bool]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    async def on_session_update(
-        session_id: str, updates: dict[str, object], publish: bool
-    ) -> object:
-        calls.append((session_id, updates, publish))
-        return None
-
-    adapter = OpenCodeAdapter(
-        emit_event=_emit,
-        on_session_update=on_session_update,
-    )
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    state.context_window_by_model[("opencode", "opencode/minimax-m2.5-free")] = 4096
-
-    properties = {
-        "sessionID": "ses_1",
-        "info": {
-            "role": "assistant",
-            "providerID": "opencode",
-            "modelID": "opencode/minimax-m2.5-free",
-            "tokens": {
-                "input": 120,
-                "output": 30,
-                "reasoning": 20,
-                "cache": {"read": 15, "write": 5},
-            },
-        },
-    }
-
-    await adapter._maybe_update_context_usage(state, properties)
-    await adapter._maybe_update_context_usage(state, properties)
-
-    assert len(calls) == 1
-    assert calls[0][0] == "local-1"
-    assert calls[0][2] is False
-    context_usage = cast(dict[str, Any], calls[0][1]["context_usage"])
-    assert context_usage["used_tokens"] == 140
-    assert context_usage["context_window_tokens"] == 4096
-    assert context_usage["source"] == "opencode"
-    assert context_usage["breakdown"] == {
-        "input_tokens": 120,
-        "output_tokens": 30,
-        "reasoning_tokens": 20,
-        "cache_read_tokens": 15,
-        "cache_write_tokens": 5,
-    }
-
-
-@pytest.mark.asyncio
-async def test_token_usage_record_keys_on_session_and_message_id() -> None:
-    records: list[tuple[str, Any, bool]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    async def on_token_usage(session_id: str, record: Any, publish: bool) -> object:
-        records.append((session_id, record, publish))
-        return None
-
-    adapter = OpenCodeAdapter(emit_event=_emit, on_token_usage=on_token_usage)
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    properties = {
-        "sessionID": "ses_1",
-        "info": {
-            "id": "msg_9",
-            "role": "assistant",
-            "providerID": "opencode",
-            "modelID": "opencode/minimax-m2.5-free",
-            "tokens": {
-                "input": 120,
-                "output": 30,
-                "reasoning": 20,
-                "cache": {"read": 15, "write": 5},
-            },
-        },
-    }
-
-    # Published even though the context window is unknown (the ledger does not
-    # need it) — decoupled from the context-usage snapshot path.
-    await adapter._maybe_update_context_usage(state, properties)
-
-    assert len(records) == 1
-    session_id, record, _ = records[0]
-    assert session_id == "local-1"
-    assert record.record_id == "ses_1:msg_9"
-    # reasoning is a subset of output for some providers, so no synthesized total.
-    assert record.display_total_tokens is None
-    assert record.totals == {
-        "input_tokens": 120,
-        "output_tokens": 30,
-        "reasoning_tokens": 20,
-        "cache_read_tokens": 15,
-        "cache_write_tokens": 5,
-    }
-
-
-@pytest.mark.asyncio
-async def test_token_usage_record_threads_resolved_model_and_effort() -> None:
-    records: list[tuple[str, Any, bool]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    async def on_token_usage(session_id: str, record: Any, publish: bool) -> object:
-        records.append((session_id, record, publish))
-        return None
-
-    adapter = OpenCodeAdapter(emit_event=_emit, on_token_usage=on_token_usage)
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-        effort="high",
-    )
-    properties = {
-        "sessionID": "ses_1",
-        "info": {
-            "id": "msg_9",
-            "role": "assistant",
-            "providerID": "opencode",
-            "modelID": "minimax-m2.5-free",
-            "tokens": {"input": 120, "output": 30},
-        },
-    }
-
-    await adapter._maybe_update_context_usage(state, properties)
-
-    assert len(records) == 1
-    record = records[0][1]
-    # The ledger's model is the exact per-message resolved value, not the
-    # session's sticky selection — assembled as "provider/model" to match the
-    # session-level ``state.model`` convention.
-    assert record.model == "opencode/minimax-m2.5-free"
-    assert record.effort == "high"
-
-
-@pytest.mark.asyncio
-async def test_context_usage_background_lookup_publishes_once_ready() -> None:
-    calls: list[tuple[str, dict[str, object], bool]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    async def on_session_update(
-        session_id: str, updates: dict[str, object], publish: bool
-    ) -> object:
-        calls.append((session_id, updates, publish))
-        return None
-
-    class _FakeClient:
-        async def get(self, path, params=None):
-            assert path == "/config/providers"
-            return {
-                "providers": [
-                    {
-                        "id": "opencode",
-                        "models": {
-                            "opencode/minimax-m2.5-free": {"limit": {"context": 4096}}
-                        },
-                    }
-                ]
-            }
-
-    adapter = OpenCodeAdapter(
-        emit_event=_emit,
-        on_session_update=on_session_update,
-    )
-    adapter._client = _FakeClient()  # type: ignore[assignment]
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    adapter._register_session(state)
-    properties = {
-        "sessionID": "ses_1",
-        "info": {
-            "role": "assistant",
-            "providerID": "opencode",
-            "modelID": "opencode/minimax-m2.5-free",
-            "tokens": {
-                "input": 120,
-                "output": 30,
-                "reasoning": 20,
-                "cache": {"read": 15, "write": 5},
-            },
-        },
-    }
-
-    await adapter._maybe_update_context_usage(state, properties)
-
-    for _ in range(100):
-        if calls:
-            break
-        await asyncio.sleep(0.01)
-
-    assert len(calls) == 1
-    assert calls[0][0] == "local-1"
-    assert calls[0][2] is True
-    context_usage = cast(dict[str, Any], calls[0][1]["context_usage"])
-    assert context_usage["used_tokens"] == 140
-    assert context_usage["context_window_tokens"] == 4096
-    assert context_usage["source"] == "opencode"
-    assert context_usage["breakdown"] == {
-        "input_tokens": 120,
-        "output_tokens": 30,
-        "reasoning_tokens": 20,
-        "cache_read_tokens": 15,
-        "cache_write_tokens": 5,
-    }
-    assert (
-        state.context_window_by_model[("opencode", "opencode/minimax-m2.5-free")]
-        == 4096
-    )
-    assert (
-        "opencode",
-        "opencode/minimax-m2.5-free",
-    ) not in state.context_usage_pending_tokens
-    assert state.context_window_lookup_pending == set()
-    assert not adapter._context_window_lookup_tasks
-
-
-@pytest.mark.asyncio
-async def test_context_window_lookup_failure_retries_after_ttl() -> None:
-    calls: list[tuple[str, dict[str, object], bool]] = []
-
-    async def _emit(*args: object, **kwargs: object) -> None:
-        return None
-
-    async def on_session_update(
-        session_id: str, updates: dict[str, object], publish: bool
-    ) -> object:
-        calls.append((session_id, updates, publish))
-        return None
-
-    class _FakeClient:
-        def __init__(self) -> None:
-            self.fail_first = True
-
-        async def get(self, path, params=None):
-            assert path == "/config/providers"
-            if self.fail_first:
-                self.fail_first = False
-                raise RuntimeError("temporary outage")
-            return {
-                "providers": [
-                    {
-                        "id": "opencode",
-                        "models": {
-                            "opencode/minimax-m2.5-free": {"limit": {"context": 4096}}
-                        },
-                    }
-                ]
-            }
-
-    adapter = OpenCodeAdapter(
-        emit_event=_emit,
-        on_session_update=on_session_update,
-    )
-    client = _FakeClient()
-    adapter._client = client  # type: ignore[assignment]
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/tmp",
-        opencode_session_id="ses_1",
-    )
-    adapter._register_session(state)
-    key = ("opencode", "opencode/minimax-m2.5-free")
-    properties = {
-        "sessionID": "ses_1",
-        "info": {
-            "role": "assistant",
-            "providerID": key[0],
-            "modelID": key[1],
-            "tokens": {
-                "input": 120,
-                "output": 30,
-                "reasoning": 20,
-                "cache": {"read": 15, "write": 5},
-            },
-        },
-    }
-
-    await adapter._maybe_update_context_usage(state, properties)
-    for _ in range(100):
-        if (
-            key in state.context_window_lookup_failed
-            and not state.context_window_lookup_pending
-        ):
-            break
-        await asyncio.sleep(0.01)
-    assert key in state.context_window_lookup_failed
-    assert not calls
-
-    state.context_window_lookup_failed[key] = time.monotonic() - 2 * 60.0
-    await adapter._maybe_update_context_usage(state, properties)
-
-    for _ in range(100):
-        if calls:
-            break
-        await asyncio.sleep(0.01)
-
-    assert len(calls) == 1
-    assert calls[0][2] is True
-    assert state.context_window_by_model[key] == 4096
-
-
-@pytest.mark.asyncio
-async def test_delete_session_deletes_via_server_endpoint() -> None:
-    adapter = _build_adapter()
-    adapter._started = True
-
-    class _FakeClient:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        async def delete(self, path: str, params: Any = None) -> Any:
-            self.calls.append(path)
-            return True
-
-    client = _FakeClient()
-    adapter._client = cast(Any, client)
-
-    assert await adapter.delete_session("ses_1") is True
-    assert client.calls == ["/session/ses_1"]
-
-
-@pytest.mark.asyncio
-async def test_delete_session_treats_false_body_as_failure() -> None:
-    adapter = _build_adapter()
-    adapter._started = True
-
-    class _FakeClient:
-        async def delete(self, path: str, params: Any = None) -> Any:
-            return False
-
-    adapter._client = cast(Any, _FakeClient())
-    assert await adapter.delete_session("ses_missing") is False
-
-
-@pytest.mark.asyncio
-async def test_delete_session_treats_empty_204_as_success() -> None:
-    adapter = _build_adapter()
-    adapter._started = True
-
-    class _FakeClient:
-        async def delete(self, path: str, params: Any = None) -> Any:
-            return {}
-
-    adapter._client = cast(Any, _FakeClient())
-    assert await adapter.delete_session("ses_1") is True
-
-
-@pytest.mark.asyncio
-async def test_delete_session_swallows_http_error_as_failure() -> None:
-    adapter = _build_adapter()
-    adapter._started = True
-
-    class _FakeClient:
-        async def delete(self, path: str, params: Any = None) -> Any:
-            raise RuntimeError("HTTP 404")
-
-    adapter._client = cast(Any, _FakeClient())
-    assert await adapter.delete_session("ses_404") is False
-
-
-class _QuestionClient:
-    def __init__(self, listing: Any = None, reject_error: Exception | None = None):
-        self.listing = listing
-        self.reject_error = reject_error
-        self.calls: list[tuple[str, str, Any]] = []
-
-    async def get(self, path, params=None):
-        self.calls.append(("GET", path, params))
-        if isinstance(self.listing, Exception):
-            raise self.listing
-        return self.listing
-
-    async def post(self, path, json_data=None, params=None, long_running=False):
-        self.calls.append(("POST", path, params))
-        if self.reject_error is not None:
-            raise self.reject_error
-        return True
-
-
-def _question_state(adapter: OpenCodeAdapter, seeded: bool = True) -> Any:
-    state = OpenCodeSessionState(
-        session_id="local-1",
-        cwd="/work",
-        opencode_session_id="ses_1",
-        questions_seeded=seeded,
-    )
+from waypoint.schemas import (
+    AttachmentSpec,
+    EventKind,
+    SessionStatus,
+    TokenUsageRecord,
+)
+
+ASK = [{"action": "*", "resource": "*", "effect": "ask"}]
+TOKENS = {
+    "input": 100,
+    "output": 20,
+    "reasoning": 5,
+    "cache": {"read": 40, "write": 3},
+}
+
+
+def _fake() -> FakeOpenCode:
+    fake = FakeOpenCode()
+    fake.add_session("ses_root", permissions=list(ASK))
+    return fake
+
+
+def _register(adapter: OpenCodeAdapter, **fields: Any) -> SessionState:
+    state = SessionState("local", WORKDIR, "ses_root", **fields)
     adapter._register_session(state)
     return state
 
 
-@pytest.mark.asyncio
-async def test_seeding_adopts_this_sessions_server_questions() -> None:
-    adapter = _build_adapter()
-    state = _question_state(adapter, seeded=False)
-    state.pending_question_ids.append("que_live_sse")
-    client = _QuestionClient(
-        [
-            {"id": "que_a", "sessionID": "ses_1"},
-            {"id": "que_other", "sessionID": "ses_2"},
-            {"id": "que_live_sse", "sessionID": "ses_1"},
-        ]
+async def _deliver(adapter: OpenCodeAdapter, *events: dict[str, Any]) -> None:
+    for item in events:
+        await adapter._handle_event(item)
+
+
+def _shell_call(session_id: str = "ses_root", call_id: str = "call_1") -> list[Any]:
+    return [
+        event("session.tool.input.started", session_id, id=call_id, name="shell"),
+        event("session.tool.called", session_id, id=call_id, input={"command": "ls"}),
+    ]
+
+
+def _permission(
+    request_id: str = "per_1",
+    session_id: str = "ses_root",
+    *,
+    action: str = "shell",
+    save: tuple[str, ...] = ("ls *",),
+    call_id: str = "call_1",
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "id": request_id,
+        "sessionID": session_id,
+        "action": action,
+        "resources": ["ls"],
+        "save": list(save),
+        "source": {"type": "tool", "messageID": "msg_1", "id": call_id},
+        **extra,
+    }
+
+
+def _asked(fake: FakeOpenCode, request: dict[str, Any]) -> dict[str, Any]:
+    fake.permissions.append(request)
+    return {"type": "permission.asked", "data": request}
+
+
+def _form(form_id: str = "frm_1", session_id: str = "ses_root") -> dict[str, Any]:
+    return {
+        "id": form_id,
+        "sessionID": session_id,
+        "title": "Questions",
+        "fields": [
+            {
+                "key": "q0",
+                "type": "string",
+                "description": "Pick one",
+                "options": [{"value": "red", "label": "Red"}],
+            }
+        ],
+    }
+
+
+def _form_created(fake: FakeOpenCode, form: dict[str, Any]) -> dict[str, Any]:
+    fake.forms.append(form)
+    return {"type": "form.created", "data": {"form": form}}
+
+
+def _attachment(tmp_path: Path) -> ResolvedAttachment:
+    path = tmp_path / "note.txt"
+    path.write_text("teal")
+    spec = AttachmentSpec(
+        id="att_1", filename="note.txt", mime="text/plain", size=4, kind="file"
     )
-    adapter._client = cast(Any, client)
-
-    assert adapter.question_liveness("local-1", ["que_a"]) == {
-        "que_a": QuestionLiveness.UNAVAILABLE
-    }
-    await adapter._seed_pending_questions(state)
-
-    assert state.pending_question_ids == ["que_live_sse", "que_a"]
-    assert client.calls == [("GET", "/question", {"directory": "/work"})]
-    assert adapter.question_liveness("local-1", ["que_a", "que_gone"]) == {
-        "que_a": QuestionLiveness.ACTIONABLE,
-        "que_gone": QuestionLiveness.CLOSED,
-    }
+    return ResolvedAttachment(spec=spec, path=path)
 
 
-@pytest.mark.parametrize("listing", [RuntimeError("down"), {"error": "x"}])
-@pytest.mark.asyncio
-async def test_failed_seeding_never_closes_questions(listing: Any) -> None:
-    adapter = _build_adapter()
-    state = _question_state(adapter, seeded=False)
-    state.pending_question_ids.append("que_sse")
-    adapter._client = cast(Any, _QuestionClient(listing))
-
-    await adapter._seed_pending_questions(state)
-
-    assert not state.questions_seeded
-    # The stream's own questions stay answerable; the rest wait for a listing.
-    assert adapter.question_liveness("local-1", ["que_sse", "que_a"]) == {
-        "que_sse": QuestionLiveness.ACTIONABLE,
-        "que_a": QuestionLiveness.UNAVAILABLE,
-    }
+# ── Sessions and turns ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_failed_seeding_is_retried_and_reported(monkeypatch) -> None:
-    changed: list[str] = []
-    adapter = OpenCodeAdapter(emit_event=_build_adapter()._emit_event)
-    adapter._on_questions_changed = changed.append
-    state = _question_state(adapter, seeded=False)
-    client = _QuestionClient(RuntimeError("down"))
-    adapter._client = cast(Any, client)
-    await adapter._seed_pending_questions(state)
+async def test_a_new_session_takes_its_location_rules_agent_and_model() -> None:
+    fake = FakeOpenCode()
+    async with driving(fake) as (adapter, emitted):
+        remote = await adapter.start_session(
+            "local",
+            WORKDIR,
+            title="T",
+            model="opencode/big-pickle",
+            effort="high",
+            agent="plan",
+            permissions=ASK,
+        )
 
-    # Within the retry gap nothing is re-listed.
-    adapter.question_liveness("local-1", ["que_a"])
-    assert adapter._question_seed_tasks == {}
-
-    client.listing = [{"id": "que_a", "sessionID": "ses_1"}]
-    monkeypatch.setattr(
-        "waypoint.backends.opencode.adapter.QUESTION_SEED_RETRY_SECONDS", 0.0
-    )
-    adapter.question_liveness("local-1", ["que_a"])
-    await asyncio.gather(*adapter._question_seed_tasks.values())
-
-    assert state.questions_seeded
-    assert changed == ["local-1"]
-    assert adapter.question_liveness("local-1", ["que_a"]) == {
-        "que_a": QuestionLiveness.ACTIONABLE
-    }
+    assert fake.calls("POST", "/api/session") == [
+        {
+            "location": {"directory": WORKDIR},
+            "title": "T",
+            "agent": "plan",
+            "permissions": ASK,
+            "model": {"providerID": "opencode", "id": "big-pickle", "variant": "high"},
+        }
+    ]
+    assert emitted.texts() == [f"OpenCode session started ({remote})"]
+    assert emitted.statuses == [SessionStatus.IDLE]
 
 
 @pytest.mark.asyncio
-async def test_reject_question_declines_the_request() -> None:
-    adapter = _build_adapter()
-    state = _question_state(adapter)
-    state.pending_question_ids.extend(["que_a", "que_b"])
-    client = _QuestionClient()
-    adapter._client = cast(Any, client)
+async def test_a_variant_the_model_lacks_is_not_selected() -> None:
+    fake = FakeOpenCode()
+    async with driving(fake) as (adapter, _emitted):
+        await adapter.start_session(
+            "local", WORKDIR, model="opencode/big-pickle", effort="max"
+        )
 
-    assert await adapter.reject_question("local-1", "que_a") == "ok"
+    [body] = fake.calls("POST", "/api/session")
+    assert body["model"] == {"providerID": "opencode", "id": "big-pickle"}
+    assert "permissions" not in body and "agent" not in body
 
-    assert client.calls == [("POST", "/question/que_a/reject", {"directory": "/work"})]
-    assert state.pending_question_ids == ["que_b"]
+
+@pytest.mark.asyncio
+async def test_an_effort_without_a_model_goes_to_the_default_model() -> None:
+    fake = FakeOpenCode()
+    async with driving(fake) as (adapter, _emitted):
+        remote = await adapter.start_session("local", WORKDIR, effort="low")
+
+    assert fake.calls("POST", f"/api/session/{remote}/model") == [
+        {"model": {"providerID": "opencode", "id": "big-pickle", "variant": "low"}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prompts_commands_and_skills_carry_their_files(tmp_path: Path) -> None:
+    fake = _fake()
+    data_url = "data:text/plain;base64,dGVhbA=="
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await adapter.send_input("local", "hello", [_attachment(tmp_path)])
+        await adapter.send_input("local", "/wp go", skills=["wp"])
+        await adapter.execute_command("local", "init", "now", [_attachment(tmp_path)])
+        await adapter.compact_session("local")
+
+    assert fake.calls("POST", "/api/session/ses_root/prompt") == [
+        {"text": "hello", "files": [{"uri": data_url, "name": "note.txt"}]},
+        {"text": "/wp go", "skills": [{"id": "wp"}]},
+    ]
+    assert fake.calls("POST", "/api/session/ses_root/command") == [
+        {
+            "name": "init",
+            "text": "now",
+            "files": [{"uri": data_url, "name": "note.txt"}],
+        }
+    ]
+    assert fake.calls("POST", "/api/session/ses_root/compact") == [{}]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_streams_text_tools_usage_and_ends_idle() -> None:
+    fake = _fake()
+    fake.diffs = [
+        {
+            "file": "a.txt",
+            "patch": "--- a/a.txt\n+++ b/a.txt\n@@ -0,0 +1 @@\n+teal\n",
+            "additions": 1,
+            "deletions": 0,
+            "status": "added",
+        }
+    ]
+    usage: list[TokenUsageRecord] = []
+    context: list[dict[str, Any]] = []
+
+    async def on_usage(_sid: str, record: TokenUsageRecord, _publish: bool) -> None:
+        usage.append(record)
+
+    async def on_update(_sid: str, update: dict[str, Any], _publish: bool) -> None:
+        context.append(update["context_usage"])
+
+    async with driving(fake, on_token_usage=on_usage, on_session_update=on_update) as (
+        adapter,
+        emitted,
+    ):
+        _register(adapter)
+        await adapter.list_models()
+        message = {"assistantMessageID": "msg_1"}
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event(
+                "session.step.started",
+                model={"providerID": "opencode", "id": "big-pickle"},
+                **message,
+            ),
+            event("session.reasoning.delta", ordinal=0, delta="hm", **message),
+            event("session.reasoning.ended", ordinal=0, text="hm", **message),
+            event("session.text.delta", ordinal=0, delta="Do", **message),
+            event("session.text.delta", ordinal=0, delta="ne", **message),
+            event("session.text.ended", ordinal=0, text="Done", **message),
+            event("session.text.ended", ordinal=1, text="All at once", **message),
+            *_shell_call(),
+            event(
+                "session.tool.success",
+                id="call_1",
+                content=[
+                    {"type": "text", "text": "a.txt\n"},
+                    {"type": "text", "text": "Exit code: 0"},
+                ],
+            ),
+            event("session.step.ended", tokens=TOKENS, files=["a.txt"], **message),
+            event("session.execution.succeeded"),
+        )
+
+    assert emitted.texts()[1:5] == ["hm", "Do", "ne", "All at once"]
+    items = [
+        metadata.get("item_id") for _, metadata in emitted.of(EventKind.AGENT_OUTPUT)
+    ]
+    assert items == [
+        "msg_1:reasoning:0",
+        "msg_1:text:0",
+        "msg_1:text:0",
+        "msg_1:text:1",
+    ]
+    [(_, call)] = emitted.of(EventKind.TOOL_CALL)
+    assert (call["tool_name"], call["tool_input"]) == ("bash", {"command": "ls"})
+    [(result, _)] = emitted.of(EventKind.TOOL_RESULT)
+    assert result == "Result for bash:\na.txt\nExit code: 0"
+
+    # The diff comes before the note that releases queued messages, and says
+    # nothing about the status.
+    assert emitted.texts()[-2:] == ["Changes: +1 -0", "Session idle"]
+    assert emitted.statuses[-2:] == [None, SessionStatus.IDLE]
+    assert emitted.events[-2][2]["diff_preview"]["phase"] == "aggregate"
+    assert set(emitted.statuses[:-2]) == {SessionStatus.RUNNING}
+
+    [record] = usage
+    assert record.record_id == "ses_root:msg_1"
+    assert record.model == "opencode/big-pickle"
+    # Waypoint's output total includes reasoning.
+    assert record.totals["output_tokens"] == 25
+    [snapshot] = context
+    assert snapshot["used_tokens"] == 143
+    assert snapshot["context_window_tokens"] == 200_000
+
+
+@pytest.mark.asyncio
+async def test_a_failed_turn_reports_its_error() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.execution.failed", error={"message": "no route"}),
+        )
+
+    assert emitted.texts()[-1] == "Error: no route"
+    assert emitted.statuses[-1] == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_events_of_other_or_closing_sessions_are_dropped() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        state = _register(adapter)
+        await _deliver(adapter, event("session.execution.started", "ses_elsewhere"))
+        state.closing = True
+        await _deliver(adapter, event("session.execution.started"))
+
+    assert emitted.events == []
+
+
+# ── Permissions ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_permission_request_shows_its_tool_call_and_takes_a_reply() -> None:
+    fake = _fake()
+    patch = {"file": "a.txt", "patch": "@@ -0,0 +1 @@\n+teal\n", "status": "added"}
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            *_shell_call(),
+            _asked(fake, _permission(metadata={"files": [patch]})),
+        )
+        [(text, card)] = emitted.of(EventKind.APPROVAL_REQUEST)
+        assert text == "bash: shell (ls)"
+        assert card["approval_id"] == "per_1"
+        assert card["interaction"]["request_id"] == "per_1"
+        assert card["tool_input"] == {"command": "ls"}
+        assert card["diff_preview"]["phase"] == "proposed"
+        assert emitted.statuses[-1] == SessionStatus.WAITING_INPUT
+        assert adapter.pending_approval_ids("local") == ("per_1",)
+
+        assert await adapter.respond_to_permission(
+            "local", "approve", approval_id="per_1"
+        )
+        assert not adapter.has_pending_approval("local")
+        await _deliver(
+            adapter, event("permission.replied", requestID="per_1", reply="once")
+        )
+
+    assert fake.calls("POST", "/api/session/ses_root/permission/per_1/reply") == [
+        {"decision": "once"}
+    ]
+    assert emitted.texts()[-1] == "Permission once"
+    assert emitted.statuses[-1] == SessionStatus.RUNNING
+    assert "approval.invalidated" not in emitted.methods()
+
+
+@pytest.mark.asyncio
+async def test_a_reply_read_before_the_post_returns_is_waypoints_own() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        state = _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission()))
+        state.replying.add("per_1")
+        await _deliver(
+            adapter, event("permission.replied", requestID="per_1", reply="reject")
+        )
+
+    assert emitted.texts()[-1] == "Permission reject"
+    assert "approval.invalidated" not in emitted.methods()
+
+
+@pytest.mark.asyncio
+async def test_approval_for_the_session_grants_it_and_never_replies_always() -> None:
+    fake = _fake()
+    fake.add_session("ses_child", parentID="ses_root", permissions=list(ASK))
+    grant = {"action": "shell", "resource": "ls *", "effect": "allow"}
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_child", "parentID": "ses_root"},
+            },
+            _asked(fake, _permission(session_id="ses_child")),
+        )
+        assert await adapter.respond_to_permission("local", "acceptForSession")
+
+    assert fake.sessions["ses_child"]["permissions"] == [*ASK, grant]
+    assert fake.sessions["ses_root"]["permissions"] == [*ASK, grant]
+    assert fake.calls("POST", "/api/session/ses_child/permission/per_1/reply") == [
+        {"decision": "once"}
+    ]
+    assert fake.calls("GET", "/api/permission/saved") == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_grant_leaves_the_request_unanswered() -> None:
+    fake = _fake()
+    fake.failures[("PATCH", "/api/session/ses_root")] = 500
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission()))
+        with pytest.raises(OpenCodeError, match="for the session"):
+            await adapter.respond_to_permission("local", "acceptForSession")
+
+        assert adapter.pending_approval_ids("local") == ("per_1",)
+    assert not any(path.endswith("/reply") for _, path in fake.writes())
+
+
+@pytest.mark.asyncio
+async def test_a_request_with_nothing_to_save_is_just_allowed_once() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission(save=())))
+        assert await adapter.respond_to_permission("local", "acceptForSession")
+
+    assert fake.writes() == [("POST", "/api/session/ses_root/permission/per_1/reply")]
+
+
+@pytest.mark.asyncio
+async def test_a_rejection_closes_the_other_requests_it_took_down() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            _asked(fake, _permission("per_1")),
+            _asked(fake, _permission("per_2", call_id="call_2")),
+        )
+        await adapter.respond_to_permission(
+            "local", "decline", "no thanks", approval_id="per_1"
+        )
+        await _deliver(
+            adapter,
+            event("permission.replied", requestID="per_1", reply="reject"),
+            event("permission.replied", requestID="per_2", reply="reject"),
+        )
+        assert not adapter.has_pending_approval("local")
+
+    assert fake.calls("POST", "/api/session/ses_root/permission/per_1/reply") == [
+        {"decision": "reject", "message": "no thanks"}
+    ]
+    assert emitted.events[-1][2]["method"] == "approval.invalidated"
+    assert emitted.events[-1][2]["approval_id"] == "per_2"
+
+
+@pytest.mark.asyncio
+async def test_a_reply_the_server_no_longer_takes_closes_the_card() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission()))
+        fake.permissions.clear()
+
+        assert not await adapter.respond_to_permission("local", "approve")
+        assert not adapter.has_pending_approval("local")
+
+    assert emitted.methods()[-1] == "approval.invalidated"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_decision_is_refused() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission()))
+        with pytest.raises(OpenCodeError, match="unsupported"):
+            await adapter.respond_to_permission("local", "perhaps")
+
+
+@pytest.mark.asyncio
+async def test_interrupting_stops_subagents_first_and_stays_interrupted() -> None:
+    fake = _fake()
+    fake.add_session("ses_child", parentID="ses_root")
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_child", "parentID": "ses_root"},
+            },
+            event("session.execution.started", "ses_child"),
+            _asked(fake, _permission()),
+        )
+        # An interrupt drops pending requests without saying so.
+        fake.permissions.clear()
+        await adapter.interrupt("local")
+        await _deliver(
+            adapter,
+            event("session.execution.interrupted", "ses_child", reason="user"),
+            event("session.execution.interrupted", reason="user"),
+        )
+
+    assert [path for _, path in fake.writes()] == [
+        "/api/session/ses_child/interrupt",
+        "/api/session/ses_root/interrupt",
+    ]
+    invalidated = emitted.methods().index("approval.invalidated")
+    # No status from here on reads as idle, which would release queued messages.
+    assert SessionStatus.IDLE not in emitted.statuses[invalidated:]
+    assert emitted.statuses[-1] == SessionStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_an_execution_that_ends_reconciles_what_is_pending() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            _asked(fake, _permission()),
+            _form_created(fake, _form()),
+        )
+        fake.failures[("GET", "/api/form")] = 500
+        await _deliver(adapter, event("session.execution.succeeded"))
+        # A failed listing is not an empty one.
+        assert adapter.pending_approval_ids("local") == ("per_1",)
+
+        fake.failures.clear()
+        fake.permissions.clear()
+        await _deliver(adapter, event("session.execution.succeeded"))
+
+        assert not adapter.has_pending_approval("local")
+        assert adapter.current_question_id("local") == "frm_1"
+    assert emitted.methods()[-1] == "approval.invalidated"
+
+
+# ── Subagents ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_subagents_share_asks_and_status_but_not_the_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "SUBAGENT_SETTLE_SECONDS", 0.0)
+    fake = _fake()
+    context: list[Any] = []
+
+    async def on_update(_sid: str, update: dict[str, Any], _publish: bool) -> None:
+        context.append(update)
+
+    async with driving(fake, on_session_update=on_update) as (adapter, emitted):
+        _register(adapter)
+        await adapter.list_models()
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event(
+                "session.tool.progress",
+                id="call_0",
+                metadata={"sessionID": "ses_child"},
+            ),
+            event("session.execution.started", "ses_child"),
+        )
+        before = len(emitted.events)
+        await _deliver(
+            adapter,
+            event(
+                "session.step.started",
+                "ses_child",
+                assistantMessageID="msg_c",
+                model={"providerID": "opencode", "id": "big-pickle"},
+            ),
+            event(
+                "session.text.delta",
+                "ses_child",
+                assistantMessageID="msg_c",
+                ordinal=0,
+                delta="hidden",
+            ),
+            *_shell_call("ses_child"),
+            event(
+                "session.step.ended",
+                "ses_child",
+                assistantMessageID="msg_c",
+                tokens=TOKENS,
+            ),
+        )
+        assert len(emitted.events) == before
+        assert context == []
+
+        await _deliver(adapter, _asked(fake, _permission(session_id="ses_child")))
+        [(text, card)] = emitted.of(EventKind.APPROVAL_REQUEST)
+        assert text.startswith("Subagent · bash")
+        assert card["tool_input"] == {"command": "ls"}
+        await adapter.respond_to_permission("local", "approve")
+
+        # The root ends while its subagent runs on.
+        await _deliver(adapter, event("session.execution.succeeded"))
+        assert adapter.session_status("local") == SessionStatus.RUNNING
+        assert "Session idle" not in emitted.texts()
+
+        await _deliver(adapter, event("session.execution.succeeded", "ses_child"))
+        await asyncio.sleep(0.05)
+
+    assert emitted.texts()[-1] == "Session idle"
+    assert emitted.statuses[-1] == SessionStatus.IDLE
+    assert ("POST", "/api/session/ses_child/permission/per_1/reply") in fake.writes()
+
+
+# ── Questions ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_form_is_a_question_that_takes_an_answer() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.tool.input.started", id="call_q", name="question"),
+            event("session.tool.called", id="call_q", input={"questions": []}),
+            _form_created(fake, _form()),
+        )
+        [(text, card)] = emitted.of(EventKind.TOOL_CALL)
+        assert (text, card["tool_name"]) == ("Need your input", "AskUserQuestion")
+        assert card["tool_use_id"] == "frm_1"
+        assert adapter.question_liveness("local", ["frm_1", "frm_0"]) == {
+            "frm_1": QuestionLiveness.ACTIONABLE,
+            "frm_0": QuestionLiveness.CLOSED,
+        }
+
+        assert await adapter.answer_question("local", "frm_1", "Red")
+        await _deliver(
+            adapter,
+            event("form.replied", id="frm_1"),
+            event("session.tool.success", id="call_q", content=[]),
+        )
+
+    assert fake.calls("POST", "/api/session/ses_root/form/frm_1/reply") == [
+        {"answer": {"q0": "red"}}
+    ]
+    assert emitted.events[-1][2]["tool_use_id"] == "frm_1"
+    assert emitted.of(EventKind.TOOL_RESULT) == []
 
 
 @pytest.mark.parametrize(
-    ("error", "outcome"),
+    ("status", "outcome"), [(None, "ok"), (404, "missing"), (500, "error")]
+)
+@pytest.mark.asyncio
+async def test_declining_a_question(status: int | None, outcome: str) -> None:
+    fake = _fake()
+    if status:
+        fake.failures[("DELETE", "/api/session/ses_root/form/frm_1")] = status
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(adapter, _form_created(fake, _form()))
+
+        assert await adapter.reject_question("local", "frm_1") == outcome
+        pending = adapter.current_question_id("local")
+
+    assert pending == ("frm_1" if outcome == "error" else None)
+
+
+@pytest.mark.asyncio
+async def test_an_answer_the_server_no_longer_takes_closes_the_question() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(adapter, _form_created(fake, _form()))
+        fake.forms.clear()
+
+        assert not await adapter.answer_question("local", "frm_1", "Red")
+        assert adapter.current_question_id("local") is None
+
+    assert emitted.events[-1][2]["tool_use_id"] == "frm_1"
+
+
+@pytest.mark.asyncio
+async def test_unlisted_questions_stay_unknown_until_a_listing_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _fake()
+    fake.forms.append(_form("frm_open"))
+    fake.failures[("GET", "/api/form")] = 500
+    changed: list[str] = []
+    async with driving(fake, on_questions_changed=changed.append) as (adapter, _):
+        state = _register(adapter, forms_seeded=False)
+        await adapter._seed_asks(state)
+        assert adapter.question_liveness("local", ["frm_open"]) == {
+            "frm_open": QuestionLiveness.UNAVAILABLE
+        }
+        assert adapter._question_seed_tasks == {}
+
+        fake.failures.clear()
+        monkeypatch.setattr(adapter_module, "QUESTION_SEED_RETRY_SECONDS", 0.0)
+        adapter.question_liveness("local", ["frm_open"])
+        await asyncio.gather(*adapter._question_seed_tasks.values())
+
+        assert changed == ["local"]
+        assert adapter.question_liveness("local", ["frm_open", "frm_gone"]) == {
+            "frm_open": QuestionLiveness.ACTIONABLE,
+            "frm_gone": QuestionLiveness.CLOSED,
+        }
+
+
+# ── Restore ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_restore_adopts_subagents_running_state_and_pending_asks() -> None:
+    fake = _fake()
+    fake.sessions["ses_root"].update(
+        model={"providerID": "opencode", "id": "big-pickle", "variant": "default"},
+        agent="build",
+        permissions=[],
+    )
+    fake.add_session("ses_child", parentID="ses_root")
+    fake.add_session("ses_grandchild", parentID="ses_child")
+    fake.active = {"ses_grandchild"}
+    fake.permissions = [
+        _permission("per_new", "ses_child"),
+        _permission("per_shown"),
+        _permission("per_other", "ses_elsewhere"),
+    ]
+    fake.forms = [_form("frm_new"), _form("frm_shown")]
+    async with driving(fake) as (adapter, emitted):
+        await adapter.restore_session(
+            "local",
+            WORKDIR,
+            "ses_root",
+            permissions=ASK,
+            model="opencode/big-pickle",
+            agent=None,
+            open_approvals=["per_shown", "per_gone"],
+            open_questions=["frm_shown"],
+        )
+        state = adapter._sessions["local"]
+
+        assert state.children == {"ses_child", "ses_grandchild"}
+        assert state.running == {"ses_grandchild"}
+        assert adapter.session_status("local") == SessionStatus.WAITING_INPUT
+        assert adapter.pending_approval_ids("local") == ("per_new", "per_shown")
+
+    # What the transcript lacks is shown, and what the server lacks is closed.
+    assert [m["approval_id"] for _, m in emitted.of(EventKind.APPROVAL_REQUEST)] == [
+        "per_new"
+    ]
+    assert [m["tool_use_id"] for _, m in emitted.of(EventKind.TOOL_CALL)] == ["frm_new"]
+    assert emitted.events[-1][2]["approval_id"] == "per_gone"
+    # The same model is not selected again; the rules are written back.
+    assert fake.writes() == [("PATCH", "/api/session/ses_root")]
+    assert fake.sessions["ses_root"]["permissions"] == ASK
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_open_cards_when_it_cannot_list_asks() -> None:
+    fake = _fake()
+    fake.failures[("GET", "/api/permission/request")] = 500
+    async with driving(fake) as (adapter, emitted):
+        await adapter.restore_session(
+            "local", WORKDIR, "ses_root", permissions=ASK, open_approvals=["per_1"]
+        )
+
+    assert "approval.invalidated" not in emitted.methods()
+
+
+@pytest.mark.asyncio
+async def test_restore_applies_what_waypoint_recorded() -> None:
+    fake = _fake()
+    fake.sessions["ses_root"].update(
+        model={"providerID": "opencode", "id": "other"}, agent="build"
+    )
+    async with driving(fake) as (adapter, _emitted):
+        await adapter.restore_session(
+            "local",
+            WORKDIR,
+            "ses_root",
+            permissions=[],
+            model="opencode/big-pickle",
+            agent="plan",
+            effort="high",
+        )
+
+    assert fake.calls("POST", "/api/session/ses_root/model") == [
+        {"model": {"providerID": "opencode", "id": "big-pickle", "variant": "high"}}
+    ]
+    assert fake.calls("POST", "/api/session/ses_root/agent") == [{"agent": "plan"}]
+
+
+@pytest.mark.asyncio
+async def test_a_selection_the_server_refuses_keeps_the_session() -> None:
+    fake = _fake()
+    fake.failures[("POST", "/api/session/ses_root/model")] = 400
+    async with driving(fake) as (adapter, emitted):
+        await adapter.restore_session(
+            "local", WORKDIR, "ses_root", permissions=[], model="opencode/big-pickle"
+        )
+        assert adapter.session_status("local") == SessionStatus.IDLE
+
+    assert emitted.texts()[-1].startswith("Could not restore the session's model")
+
+
+@pytest.mark.parametrize(
+    "broken", [("GET", "/api/session/ses_root"), ("PATCH", "/api/session/ses_root")]
+)
+@pytest.mark.asyncio
+async def test_restore_fails_without_the_session_or_its_rules(
+    broken: tuple[str, str],
+) -> None:
+    fake = _fake()
+    fake.failures[broken] = 500
+    async with driving(fake) as (adapter, _emitted):
+        with pytest.raises(OpenCodeError):
+            await adapter.restore_session("local", WORKDIR, "ses_root", permissions=ASK)
+
+        assert adapter._sessions == {} and adapter._routes == {}
+
+
+@pytest.mark.asyncio
+async def test_an_ask_answered_during_the_listing_is_not_brought_back() -> None:
+    fake = _fake()
+    fake.permissions = [_permission()]
+    async with driving(fake) as (adapter, _emitted):
+        state = _register(adapter)
+        listing = adapter._list_asks
+
+        async def answered_meanwhile() -> Any:
+            result = await listing()
+            state.forget_ask("per_1")
+            return result
+
+        adapter._list_asks = answered_meanwhile  # type: ignore[method-assign]
+        await adapter._seed_asks(state)
+
+        assert state.permissions == {}
+
+
+# ── Model, agent, permissions ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_model_and_effort_are_selected_on_the_session() -> None:
+    fake = _fake()
+    fake.models = [model_entry(), model_entry("plain", variants=())]
+    fake.default_model = model_entry()
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter, model="opencode/big-pickle")
+        await adapter.set_effort("local", "high")
+        await adapter.set_model("local", "opencode/plain")
+        await adapter.set_model("local", None)
+
+    assert [
+        body["model"] for body in fake.calls("POST", "/api/session/ses_root/model")
+    ] == [
+        {"providerID": "opencode", "id": "big-pickle", "variant": "high"},
+        {"providerID": "opencode", "id": "plain"},
+        {"providerID": "opencode", "id": "big-pickle"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_only_a_switch_waypoint_did_not_make_is_reported() -> None:
+    fake = _fake()
+    switches: list[tuple[str, str | None, str | None]] = []
+    async with driving(fake, on_agent_changed=lambda *args: switches.append(args)) as (
+        adapter,
+        _emitted,
+    ):
+        _register(adapter)
+        await adapter.set_agent("local", "plan")
+        await _deliver(
+            adapter,
+            event("session.agent.selected", agent="plan"),
+            event("session.agent.selected", agent="build"),
+        )
+
+    assert switches == [("local", "plan", "build")]
+
+
+# ── Catalogs and threads ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_catalogs_wait_for_the_server_to_load_them() -> None:
+    fake = _fake()
+    fake.unsettled = 1
+    fake.skills = [{"id": "wp-skill", "name": "WP", "description": "d"}]
+    async with driving(fake) as (adapter, _emitted):
+        commands = await adapter.list_commands()
+        fake.unsettled = 1
+        models = await adapter.list_models()
+
+    assert commands == [
+        {"name": "init", "description": None, "source": "command"},
+        {"name": "wp-skill", "description": "d", "source": "skill"},
+    ]
+    assert [model.id for model in models] == ["opencode/big-pickle"]
+    assert fake.calls("GET", "/api/model")[0] == {"location[directory]": WORKDIR}
+
+
+@pytest.mark.asyncio
+async def test_threads_and_history_follow_every_page() -> None:
+    fake = FakeOpenCode()
+    fake.page_size = 1
+    fake.add_session("ses_1")
+    fake.add_session("ses_2")
+    fake.add_session("ses_sub", parentID="ses_1")
+    fake.messages["ses_1"] = [{"id": "msg_1"}, {"id": "msg_2"}]
+    async with driving(fake) as (adapter, _emitted):
+        sessions = await adapter.list_sessions()
+        messages = await adapter.get_session_messages("ses_1")
+        with pytest.raises(OpenCodeError):
+            await adapter.get_session_messages("ses_missing")
+        assert await adapter.get_session("ses_missing") is None
+        assert await adapter.delete_session("ses_2")
+        assert not await adapter.delete_session("ses_2")
+
+    assert [item["id"] for item in sessions] == ["ses_1", "ses_2"]
+    assert [item["id"] for item in messages] == ["msg_1", "msg_2"]
+
+
+@pytest.mark.asyncio
+async def test_fork_writes_the_sources_rules() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        forked = await adapter.fork_session("local2", WORKDIR, "ses_root", ASK)
+
+    assert forked == "ses_root_fork"
+    assert fake.calls("PATCH", "/api/session/ses_root_fork") == [{"permissions": ASK}]
+
+
+# ── Server lifecycle ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("states", "failure"),
     [
-        (OpenCodeHttpError(404, "", "POST", "/x"), "missing"),
-        (OpenCodeHttpError(500, "", "POST", "/x"), "error"),
-        (RuntimeError("curl failed"), "error"),
+        (
+            [{"status": "required"}, {"status": "running"}, {"status": "completed"}],
+            None,
+        ),
+        ([{"status": "error", "error": "disk full"}], "migration failed: disk full"),
     ],
 )
 @pytest.mark.asyncio
-async def test_failed_reject_keeps_the_question_pending(
-    error: Exception, outcome: str
+async def test_start_waits_for_the_history_migration(
+    states: list[dict[str, Any]], failure: str | None
 ) -> None:
-    adapter = _build_adapter()
-    state = _question_state(adapter)
-    state.pending_question_ids.append("que_a")
-    adapter._client = cast(Any, _QuestionClient(reject_error=error))
+    fake = FakeOpenCode()
+    fake.migration = list(states)
+    async with driving(fake) as (adapter, _emitted):
+        if failure:
+            with pytest.raises(OpenCodeError, match=failure):
+                await adapter._await_migration()
+        else:
+            await adapter._await_migration()
 
-    assert await adapter.reject_question("local-1", "que_a") == outcome
-    assert state.pending_question_ids == ["que_a"]
+    assert len(fake.calls("GET", "/api/experimental/migration/v1")) == len(states)
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_the_migration_route_is_ready() -> None:
+    fake = FakeOpenCode()
+    fake.failures[("GET", "/api/experimental/migration/v1")] = 404
+    async with driving(fake) as (adapter, _emitted):
+        await adapter._await_migration()
+
+
+@pytest.mark.asyncio
+async def test_starts_are_serialized_until_one_has_migrated() -> None:
+    gate = MigrationGate()
+    inside: list[str] = []
+    overlap: list[int] = []
+
+    async def start(name: str) -> None:
+        async with gate.hold():
+            inside.append(name)
+            overlap.append(len(inside))
+            await asyncio.sleep(0.01)
+            gate.migrated = True
+            inside.remove(name)
+
+    await asyncio.gather(start("a"), start("b"), start("c"))
+    # The first ran alone; the rest, queued behind it, ran together.
+    assert overlap == [1, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_the_event_stream_is_open_before_start_returns() -> None:
+    fake = _fake()
+    async with fake.serving() as url:
+        emitted = Emitted()
+        adapter = OpenCodeAdapter(emit_event=emitted)
+        adapter._client = LocalOpenCodeClient(url, ServerAuth("secret"))
+        try:
+            await asyncio.wait_for(adapter._connect_events(), timeout=5)
+            assert adapter._connected.is_set()
+        finally:
+            await adapter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_never_opens_fails_the_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "_MAX_SSE_FAILURES", 1)
+    fake = _fake()
+    fake.failures[("GET", "/api/event")] = 500
+    died: list[list[str]] = []
+    async with fake.serving() as url:
+        adapter = OpenCodeAdapter(emit_event=Emitted(), on_server_died=died.append)
+        adapter._client = LocalOpenCodeClient(url, ServerAuth("secret"))
+        try:
+            with pytest.raises(OpenCodeError, match="event stream"):
+                await asyncio.wait_for(adapter._connect_events(), timeout=5)
+        finally:
+            await adapter.shutdown()
+    assert died == []
+
+
+@pytest.mark.asyncio
+async def test_losing_the_stream_closes_asks_and_reports_the_sessions() -> None:
+    fake = _fake()
+    died: list[list[str]] = []
+    async with fake.serving() as url:
+        emitted = Emitted()
+        adapter = OpenCodeAdapter(emit_event=emitted, on_server_died=died.append)
+        adapter._client = LocalOpenCodeClient(url, ServerAuth("secret"))
+        try:
+            await adapter._connect_events()
+            adapter._started = True
+            _register(adapter)
+            fake.events.put_nowait(_asked(fake, _permission()))
+            fake.events.put_nowait(None)
+            async with asyncio.timeout(5):
+                while not died:
+                    await asyncio.sleep(0.01)
+        finally:
+            await adapter.shutdown()
+
+    assert died == [["local"]]
+    assert emitted.methods() == [
+        "permission.asked",
+        "approval.invalidated",
+        "server.disconnected",
+    ]
+    assert emitted.statuses[-2:] == [SessionStatus.ERROR, SessionStatus.ERROR]
+
+
+@pytest.mark.asyncio
+async def test_terminate_forgets_the_session() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        state = _register(adapter)
+        state.children.add("ses_child")
+        adapter._routes["ses_child"] = "local"
+
+        assert await adapter.terminate_session("local")
+        assert not await adapter.terminate_session("local")
+        assert adapter._routes == {}
+
+    assert emitted.statuses == [SessionStatus.EXITED]
+
+
+@pytest.mark.asyncio
+async def test_an_ending_handled_across_a_close_does_not_revive_it() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        state = _register(adapter, changed_files=True)
+        listing = adapter._emit_changes
+
+        async def closed_meanwhile(target: SessionState) -> None:
+            await adapter.terminate_session("local")
+            await listing(target)
+
+        adapter._emit_changes = closed_meanwhile  # type: ignore[method-assign,assignment]
+        state.execution_started("ses_root")
+        state.changed_files = True
+        await _deliver(adapter, event("session.execution.succeeded"))
+
+    assert emitted.statuses == [SessionStatus.EXITED]
 
 
 @pytest.mark.asyncio
 async def test_cancelled_start_discards_the_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _build_adapter()
+    adapter = OpenCodeAdapter(emit_event=Emitted())
     discarded: list[str] = []
 
     class _Client:
@@ -970,7 +1112,7 @@ async def test_cancelled_start_discards_the_server(
 async def test_discarding_a_server_that_ignores_sigterm_kills_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _build_adapter()
+    adapter = OpenCodeAdapter(emit_event=Emitted())
     exited = asyncio.Event()
     signals: list[int] = []
 

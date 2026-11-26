@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,8 @@ async def test_remote_serve_script_honors_configured_binary(tmp_path: Path) -> N
 
     try:
         proc.stdin.write(b"s3cret\n")
+        line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=10)
+        assert line_bytes.decode().strip() == f"__WP_DIR__={os.getcwd()}"
         line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=10)
         assert line_bytes.decode().strip() == "__WP_PORT__=9999"
         assert argv_log.exists()

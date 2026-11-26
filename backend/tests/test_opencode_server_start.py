@@ -9,7 +9,13 @@ from typing import Any, cast
 import pytest
 from aiohttp import web
 
-from opencode_stubs import fake_opencode, loopback_ssh, server_env, serving
+from opencode_stubs import (
+    FakeOpenCode,
+    fake_opencode,
+    loopback_ssh,
+    server_env,
+    serving,
+)
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
 from waypoint.backends.opencode.client import RemoteOpenCodeClient
 from waypoint.backends.opencode.plugin import OpenCodePlugin, OpenCodePluginConfig
@@ -23,16 +29,22 @@ def _adapter(**kwargs: Any) -> OpenCodeAdapter:
     return OpenCodeAdapter(emit_event=emit, **kwargs)
 
 
-def _locked_v1(seen: Path) -> dict[str, Any]:
-    """A 1.x /config that asks for the password the binary was started with."""
+class _LockedServer(FakeOpenCode):
+    """A server that asks for the password the binary was started with."""
 
-    async def config(request: web.Request) -> web.Response:
-        expected = ServerAuth(server_env(seen)["OPENCODE_SERVER_PASSWORD"])
+    def __init__(self, seen: Path) -> None:
+        super().__init__()
+        self.seen = seen
+
+    async def _handle(self, request: web.Request) -> web.StreamResponse:
+        expected = ServerAuth(server_env(self.seen)["OPENCODE_SERVER_PASSWORD"])
         if request.headers.get("Authorization") != f"Basic {expected.basic_token}":
             return web.json_response({}, status=401)
-        return web.json_response({})
+        return await super()._handle(request)
 
-    return {"/config": config}
+
+def _port(url: str) -> int:
+    return int(url.rsplit(":", 1)[1])
 
 
 def _assert_secured(seen: Path) -> str:
@@ -49,8 +61,8 @@ async def test_local_server_gets_a_password_and_the_client_sends_it(
 ) -> None:
     seen = tmp_path / "server.env"
     passwords: set[str] = set()
-    async with serving(_locked_v1(seen)) as url:
-        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]))
+    async with _LockedServer(seen).serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url))
         for _ in range(2):
             adapter = _adapter(
                 binary=binary,
@@ -60,7 +72,7 @@ async def test_local_server_gets_a_password_and_the_client_sends_it(
             await adapter.start()
             try:
                 assert adapter.server_info is not None
-                assert adapter.server_info.major == 1
+                assert adapter.server_info.major == 2
                 passwords.add(_assert_secured(seen))
             finally:
                 await adapter.shutdown()
@@ -70,8 +82,8 @@ async def test_local_server_gets_a_password_and_the_client_sends_it(
 @pytest.mark.asyncio
 async def test_the_configured_local_binary_is_the_one_started(tmp_path: Path) -> None:
     seen = tmp_path / "server.env"
-    async with serving(_locked_v1(seen)) as url:
-        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]))
+    async with _LockedServer(seen).serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url))
         config = OpenCodePluginConfig(local_bin=binary)
         runtime = SimpleNamespace(
             settings=SimpleNamespace(plugin_config=lambda _id: config),
@@ -98,8 +110,8 @@ async def test_a_chatty_local_server_is_never_blocked_on_its_output(
         "head -c 3000000 /dev/zero >&2\n"
         f"touch '{written}'\n"
     )
-    async with serving(_locked_v1(seen)) as url:
-        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]), flood)
+    async with _LockedServer(seen).serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url), flood)
         adapter = _adapter(binary=binary, workdir=str(tmp_path))
         await adapter.start()
         try:
@@ -113,8 +125,8 @@ async def test_a_chatty_local_server_is_never_blocked_on_its_output(
 @pytest.mark.asyncio
 async def test_remote_server_password_travels_on_stdin(tmp_path: Path) -> None:
     seen = tmp_path / "server.env"
-    async with serving(_locked_v1(seen)) as url:
-        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]))
+    async with _LockedServer(seen).serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url))
         adapter = _adapter(launch_target=loopback_ssh(tmp_path, binary))
         await adapter.start()
         try:
@@ -151,7 +163,7 @@ async def test_remote_requests_authenticate_and_keep_their_body(
     body = {"text": 'line one\nline two "quoted" $HOME'}
     async with serving({"/echo": echo, "/event": events}) as url:
         client = RemoteOpenCodeClient(
-            loopback_ssh(tmp_path, "opencode"), int(url.rsplit(":", 1)[1]), auth
+            loopback_ssh(tmp_path, "opencode"), _port(url), auth
         )
         try:
             got = await client.get("/echo")
@@ -188,8 +200,12 @@ def _info(payload: dict[str, Any]) -> Any:
     ("routes", "detail"),
     [
         (
-            {"/config": _web_page, "/api/info": _info({"version": "2.4.1"})},
-            "OpenCode 2.4.1 is not supported",
+            {"/config": _info({})},
+            "OpenCode 1.x is not supported; upgrade OpenCode to 2.x",
+        ),
+        (
+            {"/config": _web_page, "/api/info": _info({"version": "3.0.0"})},
+            "OpenCode 3.0.0 is not supported",
         ),
         ({"/config": _web_page}, "200 text/html instead of JSON"),
         (
@@ -206,7 +222,38 @@ async def test_a_server_waypoint_cannot_drive_fails_at_once(
     tmp_path: Path, routes: dict[str, Any], detail: str
 ) -> None:
     async with serving(routes) as url:
-        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]))
+        binary, _ = fake_opencode(tmp_path, _port(url))
         adapter = _adapter(binary=binary, workdir=str(tmp_path))
         with pytest.raises(OpenCodeError, match=f"incompatible.*({detail})"):
             await asyncio.wait_for(adapter.start(), timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_a_remote_server_reports_the_directory_it_runs_in(
+    tmp_path: Path,
+) -> None:
+    seen = tmp_path / "server.env"
+    work = tmp_path / "work"
+    work.mkdir()
+    async with _LockedServer(seen).serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url))
+        target = loopback_ssh(tmp_path, binary)
+        adapter = _adapter(launch_target=target, workdir=str(work))
+        await adapter.start()
+        try:
+            assert adapter._directory == str(work)
+        finally:
+            await adapter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_migration_fails_the_start(tmp_path: Path) -> None:
+    seen = tmp_path / "server.env"
+    server = _LockedServer(seen)
+    server.migration = [{"status": "error", "error": "locked"}]
+    async with server.serving() as url:
+        binary, _ = fake_opencode(tmp_path, _port(url))
+        adapter = _adapter(binary=binary, workdir=str(tmp_path))
+        with pytest.raises(OpenCodeError, match="migration failed: locked"):
+            await asyncio.wait_for(adapter.start(), timeout=10)
+        assert adapter._server_process is None

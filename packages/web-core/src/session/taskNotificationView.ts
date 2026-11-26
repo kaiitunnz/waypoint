@@ -98,6 +98,13 @@ export function summarizeNotificationRun(kinds: readonly TaskNotificationView["k
   });
   return {
     phrase: parts.length > 0 ? `Reports from ${parts.join(", ")}` : "Reports",
-    glyphs: present.map((kind) => ({ glyph: TASK_NOTIFICATION_BADGES[kind].glyph, count: counts.get(kind) ?? 0 })),
+    glyphs: present.map((kind) => {
+      const many = NOTIFICATION_NOUNS[kind][1];
+      return {
+        glyph: TASK_NOTIFICATION_BADGES[kind].glyph,
+        label: many.charAt(0).toUpperCase() + many.slice(1),
+        count: counts.get(kind) ?? 0,
+      };
+    }),
   };
 }

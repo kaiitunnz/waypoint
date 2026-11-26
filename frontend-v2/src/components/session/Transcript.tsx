@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
@@ -9,10 +9,10 @@ import type { SessionStatus } from "@waypoint/web-core/types";
 
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
-import { cx } from "@/lib/cx";
 
 import { EmptyTranscript } from "./EmptyTranscript";
 import { PendingTurn } from "./PendingTurn";
+import { TranscriptHoldProvider } from "./SessionContext";
 import styles from "./Transcript.module.css";
 import { TurnView } from "./TurnView";
 import { useTranscriptScroll } from "./useTranscriptScroll";
@@ -43,15 +43,20 @@ export function Transcript({
   pending,
   override,
 }: TranscriptProps) {
-  const { scroller, content, log, away, onScroll, jumpToEnd } = useTranscriptScroll(turns);
+  const { scroller, content, log, away, onScroll, hold, jumpToEnd } = useTranscriptScroll(turns, pending.length);
   const working = isWorkingStatus(status);
+  // Every fold control carries aria-expanded; captured here, before the fold changes.
+  const onFold = (event: MouseEvent) => {
+    const toggle = (event.target as Element).closest("[aria-expanded]");
+    if (toggle) hold(toggle, toggle.getAttribute("aria-expanded") === "true");
+  };
 
   return (
     <div className={styles.frame}>
-      <div ref={scroller} className={styles.scroller} onScroll={onScroll}>
-        <div ref={content} className={cx(styles.col, Boolean(override) && styles.top)}>
+      <div ref={scroller} className={styles.scroller} onScroll={onScroll} onClickCapture={onFold}>
+        <div ref={content} className={styles.col}>
           {override ?? (
-            <>
+            <TranscriptHoldProvider value={hold}>
               {hasOlder ? (
                 <div className={styles.older}>
                   <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
@@ -59,16 +64,18 @@ export function Transcript({
                   </ActionChip>
                 </div>
               ) : null}
-              <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
-                {turns.map((turn, index) => (
-                  <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
-                ))}
+              <div className={styles.messages}>
+                <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
+                  {turns.map((turn, index) => (
+                    <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
+                  ))}
+                </div>
+                {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
+                {!loading && turns.length === 0 && pending.length === 0 ? (
+                  <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
+                ) : null}
               </div>
-              {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
-              {!loading && turns.length === 0 && pending.length === 0 ? (
-                <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
-              ) : null}
-            </>
+            </TranscriptHoldProvider>
           )}
         </div>
       </div>

@@ -7,7 +7,10 @@
   background: var(--plane);
 }
 
+/* Width rules inside the conversation are container queries on it. Unnamed:
+   CSS Modules renames a named container per file. */
 .conv {
+  container-type: inline-size;
   position: relative;
   display: flex;
   flex: 1 1 auto;

@@ -5,7 +5,7 @@ import { parseTaskNotification, planTextForEvent } from "@waypoint/web-core/even
 import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind";
 import { modelChangeText } from "@waypoint/web-core/session/cardText";
 import { summarizeNotificationRun } from "@waypoint/web-core/session/taskNotificationView";
-import { itemKey, primaryEvent, type LeafItem, type TranscriptItem } from "@waypoint/web-core/session/transcript";
+import { itemKey, primaryEvent, type LeafItem, type Repeat, type TranscriptItem } from "@waypoint/web-core/session/transcript";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { AnswerCard } from "./cards/AnswerCard";
@@ -48,7 +48,7 @@ function NotificationRun({ items }: { items: LeafItem[] }) {
   );
 }
 
-function Single({ event, first }: { event: EventRecord; first: boolean }) {
+function Single({ event, first, repeat }: { event: EventRecord; first: boolean; repeat?: Repeat }) {
   const { full, structured } = useSessionContext();
   if (!structured) return <HeuristicCard event={event} />;
   switch (cardKindOf(event)) {
@@ -82,7 +82,7 @@ function Single({ event, first }: { event: EventRecord; first: boolean }) {
     case "diff_note":
       return <ChangesNote event={event} defaultOpen={full} />;
     case "rule":
-      return <SystemRule text={event.text} ts={event.ts} />;
+      return <SystemRule text={event.text} ts={event.ts} repeat={repeat} />;
     case "heuristic":
       return <HeuristicCard event={event} />;
     case "none":
@@ -106,6 +106,6 @@ export function ItemView({ item, first, live }: ItemViewProps) {
           return <ToolRun items={[item]} working={live} />;
       }
     case "single":
-      return <Single event={item.event} first={first} />;
+      return <Single event={item.event} first={first} repeat={item.repeat} />;
   }
 }

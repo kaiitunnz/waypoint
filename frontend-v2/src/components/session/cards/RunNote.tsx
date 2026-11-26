@@ -17,8 +17,11 @@ export function RunNote({ child }: { child: LeafItem }) {
     default:
       return (
         <div className={styles.note}>
-          <span className={styles.noteText}>{event.text}</span>
-          <EventTime ts={event.ts} />
+          <span className={styles.noteText}>
+            {event.text}
+            {child.repeat ? ` ×${child.repeat.count}` : ""}
+          </span>
+          <EventTime ts={event.ts} until={child.repeat?.until} />
         </div>
       );
   }

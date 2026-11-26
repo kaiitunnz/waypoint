@@ -131,9 +131,10 @@ const PHRASE_ORDER: Category[] = [
   "other",
 ];
 
-// The chips on a collapsed run: a glyph and a count, in a fixed order.
+// The chips on a collapsed run: a glyph, what it counts and the count, in a fixed order.
 export interface RunGlyph {
   glyph: string;
+  label: string;
   count: number;
 }
 
@@ -219,14 +220,14 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
 
   const read = (counts.get("read") ?? 0) + (counts.get("search") ?? 0);
   const glyphs: RunGlyph[] = [
-    { glyph: "▤", count: read },
-    { glyph: "✎", count: edits },
-    { glyph: "›_", count: counts.get("bash") ?? 0 },
-    { glyph: "☑", count: counts.get("todo") ?? 0 },
-    { glyph: "◇", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0) },
-    { glyph: "❖", count: counts.get("skill") ?? 0 },
-    { glyph: "◉", count: counts.get("monitor") ?? 0 },
-    { glyph: "ƒ", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0) },
+    { glyph: "▤", label: "Reads and searches", count: read },
+    { glyph: "✎", label: "Edited files", count: edits },
+    { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0 },
+    { glyph: "☑", label: "Task updates", count: counts.get("todo") ?? 0 },
+    { glyph: "◇", label: "Subagents", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0) },
+    { glyph: "❖", label: "Skills", count: counts.get("skill") ?? 0 },
+    { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0 },
+    { glyph: "ƒ", label: "Other tools", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0) },
   ].filter((entry) => entry.count > 0);
 
   return { phrase: sentence(parts), glyphs, additions, deletions };

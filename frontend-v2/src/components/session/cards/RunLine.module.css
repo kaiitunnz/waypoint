@@ -83,6 +83,13 @@
   color: var(--faint);
 }
 
+.counts {
+  padding: 0 0 2px 20px;
+  font-size: var(--f-stamp);
+  line-height: 16px;
+  color: var(--faint);
+}
+
 .body {
   display: flex;
   flex-direction: column;
@@ -90,9 +97,14 @@
   padding: 0 0 4px 20px;
 }
 
-@media (max-width: 899.98px) {
+@container (max-width: 440px) {
   .hasStats .glyphs {
     display: none;
+  }
+
+  .body,
+  .counts {
+    padding-left: 12px;
   }
 }
 

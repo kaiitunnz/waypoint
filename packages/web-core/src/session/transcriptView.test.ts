@@ -18,6 +18,15 @@ describe("deriveTranscript", () => {
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "agent"]);
   });
 
+  it("leaves out the marker of an unshared reasoning step, which is not counted as hidden", () => {
+    const marker = ev(6, "system_note", "Reasoning", { item_type: "reasoning", visibility: "detail" });
+    for (const density of ["summary", "full"] as const) {
+      const view = deriveTranscript([...events, marker], density);
+      expect(JSON.stringify(view.turns)).not.toContain("Reasoning");
+    }
+    expect(deriveTranscript([...events, marker], "summary").hiddenCount).toBe(1);
+  });
+
   it("shows every event in Full", () => {
     const view = deriveTranscript(events, "full");
     expect(view.hiddenCount).toBe(0);

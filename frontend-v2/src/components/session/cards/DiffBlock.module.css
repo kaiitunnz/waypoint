@@ -17,13 +17,22 @@
   color: var(--faint);
 }
 
-.path {
-  min-width: 0;
+.path,
+.moved {
   flex: 1 1 auto;
-  font-family: var(--mono);
-  font-size: var(--f-code);
   color: var(--text);
-  overflow-wrap: anywhere;
+}
+
+.moved {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.to {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .stats {
@@ -92,6 +101,15 @@
   text-align: left;
 }
 
+/* Stays in view while the code beside it scrolls sideways. */
+.context {
+  position: sticky;
+  left: 0;
+  width: fit-content;
+  padding: 4px 8px;
+  font-family: var(--sans);
+}
+
 .foot {
   margin-top: 6px;
 }
@@ -102,7 +120,7 @@
   color: var(--faint);
 }
 
-@media (min-width: 900px) {
+@container (min-width: 600px) {
   .line {
     grid-template-columns: 38px 16px max-content;
   }

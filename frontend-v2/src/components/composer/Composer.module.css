@@ -200,7 +200,8 @@
   }
 }
 
-@media (min-width: 900px) {
+/* A wide conversation's gutter is the footer's, not the composer's. */
+@container (min-width: 600px) {
   .composer {
     padding-right: 0;
     padding-left: 0;

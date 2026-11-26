@@ -11,12 +11,14 @@ import {
   type RefObject,
 } from "react";
 
-// How long a mouse hover or a held touch takes to open the menu.
-const HOLD_MS = 450;
+// How long a mouse hover or a held touch takes to count as a hold.
+export const HOLD_MS = 450;
 
 export interface HoldMenu {
   open: boolean;
   close: (refocusTrigger?: boolean) => void;
+  // Closes it, and keeps it closed until a mouse resting on the control leaves.
+  dismiss: () => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
   itemRefs: RefObject<(HTMLButtonElement | null)[]>;
   // Around the trigger and the menu: an outside press closes it.
@@ -46,6 +48,7 @@ export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu
   const longPressed = useRef(false);
   // Disabling and enabling a trigger under the mouse fires another pointerenter.
   const hoverSpent = useRef(false);
+  const hovering = useRef(false);
 
   const clearTimer = useCallback(() => {
     if (timer.current !== null) {
@@ -68,6 +71,11 @@ export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu
     if (refocusTrigger) triggerRef.current?.focus();
   }, [clearTimer]);
 
+  const dismiss = useCallback(() => {
+    hoverSpent.current = hovering.current;
+    close();
+  }, [close]);
+
   // A touch-opened menu has no pointerleave, so an outside press closes it.
   useEffect(() => {
     if (!open) return;
@@ -84,17 +92,21 @@ export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu
   return {
     open,
     close,
+    dismiss,
     triggerRef,
     itemRefs,
     wrapRef,
     wrapProps: {
       onPointerEnter: (event) => {
-        if (event.pointerType !== "mouse" || disabled || hoverSpent.current) return;
+        if (event.pointerType !== "mouse") return;
+        hovering.current = true;
+        if (disabled || hoverSpent.current) return;
         clearTimer();
         timer.current = window.setTimeout(() => openMenu(false), HOLD_MS);
       },
       onPointerLeave: (event) => {
         if (event.pointerType !== "mouse") return;
+        hovering.current = false;
         hoverSpent.current = false;
         close();
       },

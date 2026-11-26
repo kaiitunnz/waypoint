@@ -12,13 +12,14 @@ export function useClamp<T extends HTMLElement>(cut: boolean) {
     const box = inner?.parentElement;
     if (!inner || !wrap || !box) return;
     const measure = () => {
-      wrap.hidden = !cut && inner.offsetHeight <= box.clientHeight;
+      const hidden = !cut && inner.offsetHeight <= box.clientHeight;
+      if (wrap.hidden !== hidden) wrap.hidden = hidden;
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(inner);
     return () => observer.disconnect();
-  });
+  }, [cut]);
   return { content, chip };
 }

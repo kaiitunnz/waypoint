@@ -17,7 +17,7 @@ interface RunLineProps {
   live?: boolean;
   asked?: boolean;
   // Changes the run made: kept whole while the phrase shortens, and in place of the
-  // glyph counts on a narrow screen.
+  // glyph counts in a narrow conversation.
   stats?: ReactNode;
   // Right-aligned text where the glyphs go, such as a time.
   trailing?: ReactNode;

@@ -8,7 +8,7 @@ import styles from "./Panel.module.css";
 
 interface PanelProps {
   title: string;
-  count?: number;
+  count?: ReactNode;
   // Controls beside the heading, such as Clear all.
   actions?: ReactNode;
   children: ReactNode;

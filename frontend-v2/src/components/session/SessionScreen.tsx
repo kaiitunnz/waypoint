@@ -103,7 +103,7 @@ export function SessionScreen({ id }: { id: string }) {
   const { error, errorCount } = stream;
   const loadFailed = !stream.loaded && error !== null;
   useEffect(() => {
-    if (error && !loadFailed) toast({ message: error, tone: "error", duration: null, key: "session-error" });
+    if (error && !loadFailed) toast({ message: error, tone: "error", key: "session-error" });
     // errorCount makes a repeated message a new event.
   }, [error, errorCount, loadFailed, toast]);
   useEffect(() => () => dismiss("session-error"), [dismiss]);

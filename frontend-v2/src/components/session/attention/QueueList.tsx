@@ -98,7 +98,8 @@ export function QueueList({ items, focus, canSendNow, onAction, onReleaseAll, on
       <ul className={styles.list}>
         {items.map((item) => {
           const view = queueItemView(item, { focus, canSendNow });
-          const locked = bulkBusy || busy.has(item.id);
+          // Release all and Cancel all act on held messages only.
+          const locked = (bulkBusy && item.kind === "held") || busy.has(item.id);
           return (
             <li key={`${item.kind}-${item.id}`} className={styles.item}>
               <div className={styles.meta}>

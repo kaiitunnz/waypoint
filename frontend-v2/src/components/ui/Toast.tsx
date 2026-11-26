@@ -25,7 +25,7 @@ export interface ToastOptions {
   action?: { label: string; onSelect: () => boolean | void };
   // A toast with a key replaces the one showing under the same key.
   key?: string;
-  // Milliseconds on screen; null keeps it until it is dismissed.
+  // Milliseconds on screen; null keeps it until it is dismissed, as an error does by default.
   duration?: number | null;
 }
 
@@ -86,7 +86,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const toast = useCallback(
     (options: ToastOptions) => {
       const id = next.current++;
-      const duration = options.duration === undefined ? TOAST_DURATION_MS : options.duration;
+      // An error waits for the person to dismiss it.
+      const duration = options.duration !== undefined ? options.duration : options.tone === "error" ? null : TOAST_DURATION_MS;
       setEntries((current) => {
         const replaced = options.key === undefined ? [] : current.filter((entry) => entry.key === options.key);
         replaced.forEach((entry) => clearTimer(entry.id));

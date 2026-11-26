@@ -89,7 +89,7 @@ export function AttentionStack({
 
   const report = (error: unknown, fallback: string) => {
     if (isAuthError(error)) handleAuthFailure();
-    else toast({ message: error instanceof Error ? error.message : fallback, tone: "error", duration: null });
+    else toast({ message: error instanceof Error ? error.message : fallback, tone: "error" });
   };
   const run = async (request: () => Promise<void>, fallback: string) => {
     try {

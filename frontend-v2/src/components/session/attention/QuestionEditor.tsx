@@ -63,10 +63,11 @@ export function QuestionEditor({ questions, draft, onDraft, disabled, locked = f
           </span>
         </div>
       ) : null}
-      {paginated || entry.header ? (
+      {/* A lone question is the card's headline already. */}
+      {paginated ? (
         <p className={styles.question}>
           {entry.header ? <span className={styles.header}>{entry.header}</span> : null}
-          {paginated ? entry.question : null}
+          {entry.question}
         </p>
       ) : null}
       {multi ? <p className={styles.hint}>Multi-select</p> : null}

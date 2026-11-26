@@ -37,7 +37,7 @@ export function TasksControl({ tasks, onDismiss }: TasksControlProps) {
       <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title="Tasks" subtitle={`${tasks.completed} of ${tasks.total} done`} width={360} side="top" align="right">
         <Panel
           title="Tasks"
-          count={tasks.total}
+          count={`${tasks.completed}/${tasks.total}`}
           actions={
             <Button
               variant="text"

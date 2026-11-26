@@ -36,7 +36,8 @@ export function SystemRule({ text, ts, glyph, repeat }: SystemRuleProps) {
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [open, text]);
+    // A repeat count and time range take room from the line without resizing the rule.
+  }, [open, text, repeat?.count, repeat?.until]);
 
   const content = (
     <>

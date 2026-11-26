@@ -42,15 +42,18 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
     detail.current?.scrollTo(0, 0);
   }, [selected]);
 
-  // Each item entry records, when first shown, whether it was pushed over the queue.
+  // Each item entry records, when first shown, whether the queue is the entry under it.
   // The record stays with the entry, which outlives this screen. Only the single column
-  // pushes; a row beside the item replaces.
+  // pushes; a row beside the item replaces its entry, and so takes over its record.
   const previous = useRef<string | null | undefined>(undefined);
+  const overQueue = useRef(false);
   useEffect(() => {
     const state = window.history.state;
     if (selected !== null && state && !(OVER_QUEUE in state)) {
-      window.history.replaceState({ ...state, [OVER_QUEUE]: previous.current === null && !columns }, "");
+      const over = previous.current === null ? !columns : columns && overQueue.current;
+      window.history.replaceState({ ...state, [OVER_QUEUE]: over }, "");
     }
+    overQueue.current = Boolean(window.history.state?.[OVER_QUEUE]);
     previous.current = selected;
   }, [selected, columns]);
 

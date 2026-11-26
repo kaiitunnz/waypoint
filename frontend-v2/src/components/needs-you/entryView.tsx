@@ -5,6 +5,7 @@ import { inboxBlockChips } from "@waypoint/web-core/inbox";
 import { askRow, type QueueEntry } from "@waypoint/web-core/needsYou";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
+import { Lines } from "@/components/session/cards/CommandText";
 import { PathLabel } from "@/components/session/cards/PathLabel";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -41,7 +42,10 @@ export function entryView(entry: QueueEntry, agentName: (backend: string) => str
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
       ) : request.text && request.text !== headline ? (
-        <span className={cx(request.mono && "mono")}>{request.text}</span>
+        // A command the row answers wraps whole, so each line hangs under its own start.
+        <span className={cx(request.mono && "mono")}>
+          {request.mono && request.answers ? <Lines text={request.text} /> : request.text}
+        </span>
       ) : null,
       strong: true,
       quiet: false,

@@ -66,6 +66,8 @@ class RestoreCoordinator:
         self._closing: Counter[str] = Counter()
         # Teardowns in flight, which can outlive the request that began them.
         self._teardowns: dict[str, asyncio.Task[None]] = {}
+        # Restarts waiting on one of those, each with the event that stops them.
+        self._awaiting_teardown: dict[str, asyncio.Event] = {}
 
     def spawn_boot(self, session_id: str, boot: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(boot, name=f"restore-{session_id}")
@@ -131,6 +133,9 @@ class RestoreCoordinator:
         the session. The block records the final status."""
         self._closing[session_id] += 1
         try:
+            # Its restart holds the session lock the close needs.
+            if waiting := self._awaiting_teardown.get(session_id):
+                waiting.set()
             if entry := self._restoring.get(session_id):
                 entry.superseded = True
                 await _stop(entry)
@@ -156,13 +161,22 @@ class RestoreCoordinator:
         """Wait for a teardown an earlier request stopped waiting for, so no
         process starts beside the one still going: its adapter has already
         forgotten it."""
-        if earlier := self._teardowns.get(session_id):
-            done, _ = await asyncio.wait({earlier}, timeout=self._timeout)
-            if not done:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="the previous process is still shutting down",
-                )
+        if not (earlier := self._teardowns.get(session_id)):
+            return
+        stop = self._awaiting_teardown[session_id] = asyncio.Event()
+        if session_id in self._closing:
+            stop.set()
+        try:
+            await _wait_for_end(earlier, stop, self._timeout)
+        finally:
+            del self._awaiting_teardown[session_id]
+        if stop.is_set():
+            raise RestoreCancelled
+        if not earlier.done():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the previous process is still shutting down",
+            )
 
     async def run(
         self, session: SessionRecord, restore: Restore
@@ -225,7 +239,7 @@ class RestoreCoordinator:
         self._restoring[session.id] = entry
         try:
             self._runtime._publish_session_state(session.id)
-            await _wait_for_end(entry, self._timeout)
+            await _wait_for_end(entry.call, entry.stop, self._timeout)
             timed_out = not entry.call.done() and not entry.stop.is_set()
             if not entry.call.done():
                 await _abandon(entry.call)
@@ -282,12 +296,14 @@ class RestoreCoordinator:
         )
 
 
-async def _wait_for_end(entry: _Restore, timeout: float) -> None:
+async def _wait_for_end(
+    call: asyncio.Task[None], stop: asyncio.Event, timeout: float
+) -> None:
     """Wait until the call ends, a stop is asked for, or ``timeout`` passes."""
-    stopping = asyncio.create_task(entry.stop.wait())
+    stopping = asyncio.create_task(stop.wait())
     try:
         await asyncio.wait(
-            {entry.call, stopping},
+            {call, stopping},
             timeout=timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )

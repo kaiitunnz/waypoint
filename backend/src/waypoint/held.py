@@ -54,9 +54,9 @@ class HeldQueue:
         self._draining: set[str] = set()
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
-        # Session id -> when its pane was first seen not taking input, or None
-        # once it is no longer polled.
-        self._unready_since: dict[str, float | None] = {}
+        # Session id -> when its pane was first seen not taking input in the
+        # current wait.
+        self._unready_since: dict[str, float] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._stopped = False
 
@@ -220,6 +220,12 @@ class HeldQueue:
             self.kick(session_id)
 
     def kick(self, session_id: str) -> None:
+        """Deliver automatic items after something changed for the session."""
+        # Each change gives a pane that takes no input its full wait again.
+        self._unready_since.pop(session_id, None)
+        self._start_drain(session_id)
+
+    def _start_drain(self, session_id: str) -> None:
         if self._stopped:
             return
         if session_id in self._draining:
@@ -252,7 +258,6 @@ class HeldQueue:
             or session.status in _UNDELIVERABLE
             or self._runtime.restores.pauses_delivery(session_id)
         ):
-            self._unready_since.pop(session_id, None)
             return
         async with self._send_locks[session_id]:
             for held in self._runtime.storage.list_held_messages(session_id):
@@ -276,6 +281,8 @@ class HeldQueue:
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
                 if await transport.input_blocked(session):
+                    # The wait for the input box starts once the dialog is gone.
+                    self._unready_since.pop(session_id, None)
                     self._retry_later(session_id)
                     break
                 if not await transport.ready_for_input(session):
@@ -320,12 +327,9 @@ class HeldQueue:
         stays held until the session's next state change."""
         now = asyncio.get_running_loop().time()
         since = self._unready_since.setdefault(session_id, now)
-        if since is None:
-            return
         if now - since < self._runtime.settings.session_restore_timeout_seconds:
             self._retry_later(session_id)
         else:
-            self._unready_since[session_id] = None
             log.warning("messages held for %s wait for its input box", session_id)
 
     def _retry_later(self, session_id: str) -> None:
@@ -334,7 +338,7 @@ class HeldQueue:
 
         def fire() -> None:
             self._retries.pop(session_id, None)
-            self.kick(session_id)
+            self._start_drain(session_id)
 
         self._retries[session_id] = asyncio.get_running_loop().call_later(
             DEFER_RETRY_SECONDS, fire

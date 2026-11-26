@@ -811,6 +811,36 @@ async def test_a_retry_never_overlaps_a_teardown_still_running(
     assert steps == ["teardown", "torn down", "teardown", "torn down", "restore"]
 
 
+async def test_terminate_stops_a_retry_waiting_for_a_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, session_restore_timeout_seconds=1)
+    add_session(runtime, "s1", status=SessionStatus.EXITED)
+    release = asyncio.Event()
+    teardowns: list[str] = []
+
+    async def first_teardown_hangs(*_args: Any) -> None:
+        teardowns.append("teardown")
+        if len(teardowns) == 1:
+            await release.wait()
+
+    monkeypatch.setattr(
+        get_registry().get("codex"), "terminate_session", first_teardown_hangs
+    )
+    stub_restores(monkeypatch, {})
+
+    async with asyncio.timeout(5):
+        await assert_refused(runtime.reattach("s1"), 504)
+        retry = asyncio.create_task(runtime.reattach("s1"))
+        await asyncio.sleep(0.05)
+        async with asyncio.timeout(0.5):
+            session = await runtime.terminate("s1")
+        await assert_refused(retry, 409, "cancelled")
+        release.set()
+
+    assert session.status == SessionStatus.EXITED
+
+
 async def test_a_restart_stops_a_delivery_already_under_way(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

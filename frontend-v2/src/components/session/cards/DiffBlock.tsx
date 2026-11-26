@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/events";
 import { DIFF_MARKER, type DiffLine } from "@waypoint/web-core/highlight";
 import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
-import { compactDiff, fullDiff } from "@waypoint/web-core/session/diffCompact";
+import { compactDiff, fullDiff, reachableLines } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
 import { relativeToCwd, splitPath } from "@waypoint/web-core/workspacePaths";
 
@@ -51,7 +51,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   const [open, setOpen] = useState(false);
   const compact = useMemo(() => compactDiff(lines, COMPACT_LINES), [lines]);
   const full = useMemo(() => fullDiff(lines), [lines]);
-  const folded = compact.filter((row) => row.kind === "line").length < full.length;
+  const folded = reachableLines(compact) < full.length;
   const rows = open ? full : compact;
   const change = displayChangeType(file);
   const { cwd } = useSessionContext();
@@ -67,8 +67,12 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
           {from ? (
             <span className={styles.moved}>
               {label(from)}
-              <span aria-label="renamed to">→</span>
-              {label(file.path)}
+              <span className={styles.to}>
+                <span role="img" aria-label="renamed to">
+                  →
+                </span>
+                {label(file.path)}
+              </span>
             </span>
           ) : (
             label(file.path)

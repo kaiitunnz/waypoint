@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildPlainDiffLines } from "../highlight";
-import { compactDiff, fullDiff } from "./diffCompact";
+import { compactDiff, fullDiff, reachableLines } from "./diffCompact";
 
 const DIFF = [
   "--- a/f.py",
@@ -35,6 +35,14 @@ describe("compactDiff", () => {
       compactDiff(buildPlainDiffLines(diff)).flatMap((row) => (row.kind === "fold" ? [row.lines?.map((line) => line.tokens[0].text) ?? null] : []));
     expect(folds(DIFF)).toEqual([["c5", "c6", "c7", "c8"]]);
     expect(folds("@@ -1,2 +1,2 @@\n-a\n+b\n@@ -20,2 +20,2 @@\n-c\n+d")).toEqual([null]);
+  });
+
+  it("counts the lines its folds carry as reachable, and not those cut off or between hunks", () => {
+    const reachable = (diff: string, maxLines?: number) => reachableLines(compactDiff(buildPlainDiffLines(diff), maxLines));
+    expect(reachable("@@ -1,5 +1,5 @@\n-a\n+b\n c1\n c2\n-d")).toBe(5);
+    expect(reachable(DIFF)).toBe(7);
+    expect(reachable(DIFF, 2)).toBe(2);
+    expect(reachable("@@ -1,2 +1,2 @@\n-a\n+b\n@@ -20,2 +20,2 @@\n-c\n+d")).toBe(4);
   });
 
   it("drops file and hunk headers", () => {

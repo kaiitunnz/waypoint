@@ -51,6 +51,11 @@ export function compactDiff(lines: readonly DiffLine[], maxLines = Infinity): Co
   return rows.slice(0, rows[cut - 1]?.kind === "fold" ? cut - 1 : cut);
 }
 
+// How many diff lines these rows can show: the lines in them and those their folds carry.
+export function reachableLines(rows: readonly CompactDiffRow[]): number {
+  return rows.reduce((count, row) => count + (row.kind === "line" ? 1 : (row.lines?.length ?? 0)), 0);
+}
+
 // Every line of a diff but its file and hunk headers, with nothing folded or capped.
 export function fullDiff(lines: readonly DiffLine[]): CompactDiffRow[] {
   return lines.flatMap((line): CompactDiffRow[] => (line.kind === "meta" || line.kind === "hunk" ? [] : [{ kind: "line", line }]));

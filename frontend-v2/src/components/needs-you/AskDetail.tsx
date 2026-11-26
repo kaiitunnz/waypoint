@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 
-import { humaniseBackend, useBackendCatalog } from "@waypoint/web-core/backends";
+import { humaniseBackend } from "@waypoint/web-core/backends";
 import { useApprovalRequest } from "@waypoint/web-core/hooks/useApprovalRequest";
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
@@ -20,6 +20,7 @@ import { DecisionCard } from "@/components/session/attention/DecisionCard";
 import { AskControllerProvider, SessionContextProvider } from "@/components/session/SessionContext";
 import { useAskLocks } from "@/components/sessions/AskLocks";
 import { SourceLine } from "@/components/sessions/SourceLine";
+import { useAskSession } from "@/components/sessions/useAskCall";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
@@ -30,6 +31,7 @@ import { useMountedRef } from "@/lib/useMountedRef";
 
 import { DetailFrame, DetailState } from "./DetailFrame";
 import { LoadFailed } from "./LoadFailed";
+import { RequestFields } from "./RequestFields";
 import { useDetailContext } from "./useDetailContext";
 import styles from "./AskDetail.module.css";
 
@@ -96,27 +98,36 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; cwd: string; agent: string }) {
+function RequestDetail({ ask, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; agent: string }) {
   const { host, token } = useShellData();
-  const { request, retry } = useApprovalRequest(host, token, ask, cwd, handleAuthFailure);
-  const body = request.status === "ready" ? request.body : null;
+  const session = useAskSession(ask.session_id);
+  const { request, retry } = useApprovalRequest(host, token, ask, session, handleAuthFailure);
+  const shown = request.status === "ready" ? request : null;
+  // A tool without a view of its own is shown by its fields.
+  const view = shown && !(shown.body.kind === "raw" && shown.fields?.tool_input) ? shown.body : null;
+  const fields = shown?.fields ? <RequestFields fields={shown.fields} /> : null;
   const { actions, supportsNote } = decisionView(ask);
-  const context = useDetailContext(ask.session_id, cwd, agent);
+  const context = useDetailContext(ask.session_id, session.cwd, agent);
   const text = ask.body ?? ask.title;
+  const copyText = view
+    ? approvalCopyText(view, text)
+    : shown?.fields
+      ? JSON.stringify(shown.fields, null, 2)
+      : text;
 
   return (
     <SessionContextProvider value={context}>
       <DecisionCard
         roomy
         title={ask.title}
-        copyText={body ? approvalCopyText(body, text) : text}
+        copyText={copyText}
         copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
         // Nothing is decided on part of a request.
-        locked={!(request.status === "ready" && request.whole)}
+        locked={!shown?.whole}
         actions={actions.map((action) => ({
           id: action.decision,
           label: action.label,
-          primary: action.kind === "approve",
+          primary: action.decision === "accept",
         }))}
         supportsNote={supportsNote}
         availability={ask.availability}
@@ -124,31 +135,36 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         // The card retries a not-ready agent itself.
         decide={(decision, note) => decideAsk(host, token, ask, decision, note, { attempts: 1 })}
       >
-        {body ? (
-          <ApprovalBody body={body} whole />
+        {shown ? (
+          <>
+            {shown.warnings.map((warning) => (
+              <p key={warning} className={styles.warn}>
+                {warning}
+              </p>
+            ))}
+            {view ? <ApprovalBody body={view} whole /> : null}
+            {fields}
+            {shown.whole ? null : (
+              <p className={styles.note}>
+                {shown.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}
+              </p>
+            )}
+          </>
         ) : request.status === "loading" ? (
           <p className={styles.note}>Loading…</p>
         ) : (
           <LoadFailed message={"Couldn't load the request"} onRetry={retry} />
         )}
-        {request.status === "ready" && !request.whole ? (
-          <p className={styles.note}>
-            {request.body.kind === "plan" ? "No plan text" : "The whole request isn't available here"}
-          </p>
-        ) : null}
       </DecisionCard>
     </SessionContextProvider>
   );
 }
 
 function AskView({ ask }: { ask: PendingAsk }) {
-  const { host, token } = useShellData();
-  const { sessions } = useSessionsData();
-  const catalog = useBackendCatalog(host, token, null);
+  const { catalog } = useShellData();
   const now = useNow(30_000);
   const pointer = usePointerUI();
   const agent = humaniseBackend(ask.session_backend, catalog);
-  const cwd = sessions?.find((session) => session.id === ask.session_id)?.cwd ?? "";
   const source = (
     <SourceLine
       lead={<StatusLamp state="needs" size="sm" flat />}
@@ -160,7 +176,7 @@ function AskView({ ask }: { ask: PendingAsk }) {
   );
   return (
     <DetailFrame source={source} sessionId={ask.session_id}>
-      {ask.kind === "question" ? <QuestionDetail ask={ask} /> : <RequestDetail ask={ask} cwd={cwd} agent={agent} />}
+      {ask.kind === "question" ? <QuestionDetail ask={ask} /> : <RequestDetail ask={ask} agent={agent} />}
     </DetailFrame>
   );
 }

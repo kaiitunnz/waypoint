@@ -11,9 +11,6 @@ import {
   type PlanViewModel,
 } from "../events";
 import type { EventRecord, SessionRecord } from "../types";
-import { resolveFromCwd, splitPath } from "../workspacePaths";
-import { hunksAddUp } from "../highlight";
-import { toolInputForEvent } from "./toolPresentation";
 import { collapseSupersededPlanEvents, latestActionablePlanEvent } from "./transcript";
 
 export function findPendingApprovals(events: EventRecord[]): EventRecord[] {
@@ -50,160 +47,32 @@ export type ApprovalBody =
   | { kind: "diff"; prompt: string; preview: EventDiffPreview }
   | { kind: "plan"; plan: string }
   | { kind: "task"; prompt: string; description: string; subagent: string }
-  | { kind: "command"; description: string; command: string; outsideSandbox?: boolean }
+  | { kind: "command"; description: string; command: string }
   | { kind: "workflow"; script: string }
   | { kind: "edit"; tool: string; path: string | null }
   | { kind: "raw"; text: string };
 
-const WORKFLOW_TOOLS = new Set(["Workflow", "RunWorkflow"]);
-// Tools that ask to run a text of their own (a plan, prompt, command or script): without
-// it, what is asked is not on screen.
-const CONTENT_TOOLS = new Set(["ExitPlanMode", "Task", "Agent", "Bash", ...WORKFLOW_TOOLS]);
+export const WORKFLOW_TOOLS: ReadonlySet<string> = new Set(["Workflow", "RunWorkflow"]);
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 
 export function approvalBody(event: EventRecord): ApprovalBody {
   const preview = parseEvent(event).diffPreview;
   if (preview) return { kind: "diff", prompt: event.text, preview };
-  return approvalBodyForTool(readToolName(event), asRecord(event.metadata?.tool_input), event.text);
-}
-
-// A tool with no body of its own shows its whole input: its request text may be only
-// the start. A request that carries a command beside its title shows the command.
-export function wholeApprovalBody(event: EventRecord): ApprovalBody {
-  const body = approvalBody(event);
-  if (body.kind !== "raw") return body;
+  const tool = readToolName(event);
   const input = asRecord(event.metadata?.tool_input);
-  if (input) {
-    return Object.keys(input).length === 0 ? body : { kind: "raw", text: JSON.stringify(input, null, 2) };
-  }
-  const command = asRecord(event.metadata?.request)?.command;
-  return typeof command === "string" && command ? { kind: "command", description: "", command } : body;
-}
-
-// Lines show only under a numbered hunk header, so a diff without one shows nothing, and
-// one whose hunks do not add up shows something other than the change.
-const hasWholeDiff = (file: EventDiffPreview["files"][number]) =>
-  !file.truncated && !file.binary && !file.unavailableReason && /^@@ -\d/m.test(file.diff) && hunksAddUp(file.diff);
-
-const callId = (event: EventRecord) => event.metadata?.tool_use_id ?? event.metadata?.item_id;
-
-const fileName = (path: string | null) => (path === null ? null : splitPath(path).base);
-
-// A pending Write's content, only when it is certain: from the request itself, else from
-// the transcript's one unanswered Write since the human last spoke that has this file
-// name, if it is of this very path. A request may name the file without its folder, so a
-// second file of that name leaves it unknown. An empty write has nothing to show.
-function pendingWrite(
-  request: EventRecord,
-  events: readonly EventRecord[],
-  cwd: string,
-): { path: string; content: string } | null {
-  const input = asRecord(request.metadata?.tool_input);
-  const path = toolFilePath(input);
-  if (readToolName(request) !== "Write" || !path) return null;
-  if (typeof input?.content === "string") return input.content ? { path, content: input.content } : null;
-  const asked = resolveFromCwd(path, cwd);
-  if (!asked) return null;
-  const before = events.filter((event) => event.sequence < request.sequence);
-  const turn = before.slice(before.map((event) => event.kind).lastIndexOf("user_input") + 1);
-  const answered = new Set(turn.filter((event) => event.kind === "tool_result").map(callId));
-  const calls = turn.filter(
-    (event) =>
-      event.kind === "tool_call" &&
-      readToolName(event) === "Write" &&
-      !answered.has(callId(event)) &&
-      fileName(toolFilePath(toolInputForEvent(event))) === fileName(asked),
-  );
-  if (calls.length !== 1 || toolFilePath(toolInputForEvent(calls[0])) !== asked) return null;
-  const content = toolInputForEvent(calls[0])?.content;
-  return typeof content === "string" && content ? { path: asked, content } : null;
-}
-
-// A write replaces the file, so its whole content is the change.
-function writeDiff(path: string, content: string): EventDiffPreview {
-  const lines = content.replace(/\n$/, "").split("\n");
-  const diff = [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((line) => `+${line}`), ""].join("\n");
-  const file = { path, changeType: "unknown" as const, diff, additions: lines.length, deletions: 0 };
-  return {
-    schemaVersion: 1,
-    phase: "proposed",
-    files: [{ ...file, truncated: false, binary: false }],
-    totalAdditions: lines.length,
-    totalDeletions: 0,
-    truncated: false,
-  };
-}
-
-// `whole`: the body is all of what is asked, so it can be decided on.
-export interface ShownRequest {
-  body: ApprovalBody;
-  whole: boolean;
-}
-
-// A pending request as its screen shows it. `events` are those up to the request, and
-// `cwd` the session's.
-export function shownRequest(request: EventRecord, events: readonly EventRecord[] = [], cwd = ""): ShownRequest {
-  const write = parseEvent(request).diffPreview ? null : pendingWrite(request, events, cwd);
-  const body: ApprovalBody = write
-    ? { kind: "diff", prompt: request.text, preview: writeDiff(write.path, write.content) }
-    : wholeApprovalBody(request);
-  return { body, whole: holdsWholeRequest(body, asRecord(request.metadata?.tool_input), readToolName(request)) };
-}
-
-// Whether a body holds the whole of what is asked, `input` and `tool` being the call's
-// own. Nobody decides on less: a plan, prompt or command with no text, an edit without
-// its content, a diff that is cut or lists a file without it, or a request known only by
-// its title or method.
-export function holdsWholeRequest(
-  body: ApprovalBody,
-  input: Record<string, unknown> | null,
-  tool: string | null = null,
-): boolean {
-  switch (body.kind) {
-    case "plan":
-      return body.plan.trim() !== "";
-    case "task":
-      return body.prompt.trim() !== "";
-    case "command":
-      return body.command.trim() !== "";
-    case "workflow":
-      return body.script.trim() !== "";
-    case "diff":
-      return !body.preview.truncated && body.preview.files.every(hasWholeDiff);
-    // The path alone: the change is what is asked.
-    case "edit":
-      return false;
-    case "raw": {
-      if (!input || (tool && CONTENT_TOOLS.has(tool))) return false;
-      // A call whose every argument came through empty shows nothing of itself.
-      const values = Object.values(input);
-      return values.length === 0 || values.some((value) => value !== "");
-    }
-  }
-}
-
-export const runsOutsideSandbox = (input: Record<string, unknown> | null) => input?.dangerouslyDisableSandbox === true;
-
-// `tool` is a normalized tool name; `raw` is the text where no kind matches.
-export function approvalBodyForTool(
-  tool: string | null,
-  input: Record<string, unknown> | null,
-  raw: string,
-): ApprovalBody {
   if (tool === "ExitPlanMode" && typeof input?.plan === "string") return { kind: "plan", plan: input.plan };
   if ((tool === "Task" || tool === "Agent") && typeof input?.prompt === "string") {
     return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
   }
   if (tool === "Bash" && typeof input?.command === "string") {
-    const command = { kind: "command" as const, description: text(input.description), command: input.command };
-    return runsOutsideSandbox(input) ? { ...command, outsideSandbox: true } : command;
+    return { kind: "command", description: text(input.description), command: input.command };
   }
   if (tool && WORKFLOW_TOOLS.has(tool) && typeof input?.script === "string") {
     return { kind: "workflow", script: input.script };
   }
   if (tool && FILE_EDIT_TOOLS.has(tool)) return { kind: "edit", tool, path: toolFilePath(input) };
-  return { kind: "raw", text: raw };
+  return { kind: "raw", text: event.text };
 }
 
 export function approvalPrompt(body: ApprovalBody): string | null {
@@ -235,8 +104,6 @@ export function approvalCopyText(body: ApprovalBody, eventText: string): string 
       return body.command;
     case "workflow":
       return body.script;
-    case "raw":
-      return body.text;
     default:
       return eventText;
   }

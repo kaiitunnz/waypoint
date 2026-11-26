@@ -1,0 +1,10 @@
+/* Only a very long request scrolls, and it opens at its start. */
+.fields {
+  max-height: 60lh;
+  margin-top: 8px;
+  padding: 6px 9px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: var(--f-code);
+}

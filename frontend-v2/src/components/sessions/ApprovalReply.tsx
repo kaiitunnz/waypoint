@@ -3,27 +3,25 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { decideAsk, decisionView, type DecisionKind } from "@waypoint/web-core/pendingAskActions";
+import { decideAsk, decisionView, type Decision } from "@waypoint/web-core/pendingAskActions";
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
 
 import { useAskResponder } from "./useAskResponder";
 
-const VARIANT = { approve: "primary", session: "text", decline: "danger" } as const satisfies Record<
-  DecisionKind,
-  string
->;
+const VARIANT = { accept: "primary", decline: "danger" } as const satisfies Record<Decision, string>;
 
 // An approval decided where it is listed: its reply and the note that goes with it.
-export function useApprovalReply(ask: PendingApprovalAsk | PendingPlanAsk) {
+// `held` keeps the buttons off while what they would decide is still being read.
+export function useApprovalReply(ask: PendingApprovalAsk | PendingPlanAsk, held = false) {
   const { actions, supportsNote } = decisionView(ask);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const { phase, send, busy, dismiss } = useAskResponder(ask.id);
-  const disabled = busy || ask.availability !== "actionable";
+  const disabled = held || busy || ask.availability !== "actionable";
 
-  const decide = (decision: string) =>
+  const decide = (decision: Decision) =>
     void send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry), decision);
 
   const noteProps = {
@@ -38,8 +36,7 @@ export function useApprovalReply(ask: PendingApprovalAsk | PendingPlanAsk) {
     onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
       if (!isModifiedEnterShortcut(event)) return;
       event.preventDefault();
-      const approve = actions.find((action) => action.kind === "approve");
-      if (approve && !disabled) decide(approve.decision);
+      if (!disabled) decide("accept");
     },
   };
 
@@ -60,7 +57,7 @@ export function DecisionButtons({ reply }: { reply: ReturnType<typeof useApprova
   return actions.map((action) => (
     <Button
       key={action.decision}
-      variant={VARIANT[action.kind]}
+      variant={VARIANT[action.decision]}
       size="sm"
       disabled={disabled}
       busy={phase.state === "sending" && phase.action === action.decision}

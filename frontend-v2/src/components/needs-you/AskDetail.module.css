@@ -18,3 +18,10 @@
   font-size: var(--f-meta);
   color: var(--muted);
 }
+
+.warn {
+  margin-bottom: 6px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--warn);
+}

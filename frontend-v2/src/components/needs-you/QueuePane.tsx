@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { batchDeleteInboxItems, deleteInboxItem, deleteResolvedInboxItems } from "@waypoint/web-core/api";
-import { humaniseBackend, useBackendCatalog } from "@waypoint/web-core/backends";
+import { humaniseBackend } from "@waypoint/web-core/backends";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSelection } from "@waypoint/web-core/hooks/useSelection";
 import type { InboxStatusFilter } from "@waypoint/web-core/inbox";
 import type { QueueEntry, SourceFilter } from "@waypoint/web-core/needsYou";
+import { NO_CALL } from "@waypoint/web-core/pendingAskActions";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 
 import { useAskLocks } from "@/components/sessions/AskLocks";
@@ -67,10 +68,9 @@ const CONFIRM: Record<Deletion["kind"], (count: number) => { title: string; deta
 };
 
 export function QueuePane() {
-  const { host, token, waiting: counts, retryGates } = useShellData();
+  const { host, token, waiting: counts, retryGates, catalog } = useShellData();
   const { columns, selected, leave } = useNeedsYou();
   const now = useNow(30_000);
-  const catalog = useBackendCatalog(host, token, null);
   const toastFailure = useFailureToast();
 
   const [status, setStatus] = useState<InboxStatusFilter>("open");
@@ -131,20 +131,19 @@ export function QueuePane() {
   }
 
   const row = (entry: QueueEntry) => {
-    const view = entryView(entry, agentName);
     const common = {
       entry,
-      view,
       time: formatSessionTime(entry.time, now),
       selecting: selection.selecting,
       checked: selection.selected.has(entry.key),
       onToggle: selection.toggle,
       onDelete: (id: string) => setDeletion({ kind: "one", id }),
     };
+    // A card of an ask is its own component, so its view only names the agent.
     return columns ? (
-      <QueueRow key={entry.key} {...common} selected={selected === entry.routeId} />
+      <QueueRow key={entry.key} {...common} agentName={agentName} selected={selected === entry.routeId} />
     ) : (
-      <QueueCard key={entry.key} {...common} now={now} />
+      <QueueCard key={entry.key} {...common} view={entryView(entry, agentName, NO_CALL)} now={now} />
     );
   };
 

@@ -1,170 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import { ev, planMetadata } from "../test-helpers";
-import type { EventRecord, SessionRecord } from "../types";
+import type { SessionRecord } from "../types";
 import {
   approvalActions,
   approvalBody,
-  approvalBodyForTool,
   approvalCopyText,
   approvalId,
   approvalPrompt,
   findPendingApprovals,
   pendingPlanApproval,
   planApprovalActions,
-  wholeApprovalBody,
-  holdsWholeRequest,
-  type ApprovalBody,
-  shownRequest,
-  type ShownRequest,
 } from "./approvals";
 
 const request = (seq: number, approvalId?: string) =>
   ev(seq, "approval_request", "allow?", approvalId ? { approval_id: approvalId } : {});
 const resolved = (seq: number, approvalId?: string, text = "Approval response sent") =>
   ev(seq, "system_note", text, approvalId ? { approval_id: approvalId } : {});
-
-describe("wholeApprovalBody", () => {
-  const input = { to: "a@b.c", body: "x".repeat(400), cc: "d@e.f" };
-
-  it("shows all of a generic tool's input where the request text is cut", () => {
-    const cut = ev(1, "approval_request", `Approve mcp__mail__send: ${JSON.stringify(input).slice(0, 240)}`, {
-      tool_name: "mcp__mail__send",
-      tool_input: input,
-    });
-    const body = wholeApprovalBody(cut);
-    expect(body).toEqual({ kind: "raw", text: JSON.stringify(input, null, 2) });
-    expect(approvalCopyText(body, cut.text)).toBe(JSON.stringify(input, null, 2));
-  });
-
-  it("keeps the request text without input, and a body of its own", () => {
-    const bare = ev(1, "approval_request", "Approve file changes", {});
-    expect(wholeApprovalBody(bare)).toEqual({ kind: "raw", text: "Approve file changes" });
-    const command = ev(2, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command: "ls" } });
-    expect(wholeApprovalBody(command)).toEqual(approvalBody(command));
-  });
-});
-
-describe("wholeApprovalBody of a request with a command beside its title", () => {
-  it("shows the command", () => {
-    const event = ev(1, "approval_request", "Approve command: git push", { request: { command: "git push" } });
-    expect(wholeApprovalBody(event)).toEqual({ kind: "command", description: "", command: "git push" });
-    const none = ev(2, "approval_request", "Approve command: ", { request: { command: null } });
-    expect(wholeApprovalBody(none)).toEqual({ kind: "raw", text: "Approve command: " });
-  });
-});
-
-describe("a command that leaves the sandbox", () => {
-  it("says so in its body", () => {
-    const input = { command: "ls", dangerouslyDisableSandbox: true };
-    expect(approvalBodyForTool("Bash", input, "")).toMatchObject({ kind: "command", outsideSandbox: true });
-    expect(approvalBodyForTool("Bash", { command: "ls" }, "")).not.toHaveProperty("outsideSandbox");
-  });
-});
-
-describe("holdsWholeRequest", () => {
-  const diff = (file: Record<string, unknown>, truncated = false): ApprovalBody =>
-    approvalBody(
-      ev(1, "approval_request", "Approve", {
-        diff_preview: { phase: "proposed", truncated, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\n", ...file }] },
-      }),
-    );
-
-  it("takes a body that shows everything asked", () => {
-    expect(holdsWholeRequest(diff({}), null)).toBe(true);
-    expect(holdsWholeRequest({ kind: "plan", plan: "# Do it" }, null)).toBe(true);
-    expect(holdsWholeRequest({ kind: "command", description: "", command: "ls" }, null)).toBe(true);
-    expect(holdsWholeRequest({ kind: "raw", text: "{}" }, { to: "a@b" })).toBe(true);
-    // A tool without arguments is its name.
-    expect(holdsWholeRequest({ kind: "raw", text: "Approve mcp__x__ping" }, {})).toBe(true);
-  });
-
-  it("refuses a body with nothing in it", () => {
-    expect(holdsWholeRequest({ kind: "plan", plan: "  " }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "command", description: "", command: "" }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "task", prompt: "", description: "x", subagent: "" }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "workflow", script: "" }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "edit", tool: "Edit", path: "/srv/a.ts" }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "raw", text: "{}" }, { description: "" })).toBe(false);
-  });
-
-  it("refuses a request known only by its title or method", () => {
-    expect(holdsWholeRequest({ kind: "raw", text: "Approve file changes" }, null)).toBe(false);
-    expect(holdsWholeRequest({ kind: "raw", text: "Approve plan" }, {}, "ExitPlanMode")).toBe(false);
-    expect(holdsWholeRequest({ kind: "raw", text: "{}" }, { timeout: 5 }, "Bash")).toBe(false);
-  });
-
-  it("refuses a diff that is cut or lists a file without its content", () => {
-    expect(holdsWholeRequest(diff({}, true), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ truncated: true }), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ diff: "" }), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ binary: true }), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ unavailable_reason: "diff content was not included by backend" }), null)).toBe(false);
-    // Nothing of these would show.
-    expect(holdsWholeRequest(diff({ diff: "rename from a\nrename to b\n" }), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ diff: "@@ fn\n-a\n+b\n" }), null)).toBe(false);
-    expect(holdsWholeRequest(diff({ diff: "@@ -1 +1 @@\n-a = 1+a = 2\n" }), null)).toBe(false);
-  });
-});
-
-describe("shownRequest", () => {
-  const approve = (input: Record<string, unknown>, tool = "Write") =>
-    ev(9, "approval_request", `Approve ${tool}`, { tool_name: tool, tool_input: input, approval_id: "a1" });
-  const call = (seq: number, id: string, path: string, content: string, tool = "Write") =>
-    ev(seq, "tool_call", tool, { tool_name: tool, tool_use_id: id, payload: { input: { file_path: path, content } } });
-  const added = (request: ShownRequest) =>
-    request.body.kind === "diff" ? [request.body.preview.files[0].path, request.body.preview.files[0].diff] : request.body.kind;
-  const pending = approve({ file_path: "sub/a.txt" });
-  const spoke = ev(1, "user_input", "go");
-
-  it("renders a write from the one unanswered call for that file", () => {
-    const shown = shownRequest(pending, [spoke, call(2, "t1", "/w/sub/a.txt", "one\n++two\n")], "/w");
-    expect(added(shown)).toEqual(["/w/sub/a.txt", "@@ -0,0 +1,2 @@\n+one\n+++two\n"]);
-    expect(shown.whole).toBe(true);
-  });
-
-  it("renders a write whose request carries its content", () => {
-    const shown = shownRequest(approve({ file_path: "/w/a.txt", content: "x" }), [], "");
-    expect(added(shown)).toEqual(["/w/a.txt", "@@ -0,0 +1,1 @@\n+x\n"]);
-    expect(shown.whole).toBe(true);
-  });
-
-  it("locks a write whose content is not certain", () => {
-    const result = ev(3, "tool_result", "done", { tool_use_id: "t1" });
-    const cases: [string, EventRecord[], string][] = [
-      ["another directory", [spoke, call(2, "t1", "/w/other/a.txt", "x")], "/w"],
-      ["answered", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), result], "/w"],
-      ["two candidates", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), call(3, "t2", "/w/sub/a.txt", "y")], "/w"],
-      ["another file of that name", [spoke, call(2, "t1", "/w/sub/a.txt", "x"), call(3, "t2", "/w/a.txt", "y")], "/w"],
-      ["empty content", [spoke, call(2, "t1", "/w/sub/a.txt", "")], "/w"],
-      ["from before the human spoke", [call(1, "t1", "/w/sub/a.txt", "x"), ev(2, "user_input", "next")], "/w"],
-      ["after the request", [spoke, call(10, "t1", "/w/sub/a.txt", "x")], "/w"],
-      ["unknown cwd", [spoke, call(2, "t1", "/w/sub/a.txt", "x")], ""],
-      ["an edit's call", [spoke, call(2, "t1", "/w/sub/a.txt", "x", "Edit")], "/w"],
-    ];
-    for (const [name, events, cwd] of cases) {
-      const shown = shownRequest(pending, events, cwd);
-      expect([name, shown.body.kind, shown.whole]).toEqual([name, "edit", false]);
-    }
-  });
-
-  it("locks a request that names only the file when another folder has one too", () => {
-    const named = approve({ file_path: "a.txt" });
-    const events = [spoke, call(2, "t1", "/w/sub/a.txt", "long"), call(3, "t2", "/w/a.txt", "short")];
-    expect(shownRequest(named, events, "/w").whole).toBe(false);
-    expect(shownRequest(named, [spoke, call(2, "t1", "/w/sub/a.txt", "long")], "/w").whole).toBe(false);
-    expect(shownRequest(approve({ file_path: "/w/a.txt", content: "" }), [], "/w").whole).toBe(false);
-  });
-
-  it("locks an edit, and a request known by its title", () => {
-    const events = [spoke, call(2, "t1", "/w/a.txt", "x", "Edit")];
-    expect(shownRequest(approve({ file_path: "a.txt" }, "Edit"), events, "/w").whole).toBe(false);
-    expect(shownRequest(ev(1, "approval_request", "Approve file changes", {}))).toEqual({
-      body: { kind: "raw", text: "Approve file changes" },
-      whole: false,
-    });
-  });
-});
 
 describe("findPendingApprovals", () => {
   it("is empty without events", () => {
@@ -213,14 +65,6 @@ describe("findPendingApprovals", () => {
 
 const approval = (toolName: string, toolInput: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
   ev(1, "approval_request", "raw text", { tool_name: toolName, tool_input: toolInput, approval_id: "ap1", ...extra });
-
-describe("approvalBodyForTool", () => {
-  it("reads a request from the tool call alone", () => {
-    expect(approvalBodyForTool("Bash", { command: "ls" }, "Run a command")).toEqual({ kind: "command", description: "", command: "ls" });
-    expect(approvalBodyForTool("Edit", { file_path: "/a.ts" }, "Edit")).toEqual({ kind: "edit", tool: "Edit", path: "/a.ts" });
-    expect(approvalBodyForTool(null, null, "Allow the thing")).toEqual({ kind: "raw", text: "Allow the thing" });
-  });
-});
 
 describe("approvalBody", () => {
   it("reads each tool's body and prompt", () => {

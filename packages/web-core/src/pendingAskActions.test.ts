@@ -4,16 +4,17 @@ import * as api from "./api";
 import {
   answerQuestion,
   approvalRequest,
+  askedCall,
   buildAnswer,
   decideAsk,
-  decidesInline,
   decisionView,
+  inlineCommand,
   emptyPicks,
   isAnswerable,
   isAgentNotReady,
   planPreview,
+  readTranscript,
   retryWhileNotReady,
-  sessionScopedAllow,
   showsSend,
   stripRecommendedSuffix,
   tapOption,
@@ -22,6 +23,7 @@ import {
   type PromptPick,
   isRecommendedLabel,
 } from "./pendingAskActions";
+import { ev } from "./test-helpers";
 import type {
   PendingApprovalAsk,
   PendingAskApproval,
@@ -38,6 +40,7 @@ vi.mock("./api", async (importOriginal) => {
     answerAskQuestion: vi.fn(),
     approveSession: vi.fn(),
     approvePlan: vi.fn(),
+    fetchEvents: vi.fn(),
   };
 });
 
@@ -119,36 +122,14 @@ describe("decisions", () => {
   const plan = (decisions: string[]) =>
     ({ kind: "plan_approval", plan: { plan_id: "p1", text: "# Plan", decisions, supports_note: false, resolve_via: "approve" } }) as unknown as PendingPlanAsk;
 
-  it("always offers approve and decline, and an escalation only when listed", () => {
-    expect(decisionView(approval()).actions.map((a) => a.decision)).toEqual(["accept", "decline"]);
-    expect(
-      decisionView(approval({ decisions: ["accept", "acceptForSession", "decline", "acceptAlways"] })).actions.map(
-        (a) => a.decision,
-      ),
-    ).toEqual(["accept", "acceptForSession", "decline"]);
-    expect(decisionView(plan(["acceptForSession"])).actions.map((a) => a.label)).toEqual([
-      "Approve",
-      "For this session",
-      "Decline",
-    ]);
-  });
-
-  it("sends the agent's own id for the session-scoped allow, whatever its spelling", () => {
-    for (const id of ["acceptForSession", "allow_for_session", "approve-for-this-session", "AllowForSession"]) {
-      const { actions } = decisionView(approval({ decisions: ["approve", id, "decline"] }));
-      expect(actions.map((a) => [a.decision, a.label])).toEqual([
+  it("offers only a single decision, whatever wider grant the agent lists", () => {
+    const listed = ["accept", "acceptForSession", "decline", "acceptAlways"];
+    for (const ask of [approval({ decisions: listed }), plan(listed), plan([])]) {
+      expect(decisionView(ask).actions.map((a) => [a.decision, a.label])).toEqual([
         ["accept", "Approve"],
-        [id, "For this session"],
         ["decline", "Decline"],
       ]);
     }
-    expect(sessionScopedAllow(["approve", "acceptAlways", "decline"])).toBeUndefined();
-    expect(sessionScopedAllow([])).toBeUndefined();
-  });
-
-  it("keeps Approve first and Decline last", () => {
-    const { actions } = decisionView(approval({ decisions: ["approve", "acceptForSession", "decline"] }));
-    expect(actions.map((a) => a.kind)).toEqual(["approve", "session", "decline"]);
   });
 
   it("previews the command or the edited file, and carries the plan text", () => {
@@ -195,81 +176,114 @@ describe("deciding outside the detail", () => {
       supports_note: false,
     },
   });
+  const plan = (text: string, resolve_via: PendingAskPlan["resolve_via"]) =>
+    ({ kind: "plan_approval", plan: { plan_id: "p", text, resolve_via } }) as unknown as PendingPlanAsk;
+  const session = { cwd: "/w", fromScreen: false };
 
-  it("shows what the transcript holds, and a plan from its ask", () => {
-    const body = { kind: "command" as const, description: "", command: "git push" };
-    expect(approvalRequest(approval("Bash", { command: "git push" }), null)).toEqual({ status: "loading" });
-    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), { body, whole: true })).toEqual({
+  it("decides a plain shell command that lists whole", () => {
+    expect(inlineCommand("Bash", { command: "git push" })).toBe("git push");
+    expect(inlineCommand("bash", { command: "a\nb\nc", description: "x", timeout: 5, run_in_background: true })).toBe("a\nb\nc");
+    expect(inlineCommand("Bash", { command: "x".repeat(160) })).toBe("x".repeat(160));
+    expect(inlineCommand("Bash", { command: "x".repeat(161) })).toBeNull();
+    expect(inlineCommand("Bash", { command: "a\nb\nc\nd" })).toBeNull();
+  });
+
+  it("opens a call that carries anything else", () => {
+    for (const extra of [
+      { dangerouslyDisableSandbox: true },
+      { dangerouslyDisableSandbox: false },
+      { workdir: "/etc" },
+      { cwd: "/w" },
+      { anything: 1 },
+    ]) {
+      expect(inlineCommand("Bash", { command: "ls", ...extra })).toBeNull();
+    }
+  });
+
+  it("opens everything else", () => {
+    expect(inlineCommand("Bash", null)).toBeNull();
+    expect(inlineCommand("Bash", {})).toBeNull();
+    expect(inlineCommand("Bash", { command: " " })).toBeNull();
+    expect(inlineCommand("Bash", { command: ["ls"] })).toBeNull();
+    expect(inlineCommand(null, { command: "ls" })).toBeNull();
+    expect(inlineCommand("Edit", { file_path: "/srv/a.ts" })).toBeNull();
+    expect(inlineCommand("mcp__sh__run", { command: "ls" })).toBeNull();
+  });
+
+  it("takes the ask's own input as the call, unless the server cut it", () => {
+    const input = { command: "git push" };
+    expect(askedCall(approval("Bash", input), false)).toEqual({ input, reading: false });
+    expect(askedCall(approval("Bash", input, true), false)).toEqual({ input: null, reading: false });
+    expect(askedCall(plan("# Plan", "approve"), false)).toEqual({ input: null, reading: false });
+  });
+
+  it("asks the transcript for a short command read off the screen", () => {
+    expect(askedCall(approval("Bash", { command: "git push" }), true)).toBeNull();
+    // Padding and wrapped rows do not count against it.
+    expect(askedCall(approval("Bash", { command: `ls${" ".repeat(200)}\n-a` }), true)).toBeNull();
+    for (const ask of [
+      approval("Bash", { command: "x".repeat(161) }),
+      approval("Write", { file_path: "a.txt" }),
+      approval("mcp__mail__send", { description: "Send" }),
+    ]) {
+      expect(askedCall(ask, true)).toEqual({ input: null, reading: false });
+    }
+  });
+
+  it("shows a request from its transcript", () => {
+    const request = ev(1, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command: "ls" } });
+    const ask = approval("Bash", { command: "ls" });
+    expect(approvalRequest(ask, null, session)).toEqual({ status: "loading" });
+    expect(approvalRequest(ask, "missing", session)).toEqual({ status: "failed" });
+    expect(approvalRequest(ask, "failed", session)).toEqual({ status: "failed" });
+    expect(approvalRequest(ask, { request, events: [request] }, session)).toMatchObject({
       status: "ready",
-      body,
+      body: { kind: "command", command: "ls" },
+      fields: { tool_name: "Bash", tool_input: { command: "ls" } },
       whole: true,
     });
-    const plan = (text: string) => ({ kind: "plan_approval", plan: { text } }) as unknown as PendingPlanAsk;
-    expect(approvalRequest(plan("# Plan"), null)).toEqual({
+  });
+
+  it("takes a plan's text from its ask, beside the rest of its call", () => {
+    const request = ev(1, "approval_request", "Approve plan", {
+      tool_name: "ExitPlanMode",
+      tool_input: { plan: "# Plan", allowedPrompts: [{ tool: "Bash", prompt: "run tests" }] },
+    });
+    expect(approvalRequest(plan("# Plan", "approve"), null, session)).toEqual({ status: "loading" });
+    expect(approvalRequest(plan("# Plan", "approve"), { request, events: [request] }, session)).toMatchObject({
+      body: { kind: "plan", plan: "# Plan" },
+      warnings: ["Extra permissions or network access"],
+      whole: true,
+    });
+    // A plan from Waypoint's own plan mode has no call to read.
+    expect(approvalRequest(plan("# Plan", "approve_plan"), null, session)).toEqual({
       status: "ready",
       body: { kind: "plan", plan: "# Plan" },
+      fields: null,
+      warnings: [],
+      input: null,
       whole: true,
     });
-    expect(approvalRequest(plan(" "), null)).toMatchObject({ status: "ready", whole: false });
+    expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false });
+  });
+});
+
+describe("reading a request's transcript", () => {
+  const request = ev(7, "approval_request", "Approve Bash", { approval_id: "a1" });
+  const earlier = ev(6, "tool_call", "Bash", {});
+  const later = ev(8, "tool_result", "done", {});
+  const page = (events: ReturnType<typeof ev>[]) => ({ events, has_more: false, latest_todo: null, pending_questions: null });
+
+  it("reads from before the request to the present", async () => {
+    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier, request])).mockResolvedValueOnce(page([later]));
+    expect(await readTranscript("h", "t", "s1", "a1", 7)).toEqual({ request, events: [earlier, request, later] });
+    expect(api.fetchEvents).toHaveBeenNthCalledWith(1, "h", "t", "s1", { beforeSequence: 8, messages: 20 });
+    expect(api.fetchEvents).toHaveBeenNthCalledWith(2, "h", "t", "s1", { afterId: 7 });
   });
 
-  it("stands the ask's own input in only for a missing event it carries in full", () => {
-    expect(approvalRequest(approval("Bash", { command: "git push" }), "missing")).toEqual({
-      status: "ready",
-      body: { kind: "command", description: "", command: "git push" },
-      whole: true,
-    });
-    // Too long to list, and still whole.
-    const long = `echo ${"x".repeat(300)}`;
-    expect(approvalRequest(approval("Bash", { command: long }), "missing")).toEqual({
-      status: "ready",
-      body: { kind: "command", description: "", command: long },
-      whole: true,
-    });
-    expect(approvalRequest(approval("Bash", { command: "git pu" }, true), "missing")).toEqual({ status: "failed" });
-    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), "missing")).toEqual({ status: "failed" });
-    expect(approvalRequest(approval("Bash", { command: "git push" }), "failed")).toEqual({ status: "failed" });
-  });
-
-  it("allows a whole command", () => {
-    expect(decidesInline(approval("Bash", { command: "git push" }))).toBe(true);
-    expect(decidesInline(approval("bash", { command: "git push" }))).toBe(true);
-  });
-
-  it("opens a command that leaves the sandbox first", () => {
-    expect(decidesInline(approval("Bash", { command: "ls", dangerouslyDisableSandbox: true }))).toBe(false);
-    expect(decidesInline(approval("Bash", { command: "ls", dangerouslyDisableSandbox: false }))).toBe(true);
-  });
-
-  it("opens an edit first, whose change no row shows", () => {
-    expect(decidesInline(approval("Edit", { file_path: "/srv/a.ts" }))).toBe(false);
-    expect(decidesInline(approval("Write", { file_path: "README.md", content: "x" }))).toBe(false);
-  });
-
-  it("takes a command only as long as a card lists whole", () => {
-    expect(decidesInline(approval("Bash", { command: "a\nb\nc" }))).toBe(true);
-    expect(decidesInline(approval("Bash", { command: "a\nb\nc\nd" }))).toBe(false);
-    expect(decidesInline(approval("Bash", { command: "x".repeat(160) }))).toBe(true);
-    expect(decidesInline(approval("Bash", { command: "x".repeat(161) }))).toBe(false);
-  });
-
-  it("opens everything else first", () => {
-    // Cut by the server.
-    expect(decidesInline(approval("Bash", { command: "git pu" }, true))).toBe(false);
-    // Known by its title alone.
-    expect(decidesInline(approval(null, null))).toBe(false);
-    expect(decidesInline(approval("ExitPlanMode", { plan: "" }))).toBe(false);
-    expect(decidesInline(approval("Task", { prompt: "Do it", description: "x" }))).toBe(false);
-    expect(decidesInline(approval("Workflow", { script: "run()" }))).toBe(false);
-    expect(decidesInline(approval("mcp__mail__send", { to: "a@b" }))).toBe(false);
-    expect(decidesInline(approval("Edit", {}))).toBe(false);
-    expect(
-      decidesInline({
-        ...approval(null, null),
-        kind: "plan_approval",
-        plan: { plan_id: "p", text: "Do it", decisions: ["accept"], supports_note: false, resolve_via: "approve" },
-      }),
-    ).toBe(false);
+  it("says when the request is not there", async () => {
+    vi.mocked(api.fetchEvents).mockResolvedValueOnce(page([earlier]));
+    expect(await readTranscript("h", "t", "s1", "a1", 7)).toBe("missing");
   });
 });
 
@@ -413,8 +427,8 @@ describe("answering and deciding", () => {
     expect(api.approveSession).toHaveBeenCalledWith("h", "t", "s1", "accept", undefined, "p1");
     await decideAsk("h", "t", plan("approve_plan"), "accept", "go");
     expect(api.approvePlan).toHaveBeenCalledWith("h", "t", "s1", "p1", "accept", "go");
-    await decideAsk("h", "t", plan("approve_plan"), "allow_for_session", undefined);
-    expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "acceptForSession", undefined);
+    await decideAsk("h", "t", plan("approve_plan"), "decline", undefined);
+    expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "decline", undefined);
   });
 
   it("retries a 409 on the way", async () => {

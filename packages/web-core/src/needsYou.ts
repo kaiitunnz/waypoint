@@ -1,12 +1,13 @@
 import { gateHeadline, gateKey, gateTime, isGateAnswered, type BoardGate } from "./board";
 import type { InboxStatusFilter } from "./inbox";
 import {
-  decidesInline,
   decisionView,
   fitsListing,
+  inlineCommand,
   isRecommendedLabel,
   planPreview,
   stripRecommendedSuffix,
+  type AskCall,
 } from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
 import type { InboxItem, PendingAsk, PendingQuestionAsk } from "./types";
@@ -145,8 +146,8 @@ export function decodeNeedsId(segment: string): string {
 
 // ─── Asks ───
 
-export function askNeedsDetail(ask: PendingAsk): boolean {
-  if (ask.kind !== "question") return !decidesInline(ask);
+// A question a card cannot take the answer to.
+export function askNeedsDetail(ask: PendingQuestionAsk): boolean {
   const [prompt, ...rest] = ask.question.questions;
   return rest.length > 0 || !prompt || prompt.multi_select || prompt.options.length === 0;
 }
@@ -175,15 +176,19 @@ export interface AskRow extends AskSummary {
 }
 
 // A row takes a reply only where it shows everything asked.
-export function askRow(ask: PendingAsk): AskRow {
+export function askRow(ask: PendingAsk, call: AskCall): AskRow {
   const summary = askSummary(ask);
-  const inline = !askNeedsDetail(ask);
   if (ask.kind === "question") {
-    return { ...summary, path: null, answers: inline && fitsListing(ask.question.questions[0].question) };
+    const answers = !askNeedsDetail(ask) && fitsListing(ask.question.questions[0].question);
+    return { ...summary, path: null, answers };
   }
-  const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
+  if (ask.kind === "plan_approval") return { ...summary, path: null, answers: false };
+  const command = inlineCommand(ask.approval.tool_name, call.input);
+  if (command !== null) return { text: command, mono: true, path: null, answers: true };
+  const { preview } = decisionView(ask);
   if (preview?.kind === "path") return { ...summary, path: preview.path, answers: false };
-  if (inline && preview?.kind === "command") return { ...summary, text: preview.text, path: null, answers: true };
+  // While the call is read the row keeps the shape it will answer in.
+  if (call.reading && preview?.kind === "command") return { text: preview.text, mono: true, path: null, answers: true };
   return { ...summary, path: null, answers: false };
 }
 

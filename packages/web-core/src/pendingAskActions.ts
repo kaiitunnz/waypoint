@@ -1,15 +1,11 @@
-import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
+import { answerAskQuestion, ApiError, approvePlan, approveSession, fetchEvents, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
-import {
-  approvalBodyForTool,
-  holdsWholeRequest,
-  runsOutsideSandbox,
-  type ApprovalBody,
-  type ShownRequest,
-} from "./session/approvals";
 import { toggleSelection } from "./session/askQuestion";
+import { shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
+  EventRecord,
   PendingApprovalAsk,
+  PendingAsk,
   PendingAskOption,
   PendingAskPrompt,
   PendingPlanAsk,
@@ -109,33 +105,19 @@ export function buildAnswer(prompts: PendingAskPrompt[], picks: PromptPick[]): B
 
 // ─── Approvals and plans ───
 
-export type DecisionKind = "approve" | "session" | "decline";
+// A queue decides one request at a time: a wider grant's scope is not on screen.
+export type Decision = "accept" | "decline";
 
 export interface DecisionAction {
-  // The id sent to the approve endpoint.
-  decision: string;
+  // The id sent to the approve endpoint, which every agent takes.
+  decision: Decision;
   label: string;
-  kind: DecisionKind;
 }
 
-// "acceptForSession", "allow_for_session", "approve-for-this-session": matched by
-// shape so no agent is named.
-const SESSION_ALLOW = /^(accept|allow|approve)(for)?(this)?session$/;
-
-export function sessionScopedAllow(decisions: readonly string[]): string | undefined {
-  return decisions.find((decision) => SESSION_ALLOW.test(decision.toLowerCase().replace(/[^a-z]/g, "")));
-}
-
-// Every agent maps accept and decline to allow and deny; the session-scoped
-// allow shows whenever the agent lists one.
-function decisionActions(decisions: readonly string[]): DecisionAction[] {
-  const forSession = sessionScopedAllow(decisions);
-  return [
-    { decision: "accept", label: "Approve", kind: "approve" },
-    ...(forSession ? [{ decision: forSession, label: "For this session", kind: "session" as const }] : []),
-    { decision: "decline", label: "Decline", kind: "decline" },
-  ];
-}
+const DECISION_ACTIONS: readonly DecisionAction[] = [
+  { decision: "accept", label: "Approve" },
+  { decision: "decline", label: "Decline" },
+];
 
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
 
@@ -161,7 +143,7 @@ export function planPreview(text: string, maxLines = 3): string {
 }
 
 export interface DecisionView {
-  actions: DecisionAction[];
+  actions: readonly DecisionAction[];
   supportsNote: boolean;
   preview: ApprovalPreview;
   // The full plan, for a plan approval.
@@ -172,14 +154,14 @@ export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): Decision
   if (ask.kind === "approval") {
     const { approval } = ask;
     return {
-      actions: decisionActions(approval.decisions),
+      actions: DECISION_ACTIONS,
       supportsNote: approval.supports_note,
       preview: approvalPreview(approval),
       planBody: null,
     };
   }
   return {
-    actions: decisionActions(ask.plan.decisions),
+    actions: DECISION_ACTIONS,
     supportsNote: ask.plan.supports_note,
     preview: null,
     planBody: ask.plan.text,
@@ -194,40 +176,84 @@ const LISTED_MAX_LINES = 3;
 export const fitsListing = (text: string) =>
   text.length <= LISTED_MAX_LENGTH && text.split("\n").length <= LISTED_MAX_LINES;
 
-// The ask holds a shell command or an edited file's path, uncut by the server.
-function carriesRequest(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
-  return ask.kind === "approval" && !ask.approval.tool_input_truncated && decisionView(ask).preview !== null;
+// All a shell call may carry for a row to decide it.
+const INLINE_INPUT = new Set(["command", "description", "timeout", "run_in_background"]);
+
+// The command a row or card takes a decision on, or null: a shell call that carries
+// nothing else of consequence and whose command lists whole. `input` is the call's own,
+// uncut, or null where that is not known.
+export function inlineCommand(tool: string | null, input: Record<string, unknown> | null): string | null {
+  if (normalizeToolName(tool) !== "Bash" || !input) return null;
+  if (!Object.keys(input).every((key) => INLINE_INPUT.has(key))) return null;
+  const { command } = input;
+  return typeof command === "string" && command.trim() !== "" && fitsListing(command) ? command : null;
 }
 
-// A decision is live only while the whole request is on screen. A row or card can show
-// a command whole; an edit's request is its change, and a command that leaves the sandbox
-// says so, both only in a detail.
-export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
-  const { preview } = decisionView(ask);
-  if (preview?.kind !== "command" || !carriesRequest(ask) || !fitsListing(preview.text)) return false;
-  return ask.kind === "approval" && !runsOutsideSandbox(ask.approval.tool_input);
+// What a row or card knows of the call behind an ask.
+export interface AskCall {
+  input: Record<string, unknown> | null;
+  // The transcript is being read for it.
+  reading: boolean;
 }
 
-// What a read of the transcript turned up for a pending approval.
-export type ApprovalRead = ShownRequest | "missing" | "failed";
+export const NO_CALL: AskCall = { input: null, reading: false };
+
+// What the ask alone says of its call, or null where the transcript has to say: a shell
+// command read off the screen that may be short enough to list.
+export function askedCall(ask: PendingAsk, fromScreen: boolean): AskCall | null {
+  if (ask.kind !== "approval") return NO_CALL;
+  const { tool_name: tool, tool_input: input, tool_input_truncated: cut } = ask.approval;
+  if (!fromScreen) return { input: cut ? null : input, reading: false };
+  if (normalizeToolName(tool) !== "Bash" || typeof input?.command !== "string") return NO_CALL;
+  // The screen's rows and padding only ever add to the command.
+  return input.command.replace(/\s+/g, " ").trim().length <= LISTED_MAX_LENGTH ? null : NO_CALL;
+}
+
+// The transcript around a pending request, up to the present.
+export type TranscriptRead = { request: EventRecord; events: EventRecord[] } | "missing" | "failed";
+
+// How far back from a request the call behind it is looked for.
+const TRANSCRIPT_MESSAGES = 20;
+
+// The page ending at the request, since a pending ask can be many messages old, then
+// everything recorded since.
+export async function readTranscript(
+  host: string,
+  token: string,
+  sessionId: string,
+  requestId: string,
+  sequence: number,
+): Promise<TranscriptRead> {
+  const page = await fetchEvents(host, token, sessionId, {
+    beforeSequence: sequence + 1,
+    messages: TRANSCRIPT_MESSAGES,
+  });
+  const request = page.events.find(
+    (event) => event.kind === "approval_request" && event.metadata?.approval_id === requestId,
+  );
+  if (request?.id === undefined) return "missing";
+  const since = await fetchEvents(host, token, sessionId, { afterId: request.id });
+  return { request, events: [...page.events, ...since.events] };
+}
 
 export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
 
-// A plan travels in its ask. A tool approval shows what the transcript holds; when
-// the transcript has no such event, the ask's own input is used only where it is
-// the whole request.
-export function approvalRequest(ask: PendingApprovalAsk | PendingPlanAsk, read: ApprovalRead | null): ApprovalRequest {
-  if (ask.kind === "plan_approval") {
-    const body: ApprovalBody = { kind: "plan", plan: ask.plan.text };
-    return { status: "ready", body, whole: holdsWholeRequest(body, null) };
+const planView = (plan: string) => ({ body: { kind: "plan" as const, plan }, whole: plan.trim() !== "" });
+
+// A request is shown from its transcript. A plan's text travels in its ask, and one
+// from Waypoint's own plan mode has no call behind it, so the text is all of it.
+export function approvalRequest(
+  ask: PendingApprovalAsk | PendingPlanAsk,
+  read: TranscriptRead | null,
+  session: Pick<AskSession, "cwd" | "fromScreen">,
+): ApprovalRequest {
+  if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
+    return { status: "ready", ...planView(ask.plan.text), fields: null, warnings: [], input: null };
   }
   if (read === null) return { status: "loading" };
-  if (typeof read !== "string") return { status: "ready", ...read };
-  if (read === "failed" || !carriesRequest(ask)) return { status: "failed" };
-  const { tool_name: tool, tool_input: input } = ask.approval;
-  const name = normalizeToolName(tool);
-  const body = approvalBodyForTool(name, input, ask.body ?? ask.title);
-  return { status: "ready", body, whole: holdsWholeRequest(body, input, name) };
+  if (typeof read === "string") return { status: "failed" };
+  const shown = shownRequest(read.request, read.events, session);
+  return { status: "ready", ...shown, ...(ask.kind === "plan_approval" ? planView(ask.plan.text) : null) };
 }
 
 // ─── Responding ───
@@ -289,7 +315,7 @@ export function decideAsk(
   host: string,
   token: string,
   ask: PendingApprovalAsk | PendingPlanAsk,
-  decision: string,
+  decision: Decision,
   note: string | undefined,
   retry: RetryOptions = {},
 ): Promise<void> {
@@ -298,9 +324,7 @@ export function decideAsk(
     if (ask.kind === "approval") {
       await approveSession(host, token, ask.session_id, decision, text, ask.approval.approval_id);
     } else if (ask.plan.resolve_via === "approve_plan") {
-      // approve-plan has its own fixed vocabulary; the session-scoped allow is its acceptForSession.
-      const planDecision = decision === "accept" || decision === "decline" ? decision : "acceptForSession";
-      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, planDecision, text);
+      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, decision, text);
     } else {
       await approveSession(host, token, ask.session_id, decision, text, ask.plan.plan_id);
     }

@@ -184,14 +184,10 @@ describe("routes", () => {
 });
 
 describe("asks", () => {
-  it("sends what a card cannot answer to the detail", () => {
+  it("sends a question a card cannot answer to the detail", () => {
     expect(askNeedsDetail(question(1))).toBe(false);
     expect(askNeedsDetail(question(1, [], false))).toBe(true);
     expect(askNeedsDetail(question(1, ["A"], true))).toBe(true);
-    expect(askNeedsDetail(approval(1))).toBe(false);
-    expect(askNeedsDetail(approval(1, {}))).toBe(true);
-    expect(askNeedsDetail(approval(1, { command: "ls" }, true))).toBe(true);
-    expect(askNeedsDetail(plan)).toBe(true);
     const two = question(1);
     two.question.questions.push({ ...two.question.questions[0], question: "Which test?" });
     expect(askNeedsDetail(two)).toBe(true);
@@ -208,25 +204,31 @@ describe("asks", () => {
   });
 
   it("lets a row answer only what it can show whole", () => {
-    expect(askRow(question(1))).toMatchObject({ answers: true, path: null });
-    expect(askRow(question(1, ["A"], true)).answers).toBe(false);
-    expect(askRow(plan).answers).toBe(false);
-    expect(askRow(approval(1))).toMatchObject({ text: "git push\nls", mono: true, answers: true });
-    expect(askRow(approval(1, { command: "git status\nrm -rf a\nrm -rf b\ngit push" }))).toMatchObject({
-      text: "git status …",
-      answers: false,
-    });
-    expect(askRow(approval(1, { command: `echo ${"x".repeat(200)}` })).answers).toBe(false);
-    expect(askRow(approval(1, { command: "ls" }, true)).answers).toBe(false);
-
+    const none = { input: null, reading: false };
+    const called = (input: Record<string, unknown>) => ({ input, reading: false });
+    expect(askRow(question(1), none)).toMatchObject({ answers: true, path: null });
+    expect(askRow(question(1, ["A"], true), none).answers).toBe(false);
+    expect(askRow(plan, none).answers).toBe(false);
     const long = question(1);
     long.question.questions[0].question = `Which ${"very ".repeat(40)}fix?`;
-    expect(askRow(long).answers).toBe(false);
+    expect(askRow(long, none).answers).toBe(false);
+
+    // The command shown is the call's, not the ask's.
+    expect(askRow(approval(1), called({ command: "git push\nls" }))).toMatchObject({
+      text: "git push\nls",
+      mono: true,
+      answers: true,
+    });
+    expect(askRow(approval(1, { command: "echo a\nb" }), called({ command: "echo a b" })).text).toBe("echo a b");
+    expect(askRow(approval(1), none)).toMatchObject({ text: "git push …", answers: false });
+    expect(askRow(approval(1, { command: "ls" }), called({ command: "ls", workdir: "/etc" })).answers).toBe(false);
+    // Held while the call is read.
+    expect(askRow(approval(1), { input: null, reading: true })).toMatchObject({ text: "git push\nls", answers: true });
 
     const edit = approval(1);
     edit.approval.tool_name = "Edit";
     edit.approval.tool_input = { file_path: "/srv/app/secrets.env" };
-    expect(askRow(edit)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
+    expect(askRow(edit, none)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
   });
 
   it("shapes a question for the editor", () => {

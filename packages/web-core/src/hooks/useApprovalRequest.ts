@@ -1,55 +1,98 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchEvents, isAuthError } from "../api";
-import { approvalRequest, type ApprovalRead, type ApprovalRequest } from "../pendingAskActions";
-import { shownRequest } from "../session/approvals";
-import type { PendingApprovalAsk, PendingPlanAsk } from "../types";
+import { isAuthError } from "../api";
+import {
+  approvalRequest,
+  askedCall,
+  NO_CALL,
+  readTranscript,
+  type ApprovalRequest,
+  type AskCall,
+  type TranscriptRead,
+} from "../pendingAskActions";
+import { shownRequest, type AskSession } from "../session/wholeRequest";
+import type { PendingApprovalAsk, PendingAsk, PendingPlanAsk } from "../types";
 
-// How far back from the request the call behind it is looked for.
-const MESSAGES = 20;
-
-// A pending approval's request, read from the session's transcript. One instance
-// serves one ask. `cwd` is the session's, and `onAuthFailure` must be stable.
-export function useApprovalRequest(
+// The transcript around the request `requestId` names, from before it to the present;
+// null until it has been read, or where there is none to read. It is read again when
+// the session records something. `onAuthFailure` must be stable.
+function useTranscriptRead(
   host: string,
   token: string,
-  ask: PendingApprovalAsk | PendingPlanAsk,
-  cwd: string,
+  ask: PendingAsk | null,
+  requestId: string | null,
+  revision: string,
   onAuthFailure: () => void,
-): { request: ApprovalRequest; retry: () => void } {
-  const sessionId = ask.session_id;
-  const approvalId = ask.kind === "approval" ? ask.approval.approval_id : null;
-  const sequence = ask.sequence;
-  const [read, setRead] = useState<ApprovalRead | null>(null);
+): { read: TranscriptRead | null; retry: () => void } {
+  const sessionId = ask?.session_id ?? "";
+  const sequence = ask?.sequence ?? 0;
+  const key = `${sessionId}:${requestId}:${sequence}`;
+  const [result, setResult] = useState<{ key: string; read: TranscriptRead } | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (approvalId === null) return;
+    if (requestId === null) return;
     let active = true;
-    // The page ending at the request: a pending ask can be many messages old.
-    fetchEvents(host, token, sessionId, { beforeSequence: sequence + 1, messages: MESSAGES })
-      .then((page) => {
-        const event = page.events.find(
-          (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
-        );
-        if (active) setRead(event ? shownRequest(event, page.events, cwd) : "missing");
+    readTranscript(host, token, sessionId, requestId, sequence)
+      .then((read) => {
+        if (active) setResult({ key, read });
       })
       .catch((error) => {
         if (!active) return;
         if (isAuthError(error)) onAuthFailure();
-        else setRead("failed");
+        else setResult({ key, read: "failed" });
       });
     return () => {
       active = false;
     };
-  }, [host, token, sessionId, approvalId, sequence, cwd, attempt, onAuthFailure]);
+  }, [host, token, sessionId, requestId, sequence, key, revision, attempt, onAuthFailure]);
 
   const retry = useCallback(() => {
-    setRead(null);
+    setResult(null);
     setAttempt((value) => value + 1);
   }, []);
 
-  return { request: approvalRequest(ask, read), retry };
+  // A read of another request is never shown for this one.
+  return { read: result?.key === key ? result.read : null, retry };
+}
+
+// A pending approval's request, as its detail shows it.
+export function useApprovalRequest(
+  host: string,
+  token: string,
+  ask: PendingApprovalAsk | PendingPlanAsk,
+  session: AskSession,
+  onAuthFailure: () => void,
+): { request: ApprovalRequest; retry: () => void } {
+  const requestId =
+    ask.kind === "approval"
+      ? ask.approval.approval_id
+      : ask.plan.resolve_via === "approve"
+        ? ask.plan.plan_id
+        : null;
+  const { read, retry } = useTranscriptRead(host, token, ask, requestId, session.revision, onAuthFailure);
+  const { cwd, fromScreen } = session;
+  const request = useMemo(() => approvalRequest(ask, read, { cwd, fromScreen }), [ask, read, cwd, fromScreen]);
+  return { request, retry };
+}
+
+// The call behind a pending ask, as a row or card needs it: from the ask, else from
+// the transcript where the ask cannot say.
+export function useAskCall(
+  host: string,
+  token: string,
+  ask: PendingAsk | null,
+  session: AskSession,
+  onAuthFailure: () => void,
+): AskCall {
+  const asked = ask ? askedCall(ask, session.fromScreen) : NO_CALL;
+  const requestId = asked === null && ask?.kind === "approval" ? ask.approval.approval_id : null;
+  const { read } = useTranscriptRead(host, token, ask, requestId, session.revision, onAuthFailure);
+  if (asked) return asked;
+  if (read === null) return { input: null, reading: true };
+  if (typeof read === "string") return NO_CALL;
+  const shown = shownRequest(read.request, read.events, session);
+  return shown.whole ? { input: shown.input, reading: false } : NO_CALL;
 }

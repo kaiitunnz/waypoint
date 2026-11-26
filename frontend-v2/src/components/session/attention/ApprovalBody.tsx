@@ -35,17 +35,12 @@ export function ApprovalBody({ body, whole }: { body: ApprovalBodyModel; whole?:
     case "workflow":
     case "raw":
       return (
-        <>
-          {whole && body.kind === "command" && body.outsideSandbox ? (
-            <p className={styles.warn}>Runs outside the sandbox</p>
-          ) : null}
-          <div className={styles.block}>
-            <CommandText
-              text={body.kind === "command" ? body.command : body.kind === "workflow" ? body.script : body.text}
-              whole={whole}
-            />
-          </div>
-        </>
+        <div className={styles.block}>
+          <CommandText
+            text={body.kind === "command" ? body.command : body.kind === "workflow" ? body.script : body.text}
+            whole={whole}
+          />
+        </div>
       );
     case "edit":
       return (

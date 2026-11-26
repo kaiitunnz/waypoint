@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
+import { useBackendCatalog, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { BoardGate } from "@waypoint/web-core/board";
 import { useBoardGates } from "@waypoint/web-core/hooks/useBoardGates";
 import { useInboxCount } from "@waypoint/web-core/hooks/useInboxCount";
@@ -27,6 +28,8 @@ export interface ShellData {
   retryGates: () => void;
   connection: ConnectionState;
   launchTargets: LaunchTargetsState;
+  // Read once here for the surfaces that repeat per session.
+  catalog: BackendCatalog;
 }
 
 const ShellDataContext = createContext<ShellData | null>(null);
@@ -70,6 +73,7 @@ export function ShellDataProvider({
   const inboxCount = useInboxCount(host, token, handleAuthFailure);
   const feed = useSessionsFeed(host, token, handleAuthFailure);
   const launchTargets = useLaunchTargets(host, token, handleAuthFailure);
+  const catalog = useBackendCatalog(host, token, null);
   const {
     gates,
     failed: gatesFailed,
@@ -80,8 +84,8 @@ export function ShellDataProvider({
   const { connection } = feed;
 
   const shell = useMemo(
-    () => ({ host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets }),
-    [host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets],
+    () => ({ host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets, catalog }),
+    [host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets, catalog],
   );
   const sessions = useMemo<SessionsData>(
     () => ({

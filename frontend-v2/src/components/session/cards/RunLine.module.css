@@ -83,6 +83,13 @@
   color: var(--faint);
 }
 
+.counts {
+  padding: 0 0 2px 20px;
+  font-size: var(--f-stamp);
+  line-height: 16px;
+  color: var(--faint);
+}
+
 .body {
   display: flex;
   flex-direction: column;

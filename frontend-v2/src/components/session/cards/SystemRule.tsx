@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 
+import type { Repeat } from "@waypoint/web-core/session/transcript";
+
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/lib/cx";
 
@@ -12,10 +14,12 @@ interface SystemRuleProps {
   text: string;
   ts: string;
   glyph?: string;
+  // Set when identical notes were folded into this one.
+  repeat?: Repeat;
 }
 
 // One line; a note too long for it ends in an ellipsis and opens in place.
-export function SystemRule({ text, ts, glyph }: SystemRuleProps) {
+export function SystemRule({ text, ts, glyph, repeat }: SystemRuleProps) {
   const rule = useRef<HTMLDivElement>(null);
   const line = useRef<HTMLSpanElement>(null);
   const [clipped, setClipped] = useState(false);
@@ -40,6 +44,7 @@ export function SystemRule({ text, ts, glyph }: SystemRuleProps) {
       <span ref={line} className={styles.text}>
         {text}
       </span>
+      {repeat ? <span className={styles.count}>×{repeat.count}</span> : null}
     </>
   );
   return (
@@ -61,7 +66,7 @@ export function SystemRule({ text, ts, glyph }: SystemRuleProps) {
         ) : (
           content
         )}
-        <EventTime ts={ts} className={styles.time} />
+        <EventTime ts={ts} until={repeat?.until} className={styles.time} />
       </span>
     </div>
   );

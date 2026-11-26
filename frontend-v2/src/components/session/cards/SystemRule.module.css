@@ -57,6 +57,7 @@
   place-items: center;
 }
 
+.count,
 .time {
   flex: none;
 }

@@ -6,6 +6,7 @@ import type { RunGlyph } from "@waypoint/web-core/session/toolRun";
 
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/lib/cx";
+import { usePointerUI } from "@/lib/layout";
 
 import styles from "./RunLine.module.css";
 
@@ -26,15 +27,17 @@ interface RunLineProps {
 export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked, stats, trailing, children }: RunLineProps) {
   const [choice, setChoice] = useState<boolean | null>(null);
   const open = choice ?? defaultOpen;
+  const pointer = usePointerUI();
+  const counted = (entry: RunGlyph) => `${entry.label} ${entry.count}`;
   const classes = cx(styles.line, live && styles.live, asked && styles.asked, Boolean(stats) && styles.hasStats);
   const inner = (
     <>
       <span className={styles.sum}>{phrase}</span>
       {stats ? <span className={styles.stats}>{stats}</span> : null}
       {open ? null : (
-        <span className={styles.glyphs} aria-hidden="true">
+        <span className={styles.glyphs}>
           {glyphs.map((entry) => (
-            <span key={entry.glyph}>
+            <span key={entry.glyph} role="img" aria-label={counted(entry)} title={counted(entry)}>
               {entry.glyph} {entry.count}
             </span>
           ))}
@@ -51,6 +54,8 @@ export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked,
       <button type="button" className={classes} aria-expanded={open} onClick={() => setChoice(!open)}>
         {inner}
       </button>
+      {/* Touch has no hover to name the glyphs, so an open run spells its counts out. */}
+      {open && !pointer && glyphs.length > 0 ? <p className={styles.counts}>{glyphs.map(counted).join(" · ")}</p> : null}
       {open ? <div className={styles.body}>{children}</div> : null}
     </div>
   );

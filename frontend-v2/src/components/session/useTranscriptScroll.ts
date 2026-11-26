@@ -67,7 +67,8 @@ export function useTranscriptScroll(turns: TranscriptTurn[], pendingCount: numbe
       follow.current = next;
       // By the next frame the fold has laid out and any scroll it caused has been reported.
       requestAnimationFrame(() => {
-        if (closing && toggle.isConnected) el.scrollTop += toggle.getBoundingClientRect().top - top;
+        // A toggle that is gone or hidden has no position to keep.
+        if (closing && toggle.getClientRects().length > 0) el.scrollTop += toggle.getBoundingClientRect().top - top;
         follow.current = settled(next.hold?.resumeOnSend ?? false, closing, el.scrollTop, fromEnd(el));
         setAway(!follow.current.following && fromEnd(el) > 1);
         remember();

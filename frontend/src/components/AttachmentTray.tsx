@@ -162,8 +162,7 @@ export function MessageAttachments({ specs }: { specs: AttachmentSpec[] }) {
   );
 }
 
-// A tray button that takes focus collapses the composer's leading buttons, which
-// reflows the tray and can move the button before its click lands.
+// Focusing a tray button reflows the composer, which moves the button mid-click.
 const keepFocus = (event: MouseEvent) => event.preventDefault();
 
 export function AttachmentTray({

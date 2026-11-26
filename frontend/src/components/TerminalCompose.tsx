@@ -292,7 +292,7 @@ export function TerminalCompose({
                 </button>
               </>
             ) : null}
-            <div className="term-compose-entry">
+            <div className="composer-entry">
               <button
                 type="button"
                 className="term-compose-lead-expand"

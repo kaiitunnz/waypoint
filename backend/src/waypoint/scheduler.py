@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -128,7 +129,7 @@ class Scheduler:
         self._runtime = runtime
         self._task: asyncio.Task[None] | None = None
         self._wakeup = asyncio.Event()
-        # Message schedules a send-now request is delivering; the loop skips them.
+        # Message schedules being delivered, by the loop or a send-now request.
         self._sending: set[str] = set()
 
     async def start(self) -> None:
@@ -388,20 +389,35 @@ class Scheduler:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"message schedule is {record.status.value}",
             )
-        self._claim_send(message_id)
-        try:
-            return await self._send_now(record)
-        finally:
-            self._sending.discard(message_id)
-            await self._publish_update()
-
-    def _claim_send(self, message_id: str) -> None:
         if message_id in self._sending:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="message schedule is already being sent",
             )
+        with self._claim(message_id):
+            try:
+                return await self._send_now(record)
+            finally:
+                await self._publish_update()
+
+    @contextmanager
+    def _claim(self, message_id: str) -> Iterator[None]:
+        """Hold a message schedule while it is being delivered."""
         self._sending.add(message_id)
+        try:
+            yield
+        finally:
+            self._sending.discard(message_id)
+
+    def _record_outcome(
+        self, record: ScheduledMessageRecord, **fields: Any
+    ) -> ScheduledMessageRecord:
+        """Write a delivery's outcome; the row may have been deleted with its
+        session while the delivery was in flight."""
+        try:
+            return self._runtime.storage.update_scheduled_message(record.id, **fields)
+        except KeyError:
+            return record.model_copy(update=fields)
 
     async def _send_now(
         self, record: ScheduledMessageRecord
@@ -411,15 +427,15 @@ class Scheduler:
         if storage.get_session(record.session_id) is None:
             # A deleted target is final, so the schedule records it like a timed run.
             if record.cron is not None:
-                storage.update_scheduled_message(
-                    record.id,
+                self._record_outcome(
+                    record,
                     last_run_at=now,
                     last_run_status=ScheduledMessageStatus.FAILED.value,
                     last_failure_reason="session not found",
                 )
             else:
-                storage.update_scheduled_message(
-                    record.id,
+                self._record_outcome(
+                    record,
                     status=ScheduledMessageStatus.FAILED,
                     failure_reason="session not found",
                 )
@@ -430,12 +446,8 @@ class Scheduler:
             )
         oldest_idle_batch = None
         if record.trigger == ScheduledMessageTrigger.IDLE:
-            session_idle = [
-                item
-                for item in storage.list_pending_idle_messages()
-                if item.session_id == record.session_id
-            ]
-            oldest_idle_batch = session_idle[0].idle_batch if session_idle else None
+            queued = storage.list_pending_idle_messages(record.session_id)
+            oldest_idle_batch = queued[0].idle_batch if queued else None
         claimed_next = None
         if (
             record.cron is not None
@@ -463,31 +475,23 @@ class Scheduler:
             ) from exc
         held = isinstance(result, HeldMessageRecord)
         if record.cron is not None:
-            updated = storage.update_scheduled_message(
-                record.id,
+            updated = self._record_outcome(
+                record,
                 last_run_at=now,
                 last_run_status=ScheduledMessageStatus.SENT.value,
                 last_failure_reason=None,
             )
             return updated, held
-        # A timed record's time becomes the delivery time, which history reads as
-        # "sent at"; an idle record's stays its enqueue time.
-        if record.trigger == ScheduledMessageTrigger.IDLE:
-            updated = storage.update_scheduled_message(
-                record.id, status=ScheduledMessageStatus.SENT
-            )
-        else:
-            updated = storage.update_scheduled_message(
-                record.id, status=ScheduledMessageStatus.SENT, scheduled_at=now
-            )
+        updated = self._record_outcome(
+            record, status=ScheduledMessageStatus.SENT, scheduled_at=now
+        )
         self._release_attachment_references(record)
         if oldest_idle_batch is not None and record.idle_batch == oldest_idle_batch:
             # Emptying the oldest batch consumes this idle point, as a delivery at
             # idle does, so the next batch waits for a fresh idle transition.
             batch_left = any(
-                item.session_id == record.session_id
-                and item.idle_batch == oldest_idle_batch
-                for item in storage.list_pending_idle_messages()
+                item.idle_batch == oldest_idle_batch
+                for item in storage.list_pending_idle_messages(record.session_id)
             )
             if not batch_left:
                 storage.arm_wait_for_oldest_idle_batch(record.session_id)
@@ -639,24 +643,19 @@ class Scheduler:
             # be treated as time-due. They fire from the idle pass below.
             if msg.trigger == ScheduledMessageTrigger.IDLE:
                 continue
-            if msg.scheduled_at > now:
+            if msg.scheduled_at > now or not self._still_pending(msg.id):
                 continue
-            if msg.cron is not None:
-                if msg.id in self._sending:
-                    continue
-                await self._claim_and_fire(
-                    msg,
-                    now,
-                    self._runtime.storage.claim_recurring_message,
-                    self._fire_recurring_message,
-                    "msg_id",
-                )
-            elif self._still_pending(msg.id):
-                self._sending.add(msg.id)
-                try:
+            with self._claim(msg.id):
+                if msg.cron is not None:
+                    await self._claim_and_fire(
+                        msg,
+                        now,
+                        self._runtime.storage.claim_recurring_message,
+                        self._fire_recurring_message,
+                        "msg_id",
+                    )
+                else:
                     await self._fire_message(msg)
-                finally:
-                    self._sending.discard(msg.id)
         await self._fire_due_idle_messages()
 
     async def _fire_due_idle_messages(self) -> None:
@@ -677,8 +676,8 @@ class Scheduler:
             session = self._runtime.storage.get_session(session_id)
             if session is None:
                 for record in records:
-                    self._runtime.storage.update_scheduled_message(
-                        record.id,
+                    self._record_outcome(
+                        record,
                         status=ScheduledMessageStatus.FAILED,
                         failure_reason="session not found",
                     )
@@ -700,11 +699,8 @@ class Scheduler:
                 if not self._still_pending(record.id):
                     continue
                 fired = True
-                self._sending.add(record.id)
-                try:
+                with self._claim(record.id):
                     await self._fire_idle_message(record)
-                finally:
-                    self._sending.discard(record.id)
             if not fired:
                 continue
             # Consume this idle point regardless of per-message outcome so a
@@ -715,21 +711,23 @@ class Scheduler:
     async def _fire_idle_message(self, record: ScheduledMessageRecord) -> None:
         try:
             await self._send_input(record)
-            self._runtime.storage.update_scheduled_message(
-                record.id, status=ScheduledMessageStatus.SENT
+            self._record_outcome(
+                record,
+                status=ScheduledMessageStatus.SENT,
+                scheduled_at=datetime.now(UTC),
             )
-            self._release_attachment_references(record)
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "idle message fire failed",
                 extra={"msg_id": record.id, "session_id": record.session_id},
             )
-            self._runtime.storage.update_scheduled_message(
-                record.id,
+            self._record_outcome(
+                record,
                 status=ScheduledMessageStatus.FAILED,
                 failure_reason=str(exc),
+                scheduled_at=datetime.now(UTC),
             )
-            self._release_attachment_references(record)
+        self._release_attachment_references(record)
 
     async def _claim_and_fire(
         self,
@@ -832,8 +830,8 @@ class Scheduler:
         try:
             session = self._runtime.storage.get_session(record.session_id)
             if session is None:
-                self._runtime.storage.update_scheduled_message(
-                    record.id,
+                self._record_outcome(
+                    record,
                     status=ScheduledMessageStatus.FAILED,
                     failure_reason="session not found",
                 )
@@ -841,13 +839,11 @@ class Scheduler:
                 await self._publish_update()
                 return
             await self._send_input(record)
-            self._runtime.storage.update_scheduled_message(
-                record.id, status=ScheduledMessageStatus.SENT
-            )
+            self._record_outcome(record, status=ScheduledMessageStatus.SENT)
         except Exception as exc:  # noqa: BLE001
             log.exception("scheduled message fire failed", extra={"msg_id": record.id})
-            self._runtime.storage.update_scheduled_message(
-                record.id,
+            self._record_outcome(
+                record,
                 status=ScheduledMessageStatus.FAILED,
                 failure_reason=str(exc),
             )
@@ -914,8 +910,8 @@ class Scheduler:
         try:
             session = self._runtime.storage.get_session(record.session_id)
             if session is None:
-                self._runtime.storage.update_scheduled_message(
-                    record.id,
+                self._record_outcome(
+                    record,
                     last_run_at=occurrence,
                     last_run_status=ScheduledMessageStatus.FAILED.value,
                     last_failure_reason="session not found",
@@ -926,8 +922,8 @@ class Scheduler:
                 await self._publish_update()
                 return
             await self._send_input(record)
-            self._runtime.storage.update_scheduled_message(
-                record.id,
+            self._record_outcome(
+                record,
                 last_run_at=occurrence,
                 last_run_status=ScheduledMessageStatus.SENT.value,
                 last_failure_reason=None,
@@ -938,8 +934,8 @@ class Scheduler:
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("recurring message send failed", extra={"msg_id": record.id})
-            self._runtime.storage.update_scheduled_message(
-                record.id,
+            self._record_outcome(
+                record,
                 last_run_at=occurrence,
                 last_run_status=ScheduledMessageStatus.FAILED.value,
                 last_failure_reason=str(exc),

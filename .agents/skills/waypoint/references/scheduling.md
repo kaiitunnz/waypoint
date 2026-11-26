@@ -64,12 +64,11 @@ session's input without auto-submitting it (the default submits). A record moves
 `pending → sent | cancelled | failed`.
 
 `send-now` delivers a pending message immediately, attachments included. A
-one-time or when-idle message becomes `sent` (a one-time one records the
-delivery as its `scheduled_at`); a recurring one delivers a single occurrence
-and keeps its next run. The response's `held` is true when the
-session held the message (Focus, an open dialog, a restore) rather than sending
-it. A message that already ran, was cancelled or is being sent is refused (409),
-and a refused delivery leaves the message pending.
+one-time or when-idle message becomes `sent`, with the delivery time as its
+`scheduled_at`; a recurring one delivers a single occurrence and keeps its next
+run. The response's `held` is true when the session held the message (Focus, an
+open dialog, a restore). A message that already ran, was cancelled or is being
+sent is refused (409), and a refused delivery leaves the message pending.
 
 ## Send at the next idle point
 
@@ -101,7 +100,7 @@ this message joins:
 point and never receives a queued message. A message for an `exited`/`error`
 session is refused (409). Pending idle records show as **When idle** in the
 schedule dock and panel — their listed timestamp is the enqueue time, not a
-delivery estimate.
+delivery estimate. A delivered one lists its delivery time.
 
 ## Notes
 

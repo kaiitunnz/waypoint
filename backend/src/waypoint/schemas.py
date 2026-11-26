@@ -1847,8 +1847,9 @@ class ScheduledMessageRecord(BaseModel):
     status: ScheduledMessageStatus = ScheduledMessageStatus.PENDING
     failure_reason: str | None = None
     # Delivery trigger. ``time`` uses ``scheduled_at`` (and cron); ``idle`` holds
-    # until the session is IDLE and renders from ``trigger`` — for an idle record
-    # ``scheduled_at`` is only the enqueue timestamp, never a promised time.
+    # until the session is IDLE and renders from ``trigger`` — while an idle record
+    # is pending ``scheduled_at`` is only the enqueue timestamp, never a promised
+    # time, and a delivery sets it to when it ran.
     trigger: ScheduledMessageTrigger = ScheduledMessageTrigger.TIME
     # Server-owned idle delivery state (clients never set these). ``idle_batch``
     # is an opaque per-session FIFO sequence number; ``wait_for_idle_transition``

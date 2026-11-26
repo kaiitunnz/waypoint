@@ -2435,8 +2435,6 @@ class SessionRuntime:
         Because boot reuses whatever thread is live, the chosen backend persists
         across redeploys.
         """
-        # Reset is the way out of a restore that never ends.
-        await self.assistant_boot.cancel_waiting()
         target_backend = self.settings.assistant_backend()
         if target_backend is None:
             raise HTTPException(
@@ -2476,15 +2474,18 @@ class SessionRuntime:
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
-        created = await self._create_assistant_session(
-            chosen,
-            model=model,
-            effort=effort,
-            permission_mode=permission_mode,
-            transport=transport,
-            account_profile_id=selected_profile_id,
-            usage_selection=usage_selection,
-        )
+        # Reset is the way out of a restore that never ends, so it does not wait
+        # for the boot setup.
+        async with self.assistant_boot.replacing():
+            created = await self._create_assistant_session(
+                chosen,
+                model=model,
+                effort=effort,
+                permission_mode=permission_mode,
+                transport=transport,
+                account_profile_id=selected_profile_id,
+                usage_selection=usage_selection,
+            )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)
         return self._require_assistant_summary()

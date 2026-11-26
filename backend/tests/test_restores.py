@@ -497,6 +497,46 @@ async def test_concurrent_sends_to_a_closed_session_reopen_it_once(
         assert restores == ["s1"]
 
 
+async def test_a_cancelled_reopening_send_leaves_no_copy_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    stub_restores(monkeypatch, {"s1": hang})
+    record_dispatches(runtime, monkeypatch)
+
+    async with started(runtime):
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        await runtime.held.deliver("s1", peer_send("old"), HeldMessageOrigin.AGENT)
+        await runtime.terminate("s1")
+        send = asyncio.create_task(
+            runtime.held.deliver("s1", peer_send("new"), HeldMessageOrigin.AGENT)
+        )
+        await until(lambda: runtime.restores.is_restoring("s1"))
+        send.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await send
+        # Its sender saw no result and sends it again, so no copy stays held.
+        assert held_texts(runtime.storage, "s1") == ["old"]
+
+
+async def test_shutdown_does_not_wait_long_for_a_hung_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    add_session(runtime, "s1")
+    stub_restores(monkeypatch, {})
+    monkeypatch.setattr(get_registry().get("codex"), "terminate_session", hang)
+
+    async with asyncio.timeout(3):
+        async with started(runtime):
+            await until(lambda: not runtime.restores.is_restoring("s1"))
+            request = asyncio.create_task(runtime.reattach("s1"))
+            await until(lambda: runtime.restores.holds_sends("s1"))
+            # As the server does at its graceful timeout.
+            request.cancel()
+
+
 async def test_sends_behind_a_reopening_send_are_held_not_made_to_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -703,7 +743,7 @@ async def test_a_restart_stops_a_delivery_already_under_way(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Shutdown gives the teardown that never ends this long.
-    monkeypatch.setattr("waypoint.restores.CANCEL_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr("waypoint.restores.TEARDOWN_STOP_GRACE_SECONDS", 0.05)
     runtime = make_runtime(tmp_path)
     add_session(runtime, "s1")
     release = asyncio.Event()

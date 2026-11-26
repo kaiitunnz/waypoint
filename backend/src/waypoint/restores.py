@@ -24,6 +24,10 @@ log = logging.getLogger("waypoint.restores")
 # How long a cancelled restore has to unwind before it is abandoned.
 CANCEL_GRACE_SECONDS = 5.0
 
+# Shutdown's grace for a teardown in flight. The supervisor kills the backend 10s
+# after asking it to stop, and plugins are still to be shut down.
+TEARDOWN_STOP_GRACE_SECONDS = 1.0
+
 RESTORING_DETAIL = "session is still being restored; try again in a moment"
 
 type Restore = Callable[["SessionRuntime", SessionRecord], Coroutine[Any, Any, None]]
@@ -172,7 +176,9 @@ class RestoreCoordinator:
         await cancel_and_wait(*self._boot_tasks.values())
         await asyncio.gather(*map(_stop, list(self._restoring.values())))
         if self._teardowns:
-            _, stuck = await asyncio.wait(self._teardowns, timeout=CANCEL_GRACE_SECONDS)
+            _, stuck = await asyncio.wait(
+                self._teardowns, timeout=TEARDOWN_STOP_GRACE_SECONDS
+            )
             await cancel_and_wait(*stuck)
 
     def _is_bounded(self, session: SessionRecord) -> bool:

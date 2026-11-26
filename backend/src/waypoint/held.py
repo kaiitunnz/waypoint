@@ -107,7 +107,13 @@ class HeldQueue:
                 record = await self._hold(session_id, request, origin, reason)
                 if queued and not wake and session.status is SessionStatus.EXITED:
                     # Under the send lock, so only one send reopens it.
-                    await self._reopen(session_id)
+                    try:
+                        await self._reopen(session_id)
+                    except BaseException:
+                        # The caller sends it again, so no copy may stay held.
+                        if self._runtime.storage.take_held_message(record.id):
+                            self._unpin(record)
+                        raise
         self._auto_held.add(session_id)
         self.kick(session_id)
         return record

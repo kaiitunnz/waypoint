@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
@@ -51,13 +51,28 @@ class AssistantBoot:
         if self._launching and session_id == self._runtime.assistant_session_id:
             raise _starting()
 
-    async def cancel_waiting(self) -> None:
+    async def cancel_waiting(self) -> bool:
         """Stop a setup still waiting on a restore, so it cannot replace the
-        thread under a terminate or reset. A launch in flight refuses them."""
+        thread under a terminate or reset, and return whether one was. A launch
+        in flight refuses them."""
         if self._launching:
             raise _starting()
-        if self._task is not None:
-            await cancel_and_wait(self._task)
+        if self._task is None or self._task.done():
+            return False
+        await cancel_and_wait(self._task)
+        return True
+
+    @asynccontextmanager
+    async def replacing(self) -> AsyncIterator[None]:
+        """Stop a waiting setup while the block replaces the thread, and start it
+        again if the block fails."""
+        stopped = await self.cancel_waiting()
+        try:
+            yield
+        except Exception:
+            if stopped:
+                self.start()
+            raise
 
     async def stop(self) -> None:
         if self._task is None:

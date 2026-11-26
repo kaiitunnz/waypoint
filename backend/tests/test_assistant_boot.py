@@ -161,6 +161,33 @@ async def test_reset_gets_past_a_hung_pane_restore(
         assert summary.session_id == "fresh"
 
 
+async def test_a_failed_reset_leaves_the_setup_to_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path, **assistant_settings())
+    add_assistant(runtime, transport="tmux")
+    release = asyncio.Event()
+
+    async def errored(runtime: SessionRuntime, session: SessionRecord) -> None:
+        await runtime._record_system_event(
+            session.id, "No pane", status=SessionStatus.ERROR
+        )
+
+    stub_restores(monkeypatch, {"assistant": gated_restore(release, errored)})
+    monkeypatch.setattr(get_registry().for_transport("tmux"), "terminate_session", noop)
+
+    async with started(runtime):
+        monkeypatch.setattr(
+            runtime, "_create_assistant_session", raising_async("cannot launch")
+        )
+        with pytest.raises(RuntimeError):
+            await runtime.reset_assistant()
+        stub_assistant_creation(runtime, monkeypatch)
+        release.set()
+        # An errored pane assistant is replaced once its restore ends.
+        await until(lambda: runtime.assistant_session_id == "fresh")
+
+
 async def test_the_thread_being_replaced_takes_no_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -18,7 +18,7 @@
   overscroll-behavior: contain;
 }
 
-/* The column fills the view, so "Load older" stays at its top. */
+/* The column fills the view, so a short transcript can sit at its bottom. */
 .col {
   display: flex;
   flex: 1 0 auto;
@@ -29,7 +29,7 @@
   padding: 0 12px 10px;
 }
 
-/* A short transcript sits at the bottom, like a messenger. */
+/* A short transcript sits at the bottom, like a messenger, with "Load older" above its first turn. */
 .messages {
   margin-top: auto;
 }

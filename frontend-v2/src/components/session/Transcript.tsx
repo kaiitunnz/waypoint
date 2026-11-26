@@ -57,14 +57,14 @@ export function Transcript({
         <div ref={content} className={styles.col}>
           {override ?? (
             <TranscriptHoldProvider value={hold}>
-              {hasOlder ? (
-                <div className={styles.older}>
-                  <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
-                    {loadingOlder ? "Loading older messages…" : "Load older messages"}
-                  </ActionChip>
-                </div>
-              ) : null}
               <div className={styles.messages}>
+                {hasOlder ? (
+                  <div className={styles.older}>
+                    <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
+                      {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                    </ActionChip>
+                  </div>
+                ) : null}
                 <div ref={log} className={styles.turns} role="log" aria-label="Transcript">
                   {turns.map((turn, index) => (
                     <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />

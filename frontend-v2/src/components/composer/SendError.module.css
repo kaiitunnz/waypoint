@@ -1,0 +1,45 @@
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding: 2px 2px 2px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--error) 8%, var(--plane));
+}
+
+.busy {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, var(--plane));
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* One message line tall, from the message's top padding. */
+.glyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  margin-top: 6px;
+  color: var(--error);
+}
+
+.busy .glyph {
+  color: var(--warn);
+}
+
+.message {
+  min-width: 0;
+  padding: 6px 0;
+  line-height: 20px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}

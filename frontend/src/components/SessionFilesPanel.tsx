@@ -1,16 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-import { formatFileSize } from "@waypoint/web-core/attachments";
-import { FileIcon, typeTag } from "@/components/AttachmentTray";
-import {
-  attachmentUrl,
-  deleteAllAttachments,
-  deleteAttachment,
-  fetchSessionAttachments,
-} from "@waypoint/web-core/api";
+import { filesSummary, formatFileSize, typeTag } from "@waypoint/web-core/attachments";
+import { FileIcon } from "@/components/AttachmentTray";
+import { attachmentUrl } from "@waypoint/web-core/api";
+import { useSessionFiles } from "@waypoint/web-core/hooks/useSessionFiles";
 import type { SessionAttachment } from "@waypoint/web-core/types";
 import { formatRelativeTime } from "@waypoint/web-core/usage";
 
@@ -39,27 +35,15 @@ export function SessionFilesPanel({
   onReference,
   referencedIds,
 }: SessionFilesPanelProps) {
-  const [items, setItems] = useState<SessionAttachment[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [confirmingClear, setConfirmingClear] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      setItems(await fetchSessionAttachments(host, token, sessionId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load files");
-      setItems([]);
-    }
-  }, [host, token, sessionId]);
-
-  useEffect(() => {
-    if (!open) return;
-    setItems(null);
-    setConfirmingClear(false);
-    void load();
-  }, [open, load]);
+  const {
+    items,
+    error,
+    confirmingClear,
+    setConfirmingClear,
+    busy,
+    remove: removeOne,
+    clearAll,
+  } = useSessionFiles(host, token, sessionId, open);
 
   useEffect(() => {
     if (!open) return;
@@ -70,38 +54,9 @@ export function SessionFilesPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const removeOne = useCallback(
-    async (id: string) => {
-      setItems((prev) => (prev ? prev.filter((it) => it.id !== id) : prev));
-      try {
-        await deleteAttachment(host, token, sessionId, id);
-      } catch {
-        void load(); // Resync on failure rather than lie about the state.
-      }
-    },
-    [host, token, sessionId, load],
-  );
-
-  const clearAll = useCallback(async () => {
-    setBusy(true);
-    try {
-      await deleteAllAttachments(host, token, sessionId);
-      setItems([]);
-      setConfirmingClear(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete files");
-    } finally {
-      setBusy(false);
-    }
-  }, [host, token, sessionId]);
-
   if (!open || typeof document === "undefined") return null;
 
-  const total = (items ?? []).reduce((sum, it) => sum + it.size, 0);
-  const summary =
-    items === null
-      ? "Loading…"
-      : `${items.length} file${items.length === 1 ? "" : "s"} · ${formatFileSize(total)}`;
+  const summary = items === null ? "Loading…" : filesSummary(items);
 
   return createPortal(
     <div

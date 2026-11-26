@@ -17,6 +17,8 @@ interface SessionContextValue {
   full: boolean;
   // Structured transports have cards; the rest show raw events.
   structured: boolean;
+  // Opens the session's files, or null where the session has none to show.
+  openFiles: (() => void) | null;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);

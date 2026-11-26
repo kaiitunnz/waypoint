@@ -1,0 +1,46 @@
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fields > [role="radiogroup"] {
+  align-self: flex-start;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.previewLabel {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.runs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-strong);
+}
+
+.runs span {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}

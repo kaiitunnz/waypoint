@@ -18,6 +18,14 @@ export const CADENCES: Cadence[] = [
   "custom",
 ];
 
+export const CADENCE_LABELS: Record<Cadence, string> = {
+  daily: "Daily",
+  weekdays: "Weekdays",
+  weekly: "Weekly",
+  monthly: "Monthly",
+  custom: "Custom",
+};
+
 export const WEEKDAY_LABELS = [
   "Sun",
   "Mon",

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
@@ -24,14 +23,5 @@ export function ActionChip({
       {icon ? <Icon name={icon} size={14} strokeWidth={2} /> : null}
       {children}
     </button>
-  );
-}
-
-export function ActionChipLink({ href, icon, children }: ChipContent & { href: string }) {
-  return (
-    <Link href={href} className={styles.chip}>
-      {children}
-      {icon ? <Icon name={icon} size={14} strokeWidth={2} /> : null}
-    </Link>
   );
 }

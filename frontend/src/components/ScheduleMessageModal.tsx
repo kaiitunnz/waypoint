@@ -6,12 +6,16 @@ import { createPortal } from "react-dom";
 import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { createMessageSchedule } from "@waypoint/web-core/api";
 import { trapTabFocus } from "@waypoint/web-core/keyboard";
+import { defaultRecurrenceState, RecurrenceState, TimingMode } from "@waypoint/web-core/recurrence";
 import {
-  cronFromState,
-  defaultRecurrenceState,
-  RecurrenceState,
-  TimingMode,
-} from "@waypoint/web-core/recurrence";
+  DELAY_PRESETS,
+  defaultScheduledAt,
+  scheduleMessageOptions,
+  schedulePreview,
+  type OneTimeTiming,
+  type ScheduleTrigger,
+} from "@waypoint/web-core/session/scheduleMessage";
+import { IDLE_SEND_MODES, type IdleBatchMode } from "@waypoint/web-core/session/sendModes";
 
 interface ScheduleMessageModalProps {
   host: string;
@@ -22,33 +26,6 @@ interface ScheduleMessageModalProps {
   onScheduled?: () => void;
   onError: (message: string) => void;
 }
-
-type Timing = "delay" | "datetime";
-type Trigger = "time" | "idle";
-type IdleBatch = "with_previous" | "next_cycle";
-
-// Labels and hints mirror the composer send popover's idle options
-// (SessionDetail idleActions) so the same mode reads identically in both.
-const IDLE_BATCHES: { value: IdleBatch; label: string; hint: string }[] = [
-  {
-    value: "with_previous",
-    label: "Send when idle",
-    hint: "Joins the next idle batch.",
-  },
-  {
-    value: "next_cycle",
-    label: "Send next idle cycle",
-    hint: "Waits for the following idle point.",
-  },
-];
-
-const DELAY_PRESETS: { label: string; minutes: number }[] = [
-  { label: "5m", minutes: 5 },
-  { label: "15m", minutes: 15 },
-  { label: "30m", minutes: 30 },
-  { label: "1h", minutes: 60 },
-  { label: "3h", minutes: 180 },
-];
 
 // Small portaled form modal for queuing a message to the current session.
 // Follows the SshConnectModal conventions: rendered to document.body (so it
@@ -64,11 +41,11 @@ export function ScheduleMessageModal({
   onError,
 }: ScheduleMessageModalProps) {
   const [draft, setDraft] = useState(initialDraft);
-  const [trigger, setTrigger] = useState<Trigger>("time");
-  const [idleBatch, setIdleBatch] = useState<IdleBatch>("next_cycle");
-  const [timing, setTiming] = useState<Timing>("delay");
+  const [trigger, setTrigger] = useState<ScheduleTrigger>("time");
+  const [idleBatch, setIdleBatch] = useState<IdleBatchMode>("next_cycle");
+  const [timing, setTiming] = useState<OneTimeTiming>("delay");
   const [delay, setDelay] = useState("15");
-  const [at, setAt] = useState(defaultScheduledAt);
+  const [at, setAt] = useState(() => defaultScheduledAt());
   const [submit, setSubmit] = useState(true);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -113,46 +90,23 @@ export function ScheduleMessageModal({
       return;
     }
     setError("");
-    const options: {
-      submit: boolean;
-      delaySeconds?: number;
-      scheduledAt?: string;
-      cron?: string;
-      timezone?: string;
-      startAt?: string;
-      trigger?: "idle";
-      idleBatchMode?: IdleBatch;
-    } = { submit };
-    if (trigger === "idle") {
-      options.trigger = "idle";
-      options.idleBatchMode = idleBatch;
-    } else if (timingMode === "repeat") {
-      const cron = cronFromState(recurrence);
-      if (!cron) {
-        setError("Enter a valid recurrence.");
-        return;
-      }
-      options.cron = cron;
-      options.timezone = recurrence.timezone;
-      if (recurrence.startAt) options.startAt = recurrence.startAt;
-    } else if (timing === "delay") {
-      const minutes = Number.parseFloat(delay);
-      if (!Number.isFinite(minutes) || minutes < 0) {
-        setError("Enter a non-negative delay in minutes.");
-        return;
-      }
-      options.delaySeconds = Math.round(minutes * 60);
-    } else {
-      const local = new Date(at);
-      if (Number.isNaN(local.getTime())) {
-        setError("Enter a valid scheduled time.");
-        return;
-      }
-      options.scheduledAt = local.toISOString();
+    const built = scheduleMessageOptions({
+      trigger,
+      idleBatch,
+      timingMode,
+      recurrence,
+      timing,
+      delay,
+      at,
+      submit,
+    });
+    if ("error" in built) {
+      setError(built.error);
+      return;
     }
     setSending(true);
     try {
-      await createMessageSchedule(host, token, sessionId, text, options);
+      await createMessageSchedule(host, token, sessionId, text, built.options);
       onScheduled?.();
       onClose();
     } catch (err) {
@@ -162,7 +116,7 @@ export function ScheduleMessageModal({
     }
   }
 
-  const preview = computeSchedulePreview(timing, delay, at);
+  const preview = schedulePreview(timing, delay, at);
 
   return createPortal(
     <div
@@ -236,7 +190,7 @@ export function ScheduleMessageModal({
               role="tablist"
               aria-label="Idle batch"
             >
-              {IDLE_BATCHES.map((batch) => (
+              {IDLE_SEND_MODES.map((batch) => (
                 <button
                   key={batch.value}
                   type="button"
@@ -250,7 +204,7 @@ export function ScheduleMessageModal({
               ))}
             </div>
             <p className="schedule-msg-idle-hint">
-              {IDLE_BATCHES.find((b) => b.value === idleBatch)?.hint}
+              {IDLE_SEND_MODES.find((b) => b.value === idleBatch)?.hint}.
             </p>
           </div>
         ) : (
@@ -385,64 +339,4 @@ export function ScheduleMessageModal({
     </div>,
     document.body,
   );
-}
-
-function defaultScheduledAt(): string {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() + 15);
-  const pad = (value: number) => value.toString().padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
-}
-
-function computeSchedulePreview(
-  timing: Timing,
-  delay: string,
-  at: string,
-): { absolute: string; relative: string } | null {
-  let target: Date;
-  if (timing === "delay") {
-    const minutes = Number.parseFloat(delay);
-    if (!Number.isFinite(minutes) || minutes < 0) {
-      return null;
-    }
-    target = new Date(Date.now() + minutes * 60_000);
-  } else {
-    target = new Date(at);
-    if (Number.isNaN(target.getTime())) {
-      return null;
-    }
-  }
-  const sameDay = new Date().toDateString() === target.toDateString();
-  const absolute = target.toLocaleString(undefined, {
-    weekday: sameDay ? undefined : "short",
-    month: sameDay ? undefined : "short",
-    day: sameDay ? undefined : "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return { absolute, relative: relativeFromNow(target) };
-}
-
-function relativeFromNow(target: Date): string {
-  const diff = target.getTime() - Date.now();
-  if (diff <= 0) {
-    return "now";
-  }
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 1) {
-    return "in under a minute";
-  }
-  if (minutes < 60) {
-    return `in ${minutes} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const rem = minutes % 60;
-  if (hours < 48) {
-    return rem ? `in ${hours}h ${rem}m` : `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days} days`;
 }

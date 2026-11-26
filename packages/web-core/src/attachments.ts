@@ -18,3 +18,17 @@ export function formatFileSize(bytes: number): string {
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
+
+// A short type tag for a file: the uppercased extension, else IMAGE or FILE.
+export function typeTag(filename: string, isImage: boolean): string {
+  const dot = filename.lastIndexOf(".");
+  const ext = dot > 0 && dot < filename.length - 1 ? filename.slice(dot + 1) : "";
+  if (ext && ext.length <= 5) return ext.toUpperCase();
+  return isImage ? "IMAGE" : "FILE";
+}
+
+// A set of files in words, e.g. "2 files · 1.4 MB".
+export function filesSummary(files: ReadonlyArray<{ size: number }>): string {
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  return `${files.length} file${files.length === 1 ? "" : "s"} · ${formatFileSize(total)}`;
+}

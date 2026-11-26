@@ -2,14 +2,16 @@
 
 import { useRef, useState } from "react";
 
-import { ActionChip, ActionChipLink } from "@/components/ui/ActionChip";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Field, PasswordInput, SearchInput, TextInput } from "@/components/ui/Field";
+import { Field, PasswordInput, SearchInput, TextArea, TextInput } from "@/components/ui/Field";
+import { FileThumb } from "@/components/ui/FileThumb";
+import { Flyout } from "@/components/ui/Flyout";
 import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -19,6 +21,7 @@ import { MenuButton } from "@/components/ui/MenuButton";
 import { Meter } from "@/components/ui/Meter";
 import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { Select } from "@/components/ui/Select";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useToast } from "@/components/ui/Toast";
@@ -37,6 +40,9 @@ export function Gallery() {
   const [confirm, setConfirm] = useState(false);
   const [wide, setWide] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const [flyout, setFlyout] = useState(false);
+  const flyoutTrigger = useRef<HTMLButtonElement>(null);
+  const [effort, setEffort] = useState("high");
   const [segment, setSegment] = useState("all");
   const [view, setView] = useState("chat");
   const [density, setDensity] = useState("summary");
@@ -133,9 +139,6 @@ export function Gallery() {
         <ActionChip icon="refresh" disabled>
           Retry
         </ActionChip>
-        <ActionChipLink href="/gallery" icon="chevron-right">
-          Open files
-        </ActionChipLink>
         <span>
           Running <InlineCode>npm run lint</InlineCode>
         </span>
@@ -144,6 +147,7 @@ export function Gallery() {
       <SectionHeading title="Toggle, lamps, badges" />
       <div className={styles.row}>
         <Toggle checked={on} onChange={setOn} label="Focus" />
+        <Toggle checked={false} onChange={setOn} label="Focus, saving" disabled />
         {LAMPS.map((state) => (
           <span key={state} className={styles.lamp}>
             <StatusLamp state={state} />
@@ -164,6 +168,7 @@ export function Gallery() {
         <Meter label="Calm" value={30} tone="calm" className={styles.meter} />
         <Meter label="Approaching the limit" value={77} tone="warn" className={styles.meter} />
         <Meter label="At the limit" value={96} tone="danger" className={styles.meter} />
+        <Meter label="Unknown" value={null} className={styles.meter} />
       </div>
 
       <SectionHeading title="List rows" count={4} action="See all" />
@@ -193,6 +198,12 @@ export function Gallery() {
         <ListRow lamp="exited" title="597 exited" titleFont="sans" compact dimmed selected trailing="" />
       </List>
 
+      <SectionHeading title="File thumbnails" dense />
+      <div className={styles.row}>
+        <FileThumb src="/favicon.svg" />
+        <FileThumb src={null} />
+      </div>
+
       <SectionHeading title="Fields" dense />
       <div className={styles.fields}>
         <SearchInput aria-label="Search sessions" placeholder="Search sessions" />
@@ -201,6 +212,15 @@ export function Gallery() {
         </Field>
         <Field label="Password" htmlFor="g-pass">
           <PasswordInput id="g-pass" defaultValue="hunter2" />
+        </Field>
+        <Field label="Effort" htmlFor="g-effort">
+          <Select id="g-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+          </Select>
+        </Field>
+        <Field label="Message" htmlFor="g-message">
+          <TextArea id="g-message" rows={3} defaultValue="Run the tests again." />
         </Field>
       </div>
 
@@ -212,6 +232,9 @@ export function Gallery() {
         <Button onClick={() => setConfirm(true)}>Confirm</Button>
         <Button ref={trigger} onClick={() => setPopover((open) => !open)}>
           Popover
+        </Button>
+        <Button ref={flyoutTrigger} onClick={() => setFlyout((open) => !open)}>
+          Flyout
         </Button>
         <Button onClick={() => toast({ message: "Switched to studio" })}>Toast</Button>
         <Button
@@ -307,6 +330,17 @@ export function Gallery() {
           </MenuItem>
         </Menu>
       </Popover>
+      <Flyout
+        open={flyout}
+        onClose={() => setFlyout(false)}
+        triggerRef={flyoutTrigger}
+        title="Focus"
+        side="top"
+        width={280}
+        resizeKey="waypoint.gallery-popover-size"
+      >
+        <p className={styles.flyoutDemo}>A resizable popover above its trigger on a pointer client, a sheet on touch.</p>
+      </Flyout>
     </div>
   );
 }

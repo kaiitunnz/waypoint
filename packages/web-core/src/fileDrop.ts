@@ -41,3 +41,44 @@ export function installFileDropGuard(
     target.removeEventListener("drop", onDrop as EventListener);
   };
 }
+
+// The files of a paste or drop, preferring the `items` API (which carries pasted
+// screenshots) and falling back to `files`.
+export function filesFromDataTransfer(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const out: File[] = [];
+  if (data.items && data.items.length > 0) {
+    for (const item of Array.from(data.items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+  } else if (data.files && data.files.length > 0) {
+    out.push(...Array.from(data.files));
+  }
+  return out;
+}
+
+// Whether a paste attaches its files rather than pasting its text. A file manager
+// copies a file with its name, path or URI as text; an office app puts a picture
+// of the selection beside text that names no file.
+export function pasteAttaches(files: readonly File[], text: string): boolean {
+  if (files.length === 0) return false;
+  const names = new Set(files.map((file) => file.name.normalize("NFC")));
+  return text.split(/[\r\n]+/).every((line) => !line.trim() || names.has(namedBy(line.trim()).normalize("NFC")));
+}
+
+// The file name a clipboard line stands for: its own, or the last part of an
+// absolute path or file URI. A web address or relative path is just text.
+function namedBy(line: string): string {
+  const uri = line.startsWith("file://");
+  if (!uri && !line.startsWith("/")) return line;
+  const name = line.slice(line.lastIndexOf("/") + 1);
+  if (!uri) return name;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}

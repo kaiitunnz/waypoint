@@ -10,6 +10,9 @@ export function usePopoverDismiss(
   wrapRef: RefObject<HTMLElement | null>,
   panelRef: RefObject<HTMLElement | null>,
   triggerRef: RefObject<HTMLElement | null>,
+  // For a popover that did not take the focus: Escape leaves it where it is
+  // unless it has since moved into the panel.
+  { keepOutsideFocus = false }: { keepOutsideFocus?: boolean } = {},
 ): void {
   useEffect(() => {
     if (!open) return;
@@ -25,10 +28,10 @@ export function usePopoverDismiss(
       if (restoreFocus) triggerRef.current?.focus();
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
+      if (event.key !== "Escape") return;
+      const stays = keepOutsideFocus && !panelRef.current?.contains(document.activeElement);
+      setOpen(false);
+      if (!stays) triggerRef.current?.focus();
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
@@ -36,5 +39,5 @@ export function usePopoverDismiss(
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, setOpen, wrapRef, panelRef, triggerRef]);
+  }, [open, setOpen, wrapRef, panelRef, triggerRef, keepOutsideFocus]);
 }

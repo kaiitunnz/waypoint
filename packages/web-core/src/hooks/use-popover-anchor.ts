@@ -11,10 +11,11 @@ import {
 // Where the popover is pinned relative to its trigger. ``dropdown`` drops the
 // panel just below the trigger and is portaled to ``document.body`` with
 // ``position: fixed``, so an ``overflow: hidden`` ancestor of the trigger can't
-// clip it. ``composer`` renders the panel in-tree above the trigger; CSS owns
-// its ``position: absolute`` bottom/right anchor, so the hook emits no
-// position, only bounds.
-export type PopoverPlacement = "dropdown" | "composer";
+// clip it; ``rise`` is the same portaled panel above the trigger. ``composer``
+// renders the panel in-tree above the trigger; CSS owns its
+// ``position: absolute`` bottom/right anchor, so the hook emits no position,
+// only bounds.
+export type PopoverPlacement = "dropdown" | "rise" | "composer";
 
 interface PopoverAnchorOptions {
   gap?: number;
@@ -38,7 +39,7 @@ export interface PopoverBounds {
 }
 
 export interface PopoverAnchor {
-  // Fixed-position style for a ``dropdown`` placement; null for ``composer``
+  // Fixed-position style for the ``dropdown`` and ``rise`` placements; null for ``composer``
   // (CSS owns its anchor) and whenever the popover is closed or deferred to a
   // mobile media query.
   style: CSSProperties | null;
@@ -54,12 +55,12 @@ const MIN_WIDTH = 320;
 const MIN_HEIGHT = 240;
 
 // Fixed-viewport coordinates and growth bounds for a popover anchored to a
-// trigger. The dropdown placement positions the panel ``fixed`` just below the
-// trigger and pins it to the trigger's left or right edge; the composer
-// placement leaves positioning to CSS and only reports bounds. Both compute
-// available space from the visual viewport so the panel never runs past a
-// screen edge, and both re-measure while open so the panel tracks scroll,
-// resize, and visual-viewport pan/zoom.
+// trigger. The dropdown and rise placements position the panel ``fixed`` just
+// below or above the trigger and pin it to the trigger's left or right edge;
+// the composer placement leaves positioning to CSS and only reports bounds. All
+// compute available space from the visual viewport so the panel never runs past
+// a screen edge, and re-measure while open so the panel tracks scroll, resize,
+// and visual-viewport pan/zoom.
 export function usePopoverAnchor(
   triggerRef: RefObject<HTMLElement | null>,
   open: boolean,
@@ -103,10 +104,11 @@ export function usePopoverAnchor(
       availableHeight = triggerTop - gap - visualTop - margin;
       style = null;
     } else {
-      // Anchor top/left; drop below the trigger and grow toward the
-      // bottom/right viewport margins.
-      const top = rect.bottom + gap;
-      const common: CSSProperties = { position: "fixed", top, bottom: "auto" };
+      // Anchor to the trigger's edge below or above it and grow away from it.
+      const common: CSSProperties =
+        placement === "rise"
+          ? { position: "fixed", bottom: window.innerHeight - rect.top + gap, top: "auto" }
+          : { position: "fixed", top: rect.bottom + gap, bottom: "auto" };
       style =
         align === "right"
           ? {
@@ -119,7 +121,10 @@ export function usePopoverAnchor(
         align === "right"
           ? triggerRight - visualLeft - margin
           : visualRight - triggerLeft - margin;
-      availableHeight = visualBottom - (triggerBottom + gap) - margin;
+      availableHeight =
+        placement === "rise"
+          ? triggerTop - gap - visualTop - margin
+          : visualBottom - (triggerBottom + gap) - margin;
     }
 
     const maxWidth = Math.max(0, Math.round(availableWidth));

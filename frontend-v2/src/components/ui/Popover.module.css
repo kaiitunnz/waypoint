@@ -12,6 +12,12 @@
   outline: none;
 }
 
+.scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .menu {
   display: flex;
   flex-direction: column;
@@ -30,6 +36,11 @@
   text-align: left;
 }
 
+.item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .selected {
   background: var(--fill-quiet);
   color: var(--text-strong);
@@ -45,7 +56,7 @@
     min-height: 36px;
   }
 
-  .item:hover {
+  .item:hover:not(:disabled) {
     background: var(--fill-quiet);
   }
 }

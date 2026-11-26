@@ -113,3 +113,17 @@ export function summarizeTodos(
     allComplete: completed === todos.length,
   };
 }
+
+// The newest task snapshot: the latest in the loaded events, or the one the
+// server sent with the tail page when that is newer than anything loaded.
+export function currentTodoEvent(events: readonly EventRecord[], loaded: EventRecord | null): EventRecord | null {
+  let inWindow: EventRecord | null = null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (isTodoListEvent(events[index])) {
+      inWindow = events[index];
+      break;
+    }
+  }
+  if (!inWindow) return loaded;
+  return loaded && loaded.sequence > inWindow.sequence ? loaded : inWindow;
+}

@@ -5,11 +5,9 @@ import { useRef, useState } from "react";
 import { describeHost } from "@waypoint/web-core/hostPicker";
 import { readRecentHosts } from "@waypoint/web-core/recentHosts";
 
-import { Sheet } from "@/components/ui/Dialog";
+import { Flyout } from "@/components/ui/Flyout";
 import { Icon } from "@/components/ui/Icon";
-import { Popover } from "@/components/ui/Popover";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
-import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
 
 import { SshConnectDialog } from "./SshConnectDialog";
@@ -18,7 +16,6 @@ import { SwitcherPanel } from "./SwitcherPanel";
 
 export function HostSwitcher() {
   const { host, connection, launchTargets } = useShellData();
-  const pointer = usePointerUI();
   const [open, setOpen] = useState(false);
   const [recents, setRecents] = useState(readRecentHosts);
   // The SSH password dialog stacks over the open popover or sheet, which stays
@@ -70,15 +67,9 @@ export function HostSwitcher() {
         <span className={styles.name}>{name}</span>
         <Icon name="chevron-down" size={15} strokeWidth={2} />
       </button>
-      {pointer ? (
-        <Popover open={open} onOpenChange={requestOpen} triggerRef={trigger} label={label} width={380}>
-          {open ? panel : null}
-        </Popover>
-      ) : (
-        <Sheet open={open} onClose={() => requestOpen(false)} title={label} flush>
-          {panel}
-        </Sheet>
-      )}
+      <Flyout open={open} onClose={() => requestOpen(false)} triggerRef={trigger} title={label} width={380} flush>
+        {panel}
+      </Flyout>
       {connecting && connectingTarget ? (
         <SshConnectDialog
           targetName={connectingTarget.name}

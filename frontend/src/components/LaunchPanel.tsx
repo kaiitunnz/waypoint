@@ -36,6 +36,7 @@ import {
   UsageProviderOption,
 } from "@waypoint/web-core/types";
 import type { UsageLimitSourceValue } from "@waypoint/web-core/usageLimitSource";
+import { defaultScheduledAt } from "@waypoint/web-core/session/scheduleMessage";
 
 interface ThreadSummary {
   id: string;
@@ -654,15 +655,4 @@ function subheadFor(mode: PanelMode, targetLabel: string | null): string {
     case "schedule":
       return `Spin up an agent${where} at a future time, optionally with an opening prompt.`;
   }
-}
-
-function defaultScheduledAt(): string {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() + 15);
-  // Format as YYYY-MM-DDTHH:mm for datetime-local input.
-  const pad = (value: number) => value.toString().padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
 }

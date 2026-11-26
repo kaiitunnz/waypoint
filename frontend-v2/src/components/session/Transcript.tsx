@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
+import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
 import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
 import type { SessionStatus } from "@waypoint/web-core/types";
 
@@ -11,6 +12,7 @@ import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/lib/cx";
 
 import { EmptyTranscript } from "./EmptyTranscript";
+import { PendingTurn } from "./PendingTurn";
 import styles from "./Transcript.module.css";
 import { TurnView } from "./TurnView";
 import { useTranscriptScroll } from "./useTranscriptScroll";
@@ -24,6 +26,7 @@ interface TranscriptProps {
   onLoadOlder: () => void;
   hiddenCount: number;
   onShowAll: () => void;
+  pending: PendingSend[];
   // The transcript's own content when it is not a conversation, such as a placeholder.
   override?: ReactNode;
 }
@@ -37,6 +40,7 @@ export function Transcript({
   onLoadOlder,
   hiddenCount,
   onShowAll,
+  pending,
   override,
 }: TranscriptProps) {
   const { scroller, content, log, away, onScroll, jumpToEnd } = useTranscriptScroll(turns);
@@ -60,7 +64,8 @@ export function Transcript({
                   <TurnView key={turn.key} turn={turn} working={working && index === turns.length - 1} />
                 ))}
               </div>
-              {!loading && turns.length === 0 ? (
+              {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
+              {!loading && turns.length === 0 && pending.length === 0 ? (
                 <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
               ) : null}
             </>

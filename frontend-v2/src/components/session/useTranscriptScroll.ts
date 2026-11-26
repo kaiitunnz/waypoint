@@ -72,7 +72,8 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
     remember();
   }, [turns, remember]);
 
-  // Content that grows after layout (markdown, math, images, a run opening) keeps the end in view.
+  // Content that grows after layout (markdown, math, images, a run opening), or a view that
+  // shrinks as the composer grows, keeps the end in view.
   useEffect(() => {
     const el = scroller.current;
     const node = content.current;
@@ -82,6 +83,7 @@ export function useTranscriptScroll(turns: TranscriptTurn[]) {
       remember();
     });
     observer.observe(node);
+    observer.observe(el);
     return () => observer.disconnect();
   }, [remember]);
 

@@ -13,7 +13,6 @@ import type { InboxApprovalBlock, InboxBlock, InboxItem, InboxQuestionBlock } fr
 import { AttachmentTray } from "@/components/composer/AttachmentTray";
 import { CopyButton } from "@/components/session/cards/CopyButton";
 import { Markdown } from "@/components/session/cards/Markdown";
-import { OptionRows } from "@/components/session/attention/OptionRows";
 import { Button } from "@/components/ui/Button";
 import { TextArea } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -23,6 +22,7 @@ import { cx } from "@/lib/cx";
 import { useShellData } from "@/lib/shell-data";
 
 import { FileChips, FileTile } from "./InboxFiles";
+import { OptionRows } from "./OptionRows";
 import styles from "./InboxBlock.module.css";
 
 function QuestionOptions({ block, controller }: { block: InboxQuestionBlock; controller: InboxBlockController }) {

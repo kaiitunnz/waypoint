@@ -172,7 +172,7 @@ export function SessionScreen({ id }: { id: string }) {
             ? null
             : {
                 focus: { on: focus.on, busy: focus.busy, toggle: () => void focus.set(!focus.on) },
-                schedule: () => setScheduleOpen(true),
+                schedule: paneComposer ? () => setScheduleOpen(true) : null,
                 files: openFiles,
               },
         }

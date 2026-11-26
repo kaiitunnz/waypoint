@@ -11,7 +11,8 @@ export interface ScreenMenuOptions {
     // The chat composer's session tools, for a pane shown without it.
     tools: {
       focus: { on: boolean; busy: boolean; toggle: () => void };
-      schedule: () => void;
+      // Set where a composer is mounted to host the dialog.
+      schedule: (() => void) | null;
       // Set where the session takes files.
       files: (() => void) | null;
     } | null;
@@ -44,7 +45,7 @@ export function screenMenus({ reconnect, terminal }: ScreenMenuOptions): ScreenM
       disabled: tools.focus.busy,
       run: tools.focus.toggle,
     },
-    schedule: tools && { id: "schedule", label: "Schedule message", run: tools.schedule },
+    schedule: tools?.schedule ? { id: "schedule", label: "Schedule message", run: tools.schedule } : null,
     files: tools?.files ? { id: "files", label: "Session files", run: tools.files } : null,
   } satisfies Record<string, ScreenAction | null>;
   const present = (items: (ScreenAction | null)[]) => items.filter((item): item is ScreenAction => item !== null);

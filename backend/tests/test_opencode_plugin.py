@@ -410,14 +410,14 @@ async def test_a_selection_that_fails_is_refused(method: str) -> None:
 @pytest.mark.asyncio
 async def test_clearing_the_model_reaches_the_server() -> None:
     plugin = OpenCodePlugin()
-    session = _session()
+    session = _session(effort="high")
     runtime = _runtime(session)
     adapter = MagicMock(set_model=AsyncMock(return_value=True))
     _live(plugin, runtime, session, adapter)
 
     await plugin.apply_model(runtime, session, None)
 
-    adapter.set_model.assert_awaited_once_with("sess", None)
+    adapter.set_model.assert_awaited_once_with("sess", None, "high")
 
 
 # ── Permission modes and plan ───────────────────────────────────────────

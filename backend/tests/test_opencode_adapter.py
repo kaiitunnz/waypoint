@@ -936,14 +936,19 @@ async def test_model_and_effort_are_selected_on_the_session() -> None:
     async with driving(fake) as (adapter, _emitted):
         _register(adapter, model="opencode/big-pickle")
         await adapter.set_effort("local", "high")
-        await adapter.set_model("local", "opencode/plain")
-        await adapter.set_model("local", None)
+        await adapter.set_model("local", "opencode/plain", "high")
+        await adapter.set_model("local", None, "high")
+        # An effort the model lacks is refused, and the selection stands.
+        with pytest.raises(OpenCodeError, match="no reasoning effort 'max'"):
+            await adapter.set_effort("local", "max")
+        await adapter.set_effort("local", None)
 
     assert [
         body["model"] for body in fake.calls("POST", "/api/session/ses_root/model")
     ] == [
         {"providerID": "opencode", "id": "big-pickle", "variant": "high"},
         {"providerID": "opencode", "id": "plain"},
+        {"providerID": "opencode", "id": "big-pickle", "variant": "high"},
         {"providerID": "opencode", "id": "big-pickle"},
     ]
 

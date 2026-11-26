@@ -1377,7 +1377,7 @@ class OpenCodeAdapter:
         self._register_session(state)
         if effort and not model:
             # A variant travels only with a model.
-            await self.set_effort(session_id, effort)
+            await self._select_model(state, await self.default_model_id(), effort)
         await self._emit(
             state,
             normalize.note(
@@ -1608,12 +1608,16 @@ class OpenCodeAdapter:
 
     # ── Model, agent, permissions ───────────────────────────────────────
 
-    async def set_model(self, session_id: str, model: str | None) -> bool:
+    async def set_model(
+        self, session_id: str, model: str | None, effort: str | None = None
+    ) -> bool:
+        """Select ``model``, keeping the recorded ``effort`` (else the
+        session's) where the model has it."""
         state = self._sessions.get(session_id)
         if state is None:
             return False
         await self._select_model(
-            state, model or await self.default_model_id(), state.effort
+            state, model or await self.default_model_id(), effort or state.effort
         )
         return True
 
@@ -1621,9 +1625,12 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        await self._select_model(
-            state, state.model or await self.default_model_id(), effort
-        )
+        model = state.model or await self.default_model_id()
+        if effort and model:
+            entry = await self._model(model)
+            if entry is None or effort not in entry.variants:
+                raise OpenCodeError(f"{model} has no reasoning effort {effort!r}")
+        await self._select_model(state, model, effort)
         return True
 
     async def _model_selection(

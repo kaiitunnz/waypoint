@@ -816,7 +816,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         adapter = self._live_adapter(runtime, session)
         try:
-            success = await adapter.set_model(session.id, model)
+            success = await adapter.set_model(session.id, model, session.effort)
         except OpenCodeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)

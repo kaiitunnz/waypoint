@@ -37,7 +37,7 @@ interface AttentionStackProps {
   scheduled: {
     messages: MessageSchedule[];
     cancel: (id: string) => Promise<void>;
-    // Resolves to whether the session held the message instead of sending it.
+    // Resolves to whether the session held the message.
     sendNow: (id: string) => Promise<boolean>;
   };
   sideQuestions: SideQuestionState;

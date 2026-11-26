@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchBackendModels } from "../api";
+import { modelLabelFor } from "../modelDisplay";
 import type { BackendModelOption, ScheduledSession } from "../types";
 
 // An agent's model list depends on the launch target and account profile.
 const modelsKey = (schedule: ScheduledSession) =>
   `${schedule.backend}::${schedule.launch_target_id ?? "local"}::${schedule.account_profile_id ?? "default"}`;
 
-// The display name of a scheduled launch's model: its id until the list it
-// belongs to has loaded, or null when it pins none.
+// A scheduled launch's model label, or null when it pins none.
 export function useScheduleModels(
   host: string,
   token: string,
@@ -37,7 +37,7 @@ export function useScheduleModels(
 
   return useCallback(
     (schedule: ScheduledSession) =>
-      schedule.model ? (models[modelsKey(schedule)]?.find((option) => option.id === schedule.model)?.label ?? schedule.model) : null,
+      schedule.model ? modelLabelFor(schedule.model, models[modelsKey(schedule)] ?? []) : null,
     [models],
   );
 }

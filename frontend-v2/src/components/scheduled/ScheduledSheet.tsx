@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   cancelSchedule,
@@ -44,6 +44,11 @@ import styles from "./ScheduledSheet.module.css";
 // Finished rows shown before "N more".
 const HISTORY_SHOWN = 5;
 
+const GROUPS = {
+  launch: { title: "Sessions", one: "session launch", many: "session launches", clear: clearScheduleHistory },
+  message: { title: "Messages", one: "message", many: "messages", clear: clearMessageScheduleHistory },
+};
+
 const ACTION_LABEL: Record<ScheduledAction, string> = {
   open: "Open session",
   openLast: "Open last run",
@@ -68,8 +73,8 @@ export function ScheduledSheet({ onClose, schedules, messages, titleById, catalo
   const modelLabel = useScheduleModels(host, token, schedules);
   const now = new Date(useNow(30_000));
   const zone = browserTimezone();
-  const launches = useMemo(() => sortScheduled(schedules), [schedules]);
-  const sends = useMemo(() => sortScheduled(messages), [messages]);
+  const launches = sortScheduled(schedules);
+  const sends = sortScheduled(messages);
   const pending = [...launches, ...sends].filter((row) => row.status === "pending").length;
 
   return (
@@ -80,13 +85,11 @@ export function ScheduledSheet({ onClose, schedules, messages, titleById, catalo
         <div className={styles.groups}>
           <Group
             kind="launch"
-            title="Sessions"
             rows={launches.map((schedule) => launchRowView(schedule, catalog, now, zone, modelLabel(schedule)))}
             onClose={onClose}
           />
           <Group
             kind="message"
-            title="Messages"
             rows={sends.map((message) => messageRowView(message, titleById.get(message.session_id) ?? null, now, zone))}
             onClose={onClose}
           />
@@ -97,13 +100,12 @@ export function ScheduledSheet({ onClose, schedules, messages, titleById, catalo
 }
 
 interface GroupProps {
-  kind: "launch" | "message";
-  title: string;
+  kind: keyof typeof GROUPS;
   rows: RowView[];
   onClose: () => void;
 }
 
-function Group({ kind, title, rows, onClose }: GroupProps) {
+function Group({ kind, rows, onClose }: GroupProps) {
   const { host, token } = useShellData();
   const { toast } = useToast();
   const fail = useFailureToast();
@@ -114,11 +116,10 @@ function Group({ kind, title, rows, onClose }: GroupProps) {
   const history = rows.filter((row) => row.resolved);
   const shown = expanded ? rows : [...pending, ...history.slice(0, HISTORY_SHOWN)];
   const hidden = rows.length - shown.length;
-  const noun = kind === "launch" ? "session launch" : "message";
+  const { title, one, many, clear: clearHistory } = GROUPS[kind];
 
   async function clear() {
     try {
-      const clearHistory = kind === "launch" ? clearScheduleHistory : clearMessageScheduleHistory;
       const removed = await clearHistory(host, token);
       toast({ message: `Cleared ${removed} finished ${removed === 1 ? "entry" : "entries"}` });
     } catch (error) {
@@ -150,7 +151,7 @@ function Group({ kind, title, rows, onClose }: GroupProps) {
       <ConfirmDialog
         open={confirming}
         title="Clear history"
-        detail={`Remove ${history.length} finished ${noun}${history.length === 1 ? "" : "s"}? Pending ones stay.`}
+        detail={`Remove ${history.length} finished ${history.length === 1 ? one : many}? Pending ones stay.`}
         confirmLabel="Clear"
         onConfirm={clear}
         onClose={() => setConfirming(false)}

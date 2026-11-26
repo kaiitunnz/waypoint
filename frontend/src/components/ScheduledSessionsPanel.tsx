@@ -120,7 +120,6 @@ function ScheduleRow({
   schedule: ScheduledSession;
   onCancel: (id: string) => Promise<void>;
   catalog: BackendCatalog;
-  // The pinned model's display name, or null when the schedule pins none.
   modelName: string | null;
 }) {
   const when = new Date(schedule.scheduled_at);

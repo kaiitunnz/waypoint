@@ -1,5 +1,5 @@
 import { humaniseBackend, type BackendCatalog } from "./backends";
-import { isRecurring } from "./recurrence";
+import { isIdle, isRecurring } from "./recurrence";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -236,9 +236,8 @@ export function summarizeScheduled(
     ...pendingMessages.map((message) => ({
       key: `message:${message.id}`,
       kind: "message" as const,
-      // An idle message's time is when it was queued, not when it will send.
-      when: message.trigger === "idle" || !message.scheduled_at ? null : Date.parse(message.scheduled_at),
-      whenLabel: message.trigger === "idle" ? "when idle" : formatShortWhen(message.scheduled_at, now),
+      when: isIdle(message) || !message.scheduled_at ? null : Date.parse(message.scheduled_at),
+      whenLabel: isIdle(message) ? "when idle" : formatShortWhen(message.scheduled_at, now),
       target: titleById.get(message.session_id)?.trim() || "session",
       preview: message.text?.trim() || "",
       recurring: isRecurring(message),

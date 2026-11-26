@@ -14,6 +14,12 @@ export function describeScheduledDelivery(schedule: MessageSchedule): string {
   return formatRelative(new Date(schedule.scheduled_at));
 }
 
+// Session ids are "<backend>-<hex>"; the hex suffix is the unique part.
+export function shortSessionId(id: string): string {
+  const dash = id.lastIndexOf("-");
+  return dash >= 0 ? id.slice(dash + 1) : id;
+}
+
 function scheduledAtMs(m: MessageSchedule): number {
   return m.scheduled_at
     ? new Date(m.scheduled_at).getTime()

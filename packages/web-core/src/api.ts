@@ -1372,8 +1372,8 @@ export async function deleteMessageSchedule(
   return payload.message_schedule as MessageSchedule;
 }
 
-// Delivers a pending scheduled message now; a recurring one keeps its next run.
-// `held` says the session held it (Focus, a dialog, a restore) instead.
+// A recurring schedule keeps its next run. `held` means the session queued the
+// message (Focus, a dialog, a restore).
 export async function sendMessageScheduleNow(
   host: string,
   token: string,

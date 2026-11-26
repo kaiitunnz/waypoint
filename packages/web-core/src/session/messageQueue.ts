@@ -49,7 +49,6 @@ export interface QueueViewOptions {
   focus: boolean;
 }
 
-// What to tell the person after delivering a scheduled message on request.
 export function sendNowOutcome(held: boolean): string {
   return held ? "Held: the session will send it when it can" : "Sent";
 }

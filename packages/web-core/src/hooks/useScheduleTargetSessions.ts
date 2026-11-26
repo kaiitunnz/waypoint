@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchSessionsByIds } from "../api";
 import type { MessageSchedule, SessionRecord } from "../types";
 
-// `sessions` plus the targets of scheduled messages that aren't among them: an
-// exited session drops out of the live list but its messages still name it.
+// `sessions` plus any other session a scheduled message targets, such as an
+// exited one.
 export function useScheduleTargetSessions(
   host: string,
   token: string,

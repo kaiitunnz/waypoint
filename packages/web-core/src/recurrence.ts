@@ -164,13 +164,13 @@ export function formatInZone(
 
 const HHMM = /^(\d{1,2}) (\d{1,2})$/;
 
-export type CronCadence =
+type CronCadence =
   | { kind: "daily" | "weekdays"; clock: string }
   | { kind: "weekly"; clock: string; weekday: number }
   | { kind: "monthly"; clock: string; day: number };
 
 /** The preset cadence a cron expresses, or null for any other shape. */
-export function cronCadence(cron: string): CronCadence | null {
+function cronCadence(cron: string): CronCadence | null {
   const fields = cron.trim().split(/\s+/);
   if (fields.length !== 5) return null;
   const [minute, hour, dom, month, dow] = fields;
@@ -207,6 +207,29 @@ export function cronToLabel(
       return `MONTHLY ${cadence.day} · ${cadence.clock}${zone}`;
     default:
       return `CUSTOM ${cron}${zone}`;
+  }
+}
+
+const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
+
+/**
+ * A cadence in words ("Daily at 02:00", "Mondays at 09:00"), else the cron
+ * expression. The zone is named only when it differs from `localZone`.
+ */
+export function recurrenceSentence(cron: string, timezone: string | null | undefined, localZone: string): string {
+  const zone = timezone && timezone !== localZone ? ` (${timezone})` : "";
+  const cadence = cronCadence(cron);
+  switch (cadence?.kind) {
+    case "daily":
+      return `Daily at ${cadence.clock}${zone}`;
+    case "weekdays":
+      return `Weekdays at ${cadence.clock}${zone}`;
+    case "weekly":
+      return `${WEEKDAY_NAMES[cadence.weekday]} at ${cadence.clock}${zone}`;
+    case "monthly":
+      return `Monthly on day ${cadence.day} at ${cadence.clock}${zone}`;
+    default:
+      return `Cron ${cron}${zone}`;
   }
 }
 

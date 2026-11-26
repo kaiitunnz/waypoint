@@ -1,58 +1,15 @@
 import { CWD_NOT_FOUND_DETAIL, SSH_MASTER_REQUIRED_DETAIL } from "./api";
 import { humaniseBackend, permissionModeLabel, type BackendCatalog } from "./backends";
-import { cronCadence, WEEKDAY_LABELS } from "./recurrence";
+import { isIdle, isRecurring, recurrenceSentence } from "./recurrence";
+import { countdown, dayClock } from "./scheduleTime";
 import { messageText } from "./session/heldMessages";
+import { shortSessionId } from "./session/scheduledMessages";
 import type { MessageSchedule, ScheduledSession } from "./types";
 import { splitPath } from "./workspacePaths";
 
-const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DAY_MS = 86_400_000;
-
-const pad = (value: number) => String(value).padStart(2, "0");
-const clock = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-// "today at 07:00", "Tue 02:00" within a week either way, else "Jul 21 09:00".
-export function dayClock(date: Date, now: Date): string {
-  const days = Math.round((startOfDay(date) - startOfDay(now)) / DAY_MS);
-  if (days === 0) return `today at ${clock(date)}`;
-  if (Math.abs(days) < 7) return `${WEEKDAY_LABELS[date.getDay()]} ${clock(date)}`;
-  return `${MONTHS[date.getMonth()]} ${date.getDate()} ${clock(date)}`;
-}
-
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-// "in 7h 18m" while under two days, else whole days; "now" once due.
-export function countdown(target: Date, now: Date): string {
-  const minutes = Math.ceil((target.getTime() - now.getTime()) / 60_000);
-  if (minutes <= 0) return "now";
-  if (minutes < 60) return `in ${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return minutes % 60 ? `in ${hours}h ${minutes % 60}m` : `in ${hours}h`;
-  return `in ${Math.round(hours / 24)}d`;
-}
-
-// "Daily at 02:00", "Weekdays at 09:00", "Mondays at 09:00", "Monthly on day 3 at
-// 09:00", else the cron expression; the zone is named when it isn't `localZone`.
-export function recurrenceSentence(cron: string, timezone: string | null | undefined, localZone: string): string {
-  const zone = timezone && timezone !== localZone ? ` (${timezone})` : "";
-  const cadence = cronCadence(cron);
-  switch (cadence?.kind) {
-    case "daily":
-      return `Daily at ${cadence.clock}${zone}`;
-    case "weekdays":
-      return `Weekdays at ${cadence.clock}${zone}`;
-    case "weekly":
-      return `${WEEKDAY_NAMES[cadence.weekday]} at ${cadence.clock}${zone}`;
-    case "monthly":
-      return `Monthly on day ${cadence.day} at ${cadence.clock}${zone}`;
-    default:
-      return `Cron ${cron}${zone}`;
-  }
-}
-
-// The server records an HTTP refusal as "400: <detail>"; known details read as words.
+// The server records an HTTP refusal as "400: <detail>".
 export function failureText(reason: string | null | undefined): string {
   const detail = (reason ?? "").replace(/^\d{3}: /, "");
   if (detail === CWD_NOT_FOUND_DETAIL) return "folder not found";
@@ -66,16 +23,15 @@ export interface ScheduledRowView {
   id: string;
   recurring: boolean;
   title: string;
-  // Time left until a pending run.
   countdown: string | null;
-  // When it runs or what happened; `failed` shows in the error hue.
+  // When it runs or what happened.
   state: string;
   failed: boolean;
-  // A recurring row's previous run.
   lastRun: { text: string; failed: boolean } | null;
   actions: ScheduledAction[];
-  // A resolved row reads quieter than a pending one.
   resolved: boolean;
+  // The session to open: a message's target, or the one a launch started.
+  sessionId: string | null;
 }
 
 export interface ScheduledLaunchView extends ScheduledRowView {
@@ -83,13 +39,11 @@ export interface ScheduledLaunchView extends ScheduledRowView {
   // Agent, model and permission mode.
   agent: string;
   folder: string;
-  sessionId: string | null;
 }
 
 export interface ScheduledMessageView extends ScheduledRowView {
   kind: "message";
   target: string;
-  sessionId: string;
 }
 
 interface Sortable {
@@ -97,7 +51,7 @@ interface Sortable {
   created_at: string;
   scheduled_at?: string | null;
   last_run_at?: string | null;
-  trigger?: string;
+  trigger?: MessageSchedule["trigger"];
 }
 
 const planned = (item: Sortable) => (item.scheduled_at ? Date.parse(item.scheduled_at) : 0);
@@ -113,13 +67,15 @@ function settledAt(item: Sortable): number {
 export function sortScheduled<T extends Sortable>(items: T[]): T[] {
   const pending = items.filter((item) => item.status === "pending");
   const rest = items.filter((item) => item.status !== "pending");
-  pending.sort((a, b) => Number(a.trigger === "idle") - Number(b.trigger === "idle") || planned(a) - planned(b));
+  pending.sort((a, b) => Number(isIdle(a)) - Number(isIdle(b)) || planned(a) - planned(b));
   rest.sort((a, b) => settledAt(b) - settledAt(a));
   return [...pending, ...rest];
 }
 
-function lastRun(record: { cron?: string | null; last_run_at?: string | null; last_run_status?: string | null; last_failure_reason?: string | null }, now: Date) {
-  if (!record.cron || !record.last_run_at) return null;
+type RunRecord = Pick<MessageSchedule, "cron" | "last_run_at" | "last_run_status" | "last_failure_reason">;
+
+function lastRun(record: RunRecord, now: Date) {
+  if (!isRecurring(record) || !record.last_run_at) return null;
   if (record.last_run_status === "failed") {
     return { text: `Last run failed: ${failureText(record.last_failure_reason)}`, failed: true };
   }
@@ -135,14 +91,15 @@ export function launchRowView(
   localZone: string,
   model: string | null,
 ): ScheduledLaunchView {
-  const recurring = Boolean(schedule.cron);
+  const recurring = isRecurring(schedule);
   const at = new Date(schedule.scheduled_at);
   const pending = schedule.status === "pending";
   let state: string;
   if (schedule.status === "failed") state = `Failed: ${failureText(schedule.failure_reason)}`;
   else if (schedule.status === "cancelled") state = "Cancelled";
   else if (schedule.status === "launched") state = `Launched ${dayClock(at, now)}`;
-  else state = recurring ? recurrenceSentence(schedule.cron ?? "", schedule.timezone, localZone) : capitalize(dayClock(at, now));
+  else if (schedule.cron) state = recurrenceSentence(schedule.cron, schedule.timezone, localZone);
+  else state = capitalize(dayClock(at, now));
   const agent = [
     humaniseBackend(schedule.backend, catalog),
     model,
@@ -177,8 +134,8 @@ export function messageRowView(
   now: Date,
   localZone: string,
 ): ScheduledMessageView {
-  const recurring = Boolean(message.cron);
-  const idle = message.trigger === "idle";
+  const recurring = isRecurring(message);
+  const idle = isIdle(message);
   const pending = message.status === "pending";
   const at = message.scheduled_at ? new Date(message.scheduled_at) : null;
   // An idle message's time is when it was queued until a delivery replaces it.
@@ -187,9 +144,9 @@ export function messageRowView(
   if (message.status === "failed") state = `Failed: ${failureText(message.failure_reason)}`;
   else if (message.status === "cancelled") state = "Cancelled";
   else if (message.status === "sent" && idle) state = idleRanAt ? `Sent when idle, ${dayClock(idleRanAt, now)}` : "Sent when idle";
-  else if (message.status === "sent") state = at && !recurring ? `Sent ${dayClock(at, now)}` : "Sent";
+  else if (message.status === "sent") state = at ? `Sent ${dayClock(at, now)}` : "Sent";
   else if (idle) state = "When idle";
-  else if (recurring) state = recurrenceSentence(message.cron ?? "", message.timezone, localZone);
+  else if (message.cron) state = recurrenceSentence(message.cron, message.timezone, localZone);
   else state = at ? capitalize(dayClock(at, now)) : "Pending";
   const command = message.command ? `/${message.command.name}` : "";
   return {
@@ -203,7 +160,7 @@ export function messageRowView(
     lastRun: lastRun(message, now),
     actions: pending ? ["sendNow", "cancel"] : message.status === "sent" ? ["open", "dismiss"] : ["dismiss"],
     resolved: !pending,
-    target: sessionTitle || `session ${message.session_id.split("-").pop()}`,
+    target: sessionTitle || `session ${shortSessionId(message.session_id)}`,
     sessionId: message.session_id,
   };
 }

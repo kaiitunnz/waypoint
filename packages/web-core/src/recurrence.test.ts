@@ -9,6 +9,7 @@ import {
   formatInZone,
   isIdle,
   isRecurring,
+  recurrenceSentence,
   supportedTimezones,
   timezoneAbbrev,
   type RecurrenceState,
@@ -87,6 +88,16 @@ describe("cronToLabel", () => {
     expect(cronToLabel("")).toBe("");
     expect(cronToLabel(null, "UTC")).toBe("");
     expect(cronToLabel(undefined)).toBe("");
+  });
+});
+
+describe("recurrenceSentence", () => {
+  it("reads a cron as a sentence", () => {
+    expect(recurrenceSentence("0 2 * * *", "UTC", "UTC")).toBe("Daily at 02:00");
+    expect(recurrenceSentence("30 9 * * 1-5", "Asia/Singapore", "UTC")).toBe("Weekdays at 09:30 (Asia/Singapore)");
+    expect(recurrenceSentence("0 9 * * 1", null, "UTC")).toBe("Mondays at 09:00");
+    expect(recurrenceSentence("0 9 3 * *", null, "UTC")).toBe("Monthly on day 3 at 09:00");
+    expect(recurrenceSentence("*/5 * * * *", null, "UTC")).toBe("Cron */5 * * * *");
   });
 });
 

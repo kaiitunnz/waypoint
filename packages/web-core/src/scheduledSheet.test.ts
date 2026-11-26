@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildCatalog } from "./backends";
-import {
-  countdown,
-  dayClock,
-  failureText,
-  launchRowView,
-  messageRowView,
-  recurrenceSentence,
-  sortScheduled,
-} from "./scheduledSheet";
+import { failureText, launchRowView, messageRowView, sortScheduled } from "./scheduledSheet";
 import { launchCatalogDescriptors } from "./test-helpers";
 import type { MessageSchedule, ScheduledSession } from "./types";
 
@@ -42,30 +34,6 @@ const message = (fields: Partial<MessageSchedule>): MessageSchedule =>
     status: "pending",
     ...fields,
   }) as MessageSchedule;
-
-describe("time labels", () => {
-  it("names the day relative to today", () => {
-    expect(dayClock(local(26, 7), now)).toBe("today at 07:00");
-    expect(dayClock(local(24, 2), now)).toBe("Tue 02:00");
-    expect(dayClock(local(10, 9, 5), now)).toBe("Nov 10 09:05");
-  });
-
-  it("counts down in hours and minutes", () => {
-    expect(countdown(local(26, 19, 18), now)).toBe("in 7h 18m");
-    expect(countdown(local(26, 14), now)).toBe("in 2h");
-    expect(countdown(local(26, 12, 5), now)).toBe("in 5m");
-    expect(countdown(local(29, 12), now)).toBe("in 3d");
-    expect(countdown(local(26, 11), now)).toBe("now");
-  });
-
-  it("reads a cron as a sentence", () => {
-    expect(recurrenceSentence("0 2 * * *", "UTC", "UTC")).toBe("Daily at 02:00");
-    expect(recurrenceSentence("30 9 * * 1-5", "Asia/Singapore", "UTC")).toBe("Weekdays at 09:30 (Asia/Singapore)");
-    expect(recurrenceSentence("0 9 * * 1", null, "UTC")).toBe("Mondays at 09:00");
-    expect(recurrenceSentence("0 9 3 * *", null, "UTC")).toBe("Monthly on day 3 at 09:00");
-    expect(recurrenceSentence("*/5 * * * *", null, "UTC")).toBe("Cron */5 * * * *");
-  });
-});
 
 describe("failureText", () => {
   it("reads an HTTP refusal as words and keeps other reasons", () => {

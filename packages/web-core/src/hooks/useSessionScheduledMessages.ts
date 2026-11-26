@@ -49,7 +49,7 @@ export function useSessionScheduledMessages(
     return () => window.clearInterval(id);
   }, [refresh, messages]);
 
-  // Both actions throw a failure for the caller to report.
+  // Both actions throw on failure for the caller to report.
   const cancel = useCallback(
     async (scheduleId: string) => {
       setMessages((current) => current.filter((m) => m.id !== scheduleId));
@@ -64,8 +64,7 @@ export function useSessionScheduledMessages(
     [host, token, refresh],
   );
 
-  // Delivers one now and resolves to whether the session held it, once the list
-  // reflects it.
+  // Resolves to whether the session held the message, once the list is current.
   const sendNow = useCallback(
     async (scheduleId: string): Promise<boolean> => {
       try {

@@ -108,7 +108,7 @@ export function useTerminalPane({ host, token, sessionId, session, catalog, acti
 
   return {
     term,
-    // Null while the socket is closed.
+    // Null while no connection is open, as when the pane is off screen.
     state,
     // The agent's own TUI ground; dark until the server says otherwise.
     appearance,

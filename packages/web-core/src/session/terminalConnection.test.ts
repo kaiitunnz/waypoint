@@ -175,6 +175,17 @@ describe("openTerminalConnection", () => {
     expect(onAuthFailure).toHaveBeenCalledOnce();
   });
 
+  it("reports nothing once closed", () => {
+    const { connection, states, onAuthFailure } = open();
+    latest().open();
+    const socket = latest();
+    connection.close();
+    socket.onclose?.({ code: 4410 });
+    socket.onclose?.({ code: 4401 });
+    expect(states.at(-1)).toBe("open");
+    expect(onAuthFailure).not.toHaveBeenCalled();
+  });
+
   it("closes without reconnecting, also while a retry is pending", () => {
     const first = open();
     first.connection.close();

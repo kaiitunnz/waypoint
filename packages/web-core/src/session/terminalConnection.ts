@@ -69,11 +69,14 @@ export function openTerminalConnection(options: TerminalConnectionOptions): Term
         onAppearance?.(appearance);
       },
       onResize: (cols, rows) => sink()?.resize(cols, rows),
+      // A closed connection stays silent, so it cannot report over its successor.
       onAuthFailure: () => {
+        if (!active) return;
         active = false;
         onAuthFailure?.();
       },
       onSessionExited: () => {
+        if (!active) return;
         active = false;
         onState?.("exited");
       },

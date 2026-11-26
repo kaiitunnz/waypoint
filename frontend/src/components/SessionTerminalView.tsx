@@ -491,6 +491,12 @@ export function SessionTerminalView({
   );
 }
 
+// Keys shown only on the agents that bind them: Claude Code and the Codex TUI
+// cycle modes on Shift-Tab.
+const KEY_BACKENDS: Partial<Record<string, readonly string[]>> = {
+  "⇧Tab": ["claude_code", "codex"],
+};
+
 export function TerminalKeyBar({
   onSend,
   onRequestPaste,
@@ -500,16 +506,17 @@ export function TerminalKeyBar({
   onRequestPaste: () => void;
   backend: string | null | undefined;
 }) {
-  const keys = TERMINAL_KEYS.filter(
-    (key) => !key.backends || (backend ? key.backends.includes(backend) : false),
-  );
+  const keys = TERMINAL_KEYS.filter((key) => {
+    const only = KEY_BACKENDS[key.label];
+    return !only || (backend ? only.includes(backend) : false);
+  });
   return (
     <div className="term-keys" role="group" aria-label="Send terminal keys">
       {keys.map((key) => (
         <button
           key={key.label}
           type="button"
-          className={key.backends ? "is-backend-only" : undefined}
+          className={KEY_BACKENDS[key.label] ? "is-backend-only" : undefined}
           title={key.title}
           aria-label={key.title}
           // preventDefault on mousedown prevents the button from stealing

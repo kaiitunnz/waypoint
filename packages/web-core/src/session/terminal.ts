@@ -12,16 +12,13 @@ export type TerminalKey = {
   label: string;
   title: string;
   group: TerminalKeyGroup;
-  // The agents that bind the key on their main surface. Advisory: a client
-  // may show the key everywhere.
-  backends?: readonly string[];
 } & ({ data: string } | { action: "paste" });
 
 // Ctrl combinations are raw bytes, so the bar works without a Ctrl key.
 export const TERMINAL_KEYS: readonly TerminalKey[] = [
   { label: "Esc", data: "\x1b", title: "Escape", group: "edit" },
   { label: "Tab", data: "\t", title: "Tab", group: "edit" },
-  { label: "⇧Tab", data: "\x1b[Z", title: "Shift-Tab (cycle modes)", group: "edit", backends: ["claude_code", "codex"] },
+  { label: "⇧Tab", data: "\x1b[Z", title: "Shift-Tab (cycle modes)", group: "edit" },
   { label: "Enter", data: "\r", title: "Enter (submit / select)", group: "edit" },
   // Ctrl-J: the agents' soft newline, where Enter submits.
   { label: "⇧↵", data: "\n", title: "Shift+Enter (newline)", group: "edit" },

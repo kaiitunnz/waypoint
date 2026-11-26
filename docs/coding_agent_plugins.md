@@ -149,6 +149,7 @@ Properties of the CLI/protocol itself, the same whichever transport drives it.
 | `supports_custom_cli_args` | `bool` | Allows launch requests and configured targets to pass extra raw CLI arguments to the binary. |
 | `supports_config_overrides` | `bool` | Exposes a separate `config_overrides` input wrapped per-agent (Codex's `--config K=V`). |
 | `supports_slash_compact` | `bool` | Frontend hint that `/compact` is meaningful for this agent. |
+| `supports_terminal_launch_model`, `supports_terminal_launch_effort` | `bool` | Whether `launch_flags` pin the model / the effort, so a launch over the terminal (tmux) transport honours that choice. Default `True`. The launch form hides Model or Effort for a terminal launch of an agent that sets one to `False`. |
 | `cli_binary` | `str \| None` | Default CLI for local launches and tmux fallback; `None` opts out. Override via `plugin_configs.<id>.local_bin` (local) or `ssh_targets[*].plugin_configs.<id>.remote_bin` (per SSH target). |
 | `config_dir_env_var` | `str \| None` | The env var that scopes the agent's config/account state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Non-`None` lets the agent host named account profiles and support restart-and-resume account switching — see [`account_profiles.md`](account_profiles.md). |
 | `target_aliases` | `tuple[str, ...]` | Substrings used to infer this agent from a tmux pane name. |

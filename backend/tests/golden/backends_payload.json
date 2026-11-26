@@ -141,6 +141,8 @@
       ],
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": "claude",
       "config_dir_env_var": "CLAUDE_CONFIG_DIR",
       "native_thread_store": "projects",
@@ -258,6 +260,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "supports_slash_compact": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": "claude",
       "target_aliases": [
         "claude"
@@ -430,6 +434,8 @@
       ],
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": "claude",
       "config_dir_env_var": "CLAUDE_CONFIG_DIR",
       "native_thread_store": "projects",
@@ -547,6 +553,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "supports_slash_compact": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": "claude",
       "target_aliases": [
         "claude_tty"
@@ -673,6 +681,8 @@
       ],
       "supports_custom_cli_args": true,
       "supports_config_overrides": true,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": false,
       "cli_binary": "codex",
       "config_dir_env_var": "CODEX_HOME",
       "native_thread_store": "sessions",
@@ -743,6 +753,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": true,
       "supports_slash_compact": true,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": false,
       "cli_binary": "codex",
       "target_aliases": [
         "codex"
@@ -875,6 +887,8 @@
       ],
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
+      "supports_terminal_launch_model": false,
+      "supports_terminal_launch_effort": false,
       "cli_binary": "opencode",
       "config_dir_env_var": null,
       "native_thread_store": null,
@@ -951,6 +965,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "supports_slash_compact": true,
+      "supports_terminal_launch_model": false,
+      "supports_terminal_launch_effort": false,
       "cli_binary": "opencode",
       "target_aliases": [
         "opencode"
@@ -1034,6 +1050,8 @@
       ],
       "supports_custom_cli_args": false,
       "supports_config_overrides": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": null,
       "config_dir_env_var": null,
       "native_thread_store": null,
@@ -1060,6 +1078,8 @@
       "supports_custom_cli_args": false,
       "supports_config_overrides": false,
       "supports_slash_compact": false,
+      "supports_terminal_launch_model": true,
+      "supports_terminal_launch_effort": true,
       "cli_binary": null,
       "target_aliases": [],
       "badges": {

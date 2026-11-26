@@ -58,6 +58,12 @@ class AgentCapabilities(_FrozenModel):
     supports_custom_cli_args: bool = False
     supports_config_overrides: bool = False
     supports_slash_compact: bool = False
+    # The agent's ``launch_flags`` pin the model / the effort at process start,
+    # so a launch over the terminal (tmux) transport carries the selection.
+    # Structured transports set both per session, so these gate only terminal
+    # launches.
+    supports_terminal_launch_model: bool = True
+    supports_terminal_launch_effort: bool = True
     cli_binary: str | None = None
     target_aliases: tuple[str, ...] = ()
     badges: dict[str, str] = Field(default_factory=dict)
@@ -233,6 +239,10 @@ class BackendCapabilities(_FrozenModel):
     # whose entries are wrapped (e.g. as ``--config K=V`` for codex) rather than
     # passed through as raw flags. Only codex sets this today.
     supports_config_overrides: bool = False
+    # The agent's launch flags carry the model / the effort, so a terminal
+    # (tmux) launch honours them (see AgentCapabilities for the full note).
+    supports_terminal_launch_model: bool = True
+    supports_terminal_launch_effort: bool = True
     cli_binary: str | None = None
     # The env var this agent's CLI reads for its config/state root
     # (CLAUDE_CONFIG_DIR / CODEX_HOME); None when it has no config-dir concept.
@@ -284,6 +294,8 @@ class BackendCapabilities(_FrozenModel):
             supports_custom_cli_args=self.supports_custom_cli_args,
             supports_config_overrides=self.supports_config_overrides,
             supports_slash_compact=self.supports_slash_compact,
+            supports_terminal_launch_model=self.supports_terminal_launch_model,
+            supports_terminal_launch_effort=self.supports_terminal_launch_effort,
             cli_binary=self.cli_binary,
             target_aliases=self.target_aliases,
             badges=self.badges,

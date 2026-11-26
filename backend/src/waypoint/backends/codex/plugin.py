@@ -200,6 +200,8 @@ class CodexPlugin(DefaultLaunchContract):
         supports_attachments=True,
         supports_custom_cli_args=True,
         supports_config_overrides=True,
+        # The interactive CLI has no effort flag (see launch_flags).
+        supports_terminal_launch_effort=False,
         # Codex honours "approve for session" on tool approvals
         # (adapter._map_decision) but has no persistent "always" decision.
         approval_decisions=("approve", "acceptForSession", "decline"),

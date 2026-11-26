@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from waypoint.api import _backend_descriptors
+from waypoint.backends.base import AgentLaunchContract
 from waypoint.backends.bootstrap import build_default_registry
 from waypoint.backends.capabilities import (
     AgentCapabilities,
@@ -154,3 +155,21 @@ def test_backends_payload_carries_split_subobjects() -> None:
         # The split is a total cover, so recomposing the two halves
         # reconstructs the flat descriptor the frontend sees today.
         assert BackendCapabilities.from_split(*caps.split()) == caps
+
+
+def test_terminal_launch_flags_match_launch_flags() -> None:
+    """``supports_terminal_launch_model`` / ``_effort`` say whether the agent's
+    ``launch_flags`` pin the selection, which is all a terminal launch passes
+    to the CLI."""
+    registry = build_default_registry()
+    for backend in ("claude_code", "codex", "opencode"):
+        plugin = registry.get(backend)
+        assert isinstance(plugin, AgentLaunchContract), backend
+        caps = plugin.capabilities
+        bare = plugin.launch_flags(model=None, effort=None, permission_mode=None)
+        with_model = plugin.launch_flags(model="m", effort=None, permission_mode=None)
+        with_effort = plugin.launch_flags(
+            model=None, effort="high", permission_mode=None
+        )
+        assert (with_model != bare) is caps.supports_terminal_launch_model, backend
+        assert (with_effort != bare) is caps.supports_terminal_launch_effort, backend

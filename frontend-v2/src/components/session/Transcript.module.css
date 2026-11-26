@@ -46,7 +46,7 @@
   margin-bottom: 8px;
 }
 
-/* The 44px tap target reaches 8px above the chip, so it clears the floating bar at the top. */
+/* The 44px tap target reaches 8px above the 28px chip; the padding keeps that clear of the floating bar. */
 @media not all and (hover: hover) and (pointer: fine) {
   .older {
     padding-top: 8px;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ev } from "../test-helpers";
+import { ev, planMetadata } from "../test-helpers";
 import { deriveTranscript } from "./transcriptView";
 
 const events = [
@@ -31,5 +31,15 @@ describe("deriveTranscript", () => {
     const view = deriveTranscript(events, "full");
     expect(view.hiddenCount).toBe(0);
     expect(view.turns.map((turn) => turn.kind)).toEqual(["user", "rule", "agent"]);
+  });
+});
+
+describe("docked plan", () => {
+  it("leaves the docked plan out of the transcript", () => {
+    const events = [ev(1, "user_input", "plan it"), ev(2, "agent_output", "plan", planMetadata("p1"))];
+    const sequences = (sequence: number | null) =>
+      JSON.stringify(deriveTranscript(events, "full", sequence).turns).match(/"sequence":\d+/g) ?? [];
+    expect(sequences(null)).toContain('"sequence":2');
+    expect(sequences(2)).not.toContain('"sequence":2');
   });
 });

@@ -131,5 +131,18 @@ export function useTranscriptScroll(turns: TranscriptTurn[], pendingCount: numbe
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, []);
 
-  return { scroller, content, log, away, onScroll, hold, jumpToEnd };
+  // Brings an element into view and stops following the end, as a scroll of the person's would.
+  const reveal = useCallback(
+    (target: Element) => {
+      const el = scroller.current;
+      if (!el) return;
+      follow.current = { following: false, hold: null };
+      target.scrollIntoView({ block: "center" });
+      setAway(fromEnd(el) > 1);
+      remember();
+    },
+    [remember],
+  );
+
+  return { scroller, content, log, away, onScroll, hold, jumpToEnd, reveal };
 }

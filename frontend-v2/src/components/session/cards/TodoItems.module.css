@@ -1,0 +1,41 @@
+/* Margin and padding are the caller's. */
+.list {
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  font-size: var(--f-meta);
+  line-height: 22px;
+  color: var(--muted);
+}
+
+.mark {
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+.detail {
+  display: block;
+  font-size: var(--f-stamp);
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.done {
+  color: var(--faint);
+}
+
+.done .mark {
+  color: var(--done);
+}
+
+.now {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.now .mark {
+  color: var(--working);
+}

@@ -88,9 +88,23 @@
 }
 
 .tasks {
+  composes: hit from "../../styles/hit.module.css";
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  background: var(--fill-quiet);
   font-size: var(--f-meta);
-  color: var(--muted);
+  color: var(--text);
   white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tasks:hover {
+    color: var(--text-strong);
+  }
 }
 
 /* Read out, not shown. */

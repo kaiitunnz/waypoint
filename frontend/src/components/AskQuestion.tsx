@@ -1,28 +1,21 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type KeyboardEvent } from "react";
 
-import { answerAskQuestion, cancelAskQuestion } from "@waypoint/web-core/api";
+import type { AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import {
   EMPTY_ASK_DRAFT,
   askFormState,
+  askFormView,
   askToolUseId,
-  indexAskQuestionEvidence,
+  clearAskAnswers,
   mergePendingQuestionSnapshot,
-  resolveAskQuestion,
   serializeAnswers,
+  setAskNote,
+  setAskNoteOpen,
+  stepAskQuestion,
   toggleLabel,
-  type AskAnswerEntry,
   type AskDraft,
   type AskQuestionOption,
   type AskQuestionResolution,
@@ -68,28 +61,6 @@ export function AskQuestionOptions({
   );
 }
 
-export type AskOperation = "send" | "cancel";
-
-// Session-scoped question state shared by the transcript cards and the
-// pending-question dock, so both show one draft and one availability per
-// request.
-export interface AskQuestionController {
-  // Null until the session's first snapshot arrives.
-  snapshot: PendingQuestionsSnapshot | null;
-  draft: (toolUseId: string) => AskDraft;
-  updateDraft: (toolUseId: string, update: (draft: AskDraft) => AskDraft) => void;
-  operation: (toolUseId: string) => AskOperation | null;
-  answer: (
-    toolUseId: string,
-    text: string,
-    answers: AskAnswerEntry[],
-  ) => Promise<boolean>;
-  cancel: (toolUseId: string) => Promise<boolean>;
-  resolution: (toolUseId: string) => AskQuestionResolution;
-  canReattach: boolean;
-  reattach: () => void;
-}
-
 export const AskQuestionContext = createContext<AskQuestionController | null>(null);
 
 export function useAskQuestionController(): AskQuestionController {
@@ -114,110 +85,6 @@ export function usePendingQuestionSnapshot(sessionId: string) {
   return { snapshot, applySnapshot };
 }
 
-function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const next = { ...record };
-  delete next[key];
-  return next;
-}
-
-export function useAskQuestionState({
-  host,
-  token,
-  sessionId,
-  snapshot,
-  events,
-  canReattach,
-  reattach,
-  onRequestError,
-}: {
-  host: string;
-  token: string;
-  sessionId: string;
-  snapshot: PendingQuestionsSnapshot | null;
-  events: EventRecord[];
-  canReattach: boolean;
-  reattach: () => void;
-  onRequestError: (error: unknown, fallback: string) => void;
-}): AskQuestionController {
-  const [drafts, setDrafts] = useState<Record<string, AskDraft>>({});
-  const [operations, setOperations] = useState<Record<string, AskOperation>>({});
-  const operationsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    setDrafts({});
-    setOperations({});
-    operationsRef.current.clear();
-  }, [sessionId]);
-
-  const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
-
-  const run = useCallback(
-    async (
-      toolUseId: string,
-      operation: AskOperation,
-      request: () => Promise<void>,
-      fallback: string,
-    ): Promise<boolean> => {
-      if (operationsRef.current.has(toolUseId)) return false;
-      operationsRef.current.add(toolUseId);
-      setOperations((current) => ({ ...current, [toolUseId]: operation }));
-      try {
-        await request();
-        setDrafts((current) => withoutKey(current, toolUseId));
-        return true;
-      } catch (requestError) {
-        onRequestError(requestError, fallback);
-        return false;
-      } finally {
-        operationsRef.current.delete(toolUseId);
-        setOperations((current) => withoutKey(current, toolUseId));
-      }
-    },
-    [onRequestError],
-  );
-
-  return useMemo<AskQuestionController>(
-    () => ({
-      snapshot,
-      draft: (toolUseId) => drafts[toolUseId] ?? EMPTY_ASK_DRAFT,
-      updateDraft: (toolUseId, update) =>
-        setDrafts((current) => ({
-          ...current,
-          [toolUseId]: update(current[toolUseId] ?? EMPTY_ASK_DRAFT),
-        })),
-      operation: (toolUseId) => operations[toolUseId] ?? null,
-      answer: (toolUseId, text, answers) =>
-        run(
-          toolUseId,
-          "send",
-          () => answerAskQuestion(host, token, sessionId, text, toolUseId, answers),
-          "failed to send answer",
-        ),
-      cancel: (toolUseId) =>
-        run(
-          toolUseId,
-          "cancel",
-          () => cancelAskQuestion(host, token, sessionId, toolUseId),
-          "failed to cancel question",
-        ),
-      resolution: (toolUseId) => resolveAskQuestion(toolUseId, evidence),
-      canReattach,
-      reattach,
-    }),
-    [
-      canReattach,
-      drafts,
-      evidence,
-      host,
-      operations,
-      reattach,
-      run,
-      sessionId,
-      snapshot,
-      token,
-    ],
-  );
-}
-
 export function AskQuestionForm({
   event,
   questions,
@@ -240,18 +107,8 @@ export function AskQuestionForm({
   const editable = open && toolUseId !== null;
   const busy = operation !== null;
 
-  const total = questions.length;
-  const safeIndex = Math.min(draft.activeIndex, Math.max(0, total - 1));
-  const entry = questions[safeIndex];
-  const paginated = total > 1;
-  const filled = (index: number) =>
-    Boolean(draft.picked[index]?.length) || Boolean((draft.notes[index] ?? "").trim());
-  const totalPicked = Object.values(draft.picked).reduce(
-    (count, labels) => count + labels.length,
-    0,
-  );
-  const totalNotes = Object.values(draft.notes).filter((value) => value.trim()).length;
-  const canSubmit = actionable && !busy && (totalPicked > 0 || totalNotes > 0);
+  const { index, total, entry, paginated, filled, hasAnswer, freeText } = askFormView(questions, draft);
+  const canSubmit = actionable && !busy && hasAnswer;
 
   async function submit() {
     if (!canSubmit) return;
@@ -267,9 +124,7 @@ export function AskQuestionForm({
   }
 
   if (!entry) return null;
-  const index = safeIndex;
   const selections = new Set(draft.picked[index] ?? []);
-  const freeText = entry.options.length === 0;
   const promptLabel = questions[0]?.question ?? "this question";
 
   return (
@@ -299,7 +154,7 @@ export function AskQuestionForm({
           <div className="ask-question-pager">
             <span className="muted">
               Question {index + 1} of {total}
-              {filled(index) ? " · answered" : ""}
+              {filled[index] ? " · answered" : ""}
             </span>
             <div className="ask-question-pager-dots" aria-hidden>
               {questions.map((_, dotIndex) => (
@@ -307,7 +162,7 @@ export function AskQuestionForm({
                   key={dotIndex}
                   className={`ask-question-pager-dot${
                     dotIndex === index ? " current" : ""
-                  }${filled(dotIndex) ? " filled" : ""}`}
+                  }${filled[dotIndex] ? " filled" : ""}`}
                 />
               ))}
             </div>
@@ -340,10 +195,7 @@ export function AskQuestionForm({
                 value={draft.notes[index] ?? ""}
                 onChange={(changeEvent) => {
                   const value = changeEvent.target.value;
-                  updateDraft((current) => ({
-                    ...current,
-                    notes: { ...current.notes, [index]: value },
-                  }));
+                  updateDraft((current) => setAskNote(current, index, value));
                 }}
                 onKeyDown={handleNoteKeyDown}
                 placeholder={
@@ -358,12 +210,7 @@ export function AskQuestionForm({
                 <button
                   type="button"
                   className="link-button"
-                  onClick={() =>
-                    updateDraft((current) => ({
-                      ...current,
-                      notesOpen: { ...current.notesOpen, [index]: false },
-                    }))
-                  }
+                  onClick={() => updateDraft((current) => setAskNoteOpen(current, index, false))}
                   disabled={busy}
                 >
                   Hide note
@@ -374,12 +221,7 @@ export function AskQuestionForm({
             <button
               type="button"
               className="link-button ask-question-note-toggle"
-              onClick={() =>
-                updateDraft((current) => ({
-                  ...current,
-                  notesOpen: { ...current.notesOpen, [index]: true },
-                }))
-              }
+              onClick={() => updateDraft((current) => setAskNoteOpen(current, index, true))}
               disabled={busy}
             >
               + Other / Custom response
@@ -392,12 +234,7 @@ export function AskQuestionForm({
               type="button"
               className="secondary"
               disabled={busy || index === 0}
-              onClick={() =>
-                updateDraft((current) => ({
-                  ...current,
-                  activeIndex: Math.max(0, index - 1),
-                }))
-              }
+              onClick={() => updateDraft((current) => stepAskQuestion(current, "prev", total))}
             >
               ← Previous
             </button>
@@ -405,12 +242,7 @@ export function AskQuestionForm({
               type="button"
               className="secondary"
               disabled={busy || index === total - 1}
-              onClick={() =>
-                updateDraft((current) => ({
-                  ...current,
-                  activeIndex: Math.min(total - 1, index + 1),
-                }))
-              }
+              onClick={() => updateDraft((current) => stepAskQuestion(current, "next", total))}
             >
               Next →
             </button>
@@ -427,18 +259,12 @@ export function AskQuestionForm({
           >
             {operation === "send" ? "Sending…" : "Send answers"}
           </button>
-          {totalPicked + totalNotes > 0 ? (
+          {hasAnswer ? (
             <button
               type="button"
               className="secondary"
               disabled={busy || !actionable}
-              onClick={() =>
-                updateDraft((current) => ({
-                  ...current,
-                  picked: {},
-                  notes: {},
-                }))
-              }
+              onClick={() => updateDraft(clearAskAnswers)}
             >
               Clear
             </button>

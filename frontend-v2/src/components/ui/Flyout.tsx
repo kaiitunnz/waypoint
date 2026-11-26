@@ -5,6 +5,7 @@ import type { ReactNode, RefObject } from "react";
 import { usePointerUI } from "@/lib/layout";
 
 import { Sheet } from "./Dialog";
+import styles from "./Flyout.module.css";
 import { Popover } from "./Popover";
 
 interface FlyoutProps {
@@ -24,6 +25,10 @@ interface FlyoutProps {
   autoFocus?: boolean;
   // No padding around the sheet's body, for lists and menus.
   flush?: boolean;
+  // A panel's heading: a count beside the title and controls after it. The popover
+  // then shows the title and pads its body, as a sheet does.
+  count?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -41,9 +46,12 @@ export function Flyout({
   resizeKey,
   autoFocus,
   flush,
+  count,
+  actions,
   children,
 }: FlyoutProps) {
   const pointer = usePointerUI();
+  const panel = count !== undefined || actions !== undefined;
   return pointer ? (
     <Popover
       open={open}
@@ -58,10 +66,24 @@ export function Flyout({
       resizeKey={resizeKey}
       autoFocus={autoFocus}
     >
-      {children}
+      {panel ? (
+        <div className={styles.panel}>
+          <div className={styles.head}>
+            <h2 className={styles.title}>
+              {title}
+              {count !== undefined ? <span className={styles.count}>{count}</span> : null}
+            </h2>
+            {actions}
+          </div>
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </Popover>
   ) : (
-    <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle} flush={flush}>
+    <Sheet open={open} onClose={onClose} title={title} count={count} subtitle={subtitle} flush={flush}>
+      {actions ? <div className={styles.actions}>{actions}</div> : null}
       {children}
     </Sheet>
   );

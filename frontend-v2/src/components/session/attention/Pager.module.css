@@ -1,0 +1,20 @@
+.pager {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  /* The buttons' padding stays outside the line, so the arrows sit on the text. */
+  margin: -11px 0;
+}
+
+.count {
+  min-width: 3ch;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pager {
+    margin: -7px 0;
+  }
+}

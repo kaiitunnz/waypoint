@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HeldMessage } from "../types";
-import { heldMessageOriginLabel, heldMessageText, holdReasonLabel } from "./heldMessages";
+import { heldMessageOriginLabel, heldMessageText, holdReasonLabel, parseHeldMessagesFrame } from "./heldMessages";
 
 const held = (overrides: Partial<HeldMessage> = {}): HeldMessage => ({
   id: "h1",
@@ -62,10 +62,23 @@ describe("holdReasonLabel", () => {
       text: "Sends when idle",
       manual: false,
     });
+    expect(holdReasonLabel(held({ hold_reason: "restore" }), false)).toEqual({
+      text: "Sends when the session restores",
+      manual: false,
+    });
   });
 
   it("treats an unknown reason like idle", () => {
     const message = held({ hold_reason: "other" as HeldMessage["hold_reason"] });
     expect(holdReasonLabel(message, false)).toEqual({ text: "Sends when idle", manual: false });
+  });
+});
+
+describe("parseHeldMessagesFrame", () => {
+  it("keeps this session's list and ignores another session's frame", () => {
+    expect(parseHeldMessagesFrame({ session_id: "s1", held_messages: [held()] }, "s1")).toHaveLength(1);
+    expect(parseHeldMessagesFrame({ session_id: "s1" }, "s1")).toEqual([]);
+    expect(parseHeldMessagesFrame({ session_id: "s2", held_messages: [] }, "s1")).toBeNull();
+    expect(parseHeldMessagesFrame(null, "s1")).toBeNull();
   });
 });

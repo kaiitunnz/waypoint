@@ -12,15 +12,8 @@
 }
 
 .actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+  composes: actions from "../../styles/attention.module.css";
   margin-top: 10px;
-}
-
-.actions > :first-child {
-  margin-right: 6px;
 }
 
 .meta {
@@ -82,5 +75,5 @@
 }
 
 .end {
-  margin-left: auto;
+  composes: end from "../../styles/attention.module.css";
 }

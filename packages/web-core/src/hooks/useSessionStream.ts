@@ -4,6 +4,9 @@ import { startTransition, useCallback, useEffect, useReducer, useRef, useState }
 
 import { ApiError, connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
 import { reconnectDelay } from "../session/connection";
+import { parseHeldMessagesFrame } from "../session/heldMessages";
+import { modelNoticeFromEvent } from "../session/modelNotice";
+import type { SideQuestionFrame } from "../session/sideQuestions";
 import { INITIAL_STREAM_STATE, maxEventId, streamReducer, takeNewer, type StreamState } from "../session/stream";
 import { sanitizeEvent } from "../session/transcript";
 import type { EventRecord, PendingQuestionsSnapshot, SessionRecord } from "../types";
@@ -151,13 +154,25 @@ export function useSessionStream(
         sessionId,
         (message) => {
           if (message.type === "event") {
+            const event = sanitizeEvent(message.payload.event as EventRecord);
+            // Only a live frame raises the notice: catch-ups and pages replay old changes.
+            const notice = modelNoticeFromEvent(event);
+            if (notice) dispatch({ type: "modelNotice", notice });
             // Before the page loads, the catch-up that follows it reads these events anyway.
             if (loaded) {
-              pending.push(sanitizeEvent(message.payload.event as EventRecord));
+              pending.push(event);
               scheduleFlush();
             }
           } else if (message.type === "session_state") {
             dispatch({ type: "session", session: message.payload.session as SessionRecord });
+          } else if (message.type === "held_messages") {
+            const messages = parseHeldMessagesFrame(message.payload, sessionId);
+            if (messages) dispatch({ type: "heldMessages", messages });
+          } else if (message.type === "side_question") {
+            dispatch({ type: "sideQuestion", frame: message.payload as SideQuestionFrame });
+          } else if (message.type === "clipboard_copy") {
+            const text = (message.payload as { text?: unknown }).text;
+            if (typeof text === "string" && text.length > 0) dispatch({ type: "clipboard", text });
           } else if (message.type === "pending_questions") {
             dispatch({
               type: "pendingQuestions",

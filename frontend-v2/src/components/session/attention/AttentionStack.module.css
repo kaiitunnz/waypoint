@@ -1,0 +1,27 @@
+/* Capped as a whole so the transcript and the composer keep room; a card's body scrolls first. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50dvh;
+  padding: 8px 12px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.stack:empty {
+  padding: 0;
+}
+
+.strips {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@container (min-width: 600px) {
+  .stack {
+    padding: 8px 0 0;
+  }
+}

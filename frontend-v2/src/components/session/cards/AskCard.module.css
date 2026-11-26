@@ -51,3 +51,31 @@
   content: "Answer: ";
   color: var(--faint);
 }
+
+.card {
+  border-radius: var(--r-card);
+}
+
+/* Shown in transcript: a brief ring marks the card the dock pointed at. */
+.card[data-flash] {
+  animation: flash 1.8s ease-out;
+}
+
+@keyframes flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--attention-line);
+    background: var(--attention);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card[data-flash] {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--attention-line);
+  }
+}
+
+.form {
+  padding: 6px 0 8px;
+}

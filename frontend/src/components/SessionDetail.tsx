@@ -31,7 +31,6 @@ import {
   releaseHeldMessages,
   resolveWorkspacePath,
   setSessionFocus,
-  setTaskDockDismissed,
   setSessionPinned,
   setSessionTitle,
 } from "@waypoint/web-core/api";
@@ -49,12 +48,20 @@ import {
   permissionModesFor,
   supportsApprovalNote,
   supportsAttachments,
-  supportsPlanApproval,
   supportsStructuredApproval,
   transportLabel,
   transportPresentation,
   useBackendCatalog,
 } from "@waypoint/web-core/backends";
+import { copyTextSync } from "@waypoint/web-core/clipboard";
+import { parseHeldMessagesFrame } from "@waypoint/web-core/session/heldMessages";
+import { modelNoticeFromEvent, type ModelNotice } from "@waypoint/web-core/session/modelNotice";
+import {
+  applySideQuestionFrame,
+  EMPTY_SIDE_QUESTIONS,
+  type SideQuestionFrame,
+  type SideQuestionState,
+} from "@waypoint/web-core/session/sideQuestions";
 import { clearToken } from "@waypoint/web-core/store";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
@@ -77,15 +84,13 @@ import {
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
-  isModelChangeEvent,
   isTaskNotificationEvent,
   parseTaskNotification,
-  planForEvent,
   type PlanDecision,
-  type PlanViewModel,
   type TaskNotificationKind,
 } from "@waypoint/web-core/events";
-import { approvalPager, findPendingApprovals, stepApprovalPage } from "@waypoint/web-core/session/approvals";
+import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
+import { pageOf, stepPage } from "@waypoint/web-core/session/paging";
 import {
   connectionLabel,
   connectionTitle,
@@ -103,7 +108,6 @@ import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,
   foldOlderEvents,
-  latestActionablePlanEvent,
   mergeEvents,
   minRawSequence,
   removeConfirmedOptimisticMessages,
@@ -143,12 +147,13 @@ import {
 } from "@/components/TranscriptCard";
 import {
   AskQuestionContext,
-  useAskQuestionState,
   usePendingQuestionSnapshot,
 } from "@/components/AskQuestion";
+import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
+import { useTaskDismissal } from "@waypoint/web-core/hooks/useTaskDismissal";
 import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import {
   effortLabel,
@@ -170,61 +175,7 @@ import {
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
-  SideQuestion,
 } from "@waypoint/web-core/types";
-
-// iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
-// click handler — the Promise microtask ends the transient activation
-// window before the write resolves. ``document.execCommand("copy")`` is
-// deprecated everywhere but remains the one synchronous clipboard write
-// that survives that gauntlet across iOS Safari, desktop Safari, and
-// modern Chromium.
-//
-// A contenteditable ``<div>`` is the right host: textarea's ``.value``
-// lives in an internal buffer (not DOM children), so
-// ``Range.selectNodeContents(textarea)`` selects nothing — execCommand
-// then reports success against an empty selection and the paste is
-// blank. The div holds the text in real text nodes; ``white-space: pre``
-// preserves newlines so multi-line ``/copy`` results survive intact.
-function copyTextSync(text: string): boolean {
-  if (typeof document === "undefined") return false;
-  const host = document.createElement("div");
-  host.textContent = text;
-  host.setAttribute("contenteditable", "true");
-  // ``left: -9999px`` keeps the node selectable but visually off-canvas
-  // (opacity 0 in the same coordinate space can still flash a focus
-  // ring on iOS). ``font-size: 16px`` prevents iOS's auto-zoom on
-  // focused editable fields. ``white-space: pre`` carries newlines.
-  host.style.cssText = [
-    "position:fixed",
-    "top:0",
-    "left:-9999px",
-    "width:1px",
-    "height:1px",
-    "white-space:pre",
-    "font-size:16px",
-    "user-select:text",
-    "-webkit-user-select:text",
-  ].join(";");
-  document.body.appendChild(host);
-  let ok = false;
-  const sel = window.getSelection();
-  try {
-    const range = document.createRange();
-    range.selectNodeContents(host);
-    if (sel) {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-    ok = document.execCommand("copy");
-  } catch {
-    ok = false;
-  } finally {
-    sel?.removeAllRanges();
-    document.body.removeChild(host);
-  }
-  return ok;
-}
 
 // The session id is otherwise only readable from the URL — invisible in the
 // installed PWA where the address bar is hidden. This puts a quiet,
@@ -334,14 +285,6 @@ type FilterMode = "important" | "all";
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
 
-// A live model-change notice: a mid-session switch or a launch-time mismatch.
-type ModelNotice = {
-  reason: "switch" | "initial_mismatch";
-  previous: string | null;
-  current: string;
-  selection: string | null;
-};
-
 export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false, assistantControls = null }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
@@ -389,8 +332,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // right-inset close button.
   const dockSheet = viewportWidth <= 640 || dockWidth > viewportWidth;
   useEffect(() => {
-    setSideQuestions(new Map());
-    sqLiveSeenRef.current = new Set();
+    sideQuestionStateRef.current = EMPTY_SIDE_QUESTIONS;
+    setSideQuestions(EMPTY_SIDE_QUESTIONS);
     setSqExpanded(false);
     setHeldMessages([]);
   }, [sessionId]);
@@ -421,7 +364,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // per element, so consecutive /copies on the same DOM node would
   // otherwise silently swap text with no visible motion.
   const [clipboardSeq, setClipboardSeq] = useState(0);
-  const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
+  const [sideQuestions, setSideQuestions] = useState<SideQuestionState>(EMPTY_SIDE_QUESTIONS);
+  // The socket handler reads the latest state here, so it applies each frame once.
+  const sideQuestionStateRef = useRef<SideQuestionState>(EMPTY_SIDE_QUESTIONS);
   const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
   const { snapshot: pendingQuestions, applySnapshot: applyPendingQuestions } =
     usePendingQuestionSnapshot(sessionId);
@@ -433,22 +378,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setRevealTarget(null);
   }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
-  // An in-flight dismiss/show wins over the session record until its request
-  // settles; otherwise a session_state push read before the write commits
-  // would flash the dock back.
-  const [pendingTaskDock, setPendingTaskDock] = useState<{
-    sessionId: string;
-    sequence: number | null;
-  } | null>(null);
-  const taskDockRequestRef = useRef(0);
   // The dock expands when a live (non-hydrated) side-question first arrives.
-  // The ref holds every id already seen, hydrated ones included, so a later
-  // update to a rehydrated aside doesn't expand the dock.
   const [sqExpanded, setSqExpanded] = useState(false);
-  const sqLiveSeenRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (sideQuestions.size === 0) setSqExpanded(false);
-  }, [sideQuestions.size]);
+    if (sideQuestions.items.size === 0) setSqExpanded(false);
+  }, [sideQuestions.items.size]);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -714,17 +648,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         (message: SessionEnvelope) => {
           if (message.type === "event") {
             const event = sanitizeEvent(message.payload.event as EventRecord);
-            const md = event.metadata as Record<string, unknown>;
             // Live only: a replayed model.change must not re-pop the notice.
-            if (isModelChangeEvent(event)) {
-              setModelNotice({
-                reason: md.reason === "switch" ? "switch" : "initial_mismatch",
-                previous:
-                  typeof md.previous_model === "string" ? md.previous_model : null,
-                current: typeof md.current_model === "string" ? md.current_model : "",
-                selection: typeof md.selection === "string" ? md.selection : null,
-              });
-            }
+            const notice = modelNoticeFromEvent(event);
+            if (notice) setModelNotice(notice);
             queueIncomingEvent(event);
           }
           if (message.type === "session_state") {
@@ -761,26 +687,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             }
           }
           if (message.type === "side_question") {
-            const payload = message.payload as {
-              side_question?: SideQuestion;
-              removed_id?: string;
-              hydrated?: boolean;
-            };
-            if (payload.side_question) {
-              const sq = payload.side_question;
-              setSideQuestions((prev) => new Map(prev).set(sq.id, sq));
-              if (!sqLiveSeenRef.current.has(sq.id)) {
-                sqLiveSeenRef.current.add(sq.id);
-                // Live (non-hydrated) first appearance → ask the dock to open.
-                if (!payload.hydrated) setSqExpanded(true);
-              }
-            } else if (payload.removed_id) {
-              setSideQuestions((prev) => {
-                const next = new Map(prev);
-                next.delete(payload.removed_id as string);
-                return next;
-              });
-            }
+            const { state, expand } = applySideQuestionFrame(
+              sideQuestionStateRef.current,
+              message.payload as SideQuestionFrame,
+            );
+            sideQuestionStateRef.current = state;
+            setSideQuestions(state);
+            if (expand) setSqExpanded(true);
           }
           if (message.type === "pending_questions") {
             applyPendingQuestions(
@@ -790,13 +703,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             questionsHydrated = true;
           }
           if (message.type === "held_messages") {
-            const payload = message.payload as {
-              session_id?: string;
-              held_messages?: HeldMessage[];
-            };
-            if (payload.session_id === sessionId) {
-              setHeldMessages(payload.held_messages ?? []);
-            }
+            const held = parseHeldMessagesFrame(message.payload, sessionId);
+            if (held) setHeldMessages(held);
           }
           if (message.type === "auth_revoked") {
             handleAuthFailure();
@@ -1089,32 +997,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [host, token, sessionId, handleAuthFailure],
   );
 
-  const handleTaskDockDismissal = useCallback(
-    async (sequence: number | null) => {
-      const request = ++taskDockRequestRef.current;
-      setPendingTaskDock({ sessionId, sequence });
-      try {
-        const updated = await setTaskDockDismissed(host, token, sessionId, sequence);
-        if (request === taskDockRequestRef.current) {
-          setSession(updated);
-        }
-      } catch (dockError) {
-        if (isAuthError(dockError)) {
-          handleAuthFailure();
-          return;
-        }
-        setError(
-          dockError instanceof Error ? dockError.message : "failed to update task progress",
-        );
-      } finally {
-        if (request === taskDockRequestRef.current) {
-          setPendingTaskDock(null);
-        }
-      }
-    },
-    [host, token, sessionId, handleAuthFailure],
-  );
-
   const runHeldAction = useCallback(
     async (action: () => Promise<void>) => {
       try {
@@ -1181,7 +1063,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     count: approvalCount,
     page: safeApprovalPage,
     current: pendingApproval,
-  } = approvalPager(pendingApprovals, approvalPageIndex);
+  } = pageOf(pendingApprovals, approvalPageIndex);
   const agentBusy = session ? isAgentBusy(session, connection) : false;
   const displayEvents = useMemo(
     () => collapseSupersededPlanEvents(renderedEvents),
@@ -1195,18 +1077,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [filterMode, displayEvents],
   );
   const hiddenEventCount = displayEvents.length - visibleEvents.length;
-  const pendingPlanApprovalEvent = useMemo(
-    () =>
-      session?.permission_mode === "plan" &&
-      supportsPlanApproval(session.backend, catalog)
-        ? latestActionablePlanEvent(displayEvents)
-        : null,
+  const pendingPlan = useMemo(
+    () => pendingPlanApproval(session, catalog, displayEvents),
     [session, catalog, displayEvents],
   );
-  const pendingPlanApprovalView: PlanViewModel | null = useMemo(
-    () => (pendingPlanApprovalEvent ? planForEvent(pendingPlanApprovalEvent) : null),
-    [pendingPlanApprovalEvent],
-  );
+  const pendingPlanApprovalEvent = pendingPlan?.event ?? null;
+  const pendingPlanApprovalView = pendingPlan?.plan ?? null;
   const transcriptEventsForDisplay = useMemo(
     () =>
       pendingPlanApprovalEvent
@@ -1338,14 +1214,26 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     : !canShowTerminal
       ? "chat"
       : view;
-  // The dismissal lives on the session record, so it follows the session
-  // across tabs and devices; any newer todo snapshot shows the dock again.
-  const dismissedTaskSequence =
-    pendingTaskDock?.sessionId === sessionId
-      ? pendingTaskDock.sequence
-      : (session?.task_dock_dismissed_sequence ?? null);
-  const taskDockDismissed =
-    currentTaskEvent !== null && currentTaskEvent.sequence === dismissedTaskSequence;
+  const reportTaskDockError = useCallback(
+    (dockError: unknown, fallback: string) => {
+      if (isAuthError(dockError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(dockError instanceof Error ? dockError.message : fallback);
+    },
+    [handleAuthFailure],
+  );
+  const taskDock = useTaskDismissal({
+    host,
+    token,
+    sessionId,
+    session,
+    todo: currentTaskEvent,
+    onSession: setSession,
+    onError: reportTaskDockError,
+  });
+  const taskDockDismissed = taskDock.dismissed;
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
@@ -1743,9 +1631,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onReveal={revealQuestion}
         />
       ) : null}
-      {sideQuestions.size > 0 ? (
+      {sideQuestions.items.size > 0 ? (
         <SideQuestionDock
-          questions={[...sideQuestions.values()]}
+          questions={[...sideQuestions.items.values()]}
           host={host}
           token={token}
           sessionId={sessionId}
@@ -1756,11 +1644,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       {showTaskDock && taskProgress ? (
         <TaskProgressDock
           progress={taskProgress}
-          onDismiss={() => {
-            if (currentTaskEvent) {
-              void handleTaskDockDismissal(currentTaskEvent.sequence);
-            }
-          }}
+          onDismiss={taskDock.dismiss}
         />
       ) : null}
       {heldMessages.length ? (
@@ -2082,7 +1966,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "prev", approvalCount))}
+                onClick={() => setApprovalPageIndex((i) => stepPage(i, "prev", approvalCount))}
                 disabled={safeApprovalPage === 0}
                 aria-label="Previous approval"
               >
@@ -2094,7 +1978,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "next", approvalCount))}
+                onClick={() => setApprovalPageIndex((i) => stepPage(i, "next", approvalCount))}
                 disabled={safeApprovalPage === approvalCount - 1}
                 aria-label="Next approval"
               >
@@ -2178,7 +2062,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             setToolRunsExpanded(next);
           }}
           canShowTasks={canShowTasks}
-          onShowTasks={() => void handleTaskDockDismissal(null)}
+          onShowTasks={taskDock.show}
           onDelete={removeFromList}
           onInterrupt={interruptSession}
           onModeChange={handlePermissionModeChange}

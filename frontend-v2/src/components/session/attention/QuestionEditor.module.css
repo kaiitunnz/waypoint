@@ -1,0 +1,66 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.dots {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+}
+
+.filled {
+  border-color: var(--muted);
+  background: var(--muted);
+}
+
+.current {
+  border-color: var(--text-strong);
+}
+
+.question {
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.header {
+  margin-right: 8px;
+  font-size: var(--f-meta);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.hint {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+}

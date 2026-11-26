@@ -18,8 +18,16 @@ export interface TranscriptView {
 // A reasoning step whose text is not shared leaves only a marker note.
 const isReasoningMarker = (event: EventRecord) => event.kind === "system_note" && event.metadata.item_type === "reasoning";
 
-export function deriveTranscript(events: EventRecord[], density: TranscriptDensity): TranscriptView {
-  const display = collapseSupersededPlanEvents(events).filter((event) => !isReasoningMarker(event));
+// The plan waiting for approval is shown above the composer, so the transcript
+// leaves out the event at `dockedPlanSequence`.
+export function deriveTranscript(
+  events: EventRecord[],
+  density: TranscriptDensity,
+  dockedPlanSequence: number | null = null,
+): TranscriptView {
+  const display = collapseSupersededPlanEvents(events).filter(
+    (event) => !isReasoningMarker(event) && event.sequence !== dockedPlanSequence,
+  );
   const visible = density === "full" ? display : display.filter(isImportantEvent);
   return {
     turns: groupTurns(collapseRepeats(buildTranscriptItems(visible))),

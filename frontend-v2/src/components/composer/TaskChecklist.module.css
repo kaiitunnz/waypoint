@@ -1,0 +1,15 @@
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.checklist .meter {
+  width: 100%;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+}

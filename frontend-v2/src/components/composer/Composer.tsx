@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
 
 import { fidelityFor, supportsAttachments, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
+import { useTaskDismissal } from "@waypoint/web-core/hooks/useTaskDismissal";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { canInterrupt, composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
@@ -12,6 +13,7 @@ import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import styles from "./Composer.module.css";
 import { ComposerDialogs, ComposerInput, ComposerMenus, ComposerTray, useComposerField } from "./ComposerField";
@@ -19,6 +21,7 @@ import { FocusPill } from "./FocusPill";
 import { PlusMenu, type PlusAction } from "./PlusMenu";
 import { SendControl, StopButton } from "./SendControl";
 import { SendError } from "./SendError";
+import { TasksControl } from "./TasksControl";
 import { TuneControl } from "./TuneControl";
 import { UsageControl } from "./UsageControl";
 import { useComposerSend } from "./useComposerSend";
@@ -42,6 +45,7 @@ interface ComposerProps {
   scheduleOpen: boolean;
   onScheduleOpenChange: (open: boolean) => void;
   onPending: OptimisticSends["add"];
+  onScheduled: () => void;
 }
 
 export function Composer({
@@ -58,6 +62,7 @@ export function Composer({
   scheduleOpen,
   onScheduleOpenChange,
   onPending,
+  onScheduled,
 }: ComposerProps) {
   const { host, token } = useShellData();
   const router = useRouter();
@@ -97,12 +102,15 @@ export function Composer({
     resetCompletions: completions.reset,
     onPending,
     onOpenSession: openSession,
+    onScheduled,
   });
 
   const tuning = useComposerTuning({ host, token, session, catalog, onSession, onError: reportError });
 
   const todo = useMemo(() => currentTodoEvent(events, latestTodo), [events, latestTodo]);
   const tasks = useMemo(() => summarizeTodos(readTodoEntries(todo)), [todo]);
+  const reportFailure = useFailureToast();
+  const taskDock = useTaskDismissal({ host, token, sessionId, session, todo, onSession, onError: reportFailure });
 
   const focus = useSessionFocus({ host, token, sessionId, session, onSession });
   useComposerSizing(root, field, draft, pointer);
@@ -134,6 +142,7 @@ export function Composer({
         ]
       : []),
     { id: "schedule", label: "Schedule message", icon: "clock", disabled: session === null, run: () => onScheduleOpenChange(true) },
+    ...(tasks && taskDock.dismissed ? [{ id: "tasks", label: "Show tasks", icon: "check" as const, run: taskDock.show }] : []),
     ...(structured
       ? [{ id: "command", label: "Insert command", icon: "slash" as const, disabled, run: () => composerField.insert("/") }]
       : []),
@@ -176,11 +185,7 @@ export function Composer({
       {focus.on ? (
         <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={tuneTrigger} />
       ) : null}
-      {tasks ? (
-        <span className={styles.tasks} aria-label={`Tasks: ${tasks.completed} of ${tasks.total} done`} role="img">
-          ☑ {tasks.completed}/{tasks.total}
-        </span>
-      ) : null}
+      {tasks && !taskDock.dismissed ? <TasksControl tasks={tasks} onDismiss={taskDock.dismiss} /> : null}
       <UsageControl session={session} catalog={catalog} onSession={onSession} />
     </div>
   );
@@ -234,6 +239,7 @@ export function Composer({
         onFilesOpenChange={onFilesOpenChange}
         scheduleOpen={scheduleOpen}
         onScheduleOpenChange={onScheduleOpenChange}
+        onScheduled={onScheduled}
         dropRoot={dropRoot}
       />
     </div>

@@ -1,0 +1,65 @@
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px 0 14px;
+  border-radius: var(--r-card);
+  background: var(--plane-raised);
+  font-size: var(--f-body);
+  color: var(--text);
+  text-align: left;
+}
+
+/* Drawn inside, since the scrolling stack clips what falls outside it. */
+.strip:focus-visible {
+  outline-offset: -2px;
+}
+
+.glyph {
+  flex: none;
+  width: 18px;
+  font-size: var(--f-body);
+  color: var(--muted);
+  text-align: center;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta,
+.count {
+  flex: none;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .strip {
+    min-height: 36px;
+    font-size: var(--f-meta);
+  }
+
+  .strip:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--plane-raised));
+  }
+
+  .strip:hover .chevron {
+    color: var(--text-strong);
+  }
+}

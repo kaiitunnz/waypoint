@@ -105,6 +105,11 @@
   color: var(--text-strong);
 }
 
+.count {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
 .modal .title {
   line-height: 28px;
 }

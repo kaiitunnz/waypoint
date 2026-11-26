@@ -6,10 +6,13 @@ export function heldMessageOriginLabel(message: HeldMessage): string {
   return `From ${message.sender_title || message.sender_session_id || "a session"}`;
 }
 
-export function heldMessageText(message: HeldMessage): string {
-  const attached = message.attachments.length;
+export function messageText(text: string, attached: number): string {
   const suffix = attached ? ` (+${attached} file${attached === 1 ? "" : "s"})` : "";
-  return (message.text || "(no text)") + suffix;
+  return (text || "(no text)") + suffix;
+}
+
+export function heldMessageText(message: HeldMessage): string {
+  return messageText(message.text, message.attachments.length);
 }
 
 // `manual` marks holds the human controls through Focus rather than the
@@ -24,8 +27,19 @@ export function holdReasonLabel(
   if (focus) {
     return { text: "Paused by Focus", manual: true };
   }
-  return {
-    text: message.hold_reason === "dialog" ? "Sends after you respond" : "Sends when idle",
-    manual: false,
-  };
+  const text =
+    message.hold_reason === "dialog"
+      ? "Sends after you respond"
+      : message.hold_reason === "restore"
+        ? "Sends when the session restores"
+        : "Sends when idle";
+  return { text, manual: false };
+}
+
+// A `held_messages` frame's list for this session; null for another session's frame.
+export function parseHeldMessagesFrame(payload: unknown, sessionId: string): HeldMessage[] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const { session_id, held_messages } = payload as { session_id?: unknown; held_messages?: unknown };
+  if (session_id !== sessionId) return null;
+  return Array.isArray(held_messages) ? (held_messages as HeldMessage[]) : [];
 }

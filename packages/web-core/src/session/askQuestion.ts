@@ -1,6 +1,8 @@
 import { readToolName } from "../events";
+import { stepPage } from "./paging";
 import type {
   EventRecord,
+  PendingQuestion,
   PendingQuestionAvailability,
   PendingQuestionsSnapshot,
 } from "../types";
@@ -275,4 +277,66 @@ export function askCardState(
           : "not answered";
   const answers = resolution.state === "answered" ? askAnswerEntries(resolution.answerEvent) : [];
   return { waiting, outcome, answers };
+}
+
+// ─── Answer form ───
+
+export function setAskNote(draft: AskDraft, index: number, note: string): AskDraft {
+  return { ...draft, notes: { ...draft.notes, [index]: note } };
+}
+
+export function setAskNoteOpen(draft: AskDraft, index: number, open: boolean): AskDraft {
+  return { ...draft, notesOpen: { ...draft.notesOpen, [index]: open } };
+}
+
+export function stepAskQuestion(draft: AskDraft, direction: "prev" | "next", total: number): AskDraft {
+  const index = Math.min(draft.activeIndex, Math.max(0, total - 1));
+  return { ...draft, activeIndex: stepPage(index, direction, total) };
+}
+
+// Clears the answers and notes, keeping the page and which notes are open.
+export function clearAskAnswers(draft: AskDraft): AskDraft {
+  return { ...draft, picked: {}, notes: {} };
+}
+
+export interface AskFormView {
+  // The question on screen, clamped to the list.
+  index: number;
+  total: number;
+  entry: AskUserQuestion | undefined;
+  paginated: boolean;
+  // Whether each question has an answer or a note.
+  filled: boolean[];
+  // Something to send or clear.
+  hasAnswer: boolean;
+  // A question with no options is answered in free text.
+  freeText: boolean;
+}
+
+export function askFormView(questions: AskUserQuestion[], draft: AskDraft): AskFormView {
+  const total = questions.length;
+  const index = Math.min(draft.activeIndex, Math.max(0, total - 1));
+  const entry = questions[index];
+  const filled = questions.map(
+    (_, i) => Boolean(draft.picked[i]?.length) || Boolean((draft.notes[i] ?? "").trim()),
+  );
+  return {
+    index,
+    total,
+    entry,
+    paginated: total > 1,
+    filled,
+    hasAnswer: filled.some(Boolean),
+    freeText: entry !== undefined && entry.options.length === 0,
+  };
+}
+
+// The question on `page` of a multi-question ask.
+export function pendingQuestionPrompt(question: PendingQuestion, page = 0): string {
+  const questions = parseAskUserQuestion(question.event);
+  return questions?.[Math.min(page, questions.length - 1)]?.question ?? question.event.text;
+}
+
+export function pendingQuestionsCountLabel(count: number): string {
+  return count === 1 ? "Question waiting" : `${count} questions waiting`;
 }

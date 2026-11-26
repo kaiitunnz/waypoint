@@ -155,3 +155,39 @@ describe("streamReducer", () => {
     expect(streamReducer(state, { type: "reset" })).toEqual(INITIAL_STREAM_STATE);
   });
 });
+
+describe("streamReducer attention state", () => {
+  const notice = { reason: "switch" as const, previous: "a", current: "b", selection: null };
+
+  it("keeps a model notice until the resolved model clears", () => {
+    let state = streamReducer(INITIAL_STREAM_STATE, { type: "modelNotice", notice });
+    state = streamReducer(state, { type: "session", session: { ...session("t"), resolved_model: "b" } as SessionRecord });
+    expect(state.modelNotice).toEqual(notice);
+    state = streamReducer(state, { type: "session", session: { ...session("t"), resolved_model: null } as SessionRecord });
+    expect(state.modelNotice).toBeNull();
+  });
+
+  it("counts live side-question arrivals and ignores hydrated ones", () => {
+    const aside = {
+      id: "q",
+      question: "why?",
+      status: "pending" as const,
+      attempts: 0,
+      resumed: false,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    let state = streamReducer(INITIAL_STREAM_STATE, { type: "sideQuestion", frame: { side_question: aside, hydrated: true } });
+    expect(state.sideQuestionArrivals).toBe(0);
+    state = streamReducer(state, { type: "sideQuestion", frame: { side_question: { ...aside, id: "r" } } });
+    expect(state.sideQuestionArrivals).toBe(1);
+    expect(state.sideQuestions.items.size).toBe(2);
+    expect(streamReducer(state, { type: "sideQuestion", frame: { removed_id: "missing" } })).toBe(state);
+  });
+
+  it("numbers clipboard results so a repeat is new, and resets everything", () => {
+    let state = streamReducer(INITIAL_STREAM_STATE, { type: "clipboard", text: "x" });
+    state = streamReducer(state, { type: "clipboard", text: "x" });
+    expect(state.clipboard).toEqual({ text: "x", seq: 2 });
+    expect(streamReducer(state, { type: "reset" })).toBe(INITIAL_STREAM_STATE);
+  });
+});

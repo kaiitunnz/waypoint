@@ -22,12 +22,3 @@
   margin-top: 2px;
   color: var(--text);
 }
-
-.clamped {
-  max-height: 188px;
-  overflow: hidden;
-}
-
-.more {
-  margin: 6px 0 4px;
-}

@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import { useEffect, type MouseEvent } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
@@ -27,7 +27,15 @@ interface TranscriptProps {
   hiddenCount: number;
   onShowAll: () => void;
   pending: PendingSend[];
+  // A question card to scroll to and mark; `seq` makes a repeat a new request.
+  reveal?: { toolUseId: string; seq: number } | null;
+  // Whether the card was on the page.
+  onRevealed?: (found: boolean) => void;
 }
+
+// Frames to wait for a card that is still rendering.
+const REVEAL_FRAMES = 60;
+const FLASH_MS = 2000;
 
 export function Transcript({
   turns,
@@ -39,8 +47,34 @@ export function Transcript({
   hiddenCount,
   onShowAll,
   pending,
+  reveal,
+  onRevealed,
 }: TranscriptProps) {
-  const { scroller, content, log, away, onScroll, hold, jumpToEnd } = useTranscriptScroll(turns, pending.length);
+  const { scroller, content, log, away, onScroll, hold, jumpToEnd, reveal: bringIntoView } = useTranscriptScroll(turns, pending.length);
+
+  useEffect(() => {
+    if (!reveal) return;
+    let frame = 0;
+    let attempts = 0;
+    const find = () => {
+      const card = scroller.current?.querySelector<HTMLElement>(`[data-ask-tool-use-id="${CSS.escape(reveal.toolUseId)}"]`);
+      if (card) {
+        bringIntoView(card);
+        card.removeAttribute("data-flash");
+        // A reflow restarts the animation for a card already marked.
+        void card.offsetWidth;
+        card.setAttribute("data-flash", "");
+        setTimeout(() => card.removeAttribute("data-flash"), FLASH_MS);
+        onRevealed?.(true);
+        return;
+      }
+      attempts += 1;
+      if (attempts > REVEAL_FRAMES) onRevealed?.(false);
+      else frame = requestAnimationFrame(find);
+    };
+    frame = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(frame);
+  }, [reveal, scroller, bringIntoView, onRevealed]);
   const working = isWorkingStatus(status);
   // Every fold control carries aria-expanded; captured here, before the fold changes.
   const onFold = (event: MouseEvent) => {

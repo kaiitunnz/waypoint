@@ -1,0 +1,8 @@
+.clamped {
+  max-height: calc(var(--lines) * 1lh);
+  overflow: hidden;
+}
+
+.more {
+  margin-top: 6px;
+}

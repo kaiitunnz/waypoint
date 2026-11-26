@@ -48,7 +48,7 @@ export function SessionScreen({ id }: { id: string }) {
   const { toast } = useToast();
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
-  const { session, events, connection, pendingQuestions } = stream;
+  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder } = stream;
   const [filesOpen, setFilesOpen] = useState(false);
   // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
@@ -95,9 +95,8 @@ export function SessionScreen({ id }: { id: string }) {
     };
   }, [session, agentName]);
 
-  // The older-messages chip is deferred with the turns below it, so it goes in the same commit
-  // as the older turns arrive and the transcript keeps the reader's place.
-  const { hasOlder, loadingOlder } = stream;
+  // The chip's state is deferred with the turns: the transcript keeps its place only across a
+  // change of turns, so a chip leaving on its own would shift the view.
   const live = useMemo(() => ({ events, hasOlder, loadingOlder }), [events, hasOlder, loadingOlder]);
   const shown = useDeferredValue(live);
   const rendered = shown.events;

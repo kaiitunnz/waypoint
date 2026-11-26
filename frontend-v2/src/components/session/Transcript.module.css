@@ -29,7 +29,7 @@
   padding: 0 12px 10px;
 }
 
-/* A short transcript sits at the bottom, like a messenger, with "Load older" above its first turn. */
+/* A short transcript sits at the bottom, like a messenger. */
 .messages {
   margin-top: auto;
 }

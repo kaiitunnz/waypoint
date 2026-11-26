@@ -24,7 +24,10 @@ from waypoint.backends.opencode.adapter import (
 )
 from waypoint.backends.opencode.catalog import Model
 from waypoint.backends.opencode.health import AdapterHealth
-from waypoint.backends.opencode.normalize import historical_events_from_messages
+from waypoint.backends.opencode.normalize import (
+    APPROVAL_DECISIONS,
+    historical_events_from_messages,
+)
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
@@ -216,7 +219,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         supports_custom_cli_args=True,
         # "Approve for session" is a rule on the session. OpenCode's own
         # "always" allows project-wide, so there is no acceptAlways.
-        approval_decisions=("approve", "acceptForSession", "decline"),
+        approval_decisions=APPROVAL_DECISIONS,
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,
@@ -607,7 +610,6 @@ class OpenCodePlugin(DefaultLaunchContract):
         server's state gives it."""
         await adapter.restore_session(
             session.id,
-            session.cwd,
             opencode_session_id,
             permissions=_ruleset_for_mode(session.permission_mode),
             subagent_permissions=_subagent_ruleset_for_mode(session.permission_mode),
@@ -625,7 +627,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         )
         pre_plan_mode = session.transport_state.get("pre_plan_mode")
         if pre_plan_mode is not None:
-            await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
+            adapter.set_pre_plan_mode(session.id, pre_plan_mode)
         current = adapter.session_status(session.id) or SessionStatus.IDLE
         runtime.storage.update_session(session.id, status=current)
         return current
@@ -778,7 +780,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                     if session.permission_mode != "plan"
                     else session.transport_state.get("pre_plan_mode")
                 )
-                await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
+                adapter.set_pre_plan_mode(session.id, pre_plan_mode)
                 success = await adapter.set_agent(session.id, "plan")
                 persisted: dict[str, Any] = {
                     "agent": "plan",
@@ -1207,12 +1209,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         adapter = self._adapters.get(self._session_adapter_key(runtime, session))
         if adapter is None:
             return QuestionDecline.FAILED
-        outcome = await adapter.reject_question(session.id, tool_use_id)
-        if outcome == "missing":
-            return QuestionDecline.MISSING
-        if outcome == "error":
-            return QuestionDecline.FAILED
-        return QuestionDecline.TURN_ENDS
+        return await adapter.reject_question(session.id, tool_use_id)
 
     def _session_adapter_key(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1370,14 +1367,13 @@ class OpenCodePlugin(DefaultLaunchContract):
         try:
             new_opencode_session_id = await adapter.fork_session(
                 new_session_id,
-                session.cwd,
                 opencode_session_id,
                 _ruleset_for_mode(session.permission_mode),
                 _subagent_ruleset_for_mode(session.permission_mode),
             )
             pre_plan_mode = session.transport_state.get("pre_plan_mode")
             if pre_plan_mode is not None:
-                await adapter.set_pre_plan_mode(new_session_id, pre_plan_mode)
+                adapter.set_pre_plan_mode(new_session_id, pre_plan_mode)
         except Exception as exc:
             self._health_for(key).record_failure()
             log.exception("opencode fork failed", extra={"session_id": session.id})
@@ -1730,7 +1726,6 @@ class OpenCodePlugin(DefaultLaunchContract):
         try:
             opencode_session_id = await adapter.start_session(
                 session_id,
-                request.cwd,
                 model=resolved_model,
                 effort=resolved_effort,
                 agent=agent,

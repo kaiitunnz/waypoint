@@ -409,7 +409,7 @@ class _AdapterMap:
         return self.adapter
 
 
-def opencode_plugin(outcome: str) -> Any:
+def opencode_plugin(outcome: QuestionDecline) -> Any:
     plugin = OpenCodePlugin()
     adapter = MagicMock()
     adapter.question_liveness = lambda session_id, ids: dict.fromkeys(
@@ -422,10 +422,10 @@ def opencode_plugin(outcome: str) -> Any:
 
 @pytest.mark.parametrize(
     ("outcome", "status_code", "closure"),
-    [("missing", 400, True), ("error", 502, False)],
+    [(QuestionDecline.MISSING, 400, True), (QuestionDecline.FAILED, 502, False)],
 )
 async def test_failed_opencode_reject_never_records_a_cancel(
-    tmp_path, monkeypatch, outcome: str, status_code: int, closure: bool
+    tmp_path, monkeypatch, outcome: QuestionDecline, status_code: int, closure: bool
 ) -> None:
     plugin = opencode_plugin(outcome)
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
@@ -441,7 +441,7 @@ async def test_failed_opencode_reject_never_records_a_cancel(
 
 
 async def test_opencode_cancel_rejects_then_records(tmp_path, monkeypatch) -> None:
-    plugin = opencode_plugin("ok")
+    plugin = opencode_plugin(QuestionDecline.TURN_ENDS)
     runtime = make_runtime(tmp_path, monkeypatch, plugin)
     stub_approvals(runtime, monkeypatch, pending=False)
     await ask(runtime, "q1")

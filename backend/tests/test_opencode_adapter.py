@@ -25,7 +25,7 @@ from waypoint.backends.opencode.adapter import (
 from waypoint.backends.opencode.client import LocalOpenCodeClient
 from waypoint.backends.opencode.server_auth import ServerAuth
 from waypoint.backends.opencode.sessions import SessionState
-from waypoint.questions import QuestionLiveness
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     AttachmentSpec,
     EventKind,
@@ -49,7 +49,7 @@ def _fake() -> FakeOpenCode:
 
 
 def _register(adapter: OpenCodeAdapter, **fields: Any) -> SessionState:
-    state = SessionState("local", WORKDIR, "ses_root", **fields)
+    state = SessionState("local", "ses_root", **fields)
     adapter._register_session(state)
     return state
 
@@ -130,7 +130,6 @@ async def test_a_new_session_takes_its_location_rules_agent_and_model() -> None:
     async with driving(fake) as (adapter, emitted):
         remote = await adapter.start_session(
             "local",
-            WORKDIR,
             title="T",
             model="opencode/big-pickle",
             effort="high",
@@ -155,9 +154,7 @@ async def test_a_new_session_takes_its_location_rules_agent_and_model() -> None:
 async def test_a_variant_the_model_lacks_is_not_selected() -> None:
     fake = FakeOpenCode()
     async with driving(fake) as (adapter, _emitted):
-        await adapter.start_session(
-            "local", WORKDIR, model="opencode/big-pickle", effort="max"
-        )
+        await adapter.start_session("local", model="opencode/big-pickle", effort="max")
 
     [body] = fake.calls("POST", "/api/session")
     assert body["model"] == {"providerID": "opencode", "id": "big-pickle"}
@@ -168,7 +165,7 @@ async def test_a_variant_the_model_lacks_is_not_selected() -> None:
 async def test_an_effort_without_a_model_goes_to_the_default_model() -> None:
     fake = FakeOpenCode()
     async with driving(fake) as (adapter, _emitted):
-        remote = await adapter.start_session("local", WORKDIR, effort="low")
+        remote = await adapter.start_session("local", effort="low")
 
     assert fake.calls("POST", f"/api/session/{remote}/model") == [
         {"model": {"providerID": "opencode", "id": "big-pickle", "variant": "low"}}
@@ -874,10 +871,17 @@ async def test_a_form_is_a_question_that_takes_an_answer() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "outcome"), [(None, "ok"), (404, "missing"), (500, "error")]
+    ("status", "outcome"),
+    [
+        (None, QuestionDecline.TURN_ENDS),
+        (404, QuestionDecline.MISSING),
+        (500, QuestionDecline.FAILED),
+    ],
 )
 @pytest.mark.asyncio
-async def test_declining_a_question(status: int | None, outcome: str) -> None:
+async def test_declining_a_question(
+    status: int | None, outcome: QuestionDecline
+) -> None:
     fake = _fake()
     if status:
         fake.failures[("DELETE", "/api/session/ses_root/form/frm_1")] = status
@@ -888,7 +892,7 @@ async def test_declining_a_question(status: int | None, outcome: str) -> None:
         assert await adapter.reject_question("local", "frm_1") == outcome
         pending = adapter.current_question_id("local")
 
-    assert pending == ("frm_1" if outcome == "error" else None)
+    assert pending == ("frm_1" if outcome is QuestionDecline.FAILED else None)
 
 
 @pytest.mark.asyncio
@@ -914,17 +918,17 @@ async def test_unlisted_questions_stay_unknown_until_a_listing_succeeds(
     fake.failures[("GET", "/api/session/ses_root/form")] = 500
     changed: list[str] = []
     async with driving(fake, on_questions_changed=changed.append) as (adapter, _):
-        state = _register(adapter, forms_seeded=False)
+        state = _register(adapter, asks_seeded=False)
         await adapter._seed_asks(state)
         assert adapter.question_liveness("local", ["frm_open"]) == {
             "frm_open": QuestionLiveness.UNAVAILABLE
         }
-        assert adapter._question_seed_tasks == {}
+        assert adapter._ask_seed_tasks == {}
 
         fake.failures.clear()
         monkeypatch.setattr(adapter_module, "QUESTION_SEED_RETRY_SECONDS", 0.0)
         adapter.question_liveness("local", ["frm_open"])
-        await asyncio.gather(*adapter._question_seed_tasks.values())
+        await asyncio.gather(*adapter._ask_seed_tasks.values())
 
         assert changed == ["local"]
         assert adapter.question_liveness("local", ["frm_open", "frm_gone"]) == {
@@ -957,7 +961,6 @@ async def test_restore_adopts_subagents_running_state_and_pending_asks() -> None
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
             "local",
-            WORKDIR,
             "ses_root",
             permissions=ASK,
             model="opencode/big-pickle",
@@ -994,7 +997,7 @@ async def test_restore_keeps_open_cards_when_it_cannot_list_asks() -> None:
     fake.failures[("GET", "/api/session/ses_root/permission")] = 500
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
-            "local", WORKDIR, "ses_root", permissions=ASK, open_approvals=["per_1"]
+            "local", "ses_root", permissions=ASK, open_approvals=["per_1"]
         )
 
     assert "approval.invalidated" not in emitted.methods()
@@ -1009,7 +1012,6 @@ async def test_restore_applies_what_waypoint_recorded() -> None:
     async with driving(fake) as (adapter, _emitted):
         await adapter.restore_session(
             "local",
-            WORKDIR,
             "ses_root",
             permissions=[],
             model="opencode/big-pickle",
@@ -1029,7 +1031,7 @@ async def test_a_selection_the_server_refuses_keeps_the_session() -> None:
     fake.failures[("POST", "/api/session/ses_root/model")] = 400
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
-            "local", WORKDIR, "ses_root", permissions=[], model="opencode/big-pickle"
+            "local", "ses_root", permissions=[], model="opencode/big-pickle"
         )
         assert adapter.session_status("local") == SessionStatus.IDLE
 
@@ -1047,7 +1049,7 @@ async def test_restore_fails_without_the_session_or_its_rules(
     fake.failures[broken] = 500
     async with driving(fake) as (adapter, _emitted):
         with pytest.raises(OpenCodeError):
-            await adapter.restore_session("local", WORKDIR, "ses_root", permissions=ASK)
+            await adapter.restore_session("local", "ses_root", permissions=ASK)
 
         assert adapter._sessions == {} and adapter._routes == {}
 
@@ -1064,7 +1066,6 @@ async def test_asks_a_restore_could_not_list_are_repaired(
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
             "local",
-            WORKDIR,
             "ses_root",
             permissions=ASK,
             open_approvals=["per_live", "per_gone"],
@@ -1093,7 +1094,7 @@ async def test_a_late_listing_reports_a_wait_it_has_no_card_to_show(
     fake.failures[("GET", "/api/session/ses_root/permission")] = 500
     async with driving(fake) as (adapter, emitted):
         await adapter.restore_session(
-            "local", WORKDIR, "ses_root", permissions=ASK, open_approvals=["per_1"]
+            "local", "ses_root", permissions=ASK, open_approvals=["per_1"]
         )
         fake.failures.clear()
         await asyncio.gather(*adapter._tasks)
@@ -1114,7 +1115,7 @@ async def test_a_cancelled_restore_leaves_no_session_behind() -> None:
 
         adapter._adopt_tree = stuck  # type: ignore[method-assign]
         restoring = asyncio.create_task(
-            adapter.restore_session("local", WORKDIR, "ses_root", permissions=ASK)
+            adapter.restore_session("local", "ses_root", permissions=ASK)
         )
         await listing.wait()
         restoring.cancel()
@@ -1205,7 +1206,7 @@ async def test_an_ask_answered_during_the_listing_is_not_brought_back(
 
 
 def test_executions_reported_during_the_listing_win_over_it() -> None:
-    state = SessionState("local", WORKDIR, "ses_root", children={"ses_child"})
+    state = SessionState("local", "ses_root", children={"ses_child"})
     mark = state.mark()
     state.execution_ended("ses_root")
     state.execution_started("ses_child")
@@ -1308,7 +1309,7 @@ async def test_threads_and_history_follow_every_page() -> None:
 async def test_fork_writes_the_sources_rules() -> None:
     fake = _fake()
     async with driving(fake) as (adapter, _emitted):
-        forked = await adapter.fork_session("local2", WORKDIR, "ses_root", ASK)
+        forked = await adapter.fork_session("local2", "ses_root", ASK)
 
     assert forked == "ses_root_fork"
     assert fake.calls("PATCH", "/api/session/ses_root_fork") == [{"permissions": ASK}]

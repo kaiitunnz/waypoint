@@ -430,7 +430,7 @@ async def test_clearing_the_model_reaches_the_server() -> None:
 def _mode_adapter(agent: str | None) -> MagicMock:
     return MagicMock(
         set_agent=AsyncMock(return_value=True),
-        set_pre_plan_mode=AsyncMock(),
+        set_pre_plan_mode=MagicMock(),
         set_session_permission=AsyncMock(return_value=True),
         get_agent=MagicMock(return_value=agent),
     )
@@ -617,29 +617,14 @@ async def test_an_answer_records_the_status_the_turn_is_in() -> None:
     assert runtime._record_user_event.await_args.kwargs["status"] == SessionStatus.IDLE
 
 
-@pytest.mark.parametrize(
-    ("outcome", "expected"),
-    [
-        ("ok", QuestionDecline.TURN_ENDS),
-        ("missing", QuestionDecline.MISSING),
-        ("error", QuestionDecline.FAILED),
-    ],
-)
 @pytest.mark.asyncio
-async def test_declining_a_question_ends_the_turn(
-    outcome: str, expected: QuestionDecline
-) -> None:
+async def test_declining_a_question_without_a_server_fails() -> None:
     plugin = OpenCodePlugin()
     session = _session()
-    runtime = _runtime(session)
-    _live(
-        plugin,
-        runtime,
-        session,
-        MagicMock(reject_question=AsyncMock(return_value=outcome)),
-    )
 
-    assert await plugin.decline_question(runtime, session, "frm_1") == expected
+    outcome = await plugin.decline_question(_runtime(session), session, "frm_1")
+
+    assert outcome is QuestionDecline.FAILED
 
 
 # ── Transport ───────────────────────────────────────────────────────────
@@ -894,7 +879,7 @@ def _approval(request_id: str) -> EventRecord:
 def _restorable(status: SessionStatus) -> MagicMock:
     return MagicMock(
         restore_session=AsyncMock(),
-        set_pre_plan_mode=AsyncMock(),
+        set_pre_plan_mode=MagicMock(),
         session_status=MagicMock(return_value=status),
     )
 
@@ -928,7 +913,6 @@ async def test_restore_records_the_servers_status(path: str) -> None:
 
     adapter.restore_session.assert_awaited_once_with(
         "sess",
-        "/repo",
         "ses_1",
         permissions=[],
         subagent_permissions=ASK,
@@ -938,7 +922,7 @@ async def test_restore_records_the_servers_status(path: str) -> None:
         open_approvals=["per_1"],
         open_questions=["frm_1"],
     )
-    adapter.set_pre_plan_mode.assert_awaited_once_with("sess", "ask")
+    adapter.set_pre_plan_mode.assert_called_once_with("sess", "ask")
     assert session.status == SessionStatus.WAITING_INPUT
     assert (
         runtime._record_system_event.await_args.kwargs["status"]
@@ -963,7 +947,7 @@ async def test_fork_writes_the_modes_rules_and_keeps_plan_state(
     )
     adapter = MagicMock(
         fork_session=AsyncMock(return_value="ses_forked"),
-        set_pre_plan_mode=AsyncMock(),
+        set_pre_plan_mode=MagicMock(),
     )
     build = AsyncMock(return_value=adapter)
     cast(Any, plugin)._get_or_create_adapter = build
@@ -977,10 +961,8 @@ async def test_fork_writes_the_modes_rules_and_keeps_plan_state(
         structured_log=tmp_path / "events.jsonl",
     )
 
-    adapter.fork_session.assert_awaited_once_with(
-        "forked", "/repo", "ses_parent", ASK, ASK
-    )
-    adapter.set_pre_plan_mode.assert_awaited_once_with("forked", "allow")
+    adapter.fork_session.assert_awaited_once_with("forked", "ses_parent", ASK, ASK)
+    adapter.set_pre_plan_mode.assert_called_once_with("forked", "allow")
     assert forked.transport_state == {
         "opencode_session_id": "ses_forked",
         "agent": "plan",

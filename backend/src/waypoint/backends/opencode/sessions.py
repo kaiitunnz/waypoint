@@ -53,7 +53,6 @@ class Permission:
 @dataclass
 class SessionState:
     session_id: str
-    cwd: str
     # The OpenCode session this Waypoint session drives.
     root_id: str
     # Subagent sessions under the root, at any depth.
@@ -72,8 +71,8 @@ class SessionState:
     # Whether ``forms`` is authoritative. A live session sees every form; a
     # restored one only after listing the server's, until when an unknown
     # question may still be live.
-    forms_seeded: bool = True
-    forms_seed_attempted_at: float = 0.0
+    asks_seeded: bool = True
+    asks_seed_attempted_at: float = 0.0
     # Cards the transcript still showed at restore, until a listing of the
     # server's asks says which of them it has.
     open_approvals: set[str] = field(default_factory=set)

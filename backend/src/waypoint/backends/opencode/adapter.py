@@ -20,7 +20,7 @@ from collections.abc import (
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import ResolvedAttachment
@@ -42,7 +42,7 @@ from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.backends.opencode.server_auth import ServerAuth
 from waypoint.backends.opencode.sessions import Permission, SessionState, ToolCall
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.questions import QuestionLiveness
+from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -107,7 +107,7 @@ SessionUpdateCallback = Callable[
 ]
 TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
 AgentChangedCallback = Callable[[str, str | None, str | None], Any]
-ServerDiedCallback = Callable[[list[str]], Any]
+ServerDiedCallback = Callable[[list[str]], None]
 QuestionsChangedCallback = Callable[[str], Any]
 
 
@@ -183,7 +183,7 @@ class OpenCodeAdapter:
         # OpenCode session id (a root or a subagent) -> Waypoint session id.
         self._routes: dict[str, str] = {}
         self._tasks: set[asyncio.Task[None]] = set()
-        self._question_seed_tasks: dict[str, asyncio.Task[None]] = {}
+        self._ask_seed_tasks: dict[str, asyncio.Task[None]] = {}
         # Serializes writes to session rulesets, which replace the whole list.
         self._ruleset_lock = asyncio.Lock()
         self._models: list[Model] = []
@@ -570,17 +570,15 @@ class OpenCodeAdapter:
 
         if self._on_server_died_callback is not None:
             try:
-                result = self._on_server_died_callback(active_session_ids)
-                if asyncio.iscoroutine(result):
-                    await result
+                self._on_server_died_callback(active_session_ids)
             except Exception:
                 log.exception("on_server_died callback failed")
 
     async def shutdown(self) -> None:
-        for task in [*self._question_seed_tasks.values(), *self._tasks]:
+        for task in [*self._ask_seed_tasks.values(), *self._tasks]:
             with suppress(Exception):
                 await cancel_and_wait(task)
-        self._question_seed_tasks.clear()
+        self._ask_seed_tasks.clear()
         self._tasks.clear()
         await self._stop_events()
         if self._client is not None:
@@ -949,14 +947,13 @@ class OpenCodeAdapter:
         model = state.message_models.pop(message_id, None)
         root = origin == state.root_id
         if self._on_token_usage is not None:
-            record = opencode_token_usage_record(
+            record = _token_usage_record(
                 f"{origin}:{message_id}",
                 tokens,
                 model=model,
                 effort=state.effort if root else None,
             )
-            if record is not None:
-                await self._on_token_usage(state.session_id, record, False)
+            await self._on_token_usage(state.session_id, record, False)
         # A subagent has a context of its own.
         if not root or model is None:
             return
@@ -1235,12 +1232,11 @@ class OpenCodeAdapter:
 
     async def reject_question(
         self, session_id: str, request_id: str
-    ) -> Literal["ok", "missing", "error"]:
-        """Decline one question request; ``missing`` means the server no
-        longer has it."""
+    ) -> QuestionDecline:
+        """Decline one question request, which ends the asking turn."""
         state = self._sessions.get(session_id)
         if state is None:
-            return "error"
+            return QuestionDecline.FAILED
         form = state.forms.get(request_id)
         origin = form.session_id if form else state.root_id
         try:
@@ -1250,11 +1246,11 @@ class OpenCodeAdapter:
         except Exception as exc:
             log.warning("opencode question reject failed: %s", exc)
             if http_status(exc) not in (404, 409):
-                return "error"
+                return QuestionDecline.FAILED
             state.forget_ask(request_id)
-            return "missing"
+            return QuestionDecline.MISSING
         state.forget_ask(request_id)
-        return "ok"
+        return QuestionDecline.TURN_ENDS
 
     def current_question_id(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
@@ -1282,7 +1278,7 @@ class OpenCodeAdapter:
     ) -> tuple[list[tuple[Permission, dict[str, Any]]], list[Form]]:
         """Adopt the server's pending asks of the session's tree, returning the
         ones the stream had not delivered."""
-        state.forms_seed_attempted_at = time.monotonic()
+        state.asks_seed_attempted_at = time.monotonic()
         mark = state.mark()
         permissions: list[tuple[Permission, dict[str, Any]]] = []
         forms: list[Form] = []
@@ -1312,7 +1308,7 @@ class OpenCodeAdapter:
             ):
                 state.add_form(form)
                 forms.append(form)
-        state.forms_seeded = True
+        state.asks_seeded = True
         return permissions, forms
 
     def question_liveness(
@@ -1321,13 +1317,13 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         if state is None:
             return dict.fromkeys(request_ids, QuestionLiveness.UNAVAILABLE)
-        if not state.forms_seeded:
+        if not state.asks_seeded:
             # Questions the stream delivered since restore are known live; the
             # rest wait for a successful listing.
-            self._schedule_question_seed(state)
+            self._schedule_ask_seed(state)
         untracked = (
             QuestionLiveness.CLOSED
-            if state.forms_seeded
+            if state.asks_seeded
             else QuestionLiveness.UNAVAILABLE
         )
         return {
@@ -1337,17 +1333,17 @@ class OpenCodeAdapter:
             for request_id in request_ids
         }
 
-    def _schedule_question_seed(self, state: SessionState) -> None:
-        if state.session_id in self._question_seed_tasks:
+    def _schedule_ask_seed(self, state: SessionState) -> None:
+        if state.session_id in self._ask_seed_tasks:
             return
-        elapsed = time.monotonic() - state.forms_seed_attempted_at
+        elapsed = time.monotonic() - state.asks_seed_attempted_at
         if elapsed < QUESTION_SEED_RETRY_SECONDS:
             return
 
         task = asyncio.create_task(self._reseed(state))
-        self._question_seed_tasks[state.session_id] = task
+        self._ask_seed_tasks[state.session_id] = task
         task.add_done_callback(
-            lambda _: self._question_seed_tasks.pop(state.session_id, None)
+            lambda _: self._ask_seed_tasks.pop(state.session_id, None)
         )
 
     async def _show_seeded(
@@ -1359,7 +1355,7 @@ class OpenCodeAdapter:
         """Once the server's asks are listed, show those the transcript lacks and
         close the approval cards it no longer has. Returns whether anything was
         emitted."""
-        if not state.forms_seeded:
+        if not state.asks_seeded:
             # A listing that failed says nothing about which cards are stale.
             return False
         shown, state.open_approvals = state.open_approvals, set()
@@ -1381,10 +1377,10 @@ class OpenCodeAdapter:
 
     async def _reseed(self, state: SessionState) -> None:
         """List the asks a restore could not."""
-        if state.forms_seeded:
+        if state.asks_seeded:
             return
         permissions, forms = await self._seed_asks(state)
-        if not state.forms_seeded:
+        if not state.asks_seeded:
             return
         emitted = await self._show_seeded(state, permissions, forms)
         # The restore recorded a status without these.
@@ -1398,13 +1394,13 @@ class OpenCodeAdapter:
     async def _repair_seed(self, state: SessionState) -> None:
         """Retry until the asks are listed: until then, the cards a restore left
         open cannot be answered."""
-        while not state.forms_seeded:
+        while not state.asks_seeded:
             await asyncio.sleep(QUESTION_SEED_RETRY_SECONDS)
             if state.closing or self._sessions.get(state.session_id) is not state:
                 return
             # Through the one seed task: two at once would repeat cards.
-            self._schedule_question_seed(state)
-            if task := self._question_seed_tasks.get(state.session_id):
+            self._schedule_ask_seed(state)
+            if task := self._ask_seed_tasks.get(state.session_id):
                 await asyncio.wait({task})
 
     # ── Session lifecycle ───────────────────────────────────────────────
@@ -1432,7 +1428,6 @@ class OpenCodeAdapter:
     async def start_session(
         self,
         session_id: str,
-        cwd: str,
         *,
         title: str = "New Session",
         model: str | None = None,
@@ -1461,7 +1456,6 @@ class OpenCodeAdapter:
 
         state = SessionState(
             session_id=session_id,
-            cwd=cwd,
             root_id=opencode_session_id,
             agent=agent,
             subagent_permissions=_differing(subagent_permissions, permissions),
@@ -1482,7 +1476,6 @@ class OpenCodeAdapter:
     async def fork_session(
         self,
         session_id: str,
-        cwd: str,
         source_id: str,
         permissions: list[dict[str, str]],
         subagent_permissions: list[dict[str, str]] | None = None,
@@ -1501,7 +1494,6 @@ class OpenCodeAdapter:
 
         state = SessionState(
             session_id=session_id,
-            cwd=cwd,
             root_id=opencode_session_id,
             agent=info.get("agent"),
             subagent_permissions=_differing(subagent_permissions, permissions),
@@ -1513,7 +1505,6 @@ class OpenCodeAdapter:
     async def restore_session(
         self,
         session_id: str,
-        cwd: str,
         opencode_session_id: str,
         *,
         permissions: list[dict[str, str]],
@@ -1537,10 +1528,9 @@ class OpenCodeAdapter:
 
         state = SessionState(
             session_id=session_id,
-            cwd=cwd,
             root_id=opencode_session_id,
             agent=info.get("agent"),
-            forms_seeded=False,
+            asks_seeded=False,
             open_approvals=set(open_approvals),
             open_questions=set(open_questions),
         )
@@ -1560,7 +1550,7 @@ class OpenCodeAdapter:
             if isinstance(exc, Exception):
                 raise OpenCodeError(f"failed to restore session: {exc}") from exc
             raise
-        if not state.forms_seeded:
+        if not state.asks_seeded:
             self._spawn(self._repair_seed(state))
 
     async def _adopt_tree(self, state: SessionState) -> None:
@@ -1776,12 +1766,9 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         return state.agent if state else None
 
-    async def set_pre_plan_mode(self, session_id: str, mode: str | None) -> bool:
-        state = self._sessions.get(session_id)
-        if state is None:
-            return False
-        state.pre_plan_mode = mode
-        return True
+    def set_pre_plan_mode(self, session_id: str, mode: str | None) -> None:
+        if state := self._sessions.get(session_id):
+            state.pre_plan_mode = mode
 
     def get_pre_plan_mode(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
@@ -2086,21 +2073,15 @@ def _context_usage_snapshot(
     )
 
 
-def opencode_token_usage_record(
+def _token_usage_record(
     record_id: str,
     tokens: dict[str, Any],
     *,
     model: str | None = None,
     effort: str | None = None,
-) -> TokenUsageRecord | None:
-    """Per-step ledger record from an OpenCode token dict.
-
-    ``model``/``effort`` are the resolved values in effect for the step
-    (telemetry's "actual model at turn time"); callers pass ``None`` when they
-    can't be resolved, never a guess.
-    """
-    if not record_id:
-        return None
+) -> TokenUsageRecord:
+    """A step's ledger record. ``model`` and ``effort`` are those in effect
+    for the step, when known."""
     return TokenUsageRecord(
         record_id=record_id,
         source="opencode",

@@ -224,13 +224,11 @@ class PendingQuestionTracker:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="the agent did not accept the cancellation; the question is still open",
                 )
-            settled: SessionStatus | None = None
-            if outcome is not QuestionDecline.TURN_ENDS:
-                settled = (
-                    SessionStatus.RUNNING
-                    if outcome is QuestionDecline.TURN_RESUMES
-                    else SessionStatus.IDLE
-                )
+            # A turn that ends sets the status through its own events.
+            settled = {
+                QuestionDecline.TURN_RESUMES: SessionStatus.RUNNING,
+                QuestionDecline.AGENT_IDLE: SessionStatus.IDLE,
+            }.get(outcome)
             current = self._runtime.get_session(session.id)
             await self._record_cancelled(
                 session.id,

@@ -55,13 +55,12 @@ class OpenCodeHttpClient(Protocol):
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any: ...
     async def patch(
         self, path: str, json_data: dict[str, Any] | None = None
     ) -> Any: ...
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any: ...
+    async def delete(self, path: str) -> Any: ...
     def stream_events(self, path: str) -> AsyncGenerator[str, None]: ...
     async def close(self) -> None: ...
 
@@ -100,7 +99,6 @@ class LocalOpenCodeClient:
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
         client = self._require_session()
@@ -108,7 +106,6 @@ class LocalOpenCodeClient:
         async with client.post(
             f"{self.base_url}{path}",
             json=json_data,
-            params=params,
             timeout=timeout,
         ) as resp:
             resp.raise_for_status()
@@ -124,9 +121,9 @@ class LocalOpenCodeClient:
                 return {}
             return await resp.json()
 
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any:
+    async def delete(self, path: str) -> Any:
         client = self._require_session()
-        async with client.delete(f"{self.base_url}{path}", params=params) as resp:
+        async with client.delete(f"{self.base_url}{path}") as resp:
             resp.raise_for_status()
             if resp.status == 204:
                 return {}
@@ -178,8 +175,8 @@ class RemoteOpenCodeClient:
         self,
         method: str,
         path: str,
-        json_data: dict[str, Any] | None,
-        params: dict[str, str] | None,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
         url = f"{self.base_url}{path}"
@@ -265,24 +262,21 @@ class RemoteOpenCodeClient:
             ) from exc
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
-        return await self._run_curl("GET", path, None, params)
+        return await self._run_curl("GET", path, params=params)
 
     async def post(
         self,
         path: str,
         json_data: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
         long_running: bool = False,
     ) -> Any:
-        return await self._run_curl(
-            "POST", path, json_data, params, long_running=long_running
-        )
+        return await self._run_curl("POST", path, json_data, long_running=long_running)
 
     async def patch(self, path: str, json_data: dict[str, Any] | None = None) -> Any:
-        return await self._run_curl("PATCH", path, json_data, None)
+        return await self._run_curl("PATCH", path, json_data)
 
-    async def delete(self, path: str, params: dict[str, str] | None = None) -> Any:
-        return await self._run_curl("DELETE", path, None, params)
+    async def delete(self, path: str) -> Any:
+        return await self._run_curl("DELETE", path)
 
     async def stream_events(self, path: str) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}{path}"

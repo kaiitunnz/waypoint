@@ -23,9 +23,9 @@ class _Adapter:
         }
 
     async def restore_session(
-        self, session_id: str, cwd: str, opencode_session_id: str, **kwargs: Any
+        self, session_id: str, opencode_session_id: str, **kwargs: Any
     ) -> None:
-        self.restored = {"cwd": cwd, **kwargs}
+        self.restored = kwargs
 
     def session_status(self, session_id: str) -> SessionStatus:
         return SessionStatus.IDLE

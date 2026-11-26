@@ -1,0 +1,78 @@
+.page {
+  max-width: 720px;
+  padding: 0 16px calc(32px + var(--safe-bottom));
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  column-gap: 32px;
+  max-width: 900px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scope {
+  padding: 16px 12px 4px 0;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.section {
+  scroll-margin-top: 16px;
+}
+
+.title {
+  padding: 24px 0 2px;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.list {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: start;
+  padding-top: 12px;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r);
+  font-size: var(--f-body);
+  color: var(--muted);
+}
+
+.on {
+  background: var(--fill-quiet);
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .entry {
+    min-height: 36px;
+  }
+
+  .entry:hover {
+    color: var(--text);
+  }
+}
+
+/* The page header's gutter. */
+@media (min-width: 900px) {
+  .page {
+    padding-right: 36px;
+    padding-left: 36px;
+  }
+}

@@ -202,6 +202,22 @@ describe("ActivityLoader", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("reports a failed fetch, and not one it aborted", async () => {
+    const onFailure = vi.fn();
+    const failing = new ActivityLoader<string>({ fetch: async () => Promise.reject(new Error("offline")), onResult: vi.fn(), onFailure });
+    failing.request("a", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onFailure).toHaveBeenCalledWith("a", "t1");
+
+    const aborted = vi.fn();
+    const hanging = new ActivityLoader<string>({ fetch: () => new Promise<string>(() => {}), onResult: vi.fn(), onFailure: aborted });
+    hanging.request("b", "t1");
+    await vi.advanceTimersByTimeAsync(0);
+    hanging.dispose();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(aborted).not.toHaveBeenCalled();
+  });
+
   it("stops asking after repeated failures until the session changes", async () => {
     const fetch = vi.fn(async () => {
       throw new Error("forbidden");

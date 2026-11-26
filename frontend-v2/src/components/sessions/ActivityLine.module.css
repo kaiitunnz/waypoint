@@ -1,9 +1,12 @@
 .line,
-.bright {
+.bright,
+.loading {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  /* One line of the row's type, so nothing moves as previews load. */
+  height: 1lh;
 }
 
 .bright {
@@ -15,6 +18,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.loading {
+  flex: 1 1 auto;
+}
+
+.placeholder {
+  width: min(60%, 240px);
+  height: 0.6em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .count {

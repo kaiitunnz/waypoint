@@ -41,12 +41,3 @@
   font-size: var(--f-meta);
   color: var(--error);
 }
-
-.theme {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 44px;
-  font-size: var(--f-body);
-  color: var(--text);
-}

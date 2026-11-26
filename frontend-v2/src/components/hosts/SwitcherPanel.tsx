@@ -14,15 +14,16 @@ import {
   type HostRow,
 } from "@waypoint/web-core/hostPicker";
 import type { RecentHost } from "@waypoint/web-core/recentHosts";
+import { SETTINGS_HREF } from "@waypoint/web-core/shellNav";
 import type { LaunchTargetSummary } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
-import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { ThemeRow } from "@/components/settings/DeviceSections";
+import { LinkRow, SettingsSection } from "@/components/ui/Settings";
 import { switchHost } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { PROBE_LABEL } from "@/lib/probe";
 import { useShellData } from "@/lib/shell-data";
-import { useTheme } from "@/lib/theme";
 
 import { HostPicker } from "./HostPicker";
 import styles from "./SwitcherPanel.module.css";
@@ -137,7 +138,7 @@ export function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPan
             {sshError}
           </p>
         ) : null}
-        {pointer ? null : <ThemeRow />}
+        {pointer ? null : <DeviceRows onDone={onDone} />}
         <Button variant="primary" block disabled={!dirty} onClick={apply}>
           Switch
         </Button>
@@ -165,20 +166,12 @@ function SshTargetStatus({
   );
 }
 
-function ThemeRow() {
-  const { theme, setTheme } = useTheme();
+// Touch has no nav rail, so the sheet carries the quick theme choice and the way to settings.
+function DeviceRows({ onDone }: { onDone: () => void }) {
   return (
-    <div className={styles.theme}>
-      <span>Theme</span>
-      <SegmentedControl
-        label="Theme"
-        value={theme}
-        onChange={setTheme}
-        segments={[
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]}
-      />
-    </div>
+    <SettingsSection>
+      <ThemeRow />
+      <LinkRow label="Settings" href={SETTINGS_HREF} onNavigate={onDone} />
+    </SettingsSection>
   );
 }

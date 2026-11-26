@@ -36,6 +36,7 @@ export type IconName =
   | "info"
   | "sun"
   | "moon"
+  | "settings"
   | "sessions"
   | "needs-you"
   | "board"
@@ -163,6 +164,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   moon: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />,
+  settings: (
+    <>
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="17" r="2" />
+    </>
+  ),
   sessions: (
     <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
   ),

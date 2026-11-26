@@ -94,14 +94,16 @@
   white-space: nowrap;
 }
 
-.compact {
+.compact,
+.single {
   align-items: center;
   min-height: 44px;
   padding-top: 0;
   padding-bottom: 0;
 }
 
-.compact .lamp {
+.compact .lamp,
+.single .lamp {
   margin-top: 0;
 }
 

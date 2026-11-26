@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
+import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
@@ -56,7 +57,8 @@ export function SessionsHome() {
   const sections = useMemo(() => buildSections(sessions, askSessionIds), [sessions, askSessionIds]);
   const found = useMemo(() => searchSessions(sessions, query), [sessions, query]);
   const previewed = useMemo(() => [...sections.pinned, ...sections.live], [sections.pinned, sections.live]);
-  const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
+  const [previews] = useConversationPreviews();
+  const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
 
   // Exited history is paged from the server, per query; live and pinned sessions
   // arrive over the socket.
@@ -95,7 +97,7 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  // Pinned and Live read alike: a serif title, the lamp, the time and the preview line.
+  // Pinned and Live read alike: a serif title, the lamp, the time and, unless turned off, the preview line.
   const previewGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>
@@ -103,13 +105,13 @@ export function SessionsHome() {
         {phone ? (
           <List>
             {group.map((session) => (
-              <LiveRow key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
+              <LiveRow key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
             ))}
           </List>
         ) : (
           <ul className={styles.tiles}>
             {group.map((session) => (
-              <LiveTile key={session.id} {...rowProps(session)} activity={activities.get(session.id)} />
+              <LiveTile key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
             ))}
           </ul>
         )}

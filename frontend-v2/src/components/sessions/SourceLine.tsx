@@ -1,25 +1,19 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { cx } from "@/lib/cx";
-
 import styles from "./SourceLine.module.css";
 
 interface SourceLineProps {
-  // The lamp or glyph that says what kind of source this is.
-  lead?: ReactNode;
+  lead: ReactNode;
   name: string;
-  // Where the name links to.
   href?: string;
   kind: string;
   time?: ReactNode;
-  className?: string;
 }
 
-// Who is asking: a serif name, its kind, and when.
-export function SourceLine({ lead, name, href, kind, time, className }: SourceLineProps) {
+export function SourceLine({ lead, name, href, kind, time }: SourceLineProps) {
   return (
-    <div className={cx(styles.source, className)}>
+    <div className={styles.source}>
       {lead}
       {href ? (
         <Link href={href} className={styles.name}>

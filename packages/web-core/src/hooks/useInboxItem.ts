@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { connectInboxSocket, deleteInboxItem, fetchInboxItem, isAuthError, markInboxRead } from "../api";
-import { fresherInboxItem } from "../inbox";
+import { fresherInboxItem, parseInboxUpdate } from "../inbox";
 import type { InboxItem, SessionEnvelope } from "../types";
 
 interface InboxItemOptions {
@@ -12,14 +12,13 @@ interface InboxItemOptions {
   itemId: string;
   // Must be stable: a new one re-reads the item and restarts its socket.
   onAuthFailure: () => void;
-  // Takes a failed delete, so the item stays on screen. Must be stable.
+  // Takes a failed delete, so the item stays on screen.
   onRemoveError?: (reason: unknown) => void;
 }
 
 export interface InboxItemState {
-  // Null while loading, after a deletion and on failure.
+  // Null until read and after a deletion.
   item: InboxItem | null;
-  // The item was deleted elsewhere.
   gone: boolean;
   error: string | null;
   // Resolves true once deleted; a failure goes to `onRemoveError`, else `error`.
@@ -74,13 +73,13 @@ export function useInboxItem({
         itemId,
         (message: SessionEnvelope) => {
           if (message.type !== "inbox_update") return;
-          const payload = message.payload;
-          if (payload.deleted) {
+          const update = parseInboxUpdate(message.payload);
+          if (update.deleted) {
             setGone(true);
             setItem(null);
             return;
           }
-          if (payload.item) setItem(payload.item as InboxItem);
+          if (update.item) setItem(update.item);
         },
         () => {
           if (active) onAuthFailure();

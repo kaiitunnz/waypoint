@@ -6,7 +6,7 @@ import type { AskPhase } from "./useAskResponder";
 
 // An answered ask leaves the feed when the agent closes it; if it is still listed
 // after this, it takes input again.
-export const SENT_HOLD_MS = 10_000;
+const SENT_HOLD_MS = 10_000;
 
 export interface AskLocks {
   phase: (id: string) => AskPhase;
@@ -19,9 +19,8 @@ const AskLocksContext = createContext<AskLocks | null>(null);
 
 export const useAskLocks = () => useContext(AskLocksContext);
 
-// One reply at a time per ask, however many surfaces show it: a row and the open
-// detail share its phase. Ask ids name one request, so a phase is never reused.
-export function AskLocksProvider({ children }: { children: ReactNode }) {
+// The reply phase of each ask by id.
+export function useAskPhases(): AskLocks {
   const [phases, setPhases] = useState<Record<string, AskPhase>>({});
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -49,6 +48,12 @@ export function AskLocksProvider({ children }: { children: ReactNode }) {
     return () => pending.forEach((timer) => clearTimeout(timer));
   }, []);
 
-  const value = useMemo<AskLocks>(() => ({ phase: (id) => phases[id] ?? IDLE, setPhase }), [phases, setPhase]);
-  return <AskLocksContext.Provider value={value}>{children}</AskLocksContext.Provider>;
+  return useMemo<AskLocks>(() => ({ phase: (id) => phases[id] ?? IDLE, setPhase }), [phases, setPhase]);
+}
+
+// One reply at a time per ask, shared by its row and detail. Ask ids name one request,
+// so a phase is never reused.
+export function AskLocksProvider({ children }: { children: ReactNode }) {
+  const phases = useAskPhases();
+  return <AskLocksContext.Provider value={phases}>{children}</AskLocksContext.Provider>;
 }

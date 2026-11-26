@@ -19,7 +19,6 @@ export interface ShellData {
   host: string;
   token: string;
   // Pending asks, open inbox items and board gates: everything waiting on the human.
-  needsYou: number;
   waiting: NeedsCounts;
   // Null until first read.
   gates: BoardGate[] | null;
@@ -78,12 +77,11 @@ export function ShellDataProvider({
   } = useBoardGates(host, token, feed.boardRevision + feed.inboxRevision, handleAuthFailure);
   const asks = pendingAsksCount(feed.pendingAsks);
   const waiting = useMemo(() => needsCounts(asks, inboxCount, gates ?? []), [asks, inboxCount, gates]);
-  const needsYou = waiting.all;
   const { connection } = feed;
 
   const shell = useMemo(
-    () => ({ host, token, needsYou, waiting, gates, gatesFailed, retryGates, connection, launchTargets }),
-    [host, token, needsYou, waiting, gates, gatesFailed, retryGates, connection, launchTargets],
+    () => ({ host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets }),
+    [host, token, waiting, gates, gatesFailed, retryGates, connection, launchTargets],
   );
   const sessions = useMemo<SessionsData>(
     () => ({

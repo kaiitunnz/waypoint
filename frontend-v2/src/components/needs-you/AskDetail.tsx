@@ -1,20 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 
-import { fetchEvents, isAuthError } from "@waypoint/web-core/api";
 import { humaniseBackend, useBackendCatalog } from "@waypoint/web-core/backends";
-import { normalizeToolName } from "@waypoint/web-core/events";
+import { useApprovalRequest } from "@waypoint/web-core/hooks/useApprovalRequest";
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
-import { decideAsk, decidesInline, decisionView } from "@waypoint/web-core/pendingAskActions";
-import {
-  approvalBodyForTool,
-  approvalCopyText,
-  wholeApprovalBody,
-  type ApprovalBody as ApprovalBodyModel,
-} from "@waypoint/web-core/session/approvals";
+import { decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
+import { approvalCopyText } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
@@ -26,32 +20,28 @@ import { DecisionCard } from "@/components/session/attention/DecisionCard";
 import { AskControllerProvider, SessionContextProvider } from "@/components/session/SessionContext";
 import { useAskLocks } from "@/components/sessions/AskLocks";
 import { SourceLine } from "@/components/sessions/SourceLine";
-import { ActionChip } from "@/components/ui/ActionChip";
-import { withoutRetry } from "@/components/sessions/useAskResponder";
+import { useAskResponder } from "@/components/sessions/useAskResponder";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 import { useFailureToast } from "@/lib/useFailureToast";
+import { useMountedRef } from "@/lib/useMountedRef";
 
 import { DetailFrame, DetailState } from "./DetailFrame";
+import { LoadFailed } from "./LoadFailed";
+import { useDetailContext } from "./useDetailContext";
 import styles from "./AskDetail.module.css";
 
 const NO_EVENTS: never[] = [];
 const noop = () => {};
 
-// The question form on the session's own controller, which retries a not-ready agent.
 function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   const { host, token } = useShellData();
   const locks = useAskLocks();
+  // The phase of a reply the row sent, without its Retry: the form has a reply of its own.
+  const { phase: held, dismiss } = useAskResponder(ask.id);
   const toastFailure = useFailureToast();
-  const onRequestError = useCallback(
-    (error: unknown, fallback: string) => {
-      if (isAuthError(error)) handleAuthFailure();
-      else toastFailure(error, fallback);
-    },
-    [toastFailure],
-  );
   const controller = useAskQuestionState({
     host,
     token,
@@ -60,17 +50,11 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
     events: NO_EVENTS,
     canReattach: false,
     reattach: noop,
-    onRequestError,
+    onRequestError: handleAuthFailure,
     retry: true,
   });
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  // The row of this ask waits while the form sends, and the other way round.
+  const mounted = useMountedRef();
+  // Reports the form's reply to AskLocks, so the ask's row waits while the form sends.
   const shared = useMemo<AskQuestionController>(() => {
     const report = async (request: Promise<boolean>) => {
       locks?.setPhase(ask.id, { state: "sending", retrying: false });
@@ -84,18 +68,16 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
       ...controller,
       updateDraft: (toolUseId, update) => {
         // A row's failed reply is stale once the form says something else.
-        if (locks?.phase(ask.id).state === "error") locks.setPhase(ask.id, { state: "idle" });
+        dismiss();
         controller.updateDraft(toolUseId, update);
       },
       answer: (toolUseId, text, answers) => report(controller.answer(toolUseId, text, answers)),
       cancel: (toolUseId) => report(controller.cancel(toolUseId)),
     };
-  }, [controller, locks, ask.id, ask.session_title, toastFailure]);
+  }, [controller, dismiss, locks, mounted, ask.id, ask.session_title, toastFailure]);
   const questions = useMemo(() => askUserQuestions(ask), [ask]);
   const toolUseId = ask.question.tool_use_id;
   const { entry } = askFormView(questions, controller.draft(toolUseId));
-  // A row's failure shows here without its Retry: the form has a reply of its own.
-  const held = locks ? withoutRetry(locks.phase(ask.id)) : undefined;
 
   return (
     <section className={styles.card} aria-label={ask.title}>
@@ -114,81 +96,20 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-type RequestState = { status: "loading" } | { status: "failed" } | { status: "ready"; body: ApprovalBodyModel };
-
-// The request as the transcript has it, so an edit shows its diff and any request
-// is whole. Where the transcript does not turn it up, only an ask that carries
-// its own request stands in for it.
-function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { request: RequestState; retry: () => void } {
-  const { host, token } = useShellData();
-  const sessionId = ask.session_id;
-  const approvalId = ask.kind === "approval" ? ask.approval.approval_id : null;
-  const sequence = ask.sequence;
-  const [attempt, setAttempt] = useState(0);
-  // What one read turned up: the request, no such event, or no read.
-  const [found, setFound] = useState<{ key: string; read: ApprovalBodyModel | "missing" | "failed" } | null>(null);
-  const key = `${approvalId} ${attempt}`;
-
-  useEffect(() => {
-    if (approvalId === null) return;
-    let active = true;
-    // The page ending at the request: a pending ask can be many messages old.
-    fetchEvents(host, token, sessionId, { beforeSequence: sequence + 1, messages: 1 })
-      .then((page) => {
-        const event = page.events.find(
-          (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
-        );
-        if (active) setFound({ key, read: event ? wholeApprovalBody(event) : "missing" });
-      })
-      .catch((error) => {
-        if (!active) return;
-        if (isAuthError(error)) handleAuthFailure();
-        else setFound({ key, read: "failed" });
-      });
-    return () => {
-      active = false;
-    };
-  }, [host, token, sessionId, approvalId, sequence, key]);
-
-  const retry = useCallback(() => setAttempt((value) => value + 1), []);
-  const resolve = (): RequestState => {
-    if (ask.kind === "plan_approval") return { status: "ready", body: { kind: "plan", plan: ask.plan.text } };
-    if (!found || found.key !== key) return { status: "loading" };
-    if (typeof found.read !== "string") return { status: "ready", body: found.read };
-    if (found.read === "failed" || !decidesInline(ask)) return { status: "failed" };
-    const { tool_name: tool, tool_input: input } = ask.approval;
-    return { status: "ready", body: approvalBodyForTool(normalizeToolName(tool), input, ask.body ?? ask.title) };
-  };
-  return { request: resolve(), retry };
-}
-
 function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; cwd: string; agent: string }) {
   const { host, token } = useShellData();
-  const { request, retry } = useRequestBody(ask);
+  const { request, retry } = useApprovalRequest(host, token, ask, handleAuthFailure);
   const body = request.status === "ready" ? request.body : null;
   const { actions, supportsNote } = decisionView(ask);
-  const context = useMemo(
-    () => ({
-      host,
-      token,
-      sessionId: ask.session_id,
-      cwd,
-      agentName: agent,
-      full: false,
-      structured: true,
-      openFiles: null,
-    }),
-    [host, token, ask.session_id, cwd, agent],
-  );
+  const context = useDetailContext(ask.session_id, cwd, agent);
   const text = ask.body ?? ask.title;
 
   return (
     <SessionContextProvider value={context}>
       <DecisionCard
-        key={ask.id}
         roomy
         title={ask.title}
-        copyText={body ? approvalCopyText(body, body.kind === "raw" ? body.text : text) : text}
+        copyText={body ? approvalCopyText(body, text) : text}
         copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
         locked={!body}
         actions={actions.map((action) => ({
@@ -207,12 +128,7 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         ) : request.status === "loading" ? (
           <p className={styles.note}>Loading…</p>
         ) : (
-          <div className={styles.failed} role="alert">
-            <p>{"Couldn't load the request"}</p>
-            <ActionChip icon="refresh" onClick={retry}>
-              Retry
-            </ActionChip>
-          </div>
+          <LoadFailed message={"Couldn't load the request"} onRetry={retry} />
         )}
         {body?.kind === "plan" && !body.plan.trim() ? <p className={styles.note}>No plan text</p> : null}
       </DecisionCard>
@@ -239,12 +155,7 @@ function AskView({ ask }: { ask: PendingAsk }) {
   );
   return (
     <DetailFrame source={source} sessionId={ask.session_id}>
-      {pointer ? null : <div className={styles.source}>{source}</div>}
-      {ask.kind === "question" ? (
-        <QuestionDetail key={ask.id} ask={ask} />
-      ) : (
-        <RequestDetail key={ask.id} ask={ask} cwd={cwd} agent={agent} />
-      )}
+      {ask.kind === "question" ? <QuestionDetail ask={ask} /> : <RequestDetail ask={ask} cwd={cwd} agent={agent} />}
     </DetailFrame>
   );
 }

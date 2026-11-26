@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
 import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint/web-core/pendingAskActions";
@@ -8,7 +8,7 @@ import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint
 import { handleAuthFailure } from "@/lib/auth";
 import { useShellData } from "@/lib/shell-data";
 
-import { SENT_HOLD_MS, useAskLocks } from "./AskLocks";
+import { useAskLocks, useAskPhases } from "./AskLocks";
 
 // `action` names which reply is in flight or went through.
 export type AskPhase =
@@ -16,46 +16,26 @@ export type AskPhase =
   // `retrying`: the agent is not ready yet and the reply is being retried.
   | { state: "sending"; retrying: boolean; action?: string }
   | { state: "sent"; action?: string }
-  // `retry` sends the very reply that failed. `owner` names the surface that sent
-  // it, the only one to offer the retry.
-  | { state: "error"; message: string; owner?: string; retry?: () => void };
-
-// A failure as a surface that did not send the reply shows it.
-export function withoutRetry(phase: AskPhase): AskPhase {
-  return phase.state === "error" ? { state: "error", message: phase.message } : phase;
-}
+  | {
+      state: "error";
+      message: string;
+      // The surface that sent the reply, the only one to offer its retry.
+      owner?: string;
+      // Sends the failed reply again.
+      retry?: () => void;
+    };
 
 // Runs one response to an ask. A failure keeps the card as it was, with the reason.
 // With a `lockId` under an AskLocksProvider, every surface of the ask shares the phase.
 export function useAskResponder(lockId?: string) {
   const { host, token } = useShellData();
   const owner = useId();
-  const locks = useAskLocks();
-  const shared = lockId !== undefined && locks ? { id: lockId, locks } : null;
-  const [local, setLocal] = useState<AskPhase>({ state: "idle" });
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const phase = shared ? shared.locks.phase(shared.id) : local;
-  const sharedId = shared?.id;
-  const setShared = shared?.locks.setPhase;
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const setPhase = useCallback(
-    (next: AskPhase) => {
-      // The provider times out a shared "sent" itself.
-      if (sharedId !== undefined && setShared) setShared(sharedId, next);
-      else {
-        setLocal(next);
-        if (next.state === "sent") timer.current = setTimeout(() => setLocal({ state: "idle" }), SENT_HOLD_MS);
-      }
-    },
-    [sharedId, setShared, setLocal],
-  );
+  const shared = useAskLocks();
+  const own = useAskPhases();
+  const [locks, id] = shared && lockId !== undefined ? [shared, lockId] : [own, owner];
+  const { setPhase: setById } = locks;
+  const setPhase = useCallback((next: AskPhase) => setById(id, next), [setById, id]);
+  const phase = locks.phase(id);
 
   const send = useCallback(
     async function attempt(
@@ -94,6 +74,7 @@ export function useAskResponder(lockId?: string) {
   }, [phase.state, setPhase]);
 
   const busy = phase.state === "sending" || phase.state === "sent";
-  const own = phase.state !== "error" || phase.owner === owner;
-  return { phase: own ? phase : withoutRetry(phase), send, busy, dismiss };
+  const offered: AskPhase =
+    phase.state === "error" && phase.owner !== owner ? { state: "error", message: phase.message } : phase;
+  return { phase: offered, send, busy, dismiss };
 }

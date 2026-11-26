@@ -18,7 +18,6 @@ function useFile(ref: InboxAttachmentRef) {
   return { url, name: ref.filename ?? ref.attachment_id, preview: image ? url : null, image: ref.kind === "image" };
 }
 
-// An attached file as a row that opens it in a new tab.
 export function FileTile({ attachment }: { attachment: InboxAttachmentRef }) {
   const { url, name, preview, image } = useFile(attachment);
   return (

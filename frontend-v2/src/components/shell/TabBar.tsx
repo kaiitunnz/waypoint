@@ -15,7 +15,7 @@ import styles from "./TabBar.module.css";
 
 export function TabBar() {
   const active = activeNavKey(usePathname());
-  const { needsYou } = useShellData();
+  const { waiting } = useShellData();
   // Toasts sit above the tab bar only while there is one.
   useEffect(() => {
     const root = document.documentElement;
@@ -28,7 +28,7 @@ export function TabBar() {
     <nav className={styles.bar} aria-label="Main">
       {NAV_DESTINATIONS.map((destination) => {
         const isActive = destination.key === active;
-        const count = destination.key === "needs-you" ? needsYou : 0;
+        const count = destination.key === "needs-you" ? waiting.all : 0;
         return (
           <Link
             key={destination.key}

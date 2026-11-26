@@ -26,6 +26,7 @@ import { useFailureToast } from "@/lib/useFailureToast";
 
 import { CheckMark } from "./CheckMark";
 import { entryView } from "./entryView";
+import { LoadFailed } from "./LoadFailed";
 import { useNeedsYou } from "./NeedsYouContext";
 import { QueueCard } from "./QueueCard";
 import { QueueRow } from "./QueueRow";
@@ -64,7 +65,7 @@ const CONFIRM: Record<Deletion["kind"], (count: number) => { title: string; deta
 };
 
 export function QueuePane() {
-  const { host, token } = useShellData();
+  const { host, token, waiting: counts, retryGates } = useShellData();
   const { columns, selected, leave } = useNeedsYou();
   const now = useNow(30_000);
   const catalog = useBackendCatalog(host, token, null);
@@ -78,7 +79,8 @@ export function QueuePane() {
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const queue = useQueue(status, source, q, now);
-  const { entries, todayEntries, list, resolved, counts, loaded, awaiting, boardFailed, retryGates } = queue;
+  const { entries, todayEntries, list, resolved, awaiting, boardFailed } = queue;
+  const { loaded } = list;
 
   // Select-all and bulk delete act on the rows shown, never on a hidden item.
   const shownToday = showToday ? todayEntries : NO_ENTRIES;
@@ -116,7 +118,6 @@ export function QueuePane() {
         gone = new Set(await deleteResolvedInboxItems(host, token));
         exitSelect();
       }
-      // The live update removes them too; this is immediate.
       list.remove(gone);
       resolved.remove(gone);
       if (selected && gone.has(selected)) leave();
@@ -139,19 +140,14 @@ export function QueuePane() {
     return columns ? (
       <QueueRow key={entry.key} {...common} selected={selected === entry.routeId} />
     ) : (
-      <QueueCard
-        key={entry.key}
-        {...common}
-        agent={entry.source === "sessions" ? agentName(entry.ask.session_backend) : ""}
-        now={now}
-      />
+      <QueueCard key={entry.key} {...common} now={now} />
     );
   };
 
   const loading = (list.loading && !loaded) || (awaiting && entries.length === 0);
   const failed = !loaded && !list.loading && list.error !== null;
   const pageable = list.hasMore && loaded && (source === "all" || source === "inbox");
-  const empty = entries.length === 0 && loaded && !awaiting && !boardFailed;
+  const empty = entries.length === 0 && loaded && !awaiting && !boardFailed && !pageable;
   const confirm = deletion ? CONFIRM[deletion.kind](deletion.kind === "selected" ? deletion.ids.length : 1) : null;
 
   return (
@@ -218,21 +214,9 @@ export function QueuePane() {
       ) : null}
 
       <div className={cx(styles.scroll, selection.selecting && styles.selecting)}>
-        {failed ? (
-          <div className={styles.failed} role="alert">
-            <p>{list.error}</p>
-            <ActionChip icon="refresh" onClick={list.retry}>
-              Retry
-            </ActionChip>
-          </div>
-        ) : null}
+        {failed ? <LoadFailed className={styles.failed} message={list.error ?? ""} onRetry={list.retry} /> : null}
         {boardFailed ? (
-          <div className={styles.failed} role="alert">
-            <p>{"Couldn't load board gates"}</p>
-            <ActionChip icon="refresh" onClick={retryGates}>
-              Retry
-            </ActionChip>
-          </div>
+          <LoadFailed className={styles.failed} message={"Couldn't load board gates"} onRetry={retryGates} />
         ) : null}
         <ul className={styles.list}>{entries.map(row)}</ul>
         {loading ? (

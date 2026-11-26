@@ -30,10 +30,10 @@ describe("wholeApprovalBody", () => {
     });
     const body = wholeApprovalBody(cut);
     expect(body).toEqual({ kind: "raw", text: JSON.stringify(input, null, 2) });
-    expect(approvalCopyText(body, body.kind === "raw" ? body.text : "")).toContain("d@e.f");
+    expect(approvalCopyText(body, cut.text)).toBe(JSON.stringify(input, null, 2));
   });
 
-  it("keeps the request text without input, and every body of its own", () => {
+  it("keeps the request text without input, and a body of its own", () => {
     const bare = ev(1, "approval_request", "Approve file changes", {});
     expect(wholeApprovalBody(bare)).toEqual({ kind: "raw", text: "Approve file changes" });
     const command = ev(2, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command: "ls" } });

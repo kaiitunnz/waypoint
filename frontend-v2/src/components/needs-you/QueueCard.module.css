@@ -1,37 +1,12 @@
 .item {
-  position: relative;
   border-radius: var(--r-card);
-}
-
-.slide {
-  position: relative;
-  touch-action: pan-y;
-  transition: transform 140ms ease-out;
-}
-
-.swiping .slide {
-  transition: none;
 }
 
 .behind {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-right: 18px;
   border-radius: var(--r-card);
-  background: var(--error);
-  color: var(--on-action);
-  font-weight: 600;
 }
 
-.swiping .behind {
-  display: flex;
-}
-
-/* A card that only opens: the attention fill with no brass hairline. */
+/* A card that only opens has no brass hairline. */
 .card {
   display: block;
   width: 100%;
@@ -92,24 +67,12 @@
   color: var(--text-strong);
 }
 
-.inert {
-  opacity: 0.45;
-}
-
 .trash {
-  position: absolute;
   top: 4px;
   right: 4px;
   background: var(--attention);
-  opacity: 0;
 }
 
-.item:hover .trash,
-.trash:focus-visible {
-  opacity: 1;
-}
-
-/* The trash takes the time's place while it shows. */
-.item:hover:has(> .trash) .time {
-  visibility: hidden;
+.time {
+  composes: time from "./QueueItemShell.module.css";
 }

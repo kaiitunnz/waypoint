@@ -1,4 +1,3 @@
-/* The screen fills the content area above the tab bar; each pane scrolls itself. */
 .screen {
   position: relative;
   display: grid;
@@ -28,7 +27,7 @@
   overflow-y: auto;
 }
 
-/* A hidden pane keeps its layout, and so its scroll position and its drafts. */
+/* A hidden pane keeps its layout, and so its scroll position. */
 .off {
   position: absolute;
   inset: 0;

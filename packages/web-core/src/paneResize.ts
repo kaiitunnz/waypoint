@@ -1,6 +1,3 @@
-// The width of a pane the person can drag: clamped to its range and half the
-// window, and forgotten when it comes back to the default.
-
 export interface PaneWidthConfig {
   storageKey: string;
   defaultWidth: number;

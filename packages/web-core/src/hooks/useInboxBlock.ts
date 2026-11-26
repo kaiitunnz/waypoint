@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import { submitInboxBlock } from "../api";
 import {
   blockDraft,
-  blockSaveAction,
   buildBlockAnswer,
   buildBlockSubmit,
   isBlockAnswered,
@@ -22,7 +21,6 @@ interface InboxBlockOptions {
   block: InboxBlock;
 }
 
-// The answer and reply of one block: its draft, uploads and save.
 export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
   const [error, setError] = useState<string | null>(null);
   // Reply files are pinned so the requesting session can read them back later.
@@ -34,8 +32,7 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     onError: setError,
   });
   const committed = () => blockDraft(block);
-  // Pre-filled with the existing reply, so a re-submit visibly edits that one
-  // reply instead of silently overwriting it (single reply per block, no thread).
+  // A block has one reply, which a save replaces, so the draft starts from it.
   const [notes, setNotes] = useState(() => committed().notes);
   const [selected, setSelected] = useState(() => committed().selected);
   const [other, setOther] = useState(() => committed().other);
@@ -70,9 +67,8 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     setEditing(true);
   }
 
-  // Reverts local edits and frees uncommitted uploads. An unanswered decision
-  // stays open rather than looking answered. A save in flight owns its uploads,
-  // so there is nothing to cancel until it settles.
+  // An unanswered decision stays open. Does nothing while a save is in flight, which
+  // owns the uploads.
   function cancel() {
     if (saving.current) return;
     reset();
@@ -82,12 +78,7 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
   }
 
   async function save() {
-    const action = blockSaveAction({ submitting: saving.current, uploading: attachments.uploading, canSave });
-    if (action === "wait") return;
-    if (action === "nothing") {
-      cancel();
-      return;
-    }
+    if (saving.current || attachments.uploading) return;
     const uploaded = attachments.readyIds.map((attachmentId) => ({
       session_id: item.from_session_id,
       attachment_id: attachmentId,
@@ -106,7 +97,7 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     try {
       await submitInboxBlock(host, token, item.id, block.id, body);
       if (body.reply) sentFiles.current = body.reply.attachments ?? [];
-      // The reply keeps its files: they leave the tray, and its cleanup, intact.
+      // Empties the tray and keeps the files the saved reply names.
       attachments.clear();
       setNotes(notes.trim());
       setEditing(false);
@@ -130,7 +121,6 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
     notes,
     setNotes,
     selected,
-    setSelected,
     toggle,
     other,
     setOther,

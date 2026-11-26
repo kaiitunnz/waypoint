@@ -4,8 +4,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 
 import { filesFromDataTransfer, isExternalFileDrag } from "../fileDrop";
 
-// Files dropped onto one element. Enter/leave bubble from every child the cursor
-// crosses, so they are depth-counted.
+// Enter/leave bubble from every child the cursor crosses, so they are depth-counted.
 export function useElementFileDrop(enabled: boolean, onFiles: (files: File[]) => void) {
   const [dragActive, setDragActive] = useState(false);
   const depth = useRef(0);

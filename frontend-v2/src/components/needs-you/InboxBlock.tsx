@@ -1,21 +1,19 @@
 "use client";
 
-import { useRef, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useRef, type KeyboardEvent } from "react";
 
-import { filesFromDataTransfer, pasteAttaches } from "@waypoint/web-core/fileDrop";
+import { attachFromPaste } from "@waypoint/web-core/fileDrop";
 import { useElementFileDrop } from "@waypoint/web-core/hooks/useElementFileDrop";
 import { useInboxBlock, type InboxBlockController } from "@waypoint/web-core/hooks/useInboxBlock";
-import { blockAnswerEcho, blockEditLabel, isDecisionBlock } from "@waypoint/web-core/inbox";
+import { blockAnswerEcho, blockEditLabel, isDecisionBlock, type InboxDecisionBlock } from "@waypoint/web-core/inbox";
 import { isComposingKeyEvent, isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { stripRecommendedSuffix } from "@waypoint/web-core/pendingAskActions";
-import type { AskDraft, AskUserQuestion } from "@waypoint/web-core/session/askQuestion";
 import type { InboxApprovalBlock, InboxBlock, InboxItem, InboxQuestionBlock } from "@waypoint/web-core/types";
 
 import { AttachmentTray } from "@/components/composer/AttachmentTray";
 import { CopyButton } from "@/components/session/cards/CopyButton";
 import { Markdown } from "@/components/session/cards/Markdown";
 import { OptionRows } from "@/components/session/attention/OptionRows";
-import { QuestionEditor } from "@/components/session/attention/QuestionEditor";
 import { Button } from "@/components/ui/Button";
 import { TextArea } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -27,38 +25,28 @@ import { useShellData } from "@/lib/shell-data";
 import { FileChips, FileTile } from "./InboxFiles";
 import styles from "./InboxBlock.module.css";
 
-// The question editor over a block's selection and Other answer.
-function QuestionOptions({ block, controller, onSubmit }: { block: InboxQuestionBlock; controller: InboxBlockController; onSubmit: () => void }) {
-  const questions: AskUserQuestion[] = [
-    {
-      question: block.question,
-      header: block.header ?? undefined,
-      options: block.options.map((option) => ({ label: option.label, description: option.description ?? undefined })),
-      multiSelect: block.multi,
-    },
-  ];
-  const draft: AskDraft = {
-    picked: { 0: [...controller.selected] },
-    notes: { 0: controller.other },
-    notesOpen: {},
-    activeIndex: 0,
-  };
-
+function QuestionOptions({ block, controller }: { block: InboxQuestionBlock; controller: InboxBlockController }) {
   return (
-    <QuestionEditor
-      variant="rows"
-      headed
-      questions={questions}
-      draft={draft}
-      onDraft={(update) => {
-        const next = update(draft);
-        controller.setSelected(new Set(next.picked[0] ?? []));
-        controller.setOther(next.notes[0] ?? "");
-      }}
-      disabled={controller.submitting}
-      locked={controller.submitting}
-      onSubmit={onSubmit}
-    />
+    <>
+      {block.options.length > 0 ? (
+        <OptionRows
+          options={block.options}
+          selected={[...controller.selected]}
+          multi={block.multi}
+          disabled={controller.submitting}
+          label={block.question}
+          onOption={controller.toggle}
+        />
+      ) : null}
+      <TextArea
+        rows={1}
+        value={controller.other}
+        disabled={controller.submitting}
+        aria-label="Other answer"
+        placeholder="Other answer"
+        onChange={(event) => controller.setOther(event.target.value)}
+      />
+    </>
   );
 }
 
@@ -81,13 +69,6 @@ function ReplyEditor({ block, controller }: { block: InboxBlock; controller: Inb
   const picker = useRef<HTMLInputElement>(null);
   const carried = block.reply?.attachments ?? [];
 
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = filesFromDataTransfer(event.clipboardData);
-    if (!pasteAttaches(files, event.clipboardData.getData("text/plain"))) return;
-    event.preventDefault();
-    attachments.addFiles(files);
-  };
-
   return (
     <>
       {carried.length > 0 ? (
@@ -103,7 +84,7 @@ function ReplyEditor({ block, controller }: { block: InboxBlock; controller: Inb
         aria-label="Reply"
         placeholder="Reply"
         onChange={(event) => controller.setNotes(event.target.value)}
-        onPaste={onPaste}
+        onPaste={(event) => attachFromPaste(event, attachments.addFiles)}
       />
       {attachments.items.length > 0 ? (
         <AttachmentTray
@@ -151,10 +132,10 @@ function ReplyEditor({ block, controller }: { block: InboxBlock; controller: Inb
 }
 
 function Committed({ block, controller }: { block: InboxBlock; controller: InboxBlockController }) {
-  const answered = isDecisionBlock(block) && block.answer !== null;
+  const { answered } = controller;
   return (
     <>
-      {answered ? (
+      {isDecisionBlock(block) && answered ? (
         <p className={styles.echo}>
           <span className={styles.echoLabel}>Your answer</span>
           <span className={styles.echoAnswer}>{blockAnswerEcho(block, stripRecommendedSuffix)}</span>
@@ -178,7 +159,7 @@ function Committed({ block, controller }: { block: InboxBlock; controller: Inbox
   );
 }
 
-function Head({ block, controller }: { block: InboxQuestionBlock | InboxApprovalBlock; controller: InboxBlockController }) {
+function Head({ block, controller }: { block: InboxDecisionBlock; controller: InboxBlockController }) {
   return (
     <div className={styles.head}>
       <span className={styles.kind}>{block.type === "question" ? "Question" : "Approval"}</span>
@@ -206,17 +187,10 @@ function Head({ block, controller }: { block: InboxQuestionBlock | InboxApproval
   );
 }
 
-// One block: its content, then the committed answer and reply or their editor.
-// Cmd/Ctrl+Enter anywhere in an open editor saves it, and Escape cancels.
 export function InboxBlockView({ item, block }: { item: InboxItem; block: InboxBlock }) {
   const { host, token } = useShellData();
   const controller = useInboxBlock({ host, token, item, block });
   const { dragActive, dropProps } = useElementFileDrop(controller.editing, controller.attachments.addFiles);
-
-  // The shortcut saves only what the Save button would: nothing to send does nothing.
-  const submit = () => {
-    if (controller.canSave && !controller.attachments.uploading) void controller.save();
-  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!controller.editing || isComposingKeyEvent(event)) return;
@@ -226,11 +200,10 @@ export function InboxBlockView({ item, block }: { item: InboxItem; block: InboxB
       controller.cancel();
       return;
     }
-    // The Other field handles the shortcut itself.
     if (event.defaultPrevented || !isModifiedEnterShortcut(event)) return;
-    // A focused option must not toggle on its way out.
+    // A focused option must not toggle.
     event.preventDefault();
-    submit();
+    void controller.save();
   };
 
   return (
@@ -257,7 +230,7 @@ export function InboxBlockView({ item, block }: { item: InboxItem; block: InboxB
       {block.type === "approval" ? <p className={styles.question}>{block.prompt}</p> : null}
       {controller.editing ? (
         <div className={styles.edit}>
-          {block.type === "question" ? <QuestionOptions block={block} controller={controller} onSubmit={submit} /> : null}
+          {block.type === "question" ? <QuestionOptions block={block} controller={controller} /> : null}
           {block.type === "approval" ? <ApprovalOptions block={block} controller={controller} /> : null}
           <ReplyEditor block={block} controller={controller} />
         </div>

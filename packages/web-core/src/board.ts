@@ -163,7 +163,6 @@ export function gateView(ticket: ManagerTicket): GateView {
   return { gate, summary };
 }
 
-// The ask itself, for a queue row.
 export function gateHeadline(ticket: ManagerTicket): string {
   if (ticket.state === "spec_review") return "Spec ready for review";
   if (ticket.state !== "review_requested") return "Blocked, needs your decision";
@@ -192,9 +191,9 @@ export function managerGates(manager: ManagerSummary, state: ManagerStateRespons
   }));
 }
 
-// One read of the managers: the gates it saw, and the managers it could not read.
 export interface GateRead {
   gates: BoardGate[];
+  // Ids of the managers that could not be read.
   failed: string[];
 }
 
@@ -211,7 +210,15 @@ export function gateKey(gate: BoardGate): string {
   return `gate:${gate.managerId}:${gate.ticket.id}`;
 }
 
-// Where the ticket's discussion lives; the board itself when it has no channel.
+export function gateTime(gate: BoardGate): string {
+  return gate.ticket.awaiting_since ?? gate.ticket.updated_at;
+}
+
+// The ticket's pull request, when it is a link a browser can open.
+export function gatePrUrl(ticket: ManagerTicket): string | null {
+  return ticket.pr_url && /^https?:\/\//.test(ticket.pr_url) ? ticket.pr_url : null;
+}
+
 export function gateBoardHref(gate: BoardGate): string {
   return gate.channelPrefix
     ? `/board?channel=${encodeURIComponent(`${gate.channelPrefix}${gate.ticket.id}`)}`

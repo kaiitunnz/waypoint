@@ -62,8 +62,8 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   return approvalBodyForTool(readToolName(event), asRecord(event.metadata?.tool_input), event.text);
 }
 
-// The body as a screen that decides the request shows it. A tool with no body of
-// its own shows its whole input, since its request text may be only the start.
+// A tool with no body of its own shows its whole input: its request text may be only
+// the start.
 export function wholeApprovalBody(event: EventRecord): ApprovalBody {
   const body = approvalBody(event);
   const input = asRecord(event.metadata?.tool_input);
@@ -71,8 +71,7 @@ export function wholeApprovalBody(event: EventRecord): ApprovalBody {
   return { kind: "raw", text: JSON.stringify(input, null, 2) };
 }
 
-// The body from the tool call alone, for a request whose event is not at hand.
-// `tool` is a normalized tool name; `raw` stands for input no kind matches.
+// `tool` is a normalized tool name; `raw` is the text where no kind matches.
 export function approvalBodyForTool(
   tool: string | null,
   input: Record<string, unknown> | null,
@@ -121,6 +120,8 @@ export function approvalCopyText(body: ApprovalBody, eventText: string): string 
       return body.command;
     case "workflow":
       return body.script;
+    case "raw":
+      return body.text;
     default:
       return eventText;
   }

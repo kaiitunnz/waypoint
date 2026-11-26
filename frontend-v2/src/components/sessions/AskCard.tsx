@@ -13,8 +13,7 @@ interface AskCardProps {
   ask: PendingAsk;
   agent: string;
   now: number;
-  // Whether the source name goes to the session. A card that opens the ask keeps
-  // one target at its top.
+  // False when the headline opens the ask: a card has one target at its top.
   linked: boolean;
   children: ReactNode;
 }

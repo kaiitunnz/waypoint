@@ -1,9 +1,3 @@
-.glyph {
-  display: inline-grid;
-  place-items: center;
-  color: var(--brass-text);
-}
-
 .headline {
   margin-top: 6px;
   font-size: var(--f-title);

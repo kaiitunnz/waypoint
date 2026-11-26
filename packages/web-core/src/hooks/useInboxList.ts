@@ -10,15 +10,12 @@ import {
   INBOX_PAGE_LIMIT,
   parseInboxUpdate,
   type InboxStatusFilter,
+  type InboxSubscribe,
   type InboxUpdate,
 } from "../inbox";
 import type { InboxItem, SessionEnvelope } from "../types";
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-// Live inbox changes from a socket the caller already holds; "reconnected" means
-// some may have been missed.
-export type InboxSubscribe = (listener: (event: InboxUpdate | "reconnected") => void) => () => void;
 
 interface InboxListOptions {
   host: string;
@@ -35,13 +32,13 @@ interface InboxListOptions {
 
 export interface InboxList {
   items: InboxItem[];
-  // The search the items answer.
+  // The search being requested: `q` once it settles.
   query: string;
-  // The `status` and `query` the items were read for; empty until the first page.
-  loadedFor: string;
+  // The items are those of the current status and search.
+  loaded: boolean;
   loading: boolean;
   hasMore: boolean;
-  // Why the last page request failed.
+  // Why the filter's first page could not be read.
   error: string | null;
   loadMore: () => void;
   retry: () => void;
@@ -49,9 +46,8 @@ export interface InboxList {
   remove: (ids: ReadonlySet<string>) => void;
 }
 
-export const inboxListKey = (status: InboxStatusFilter, q: string) => `${status}|${q}`;
+const filterKey = (status: InboxStatusFilter, q: string) => `${status}|${q}`;
 
-// A page of the inbox for a status and search, kept current by live updates.
 export function useInboxList({
   host,
   token,
@@ -108,7 +104,7 @@ export function useInboxList({
         setCursor(page.cursor);
         setHasMore(page.hasMore);
         setError(null);
-        setLoadedFor(inboxListKey(status, query));
+        setLoadedFor(filterKey(status, query));
       })
       .catch((reason) => {
         if (!active) return;
@@ -137,7 +133,7 @@ export function useInboxList({
         setHasMore(page.hasMore);
         setError(null);
         // This may be the first read of the filter to succeed.
-        setLoadedFor(inboxListKey(status, query));
+        setLoadedFor(filterKey(status, query));
       })
       .catch((reason) => {
         if (isAuthError(reason)) onAuthFailure();
@@ -222,5 +218,6 @@ export function useInboxList({
     setItems((prev) => prev.filter((item) => !ids.has(item.id)));
   }, []);
 
-  return { items, query, loadedFor, loading, hasMore, error, loadMore, retry, remove };
+  const loaded = loadedFor === filterKey(status, query);
+  return { items, query, loaded, loading, hasMore, error, loadMore, retry, remove };
 }

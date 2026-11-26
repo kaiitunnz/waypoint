@@ -1,5 +1,7 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
+import { approvalBodyForTool, type ApprovalBody } from "./session/approvals";
+import { toggleSelection } from "./session/askQuestion";
 import type {
   PendingApprovalAsk,
   PendingAskOption,
@@ -34,14 +36,8 @@ export function emptyPicks(prompts: PendingAskPrompt[]): PromptPick[] {
   return prompts.map(() => EMPTY_PICK);
 }
 
-// A single-select prompt holds one label (tapping it again clears it); a
-// multi-select prompt toggles each label.
 export function toggleOption(pick: PromptPick, label: string, multiSelect: boolean): PromptPick {
-  const has = pick.labels.includes(label);
-  if (multiSelect) {
-    return { ...pick, labels: has ? pick.labels.filter((item) => item !== label) : [...pick.labels, label] };
-  }
-  return { ...pick, labels: has ? [] : [label] };
+  return { ...pick, labels: toggleSelection(pick.labels, label, multiSelect) };
 }
 
 // A lone single-select question is answered by tapping an option, so a tap
@@ -184,11 +180,27 @@ export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): Decision
   };
 }
 
-// Whether an approval may be decided outside its detail: only where the ask
-// carries what is approved, as the whole shell command or the edited file's path.
-// A plan, a request known by its title alone and any other tool open first.
+// An approval is decided outside its detail only where the ask carries what is
+// approved: the whole shell command or the edited file's path.
 export function decidesInline(ask: PendingApprovalAsk | PendingPlanAsk): boolean {
   return ask.kind === "approval" && !ask.approval.tool_input_truncated && decisionView(ask).preview !== null;
+}
+
+// What a read of the transcript turned up for a pending approval.
+export type ApprovalRead = ApprovalBody | "missing" | "failed";
+
+export type ApprovalRequest = { status: "loading" } | { status: "failed" } | { status: "ready"; body: ApprovalBody };
+
+// A plan travels in its ask. A tool approval shows what the transcript holds; when
+// the transcript has no such event, the ask's own input is used only where
+// `decidesInline` allows.
+export function approvalRequest(ask: PendingApprovalAsk | PendingPlanAsk, read: ApprovalRead | null): ApprovalRequest {
+  if (ask.kind === "plan_approval") return { status: "ready", body: { kind: "plan", plan: ask.plan.text } };
+  if (read === null) return { status: "loading" };
+  if (typeof read !== "string") return { status: "ready", body: read };
+  if (read === "failed" || !decidesInline(ask)) return { status: "failed" };
+  const { tool_name: tool, tool_input: input } = ask.approval;
+  return { status: "ready", body: approvalBodyForTool(normalizeToolName(tool), input, ask.body ?? ask.title) };
 }
 
 // ─── Responding ───

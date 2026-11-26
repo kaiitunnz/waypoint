@@ -51,7 +51,6 @@ interface AskFormViewProps {
   submitKey?: boolean;
 }
 
-// The editor and its actions for one pending question, from the controller.
 export function AskFormView({ toolUseId, questions, headed = false, formState, held, submitKey }: AskFormViewProps) {
   const controller = useAskController();
   const draft = controller.draft(toolUseId);
@@ -79,7 +78,12 @@ export function AskFormView({ toolUseId, questions, headed = false, formState, h
   const phase: AskPhase = operation
     ? { state: "sending", retrying: controller.retrying(toolUseId) }
     : failure
-      ? { state: "error", message: failure.notReady ? NOT_READY_MESSAGE : failure.message }
+      ? {
+          state: "error",
+          message: failure.notReady ? NOT_READY_MESSAGE : failure.message,
+          // Not while another surface holds the question.
+          retry: busy ? undefined : failure.operation === "send" ? submit : cancel,
+        }
       : (held ?? { state: "idle" });
   const reattach = formState === "unavailable" && controller.canReattach && !failure;
 
@@ -102,11 +106,7 @@ export function AskFormView({ toolUseId, questions, headed = false, formState, h
           </ActionChip>
         </div>
       ) : (
-        <AskStatus
-          availability={formState === "loading" ? "starting" : formState}
-          phase={phase}
-          onRetry={failure ? (failure.operation === "send" ? submit : cancel) : undefined}
-        />
+        <AskStatus availability={formState === "loading" ? "starting" : formState} phase={phase} />
       )}
       <div className={styles.actions}>
         <Button variant="primary" size="sm" disabled={!canSend} busy={operation === "send"} onClick={submit}>

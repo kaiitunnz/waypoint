@@ -19,8 +19,9 @@ const PHONE_LIMIT = 3;
 
 interface NeedsYouSectionProps {
   asks: PendingAsk[];
-  // Open inbox items and board gates, which have no card here.
+  // Open inbox items, which have no card here.
   inbox: number;
+  // Board gates, which have no card here.
   board: number;
   phone: boolean;
   agentLabel: (ask: PendingAsk) => string;
@@ -30,8 +31,8 @@ interface NeedsYouSectionProps {
 function QueueLink({ count, place }: { count: number; place: string }) {
   if (count === 0) return null;
   return (
-    <div className={styles.inboxWrap}>
-      <Link href="/inbox" className={styles.inbox} aria-label={`${count} ${place}`}>
+    <div className={styles.queueWrap}>
+      <Link href="/inbox" className={styles.queueLink} aria-label={`${count} ${place}`}>
         <Badge count={count} />
         <span aria-hidden="true">{place}</span>
         <Icon name="chevron-right" size={16} strokeWidth={2} />

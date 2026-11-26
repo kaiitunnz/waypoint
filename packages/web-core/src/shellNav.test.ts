@@ -37,13 +37,13 @@ describe("sessionHref", () => {
 describe("showsTabBar", () => {
   it("shows on top-level screens", () => {
     for (const path of ["/", "/inbox", "/board", "/telemetry", "/board/"]) {
-      expect(showsTabBar(path)).toBe(true);
+      expect(showsTabBar(path, false)).toBe(true);
     }
   });
 
   it("hides inside a session, an item and the assistant", () => {
     for (const path of ["/session/a", "/session/a/files", "/inbox/7", "/assistant", "/gallery"]) {
-      expect(showsTabBar(path)).toBe(false);
+      expect(showsTabBar(path, false)).toBe(false);
     }
   });
 
@@ -90,6 +90,6 @@ describe("settings paths", () => {
 
   it("keeps the page outside the navigation and the tab bar", () => {
     expect(activeNavKey("/settings")).toBeNull();
-    expect(showsTabBar("/settings")).toBe(false);
+    expect(showsTabBar("/settings", false)).toBe(false);
   });
 });

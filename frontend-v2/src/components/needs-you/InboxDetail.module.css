@@ -1,14 +1,3 @@
-.glyph {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  color: var(--brass-text);
-}
-
-.done {
-  color: var(--faint);
-}
-
 .subject {
   margin-top: 6px;
   font-size: var(--f-title);
@@ -87,8 +76,7 @@
   color: var(--text);
 }
 
-/* Each file keeps its own reply, side by side where there is room. The files of a
-   group take no hairline between them. */
+/* Overrides the hairline between blocks: a group of files has none. */
 .blocks > .group > .grid > * {
   border-top: 0;
 }

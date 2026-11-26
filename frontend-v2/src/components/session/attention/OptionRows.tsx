@@ -26,7 +26,6 @@ interface OptionRowsProps {
   onOption: (label: string) => void;
 }
 
-// Full-width radio rows, or checkboxes when several may be picked.
 export function OptionRows({ options, selected, multi, disabled, label, columns, onOption }: OptionRowsProps) {
   const group = useRef<HTMLDivElement>(null);
   const chosen = options.findIndex((option) => selected.includes(option.label));

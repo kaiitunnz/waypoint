@@ -1,5 +1,4 @@
 .row {
-  position: relative;
   overflow: hidden;
   margin-left: 8px;
   border-radius: var(--r) 0 0 var(--r);
@@ -23,35 +22,11 @@
 }
 
 .slide {
-  position: relative;
   background: var(--ground);
-  touch-action: pan-y;
-  transition: transform 140ms ease-out;
-}
-
-.swiping .slide {
-  transition: none;
 }
 
 .selected .slide {
   background: var(--plane);
-}
-
-.behind {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-right: 18px;
-  font-weight: 600;
-  color: var(--on-action);
-  background: var(--error);
-}
-
-.swiping .behind {
-  display: flex;
 }
 
 .main {
@@ -102,6 +77,7 @@
 }
 
 .time {
+  composes: time from "./QueueItemShell.module.css";
   font-size: var(--f-meta);
   line-height: 18px;
   color: var(--faint);
@@ -146,38 +122,13 @@
   font-weight: 400;
 }
 
-.inert {
-  opacity: 0.45;
-}
-
-.actions {
-  padding: 0 12px 10px 28px;
-  margin-top: -6px;
-}
-
-.actions:empty {
-  display: none;
-}
-
 .trash {
-  position: absolute;
   top: 3px;
   right: 6px;
   z-index: 2;
   background: var(--ground);
-  opacity: 0;
 }
 
 .selected .trash {
   background: var(--plane);
-}
-
-.row:hover .trash,
-.trash:focus-visible {
-  opacity: 1;
-}
-
-/* The trash takes the time's place while it shows. */
-.row:hover:has(> .trash) .time {
-  visibility: hidden;
 }

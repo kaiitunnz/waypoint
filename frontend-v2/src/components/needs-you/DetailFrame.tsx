@@ -16,9 +16,8 @@ import { useNeedsYou } from "./NeedsYouContext";
 import styles from "./DetailFrame.module.css";
 
 interface DetailFrameProps {
-  // Who is asking; a pointer client shows it in the header.
+  // Who is asking: in the header on a pointer client, else above the content.
   source?: ReactNode;
-  // The session "Open session" goes to; none hides it.
   sessionId?: string;
   onDelete?: () => void;
   children: ReactNode;
@@ -34,7 +33,6 @@ function Back() {
   );
 }
 
-// An item's screen: a header with the way back and its actions, over a readable column.
 export function DetailFrame({ source, sessionId, onDelete, children }: DetailFrameProps) {
   const { columns } = useNeedsYou();
   const pointer = usePointerUI();
@@ -65,12 +63,14 @@ export function DetailFrame({ source, sessionId, onDelete, children }: DetailFra
           )
         ) : null}
       </header>
-      <div className={styles.column}>{children}</div>
+      <div className={styles.column}>
+        {source && !pointer ? <div className={styles.lead}>{source}</div> : null}
+        {children}
+      </div>
     </article>
   );
 }
 
-// An item that is loading, gone, or no longer waiting.
 export function DetailState({ title, sessionId, action }: { title: string; sessionId?: string; action?: ReactNode }) {
   return (
     <DetailFrame sessionId={sessionId}>

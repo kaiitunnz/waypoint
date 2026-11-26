@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import {
   answerQuestion,
+  approvalRequest,
   buildAnswer,
   decideAsk,
   decidesInline,
@@ -193,6 +194,24 @@ describe("deciding outside the detail", () => {
       decisions: ["accept", "decline"],
       supports_note: false,
     },
+  });
+
+  it("shows what the transcript holds, and a plan from its ask", () => {
+    const body = { kind: "command" as const, description: "", command: "git push" };
+    expect(approvalRequest(approval("Bash", { command: "git push" }), null)).toEqual({ status: "loading" });
+    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), body)).toEqual({ status: "ready", body });
+    const plan = { kind: "plan_approval", plan: { text: "# Plan" } } as unknown as PendingPlanAsk;
+    expect(approvalRequest(plan, null)).toEqual({ status: "ready", body: { kind: "plan", plan: "# Plan" } });
+  });
+
+  it("stands the ask's own input in only for a missing event it carries in full", () => {
+    expect(approvalRequest(approval("Bash", { command: "git push" }), "missing")).toEqual({
+      status: "ready",
+      body: { kind: "command", description: "", command: "git push" },
+    });
+    expect(approvalRequest(approval("Bash", { command: "git pu" }, true), "missing")).toEqual({ status: "failed" });
+    expect(approvalRequest(approval("mcp__mail__send", { to: "a@b" }), "missing")).toEqual({ status: "failed" });
+    expect(approvalRequest(approval("Bash", { command: "git push" }), "failed")).toEqual({ status: "failed" });
   });
 
   it("allows a whole command or an edited path", () => {

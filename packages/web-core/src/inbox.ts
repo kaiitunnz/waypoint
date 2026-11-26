@@ -1,7 +1,5 @@
-// Inbox logic shared by the apps: list filtering and live updates, block drafts and
-// the submit payload, selection, and display strings.
-
 import type { InboxBlockSubmit, InboxListPage } from "./api";
+import { toggleSelection } from "./session/askQuestion";
 import type {
   InboxApprovalAnswer,
   InboxApprovalBlock,
@@ -35,7 +33,7 @@ export function matchesInboxFilter(item: InboxItem, filter: InboxFilter): boolea
   return true;
 }
 
-export function byUpdatedDesc(a: InboxItem, b: InboxItem): number {
+function byUpdatedDesc(a: InboxItem, b: InboxItem): number {
   if (a.updated_at < b.updated_at) return 1;
   if (a.updated_at > b.updated_at) return -1;
   return 0;
@@ -45,17 +43,17 @@ export interface InboxUpdate {
   itemId: string;
   deleted: boolean;
   item: InboxItem | null;
-  unresolvedCount: number | null;
 }
 
-// An `inbox_update` frame payload.
+// Live inbox changes from a socket the caller already holds; "reconnected" means
+// some may have been missed.
+export type InboxSubscribe = (listener: (event: InboxUpdate | "reconnected") => void) => () => void;
+
 export function parseInboxUpdate(payload: Record<string, unknown>): InboxUpdate {
-  const count = payload.unresolved_count;
   return {
     itemId: payload.item_id as string,
     deleted: Boolean(payload.deleted),
     item: (payload.item as InboxItem | null | undefined) ?? null,
-    unresolvedCount: typeof count === "number" ? count : null,
   };
 }
 
@@ -67,7 +65,6 @@ export function fresherInboxItem(current: InboxItem | null, read: InboxItem): In
   return current.read_at && !read.read_at ? current : read;
 }
 
-// A changed item moves to its place; a deleted one, or one that left the filter, goes.
 export function applyInboxUpdate(items: InboxItem[], update: InboxUpdate, filter: InboxFilter): InboxItem[] {
   const next = items.filter((item) => item.id !== update.itemId);
   if (!update.deleted && update.item && matchesInboxFilter(update.item, filter)) {
@@ -189,8 +186,7 @@ export function requiredAnswersLeft(item: InboxItem): number {
   return item.blocks.filter((block) => isDecisionBlock(block) && block.required && block.answer === null).length;
 }
 
-// What was answered, as one line.
-// `label` shows an option as the surface lists it.
+// `label` formats each option.
 export function blockAnswerEcho(block: InboxBlock, label: (option: string) => string = (option) => option): string {
   if (block.type === "approval") return block.answer ? label(block.answer.decision) : "";
   if (block.type === "question" && block.answer) {
@@ -223,19 +219,8 @@ export function blockDraft(block: InboxBlock): BlockDraft {
   };
 }
 
-// Multi-select toggles; single-select replaces, and tapping the one pick clears it.
 export function toggleBlockOption(selected: ReadonlySet<string>, label: string, multi: boolean): Set<string> {
-  const next = new Set(selected);
-  if (multi) {
-    if (next.has(label)) next.delete(label);
-    else next.add(label);
-  } else if (next.has(label) && next.size === 1) {
-    next.clear();
-  } else {
-    next.clear();
-    next.add(label);
-  }
-  return next;
+  return new Set(toggleSelection([...selected], label, multi));
 }
 
 // The answer in the draft, or undefined when there is none: an answer is never sent
@@ -275,12 +260,6 @@ export function buildBlockSubmit(block: InboxBlock, { draft, uploaded, carried }
   return body;
 }
 
-// A save waits out uploads and an earlier save; with nothing to send it does nothing.
-export function blockSaveAction(state: { submitting: boolean; uploading: boolean; canSave: boolean }): "wait" | "nothing" | "save" {
-  if (state.submitting || state.uploading) return "wait";
-  return state.canSave ? "save" : "nothing";
-}
-
 // ─── Selection ───
 
 export function toggleId(selected: ReadonlySet<string>, id: string): Set<string> {
@@ -290,7 +269,7 @@ export function toggleId(selected: ReadonlySet<string>, id: string): Set<string>
   return next;
 }
 
-// Drops ids that are no longer listed; the same set when nothing dropped.
+// Keeps the listed ids; the same set when all are listed.
 export function pruneSelection(selected: Set<string>, listed: readonly string[]): Set<string> {
   if (selected.size === 0) return selected;
   const present = new Set(listed);

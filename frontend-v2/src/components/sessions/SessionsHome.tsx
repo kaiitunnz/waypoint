@@ -44,7 +44,7 @@ const NO_SESSIONS: SessionRecord[] = [];
 
 export function SessionsHome() {
   const phone = usePhoneLayout();
-  const { host, token, needsYou, waiting, launchTargets } = useShellData();
+  const { host, token, waiting, launchTargets } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
@@ -140,7 +140,7 @@ export function SessionsHome() {
     ) : null;
 
   const loading = feed.sessions === null;
-  const empty = !loading && sessions.length === 0 && needsYou === 0 && exitedCount === 0;
+  const empty = !loading && sessions.length === 0 && waiting.all === 0 && exitedCount === 0;
 
   const results = searching ? (
     <SearchResults

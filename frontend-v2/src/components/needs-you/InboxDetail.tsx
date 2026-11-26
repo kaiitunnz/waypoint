@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 
-import { gateBoardHref, gateView, isGateAnswered, type BoardGate } from "@waypoint/web-core/board";
+import { gateView, isGateAnswered, type BoardGate } from "@waypoint/web-core/board";
 import { useInboxItem } from "@waypoint/web-core/hooks/useInboxItem";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { formatInboxTime, requiredAnswersLeft } from "@waypoint/web-core/inbox";
@@ -21,29 +20,21 @@ import { useShellData } from "@/lib/shell-data";
 import { useFailureToast } from "@/lib/useFailureToast";
 
 import { DetailFrame, DetailState } from "./DetailFrame";
+import { GateLinks } from "./GateLinks";
 import { InboxBlockView } from "./InboxBlock";
 import { useNeedsYou } from "./NeedsYouContext";
+import { SourceGlyph } from "./SourceGlyph";
+import { useDetailContext } from "./useDetailContext";
 import styles from "./InboxDetail.module.css";
 
-// The gate this item asks about, when a ticket is waiting on it.
 function GateStrip({ gate }: { gate: BoardGate }) {
-  const url = gate.ticket.pr_url;
   return (
     <div className={styles.gate}>
       <Icon name="board" size={14} />
       <span className={styles.gateKind}>{gateView(gate.ticket).gate}</span>
       {isGateAnswered(gate) ? <span>Answered</span> : null}
       <span className={styles.gateTitle}>{gate.ticket.title}</span>
-      {url && /^https?:\/\//.test(url) ? (
-        <a className={styles.gateLink} href={url} target="_blank" rel="noreferrer">
-          Open PR
-          <Icon name="external" size={14} />
-        </a>
-      ) : null}
-      <Link className={styles.gateLink} href={gateBoardHref(gate)}>
-        Open on board
-        <Icon name="chevron-right" size={14} strokeWidth={2} />
-      </Link>
+      <GateLinks gate={gate} linkClass={styles.gateLink} />
     </div>
   );
 }
@@ -92,20 +83,8 @@ export function InboxDetail({ id }: { id: string }) {
   });
   const [confirming, setConfirming] = useState(false);
   const gate = gates?.find((entry) => entry.item?.id === id);
-  // Inbox text has no session behind it, so its paths stay text.
-  const context = useMemo(
-    () => ({
-      host,
-      token,
-      sessionId: "",
-      cwd: "",
-      agentName: item?.from_label ?? "Agent",
-      full: false,
-      structured: true,
-      openFiles: null,
-    }),
-    [host, token, item?.from_label],
-  );
+  // No session behind inbox text, so its paths stay text.
+  const context = useDetailContext("", "", item?.from_label ?? "Agent");
 
   if (gone) return <DetailState title="This item was deleted." />;
   if (error) return <DetailState title={error} />;
@@ -115,11 +94,7 @@ export function InboxDetail({ id }: { id: string }) {
   const resolved = item.status === "resolved";
   const source = (
     <SourceLine
-      lead={
-        <span className={cx(styles.glyph, resolved && styles.done)} aria-hidden="true">
-          <Icon name="mail" size={14} strokeWidth={2} />
-        </span>
-      }
+      lead={<SourceGlyph icon="mail" done={resolved} />}
       name={item.from_label ?? "unknown"}
       kind="Inbox"
       time={pointer ? undefined : <time dateTime={item.created_at}>{formatInboxTime(item.created_at, now)}</time>}
@@ -128,7 +103,6 @@ export function InboxDetail({ id }: { id: string }) {
 
   return (
     <DetailFrame source={source} sessionId={item.from_session_id || undefined} onDelete={() => setConfirming(true)}>
-      {pointer ? null : source}
       <h1 className={styles.subject}>{item.subject}</h1>
       <div className={styles.meta}>
         <span className={cx(styles.status, !resolved && styles.waiting)}>

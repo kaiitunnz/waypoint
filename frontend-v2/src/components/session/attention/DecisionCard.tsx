@@ -28,13 +28,11 @@ interface DecisionCardProps<Id extends string> {
   // Sends one decision; a not-ready agent is retried.
   decide: (id: Id, note: string | undefined) => Promise<void>;
   children: ReactNode;
-  // Whether the agent can take a reply now.
   availability?: PendingAsk["availability"];
   // Shares the reply's phase with the ask's other surfaces.
   lockId?: string;
-  // Holds every action back while there is not yet anything to decide on.
   locked?: boolean;
-  // On its own screen: the body takes its full height.
+  // The body takes its full height, with no scroll cap.
   roomy?: boolean;
 }
 

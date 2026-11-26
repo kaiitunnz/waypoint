@@ -3,11 +3,9 @@
 import { createContext, useContext } from "react";
 
 export interface NeedsYouContextValue {
-  // Queue and item side by side, rather than one at a time.
+  // Queue and item side by side.
   columns: boolean;
-  // The route id of the open item.
   selected: string | null;
-  // Back to the queue.
   leave: () => void;
 }
 

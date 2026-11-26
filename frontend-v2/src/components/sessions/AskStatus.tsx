@@ -8,18 +8,15 @@ import styles from "./AskStatus.module.css";
 interface AskStatusProps {
   availability: PendingAsk["availability"];
   phase: AskPhase;
-  // For a failure that does not carry its own retry.
-  onRetry?: () => void;
 }
 
-export function AskStatus({ availability, phase, onRetry }: AskStatusProps) {
+export function AskStatus({ availability, phase }: AskStatusProps) {
   if (phase.state === "error") {
-    const retry = phase.retry ?? onRetry;
     return (
       <div className={styles.error} role="alert">
         <p>{phase.message}</p>
-        {retry ? (
-          <ActionChip icon="refresh" onClick={retry}>
+        {phase.retry ? (
+          <ActionChip icon="refresh" onClick={phase.retry}>
             Retry
           </ActionChip>
         ) : null}

@@ -10,7 +10,7 @@ interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   // A text-only chip for the escape hatch ("Other…").
   quiet?: boolean;
   selected?: boolean;
-  // Smaller on a pointer client, for a list row.
+  // Smaller on a pointer client.
   compact?: boolean;
   children: ReactNode;
 }

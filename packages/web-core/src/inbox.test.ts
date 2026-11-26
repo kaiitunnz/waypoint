@@ -6,7 +6,6 @@ import {
   blockAnswerEcho,
   blockDraft,
   blockEditLabel,
-  blockSaveAction,
   fetchInboxUpTo,
   buildBlockAnswer,
   buildBlockSubmit,
@@ -79,30 +78,25 @@ describe("matchesInboxFilter", () => {
   });
 });
 
-describe("applyInboxUpdate", () => {
+describe("list updates", () => {
   const filter = { status: "open" as const, q: "" };
   const older = item("1", { updated_at: "2026-11-27T07:00:00Z" });
   const newer = item("2", { updated_at: "2026-11-27T09:00:00Z" });
 
   it("upserts a matching item in updated order", () => {
     const changed = { ...older, updated_at: "2026-11-27T10:00:00Z" };
-    const next = applyInboxUpdate([newer, older], { itemId: "1", deleted: false, item: changed, unresolvedCount: 2 }, filter);
+    const next = applyInboxUpdate([newer, older], { itemId: "1", deleted: false, item: changed }, filter);
     expect(next.map((entry) => entry.id)).toEqual(["1", "2"]);
   });
 
   it("removes a deleted item and one that left the filter", () => {
-    expect(applyInboxUpdate([newer, older], { itemId: "1", deleted: true, item: null, unresolvedCount: 1 }, filter)).toEqual([newer]);
+    expect(applyInboxUpdate([newer, older], { itemId: "1", deleted: true, item: null }, filter)).toEqual([newer]);
     const resolved = { ...older, status: "resolved" as const };
-    expect(applyInboxUpdate([newer, older], { itemId: "1", deleted: false, item: resolved, unresolvedCount: 1 }, filter)).toEqual([newer]);
+    expect(applyInboxUpdate([newer, older], { itemId: "1", deleted: false, item: resolved }, filter)).toEqual([newer]);
   });
 
   it("parses a frame payload", () => {
-    expect(parseInboxUpdate({ item_id: "1", deleted: 1, unresolved_count: 3 })).toEqual({
-      itemId: "1",
-      deleted: true,
-      item: null,
-      unresolvedCount: 3,
-    });
+    expect(parseInboxUpdate({ item_id: "1", deleted: 1 })).toEqual({ itemId: "1", deleted: true, item: null });
     expect(parseInboxUpdate({ item_id: "1", item: older }).item).toBe(older);
   });
 
@@ -118,7 +112,7 @@ describe("fresherInboxItem", () => {
     expect(fresherInboxItem(item("2", { version: 9 }), open)).toBe(open);
     expect(fresherInboxItem(item("1", { subject: "old" }), open)).toBe(open);
   });
-  it("keeps a held item of a higher version", () => {
+  it("takes whichever has the higher version", () => {
     const resolved = item("1", { status: "resolved", version: 2 });
     expect(fresherInboxItem(resolved, open)).toBe(resolved);
     expect(fresherInboxItem(open, resolved)).toBe(resolved);
@@ -130,7 +124,7 @@ describe("fresherInboxItem", () => {
 });
 
 describe("fetchInboxUpTo", () => {
-  const all = Array.from({ length: 75 }, (_, index) => item(String(index)));
+  const all = Array.from({ length: 250 }, (_, index) => item(String(index)));
   const pages: [string | null, number][] = [];
   const fetchPage = async (cursor: string | null, limit: number) => {
     pages.push([cursor, limit]);
@@ -139,31 +133,27 @@ describe("fetchInboxUpTo", () => {
     return { items: all.slice(start, end), hasMore: end < all.length, cursor: end < all.length ? String(end) : null };
   };
 
-  it("reads pages until it holds as many items as before", async () => {
+  it("reads page by page until it holds as many items as before", async () => {
     pages.length = 0;
-    const result = await fetchInboxUpTo(fetchPage, 60);
-    expect(result.items).toHaveLength(60);
+    const result = await fetchInboxUpTo(fetchPage, 160);
+    expect(result.items).toHaveLength(160);
     expect(result.hasMore).toBe(true);
-    expect(result.cursor).toBe("60");
-    expect(pages).toEqual([[null, 60]]);
+    expect(result.cursor).toBe("160");
+    expect(pages).toEqual([
+      [null, 100],
+      ["100", 60],
+    ]);
   });
 
   it("reads at least a page and stops at the end", async () => {
     pages.length = 0;
     expect((await fetchInboxUpTo(fetchPage, 0)).items).toHaveLength(30);
-    expect((await fetchInboxUpTo(fetchPage, 500)).items).toHaveLength(75);
+    expect((await fetchInboxUpTo(fetchPage, 500)).items).toHaveLength(250);
     expect(pages.slice(1)).toEqual([
       [null, 100],
+      ["100", 100],
+      ["200", 100],
     ]);
-  });
-});
-
-describe("blockSaveAction", () => {
-  it("waits out uploads and saves, and never sends nothing", () => {
-    expect(blockSaveAction({ submitting: true, uploading: false, canSave: true })).toBe("wait");
-    expect(blockSaveAction({ submitting: false, uploading: true, canSave: false })).toBe("wait");
-    expect(blockSaveAction({ submitting: false, uploading: false, canSave: false })).toBe("nothing");
-    expect(blockSaveAction({ submitting: false, uploading: false, canSave: true })).toBe("save");
   });
 });
 

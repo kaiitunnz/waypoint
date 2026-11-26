@@ -11,6 +11,8 @@ import {
   gateBoardHref,
   gateHeadline,
   gateKey,
+  gatePrUrl,
+  gateTime,
   gateView,
   isGateAnswered,
   prNumber,
@@ -275,6 +277,19 @@ describe("gates", () => {
     expect(gateKey(gate())).toBe("gate:mgr-1:t1");
     expect(gateBoardHref(gate())).toBe("/board?channel=p-ticket-t1");
     expect(gateBoardHref(gate({}, null, null))).toBe("/board");
+  });
+
+  it("links only a pull request a browser can open", () => {
+    expect(gatePrUrl(ticket("t", "review_requested", { pr_url: "https://github.com/o/r/pull/9" }))).toBe(
+      "https://github.com/o/r/pull/9",
+    );
+    expect(gatePrUrl(ticket("t", "review_requested", { pr_url: "#9" }))).toBeNull();
+    expect(gatePrUrl(ticket("t", "blocked"))).toBeNull();
+  });
+
+  it("dates a gate from when it started waiting", () => {
+    expect(gateTime(gate({ awaiting_since: "b", updated_at: "a" }))).toBe("b");
+    expect(gateTime(gate({ updated_at: "a" }))).toBe("a");
   });
 
   it("is answered once its item is resolved", () => {

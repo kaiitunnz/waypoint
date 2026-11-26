@@ -2,10 +2,10 @@
 
 import { useRef, useState, type PointerEvent } from "react";
 
-// Movement before a drag is told apart from a tap, and the leftward distance past
-// which releasing acts.
+// Movement before a drag is told apart from a tap.
 const SLOP = 8;
-export const SWIPE_THRESHOLD = 96;
+// Releasing past this leftward distance acts.
+const SWIPE_THRESHOLD = 96;
 
 // A left swipe (touch or mouse drag) on a row. Vertical drags are left to the
 // list's scrolling, so the row takes `touch-action: pan-y`.

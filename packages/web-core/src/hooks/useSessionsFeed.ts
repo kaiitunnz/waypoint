@@ -11,11 +11,10 @@ import {
   isAuthError,
   parseLiveSessionList,
 } from "../api";
-import { parseInboxUpdate } from "../inbox";
+import { parseInboxUpdate, type InboxSubscribe } from "../inbox";
 import { applyPendingAsksSnapshot, parsePendingAsksSnapshot } from "../pendingAsks";
 import type { ConnectionState } from "../session/connection";
 import { applySessionState, upsertLiveSession } from "../sessionHistory";
-import type { InboxSubscribe } from "./useInboxList";
 import type {
   MessageSchedule,
   PendingAsksSnapshot,

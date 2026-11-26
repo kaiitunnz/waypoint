@@ -28,7 +28,8 @@ interface QuestionAskProps {
   ask: PendingQuestionAsk;
   agent: string;
   now: number;
-  // Where the ask opens; a long one is answered there instead of in a dialog.
+  // Where the ask opens. With it there is no dialog: an ask `askNeedsDetail` flags is
+  // answered there.
   openHref?: string;
 }
 
@@ -42,7 +43,7 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
   const actionable = ask.availability === "actionable";
   const disabled = busy || !actionable;
   const answerable = isAnswerable(prompts, picks);
-  const long = openHref !== undefined && askNeedsDetail(ask);
+  const needsDetail = openHref !== undefined && askNeedsDetail(ask);
 
   const update = (index: number, change: (pick: PromptPick) => PromptPick) => {
     setPicks((current) => current.map((pick, i) => (i === index ? change(pick) : pick)));
@@ -71,7 +72,7 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
   return (
     <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
       {openHref ? <OpenHeadline href={openHref}>{headline}</OpenHeadline> : <h3 className={styles.headline}>{headline}</h3>}
-      {long ? (
+      {needsDetail ? (
         <div className={styles.review}>
           <p className={styles.meta}>{askSummary(ask).text}</p>
           <OpenLink href={openHref} label="Answer" />

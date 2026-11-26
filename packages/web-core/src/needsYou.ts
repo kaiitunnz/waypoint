@@ -1,7 +1,4 @@
-// The needs-you queue: pending asks, inbox items and board gates as one list,
-// with its counts, search and routes.
-
-import { gateHeadline, gateKey, isGateAnswered, type BoardGate } from "./board";
+import { gateHeadline, gateKey, gateTime, isGateAnswered, type BoardGate } from "./board";
 import type { InboxStatusFilter } from "./inbox";
 import { decidesInline, decisionView, isRecommendedLabel, planPreview, stripRecommendedSuffix } from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
@@ -21,7 +18,7 @@ export function gateRouteId(gate: BoardGate): string {
 }
 
 // The items a listed gate stands for, which get no row of their own.
-export function gateItemIds(gates: readonly BoardGate[]): Set<string> {
+function gateItemIds(gates: readonly BoardGate[]): Set<string> {
   return new Set(gates.flatMap((gate) => (gate.ticket.inbox_item_id ? [gate.ticket.inbox_item_id] : [])));
 }
 
@@ -44,8 +41,6 @@ function gateMatches(gate: BoardGate, query: string): boolean {
 }
 
 // ─── Queue ───
-
-const gateTime = (gate: BoardGate) => gate.ticket.awaiting_since ?? gate.ticket.updated_at;
 
 export interface QueueInput {
   asks: readonly PendingAsk[];
@@ -143,7 +138,6 @@ export function decodeNeedsId(segment: string): string {
 
 // ─── Asks ───
 
-// A row or card can answer these itself; the others need the detail.
 export function askNeedsDetail(ask: PendingAsk): boolean {
   if (ask.kind !== "question") return !decidesInline(ask);
   const [prompt, ...rest] = ask.question.questions;
@@ -166,15 +160,14 @@ export interface AskSummary {
   mono: boolean;
 }
 
-// A row of the split view answers an ask only where it shows everything asked;
-// a longer request is decided in the detail.
+// A row takes a reply only where it shows everything asked.
 const ROW_MAX_LENGTH = 160;
 const ROW_MAX_LINES = 3;
 
 const fitsRow = (text: string) => text.length <= ROW_MAX_LENGTH && text.split("\n").length <= ROW_MAX_LINES;
 
 export interface AskRow extends AskSummary {
-  // Set instead of `text` being shown: a path keeps its file name on one line.
+  // Shown in place of `text`: a path keeps its file name on one line.
   path: string | null;
   // The row shows the whole request and takes the reply.
   answers: boolean;
@@ -194,7 +187,6 @@ export function askRow(ask: PendingAsk): AskRow {
   return { ...summary, path: null, answers: false };
 }
 
-// The line under a row's headline.
 export function askSummary(ask: PendingAsk): AskSummary {
   if (ask.kind === "question") return { text: questionSummary(ask), mono: false };
   if (ask.kind === "plan_approval") return { text: planPreview(ask.plan.text, 1), mono: false };
@@ -207,7 +199,6 @@ export function askSummary(ask: PendingAsk): AskSummary {
   return { text: ask.body ?? ask.approval.tool_name ?? ask.title, mono: false };
 }
 
-// A pending question in the shape the question editor takes.
 export function askUserQuestions(ask: PendingQuestionAsk): AskUserQuestion[] {
   return ask.question.questions.map((prompt) => ({
     question: prompt.question,

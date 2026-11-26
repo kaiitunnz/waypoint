@@ -244,8 +244,8 @@ export function useAttachments({
     [revoke],
   );
 
-  // Holds files out of the unsent set while a request naming them is in flight.
-  // Call what it returns if the request fails.
+  // Keeps the page-leave cleanup off files a request in flight names. Call what it
+  // returns if the request fails.
   const hold = useCallback((ids: readonly string[]) => {
     for (const id of ids) sendingRef.current.add(id);
     return () => {

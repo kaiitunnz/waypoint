@@ -7,25 +7,23 @@ import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { Lines } from "@/components/session/cards/CommandText";
 import { PathLabel } from "@/components/session/cards/PathLabel";
-import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
 
+import { SourceGlyph } from "./SourceGlyph";
 import styles from "./entryView.module.css";
 
 export interface EntryView {
-  // The lamp or glyph of the source.
   lead: ReactNode;
   name: string;
   kind: string;
   headline: string;
-  // The line under the headline; null when there is nothing to add.
   detail: ReactNode;
   // Waiting on the human, or an inbox item not yet read.
   strong: boolean;
   // Nothing left for the human to do here.
   quiet: boolean;
-  // The headline and detail wrap rather than being cut: a row answers from them.
+  // Wraps the headline and detail in full: a row answers from them.
   whole?: boolean;
 }
 
@@ -42,7 +40,7 @@ export function entryView(entry: QueueEntry, agentName: (backend: string) => str
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
       ) : request.text && request.text !== headline ? (
-        // A command the row answers wraps whole, so each line hangs under its own start.
+        // Each line of a wrapped command hangs under its own start.
         <span className={cx(request.mono && "mono")}>
           {request.mono && request.answers ? <Lines text={request.text} /> : request.text}
         </span>
@@ -57,11 +55,7 @@ export function entryView(entry: QueueEntry, agentName: (backend: string) => str
     const resolved = item.status === "resolved";
     const chips = inboxBlockChips(item);
     return {
-      lead: (
-        <span className={cx(styles.glyph, resolved && styles.done)} role="img" aria-label={resolved ? "Resolved" : "Open"}>
-          <Icon name={resolved ? "check" : "mail"} size={13} strokeWidth={2} />
-        </span>
-      ),
+      lead: <SourceGlyph icon={resolved ? "check" : "mail"} done={resolved} label={resolved ? "Resolved" : "Open"} />,
       name: item.from_label ?? "unknown",
       kind: "Inbox",
       headline: item.subject,
@@ -81,11 +75,7 @@ export function entryView(entry: QueueEntry, agentName: (backend: string) => str
   }
   const { gate, answered } = entry;
   return {
-    lead: (
-      <span className={cx(styles.glyph, answered && styles.done)} aria-hidden="true">
-        <Icon name="board" size={12} strokeWidth={2} />
-      </span>
-    ),
+    lead: <SourceGlyph icon="board" done={answered} />,
     name: "Board",
     kind: gateView(gate.ticket).gate,
     headline: gateHeadline(gate.ticket),

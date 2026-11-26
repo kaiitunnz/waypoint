@@ -57,7 +57,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 function MarkdownAnchor({ href, title, children }: ComponentPropsWithoutRef<"a">) {
   const { sessionId } = useSessionContext();
   if (href && isWorkspacePathHref(href)) {
-    // Text with no session behind it (an inbox item) has no files to open.
+    // Without a session there are no files to open.
     if (!sessionId) return <span className={styles.path}>{children}</span>;
     return (
       <Link href={sessionFilesHref(sessionId, href)} className={styles.path}>

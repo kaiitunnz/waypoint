@@ -10,7 +10,6 @@ export function useSelection(listed: readonly string[]) {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
-  // Ids no longer listed (deleted elsewhere, paged out) drop out.
   useEffect(() => {
     setSelected((current) => pruneSelection(current, listed));
   }, [listed]);

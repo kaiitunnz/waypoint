@@ -7,9 +7,9 @@ import { managerGates, mergeGates, type BoardGate, type GateRead } from "../boar
 
 const DEBOUNCE_MS = 300;
 // A manager files its gate item before it records the item on the ticket, and a
-// ticket change sends no frame of its own: read once more after the dust settles,
-// and keep an eye on the gates that exist.
+// ticket change sends no frame: a later read catches up.
 const SETTLE_MS = 10_000;
+// Ticket changes send no frame, so listed gates are re-read on a timer.
 const POLL_MS = 60_000;
 
 async function gateWithItem(host: string, token: string, gate: BoardGate): Promise<BoardGate> {
@@ -24,7 +24,7 @@ async function gateWithItem(host: string, token: string, gate: BoardGate): Promi
 }
 
 // Each manager is read on its own, so one that fails hides no other's gates.
-async function loadGates(host: string, token: string): Promise<GateRead> {
+export async function loadGates(host: string, token: string): Promise<GateRead> {
   const managers = (await fetchManagers(host, token)).filter((manager) => manager.attention_count > 0);
   const reads = await Promise.allSettled(
     managers.map(async (manager) => {
@@ -51,12 +51,12 @@ export interface BoardGates {
 
 // The tickets waiting on the human across managers, each with its inbox item.
 // Re-reads when `revision` moves and when the page is shown again.
-// `onAuthFailure` must be stable.
+// `onAuthFailure` must be stable: a new one drops the gates and reads again.
 export function useBoardGates(
   host: string,
   token: string,
   revision: number,
-  onAuthFailure?: () => void,
+  onAuthFailure: () => void,
 ): BoardGates {
   const [gates, setGates] = useState<BoardGate[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -104,7 +104,7 @@ export function useBoardGates(
         })
         .catch((error) => {
           if (!active || mine < shown) return;
-          if (isAuthError(error)) onAuthFailure?.();
+          if (isAuthError(error)) onAuthFailure();
           else setFailed(true);
         });
     };

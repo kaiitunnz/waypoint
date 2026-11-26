@@ -7,16 +7,13 @@ import { clampPaneWidth, PANE_KEY_STEP, snapPaneWidth, type PaneWidthConfig } fr
 const viewportWidth = () => (typeof window === "undefined" ? undefined : window.innerWidth);
 
 export interface ResizablePane {
-  // Undefined until the person picks a width.
+  // Undefined while the width is the default.
   width: number | undefined;
-  // The width in force.
   rendered: number;
   startDrag: (event: ReactPointerEvent) => void;
   onKeyDown: (event: KeyboardEvent) => void;
 }
 
-// A seam the person drags, or moves with the arrow keys; the width is remembered.
-// `config` and `onDragChange` must be stable.
 export function useResizablePane(
   config: PaneWidthConfig,
   onDragChange?: (dragging: boolean) => void,

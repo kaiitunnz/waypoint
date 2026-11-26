@@ -110,7 +110,7 @@ describe("buildQueue", () => {
     expect(keys(input)).toEqual(["gate:mgr:g1", "i2"]);
     expect(buildQueue(input)[0].routeId).toBe("i1");
     expect(keys({ ...input, status: "all" })).toEqual(["gate:mgr:g1", "i2"]);
-    // Gates are not listed under Resolved, so the answered item is.
+    // Resolved lists no gates, so the item has its own row.
     expect(keys({ ...input, status: "resolved", items: [linked] })).toEqual(["i1"]);
   });
 
@@ -137,6 +137,7 @@ describe("buildQueue", () => {
     const linked = item("i1", 2, { subject: "Spec review: lanes RFC" });
     const input = { ...queue, asks: [question(1)], gates: [gate("g1", 3, linked)] };
     expect(keys({ ...input, q: "fix race" })).toEqual(["question:s1:t1"]);
+    expect(keys({ ...input, q: "which fix" })).toEqual(["question:s1:t1"]);
     expect(keys({ ...input, q: "lanes rfc" })).toEqual(["gate:mgr:g1"]);
     expect(keys({ ...input, q: "ticket g1" })).toEqual(["gate:mgr:g1"]);
     expect(keys({ ...input, q: "nothing" })).toEqual([]);
@@ -153,6 +154,8 @@ describe("needsCounts", () => {
     // Two unresolved items: i1 (a gate's) and another.
     expect(needsCounts(2, 2, gates)).toEqual({ sessions: 2, inbox: 1, board: 2, all: 5 });
     expect(needsCounts(0, 0, [])).toEqual({ sessions: 0, inbox: 0, board: 0, all: 0 });
+    // The unread count can trail the gates.
+    expect(needsCounts(0, 0, [gates[0]])).toEqual({ sessions: 0, inbox: 0, board: 1, all: 1 });
   });
 });
 
@@ -181,7 +184,7 @@ describe("routes", () => {
 });
 
 describe("asks", () => {
-  it("sends long ones to the detail", () => {
+  it("sends what a card cannot answer to the detail", () => {
     expect(askNeedsDetail(question(1))).toBe(false);
     expect(askNeedsDetail(question(1, [], false))).toBe(true);
     expect(askNeedsDetail(question(1, ["A"], true))).toBe(true);
@@ -189,6 +192,10 @@ describe("asks", () => {
     expect(askNeedsDetail(approval(1, {}))).toBe(true);
     expect(askNeedsDetail(approval(1, { command: "ls" }, true))).toBe(true);
     expect(askNeedsDetail(plan)).toBe(true);
+    const two = question(1);
+    two.question.questions.push({ ...two.question.questions[0], question: "Which test?" });
+    expect(askNeedsDetail(two)).toBe(true);
+    expect(askSummary(two)).toEqual({ text: "2 questions", mono: false });
   });
 
   it("summarises an ask", () => {

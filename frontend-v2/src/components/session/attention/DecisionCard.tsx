@@ -6,18 +6,18 @@ import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { retryWhileNotReady } from "@waypoint/web-core/pendingAskActions";
 import type { ApprovalAction } from "@waypoint/web-core/session/approvals";
 
+import { AskStatus } from "@/components/sessions/AskStatus";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
-import { ActionChip } from "@/components/ui/ActionChip";
 import { Button } from "@/components/ui/Button";
 import { TextArea } from "@/components/ui/Field";
+import { StatusLamp } from "@/components/ui/StatusLamp";
 
 import { CopyButton } from "../cards/CopyButton";
 import styles from "./DecisionCard.module.css";
 
 interface DecisionCardProps<Id extends string> {
   title: ReactNode;
-  // Beside the title: a pager or a time.
-  meta?: ReactNode;
+  pager?: ReactNode;
   copyText: string;
   copyLabel: string;
   actions: ApprovalAction<Id>[];
@@ -27,11 +27,10 @@ interface DecisionCardProps<Id extends string> {
   children: ReactNode;
 }
 
-// A decision the human owes the agent: a body, then Approve and the other
-// decisions, with an optional note. Every action locks while one is in flight.
+// Every action locks while one is in flight.
 export function DecisionCard<Id extends string>({
   title,
-  meta,
+  pager,
   copyText,
   copyLabel,
   actions,
@@ -43,6 +42,7 @@ export function DecisionCard<Id extends string>({
   const [note, setNote] = useState("");
   const [last, setLast] = useState<Id | null>(null);
   const { phase, send, busy } = useAskResponder();
+  const sending = phase.state === "sending";
 
   const run = (id: Id) => {
     if (busy) return;
@@ -61,9 +61,11 @@ export function DecisionCard<Id extends string>({
   return (
     <section className={styles.card} aria-label="Needs your decision">
       <div className={styles.head}>
-        <span className={styles.lamp} aria-hidden />
+        <span className={styles.lamp}>
+          <StatusLamp state="needs" size="sm" flat />
+        </span>
         <h3 className={styles.title}>{title}</h3>
-        {meta}
+        {pager}
         <CopyButton text={copyText} label={copyLabel} />
       </div>
       <div className={styles.body}>{children}</div>
@@ -86,10 +88,10 @@ export function DecisionCard<Id extends string>({
             variant={action.primary ? "primary" : "text"}
             size="sm"
             disabled={busy}
-            busy={phase.state === "sending" && last === action.id}
+            busy={sending && last === action.id}
             onClick={() => run(action.id)}
           >
-            {phase.state === "sending" && last === action.id && action.loadingLabel ? action.loadingLabel : action.label}
+            {sending && last === action.id && action.loadingLabel ? action.loadingLabel : action.label}
           </Button>
         ))}
         {supportsNote && !noteOpen ? (
@@ -98,17 +100,7 @@ export function DecisionCard<Id extends string>({
           </Button>
         ) : null}
       </div>
-      {phase.state === "sending" && phase.retrying ? <p className={styles.status}>Waiting for the agent…</p> : null}
-      {phase.state === "error" ? (
-        <div className={styles.failure} role="alert">
-          <p>{phase.message}</p>
-          {last ? (
-            <ActionChip icon="refresh" onClick={() => run(last)}>
-              Retry
-            </ActionChip>
-          ) : null}
-        </div>
-      ) : null}
+      <AskStatus availability="actionable" phase={phase} onRetry={last ? () => run(last) : undefined} />
     </section>
   );
 }

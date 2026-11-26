@@ -3,16 +3,17 @@
 import { useEffect, useId, useState } from "react";
 
 import { parseAskUserQuestion, pendingQuestionPrompt } from "@waypoint/web-core/session/askQuestion";
+import { pageOf, stepPage } from "@waypoint/web-core/session/paging";
 import type { PendingQuestion } from "@waypoint/web-core/types";
 
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/lib/cx";
 
 import { EventTime } from "../cards/EventTime";
 import { useSessionContext } from "../SessionContext";
 import { AskForm } from "./AskForm";
+import { Pager } from "./Pager";
 import styles from "./QuestionDock.module.css";
 
 interface QuestionDockProps {
@@ -21,8 +22,7 @@ interface QuestionDockProps {
   onReveal: (toolUseId: string) => void;
 }
 
-// The session's open questions: one line until the human opens it, then the
-// answer form, paging between questions when several wait.
+// Collapsed to one line until the human opens it.
 export function QuestionDock({ questions, onReveal }: QuestionDockProps) {
   const { agentName } = useSessionContext();
   const [expanded, setExpanded] = useState(false);
@@ -38,14 +38,11 @@ export function QuestionDock({ questions, onReveal }: QuestionDockProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded]);
 
-  const count = questions.length;
   const found = questions.findIndex((question) => question.tool_use_id === openId);
-  const index = found === -1 ? 0 : found;
-  const current = questions[index];
+  const { count, page, current } = pageOf(questions, Math.max(0, found));
   if (!current) return null;
   const parsed = parseAskUserQuestion(current.event);
   const prompt = pendingQuestionPrompt(current);
-  const step = (by: number) => setOpenId(questions[Math.min(count - 1, Math.max(0, index + by))].tool_use_id);
 
   return (
     <section className={cx(styles.card, expanded && styles.expanded)} aria-label={count === 1 ? "Question waiting" : `${count} questions waiting`}>
@@ -72,17 +69,12 @@ export function QuestionDock({ questions, onReveal }: QuestionDockProps) {
               {agentName} asked <EventTime ts={current.event.ts} />
             </span>
             {count > 1 ? (
-              <span className={styles.pager}>
-                <IconButton label="Previous question" size="sm" disabled={index === 0} onClick={() => step(-1)}>
-                  <Icon name="chevron-left" size={16} />
-                </IconButton>
-                <span>
-                  {index + 1} / {count}
-                </span>
-                <IconButton label="Next question" size="sm" disabled={index === count - 1} onClick={() => step(1)}>
-                  <Icon name="chevron-right" size={16} />
-                </IconButton>
-              </span>
+              <Pager
+                page={page}
+                count={count}
+                noun="question"
+                onStep={(direction) => setOpenId(questions[stepPage(page, direction, count)].tool_use_id)}
+              />
             ) : null}
             <ActionChip
               className={styles.reveal}

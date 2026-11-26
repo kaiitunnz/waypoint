@@ -3,17 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-import { dismissSideQuestion, forkSideQuestion, isAuthError } from "@waypoint/web-core/api";
+import { dismissSideQuestion, forkSideQuestion } from "@waypoint/web-core/api";
 import { sideQuestionStripLabel, sortedSideQuestions } from "@waypoint/web-core/session/sideQuestions";
 import type { SideQuestion } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
 import { Flyout } from "@/components/ui/Flyout";
-import { useToast } from "@/components/ui/Toast";
-import { handleAuthFailure } from "@/lib/auth";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { useSessionContext } from "../SessionContext";
-import { Panel } from "./Panel";
 import { SideQuestionList } from "./SideQuestionList";
 import { Strip } from "./Strip";
 
@@ -26,17 +24,13 @@ interface SideQuestionDockProps {
 export function SideQuestionDock({ questions, open, onOpenChange }: SideQuestionDockProps) {
   const { host, token, sessionId } = useSessionContext();
   const router = useRouter();
-  const { toast } = useToast();
+  const fail = useFailureToast();
   const [dismissing, setDismissing] = useState<Set<string>>(new Set());
   const [forking, setForking] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const sorted = sortedSideQuestions(questions);
   const count = sorted.length;
 
-  const fail = (error: unknown, fallback: string) => {
-    if (isAuthError(error)) handleAuthFailure();
-    else toast({ message: error instanceof Error ? error.message : fallback, tone: "error" });
-  };
   const dismiss = async (id: string) => {
     setDismissing((current) => new Set(current).add(id));
     try {
@@ -75,20 +69,24 @@ export function SideQuestionDock({ questions, open, onOpenChange }: SideQuestion
         open={open}
         onToggle={() => onOpenChange(!open)}
       />
-      <Flyout open={open} onClose={() => onOpenChange(false)} triggerRef={trigger} title={title} width={420} side="top" resizeKey="side-questions">
-        <Panel
-          title={title}
-          count={count}
-          actions={
-            count >= 2 ? (
-              <Button variant="text" size="sm" onClick={() => sorted.forEach((aside) => void dismiss(aside.id))}>
-                Clear all
-              </Button>
-            ) : undefined
-          }
-        >
-          <SideQuestionList questions={sorted} dismissing={dismissing} forking={forking} onDismiss={(id) => void dismiss(id)} onFork={(id) => void fork(id)} />
-        </Panel>
+      <Flyout
+        open={open}
+        onClose={() => onOpenChange(false)}
+        triggerRef={trigger}
+        title={title}
+        count={count}
+        actions={
+          count >= 2 ? (
+            <Button variant="text" size="sm" onClick={() => sorted.forEach((aside) => void dismiss(aside.id))}>
+              Clear all
+            </Button>
+          ) : undefined
+        }
+        width={420}
+        side="top"
+        resizeKey="side-questions"
+      >
+        <SideQuestionList questions={sorted} dismissing={dismissing} forking={forking} onDismiss={(id) => void dismiss(id)} onFork={(id) => void fork(id)} />
       </Flyout>
     </>
   );

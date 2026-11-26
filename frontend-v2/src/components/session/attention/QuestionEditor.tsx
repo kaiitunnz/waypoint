@@ -3,10 +3,9 @@
 import type { KeyboardEvent } from "react";
 
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
-import { stripRecommendedSuffix } from "@waypoint/web-core/pendingAskActions";
+import { isRecommendedLabel } from "@waypoint/web-core/pendingAskActions";
 import {
   askFormView,
-  isRecommendedLabel,
   setAskNote,
   setAskNoteOpen,
   stepAskQuestion,
@@ -16,6 +15,7 @@ import {
 } from "@waypoint/web-core/session/askQuestion";
 
 import { ActionChip } from "@/components/ui/ActionChip";
+import { OptionChips } from "@/components/sessions/OptionChips";
 import { Chip } from "@/components/ui/Chip";
 import { TextArea } from "@/components/ui/Field";
 import { cx } from "@/lib/cx";
@@ -26,19 +26,16 @@ interface QuestionEditorProps {
   questions: AskUserQuestion[];
   draft: AskDraft;
   onDraft: (update: (draft: AskDraft) => AskDraft) => void;
-  // Options and notes take no input.
   disabled: boolean;
-  // Paging stays available while the answer cannot be edited.
-  locked?: boolean;
+  // Locks paging too, while a request is in flight.
+  locked: boolean;
   onSubmit: () => void;
 }
 
-// Answers an AskUserQuestion: one question at a time, options as chips, and a
-// note beside them ("Other…") or a free-text answer.
-export function QuestionEditor({ questions, draft, onDraft, disabled, locked = false, onSubmit }: QuestionEditorProps) {
+// "Other…" opens a note kept beside the picked options, as Claude Code sends it.
+export function QuestionEditor({ questions, draft, onDraft, disabled, locked, onSubmit }: QuestionEditorProps) {
   const { index, total, entry, paginated, filled, freeText } = askFormView(questions, draft);
   if (!entry) return null;
-  const selected = new Set(draft.picked[index] ?? []);
   const noteOpen = freeText || Boolean(draft.notesOpen[index]);
   const multi = entry.multiSelect ?? false;
 
@@ -52,7 +49,7 @@ export function QuestionEditor({ questions, draft, onDraft, disabled, locked = f
     <div className={styles.editor}>
       {paginated ? (
         <div className={styles.pager}>
-          <span className={styles.count}>
+          <span>
             Question {index + 1} of {total}
             {filled[index] ? " · answered" : ""}
           </span>
@@ -72,28 +69,20 @@ export function QuestionEditor({ questions, draft, onDraft, disabled, locked = f
       ) : null}
       {multi ? <p className={styles.hint}>Multi-select</p> : null}
       {freeText ? null : (
-        <div className={styles.chips} role="group" aria-label={multi ? "Choose any" : "Options"}>
-          {entry.options.map((option) => (
-            <Chip
-              key={option.label}
-              className={styles.option}
-              recommended={isRecommendedLabel(option.label)}
-              selected={selected.has(option.label)}
-              disabled={disabled}
-              onClick={() => onDraft((current) => toggleLabel(current, index, option.label, multi))}
-            >
-              <span className={styles.optionText}>
-                <span>{stripRecommendedSuffix(option.label)}</span>
-                {option.description ? <span className={styles.desc}>{option.description}</span> : null}
-              </span>
-            </Chip>
-          ))}
+        <OptionChips
+          options={entry.options.map((option) => ({ ...option, recommended: isRecommendedLabel(option.label) }))}
+          selected={draft.picked[index] ?? []}
+          multi={multi}
+          disabled={disabled}
+          describe
+          onOption={(label) => onDraft((current) => toggleLabel(current, index, label, multi))}
+        >
           {noteOpen ? null : (
             <Chip quiet disabled={disabled} onClick={() => onDraft((current) => setAskNoteOpen(current, index, true))}>
               Other…
             </Chip>
           )}
-        </div>
+        </OptionChips>
       )}
       {noteOpen ? (
         <div className={styles.note}>

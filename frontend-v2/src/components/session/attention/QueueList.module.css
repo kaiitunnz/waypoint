@@ -62,6 +62,8 @@
 .text {
   font-size: var(--f-body);
   color: var(--text-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .actions {

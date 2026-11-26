@@ -1,12 +1,9 @@
 .card {
+  composes: card from "../../../styles/attention.module.css";
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 0;
   padding: 10px 14px 12px;
-  border: 1px solid var(--attention-line);
-  border-radius: var(--r-card);
-  background: var(--attention);
 }
 
 .head {
@@ -16,14 +13,12 @@
   min-width: 0;
 }
 
+/* Centres the lamp on the title's first line. */
 .lamp {
+  display: flex;
   flex: none;
-  width: 8px;
-  height: 8px;
-  /* Centred on the title's first line. */
-  margin-top: 7px;
-  border-radius: var(--r-pill);
-  background: var(--brass);
+  align-items: center;
+  height: 22px;
 }
 
 .title {
@@ -44,30 +39,9 @@
 }
 
 .actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.actions > :first-child {
-  margin-right: 6px;
+  composes: actions from "../../../styles/attention.module.css";
 }
 
 .end {
-  margin-left: auto;
-}
-
-.status {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
-.failure {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--f-meta);
-  color: var(--error);
+  composes: end from "../../../styles/attention.module.css";
 }

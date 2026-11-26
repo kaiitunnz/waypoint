@@ -49,7 +49,6 @@ interface Options {
   resetCompletions: () => void;
   onPending: OptimisticSends["add"];
   onOpenSession: (sessionId: string) => void;
-  // A message went into the session's queue.
   onScheduled: () => void;
 }
 

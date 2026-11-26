@@ -3,7 +3,7 @@
   z-index: var(--z-toast);
   left: 0;
   right: 0;
-  bottom: calc(var(--safe-bottom) + var(--dock-height, 0px) + var(--composer-height, 0px) + 12px);
+  bottom: calc(var(--safe-bottom) + var(--dock-height, 0px) + var(--attention-height, 0px) + var(--composer-height, 0px) + 12px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -69,7 +69,7 @@
   }
 
   .viewport {
-    bottom: calc(var(--dock-height, 0px) + var(--composer-height, 0px) + 20px);
+    bottom: calc(var(--attention-height, 0px) + var(--composer-height, 0px) + 20px);
     align-items: flex-end;
     padding: 0 20px;
   }

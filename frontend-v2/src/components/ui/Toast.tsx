@@ -34,16 +34,15 @@ interface ToastEntry extends ToastOptions {
 }
 
 interface ToastContextValue {
-  // Returns the toast's id.
-  toast: (options: ToastOptions) => number;
-  // Takes a toast's id or key.
-  dismiss: (target: number | string) => void;
+  toast: (options: ToastOptions) => void;
+  // Closes the toast showing under a key.
+  dismiss: (key: string) => void;
 }
 
 const TOAST_DURATION_MS = 4000;
 const MAX_TOASTS = 4;
 
-const ToastContext = createContext<ToastContextValue>({ toast: () => -1, dismiss: () => {} });
+const ToastContext = createContext<ToastContextValue>({ toast: () => {}, dismiss: () => {} });
 
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
@@ -76,10 +75,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     timers.current.delete(id);
   }, []);
 
-  const dismiss = useCallback(
-    (target: number | string) => {
+  const remove = useCallback(
+    (match: (entry: ToastEntry) => boolean) => {
       setEntries((current) => {
-        const gone = current.filter((entry) => entry.id === target || entry.key === target);
+        const gone = current.filter(match);
         if (gone.length === 0) return current;
         gone.forEach((entry) => clearTimer(entry.id));
         return current.filter((entry) => !gone.includes(entry));
@@ -87,6 +86,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [clearTimer],
   );
+  const dismissId = useCallback((id: number) => remove((entry) => entry.id === id), [remove]);
+  const dismiss = useCallback((key: string) => remove((entry) => entry.key === key), [remove]);
 
   const toast = useCallback(
     (options: ToastOptions) => {
@@ -99,14 +100,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         return capped([...current.filter((entry) => !replaced.includes(entry)), { ...options, duration, id }]);
       });
       if (duration !== null) {
-        timers.current.set(
-          id,
-          setTimeout(() => dismiss(id), duration),
-        );
+        timers.current.set(id, setTimeout(() => dismissId(id), duration));
       }
-      return id;
     },
-    [clearTimer, dismiss],
+    [clearTimer, dismissId],
   );
 
   useEffect(() => {
@@ -136,13 +133,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       type="button"
                       className={styles.action}
                       onClick={() => {
-                        if (entry.action?.onSelect() !== false) dismiss(entry.id);
+                        if (entry.action?.onSelect() !== false) dismissId(entry.id);
                       }}
                     >
                       {entry.action.label}
                     </button>
                   ) : null}
-                  <button type="button" className={styles.close} aria-label="Dismiss" title="Dismiss" onClick={() => dismiss(entry.id)}>
+                  <button type="button" className={styles.close} aria-label="Dismiss" title="Dismiss" onClick={() => dismissId(entry.id)}>
                     <Icon name="close" size={16} />
                   </button>
                 </div>

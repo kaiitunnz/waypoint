@@ -4,13 +4,13 @@ import type { EventRecord } from "@waypoint/web-core/types";
 import { askCardState, askToolUseId, parseAskUserQuestion } from "@waypoint/web-core/session/askQuestion";
 
 import { AskForm } from "../attention/AskForm";
-import { useAskState } from "../SessionContext";
+import { useAskController } from "../SessionContext";
 import { EventTime } from "./EventTime";
 import { RunLine } from "./RunLine";
 import styles from "./AskCard.module.css";
 
 export function AskCard({ event }: { event: EventRecord }) {
-  const { evidence, snapshot } = useAskState();
+  const { evidence, snapshot } = useAskController();
   const questions = parseAskUserQuestion(event) ?? [];
   const { waiting, outcome, answers } = askCardState(event, evidence, snapshot);
   const first = questions[0]?.question ?? "";

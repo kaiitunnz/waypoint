@@ -13,12 +13,11 @@ import {
 import { Button } from "@/components/ui/Button";
 import { cx } from "@/lib/cx";
 
-import { ClampedText } from "./ClampedText";
+import { Clamped } from "../cards/Clamped";
 import styles from "./QueueList.module.css";
 
 export interface QueueHandlers {
   onAction: (item: QueueItem, action: QueueAction) => Promise<void>;
-  // Release or cancel every held message.
   onReleaseAll: () => Promise<void>;
   onCancelAll: () => Promise<void>;
 }
@@ -35,8 +34,6 @@ const ACTION_LABEL: Record<QueueAction, string> = {
   cancel: "Cancel",
 };
 
-// Every message waiting to reach the session, held or scheduled, with what
-// releases it and what the human can do about it.
 export function QueueList({ items, focus, canSendNow, onAction, onReleaseAll, onCancelAll }: QueueListProps) {
   // Ages and countdowns move on.
   useNow(30_000);
@@ -108,7 +105,9 @@ export function QueueList({ items, focus, canSendNow, onAction, onReleaseAll, on
                 {view.cadence ? <span>{view.cadence}</span> : null}
               </div>
               {view.reason ? <p className={cx(styles.reason, view.manual && styles.manual)}>{view.reason}</p> : null}
-              <ClampedText text={view.text} className={styles.text} />
+              <Clamped lines={3} className={styles.text}>
+                {view.text}
+              </Clamped>
               <div className={styles.actions}>
                 {view.actions.map((action) => (
                   <Button

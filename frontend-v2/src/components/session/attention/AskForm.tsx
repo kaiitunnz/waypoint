@@ -1,20 +1,22 @@
 "use client";
 
+import { NOT_READY_MESSAGE } from "@waypoint/web-core/pendingAskActions";
 import {
   askFormState,
   askFormView,
   askToolUseId,
   clearAskAnswers,
-  EMPTY_ASK_DRAFT,
   serializeAnswers,
   type AskUserQuestion,
 } from "@waypoint/web-core/session/askQuestion";
 import type { EventRecord } from "@waypoint/web-core/types";
 
+import { AskStatus } from "@/components/sessions/AskStatus";
+import type { AskPhase } from "@/components/sessions/useAskResponder";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Button } from "@/components/ui/Button";
 
-import { useAskController } from "./AskController";
+import { useAskController } from "../SessionContext";
 import styles from "./AskForm.module.css";
 import { QuestionEditor } from "./QuestionEditor";
 
@@ -23,18 +25,16 @@ interface AskFormProps {
   questions: AskUserQuestion[];
 }
 
-// Answers or cancels one pending question through the session's shared controller.
 export function AskForm({ event, questions }: AskFormProps) {
   const controller = useAskController();
   const toolUseId = askToolUseId(event);
-  const draft = toolUseId ? controller.draft(toolUseId) : EMPTY_ASK_DRAFT;
-  const operation = toolUseId ? controller.operation(toolUseId) : null;
-  const failure = toolUseId ? controller.failure(toolUseId) : null;
-  const retrying = toolUseId ? controller.retrying(toolUseId) : false;
-  const resolution = toolUseId ? controller.resolution(toolUseId) : ({ state: "pending" } as const);
-  const formState = askFormState(controller.snapshot, event, resolution);
-  if (formState === "resolved" || formState === "gone" || !toolUseId) return null;
+  if (!toolUseId) return null;
+  const formState = askFormState(controller.snapshot, event, controller.resolution(toolUseId));
+  if (formState === "resolved" || formState === "gone") return null;
 
+  const draft = controller.draft(toolUseId);
+  const operation = controller.operation(toolUseId);
+  const failure = controller.failure(toolUseId);
   const busy = operation !== null;
   const actionable = formState === "actionable";
   const { hasAnswer } = askFormView(questions, draft);
@@ -47,29 +47,12 @@ export function AskForm({ event, questions }: AskFormProps) {
   };
   const cancel = () => void controller.cancel(toolUseId);
 
-  const status = retrying ? (
-    <p className={styles.note}>Waiting for the agent…</p>
-  ) : failure ? (
-    <div className={styles.failure} role="alert">
-      <p className={failure.notReady ? undefined : styles.error}>
-        {failure.notReady ? "The agent isn't ready for a reply yet" : failure.message}
-      </p>
-      <ActionChip icon="refresh" disabled={busy} onClick={failure.operation === "send" ? submit : cancel}>
-        Retry
-      </ActionChip>
-    </div>
-  ) : formState === "starting" || formState === "loading" ? (
-    <p className={styles.note}>Waiting for the agent to accept a reply</p>
-  ) : formState === "unavailable" ? (
-    <div className={styles.failure}>
-      <p>{controller.canReattach ? "This session isn't running" : "The agent can't take a reply right now"}</p>
-      {controller.canReattach ? (
-        <ActionChip icon="refresh" onClick={controller.reattach}>
-          Reattach
-        </ActionChip>
-      ) : null}
-    </div>
-  ) : null;
+  const phase: AskPhase = busy
+    ? { state: "sending", retrying: controller.retrying(toolUseId) }
+    : failure
+      ? { state: "error", message: failure.notReady ? NOT_READY_MESSAGE : failure.message }
+      : { state: "idle" };
+  const reattach = formState === "unavailable" && controller.canReattach && !failure;
 
   return (
     <div className={styles.form}>
@@ -81,7 +64,20 @@ export function AskForm({ event, questions }: AskFormProps) {
         locked={busy}
         onSubmit={submit}
       />
-      {status}
+      {reattach ? (
+        <div className={styles.reattach}>
+          <p>This session isn&apos;t running</p>
+          <ActionChip icon="refresh" onClick={controller.reattach}>
+            Reattach
+          </ActionChip>
+        </div>
+      ) : (
+        <AskStatus
+          availability={formState === "loading" ? "starting" : formState}
+          phase={phase}
+          onRetry={failure ? (failure.operation === "send" ? submit : cancel) : undefined}
+        />
+      )}
       <div className={styles.actions}>
         <Button variant="primary" size="sm" disabled={!canSend} busy={operation === "send"} onClick={submit}>
           Send

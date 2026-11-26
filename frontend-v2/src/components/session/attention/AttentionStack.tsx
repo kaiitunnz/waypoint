@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { cancelHeldMessages, isAuthError, releaseHeldMessages } from "@waypoint/web-core/api";
+import { cancelHeldMessages, releaseHeldMessages } from "@waypoint/web-core/api";
 import {
   approvalDecisionsFor,
   supportsApprovalNote,
@@ -21,8 +21,7 @@ import type {
   SessionRecord,
 } from "@waypoint/web-core/types";
 
-import { useToast } from "@/components/ui/Toast";
-import { handleAuthFailure } from "@/lib/auth";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { useSessionContext } from "../SessionContext";
 import { ApprovalDock } from "./ApprovalDock";
@@ -36,7 +35,6 @@ interface AttentionStackProps {
   session: SessionRecord;
   catalog: BackendCatalog;
   events: EventRecord[];
-  // The plan waiting for approval, when the session is in plan mode.
   plan: PlanViewModel | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
   heldMessages: HeldMessage[];
@@ -64,7 +62,7 @@ export function AttentionStack({
   onRevealQuestion,
 }: AttentionStackProps) {
   const { host, token, sessionId } = useSessionContext();
-  const { toast } = useToast();
+  const report = useFailureToast();
   const root = useRef<HTMLDivElement>(null);
   // Held here, where it survives the side-question strip mounting with its first aside:
   // a live aside's arrival opens the panel.
@@ -87,18 +85,14 @@ export function AttentionStack({
     const node = root.current;
     if (!node) return;
     const page = document.documentElement;
-    const observer = new ResizeObserver(() => page.style.setProperty("--dock-height", `${node.offsetHeight}px`));
+    const observer = new ResizeObserver(() => page.style.setProperty("--attention-height", `${node.offsetHeight}px`));
     observer.observe(node);
     return () => {
       observer.disconnect();
-      page.style.removeProperty("--dock-height");
+      page.style.removeProperty("--attention-height");
     };
   }, []);
 
-  const report = (error: unknown, fallback: string) => {
-    if (isAuthError(error)) handleAuthFailure();
-    else toast({ message: error instanceof Error ? error.message : fallback, tone: "error" });
-  };
   const run = async (request: () => Promise<void>, fallback: string) => {
     try {
       await request();

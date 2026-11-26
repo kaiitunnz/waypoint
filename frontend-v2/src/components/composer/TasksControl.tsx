@@ -4,12 +4,11 @@ import { useRef, useState } from "react";
 
 import type { TodoProgress } from "@waypoint/web-core/todos";
 
-import { Panel } from "@/components/session/attention/Panel";
-import { TaskChecklist } from "@/components/session/attention/TaskChecklist";
 import { Button } from "@/components/ui/Button";
 import { Flyout } from "@/components/ui/Flyout";
 
 import styles from "./Composer.module.css";
+import { TaskChecklist } from "./TaskChecklist";
 
 interface TasksControlProps {
   tasks: TodoProgress;
@@ -17,7 +16,6 @@ interface TasksControlProps {
   onDismiss: () => void;
 }
 
-// ☑ done/total in the control row; it opens the whole checklist.
 export function TasksControl({ tasks, onDismiss }: TasksControlProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -34,25 +32,30 @@ export function TasksControl({ tasks, onDismiss }: TasksControlProps) {
       >
         ☑ {tasks.completed}/{tasks.total}
       </button>
-      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title="Tasks" subtitle={`${tasks.completed} of ${tasks.total} done`} width={360} side="top" align="right">
-        <Panel
-          title="Tasks"
-          count={`${tasks.completed}/${tasks.total}`}
-          actions={
-            <Button
-              variant="text"
-              size="sm"
-              onClick={() => {
-                setOpen(false);
-                onDismiss();
-              }}
-            >
-              Dismiss
-            </Button>
-          }
-        >
-          <TaskChecklist progress={tasks} />
-        </Panel>
+      <Flyout
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={trigger}
+        title="Tasks"
+        subtitle={`${tasks.completed} of ${tasks.total} done`}
+        count={`${tasks.completed}/${tasks.total}`}
+        actions={
+          <Button
+            variant="text"
+            size="sm"
+            onClick={() => {
+              setOpen(false);
+              onDismiss();
+            }}
+          >
+            Dismiss
+          </Button>
+        }
+        width={360}
+        side="top"
+        align="right"
+      >
+        <TaskChecklist progress={tasks} />
       </Flyout>
     </>
   );

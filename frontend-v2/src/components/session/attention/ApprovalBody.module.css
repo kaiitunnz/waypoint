@@ -3,10 +3,6 @@
   color: var(--text);
 }
 
-.clamped {
-  composes: clamp from "../cards/Clamp.module.css";
-}
-
 .block {
   padding: 6px 9px;
   border-radius: 8px;

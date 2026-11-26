@@ -18,6 +18,7 @@ import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/compose
 import { filesFromDataTransfer, pasteAttaches } from "@waypoint/web-core/fileDrop";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
+import { useTaskDismissal } from "@waypoint/web-core/hooks/useTaskDismissal";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
 import type { OptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
@@ -28,6 +29,7 @@ import type { EventRecord, SessionRecord } from "@waypoint/web-core/types";
 import { useToast } from "@/components/ui/Toast";
 import { usePointerUI } from "@/lib/layout";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { AttachmentTray } from "./AttachmentTray";
 import styles from "./Composer.module.css";
@@ -46,7 +48,6 @@ import { useComposerSend } from "./useComposerSend";
 import { useComposerSizing } from "./useComposerSizing";
 import { useComposerTuning } from "./useComposerTuning";
 import { useSessionFocus } from "./useSessionFocus";
-import { useTaskDismissal } from "./useTaskDismissal";
 
 interface ComposerProps {
   sessionId: string;
@@ -62,7 +63,6 @@ interface ComposerProps {
   filesOpen: boolean;
   onFilesOpenChange: (open: boolean) => void;
   onPending: OptimisticSends["add"];
-  // A message went into the session's queue.
   onScheduled: () => void;
 }
 
@@ -171,7 +171,8 @@ export function Composer({
 
   const todo = useMemo(() => currentTodoEvent(events, latestTodo), [events, latestTodo]);
   const tasks = useMemo(() => summarizeTodos(readTodoEntries(todo)), [todo]);
-  const taskDock = useTaskDismissal({ host, token, sessionId, session, todo, onSession, onError: reportError });
+  const reportFailure = useFailureToast();
+  const taskDock = useTaskDismissal({ host, token, sessionId, session, todo, onSession, onError: reportFailure });
 
   const focus = useSessionFocus({ host, token, sessionId, session, onSession });
   useComposerSizing(root, field, draft, pointer);

@@ -2,8 +2,7 @@
 
 import { createContext, useContext } from "react";
 
-import type { AskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
-import type { PendingQuestionsSnapshot } from "@waypoint/web-core/types";
+import type { AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 
 interface SessionContextValue {
   host: string;
@@ -33,21 +32,15 @@ export function useSessionContext(): SessionContextValue {
   return value;
 }
 
-interface AskState {
-  evidence: AskQuestionEvidence;
-  snapshot: PendingQuestionsSnapshot | null;
-}
+// One controller per session: the dock and the transcript card share its drafts and requests.
+const AskControllerContext = createContext<AskQuestionController | null>(null);
 
-const AskStateContext = createContext<AskState | null>(null);
+export const AskControllerProvider = AskControllerContext.Provider;
 
-export const AskStateProvider = AskStateContext.Provider;
-
-export function useAskState(): AskState {
-  const value = useContext(AskStateContext);
-  if (!value) {
-    throw new Error("useAskState needs an AskStateProvider");
-  }
-  return value;
+export function useAskController(): AskQuestionController {
+  const controller = useContext(AskControllerContext);
+  if (!controller) throw new Error("useAskController needs an AskControllerProvider");
+  return controller;
 }
 
 // Keeps the transcript's view still when something in it changes size without an

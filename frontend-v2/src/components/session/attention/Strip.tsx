@@ -9,17 +9,14 @@ import styles from "./Strip.module.css";
 interface StripProps {
   glyph: ReactNode;
   label: ReactNode;
-  // Right-aligned beside the count, such as when a message sends.
   meta?: ReactNode;
   count?: ReactNode;
-  // Names the strip for assistive tech when the label alone does not.
   ariaLabel: string;
   open: boolean;
   onToggle: () => void;
   ref?: Ref<HTMLButtonElement>;
 }
 
-// One line above the composer that opens its panel.
 export function Strip({ glyph, label, meta, count, ariaLabel, open, onToggle, ref }: StripProps) {
   return (
     <button

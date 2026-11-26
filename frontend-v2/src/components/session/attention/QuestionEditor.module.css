@@ -53,36 +53,7 @@
   color: var(--muted);
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
 /* Options wrap their text, so a long one grows instead of overflowing. */
-.chips .option {
-  height: auto;
-  min-height: 44px;
-  max-width: 100%;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  white-space: normal;
-  text-align: left;
-}
-
-.optionText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.desc {
-  font-size: var(--f-meta);
-  font-weight: 400;
-  color: var(--muted);
-}
 
 .note {
   display: flex;
@@ -94,12 +65,4 @@
 .nav {
   display: flex;
   gap: 8px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .chips .option {
-    min-height: 36px;
-    padding-top: 4px;
-    padding-bottom: 4px;
-  }
 }

@@ -7,7 +7,6 @@ import { queueItemView, queueStripItem, type QueueItem } from "@waypoint/web-cor
 import { Flyout } from "@/components/ui/Flyout";
 
 import { QueueList, type QueueHandlers } from "./QueueList";
-import { Panel } from "./Panel";
 import { Strip } from "./Strip";
 
 interface QueueDockProps extends QueueHandlers {
@@ -15,7 +14,6 @@ interface QueueDockProps extends QueueHandlers {
   focus: boolean;
 }
 
-// The strip for the message queue: the next or latest message and a count.
 export function QueueDock({ items, focus, ...handlers }: QueueDockProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -37,10 +35,8 @@ export function QueueDock({ items, focus, ...handlers }: QueueDockProps) {
         open={open}
         onToggle={() => setOpen(!open)}
       />
-      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={title} width={420} side="top" resizeKey="queue">
-        <Panel title={title} count={count}>
-          <QueueList items={items} focus={focus} {...handlers} />
-        </Panel>
+      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={title} count={count} width={420} side="top" resizeKey="queue">
+        <QueueList items={items} focus={focus} {...handlers} />
       </Flyout>
     </>
   );

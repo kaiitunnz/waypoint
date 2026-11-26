@@ -1,19 +1,28 @@
 import type { PendingAsk } from "@waypoint/web-core/types";
 
+import { ActionChip } from "@/components/ui/ActionChip";
+
 import type { AskPhase } from "./useAskResponder";
 import styles from "./AskStatus.module.css";
 
 interface AskStatusProps {
   availability: PendingAsk["availability"];
   phase: AskPhase;
+  // Sends the failed response again.
+  onRetry?: () => void;
 }
 
-export function AskStatus({ availability, phase }: AskStatusProps) {
+export function AskStatus({ availability, phase, onRetry }: AskStatusProps) {
   if (phase.state === "error") {
     return (
-      <p className={styles.error} role="alert">
-        {phase.message}
-      </p>
+      <div className={styles.error} role="alert">
+        <p>{phase.message}</p>
+        {onRetry ? (
+          <ActionChip icon="refresh" onClick={onRetry}>
+            Retry
+          </ActionChip>
+        ) : null}
+      </div>
     );
   }
   if (phase.state === "sending") {

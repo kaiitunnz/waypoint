@@ -1,22 +1,17 @@
 import type { TodoProgress } from "@waypoint/web-core/todos";
 
-import { TodoItems } from "../cards/TodoItems";
+import { TodoItems } from "@/components/session/cards/TodoItems";
+import { Meter } from "@/components/ui/Meter";
+
 import styles from "./TaskChecklist.module.css";
 
-// The session's task list as the agent last wrote it.
 export function TaskChecklist({ progress }: { progress: TodoProgress }) {
   return (
     <div className={styles.checklist}>
-      <div
-        className={styles.meter}
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={progress.total}
-        aria-valuenow={progress.completed}
-        aria-label={`${progress.completed} of ${progress.total} tasks done`}
-      >
-        <span style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }} />
-      </div>
+      <Meter
+        value={progress.total ? (progress.completed / progress.total) * 100 : 0}
+        label={`${progress.completed} of ${progress.total} tasks done`}
+      />
       <TodoItems todos={progress.todos} className={styles.list} />
     </div>
   );

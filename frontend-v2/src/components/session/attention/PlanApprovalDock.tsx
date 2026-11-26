@@ -6,7 +6,7 @@ import { planApprovalActions } from "@waypoint/web-core/session/approvals";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { useSessionContext } from "../SessionContext";
-import { ClampedMarkdown } from "./ApprovalBody";
+import { ApprovalBody } from "./ApprovalBody";
 import { DecisionCard } from "./DecisionCard";
 
 interface PlanApprovalDockProps {
@@ -14,7 +14,6 @@ interface PlanApprovalDockProps {
   onSession: (session: SessionRecord) => void;
 }
 
-// The plan the agent wants approved before it leaves plan mode.
 export function PlanApprovalDock({ plan, onSession }: PlanApprovalDockProps) {
   const { host, token, sessionId, agentName } = useSessionContext();
   return (
@@ -29,7 +28,7 @@ export function PlanApprovalDock({ plan, onSession }: PlanApprovalDockProps) {
         onSession(await approvePlan(host, token, sessionId, plan.id, decision, note));
       }}
     >
-      <ClampedMarkdown text={plan.text} />
+      <ApprovalBody body={{ kind: "plan", plan: plan.text }} />
     </DecisionCard>
   );
 }

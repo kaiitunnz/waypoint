@@ -3,29 +3,21 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import { isAuthError } from "@waypoint/web-core/api";
 import {
   fidelityFor,
   hasTerminalPane,
   liveTerminal,
   supportsAttachments,
-  supportsPlanApproval,
   useBackendCatalog,
 } from "@waypoint/web-core/backends";
-import { planForEvent } from "@waypoint/web-core/events";
 import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
-import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
+import { pendingPlanApproval } from "@waypoint/web-core/session/approvals";
 import { composerAvailability } from "@waypoint/web-core/session/send";
-import {
-  deriveTranscript,
-  dockedPlanEvent,
-  TRANSCRIPT_DENSITIES,
-  type TranscriptDensity,
-} from "@waypoint/web-core/session/transcriptView";
+import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { Composer } from "@/components/composer/Composer";
@@ -39,12 +31,12 @@ import { cx } from "@/lib/cx";
 import { useNarrowerThan, usePointerUI } from "@/lib/layout";
 import { useLocalSetting } from "@/lib/local-setting";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
-import { AskControllerProvider } from "./attention/AskController";
 import { AttentionStack } from "./attention/AttentionStack";
 import { useSessionNotices } from "./attention/useSessionNotices";
 import { DensityToggle } from "./DensityToggle";
-import { AskStateProvider, SessionContextProvider } from "./SessionContext";
+import { AskControllerProvider, SessionContextProvider } from "./SessionContext";
 import { SessionBar } from "./SessionBar";
 import { SessionFooter } from "./SessionFooter";
 import { SessionHeader } from "./SessionHeader";
@@ -53,11 +45,9 @@ import styles from "./SessionScreen.module.css";
 import { SideDrawer } from "./SideDrawer";
 import { SidePane } from "./SidePane";
 import { Transcript } from "./Transcript";
+import { useQuestionReveal } from "./useQuestionReveal";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
-
-// How many older pages Show in transcript loads looking for a question.
-const REVEAL_PAGE_LIMIT = 50;
 
 export function SessionScreen({ id }: { id: string }) {
   const pointer = usePointerUI();
@@ -88,8 +78,8 @@ export function SessionScreen({ id }: { id: string }) {
   const [view, setView] = useState<SessionView>("chat");
   const goHome = useCallback(() => router.replace("/"), [router]);
   const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
-  // A second reattach would restart the session the first one restored.
-  // The menu and the question form both reattach; the ref stops a second tap before a render.
+  // A second reattach, from the menu or the question form, would restart the session the
+  // first one restored; the ref stops a second tap before the next render.
   const [reconnecting, setReconnecting] = useState(false);
   const reconnectingRef = useRef(false);
   const reconnect = useCallback(async () => {
@@ -132,17 +122,12 @@ export function SessionScreen({ id }: { id: string }) {
   const shown = useDeferredValue(live);
   const rendered = shown.events;
   const optimistic = useOptimisticSends(rendered);
-  // The plan waiting for approval sits above the composer instead of in the transcript.
-  const planMode = session?.permission_mode === "plan" && supportsPlanApproval(session.backend, catalog);
-  const planEvent = useMemo(() => (planMode ? dockedPlanEvent(events) : null), [planMode, events]);
-  const plan = useMemo(() => (planEvent ? planForEvent(planEvent) : null), [planEvent]);
-  const dockedPlanSequence = plan && planEvent ? planEvent.sequence : null;
+  const pendingPlan = useMemo(() => pendingPlanApproval(session, catalog, events), [session, catalog, events]);
+  const dockedPlanSequence = pendingPlan?.event.sequence ?? null;
   const transcript = useMemo(
     () => deriveTranscript(rendered, density, dockedPlanSequence),
     [rendered, density, dockedPlanSequence],
   );
-  const evidence = useMemo(() => indexAskQuestionEvidence(events), [events]);
-  const askState = useMemo(() => ({ evidence, snapshot: pendingQuestions }), [evidence, pendingQuestions]);
   const cwd = session?.cwd ?? "";
 
   const terminalOnly = session ? liveTerminal(session.transport, catalog) : false;
@@ -159,15 +144,8 @@ export function SessionScreen({ id }: { id: string }) {
     [host, token, id, cwd, agentName, full, structured, openFiles],
   );
 
-  const reportAskError = useCallback(
-    (requestError: unknown, fallback: string) => {
-      if (isAuthError(requestError)) handleAuthFailure();
-      else toast({ message: requestError instanceof Error ? requestError.message : fallback, tone: "error" });
-    },
-    [toast],
-  );
+  const reportFailure = useFailureToast();
   const dormant = composerAvailability(session, catalog).dormant;
-  const reattachForAsk = useCallback(() => void reconnect(), [reconnect]);
   const askController = useAskQuestionState({
     host,
     token,
@@ -175,44 +153,22 @@ export function SessionScreen({ id }: { id: string }) {
     snapshot: pendingQuestions,
     events,
     canReattach: dormant,
-    reattach: reattachForAsk,
-    onRequestError: reportAskError,
+    reattach: reconnect,
+    onRequestError: reportFailure,
     retry: true,
   });
 
-  // Show in transcript: page older events until the question's card is loaded, then
-  // let the transcript scroll to it.
-  const [revealing, setRevealing] = useState<{ toolUseId: string; seq: number } | null>(null);
-  const revealPages = useRef(0);
-  const revealQuestion = useCallback((toolUseId: string) => {
-    setView("chat");
-    revealPages.current = REVEAL_PAGE_LIMIT;
-    setRevealing((current) => ({ toolUseId, seq: (current?.seq ?? 0) + 1 }));
-  }, []);
-  const revealLoaded =
-    revealing !== null &&
-    events.some((event) => event.kind === "tool_call" && event.metadata?.tool_use_id === revealing.toolUseId);
-  useEffect(() => {
-    if (!revealing || revealLoaded || loadingOlder || !hasOlder || revealPages.current <= 0) return;
-    revealPages.current -= 1;
-    loadOlder();
-  }, [revealing, revealLoaded, loadingOlder, hasOlder, loadOlder]);
-  const onRevealed = useCallback(
-    (found: boolean) => {
-      // Summary may leave the card out; Full shows every event.
-      if (!found && density === "summary") {
-        setDensity("full");
-        setRevealing((current) => (current ? { ...current, seq: current.seq + 1 } : null));
-        return;
-      }
-      setRevealing(null);
-    },
-    [density, setDensity],
-  );
-  // The deferred turns must have caught up before the card can be on the page.
-  const revealReady = revealing !== null && revealLoaded && rendered === events;
-  // One object per request, so the transcript's search is not restarted by an unrelated render.
-  const reveal = useMemo(() => (revealReady ? revealing : null), [revealReady, revealing]);
+  const showChat = useCallback(() => setView("chat"), []);
+  const { reveal, onRevealed, revealQuestion } = useQuestionReveal({
+    events,
+    rendered,
+    hasOlder,
+    loadingOlder,
+    loadOlder,
+    density,
+    setDensity,
+    showChat,
+  });
 
   const asking = feed.askSessionIds.has(id);
   const standing = session ? sessionStanding(session, asking || (pendingQuestions?.questions.length ?? 0) > 0, connection) : null;
@@ -273,8 +229,7 @@ export function SessionScreen({ id }: { id: string }) {
 
   return (
     <SessionContextProvider value={context}>
-      <AskStateProvider value={askState}>
-        <AskControllerProvider value={askController}>
+      <AskControllerProvider value={askController}>
         <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
           {railColumn ? <SessionRail currentId={id} /> : null}
           <section ref={conversationRef} className={styles.conv} aria-label="Conversation">
@@ -311,7 +266,7 @@ export function SessionScreen({ id }: { id: string }) {
                     session={session}
                     catalog={catalog}
                     events={events}
-                    plan={plan}
+                    plan={pendingPlan?.plan ?? null}
                     pendingQuestions={pendingQuestions}
                     heldMessages={stream.heldMessages}
                     scheduled={scheduled}
@@ -355,8 +310,7 @@ export function SessionScreen({ id }: { id: string }) {
           ) : null}
         </div>
         {dialogs}
-        </AskControllerProvider>
-      </AskStateProvider>
+      </AskControllerProvider>
     </SessionContextProvider>
   );
 }

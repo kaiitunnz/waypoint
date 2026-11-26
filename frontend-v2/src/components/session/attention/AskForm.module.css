@@ -5,12 +5,7 @@
   min-width: 0;
 }
 
-.note {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
-.failure {
+.reattach {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -19,21 +14,10 @@
   color: var(--muted);
 }
 
-.error {
-  color: var(--error);
-}
-
 .actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.actions > :first-child {
-  margin-right: 6px;
+  composes: actions from "../../../styles/attention.module.css";
 }
 
 .end {
-  margin-left: auto;
+  composes: end from "../../../styles/attention.module.css";
 }

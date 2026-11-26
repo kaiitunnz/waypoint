@@ -2,8 +2,8 @@
   display: inline-flex;
   flex: none;
   align-items: center;
-  /* The buttons' own padding lines the arrows up with the title. */
-  margin: -11px -6px -11px 0;
+  /* The buttons' padding stays outside the line, so the arrows sit on the text. */
+  margin: -11px 0;
 }
 
 .count {
@@ -15,6 +15,6 @@
 
 @media (hover: hover) and (pointer: fine) {
   .pager {
-    margin: -7px -4px -7px 0;
+    margin: -7px 0;
   }
 }

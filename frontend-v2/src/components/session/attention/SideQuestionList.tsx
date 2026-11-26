@@ -5,10 +5,11 @@ import type { SideQuestion } from "@waypoint/web-core/types";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
+import { StatusLamp } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
 
 import { EventTime } from "../cards/EventTime";
-import { ClampedText } from "./ClampedText";
+import { Clamped } from "../cards/Clamped";
 import styles from "./SideQuestionList.module.css";
 
 interface SideQuestionListProps {
@@ -20,7 +21,6 @@ interface SideQuestionListProps {
   onFork: (id: string) => void;
 }
 
-// Asides the human asked beside the main thread, each with its answer.
 export function SideQuestionList({ questions, dismissing, forking, onDismiss, onFork }: SideQuestionListProps) {
   return (
     <ul className={styles.list}>
@@ -33,7 +33,7 @@ export function SideQuestionList({ questions, dismissing, forking, onDismiss, on
               <span className={cx(styles.state, failed && styles.failed)}>
                 {asking ? (
                   <>
-                    <span className={styles.pulse} aria-hidden />
+                    <StatusLamp state="working" size="sm" />
                     Asking…
                   </>
                 ) : failed ? (
@@ -50,7 +50,9 @@ export function SideQuestionList({ questions, dismissing, forking, onDismiss, on
             </div>
             <p className={styles.question}>{aside.question}</p>
             {asking ? null : (
-              <ClampedText text={aside.answer ?? aside.error ?? ""} className={cx(styles.answer, failed && styles.failed)} more="Read full aside" />
+              <Clamped lines={3} className={cx(styles.answer, failed && styles.failed)} more="Read full aside">
+                {aside.answer ?? aside.error ?? ""}
+              </Clamped>
             )}
             {asking || failed ? null : (
               <div className={styles.foot}>

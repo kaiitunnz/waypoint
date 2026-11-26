@@ -17,11 +17,11 @@ export function Lines({ text }: { text: string }) {
 }
 
 // A command or script in mono, folded at eight lines.
-export function CommandText({ text, className }: { text: string; className?: string }) {
+export function CommandText({ text }: { text: string }) {
   const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text, "start");
   return (
     <>
-      <div className={cx(styles.mono, !open && clamp.clamp, className)}>
+      <div className={cx(styles.mono, !open && clamp.clamp)}>
         <div ref={content}>
           <Lines text={shown} />
         </div>

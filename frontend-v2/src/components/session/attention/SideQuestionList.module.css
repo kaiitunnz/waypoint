@@ -36,26 +36,6 @@
   color: var(--error);
 }
 
-.pulse {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--r-pill);
-  background: var(--working);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pulse {
-    animation: none;
-  }
-}
-
 .time {
   margin-left: auto;
 }
@@ -68,6 +48,8 @@
 
 .answer {
   color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .foot {

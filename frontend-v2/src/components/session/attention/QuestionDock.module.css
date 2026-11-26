@@ -1,8 +1,5 @@
 .card {
-  min-width: 0;
-  border: 1px solid var(--attention-line);
-  border-radius: var(--r-card);
-  background: var(--attention);
+  composes: card from "../../../styles/attention.module.css";
 }
 
 .toggle {
@@ -83,12 +80,6 @@
   gap: 4px 12px;
   font-size: var(--f-meta);
   color: var(--muted);
-}
-
-.pager {
-  display: inline-flex;
-  align-items: center;
-  margin: -8px 0;
 }
 
 .reveal {

@@ -52,6 +52,7 @@ import { SessionRail } from "./SessionRail";
 import styles from "./SessionScreen.module.css";
 import { SideDrawer } from "./SideDrawer";
 import { SidePane } from "./SidePane";
+import { TerminalKeys } from "./terminal/TerminalKeys";
 import { TerminalView } from "./terminal/TerminalView";
 import { Transcript } from "./Transcript";
 import { useQuestionReveal } from "./useQuestionReveal";
@@ -91,6 +92,7 @@ export function SessionScreen({ id }: { id: string }) {
   // for this visit only.
   const [paneBesideTerminal, setPaneBesideTerminal] = useState(false);
   const switchView = (next: SessionView) => {
+    if (next === view) return;
     setView(next);
     setPaneBesideTerminal(false);
   };
@@ -274,7 +276,7 @@ export function SessionScreen({ id }: { id: string }) {
       reconnect={reconnectAction}
       lead={
         !chatComposer && focus.on ? (
-          <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={terminalViewRef} />
+          <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={terminalViewRef} side="bottom" />
         ) : null
       }
       menu={terminalMenu}
@@ -345,6 +347,7 @@ export function SessionScreen({ id }: { id: string }) {
                   />
                 ) : null
               }
+              keys={terminalView && terminal.keyInjection ? <TerminalKeys input={terminal.input} /> : null}
               composer={
                 drawerComposer ? (
                   <TerminalCompose

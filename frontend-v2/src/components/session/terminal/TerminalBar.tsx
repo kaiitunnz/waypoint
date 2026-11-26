@@ -17,7 +17,8 @@ interface TerminalBarProps {
   // Null hides the control.
   lock: { unlocked: boolean; onToggle: () => void } | null;
   onScroll: ((direction: ScrollDirection) => void) | null;
-  onJumpToLive: (() => void) | null;
+  // Takes whether the chip held the focus.
+  onJumpToLive: ((hadFocus: boolean) => void) | null;
   dims: TerminalDims | null;
   reconnect: ReconnectAction | null;
   // Session state shown at the start of the bar, such as Focus.
@@ -28,14 +29,13 @@ interface TerminalBarProps {
 export function TerminalBar({ lock, onScroll, onJumpToLive, dims, reconnect, lead, menu }: TerminalBarProps) {
   const hold = useHoldRepeat((direction: ScrollDirection) => onScroll?.(direction));
   return (
-    <div className={styles.bar} role="toolbar" aria-label="Terminal">
+    <div className={styles.bar} role="toolbar" aria-label="Terminal controls">
       {lead}
       {lock ? (
         <button
           type="button"
           className={cx(styles.lock, lock.unlocked && styles.unlocked)}
-          aria-pressed={lock.unlocked}
-          aria-label={lock.unlocked ? "Pane input unlocked. Lock it" : "Pane input locked. Unlock to type into the pane"}
+          aria-label={lock.unlocked ? "Unlocked. Lock the pane" : "Locked. Unlock to type into the pane"}
           onClick={lock.onToggle}
         >
           <Icon name={lock.unlocked ? "unlock" : "lock"} size={15} strokeWidth={1.9} />
@@ -44,12 +44,18 @@ export function TerminalBar({ lock, onScroll, onJumpToLive, dims, reconnect, lea
       ) : null}
       <span className={styles.spacer} />
       {dims ? (
-        <span className={styles.dims} aria-label={`${dims.cols} columns by ${dims.rows} rows`}>
+        <span className={styles.dims}>
           {dims.cols}×{dims.rows}
         </span>
       ) : null}
       {onJumpToLive ? (
-        <ActionChip icon="arrow-down" onClick={onJumpToLive}>
+        <ActionChip
+          icon="arrow-down"
+          // The chip goes once the pane is live: a click leaves the focus where it was,
+          // and a keyboard press hands it to the pane.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => onJumpToLive(event.currentTarget.matches(":focus"))}
+        >
           Jump to live
         </ActionChip>
       ) : null}

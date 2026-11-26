@@ -6,20 +6,3 @@
   min-height: 0;
   padding-top: calc(var(--safe-top) + var(--bar-height));
 }
-
-.foot {
-  flex: none;
-  border-top: 1px solid var(--line);
-}
-
-.col {
-  width: 100%;
-  max-width: var(--session-col);
-  margin: 0 auto;
-}
-
-@container (min-width: 600px) {
-  .col {
-    padding: 0 var(--session-gutter);
-  }
-}

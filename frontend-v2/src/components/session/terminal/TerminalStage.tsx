@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -31,16 +31,28 @@ interface Pan {
   atEnd: boolean;
 }
 
+// The letterbox's inset around a grid that fits; `.letterbox .fixed` pads by it.
+const LETTERBOX_INSET = 12;
+
+const samePan = (a: Pan | null, b: Pan | null) =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.atEnd === b.atEnd &&
+    Math.abs(a.start - b.start) < 0.001 &&
+    Math.abs(a.size - b.size) < 0.001);
+
 export function TerminalStage({ termRef, fit, typable, appearance, onData, onResize, onScrollChange }: TerminalStageProps) {
   const pointer = usePointerUI();
   const host = useRef<HTMLDivElement>(null);
-  // The token is per input; a change of input renders this again.
-  const fontSize = terminalFontSize();
+  // The size token is per input, so it is read again when the input changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const font = useMemo(() => ({ size: terminalFontSize(), family: terminalFontFamily() }), [pointer]);
   const handle = useXTerminal(host, {
     readOnly: !typable,
     autoFit: fit,
-    fontSize,
-    fontFamily: terminalFontFamily(),
+    fontSize: font.size,
+    fontFamily: font.family,
     themeFor: terminalThemeFor,
     onData,
     onResize,
@@ -53,22 +65,24 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
     };
   }, [termRef, handle]);
 
-  // A grid that fits sits on a letterbox; a wider one pans, and on touch,
-  // where scrollbars hide, shows a thin indicator.
+  // A grid that fits with its inset sits on a letterbox; a wider one pans, and
+  // on touch, where scrollbars hide, shows a thin indicator. The mode follows
+  // the grid's own width, which neither mode's padding changes.
   const [pan, setPan] = useState<Pan | null>(null);
   const measure = useCallback(() => {
     const node = host.current;
-    if (!node) return;
+    const grid = node?.firstElementChild;
+    if (!node || !(grid instanceof HTMLElement)) return;
     const { scrollLeft, scrollWidth, clientWidth } = node;
-    if (scrollWidth <= clientWidth + 1) {
-      setPan(null);
-      return;
-    }
-    setPan({
-      start: scrollLeft / scrollWidth,
-      size: clientWidth / scrollWidth,
-      atEnd: scrollLeft + clientWidth >= scrollWidth - 1,
-    });
+    const next =
+      grid.offsetWidth + 2 * LETTERBOX_INSET > clientWidth
+        ? {
+            start: scrollLeft / scrollWidth,
+            size: Math.min(1, clientWidth / scrollWidth),
+            atEnd: scrollLeft + clientWidth >= scrollWidth - 1,
+          }
+        : null;
+    setPan((current) => (samePan(current, next) ? current : next));
   }, []);
   useEffect(() => {
     const node = host.current;
@@ -79,7 +93,7 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
     if (grid) observer.observe(grid);
     return () => observer.disconnect();
   }, [fit, measure]);
-  const indicator = pan && !pointer ? pan : null;
+  const indicator = pan && pan.size < 1 && !pointer ? pan : null;
 
   return (
     <div

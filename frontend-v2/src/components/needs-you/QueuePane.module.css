@@ -72,6 +72,11 @@
   padding-bottom: 16px;
 }
 
+/* Takes the focus when the last row leaves; its ring sits inside the pane. */
+.scroll:focus-visible {
+  outline-offset: -2px;
+}
+
 .list {
   display: flex;
   flex-direction: column;

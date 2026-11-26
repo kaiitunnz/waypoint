@@ -10,6 +10,7 @@ import type { InboxStatusFilter } from "@waypoint/web-core/inbox";
 import type { QueueEntry, SourceFilter } from "@waypoint/web-core/needsYou";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 
+import { useAskLocks } from "@/components/sessions/AskLocks";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +31,7 @@ import { LoadFailed } from "./LoadFailed";
 import { useNeedsYou } from "./NeedsYouContext";
 import { QueueCard } from "./QueueCard";
 import { QueueRow } from "./QueueRow";
+import { useAnsweredFocus } from "./useAnsweredFocus";
 import { useQueue } from "./useQueue";
 import styles from "./QueuePane.module.css";
 
@@ -81,6 +83,8 @@ export function QueuePane() {
   const queue = useQueue(status, source, q, now);
   const { entries, todayEntries, list, resolved, awaiting, boardFailed } = queue;
   const { loaded } = list;
+  const locks = useAskLocks();
+  const { queueRef, listRef } = useAnsweredFocus(entries, columns, locks);
 
   // Select-all and bulk delete act on the rows shown, never on a hidden item.
   const shownToday = showToday ? todayEntries : NO_ENTRIES;
@@ -213,12 +217,14 @@ export function QueuePane() {
         </div>
       ) : null}
 
-      <div className={cx(styles.scroll, selection.selecting && styles.selecting)}>
+      <div ref={queueRef} tabIndex={-1} className={cx(styles.scroll, selection.selecting && styles.selecting)}>
         {failed ? <LoadFailed className={styles.failed} message={list.error ?? ""} onRetry={list.retry} /> : null}
         {boardFailed ? (
           <LoadFailed className={styles.failed} message={"Couldn't load board gates"} onRetry={retryGates} />
         ) : null}
-        <ul className={styles.list}>{entries.map(row)}</ul>
+        <ul ref={listRef} className={styles.list}>
+          {entries.map(row)}
+        </ul>
         {loading ? (
           <ul className={styles.skeleton} aria-label="Loading">
             {Array.from({ length: entries.length ? 2 : 6 }, (_, index) => (

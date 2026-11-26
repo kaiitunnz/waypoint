@@ -140,15 +140,17 @@ export async function loadPresetSpec(
 export type PresetSelection = { kind: "default" } | { kind: "preset"; presetId: string | null };
 
 // The preset a launch opens with, and its spec when the form can take it at once;
-// a preset with variables waits for their values.
+// a preset with variables waits for their values. A preset whose agent the host
+// or target cannot launch opens nothing.
 export function openingPreset(
   presets: SessionPresetSummary[],
   defaultPresetId: string | null,
   selection: PresetSelection,
+  launchable: Backend[],
 ): { id: string | null; spec: SessionPresetSpec | null } {
   const id = selection.kind === "preset" ? selection.presetId : defaultPresetId;
   const preset = presets.find((entry) => entry.id === id);
-  if (!preset) return { id: null, spec: null };
+  if (!preset || presetBackendUnsupported(preset, launchable)) return { id: null, spec: null };
   return { id: preset.id, spec: presetNeedsFullSpec(preset) ? null : specFromSummary(preset.spec) };
 }
 

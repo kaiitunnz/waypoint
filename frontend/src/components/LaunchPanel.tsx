@@ -15,7 +15,11 @@ import { RecurrenceControl } from "@/components/RecurrenceControl";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { attachRequest, attachTargetError } from "@waypoint/web-core/launch/attach";
 import { useLaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
-import { loadPresetSpec, type PresetSelection } from "@waypoint/web-core/launch/presets";
+import {
+  loadPresetSpec,
+  presetBackendUnsupported,
+  type PresetSelection,
+} from "@waypoint/web-core/launch/presets";
 import { withScheduleTiming } from "@waypoint/web-core/launch/schedule";
 import type { AgentThread, ThreadSummary } from "@waypoint/web-core/launch/threads";
 import {
@@ -150,12 +154,18 @@ export function LaunchPanel({
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const presetHydratedRef = useRef(false);
 
+  // A preset whose agent this target cannot launch stays selected under its
+  // warning, but fills, sends and updates nothing.
+  const selectedUnsupported =
+    presetBackendUnsupported(presets.find((preset) => preset.id === selectedPresetId) ?? null, supportedBackends) !== null;
+  const appliedPresetId = selectedUnsupported ? null : selectedPresetId;
+
   const applyPresetById = useCallback(
     async (id: string | null) => {
       setSelectedPresetId(id);
       if (!id) return;
       const summary = presets.find((preset) => preset.id === id);
-      if (!summary) return;
+      if (!summary || presetBackendUnsupported(summary, supportedBackends)) return;
       try {
         form.applyPreset(await loadPresetSpec(summary, onFetchPresetSpec));
       } catch {
@@ -165,7 +175,7 @@ export function LaunchPanel({
         setSelectedPresetId(null);
       }
     },
-    [presets, onFetchPresetSpec, form],
+    [presets, supportedBackends, onFetchPresetSpec, form],
   );
 
   // Seed the form's preset once per mount: a caller-requested preset wins,
@@ -200,7 +210,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onCreate(form.createRequest(selectedPresetId));
+      await onCreate(form.createRequest(appliedPresetId));
       form.setTitle("");
     } finally {
       setFormBusy(false);
@@ -222,7 +232,7 @@ export function LaunchPanel({
   async function submitSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setScheduleError("");
-    const built = withScheduleTiming(form.scheduleRequest(prompt, selectedPresetId), {
+    const built = withScheduleTiming(form.scheduleRequest(prompt, appliedPresetId), {
       timingMode,
       recurrence,
       timing: scheduleTiming,
@@ -290,7 +300,7 @@ export function LaunchPanel({
           <PresetSaveActions
             form={form}
             presets={presets}
-            selectedPresetId={selectedPresetId}
+            selectedPresetId={appliedPresetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}
@@ -392,7 +402,7 @@ export function LaunchPanel({
           <PresetSaveActions
             form={form}
             presets={presets}
-            selectedPresetId={selectedPresetId}
+            selectedPresetId={appliedPresetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
             onSelectPreset={setSelectedPresetId}

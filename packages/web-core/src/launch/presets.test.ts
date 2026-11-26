@@ -81,13 +81,14 @@ describe("opening a preset", () => {
   const withEnv = preset("env", { backend: "codex", launch_env_keys: ["A"] });
 
   it("opens the default or the chosen preset, with its spec when no values are needed", () => {
-    expect(openingPreset([plain, withEnv], "plain", { kind: "default" })).toEqual({
+    expect(openingPreset([plain, withEnv], "plain", { kind: "default" }, ["codex"])).toEqual({
       id: "plain",
       spec: { backend: "codex", model: "gpt" },
     });
-    expect(openingPreset([plain, withEnv], "plain", { kind: "preset", presetId: "env" })).toEqual({ id: "env", spec: null });
-    expect(openingPreset([plain], "plain", { kind: "preset", presetId: null })).toEqual({ id: null, spec: null });
-    expect(openingPreset([plain], "gone", { kind: "default" })).toEqual({ id: null, spec: null });
+    expect(openingPreset([plain, withEnv], "plain", { kind: "preset", presetId: "env" }, ["codex"])).toEqual({ id: "env", spec: null });
+    expect(openingPreset([plain], "plain", { kind: "preset", presetId: null }, ["codex"])).toEqual({ id: null, spec: null });
+    expect(openingPreset([plain], "gone", { kind: "default" }, ["codex"])).toEqual({ id: null, spec: null });
+    expect(openingPreset([plain], "plain", { kind: "default" }, ["claude_code"])).toEqual({ id: null, spec: null });
   });
 
   it("fetches the full spec only for a preset with variables", async () => {

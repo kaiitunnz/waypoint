@@ -139,7 +139,7 @@ export function PresetSelect({
       {unsupportedBackend ? (
         <p className="error preset-bar-error" role="alert">
           This preset&apos;s backend ({humaniseBackend(unsupportedBackend)})
-          isn&apos;t available here — change the backend or launch target.
+          isn&apos;t available here — pick another preset or launch target.
         </p>
       ) : null}
       {error ? (

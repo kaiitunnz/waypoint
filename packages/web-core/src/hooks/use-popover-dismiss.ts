@@ -18,9 +18,17 @@ export function usePopoverDismiss(
   // unless it has since moved into the panel.
   { keepOutsideFocus = false }: { keepOutsideFocus?: boolean } = {},
 ): void {
+  // Its own effect, so re-renders keep the order popovers opened in.
   useEffect(() => {
     if (!open) return;
     openPanels.push(panelRef);
+    return () => {
+      openPanels.splice(openPanels.indexOf(panelRef), 1);
+    };
+  }, [open, panelRef]);
+
+  useEffect(() => {
+    if (!open) return;
     function onDocClick(event: MouseEvent) {
       const target = event.target as Node | null;
       if (!target) return;
@@ -34,7 +42,8 @@ export function usePopoverDismiss(
       if (restoreFocus) triggerRef.current?.focus();
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      // Only the innermost open popover answers Escape.
+      if (event.key !== "Escape" || openPanels[openPanels.length - 1] !== panelRef) return;
       const stays = keepOutsideFocus && !panelRef.current?.contains(document.activeElement);
       setOpen(false);
       if (!stays) triggerRef.current?.focus();
@@ -42,7 +51,6 @@ export function usePopoverDismiss(
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
     return () => {
-      openPanels.splice(openPanels.indexOf(panelRef), 1);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };

@@ -4,7 +4,7 @@ import { startTransition, useCallback, useEffect, useReducer, useRef, useState }
 
 import { ApiError, connectSessionSocket, fetchEvents, fetchSession, isAuthError } from "../api";
 import { reconnectDelay } from "../session/connection";
-import { parseHeldMessagesFrame } from "../session/messageQueue";
+import { parseHeldMessagesFrame } from "../session/heldMessages";
 import { modelNoticeFromEvent } from "../session/modelNotice";
 import type { SideQuestionFrame } from "../session/sideQuestions";
 import { INITIAL_STREAM_STATE, maxEventId, streamReducer, takeNewer, type StreamState } from "../session/stream";
@@ -155,7 +155,7 @@ export function useSessionStream(
         (message) => {
           if (message.type === "event") {
             const event = sanitizeEvent(message.payload.event as EventRecord);
-            // Only a live frame raises it: catch-ups and pages replay old changes.
+            // Only a live frame raises the notice: catch-ups and pages replay old changes.
             const notice = modelNoticeFromEvent(event);
             if (notice) dispatch({ type: "modelNotice", notice });
             // Before the page loads, the catch-up that follows it reads these events anyway.
@@ -238,12 +238,5 @@ export function useSessionStream(
 
   const setSession = useCallback((session: SessionRecord) => dispatch({ type: "session", session }), []);
 
-
-  return {
-    ...state,
-    loading: !state.loaded && state.error === null,
-    loadingOlder,
-    loadOlder,
-    setSession,
-  };
+  return { ...state, loading: !state.loaded && state.error === null, loadingOlder, loadOlder, setSession };
 }

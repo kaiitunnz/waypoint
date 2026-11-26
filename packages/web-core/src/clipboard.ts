@@ -1,25 +1,7 @@
-// Clipboard helper that survives plain-HTTP origins and Safari. The async
-// Clipboard API (`navigator.clipboard`) is unavailable in non-secure contexts
-// (Waypoint is reached over http on a tailnet) and Safari rejects it outside a
-// trusted gesture, so fall back to the legacy `execCommand("copy")` path.
-
-function legacyCopy(text: string): boolean {
-  const el = document.createElement("textarea");
-  el.value = text;
-  el.setAttribute("readonly", "");
-  el.style.position = "fixed";
-  el.style.opacity = "0";
-  document.body.appendChild(el);
-  el.select();
-  let ok = false;
-  try {
-    ok = document.execCommand("copy");
-  } catch {
-    ok = false;
-  }
-  document.body.removeChild(el);
-  return ok;
-}
+// The async Clipboard API is missing on plain-HTTP origins (Waypoint is reached
+// over http on a tailnet), and iOS Safari rejects it once a gesture's activation
+// has passed. `execCommand("copy")` is deprecated but synchronous, so it still
+// works inside the tap that calls it.
 
 export async function copyText(text: string): Promise<boolean> {
   if (!text) return false;
@@ -28,36 +10,21 @@ export async function copyText(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // writeText can reject at runtime when the document loses focus or the
-      // user denied clipboard-write permission. Fall back before giving up.
-      return legacyCopy(text);
+      return copyTextSync(text);
     }
   }
-  return legacyCopy(text);
+  return copyTextSync(text);
 }
 
-// iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
-// click handler — the Promise microtask ends the transient activation
-// window before the write resolves. ``document.execCommand("copy")`` is
-// deprecated everywhere but remains the one synchronous clipboard write
-// that survives that gauntlet across iOS Safari, desktop Safari, and
-// modern Chromium.
-//
-// A contenteditable ``<div>`` is the right host: textarea's ``.value``
-// lives in an internal buffer (not DOM children), so
-// ``Range.selectNodeContents(textarea)`` selects nothing — execCommand
-// then reports success against an empty selection and the paste is
-// blank. The div holds the text in real text nodes; ``white-space: pre``
-// preserves newlines so multi-line ``/copy`` results survive intact.
+// Copies inside the current gesture. The text sits in a contenteditable element:
+// a range cannot select a textarea's value, and `white-space: pre` keeps newlines.
 export function copyTextSync(text: string): boolean {
   if (typeof document === "undefined") return false;
   const host = document.createElement("div");
   host.textContent = text;
   host.setAttribute("contenteditable", "true");
-  // ``left: -9999px`` keeps the node selectable but visually off-canvas
-  // (opacity 0 in the same coordinate space can still flash a focus
-  // ring on iOS). ``font-size: 16px`` prevents iOS's auto-zoom on
-  // focused editable fields. ``white-space: pre`` carries newlines.
+  // Off-canvas rather than transparent, which can flash a focus ring on iOS; 16px
+  // keeps iOS from zooming to it.
   host.style.cssText = [
     "position:fixed",
     "top:0",
@@ -70,20 +37,18 @@ export function copyTextSync(text: string): boolean {
     "-webkit-user-select:text",
   ].join(";");
   document.body.appendChild(host);
+  const selection = window.getSelection();
   let ok = false;
-  const sel = window.getSelection();
   try {
     const range = document.createRange();
     range.selectNodeContents(host);
-    if (sel) {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
+    selection?.removeAllRanges();
+    selection?.addRange(range);
     ok = document.execCommand("copy");
   } catch {
     ok = false;
   } finally {
-    sel?.removeAllRanges();
+    selection?.removeAllRanges();
     document.body.removeChild(host);
   }
   return ok;

@@ -1,4 +1,5 @@
 import { readToolName } from "../events";
+import { stepPage } from "./paging";
 import type {
   EventRecord,
   PendingQuestion,
@@ -280,11 +281,6 @@ export function askCardState(
 
 // ─── Answer form ───
 
-// An option the agent recommends carries a trailing "(Recommended)" marker.
-export function isRecommendedLabel(label: string): boolean {
-  return /\(recommended\)\s*$/i.test(label);
-}
-
 export function setAskNote(draft: AskDraft, index: number, note: string): AskDraft {
   return { ...draft, notes: { ...draft.notes, [index]: note } };
 }
@@ -295,8 +291,7 @@ export function setAskNoteOpen(draft: AskDraft, index: number, open: boolean): A
 
 export function stepAskQuestion(draft: AskDraft, direction: "prev" | "next", total: number): AskDraft {
   const index = Math.min(draft.activeIndex, Math.max(0, total - 1));
-  const activeIndex = direction === "prev" ? Math.max(0, index - 1) : Math.min(total - 1, index + 1);
-  return { ...draft, activeIndex };
+  return { ...draft, activeIndex: stepPage(index, direction, total) };
 }
 
 // Clears the answers and notes, keeping the page and which notes are open.
@@ -336,7 +331,6 @@ export function askFormView(questions: AskUserQuestion[], draft: AskDraft): AskF
   };
 }
 
-// The question a pending-question entry asks first, for a one-line headline.
 export function pendingQuestionPrompt(question: PendingQuestion): string {
   return parseAskUserQuestion(question.event)?.[0]?.question ?? question.event.text;
 }

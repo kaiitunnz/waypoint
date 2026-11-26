@@ -1,7 +1,7 @@
 import { cronToLabel, isRecurring } from "../recurrence";
 import type { HeldMessage, MessageSchedule } from "../types";
 import { formatRelativeTime } from "../usage";
-import { heldMessageOriginLabel, heldMessageText, holdReasonLabel } from "./heldMessages";
+import { heldMessageOriginLabel, heldMessageText, holdReasonLabel, messageText } from "./heldMessages";
 import { describeScheduledDelivery, pendingSchedulesSorted } from "./scheduledMessages";
 
 // One queue for everything a session will receive later: messages it holds and
@@ -46,7 +46,6 @@ export interface QueueItemView {
 }
 
 export interface QueueViewOptions {
-  // Focus is on for the session.
   focus: boolean;
   // A schedule can be delivered on request.
   canSendNow?: boolean;
@@ -67,23 +66,13 @@ export function queueItemView(item: QueueItem, { focus, canSendNow = false }: Qu
     };
   }
   const { schedule } = item;
-  const attached = schedule.attachments?.length ?? 0;
-  const suffix = attached ? ` (+${attached} file${attached === 1 ? "" : "s"})` : "";
   return {
     origin: "Scheduled",
     when: describeScheduledDelivery(schedule),
     cadence: isRecurring(schedule) ? cronToLabel(schedule.cron, schedule.timezone) : null,
     reason: null,
     manual: false,
-    text: (schedule.text || "(no text)") + suffix,
+    text: messageText(schedule.text, schedule.attachments?.length ?? 0),
     actions: canSendNow ? ["sendNow", "cancel"] : ["cancel"],
   };
-}
-
-// A `held_messages` frame's list for this session; null for another session's frame.
-export function parseHeldMessagesFrame(payload: unknown, sessionId: string): HeldMessage[] | null {
-  if (!payload || typeof payload !== "object") return null;
-  const { session_id, held_messages } = payload as { session_id?: unknown; held_messages?: unknown };
-  if (session_id !== sessionId) return null;
-  return Array.isArray(held_messages) ? (held_messages as HeldMessage[]) : [];
 }

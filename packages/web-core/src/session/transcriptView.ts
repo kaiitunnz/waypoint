@@ -1,7 +1,7 @@
 import type { EventRecord } from "../types";
 import { isImportantEvent } from "./importance";
 import { collapseRepeats } from "./repeats";
-import { buildTranscriptItems, collapseSupersededPlanEvents, latestActionablePlanEvent } from "./transcript";
+import { buildTranscriptItems, collapseSupersededPlanEvents } from "./transcript";
 import { groupTurns, type TranscriptTurn } from "./turns";
 
 // Summary shows the important events and folds tool runs; Full shows every event
@@ -33,9 +33,4 @@ export function deriveTranscript(
     turns: groupTurns(collapseRepeats(buildTranscriptItems(visible))),
     hiddenCount: display.length - visible.length,
   };
-}
-
-// The plan the dock asks the human to approve, if any.
-export function dockedPlanEvent(events: EventRecord[]): EventRecord | null {
-  return latestActionablePlanEvent(collapseSupersededPlanEvents(events));
 }

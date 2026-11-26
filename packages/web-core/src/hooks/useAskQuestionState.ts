@@ -10,6 +10,7 @@ import {
   resolveAskQuestion,
   type AskAnswerEntry,
   type AskDraft,
+  type AskQuestionEvidence,
   type AskQuestionResolution,
 } from "../session/askQuestion";
 import type { EventRecord, PendingQuestionsSnapshot } from "../types";
@@ -30,6 +31,8 @@ export interface AskFailure {
 export interface AskQuestionController {
   // Null until the session's first snapshot arrives.
   snapshot: PendingQuestionsSnapshot | null;
+  // What resolved each question, from every loaded event.
+  evidence: AskQuestionEvidence;
   draft: (toolUseId: string) => AskDraft;
   updateDraft: (toolUseId: string, update: (draft: AskDraft) => AskDraft) => void;
   operation: (toolUseId: string) => AskOperation | null;
@@ -139,6 +142,7 @@ export function useAskQuestionState({
   return useMemo<AskQuestionController>(
     () => ({
       snapshot,
+      evidence,
       draft: (toolUseId) => drafts[toolUseId] ?? EMPTY_ASK_DRAFT,
       updateDraft: (toolUseId, update) =>
         setDrafts((current) => ({

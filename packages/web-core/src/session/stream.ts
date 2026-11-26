@@ -63,7 +63,7 @@ export type StreamAction =
   | { type: "pendingQuestions"; snapshot: PendingQuestionsSnapshot; replace: boolean }
   | { type: "heldMessages"; messages: HeldMessage[] }
   | { type: "sideQuestion"; frame: SideQuestionFrame }
-  | { type: "modelNotice"; notice: ModelNotice | null }
+  | { type: "modelNotice"; notice: ModelNotice }
   | { type: "clipboard"; text: string }
   | { type: "connection"; connection: ConnectionState }
   | { type: "error"; message: string | null; status?: number };

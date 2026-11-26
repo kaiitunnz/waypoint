@@ -1,5 +1,17 @@
-import { normalizeToolName, parseEvent, type EventDiffPreview, type PlanDecision } from "../events";
-import type { EventRecord } from "../types";
+import { supportsPlanApproval, type BackendCatalog } from "../backends";
+import {
+  asRecord,
+  FILE_EDIT_TOOLS,
+  parseEvent,
+  planForEvent,
+  readToolName,
+  toolFilePath,
+  type EventDiffPreview,
+  type PlanDecision,
+  type PlanViewModel,
+} from "../events";
+import type { EventRecord, SessionRecord } from "../types";
+import { collapseSupersededPlanEvents, latestActionablePlanEvent } from "./transcript";
 
 export function findPendingApprovals(events: EventRecord[]): EventRecord[] {
   // Track approvals as a queue: every approval_request enqueues, and every
@@ -29,27 +41,8 @@ function isApprovalResolutionEvent(event: EventRecord): boolean {
   return /(Approval response sent|Approval timed out)/i.test(event.text);
 }
 
-export interface ApprovalPager {
-  count: number;
-  page: number;
-  current: EventRecord | null;
-}
-
-// The queue can shrink under the page index (an approval resolves while the
-// pager is on a later one), so the index is clamped on every read.
-export function approvalPager(approvals: EventRecord[], index: number): ApprovalPager {
-  const count = approvals.length;
-  const page = count > 0 ? Math.min(index, count - 1) : 0;
-  return { count, page, current: approvals[page] ?? null };
-}
-
-export function stepApprovalPage(index: number, direction: "prev" | "next", count: number): number {
-  return direction === "prev" ? Math.max(0, index - 1) : Math.min(count - 1, index + 1);
-}
-
 // ─── Approval cards ───
 
-// What an approval card shows, by tool.
 export type ApprovalBody =
   | { kind: "diff"; prompt: string; preview: EventDiffPreview }
   | { kind: "plan"; plan: string }
@@ -59,25 +52,15 @@ export type ApprovalBody =
   | { kind: "edit"; tool: string; path: string | null }
   | { kind: "raw"; text: string };
 
-const FILE_EDIT_APPROVAL_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 const WORKFLOW_TOOLS = new Set(["Workflow", "RunWorkflow"]);
-
-function approvalTool(event: EventRecord): { tool: string | null; input: Record<string, unknown> | null } {
-  const metadata = event.metadata ?? {};
-  const tool = normalizeToolName(typeof metadata.tool_name === "string" ? metadata.tool_name : null);
-  const input =
-    metadata.tool_input && typeof metadata.tool_input === "object"
-      ? (metadata.tool_input as Record<string, unknown>)
-      : null;
-  return { tool, input };
-}
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 
 export function approvalBody(event: EventRecord): ApprovalBody {
   const preview = parseEvent(event).diffPreview;
   if (preview) return { kind: "diff", prompt: event.text, preview };
-  const { tool, input } = approvalTool(event);
+  const tool = readToolName(event);
+  const input = asRecord(event.metadata?.tool_input);
   if (tool === "ExitPlanMode" && typeof input?.plan === "string") return { kind: "plan", plan: input.plan };
   if ((tool === "Task" || tool === "Agent") && typeof input?.prompt === "string") {
     return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
@@ -88,14 +71,10 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   if (tool && WORKFLOW_TOOLS.has(tool) && typeof input?.script === "string") {
     return { kind: "workflow", script: input.script };
   }
-  if (tool && FILE_EDIT_APPROVAL_TOOLS.has(tool)) {
-    const path = input?.file_path ?? input?.path ?? input?.notebook_path;
-    return { kind: "edit", tool, path: typeof path === "string" && path ? path : null };
-  }
+  if (tool && FILE_EDIT_TOOLS.has(tool)) return { kind: "edit", tool, path: toolFilePath(input) };
   return { kind: "raw", text: event.text };
 }
 
-// The line above an approval's body.
 export function approvalPrompt(body: ApprovalBody): string | null {
   switch (body.kind) {
     case "diff":
@@ -116,8 +95,7 @@ export function approvalPrompt(body: ApprovalBody): string | null {
 }
 
 // What copying an approval copies: the plan, prompt, command or script, else the event text.
-export function approvalCopyText(event: EventRecord): string {
-  const body = approvalBody(event);
+export function approvalCopyText(body: ApprovalBody, eventText: string): string {
   switch (body.kind) {
     case "plan":
       return body.plan;
@@ -128,7 +106,7 @@ export function approvalCopyText(event: EventRecord): string {
     case "workflow":
       return body.script;
     default:
-      return event.text;
+      return eventText;
   }
 }
 
@@ -165,9 +143,19 @@ const PLAN_ACTIONS: ReadonlyArray<ApprovalAction<PlanDecision>> = [
   { id: "cancel", label: "Cancel", loadingLabel: "Cancelling…", primary: false },
 ];
 
-// A plan with no decision list offers every plan decision.
-export function planApprovalActions(decisions: readonly PlanDecision[] | undefined): ApprovalAction<PlanDecision>[] {
-  if (!decisions || decisions.length === 0) return [...PLAN_ACTIONS];
-  const allowed = new Set(decisions);
-  return PLAN_ACTIONS.filter((action) => allowed.has(action.id));
+export function planApprovalActions(decisions: readonly PlanDecision[]): ApprovalAction<PlanDecision>[] {
+  return PLAN_ACTIONS.filter((action) => decisions.includes(action.id));
+}
+
+// The plan waiting for the human: the session is in plan mode, its agent takes plan
+// approvals, and the newest plan has no decision yet.
+export function pendingPlanApproval(
+  session: SessionRecord | null,
+  catalog: BackendCatalog | undefined,
+  events: EventRecord[],
+): { event: EventRecord; plan: PlanViewModel } | null {
+  if (session?.permission_mode !== "plan" || !supportsPlanApproval(session.backend, catalog)) return null;
+  const event = latestActionablePlanEvent(collapseSupersededPlanEvents(events));
+  const plan = event ? planForEvent(event) : null;
+  return event && plan ? { event, plan } : null;
 }

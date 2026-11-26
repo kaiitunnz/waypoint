@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HeldMessage, MessageSchedule } from "../types";
-import { buildMessageQueue, heldCount, parseHeldMessagesFrame, queueItemView, queueStripItem } from "./messageQueue";
+import { buildMessageQueue, heldCount, queueItemView, queueStripItem } from "./messageQueue";
 
 const held = (id: string, overrides: Partial<HeldMessage> = {}): HeldMessage => ({
   id,
@@ -77,14 +77,5 @@ describe("queueItemView", () => {
     const view = queueItemView(item, { focus: false });
     expect(view.when).toBe("When idle");
     expect(view.reason).toBeNull();
-  });
-});
-
-describe("parseHeldMessagesFrame", () => {
-  it("keeps this session's list and ignores another session's frame", () => {
-    expect(parseHeldMessagesFrame({ session_id: "s1", held_messages: [held("a")] }, "s1")).toHaveLength(1);
-    expect(parseHeldMessagesFrame({ session_id: "s1" }, "s1")).toEqual([]);
-    expect(parseHeldMessagesFrame({ session_id: "s2", held_messages: [] }, "s1")).toBeNull();
-    expect(parseHeldMessagesFrame(null, "s1")).toBeNull();
   });
 });

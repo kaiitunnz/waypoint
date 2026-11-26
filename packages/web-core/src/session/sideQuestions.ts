@@ -40,7 +40,6 @@ export function sortedSideQuestions(questions: Iterable<SideQuestion>): SideQues
   return [...questions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-// The strip reads "Asking…" while any aside is still being answered, else the latest question.
 export function sideQuestionStripLabel(sorted: SideQuestion[]): string {
   if (sorted.some((question) => question.status === "pending")) return "Asking…";
   return sorted[0]?.question ?? "";

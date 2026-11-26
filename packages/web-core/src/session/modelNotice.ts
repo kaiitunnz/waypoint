@@ -10,7 +10,6 @@ export interface ModelNotice {
   selection: string | null;
 }
 
-// Read only from live events: a replayed model.change must not raise it again.
 export function modelNoticeFromEvent(event: EventRecord): ModelNotice | null {
   if (!isModelChangeEvent(event)) return null;
   const metadata = event.metadata ?? {};

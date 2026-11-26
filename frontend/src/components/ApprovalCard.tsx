@@ -10,7 +10,7 @@ import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
-import type { PlanDecision } from "@waypoint/web-core/events";
+import { PLAN_DECISIONS, type PlanDecision } from "@waypoint/web-core/events";
 import {
   approvalActions,
   approvalBody,
@@ -169,10 +169,11 @@ export function ApprovalRequestCard({
   decisions?: readonly string[];
 }) {
   const id = approvalId(event);
+  const body = approvalBody(event);
   return (
     <SharedApprovalCard
       badge="approval"
-      copyText={approvalCopyText(event)}
+      copyText={approvalCopyText(body, event.text)}
       notePlaceholder="Add a note to your approval or decline…"
       supportsNote={supportsNote}
       actions={approvalActions(decisions).map((action) => ({
@@ -182,7 +183,7 @@ export function ApprovalRequestCard({
         onSelect: (note?: string) => onDecide(action.id, note, id),
       }))}
     >
-      <ApprovalCardBody body={approvalBody(event)} />
+      <ApprovalCardBody body={body} />
     </SharedApprovalCard>
   );
 }
@@ -208,7 +209,7 @@ export function PlanApprovalCard({
 }) {
   const actions =
     canApprove && onDecide
-      ? planApprovalActions(decisions).map((entry) => ({
+      ? planApprovalActions(decisions?.length ? decisions : PLAN_DECISIONS).map((entry) => ({
           id: entry.id,
           label: entry.label,
           loadingLabel: entry.loadingLabel,

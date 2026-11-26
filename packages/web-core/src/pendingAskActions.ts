@@ -10,9 +10,16 @@ import type {
 
 // ─── Questions ───
 
-// The recommended flag carries the "(Recommended)" marker, so the label drops it.
+// An option the agent recommends carries a trailing "(Recommended)" marker.
+const RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i;
+
+export function isRecommendedLabel(label: string): boolean {
+  return RECOMMENDED_SUFFIX.test(label);
+}
+
+// The recommended flag carries the marker, so the label drops it.
 export function stripRecommendedSuffix(label: string): string {
-  return label.replace(/\s*\(recommended\)\s*$/i, "").trim() || label;
+  return label.replace(RECOMMENDED_SUFFIX, "").trim() || label;
 }
 
 // Labels are the options' own text, "(Recommended)" included.

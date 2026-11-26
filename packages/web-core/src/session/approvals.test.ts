@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { ev } from "../test-helpers";
+import { ev, planMetadata } from "../test-helpers";
+import type { SessionRecord } from "../types";
 import {
   approvalActions,
   approvalBody,
   approvalCopyText,
   approvalId,
-  approvalPager,
   approvalPrompt,
   findPendingApprovals,
+  pendingPlanApproval,
   planApprovalActions,
-  stepApprovalPage,
 } from "./approvals";
 
 const request = (seq: number, approvalId?: string) =>
@@ -63,38 +63,6 @@ describe("findPendingApprovals", () => {
   });
 });
 
-describe("approvalPager", () => {
-  const approvals = [request(1, "a"), request(2, "b"), request(3, "c")];
-
-  it("reports an empty queue", () => {
-    expect(approvalPager([], 0)).toEqual({ count: 0, page: 0, current: null });
-    expect(approvalPager([], 4)).toEqual({ count: 0, page: 0, current: null });
-  });
-
-  it("selects the page at the index", () => {
-    expect(approvalPager(approvals, 1)).toEqual({ count: 3, page: 1, current: approvals[1] });
-  });
-
-  it("clamps an index past the end when the queue has shrunk", () => {
-    expect(approvalPager(approvals.slice(0, 2), 2)).toEqual({ count: 2, page: 1, current: approvals[1] });
-    expect(approvalPager(approvals, 99).page).toBe(2);
-  });
-});
-
-describe("stepApprovalPage", () => {
-  it("moves one page and stops at both ends", () => {
-    expect(stepApprovalPage(1, "next", 3)).toBe(2);
-    expect(stepApprovalPage(2, "next", 3)).toBe(2);
-    expect(stepApprovalPage(1, "prev", 3)).toBe(0);
-    expect(stepApprovalPage(0, "prev", 3)).toBe(0);
-  });
-
-  it("steps from the raw index, so a stale index past the end only moves down by one", () => {
-    expect(stepApprovalPage(5, "prev", 2)).toBe(4);
-    expect(stepApprovalPage(5, "next", 2)).toBe(1);
-  });
-});
-
 const approval = (toolName: string, toolInput: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
   ev(1, "approval_request", "raw text", { tool_name: toolName, tool_input: toolInput, approval_id: "ap1", ...extra });
 
@@ -132,10 +100,11 @@ describe("approvalBody", () => {
   });
 
   it("copies the command, plan, prompt or script, else the text", () => {
-    expect(approvalCopyText(approval("Bash", { command: "ls" }))).toBe("ls");
-    expect(approvalCopyText(approval("ExitPlanMode", { plan: "p" }))).toBe("p");
-    expect(approvalCopyText(approval("Task", { prompt: "go" }))).toBe("go");
-    expect(approvalCopyText(approval("Mystery", {}))).toBe("raw text");
+    const copy = (event: ReturnType<typeof approval>) => approvalCopyText(approvalBody(event), event.text);
+    expect(copy(approval("Bash", { command: "ls" }))).toBe("ls");
+    expect(copy(approval("ExitPlanMode", { plan: "p" }))).toBe("p");
+    expect(copy(approval("Task", { prompt: "go" }))).toBe("go");
+    expect(copy(approval("Mystery", {}))).toBe("raw text");
     expect(approvalId(approval("Bash", { command: "ls" }))).toBe("ap1");
   });
 });
@@ -153,9 +122,25 @@ describe("approval actions", () => {
     expect(approvalActions(undefined).filter((a) => a.primary).map((a) => a.id)).toEqual(["accept"]);
   });
 
-  it("offers every plan decision unless the plan lists its own", () => {
-    expect(planApprovalActions(undefined)).toHaveLength(4);
-    expect(planApprovalActions([]).map((a) => a.id)).toEqual(["accept", "acceptForSession", "decline", "cancel"]);
-    expect(planApprovalActions(["accept", "decline"]).map((a) => a.id)).toEqual(["accept", "decline"]);
+  it("offers the plan's decisions in a fixed order", () => {
+    expect(planApprovalActions(["decline", "accept"]).map((a) => a.id)).toEqual(["accept", "decline"]);
+    expect(planApprovalActions(["accept", "acceptForSession", "decline", "cancel"])).toHaveLength(4);
+  });
+});
+
+describe("pendingPlanApproval", () => {
+  const plan = ev(2, "agent_output", "plan", planMetadata("p1", "Do it"));
+  const session = (mode: string, backend = "codex") => ({ permission_mode: mode, backend }) as SessionRecord;
+
+  it("is the undecided plan of a plan-mode session whose agent takes plan approvals", () => {
+    const found = pendingPlanApproval(session("plan"), undefined, [ev(1, "user_input", "go"), plan]);
+    expect(found?.event).toBe(plan);
+    expect(found?.plan.id).toBe("p1");
+  });
+
+  it("is null outside plan mode, or for an agent without plan approval", () => {
+    expect(pendingPlanApproval(session("default"), undefined, [plan])).toBeNull();
+    expect(pendingPlanApproval(session("plan", "claude_code"), undefined, [plan])).toBeNull();
+    expect(pendingPlanApproval(null, undefined, [plan])).toBeNull();
   });
 });

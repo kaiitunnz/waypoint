@@ -61,9 +61,6 @@ export function AskQuestionOptions({
   );
 }
 
-// Session-scoped question state shared by the transcript cards and the
-// pending-question dock, so both show one draft and one availability per
-// request.
 export const AskQuestionContext = createContext<AskQuestionController | null>(null);
 
 export function useAskQuestionController(): AskQuestionController {
@@ -110,8 +107,7 @@ export function AskQuestionForm({
   const editable = open && toolUseId !== null;
   const busy = operation !== null;
 
-  const view = askFormView(questions, draft);
-  const { index, total, entry, paginated, filled, hasAnswer, freeText } = view;
+  const { index, total, entry, paginated, filled, hasAnswer, freeText } = askFormView(questions, draft);
   const canSubmit = actionable && !busy && hasAnswer;
 
   async function submit() {

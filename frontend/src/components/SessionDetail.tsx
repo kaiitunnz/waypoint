@@ -33,7 +33,6 @@ import {
   resolveWorkspacePath,
   sendInput,
   setSessionFocus,
-  setTaskDockDismissed,
   setSessionPinned,
   setSessionTitle,
 } from "@waypoint/web-core/api";
@@ -51,7 +50,6 @@ import {
   permissionModesFor,
   supportsApprovalNote,
   supportsAttachments,
-  supportsPlanApproval,
   supportsStructuredApproval,
   terminalInteractive,
   terminalKeyInjection,
@@ -61,7 +59,7 @@ import {
   useBackendCatalog,
 } from "@waypoint/web-core/backends";
 import { copyTextSync } from "@waypoint/web-core/clipboard";
-import { parseHeldMessagesFrame } from "@waypoint/web-core/session/messageQueue";
+import { parseHeldMessagesFrame } from "@waypoint/web-core/session/heldMessages";
 import { modelNoticeFromEvent, type ModelNotice } from "@waypoint/web-core/session/modelNotice";
 import {
   applySideQuestionFrame,
@@ -94,12 +92,11 @@ import { useCopied } from "@waypoint/web-core/hooks/use-copied";
 import {
   isTaskNotificationEvent,
   parseTaskNotification,
-  planForEvent,
   type PlanDecision,
-  type PlanViewModel,
   type TaskNotificationKind,
 } from "@waypoint/web-core/events";
-import { approvalPager, findPendingApprovals, stepApprovalPage } from "@waypoint/web-core/session/approvals";
+import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
+import { pageOf, stepPage } from "@waypoint/web-core/session/paging";
 import {
   connectionLabel,
   connectionTitle,
@@ -115,7 +112,6 @@ import {
   buildTranscriptItems,
   collapseSupersededPlanEvents,
   foldOlderEvents,
-  latestActionablePlanEvent,
   mergeEvents,
   minRawSequence,
   removeConfirmedOptimisticMessages,
@@ -162,14 +158,8 @@ import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionStat
 import { PendingQuestionDock } from "@/components/PendingQuestionDock";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
-import {
-  currentTodoEvent,
-  dismissedTaskSequence,
-  isTaskProgressDismissed,
-  readTodoEntries,
-  summarizeTodos,
-  type PendingTaskDismissal,
-} from "@waypoint/web-core/todos";
+import { useTaskDismissal } from "@waypoint/web-core/hooks/useTaskDismissal";
+import { currentTodoEvent, readTodoEntries, summarizeTodos } from "@waypoint/web-core/todos";
 import {
   effortLabel,
   formatResolvedModelLabel,
@@ -417,11 +407,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     setRevealTarget(null);
   }, [sessionId]);
   const [focusBusy, setFocusBusy] = useState(false);
-  // An in-flight dismiss/show wins over the session record until its request
-  // settles; otherwise a session_state push read before the write commits
-  // would flash the dock back.
-  const [pendingTaskDock, setPendingTaskDock] = useState<PendingTaskDismissal | null>(null);
-  const taskDockRequestRef = useRef(0);
   // The dock expands when a live (non-hydrated) side-question first arrives.
   const [sqExpanded, setSqExpanded] = useState(false);
   useEffect(() => {
@@ -1041,32 +1026,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [host, token, sessionId, handleAuthFailure],
   );
 
-  const handleTaskDockDismissal = useCallback(
-    async (sequence: number | null) => {
-      const request = ++taskDockRequestRef.current;
-      setPendingTaskDock({ sessionId, sequence });
-      try {
-        const updated = await setTaskDockDismissed(host, token, sessionId, sequence);
-        if (request === taskDockRequestRef.current) {
-          setSession(updated);
-        }
-      } catch (dockError) {
-        if (isAuthError(dockError)) {
-          handleAuthFailure();
-          return;
-        }
-        setError(
-          dockError instanceof Error ? dockError.message : "failed to update task progress",
-        );
-      } finally {
-        if (request === taskDockRequestRef.current) {
-          setPendingTaskDock(null);
-        }
-      }
-    },
-    [host, token, sessionId, handleAuthFailure],
-  );
-
   const runHeldAction = useCallback(
     async (action: () => Promise<void>) => {
       try {
@@ -1133,7 +1092,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     count: approvalCount,
     page: safeApprovalPage,
     current: pendingApproval,
-  } = approvalPager(pendingApprovals, approvalPageIndex);
+  } = pageOf(pendingApprovals, approvalPageIndex);
   const agentBusy = session ? isAgentBusy(session, connection) : false;
   const displayEvents = useMemo(
     () => collapseSupersededPlanEvents(renderedEvents),
@@ -1147,18 +1106,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [filterMode, displayEvents],
   );
   const hiddenEventCount = displayEvents.length - visibleEvents.length;
-  const pendingPlanApprovalEvent = useMemo(
-    () =>
-      session?.permission_mode === "plan" &&
-      supportsPlanApproval(session.backend, catalog)
-        ? latestActionablePlanEvent(displayEvents)
-        : null,
+  const pendingPlan = useMemo(
+    () => pendingPlanApproval(session, catalog, displayEvents),
     [session, catalog, displayEvents],
   );
-  const pendingPlanApprovalView: PlanViewModel | null = useMemo(
-    () => (pendingPlanApprovalEvent ? planForEvent(pendingPlanApprovalEvent) : null),
-    [pendingPlanApprovalEvent],
-  );
+  const pendingPlanApprovalEvent = pendingPlan?.event ?? null;
+  const pendingPlanApprovalView = pendingPlan?.plan ?? null;
   const transcriptEventsForDisplay = useMemo(
     () =>
       pendingPlanApprovalEvent
@@ -1309,10 +1262,26 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     : !canShowTerminal
       ? "chat"
       : view;
-  const taskDockDismissed = isTaskProgressDismissed(
-    currentTaskEvent,
-    dismissedTaskSequence(pendingTaskDock, sessionId, session?.task_dock_dismissed_sequence),
+  const reportTaskDockError = useCallback(
+    (dockError: unknown, fallback: string) => {
+      if (isAuthError(dockError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(dockError instanceof Error ? dockError.message : fallback);
+    },
+    [handleAuthFailure],
   );
+  const taskDock = useTaskDismissal({
+    host,
+    token,
+    sessionId,
+    session,
+    todo: currentTaskEvent,
+    onSession: setSession,
+    onError: reportTaskDockError,
+  });
+  const taskDockDismissed = taskDock.dismissed;
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
@@ -1909,11 +1878,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       {showTaskDock && taskProgress ? (
         <TaskProgressDock
           progress={taskProgress}
-          onDismiss={() => {
-            if (currentTaskEvent) {
-              void handleTaskDockDismissal(currentTaskEvent.sequence);
-            }
-          }}
+          onDismiss={taskDock.dismiss}
         />
       ) : null}
       {heldMessages.length ? (
@@ -2236,7 +2201,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "prev", approvalCount))}
+                onClick={() => setApprovalPageIndex((i) => stepPage(i, "prev", approvalCount))}
                 disabled={safeApprovalPage === 0}
                 aria-label="Previous approval"
               >
@@ -2248,7 +2213,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               <button
                 type="button"
                 className="approval-pager-btn"
-                onClick={() => setApprovalPageIndex((i) => stepApprovalPage(i, "next", approvalCount))}
+                onClick={() => setApprovalPageIndex((i) => stepPage(i, "next", approvalCount))}
                 disabled={safeApprovalPage === approvalCount - 1}
                 aria-label="Next approval"
               >
@@ -2332,7 +2297,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             setToolRunsExpanded(next);
           }}
           canShowTasks={canShowTasks}
-          onShowTasks={() => void handleTaskDockDismissal(null)}
+          onShowTasks={taskDock.show}
           onDelete={removeFromList}
           onInterrupt={interruptSession}
           onModeChange={handlePermissionModeChange}

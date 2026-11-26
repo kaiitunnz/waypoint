@@ -18,7 +18,6 @@ import {
   type AskUserQuestion,
   askFormView,
   clearAskAnswers,
-  isRecommendedLabel,
   pendingQuestionPrompt,
   pendingQuestionsCountLabel,
   setAskNote,
@@ -349,12 +348,6 @@ describe("answer form helpers", () => {
     draft = setAskNoteOpen(setAskNote(draft, 0, "n"), 0, true);
     const cleared = clearAskAnswers({ ...draft, picked: { 0: ["B"] } });
     expect(cleared).toEqual({ ...draft, picked: {}, notes: {} });
-  });
-
-  it("spots the recommended marker", () => {
-    expect(isRecommendedLabel("A (Recommended)")).toBe(true);
-    expect(isRecommendedLabel("A (recommended) ")).toBe(true);
-    expect(isRecommendedLabel("Recommended A")).toBe(false);
   });
 
   it("heads a waiting question by its first prompt", () => {

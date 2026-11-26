@@ -1,6 +1,5 @@
 "use client";
 
-import { notFound } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { SETTINGS_HREF, settingsSectionHref } from "@waypoint/web-core/shellNav";
@@ -31,8 +30,7 @@ function byScope(sections: SettingsSectionSpec[]): { title?: string; sections: S
 export function SettingsScreen({ sectionId }: { sectionId?: string }) {
   const phone = usePhoneLayout();
   const columns = useMultiColumn();
-  const section = sectionId === undefined ? null : SETTINGS_SECTIONS.find((entry) => entry.id === sectionId);
-  if (sectionId !== undefined && !section) notFound();
+  const section = SETTINGS_SECTIONS.find((entry) => entry.id === sectionId);
 
   if (phone && section) {
     return (

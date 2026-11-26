@@ -1,14 +1,10 @@
-"use client";
-
 import type { ComponentType } from "react";
 
-import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
-
-import { PickerRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
-import { useTheme } from "@/lib/theme";
+import { Appearance, SessionLists } from "./DeviceSections";
 
 // Device sections are this browser's own choices; server sections belong to the backend
 // in use and read it from the shell. A section renders one or more SettingsSections.
+// No "use client": the route reads the ids on the server.
 export type SettingsScope = "device" | "server";
 
 export interface SettingsSectionSpec {
@@ -17,32 +13,6 @@ export interface SettingsSectionSpec {
   title: string;
   scope: SettingsScope;
   Component: ComponentType;
-}
-
-function Appearance() {
-  const { theme, setTheme } = useTheme();
-  return (
-    <SettingsSection>
-      <PickerRow
-        label="Theme"
-        value={theme}
-        onChange={setTheme}
-        options={[
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]}
-      />
-    </SettingsSection>
-  );
-}
-
-function SessionLists() {
-  const [previews, setPreviews] = useConversationPreviews();
-  return (
-    <SettingsSection>
-      <SwitchRow label="Conversation previews" checked={previews} onChange={setPreviews} />
-    </SettingsSection>
-  );
 }
 
 // In page order. A new section is one entry here.

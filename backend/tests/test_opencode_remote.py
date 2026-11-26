@@ -23,6 +23,7 @@ async def test_remote_serve_script_honors_configured_binary(tmp_path: Path) -> N
     stub.write_text(
         "#!/usr/bin/env bash\n"
         f"echo \"$0 $*\" > '{argv_log}'\n"
+        f"echo \"$OPENCODE_SERVER_PASSWORD $OPENCODE_PASSWORD\" >> '{argv_log}'\n"
         'echo "listening on http://127.0.0.1:9999"\n'
         "sleep 5\n"
     )
@@ -41,12 +42,15 @@ async def test_remote_serve_script_honors_configured_binary(tmp_path: Path) -> N
     assert proc.stdout is not None
 
     try:
+        proc.stdin.write(b"s3cret\n")
         line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=10)
         assert line_bytes.decode().strip() == "__WP_PORT__=9999"
         assert argv_log.exists()
-        recorded = argv_log.read_text().strip()
+        recorded, passwords = argv_log.read_text().splitlines()
         assert recorded.startswith(str(stub))
         assert "serve --hostname=127.0.0.1 --port=0" in recorded
+        assert "s3cret" not in recorded
+        assert passwords == "s3cret s3cret"
     finally:
         proc.stdin.close()
         try:

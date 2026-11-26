@@ -13,19 +13,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import aiohttp
-
 from waypoint.asyncio_tasks import cancel_and_wait
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.opencode.client import (
     LocalOpenCodeClient,
     OpenCodeHttpClient,
-    OpenCodeHttpError,
-    OpenCodeNonJsonError,
     RemoteOpenCodeClient,
+    http_status,
 )
 from waypoint.backends.opencode.normalize import map_event
+from waypoint.backends.opencode.probe import (
+    IncompatibleServerError,
+    ServerInfo,
+    probe_server,
+)
 from waypoint.backends.opencode.remote import build_remote_serve_args
+from waypoint.backends.opencode.server_auth import ServerAuth
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
@@ -80,18 +83,6 @@ SessionUpdateCallback = Callable[
     Awaitable[Any],
 ]
 TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
-
-
-# Statuses that mean the server is up but does not serve this API.
-_INCOMPATIBLE_PROBE_STATUSES = frozenset({401, 403, 404})
-
-
-def _http_status(exc: BaseException) -> int | None:
-    if isinstance(exc, OpenCodeHttpError):
-        return exc.status
-    if isinstance(exc, aiohttp.ClientResponseError):
-        return exc.status
-    return None
 
 
 class OpenCodeError(RuntimeError):
@@ -182,6 +173,7 @@ class OpenCodeAdapter:
         self._server_process: asyncio.subprocess.Process | None = None
         self._sse_task: asyncio.Task[None] | None = None
         self._client: OpenCodeHttpClient | None = None
+        self.server_info: ServerInfo | None = None
         self._started = False
         self._start_lock = asyncio.Lock()
 
@@ -212,6 +204,7 @@ class OpenCodeAdapter:
         cwd = str(Path(self._workdir).expanduser()) if self._workdir else None
 
         log.info("starting local opencode server on %s:%d", self._host, self._port)
+        auth = ServerAuth.generate()
         # Spawn directly with the requested port (0 = let the kernel pick) and
         # parse the bound port from the server's "listening on" log line. The
         # previous bind/close/spawn dance left a TOCTOU window where another
@@ -227,7 +220,7 @@ class OpenCodeAdapter:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
             cwd=cwd,
-            env={**os.environ, **self._launch_env},
+            env={**os.environ, **self._launch_env, **auth.server_env()},
         )
 
         bound_port = await self._read_local_listening_port()
@@ -245,7 +238,7 @@ class OpenCodeAdapter:
             )
 
         self._port = bound_port
-        self._client = LocalOpenCodeClient(f"http://{self._host}:{self._port}")
+        self._client = LocalOpenCodeClient(f"http://{self._host}:{self._port}", auth)
         try:
             await self._wait_for_server()
         except Exception as exc:
@@ -302,6 +295,11 @@ class OpenCodeAdapter:
         assert self._server_process.stdin is not None
         assert self._server_process.stdout is not None
 
+        # The serve script reads the password from its first stdin line.
+        auth = ServerAuth.generate()
+        self._server_process.stdin.write(f"{auth.password}\n".encode())
+        await self._server_process.stdin.drain()
+
         # Wait for the port sentinel
         remote_port = None
         start_time = time.monotonic()
@@ -334,7 +332,7 @@ class OpenCodeAdapter:
 
         log.info("remote opencode bound to port %d", remote_port)
         self._client = RemoteOpenCodeClient(
-            self._launch_target, remote_port, self._workdir
+            self._launch_target, remote_port, auth, self._workdir
         )
         try:
             await self._wait_for_server()
@@ -413,16 +411,12 @@ class OpenCodeAdapter:
                 raise OpenCodeError("timeout waiting for opencode server")
             try:
                 async with asyncio.timeout(remaining):
-                    await client.get("/config")
+                    self.server_info = await probe_server(client)
                 return
-            except OpenCodeNonJsonError as exc:
+            except IncompatibleServerError as exc:
                 raise OpenCodeError(f"incompatible OpenCode server: {exc}") from exc
-            except Exception as exc:
-                if (status := _http_status(exc)) in _INCOMPATIBLE_PROBE_STATUSES:
-                    raise OpenCodeError(
-                        f"incompatible OpenCode server: GET /config returned "
-                        f"HTTP {status}"
-                    ) from exc
+            except Exception:
+                pass
             await asyncio.sleep(0.5)
 
     def _require_client(self) -> OpenCodeHttpClient:
@@ -1438,12 +1432,9 @@ class OpenCodeAdapter:
                 f"/question/{request_id}/reject",
                 params={"directory": state.cwd},
             )
-        except (aiohttp.ClientResponseError, OpenCodeHttpError) as exc:
-            log.warning("opencode question reject failed: %s", exc)
-            return "missing" if exc.status == 404 else "error"
         except Exception as exc:
             log.warning("opencode question reject failed: %s", exc)
-            return "error"
+            return "missing" if http_status(exc) == 404 else "error"
         self._forget_question(state, request_id)
         return "ok"
 

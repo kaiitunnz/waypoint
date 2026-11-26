@@ -59,6 +59,14 @@ export function parseInboxUpdate(payload: Record<string, unknown>): InboxUpdate 
   };
 }
 
+// A read of one item can land after its socket has delivered a later state. A
+// plain read sets `read_at` and leaves `version` as it was.
+export function fresherInboxItem(current: InboxItem | null, read: InboxItem): InboxItem {
+  if (!current || current.id !== read.id) return read;
+  if (current.version !== read.version) return current.version > read.version ? current : read;
+  return current.read_at && !read.read_at ? current : read;
+}
+
 // A changed item moves to its place; a deleted one, or one that left the filter, goes.
 export function applyInboxUpdate(items: InboxItem[], update: InboxUpdate, filter: InboxFilter): InboxItem[] {
   const next = items.filter((item) => item.id !== update.itemId);

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { connectInboxSocket, deleteInboxItem, fetchInboxItem, isAuthError, markInboxRead } from "../api";
+import { fresherInboxItem } from "../inbox";
 import type { InboxItem, SessionEnvelope } from "../types";
 
 interface InboxItemOptions {
@@ -36,7 +37,7 @@ export function useInboxItem({ host, token, itemId, onAuthFailure }: InboxItemOp
     setError(null);
     fetchInboxItem(host, token, itemId)
       .then((value) => {
-        if (active) setItem(value);
+        if (active) setItem((current) => fresherInboxItem(current, value));
       })
       .catch((reason) => {
         if (!active) return;

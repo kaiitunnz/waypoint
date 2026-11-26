@@ -14,6 +14,7 @@ import {
   inboxBlockChips,
   inboxRelativeTime,
   matchesInboxFilter,
+  fresherInboxItem,
   parseInboxUpdate,
   pruneSelection,
   requiredAnswersLeft,
@@ -107,6 +108,24 @@ describe("applyInboxUpdate", () => {
 
   it("appends a page without repeating items", () => {
     expect(appendInboxPage([newer], [newer, older]).map((entry) => entry.id)).toEqual(["2", "1"]);
+  });
+});
+
+describe("fresherInboxItem", () => {
+  const open = item("1");
+  it("takes the read when nothing newer is held", () => {
+    expect(fresherInboxItem(null, open)).toBe(open);
+    expect(fresherInboxItem(item("2", { version: 9 }), open)).toBe(open);
+    expect(fresherInboxItem(item("1", { subject: "old" }), open)).toBe(open);
+  });
+  it("keeps a held item of a higher version", () => {
+    const resolved = item("1", { status: "resolved", version: 2 });
+    expect(fresherInboxItem(resolved, open)).toBe(resolved);
+    expect(fresherInboxItem(open, resolved)).toBe(resolved);
+  });
+  it("keeps the read mark the read has not seen", () => {
+    const seen = item("1", { read_at: "2026-11-27T08:01:00Z" });
+    expect(fresherInboxItem(seen, open)).toBe(seen);
   });
 });
 

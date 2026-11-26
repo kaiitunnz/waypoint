@@ -101,7 +101,7 @@ this message joins:
 point and never receives a queued message. A message for an `exited`/`error`
 session is refused (409). Pending idle records show as **When idle** in the
 schedule dock and panel — their listed timestamp is the enqueue time, not a
-delivery estimate. A delivered one lists its delivery time.
+delivery estimate. Once sent or failed at delivery, one lists that time.
 
 ## Notes
 

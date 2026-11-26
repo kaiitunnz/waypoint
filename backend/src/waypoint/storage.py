@@ -6,7 +6,7 @@ import secrets
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -3500,9 +3500,25 @@ class Storage:
         rows = self.connection.execute(query, params).fetchall()
         return [self._scheduled_message_from_row(row) for row in rows]
 
+    def _oldest_pending_idle_batch_locked(
+        self, session_id: str, ignoring: Collection[str]
+    ) -> int | None:
+        row = self.connection.execute(
+            f"""
+            SELECT MIN(idle_batch) AS oldest FROM scheduled_messages
+            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
+              AND idle_batch IS NOT NULL
+              AND id NOT IN ({",".join("?" * len(ignoring))})
+            """,
+            (session_id, *ignoring),
+        ).fetchone()
+        if row is None or row["oldest"] is None:
+            return None
+        return int(row["oldest"])
+
     @_synchronized
     def release_idle_wait_for_transition(
-        self, session_id: str, idle_at: datetime
+        self, session_id: str, idle_at: datetime, ignoring: Collection[str] = ()
     ) -> bool:
         """Clear the wait flag on the session's oldest pending idle batch, but
         only when that batch predates ``idle_at``.
@@ -3510,16 +3526,10 @@ class Storage:
         Guards against a previously persisted idle event (whose async publish
         races a new next_cycle request) unlocking that request's own cycle: a
         record created after this idle transition keeps waiting for the next one.
+        Records in ``ignoring`` take no part in choosing the oldest batch.
         """
-        row = self.connection.execute(
-            """
-            SELECT MIN(idle_batch) AS oldest FROM scheduled_messages
-            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
-              AND idle_batch IS NOT NULL
-            """,
-            (session_id,),
-        ).fetchone()
-        if row is None or row["oldest"] is None:
+        oldest = self._oldest_pending_idle_batch_locked(session_id, ignoring)
+        if oldest is None:
             return False
         cursor = self.connection.execute(
             """
@@ -3528,25 +3538,21 @@ class Storage:
               AND idle_batch = ? AND wait_for_idle_transition = 1
               AND created_at < ?
             """,
-            (session_id, int(row["oldest"]), idle_at.isoformat()),
+            (session_id, oldest, idle_at.isoformat()),
         )
         self.connection.commit()
         return (cursor.rowcount or 0) > 0
 
     @_synchronized
-    def arm_wait_for_oldest_idle_batch(self, session_id: str) -> None:
+    def arm_wait_for_oldest_idle_batch(
+        self, session_id: str, ignoring: Collection[str] = ()
+    ) -> None:
         """After a batch resolves, force the newly-oldest pending idle batch to
         wait for a fresh idle transition, so it cannot leak into the same cycle.
+        Records in ``ignoring`` take no part in choosing it.
         """
-        row = self.connection.execute(
-            """
-            SELECT MIN(idle_batch) AS oldest FROM scheduled_messages
-            WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
-              AND idle_batch IS NOT NULL
-            """,
-            (session_id,),
-        ).fetchone()
-        if row is None or row["oldest"] is None:
+        oldest = self._oldest_pending_idle_batch_locked(session_id, ignoring)
+        if oldest is None:
             return
         self.connection.execute(
             """
@@ -3554,7 +3560,7 @@ class Storage:
             WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
               AND idle_batch = ?
             """,
-            (session_id, int(row["oldest"])),
+            (session_id, oldest),
         )
         self.connection.commit()
 

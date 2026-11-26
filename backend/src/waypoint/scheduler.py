@@ -131,8 +131,9 @@ class Scheduler:
         self._wakeup = asyncio.Event()
         # Message schedules being delivered, by the loop or a send-now request.
         self._sending: set[str] = set()
-        # One-shots already run, by the loop or a send-now. One whose outcome could
-        # not be written stays pending, and the loop must not run it again.
+        # One-shots already run, by the loop or a send-now, until their row is seen
+        # resolved. One whose outcome could not be written stays pending and must
+        # not run again.
         self._attempted: set[str] = set()
 
     async def start(self) -> None:
@@ -392,6 +393,11 @@ class Scheduler:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"message schedule is {record.status.value}",
             )
+        if message_id in self._attempted:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="message schedule already ran, but its outcome was not saved",
+            )
         if message_id in self._sending:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -461,7 +467,7 @@ class Scheduler:
             )
         in_oldest_batch = (
             record.trigger == ScheduledMessageTrigger.IDLE
-            and storage.list_pending_idle_messages(record.session_id)[0].idle_batch
+            and self._batchable_idle(record.session_id)[0].idle_batch
             == record.idle_batch
         )
         claimed_next = None
@@ -471,7 +477,12 @@ class Scheduler:
             and record.scheduled_at <= now
         ):
             # The due occurrence is this send, so the loop must not run it too.
-            claimed_next = next_occurrence_after(record.cron, record.timezone, now)
+            try:
+                claimed_next = next_occurrence_after(record.cron, record.timezone, now)
+            except RecurrenceError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
             storage.claim_recurring_message(
                 record.id, record.scheduled_at, claimed_next
             )
@@ -480,9 +491,16 @@ class Scheduler:
         except Exception as exc:
             if claimed_next is not None:
                 # Nothing was delivered, so the occurrence is still due.
-                storage.claim_recurring_message(
-                    record.id, claimed_next, record.scheduled_at
-                )
+                try:
+                    storage.claim_recurring_message(
+                        record.id, claimed_next, record.scheduled_at
+                    )
+                except Exception:  # noqa: BLE001
+                    # The refusal below is what the person needs to see.
+                    log.exception(
+                        "send-now occurrence restore failed",
+                        extra={"msg_id": record.id},
+                    )
             if isinstance(exc, HTTPException):
                 raise
             log.exception("send-now delivery failed", extra={"msg_id": record.id})
@@ -494,10 +512,19 @@ class Scheduler:
         # does, so the next batch waits for a fresh idle transition.
         if in_oldest_batch and all(
             item.idle_batch != record.idle_batch
-            for item in storage.list_pending_idle_messages(record.session_id)
+            for item in self._batchable_idle(record.session_id)
         ):
-            storage.arm_wait_for_oldest_idle_batch(record.session_id)
+            storage.arm_wait_for_oldest_idle_batch(record.session_id, self._attempted)
         return updated, isinstance(result, HeldMessageRecord)
+
+    def _batchable_idle(self, session_id: str) -> list[ScheduledMessageRecord]:
+        # A record whose outcome was lost stays pending; it takes no further part
+        # in batching, so the batches behind it still go out.
+        return [
+            item
+            for item in self._runtime.storage.list_pending_idle_messages(session_id)
+            if item.id not in self._attempted
+        ]
 
     def _launch_still_pending(self, schedule_id: str) -> bool:
         # Re-read at its turn: earlier launches in the pass can outlast a cancel.
@@ -569,7 +596,9 @@ class Scheduler:
         next turn instead of waiting for the bounded fallback poll.
         """
         try:
-            self._runtime.storage.release_idle_wait_for_transition(session_id, idle_at)
+            self._runtime.storage.release_idle_wait_for_transition(
+                session_id, idle_at, self._attempted
+            )
         except Exception:  # noqa: BLE001
             log.exception("idle wait release failed", extra={"session_id": session_id})
         self._wakeup.set()
@@ -613,6 +642,9 @@ class Scheduler:
         pending_msgs = self._runtime.storage.list_scheduled_messages(
             [ScheduledMessageStatus.PENDING]
         )
+        self._attempted &= {item.id for item in pending} | {
+            item.id for item in pending_msgs
+        }
         # Only timed records feed the absolute due time. Idle records carry a
         # past enqueue timestamp; they wake on normalized idle events and fall
         # back to bounded polling, so they never drive the wait toward 0.
@@ -709,27 +741,34 @@ class Scheduler:
             return
         if session.status != SessionStatus.IDLE:
             return
-        # ``records`` is already FIFO by (batch, created_at, id); the first
-        # record's batch is the smallest for this session.
+        # ``records`` is already FIFO by (batch, created_at, id); the first one
+        # still batching has the session's smallest batch.
+        records = [r for r in records if r.id not in self._attempted]
+        if not records:
+            return
         selected_batch = records[0].idle_batch
         batch = [r for r in records if r.idle_batch == selected_batch]
         if batch[0].wait_for_idle_transition:
             # Still waiting for a later idle transition (a next_cycle created
             # while already idle, or a batch armed after an earlier delivery).
             return
-        fired = False
+        consumed = False
         for record in batch:
             with self._isolated(msg_id=record.id):
                 if not self._message_still_pending(record.id):
+                    # One sent by hand mid-pass used this idle point too.
+                    consumed = consumed or record.id in self._attempted
                     continue
-                fired = True
+                consumed = True
                 with self._claim(record.id):
                     await self._fire_idle_message(record)
-        if not fired:
+        if not consumed:
             return
         # Consume this idle point regardless of per-message outcome so a later
         # batch cannot leak into the same cycle.
-        self._runtime.storage.arm_wait_for_oldest_idle_batch(session_id)
+        self._runtime.storage.arm_wait_for_oldest_idle_batch(
+            session_id, self._attempted
+        )
         await self._publish_update()
 
     async def _deliver_due(self, record: ScheduledMessageRecord) -> str | None:

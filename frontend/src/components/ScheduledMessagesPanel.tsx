@@ -13,6 +13,7 @@ import {
   isRecurring,
   timezoneAbbrev,
 } from "@waypoint/web-core/recurrence";
+import { shortSessionId } from "@waypoint/web-core/session/scheduledMessages";
 import { MessageSchedule, SessionRecord } from "@waypoint/web-core/types";
 
 const PAGE_SIZE = 5;
@@ -216,12 +217,5 @@ function MessageRow({
       ) : null}
     </article>
   );
-}
-
-function shortSessionId(id: string): string {
-  // Session ids are "<backend>-<hex>"; the hex suffix is the unique part and
-  // reads as an intentional handle, unlike a blind prefix truncation.
-  const dash = id.lastIndexOf("-");
-  return dash >= 0 ? id.slice(dash + 1) : id;
 }
 

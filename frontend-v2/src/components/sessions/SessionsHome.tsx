@@ -8,6 +8,7 @@ import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useScheduleTargetSessions } from "@waypoint/web-core/hooks/useScheduleTargetSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
 import { agentModelLabel, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
@@ -17,6 +18,7 @@ import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 
 import { LaunchDialog, type LaunchRequest } from "@/components/launch/LaunchDialog";
 import { StartFromPreset } from "@/components/launch/StartFromPreset";
+import { ScheduledSheet } from "@/components/scheduled/ScheduledSheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -38,6 +40,8 @@ import { useSwitcher } from "./SwitcherProvider";
 import { BoardSummaryCard, LimitsReadout, LimitsStrip, ScheduledSummaryList } from "./Summaries";
 import styles from "./SessionsHome.module.css";
 
+const NO_SESSIONS: SessionRecord[] = [];
+
 export function SessionsHome() {
   const phone = usePhoneLayout();
   const { host, token, needsYou, inboxCount, launchTargets } = useShellData();
@@ -46,7 +50,7 @@ export function SessionsHome() {
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
-  const now = useNow();
+  const now = useNow(30_000);
   const usage = useUsageSummary(host, token, handleAuthFailure);
   const board = useBoardSummary(host, token, feed.boardRevision, handleAuthFailure);
 
@@ -55,6 +59,7 @@ export function SessionsHome() {
   const [showExited, setShowExited] = useShowExited();
   const launch = useLaunchContext(host, token, launchTargets.targets, launchTargets.activeTargetId, handleAuthFailure);
   const [launchRequest, setLaunchRequest] = useState<LaunchRequest | null>(null);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
   const { refresh: refreshLaunch } = launch;
   const { sessions: knownSessions, schedules: knownSchedules } = feed;
   const openLaunch = useCallback(
@@ -176,17 +181,16 @@ export function SessionsHome() {
     </>
   );
 
-  const scheduled = useMemo(
-    () =>
-      summarizeScheduled(
-        feed.schedules,
-        feed.messageSchedules,
-        new Map((feed.sessions ?? []).map((session) => [session.id, session.title])),
-        3,
-        now,
-      ),
-    [feed.schedules, feed.messageSchedules, feed.sessions, now],
+  const titleSessions = useScheduleTargetSessions(host, token, feed.sessions ?? NO_SESSIONS, feed.messageSchedules);
+  const titleById = useMemo(
+    () => new Map(titleSessions.map((session) => [session.id, session.title])),
+    [titleSessions],
   );
+  const scheduled = useMemo(
+    () => summarizeScheduled(feed.schedules, feed.messageSchedules, titleById, 3, now),
+    [feed.schedules, feed.messageSchedules, titleById, now],
+  );
+  const openScheduled = () => setScheduledOpen(true);
 
   const main = (
     <>
@@ -204,7 +208,7 @@ export function SessionsHome() {
       {sectionsView}
       {phone && !searching ? (
         <div className={styles.summaries}>
-          <ScheduledSummaryList summary={scheduled} />
+          <ScheduledSummaryList summary={scheduled} now={now} onOpen={openScheduled} />
           <BoardSummaryCard summary={board} hideEmpty />
         </div>
       ) : null}
@@ -226,13 +230,23 @@ export function SessionsHome() {
               />
             ) : null}
             <LimitsReadout usage={usage} now={now} />
-            <ScheduledSummaryList summary={scheduled} />
+            <ScheduledSummaryList summary={scheduled} now={now} onOpen={openScheduled} />
             <BoardSummaryCard summary={board} />
           </div>
         </aside>
       )}
 
       <LaunchDialog request={launchRequest} launch={launch} onClose={() => setLaunchRequest(null)} />
+      {scheduledOpen ? (
+        <ScheduledSheet
+          onClose={() => setScheduledOpen(false)}
+          schedules={feed.schedules}
+          messages={feed.messageSchedules}
+          titleById={titleById}
+          catalog={catalog}
+          now={now}
+        />
+      ) : null}
       {dialogs}
     </div>
   );

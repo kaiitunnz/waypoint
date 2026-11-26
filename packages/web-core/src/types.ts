@@ -975,8 +975,8 @@ export interface MessageSchedule {
   status: MessageScheduleStatus;
   created_at: string;
   failure_reason?: string | null;
-  // Delivery trigger. For "idle", scheduled_at is only the enqueue timestamp —
-  // render "When idle" from this field, never a countdown from scheduled_at.
+  // Delivery trigger. For "idle", scheduled_at is the enqueue time until a
+  // delivery sets it; a pending one renders "When idle", never a countdown.
   trigger?: "time" | "idle";
   idle_batch?: number | null;
   wait_for_idle_transition?: boolean;

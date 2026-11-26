@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cancelHeldMessages, releaseHeldMessages } from "@waypoint/web-core/api";
 import { approvalDecisionsFor, supportsApprovalNote, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { PlanViewModel } from "@waypoint/web-core/events";
-import { buildMessageQueue, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
+import { buildMessageQueue, sendNowOutcome, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
 import type { SideQuestionState } from "@waypoint/web-core/session/sideQuestions";
 import type {
   EventRecord,
@@ -15,6 +15,7 @@ import type {
   SessionRecord,
 } from "@waypoint/web-core/types";
 
+import { useToast } from "@/components/ui/Toast";
 import { useFailureToast } from "@/lib/useFailureToast";
 
 import { useSessionContext } from "../SessionContext";
@@ -33,7 +34,12 @@ interface AttentionStackProps {
   plan: PlanViewModel | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
   heldMessages: HeldMessage[];
-  scheduled: { messages: MessageSchedule[]; cancel: (id: string) => Promise<void> };
+  scheduled: {
+    messages: MessageSchedule[];
+    cancel: (id: string) => Promise<void>;
+    // Resolves to whether the session held the message.
+    sendNow: (id: string) => Promise<boolean>;
+  };
   sideQuestions: SideQuestionState;
   sideQuestionArrivals: number;
   onSession: (session: SessionRecord) => void;
@@ -58,6 +64,7 @@ export function AttentionStack({
 }: AttentionStackProps) {
   const { host, token, sessionId } = useSessionContext();
   const report = useFailureToast();
+  const { toast } = useToast();
   const root = useRef<HTMLDivElement>(null);
   // Held here, where it survives the side-question strip mounting with its first aside:
   // a live aside's arrival opens the panel, leaving the focus where the human is typing.
@@ -93,8 +100,10 @@ export function AttentionStack({
   };
   const onAction = async (item: QueueItem, action: QueueAction) => {
     if (item.kind === "scheduled") {
-      // Delivering a schedule on request has no endpoint, so queueItemView does not offer it.
-      if (action === "cancel") await scheduled.cancel(item.id);
+      if (action === "cancel") await run(() => scheduled.cancel(item.id), "Could not cancel the message");
+      if (action === "sendNow") {
+        await run(async () => toast({ message: sendNowOutcome(await scheduled.sendNow(item.id)) }), "Could not send the message");
+      }
       return;
     }
     const target = { heldId: item.id };

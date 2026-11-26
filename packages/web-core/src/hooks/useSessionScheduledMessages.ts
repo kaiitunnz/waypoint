@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { deleteMessageSchedule, fetchMessageSchedules } from "../api";
+import { deleteMessageSchedule, fetchMessageSchedules, sendMessageScheduleNow } from "../api";
 import {
   pendingSchedulesSorted,
   sameSchedules,
@@ -49,18 +49,32 @@ export function useSessionScheduledMessages(
     return () => window.clearInterval(id);
   }, [refresh, messages]);
 
+  // Both actions throw on failure for the caller to report.
   const cancel = useCallback(
     async (scheduleId: string) => {
       setMessages((current) => current.filter((m) => m.id !== scheduleId));
       try {
         await deleteMessageSchedule(host, token, scheduleId);
-      } catch {
+      } catch (error) {
         // Re-sync from the server if the cancel didn't land.
-        void refresh();
+        await refresh();
+        throw error;
       }
     },
     [host, token, refresh],
   );
 
-  return { messages, refresh, cancel };
+  // Resolves to whether the session held the message, once the list is current.
+  const sendNow = useCallback(
+    async (scheduleId: string): Promise<boolean> => {
+      try {
+        return (await sendMessageScheduleNow(host, token, scheduleId)).held;
+      } finally {
+        await refresh();
+      }
+    },
+    [host, token, refresh],
+  );
+
+  return { messages, refresh, cancel, sendNow };
 }

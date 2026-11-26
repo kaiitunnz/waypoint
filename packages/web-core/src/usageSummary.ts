@@ -1,5 +1,5 @@
 import { humaniseBackend, type BackendCatalog } from "./backends";
-import { isRecurring } from "./recurrence";
+import { isIdle, isRecurring } from "./recurrence";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -208,6 +208,8 @@ export function formatShortWhen(iso: string | null | undefined, now: number = Da
 
 export interface ScheduledSummary {
   queued: number;
+  // Every schedule, finished ones included.
+  total: number;
   items: ScheduledItem[];
   overflow: number;
 }
@@ -234,8 +236,8 @@ export function summarizeScheduled(
     ...pendingMessages.map((message) => ({
       key: `message:${message.id}`,
       kind: "message" as const,
-      when: message.scheduled_at ? Date.parse(message.scheduled_at) : null,
-      whenLabel: formatShortWhen(message.scheduled_at, now),
+      when: isIdle(message) || !message.scheduled_at ? null : Date.parse(message.scheduled_at),
+      whenLabel: isIdle(message) ? "when idle" : formatShortWhen(message.scheduled_at, now),
       target: titleById.get(message.session_id)?.trim() || "session",
       preview: message.text?.trim() || "",
       recurring: isRecurring(message),
@@ -243,7 +245,7 @@ export function summarizeScheduled(
   ].sort((a, b) => (a.when ?? Infinity) - (b.when ?? Infinity));
   const queued = items.length;
   const shown = items.slice(0, limit);
-  return { queued, items: shown, overflow: queued - shown.length };
+  return { queued, total: schedules.length + messageSchedules.length, items: shown, overflow: queued - shown.length };
 }
 
 // ─── Board channels ───

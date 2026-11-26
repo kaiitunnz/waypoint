@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatClock, formatRelative } from "./scheduleTime";
+import { countdown, dayClock, formatClock, formatRelative } from "./scheduleTime";
 
 const NOW = new Date(2026, 10, 24, 12, 0, 0);
 
@@ -63,5 +63,23 @@ describe("formatClock", () => {
     expect(formatClock(target)).not.toBe(
       target.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" }),
     );
+  });
+});
+
+describe("dayClock", () => {
+  it("names the day relative to now", () => {
+    expect(dayClock(new Date(2026, 10, 24, 7), NOW)).toBe("today at 07:00");
+    expect(dayClock(new Date(2026, 10, 22, 2), NOW)).toBe("Sun 02:00");
+    expect(dayClock(new Date(2026, 10, 10, 9, 5), NOW)).toBe("Nov 10 09:05");
+  });
+});
+
+describe("countdown", () => {
+  it("counts down in hours and minutes, then days", () => {
+    expect(countdown(new Date(2026, 10, 24, 19, 18), NOW)).toBe("in 7h 18m");
+    expect(countdown(new Date(2026, 10, 24, 14), NOW)).toBe("in 2h");
+    expect(countdown(new Date(2026, 10, 24, 12, 5), NOW)).toBe("in 5m");
+    expect(countdown(new Date(2026, 10, 27, 12), NOW)).toBe("in 3d");
+    expect(countdown(new Date(2026, 10, 24, 11), NOW)).toBe("now");
   });
 });

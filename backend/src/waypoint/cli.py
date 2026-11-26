@@ -5941,6 +5941,21 @@ def schedule_message_delete(
     )
 
 
+@schedule_message_app.command("send-now")
+def schedule_message_send_now(
+    ctx: typer.Context,
+    schedule_id: Annotated[str, typer.Argument(help="Pending message schedule id.")],
+) -> None:
+    """Deliver a pending scheduled message now.
+
+    A recurring schedule delivers one occurrence and keeps its next run.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.send_message_schedule_now(schedule_id),
+    )
+
+
 @schedule_message_app.command("clear-history")
 def schedule_message_clear_history(
     ctx: typer.Context,

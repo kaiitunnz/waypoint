@@ -54,6 +54,7 @@ waypoint schedule message list --session-id <session-id>
 waypoint schedule message create <session-id> "ping the reviewer" --delay-seconds 600
 waypoint schedule message create <session-id> "run the suite" --scheduled-at 2026-07-02T09:00:00Z
 waypoint schedule message create <session-id> "draft only" --no-submit
+waypoint schedule message send-now <schedule-id>
 waypoint schedule message delete <schedule-id>
 waypoint schedule message clear-history [--session-id <session-id>]
 ```
@@ -61,6 +62,14 @@ waypoint schedule message clear-history [--session-id <session-id>]
 The target session must already exist. `--no-submit` queues the text into the
 session's input without auto-submitting it (the default submits). A record moves
 `pending → sent | cancelled | failed`.
+
+`send-now` delivers a pending message immediately. A one-time or when-idle
+message becomes `sent`, with the delivery time as its `scheduled_at`; a recurring
+one delivers a single occurrence and keeps its next run. The response's `held`
+is true when the session held the message (Focus, an open dialog, a restore). A
+message that already ran, was cancelled or is being sent is refused (409), and a
+refused delivery leaves the message pending. A message can't be deleted while it
+is being sent (409).
 
 ## Send at the next idle point
 
@@ -92,7 +101,7 @@ this message joins:
 point and never receives a queued message. A message for an `exited`/`error`
 session is refused (409). Pending idle records show as **When idle** in the
 schedule dock and panel — their listed timestamp is the enqueue time, not a
-delivery estimate.
+delivery estimate. Once sent or failed at delivery, one lists that time.
 
 ## Notes
 

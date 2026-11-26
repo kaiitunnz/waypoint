@@ -47,11 +47,13 @@ export interface QueueItemView {
 
 export interface QueueViewOptions {
   focus: boolean;
-  // A schedule can be delivered on request.
-  canSendNow?: boolean;
 }
 
-export function queueItemView(item: QueueItem, { focus, canSendNow = false }: QueueViewOptions): QueueItemView {
+export function sendNowOutcome(held: boolean): string {
+  return held ? "Held: the session will send it when it can" : "Sent";
+}
+
+export function queueItemView(item: QueueItem, { focus }: QueueViewOptions): QueueItemView {
   if (item.kind === "held") {
     const { message } = item;
     const reason = holdReasonLabel(message, focus);
@@ -73,6 +75,6 @@ export function queueItemView(item: QueueItem, { focus, canSendNow = false }: Qu
     reason: null,
     manual: false,
     text: messageText(schedule.text, schedule.attachments?.length ?? 0),
-    actions: canSendNow ? ["sendNow", "cancel"] : ["cancel"],
+    actions: ["sendNow", "cancel"],
   };
 }

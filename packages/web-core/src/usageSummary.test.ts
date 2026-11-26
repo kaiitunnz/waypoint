@@ -226,6 +226,13 @@ describe("scheduled summary", () => {
     expect(summary.items.map((item) => item.key)).toEqual(["message:m1", "launch:a"]);
     expect(summary.items[0]).toMatchObject({ target: "Fix race", whenLabel: "in 30m", kind: "message" });
     expect(summary.items[1]).toMatchObject({ target: "Dependabot sweep", recurring: true, preview: "/repo" });
+    expect(summary.total).toBe(5);
+  });
+
+  it("labels a when-idle message by its trigger, not its queue time", () => {
+    const idle = { id: "m1", session_id: "s1", text: "after", status: "pending", trigger: "idle", scheduled_at: at(-30) } as MessageSchedule;
+    const summary = summarizeScheduled([], [idle], new Map(), 3, NOW);
+    expect(summary.items[0]).toMatchObject({ whenLabel: "when idle", when: null });
   });
 });
 

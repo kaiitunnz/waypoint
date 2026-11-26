@@ -58,18 +58,13 @@ describe("queueItemView", () => {
     expect(view.actions).toEqual(["release", "cancel"]);
   });
 
-  it("describes a recurring schedule with its cadence and cancel only", () => {
+  it("describes a recurring schedule with its cadence and actions", () => {
     const [item] = buildMessageQueue([], [scheduled("s", { cron: "0 9 * * *", timezone: "UTC" })]);
     const view = queueItemView(item, { focus: false });
     expect(view.origin).toBe("Scheduled");
     expect(view.cadence).toBeTruthy();
     expect(view.when).toMatch(/^in /);
-    expect(view.actions).toEqual(["cancel"]);
-  });
-
-  it("offers Send now on a schedule once it can be delivered on request", () => {
-    const [item] = buildMessageQueue([], [scheduled("s")]);
-    expect(queueItemView(item, { focus: false, canSendNow: true }).actions).toEqual(["sendNow", "cancel"]);
+    expect(view.actions).toEqual(["sendNow", "cancel"]);
   });
 
   it("reads an idle schedule as sending when idle", () => {

@@ -25,7 +25,6 @@ export interface QueueHandlers {
 interface QueueListProps extends QueueHandlers {
   items: QueueItem[];
   focus: boolean;
-  canSendNow?: boolean;
 }
 
 const ACTION_LABEL: Record<QueueAction, string> = {
@@ -34,7 +33,7 @@ const ACTION_LABEL: Record<QueueAction, string> = {
   cancel: "Cancel",
 };
 
-export function QueueList({ items, focus, canSendNow, onAction, onReleaseAll, onCancelAll }: QueueListProps) {
+export function QueueList({ items, focus, onAction, onReleaseAll, onCancelAll }: QueueListProps) {
   // Ages and countdowns move on.
   useNow(30_000);
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -94,7 +93,7 @@ export function QueueList({ items, focus, canSendNow, onAction, onReleaseAll, on
       ) : null}
       <ul className={styles.list}>
         {items.map((item) => {
-          const view = queueItemView(item, { focus, canSendNow });
+          const view = queueItemView(item, { focus });
           // Release all and Cancel all act on held messages only.
           const locked = (bulkBusy && item.kind === "held") || busy.has(item.id);
           return (

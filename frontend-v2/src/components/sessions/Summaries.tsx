@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { countdown } from "@waypoint/web-core/scheduleTime";
 import type { BoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import type { UsageSummaryState } from "@waypoint/web-core/hooks/useUsageSummary";
 import { formatRelativeTime, type UsageTone } from "@waypoint/web-core/usage";
@@ -94,11 +95,26 @@ export function LimitsReadout({ usage, now }: { usage: UsageSummaryState; now: n
   );
 }
 
-export function ScheduledSummaryList({ summary }: { summary: ScheduledSummary }) {
-  if (summary.queued === 0) return null;
+interface ScheduledSummaryListProps {
+  summary: ScheduledSummary;
+  now: number;
+  onOpen: () => void;
+}
+
+export function ScheduledSummaryList({ summary, now, onOpen }: ScheduledSummaryListProps) {
+  if (summary.total === 0) return null;
   return (
     <section>
-      <SectionHeading title="Scheduled" count={summary.queued} />
+      <SectionHeading
+        title="Scheduled"
+        count={summary.queued}
+        action={
+          <button type="button" onClick={onOpen}>
+            All
+          </button>
+        }
+      />
+      {summary.queued === 0 ? <p className={styles.empty}>Nothing pending</p> : null}
       <ul className={styles.scheduled}>
         {summary.items.map((item) => (
           <li key={item.key} className={styles.item}>
@@ -117,7 +133,8 @@ export function ScheduledSummaryList({ summary }: { summary: ScheduledSummary })
                   : `Message to ${item.target}`}
               </span>
             </span>
-            <span className={styles.when}>{item.whenLabel}</span>
+            {/* The sheet's countdown, so the two never disagree. */}
+            <span className={styles.when}>{item.when === null ? item.whenLabel : countdown(new Date(item.when), new Date(now))}</span>
           </li>
         ))}
       </ul>

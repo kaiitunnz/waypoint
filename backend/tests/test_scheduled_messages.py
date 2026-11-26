@@ -1013,6 +1013,8 @@ async def test_send_now_delivers_a_one_shot_and_marks_it_sent(
     assert sent.status == ScheduledMessageStatus.SENT
     assert held is False
     assert sends == [("sess-1", "ship it", [spec.id])]
+    # History reads the delivery time, not the time it was scheduled for.
+    assert sent.scheduled_at <= datetime.now(UTC)
     assert spec.id not in runtime.attachments.schedule_referenced_ids("sess-1")
 
 

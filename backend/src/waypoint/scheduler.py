@@ -462,9 +462,16 @@ class Scheduler:
                 last_failure_reason=None,
             )
             return updated, held
-        updated = storage.update_scheduled_message(
-            record.id, status=ScheduledMessageStatus.SENT
-        )
+        # A timed record's time becomes the delivery time, which history reads as
+        # "sent at"; an idle record's stays its enqueue time.
+        if record.trigger == ScheduledMessageTrigger.IDLE:
+            updated = storage.update_scheduled_message(
+                record.id, status=ScheduledMessageStatus.SENT
+            )
+        else:
+            updated = storage.update_scheduled_message(
+                record.id, status=ScheduledMessageStatus.SENT, scheduled_at=now
+            )
         self._release_attachment_references(record)
         if oldest_idle_batch is not None and record.idle_batch == oldest_idle_batch:
             # Emptying the oldest batch consumes this idle point, as a delivery at

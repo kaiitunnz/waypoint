@@ -94,7 +94,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  /* The composer's side padding, which it drops from 900px. */
+  /* The composer's side padding, which a wide conversation drops. */
   .menu {
     right: 12px;
     left: 12px;
@@ -106,9 +106,11 @@
   }
 }
 
-@media (hover: hover) and (pointer: fine) and (min-width: 900px) {
-  .menu {
-    right: 0;
-    left: 0;
+@media (hover: hover) and (pointer: fine) {
+  @container (min-width: 600px) {
+    .menu {
+      right: 0;
+      left: 0;
+    }
   }
 }

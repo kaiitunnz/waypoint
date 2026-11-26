@@ -74,7 +74,7 @@
   background: color-mix(in srgb, var(--text) 14%, var(--glass));
 }
 
-@media (min-width: 900px) {
+@container (min-width: 600px) {
   .col {
     padding: 0 var(--session-gutter) 10px;
   }

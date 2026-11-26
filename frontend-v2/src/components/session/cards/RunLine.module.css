@@ -97,7 +97,7 @@
   padding: 0 0 4px 20px;
 }
 
-@media (max-width: 899.98px) {
+@container (max-width: 440px) {
   .hasStats .glyphs {
     display: none;
   }

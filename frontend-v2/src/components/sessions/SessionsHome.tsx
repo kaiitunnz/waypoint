@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
+import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
@@ -13,6 +14,8 @@ import { buildSections, searchSessions } from "@waypoint/web-core/sessionSection
 import { summarizeScheduled } from "@waypoint/web-core/usageSummary";
 import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 
+import { LaunchDialog, type LaunchRequest } from "@/components/launch/LaunchDialog";
+import { StartFromPreset } from "@/components/launch/StartFromPreset";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -25,7 +28,6 @@ import { useSessionsData, useShellData } from "@/lib/shell-data";
 import { ExitedGroup } from "./ExitedGroup";
 import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
-import { NewSessionDialog } from "./NewSessionDialog";
 import { SearchResults } from "./SearchResults";
 import { SessionMenu } from "./SessionMenu";
 import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
@@ -37,7 +39,7 @@ import styles from "./SessionsHome.module.css";
 
 export function SessionsHome() {
   const phone = usePhoneLayout();
-  const { host, token, needsYou, inboxCount } = useShellData();
+  const { host, token, needsYou, inboxCount, launchTargets } = useShellData();
   const feed = useSessionsData();
   const { visible: sessions, askSessionIds } = feed;
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
@@ -50,7 +52,17 @@ export function SessionsHome() {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [showExited, setShowExited] = useShowExited();
-  const [newOpen, setNewOpen] = useState(false);
+  const launch = useLaunchContext(host, token, launchTargets.targets, launchTargets.activeTargetId, handleAuthFailure);
+  const [launchRequest, setLaunchRequest] = useState<LaunchRequest | null>(null);
+  const { refresh: refreshLaunch } = launch;
+  const openLaunch = useCallback(
+    (request: LaunchRequest) => {
+      setLaunchRequest(request);
+      // Presets may have changed in another tab or client.
+      void refreshLaunch();
+    },
+    [refreshLaunch],
+  );
   const searching = query.trim() !== "";
 
   const asks = useMemo(() => feed.pendingAsks?.items ?? [], [feed.pendingAsks]);
@@ -180,7 +192,7 @@ export function SessionsHome() {
         onQuery={setQuery}
         searchOpen={searchOpen}
         onSearchOpen={setSearchOpen}
-        onNew={() => setNewOpen(true)}
+        onNew={() => openLaunch({ mode: "new", preset: { kind: "default" } })}
         onTitle={switcher.open}
       />
       {phone ? <LimitsStrip usage={usage} now={now} /> : null}
@@ -201,6 +213,14 @@ export function SessionsHome() {
       {phone ? null : (
         <aside className={styles.side} aria-label="Limits and summaries">
           <div className={styles.sideInner}>
+            {launch.ready ? (
+              <StartFromPreset
+                presets={launch.presets}
+                defaultPresetId={launch.defaultPresetId}
+                catalog={launch.catalog}
+                onOpen={openLaunch}
+              />
+            ) : null}
             <LimitsReadout usage={usage} now={now} />
             <ScheduledSummaryList summary={scheduled} />
             <BoardSummaryCard summary={board} />
@@ -208,7 +228,7 @@ export function SessionsHome() {
         </aside>
       )}
 
-      <NewSessionDialog open={newOpen} onClose={() => setNewOpen(false)} />
+      <LaunchDialog request={launchRequest} launch={launch} onClose={() => setLaunchRequest(null)} />
       {dialogs}
     </div>
   );

@@ -1,0 +1,164 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.muted {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+}
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  color: var(--muted);
+}
+
+.disclosureTitle {
+  flex: 1 1 auto;
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-strong);
+}
+
+.envField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.note {
+  padding: 8px 2px;
+  color: var(--muted);
+}
+
+.threads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread {
+  position: relative;
+  border-radius: var(--r-sm);
+}
+
+.thread + .thread {
+  border-top: 1px solid var(--line);
+}
+
+.selected {
+  background: var(--fill-quiet);
+}
+
+.threadButton {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 12px;
+  width: 100%;
+  padding: 12px 48px 12px 8px;
+  text-align: left;
+}
+
+.radio {
+  width: 20px;
+  height: 20px;
+  margin-top: 3px;
+  border: 1.5px solid var(--field-line);
+  border-radius: var(--r-pill);
+}
+
+.radioOn {
+  border: 6px solid var(--text-strong);
+}
+
+.threadBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.threadHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.threadTitle {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--f-head);
+  font-weight: 600;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  flex: none;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.preview {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.branch {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.menu {
+  position: absolute;
+  top: 10px;
+  right: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .threadButton {
+    padding: 8px 44px 8px 8px;
+  }
+
+  .threadButton:hover {
+    background: var(--fill-quiet);
+  }
+
+  .menu {
+    top: 6px;
+  }
+}

@@ -34,6 +34,9 @@ export function useDialog(open: boolean, onClose: () => void, panel: RefObject<H
 
     function onKeyDown(event: KeyboardEvent) {
       if (stack[stack.length - 1] !== id) return;
+      // A popover opened from the dialog is portaled outside it and handles its own keys.
+      const active = document.activeElement;
+      if (active && active !== document.body && !panel.current?.contains(active)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close.current();

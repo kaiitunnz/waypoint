@@ -1,0 +1,370 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+
+import { attachTmux, createSchedule, createSession } from "@waypoint/web-core/api";
+import type { LaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
+import { useLaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
+import { useLaunchModels } from "@waypoint/web-core/hooks/useLaunchModels";
+import { attachRequest, attachTargetError } from "@waypoint/web-core/launch/attach";
+import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
+import { classifyLaunchFailure } from "@waypoint/web-core/launch/launchError";
+import { withScheduleTiming } from "@waypoint/web-core/launch/schedule";
+import { defaultRecurrenceState } from "@waypoint/web-core/recurrence";
+import { defaultScheduledAt } from "@waypoint/web-core/session/scheduleMessage";
+import { sessionHref } from "@waypoint/web-core/shellNav";
+import { pushRecentCwd, readRecentCwds } from "@waypoint/web-core/store";
+
+import { SshConnectDialog } from "@/components/hosts/SshConnectDialog";
+import { ActionChip } from "@/components/ui/ActionChip";
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { useToast } from "@/components/ui/Toast";
+import { handleAuthFailure } from "@/lib/auth";
+import { cx } from "@/lib/cx";
+import { useMultiColumn, usePointerUI } from "@/lib/layout";
+import { useSessionsData, useShellData } from "@/lib/shell-data";
+
+import { AttachPane, type AttachState } from "./AttachPane";
+import { LaunchFields } from "./LaunchFields";
+import { PresetDialogs, PresetRow, PresetsColumn } from "./Presets";
+import { ResumePane } from "./ResumePane";
+import { ScheduleWhen, type ScheduleState } from "./ScheduleWhen";
+import { TargetChip } from "./TargetChip";
+import { openingPreset, usePresetControls, type PresetSelection } from "./usePresetControls";
+import { useResume } from "./useResume";
+import styles from "./LaunchDialog.module.css";
+
+export type LaunchMode = "new" | "resume" | "attach" | "schedule";
+
+export interface LaunchRequest {
+  mode: LaunchMode;
+  preset: PresetSelection;
+}
+
+const TITLES: Record<LaunchMode, string> = {
+  new: "New session",
+  resume: "Resume a thread",
+  attach: "Attach a pane",
+  schedule: "Schedule a session",
+};
+
+const MODE_LABELS: Record<LaunchMode, [pointer: string, touch: string]> = {
+  new: ["New", "New"],
+  resume: ["Resume thread", "Resume"],
+  attach: ["Attach tmux pane", "Attach"],
+  schedule: ["Schedule", "Schedule"],
+};
+
+const MODES: LaunchMode[] = ["new", "resume", "attach", "schedule"];
+
+interface LaunchDialogProps {
+  request: LaunchRequest | null;
+  launch: LaunchContext;
+  onClose: () => void;
+}
+
+// Launch, resume, attach or schedule a session. The form starts fresh on each open.
+export function LaunchDialog({ request, launch, onClose }: LaunchDialogProps) {
+  if (!request) return null;
+  if (!launch.ready) {
+    return (
+      <Dialog open title={TITLES[request.mode]} onClose={onClose}>
+        <p className={styles.loading}>Loading…</p>
+      </Dialog>
+    );
+  }
+  return <LaunchSurface request={request} launch={launch} onClose={onClose} />;
+}
+
+function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; launch: LaunchContext; onClose: () => void }) {
+  const { host, token, launchTargets } = useShellData();
+  const feed = useSessionsData();
+  const router = useRouter();
+  const { toast } = useToast();
+  const pointer = usePointerUI();
+  const wide = useMultiColumn();
+  const { catalog, defaults } = launch;
+  const targetId = launchTargets.activeTargetId;
+  const activeTarget = launchTargets.targets.find((target) => target.id === targetId) ?? null;
+  const [mode, setMode] = useState<LaunchMode>(request.mode);
+
+  const [opening] = useState(() => openingPreset(launch, request.preset));
+  const form = useLaunchForm({
+    defaultBackend: defaults.defaultBackend,
+    defaultCwd: defaults.defaultCwd,
+    launchTargetId: targetId || null,
+    defaultLaunchEnvByBackend: defaults.defaultLaunchEnvByBackend,
+    accountProfilesByBackend: defaults.accountProfilesByBackend,
+    usageProviderOptions: launch.usageProviderOptions,
+    catalog,
+    initialPreset: opening.spec,
+  });
+  const models = useLaunchModels(host, token, form.backend, targetId || null, form.accountProfileId || null, handleAuthFailure);
+  const { handleModelsLoaded } = form;
+  useEffect(() => {
+    if (models) handleModelsLoaded(models);
+  }, [models, handleModelsLoaded]);
+  const presets = usePresetControls(launch, form, opening.id);
+
+  // Folders the server knows join the recent folders once, as the form opens.
+  const [seeded] = useState(() => {
+    if (feed.sessions) seedRecentCwdsFromHistory(host, feed.sessions, feed.schedules);
+    return true;
+  });
+  const recents = useMemo(() => (seeded ? readRecentCwds(host, targetId) : []), [seeded, host, targetId]);
+
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [rejectedCwd, setCwdError] = useState<string | null>(null);
+  // The folder error belongs to the folder the server rejected.
+  const cwdError = rejectedCwd !== null && form.cwd === rejectedCwd ? rejectedCwd : null;
+  const [sshRetry, setSshRetry] = useState<(() => void) | null>(null);
+  const [attach, setAttach] = useState<AttachState>({ target: "", agent: form.backend, title: "" });
+  const [schedule, setSchedule] = useState<ScheduleState>(() => ({
+    timingMode: "once",
+    recurrence: defaultRecurrenceState(),
+    recurrenceValid: false,
+    timing: "delay",
+    delay: "15",
+    at: defaultScheduledAt(),
+    prompt: "",
+  }));
+  const updateSchedule = useCallback((patch: Partial<ScheduleState>) => setSchedule((current) => ({ ...current, ...patch })), []);
+  const resume = useResume({
+    host,
+    token,
+    enabled: mode === "resume",
+    catalog,
+    launchable: defaults.launchableBackends,
+    launchTargetId: targetId,
+    formBackend: form.backend,
+    formAccountProfileId: form.accountProfileId,
+    defaultLaunchEnvByBackend: defaults.defaultLaunchEnvByBackend,
+    revision: launchTargets.targets,
+    onError: setFailure,
+  });
+
+  const changeMode = (next: LaunchMode) => {
+    setMode(next);
+    setFailure(null);
+    setCwdError(null);
+  };
+
+  // Runs a launch. A password-auth target that is not connected asks for its
+  // password and then replays this same request.
+  async function run(action: () => Promise<void>, fallback: string, cwd?: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await action();
+    } catch (error) {
+      const outcome = classifyLaunchFailure(error, fallback);
+      if (outcome.kind === "auth") handleAuthFailure();
+      else if (outcome.kind === "cwd" && cwd !== undefined) setCwdError(cwd);
+      else if (outcome.kind === "ssh" && activeTarget) setSshRetry(() => () => void run(action, fallback, cwd));
+      else setFailure(outcome.kind === "detail" ? outcome.message : fallback);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const open = useCallback(
+    (sessionId: string) => {
+      onClose();
+      router.push(sessionHref(sessionId));
+    },
+    [onClose, router],
+  );
+
+  function submit() {
+    if (busy) return;
+    if (mode === "new") {
+      const request = form.createRequest(targetId, presets.selectedId);
+      const cwd = form.cwd;
+      void run(
+        async () => {
+          const session = await createSession(host, token, request);
+          pushRecentCwd(host, targetId, cwd);
+          open(session.id);
+        },
+        "failed to create session",
+        cwd,
+      );
+    } else if (mode === "schedule") {
+      const built = withScheduleTiming(form.scheduleRequest(schedule.prompt, presets.selectedId), schedule);
+      if ("error" in built) {
+        setFailure(built.error);
+        return;
+      }
+      const payload = { ...built.payload, launch_target_id: targetId || null };
+      void run(async () => {
+        await createSchedule(host, token, payload);
+        pushRecentCwd(host, targetId, payload.cwd);
+        toast({ message: payload.cron ? "Recurring launch scheduled" : "Launch scheduled" });
+        onClose();
+      }, "failed to schedule");
+    } else if (mode === "attach") {
+      if (attachTargetError(attach.target)) return;
+      const payload = attachRequest(attach.target, attach.agent, attach.title);
+      void run(async () => {
+        const session = await attachTmux(host, token, payload);
+        open(session.id);
+      }, "failed to attach");
+    } else {
+      void run(async () => {
+        const session = await resume.resume();
+        if (session) open(session.id);
+      }, "failed to resume the thread");
+    }
+  }
+
+  const blocked =
+    !launch.ready ||
+    (mode === "resume" && !resume.selected) ||
+    (mode === "attach" && attachTargetError(attach.target) !== null) ||
+    (mode === "schedule" && schedule.timingMode === "repeat" && !schedule.recurrenceValid);
+  const primaryLabel =
+    mode === "new" ? (pointer ? "Launch session" : "Launch") : mode === "resume" ? "Resume" : mode === "attach" ? "Attach" : "Schedule";
+
+  const surface = useRef<HTMLDivElement>(null);
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    // A dialog opened over this one is portaled elsewhere but still bubbles here.
+    if (!pointer || event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    if (!surface.current?.contains(event.target as Node)) return;
+    event.preventDefault();
+    if (!blocked) submit();
+  }
+
+  const formMode = mode === "new" || mode === "schedule";
+  const column = pointer && wide && formMode;
+  const modes = (
+    <SegmentedControl
+      label="Launch mode"
+      value={mode}
+      onChange={changeMode}
+      segments={MODES.map((value) => ({ value, label: MODE_LABELS[value][pointer ? 0 : 1] }))}
+    />
+  );
+
+  const header = (
+    <div className={styles.header}>
+      <div className={styles.titleBlock}>
+        <h2 className={styles.title}>{TITLES[mode]}</h2>
+        <TargetChip disabled={busy} />
+      </div>
+      {pointer ? modes : null}
+    </div>
+  );
+
+  const fields = (
+    <LaunchFields
+      form={form}
+      catalog={catalog}
+      agents={defaults.launchableBackends}
+      host={host}
+      token={token}
+      launchTargetId={targetId || null}
+      recentCwds={recents}
+      cwdError={cwdError}
+      busy={busy}
+      presetRow={column ? null : <PresetRow controls={presets} catalog={catalog} />}
+    >
+      {mode === "schedule" ? <ScheduleWhen host={host} token={token} value={schedule} onChange={updateSchedule} /> : null}
+    </LaunchFields>
+  );
+
+  const notice = failure ? (
+    <div className={styles.notice} role="alert">
+      <span className={styles.noticeGlyph}>
+        <Icon name="alert" size={16} />
+      </span>
+      <p className={styles.noticeText}>{failure}</p>
+      <ActionChip icon="refresh" disabled={busy || blocked} onClick={submit}>
+        Retry
+      </ActionChip>
+      <IconButton label="Dismiss" size="sm" onClick={() => setFailure(null)}>
+        <Icon name="close" size={16} />
+      </IconButton>
+    </div>
+  ) : null;
+
+  const footer = (
+    <div className={styles.footer}>
+      {notice}
+      <div className={styles.actions}>
+        {mode === "resume" && !pointer && resume.more > 0 ? (
+          <Button variant="text" onClick={resume.showMore}>
+            {resume.more} more threads
+          </Button>
+        ) : null}
+        <span className={styles.grow} />
+        {pointer ? (
+          <Button variant="text" onClick={onClose}>
+            Cancel
+          </Button>
+        ) : null}
+        <Button
+          variant="primary"
+          block={!pointer && mode !== "resume"}
+          busy={busy}
+          disabled={blocked}
+          onClick={submit}
+        >
+          {primaryLabel}
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <Dialog open onClose={onClose} title={TITLES[mode]} header={header} footer={footer} size="xl" flush>
+        <div ref={surface} className={cx(styles.layout, pointer && styles.pointerLayout, column && styles.withColumn)} onKeyDown={onKeyDown}>
+          {column ? <PresetsColumn controls={presets} catalog={catalog} /> : null}
+          <div className={styles.main}>
+            {pointer ? null : <div className={styles.touchModes}>{modes}</div>}
+            {formMode ? fields : null}
+            {mode === "resume" ? (
+              <ResumePane
+                resume={resume}
+                catalog={catalog}
+                targetLabel={activeTarget?.name ?? null}
+                busy={busy}
+                onDeleteFailed={setFailure}
+              />
+            ) : null}
+            {mode === "attach" ? (
+              <AttachPane value={attach} onChange={setAttach} agents={defaults.launchableBackends} catalog={catalog} busy={busy} />
+            ) : null}
+          </div>
+        </div>
+      </Dialog>
+      <PresetDialogs
+        controls={presets}
+        spec={form.presetSpec()}
+        catalog={catalog}
+        profiles={form.accountProfiles}
+        usageProviders={launch.usageProviderOptions}
+      />
+      {sshRetry && activeTarget ? (
+        <SshConnectDialog
+          targetName={activeTarget.name}
+          onConnect={async (password) => {
+            const outcome = await launchTargets.connect(activeTarget.id, password);
+            if (outcome.connected) {
+              const retry = sshRetry;
+              queueMicrotask(retry);
+            }
+            return outcome;
+          }}
+          onClose={() => setSshRetry(null)}
+        />
+      ) : null}
+    </>
+  );
+}

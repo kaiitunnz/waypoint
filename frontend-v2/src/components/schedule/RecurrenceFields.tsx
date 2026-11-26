@@ -67,7 +67,7 @@ export function RecurrenceFields({
           <div className={styles.chips} role="group" aria-label="Cadence">
             {CADENCES.map((cadence) => (
               <Chip key={cadence} selected={state.cadence === cadence} onClick={() => update({ cadence })}>
-                {CADENCE_LABELS[cadence]}
+                {cadence === "custom" ? "Cron" : CADENCE_LABELS[cadence]}
               </Chip>
             ))}
           </div>

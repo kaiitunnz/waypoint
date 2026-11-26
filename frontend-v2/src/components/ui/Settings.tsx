@@ -24,21 +24,33 @@ interface SettingsRowProps {
   control?: ReactNode;
   href?: string;
   onNavigate?: () => void;
+  // Opens a picker or editor over the current view; the row then ends in a chevron too.
+  onPress?: () => void;
+  // The detail is a machine string, such as a path.
+  mono?: boolean;
+  disabled?: boolean;
 }
 
-export function SettingsRow({ label, detail, control, href, onNavigate }: SettingsRowProps) {
+export function SettingsRow({ label, detail, control, href, onNavigate, onPress, mono, disabled }: SettingsRowProps) {
   const content = (
     <>
       <span className={styles.label}>{label}</span>
-      {detail ? <span className={styles.detail}>{detail}</span> : null}
+      {detail ? <span className={cx(styles.detail, mono && styles.mono)}>{detail}</span> : null}
       {control}
-      {href ? (
+      {href || onPress ? (
         <span className={styles.chev} aria-hidden="true">
           <Icon name="chevron-right" size={16} strokeWidth={2} />
         </span>
       ) : null}
     </>
   );
+  if (onPress) {
+    return (
+      <button type="button" className={cx(styles.row, styles.pressable, styles.button)} onClick={onPress} disabled={disabled}>
+        {content}
+      </button>
+    );
+  }
   return href ? (
     <Link href={href} className={cx(styles.row, styles.pressable)} onNavigate={onNavigate}>
       {content}

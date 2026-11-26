@@ -1,0 +1,75 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.rows {
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 48px;
+  padding: 4px 0;
+}
+
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+/* A new row has two inputs, so the key gets its own share of the width. */
+.added {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+}
+
+.key {
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.struck {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.value {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removed {
+  font-size: var(--f-meta);
+  color: var(--error);
+}
+
+.keyInput,
+.valueInput {
+  min-width: 0;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .row {
+    min-height: 40px;
+  }
+}

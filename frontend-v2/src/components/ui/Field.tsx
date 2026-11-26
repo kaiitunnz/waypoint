@@ -34,8 +34,8 @@ export function TextInput({ mono, className, ref, ...rest }: TextInputProps) {
   return <input {...rest} ref={ref} className={cx(styles.input, mono && styles.mono, className)} />;
 }
 
-export function TextArea(props: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className">) {
-  return <textarea {...props} className={cx(styles.input, styles.area)} />;
+export function TextArea({ mono, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className"> & { mono?: boolean }) {
+  return <textarea {...props} className={cx(styles.input, styles.area, mono && styles.mono)} />;
 }
 
 export function SearchInput({ className, ref, ...rest }: TextInputProps) {

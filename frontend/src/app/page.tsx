@@ -127,8 +127,6 @@ export default function HomePage() {
   // Live and pinned sessions; exited history is paged by SessionList.
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [historyRevision, setHistoryRevision] = useState("");
-  // Sessions referenced by message schedules but absent from the live list,
-  // fetched by id so schedule rows keep their titles.
   const [settingsSession, setSettingsSession] = useState<SessionRecord | null>(
     null,
   );

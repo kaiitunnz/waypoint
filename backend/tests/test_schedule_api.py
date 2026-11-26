@@ -197,3 +197,38 @@ async def test_preview_requires_auth(tmp_path: Path) -> None:
             json={"cron": "0 9 * * *", "timezone": "UTC"},
         )
     assert resp.status_code == 401
+
+
+async def test_send_now_delivers_once_then_refuses(tmp_path: Path, monkeypatch) -> None:
+    app, token = _build(tmp_path)
+    _seed_session(app, "sess-1")
+    runtime = app.state.context.runtime
+    sent: list[str] = []
+
+    async def fake_handle_input(session_id: str, request: Any) -> Any:
+        sent.append(request.text)
+        return runtime.get_session(session_id)
+
+    monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
+    async with _client(app) as client:
+        created = await client.post(
+            "/api/sessions/sess-1/message-schedules",
+            json={"text": "now please", "delay_seconds": 3600},
+            headers=_auth(token),
+        )
+        schedule_id = created.json()["message_schedule"]["id"]
+        first = await client.post(
+            f"/api/message-schedules/{schedule_id}/send-now", headers=_auth(token)
+        )
+        again = await client.post(
+            f"/api/message-schedules/{schedule_id}/send-now", headers=_auth(token)
+        )
+        missing = await client.post(
+            "/api/message-schedules/msg-missing/send-now", headers=_auth(token)
+        )
+    assert first.status_code == 200
+    assert first.json()["message_schedule"]["status"] == "sent"
+    assert sent == ["now please"]
+    assert again.status_code == 409
+    assert again.json()["detail"] == "message schedule is sent"
+    assert missing.status_code == 404

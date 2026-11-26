@@ -1339,6 +1339,12 @@ class WaypointClient:
         ).json()["message_schedule"]
         return data
 
+    def send_message_schedule_now(self, schedule_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/message-schedules/{schedule_id}/send-now"
+        ).json()["message_schedule"]
+        return data
+
     def clear_message_schedule_history(
         self, session_id: str | None = None
     ) -> dict[str, Any]:

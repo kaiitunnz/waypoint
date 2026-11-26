@@ -2339,6 +2339,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         record = context.runtime.scheduler.cancel_message_schedule(schedule_id)
         return {"message_schedule": record.model_dump(mode="json")}
 
+    @app.post("/api/message-schedules/{schedule_id}/send-now")
+    async def send_message_schedule_now(
+        schedule_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        record = await context.runtime.scheduler.send_message_now(schedule_id)
+        return {"message_schedule": record.model_dump(mode="json")}
+
     @app.post("/api/message-schedules/clear-history")
     async def clear_message_schedule_history(
         _: Annotated[str, Depends(token_dependency())],

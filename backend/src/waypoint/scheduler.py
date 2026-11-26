@@ -127,6 +127,8 @@ class Scheduler:
         self._runtime = runtime
         self._task: asyncio.Task[None] | None = None
         self._wakeup = asyncio.Event()
+        # Message schedules a send-now request is delivering; the loop skips them.
+        self._sending: set[str] = set()
 
     async def start(self) -> None:
         if self._task is not None:
@@ -359,6 +361,113 @@ class Scheduler:
         asyncio.create_task(self._publish_update())
         return existing
 
+    async def send_message_now(self, message_id: str) -> ScheduledMessageRecord:
+        """Deliver a pending message schedule now.
+
+        A one-shot or when-idle record resolves to ``sent``; a recurring record
+        delivers one occurrence and keeps its next run. A failed delivery is
+        recorded on the schedule and raised.
+        """
+        record = self._runtime.storage.get_scheduled_message(message_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="message schedule not found",
+            )
+        if record.status != ScheduledMessageStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"message schedule is {record.status.value}",
+            )
+        if message_id in self._sending:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="message schedule is already being sent",
+            )
+        self._sending.add(message_id)
+        try:
+            return await self._send_now(record)
+        finally:
+            self._sending.discard(message_id)
+            await self._publish_update()
+
+    async def _send_now(self, record: ScheduledMessageRecord) -> ScheduledMessageRecord:
+        storage = self._runtime.storage
+        recurring = record.cron is not None
+        now = datetime.now(UTC)
+        oldest_idle_batch = None
+        if record.trigger == ScheduledMessageTrigger.IDLE:
+            session_idle = [
+                item
+                for item in storage.list_pending_idle_messages()
+                if item.session_id == record.session_id
+            ]
+            oldest_idle_batch = session_idle[0].idle_batch if session_idle else None
+
+        def fail(reason: str) -> None:
+            if recurring:
+                storage.update_scheduled_message(
+                    record.id,
+                    last_run_at=now,
+                    last_run_status=ScheduledMessageStatus.FAILED.value,
+                    last_failure_reason=reason,
+                )
+            else:
+                storage.update_scheduled_message(
+                    record.id,
+                    status=ScheduledMessageStatus.FAILED,
+                    failure_reason=reason,
+                )
+                self._release_attachment_references(record)
+
+        if storage.get_session(record.session_id) is None:
+            fail("session not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"session {record.session_id} not found",
+            )
+        try:
+            await self._send_input(record)
+        except HTTPException as exc:
+            fail(str(exc.detail))
+            raise
+        except Exception as exc:
+            log.exception("send-now delivery failed", extra={"msg_id": record.id})
+            fail(str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
+        if recurring:
+            return storage.update_scheduled_message(
+                record.id,
+                last_run_at=now,
+                last_run_status=ScheduledMessageStatus.SENT.value,
+                last_failure_reason=None,
+            )
+        updated = storage.update_scheduled_message(
+            record.id, status=ScheduledMessageStatus.SENT
+        )
+        self._release_attachment_references(record)
+        if oldest_idle_batch is not None and record.idle_batch == oldest_idle_batch:
+            # Emptying the oldest batch consumes this idle point, as a delivery at
+            # idle does, so the next batch waits for a fresh idle transition.
+            batch_left = any(
+                item.session_id == record.session_id
+                and item.idle_batch == oldest_idle_batch
+                for item in storage.list_pending_idle_messages()
+            )
+            if not batch_left:
+                storage.arm_wait_for_oldest_idle_batch(record.session_id)
+        return updated
+
+    def _still_pending(self, message_id: str) -> bool:
+        """Whether a record listed at the start of a pass is still due to fire:
+        not cancelled or sent since, and not being sent by a send-now request."""
+        if message_id in self._sending:
+            return False
+        current = self._runtime.storage.get_scheduled_message(message_id)
+        return current is not None and current.status == ScheduledMessageStatus.PENDING
+
     async def purge_session_messages(self, session_id: str) -> int:
         # The session's attachment dir (and its schedule-reference index) is
         # discarded wholesale when the session is deleted, so no per-record
@@ -507,7 +616,7 @@ class Scheduler:
                     self._fire_recurring_message,
                     "msg_id",
                 )
-            else:
+            elif self._still_pending(msg.id):
                 await self._fire_message(msg)
         await self._fire_due_idle_messages()
 
@@ -548,7 +657,8 @@ class Scheduler:
                 # while already idle, or a batch armed after an earlier delivery).
                 continue
             for record in batch:
-                await self._fire_idle_message(record)
+                if self._still_pending(record.id):
+                    await self._fire_idle_message(record)
             # Consume this idle point regardless of per-message outcome so a
             # later batch cannot leak into the same cycle.
             self._runtime.storage.arm_wait_for_oldest_idle_batch(session_id)
@@ -677,6 +787,8 @@ class Scheduler:
                     status=ScheduledMessageStatus.FAILED,
                     failure_reason="session not found",
                 )
+                self._release_attachment_references(record)
+                await self._publish_update()
                 return
             await self._send_input(record)
             self._runtime.storage.update_scheduled_message(
@@ -689,6 +801,7 @@ class Scheduler:
                 status=ScheduledMessageStatus.FAILED,
                 failure_reason=str(exc),
             )
+        self._release_attachment_references(record)
         await self._publish_update()
 
     async def _fire(self, schedule: ScheduledSessionRecord) -> None:

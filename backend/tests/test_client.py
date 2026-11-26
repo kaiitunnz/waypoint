@@ -262,6 +262,11 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         ):
             state["msg_clear_params"] = dict(request.url.params)
             return httpx.Response(200, json={"removed": 2})
+        if request.url.path.endswith("/send-now") and request.method == "POST":
+            schedule_id = request.url.path.split("/")[-2]
+            return httpx.Response(
+                200, json={"message_schedule": {"id": schedule_id, "status": "sent"}}
+            )
         if (
             request.url.path.startswith("/api/message-schedules/")
             and request.method == "DELETE"
@@ -1228,6 +1233,16 @@ def test_delete_message_schedule(
     with _client(_settings(tmp_path), state) as client:
         schedule = client.delete_message_schedule("ms1")
     assert schedule == {"id": "ms1"}
+
+
+def test_send_message_schedule_now(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.send_message_schedule_now("ms1")
+    assert schedule == {"id": "ms1", "status": "sent"}
 
 
 def test_clear_message_schedule_history(

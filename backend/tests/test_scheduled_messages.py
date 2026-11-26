@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
+from starlette import status as http
 
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
@@ -971,4 +972,226 @@ async def test_idle_attachment_reference_retained_then_released(tmp_path) -> Non
     assert spec.id in runtime.attachments.schedule_referenced_ids("sess-1")
 
     runtime.scheduler.cancel_message_schedule(record.id)
+    assert spec.id not in runtime.attachments.schedule_referenced_ids("sess-1")
+
+
+def _capture_sends(runtime, monkeypatch) -> list[tuple[str, str, list[str] | None]]:
+    sends: list[tuple[str, str, list[str] | None]] = []
+
+    async def fake_handle_input(session_id: str, request) -> SessionRecord:
+        sends.append((session_id, request.text, request.attachments))
+        return runtime.get_session(session_id)
+
+    monkeypatch.setattr(runtime, "handle_input", fake_handle_input)
+    return sends
+
+
+def _runtime_with_session(tmp_path):
+    runtime = make_runtime(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "sess-1"))
+    return runtime
+
+
+async def test_send_now_delivers_a_one_shot_and_marks_it_sent(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _capture_sends(runtime, monkeypatch)
+    spec = runtime.attachments.save(
+        "sess-1", data=b"hello", filename="note.txt", content_type="text/plain"
+    )
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="ship it", attachments=[spec.id], delay_seconds=3600
+        ),
+    )
+
+    sent = await runtime.scheduler.send_message_now(record.id)
+
+    assert sent.status == ScheduledMessageStatus.SENT
+    assert sends == [("sess-1", "ship it", [spec.id])]
+    assert spec.id not in runtime.attachments.schedule_referenced_ids("sess-1")
+
+
+async def test_send_now_runs_one_recurring_occurrence_and_keeps_the_next_run(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _capture_sends(runtime, monkeypatch)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="tick", cron="0 9 * * *", timezone="UTC"),
+    )
+
+    sent = await runtime.scheduler.send_message_now(record.id)
+
+    assert sends == [("sess-1", "tick", None)]
+    assert sent.status == ScheduledMessageStatus.PENDING
+    assert sent.scheduled_at == record.scheduled_at
+    assert sent.last_run_status == ScheduledMessageStatus.SENT.value
+    assert sent.last_run_at is not None
+
+
+async def test_send_now_delivers_an_idle_message_and_arms_the_next_batch(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    runtime.storage.update_session("sess-1", status=SessionStatus.RUNNING)
+    sends = _capture_sends(runtime, monkeypatch)
+    first = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="first", trigger=ScheduledMessageTrigger.IDLE
+        ),
+    )
+    second = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="second",
+            trigger=ScheduledMessageTrigger.IDLE,
+            idle_batch_mode=IdleMessageBatchMode.NEXT_CYCLE,
+        ),
+    )
+
+    sent = await runtime.scheduler.send_message_now(first.id)
+
+    assert sent.status == ScheduledMessageStatus.SENT
+    assert sends == [("sess-1", "first", None)]
+    # The session goes idle in the same cycle: the next batch waits for a fresh
+    # idle transition instead of following the manual send at once.
+    runtime.storage.update_session("sess-1", status=SessionStatus.IDLE)
+    await runtime.scheduler._fire_due_schedules()
+    waiting = runtime.storage.get_scheduled_message(second.id)
+    assert waiting is not None
+    assert waiting.status == ScheduledMessageStatus.PENDING
+    assert waiting.wait_for_idle_transition is True
+    assert sends == [("sess-1", "first", None)]
+
+
+@pytest.mark.parametrize(
+    "resolve",
+    [
+        {"status": ScheduledMessageStatus.SENT},
+        {"status": ScheduledMessageStatus.CANCELLED},
+        {"status": ScheduledMessageStatus.FAILED, "failure_reason": "boom"},
+    ],
+)
+async def test_send_now_refuses_a_resolved_schedule(
+    tmp_path, monkeypatch, resolve
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _capture_sends(runtime, monkeypatch)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1", ScheduledMessageCreateRequest(text="late", delay_seconds=60)
+    )
+    runtime.storage.update_scheduled_message(record.id, **resolve)
+
+    with pytest.raises(HTTPException) as caught:
+        await runtime.scheduler.send_message_now(record.id)
+
+    assert caught.value.status_code == http.HTTP_409_CONFLICT
+    assert caught.value.detail == f"message schedule is {resolve['status'].value}"
+    assert sends == []
+
+
+async def test_send_now_refuses_an_unknown_schedule(tmp_path) -> None:
+    runtime = _runtime_with_session(tmp_path)
+
+    with pytest.raises(HTTPException) as caught:
+        await runtime.scheduler.send_message_now("msg-missing")
+
+    assert caught.value.status_code == http.HTTP_404_NOT_FOUND
+
+
+async def test_send_now_records_a_failed_delivery(tmp_path, monkeypatch) -> None:
+    runtime = _runtime_with_session(tmp_path)
+
+    async def refuse(session_id: str, request) -> SessionRecord:
+        raise HTTPException(
+            status_code=http.HTTP_409_CONFLICT, detail="session is busy"
+        )
+
+    monkeypatch.setattr(runtime, "handle_input", refuse)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1", ScheduledMessageCreateRequest(text="hi", delay_seconds=60)
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await runtime.scheduler.send_message_now(record.id)
+
+    assert caught.value.status_code == http.HTTP_409_CONFLICT
+    failed = runtime.storage.get_scheduled_message(record.id)
+    assert failed is not None
+    assert failed.status == ScheduledMessageStatus.FAILED
+    assert failed.failure_reason == "session is busy"
+
+
+async def test_send_now_records_a_missing_session(tmp_path, monkeypatch) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    _capture_sends(runtime, monkeypatch)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="tick", cron="0 9 * * *", timezone="UTC"),
+    )
+    runtime.storage.delete_session("sess-1")
+
+    with pytest.raises(HTTPException) as caught:
+        await runtime.scheduler.send_message_now(record.id)
+
+    assert caught.value.status_code == http.HTTP_404_NOT_FOUND
+    kept = runtime.storage.get_scheduled_message(record.id)
+    assert kept is not None
+    assert kept.status == ScheduledMessageStatus.PENDING
+    assert kept.last_run_status == ScheduledMessageStatus.FAILED.value
+    assert kept.last_failure_reason == "session not found"
+
+
+async def test_the_loop_skips_a_message_sent_now_since_its_pass_began(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _capture_sends(runtime, monkeypatch)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1", ScheduledMessageCreateRequest(text="once", delay_seconds=0)
+    )
+    runtime.storage.update_scheduled_message(
+        record.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    listed = runtime.storage.list_scheduled_messages
+
+    def list_then_send_now(*args, **kwargs):
+        snapshot = listed(*args, **kwargs)
+        # The pass has its snapshot; a send-now resolves the record meanwhile.
+        runtime.storage.update_scheduled_message(
+            record.id, status=ScheduledMessageStatus.SENT
+        )
+        return snapshot
+
+    monkeypatch.setattr(runtime.storage, "list_scheduled_messages", list_then_send_now)
+    await runtime.scheduler._fire_due_schedules()
+
+    assert sends == []
+
+
+async def test_a_timed_one_shot_releases_its_attachments_when_it_fires(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    _capture_sends(runtime, monkeypatch)
+    spec = runtime.attachments.save(
+        "sess-1", data=b"hello", filename="note.txt", content_type="text/plain"
+    )
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(
+            text="see", attachments=[spec.id], delay_seconds=0
+        ),
+    )
+    runtime.storage.update_scheduled_message(
+        record.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+
+    await runtime.scheduler._fire_due_schedules()
+
     assert spec.id not in runtime.attachments.schedule_referenced_ids("sess-1")

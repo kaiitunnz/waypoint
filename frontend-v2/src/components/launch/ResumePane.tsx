@@ -1,27 +1,26 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { humaniseBackend, transportPresentation } from "@waypoint/web-core/backends";
+import { humaniseBackend } from "@waypoint/web-core/backends";
 import { envSummary } from "@waypoint/web-core/launch/env";
+import { modelChoices } from "@waypoint/web-core/launch/models";
 import { deleteThreadMessage, formatThreadTime, threadEmptyHint, threadFilterOptions, type AgentThread } from "@waypoint/web-core/launch/threads";
 
 import { ActionChip } from "@/components/ui/ActionChip";
-import { Button } from "@/components/ui/Button";
 import { ChoiceField } from "@/components/ui/Choice";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Sheet } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
 import { MenuButton } from "@/components/ui/MenuButton";
-import { SettingsRow, SwitchRow } from "@/components/ui/Settings";
+import { SwitchRow } from "@/components/ui/Settings";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { usePointerUI } from "@/lib/layout";
 
-import { EnvRows } from "./EnvRows";
+import { Disclosure, EnvField } from "./AdvancedFields";
+import { transportOptions } from "./options";
 import { threadKey, type ResumeState } from "./useResume";
 import styles from "./ResumePane.module.css";
 
@@ -33,19 +32,15 @@ interface ResumePaneProps {
   onDeleteFailed: (message: string) => void;
 }
 
-// Pick a stored thread, then resume it with one primary. The interface, model and
-// environment apply when one agent is chosen.
+// The interface, model and environment apply only when one agent is chosen.
 export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed }: ResumePaneProps) {
   const pointer = usePointerUI();
-  const id = useId();
-  const [envOpen, setEnvOpen] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
   const [deleting, setDeleting] = useState<AgentThread | null>(null);
   const label = (agent: string) => humaniseBackend(agent, catalog);
   const filters = threadFilterOptions(resume.backends);
   const agent = resume.agent;
 
-  const env = <EnvRows entries={resume.envEntries} onChange={resume.setEnvEntries} disabled={busy} />;
+  const env = <EnvField entries={resume.envEntries} onChange={resume.setEnvEntries} disabled={busy} />;
   const settings = (
     <div className={pointer ? styles.grid : styles.rows}>
       {filters.length > 1 ? (
@@ -64,10 +59,7 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
         <ChoiceField
           label="Interface"
           value={resume.transport}
-          options={resume.transports.map((value) => {
-            const shown = transportPresentation(value, catalog);
-            return { value, label: shown.name, detail: shown.description };
-          })}
+          options={transportOptions(resume.transports, catalog)}
           onChange={resume.setTransport}
           disabled={busy}
         />
@@ -76,9 +68,10 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
         <ChoiceField
           label="Model"
           value={resume.models.selected ?? ""}
-          options={resume.models.options
-            .filter((model) => !model.hidden)
-            .map((model) => ({ value: model.id, label: model.label }))}
+          options={modelChoices(
+            resume.models.options.filter((model) => !model.hidden),
+            resume.models.selected,
+          ).map((model) => ({ value: model.id, label: model.label }))}
           onChange={resume.models.setSelected}
           disabled={busy}
         />
@@ -94,24 +87,12 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
         {agent ? (
           pointer ? (
             <div className={styles.advanced}>
-              <button type="button" className={styles.disclosure} aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}>
-                <span className={styles.disclosureTitle}>Advanced</span>
-                {advanced ? null : <span className={styles.muted}>{envSummary(resume.envEntries) || "No environment overrides"}</span>}
-                <Icon name={advanced ? "chevron-up" : "chevron-down"} size={18} />
-              </button>
-              {advanced ? (
-                <div className={styles.envField}>
-                  <span className={styles.muted}>Environment variables</span>
-                  {env}
-                </div>
-              ) : null}
+              <Disclosure title="Advanced" summary={envSummary(resume.envEntries) || "No environment overrides"}>
+                {env}
+              </Disclosure>
             </div>
           ) : (
-            <SettingsRow
-              label="Environment"
-              detail={envSummary(resume.envEntries) || "None"}
-              mono={Boolean(envSummary(resume.envEntries))}
-              onPress={() => setEnvOpen(true)} />
+            env
           )
         ) : null}
       </div>
@@ -132,9 +113,9 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
       {!resume.loading && resume.threads.length === 0 ? (
         <p className={styles.note}>{resume.query.trim() ? "No threads match." : threadEmptyHint(resume.filter, catalog, targetLabel)}</p>
       ) : null}
-      <ul className={styles.threads} role="radiogroup" aria-label="Threads" id={`${id}-threads`}>
+      <ul className={styles.threads} role="radiogroup" aria-label="Threads">
         {resume.shown.map((thread) => {
-          const selected = resume.selected !== null && threadKey(resume.selected) === threadKey(thread);
+          const selected = resume.selected === thread;
           return (
             <li key={threadKey(thread)} className={cx(styles.thread, selected && styles.selected)}>
               <button
@@ -181,20 +162,6 @@ export function ResumePane({ resume, catalog, targetLabel, busy, onDeleteFailed 
           {resume.more} more threads
         </ActionChip>
       ) : null}
-      {pointer ? null : (
-        <Sheet
-          open={envOpen}
-          onClose={() => setEnvOpen(false)}
-          title="Environment"
-          footer={
-            <Button variant="primary" block onClick={() => setEnvOpen(false)}>
-              Done
-            </Button>
-          }
-        >
-          {env}
-        </Sheet>
-      )}
       <ConfirmDialog
         open={deleting !== null}
         title="Delete transcript"

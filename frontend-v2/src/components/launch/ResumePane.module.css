@@ -10,37 +10,17 @@
   gap: 14px 16px;
 }
 
+@container (max-width: 520px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .rows > * + * {
   border-top: 1px solid var(--line);
 }
 
-.muted {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
 .advanced {
-  display: flex;
-  flex-direction: column;
-}
-
-.disclosure {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 40px;
-  color: var(--muted);
-}
-
-.disclosureTitle {
-  flex: 1 1 auto;
-  font-weight: 600;
-  text-align: left;
-  color: var(--text-strong);
-}
-
-.envField {
   display: flex;
   flex-direction: column;
   gap: 4px;

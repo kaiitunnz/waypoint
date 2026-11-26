@@ -216,7 +216,7 @@
   padding-top: 13px;
 }
 
-.pickerLine > :last-child:not(.pickerRow):not(.defaultMark) {
+.lineMenu {
   padding-top: 4px;
 }
 
@@ -245,10 +245,6 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   padding: 0 8px 10px 52px;
-}
-
-.danger {
-  color: var(--error);
 }
 
 .empty {

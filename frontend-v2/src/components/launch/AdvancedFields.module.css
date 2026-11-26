@@ -1,0 +1,36 @@
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  color: var(--muted);
+}
+
+.title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-strong);
+}
+
+.summary {
+  font-size: var(--f-meta);
+}
+
+.envField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .disclosure {
+    min-height: 40px;
+  }
+}

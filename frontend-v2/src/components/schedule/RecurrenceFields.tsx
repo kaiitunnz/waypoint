@@ -21,6 +21,8 @@ import { Select } from "@/components/ui/Select";
 
 import styles from "./RecurrenceFields.module.css";
 
+const LABELS = { ...CADENCE_LABELS, custom: "Cron" };
+
 interface RecurrenceFieldsProps {
   host: string;
   token: string;
@@ -67,7 +69,7 @@ export function RecurrenceFields({
           <div className={styles.chips} role="group" aria-label="Cadence">
             {CADENCES.map((cadence) => (
               <Chip key={cadence} selected={state.cadence === cadence} onClick={() => update({ cadence })}>
-                {cadence === "custom" ? "Cron" : CADENCE_LABELS[cadence]}
+                {LABELS[cadence]}
               </Chip>
             ))}
           </div>
@@ -77,9 +79,6 @@ export function RecurrenceFields({
                 id={`${id}-cron`}
                 mono
                 value={state.customCron}
-                spellCheck={false}
-                autoCapitalize="none"
-                autoCorrect="off"
                 onChange={(event) => update({ customCron: event.target.value })}
               />
             </Field>

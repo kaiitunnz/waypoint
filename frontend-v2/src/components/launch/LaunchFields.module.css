@@ -68,44 +68,6 @@
   border-top: 1px solid var(--line);
 }
 
-.disclosure {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 48px;
-  color: var(--muted);
-}
-
-.disclosureTitle {
-  flex: 1 1 auto;
-  font-weight: 600;
-  text-align: left;
-  color: var(--text-strong);
-}
-
-.disclosureDetail {
-  font-size: var(--f-meta);
-}
-
-.fieldLabel {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
-.envField {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .disclosure {
-    min-height: 40px;
-  }
-}
-
-/* A narrow window stacks the tuning fields. */
 @container (max-width: 520px) {
   .grid3 {
     grid-template-columns: minmax(0, 1fr);

@@ -2,15 +2,20 @@
 
 import { useId } from "react";
 
-import type { RecurrenceState, TimingMode } from "@waypoint/web-core/recurrence";
-import { DELAY_PRESETS, schedulePreview, type OneTimeTiming } from "@waypoint/web-core/session/scheduleMessage";
+import { defaultRecurrenceState, type RecurrenceState, type TimingMode } from "@waypoint/web-core/recurrence";
+import {
+  DELAY_PRESETS,
+  defaultScheduledAt,
+  schedulePreview,
+  type OneTimeTiming,
+} from "@waypoint/web-core/session/scheduleMessage";
 
 import { RecurrenceFields } from "@/components/schedule/RecurrenceFields";
 import { Chip } from "@/components/ui/Chip";
 import { Field, TextArea, TextInput } from "@/components/ui/Field";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 
-import styles from "./LaunchDialog.module.css";
+import styles from "./ScheduleWhen.module.css";
 
 export interface ScheduleState {
   timingMode: TimingMode;
@@ -22,6 +27,18 @@ export interface ScheduleState {
   prompt: string;
 }
 
+export function initialScheduleState(): ScheduleState {
+  return {
+    timingMode: "once",
+    recurrence: defaultRecurrenceState(),
+    recurrenceValid: false,
+    timing: "delay",
+    delay: "15",
+    at: defaultScheduledAt(),
+    prompt: "",
+  };
+}
+
 interface ScheduleWhenProps {
   host: string;
   token: string;
@@ -29,7 +46,6 @@ interface ScheduleWhenProps {
   onChange: (patch: Partial<ScheduleState>) => void;
 }
 
-// When the session launches, and the first message it gets.
 export function ScheduleWhen({ host, token, value, onChange }: ScheduleWhenProps) {
   const id = useId();
   const preview = schedulePreview(value.timing, value.delay, value.at);
@@ -83,16 +99,14 @@ export function ScheduleWhen({ host, token, value, onChange }: ScheduleWhenProps
           )}
           {preview ? (
             <p className={styles.preview}>
-              Launches <strong>{preview.absolute}</strong> <span>{preview.relative}</span>
+              Launches <strong>{preview.absolute}</strong> {preview.relative}
             </p>
           ) : null}
         </RecurrenceFields>
       </section>
-      <section className={styles.stack}>
-        <Field label="First message" htmlFor={`${id}-prompt`}>
-          <TextArea id={`${id}-prompt`} rows={3} value={value.prompt} onChange={(event) => onChange({ prompt: event.target.value })} />
-        </Field>
-      </section>
+      <Field label="First message" htmlFor={`${id}-prompt`}>
+        <TextArea id={`${id}-prompt`} rows={3} value={value.prompt} onChange={(event) => onChange({ prompt: event.target.value })} />
+      </Field>
     </>
   );
 }

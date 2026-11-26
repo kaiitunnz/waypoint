@@ -1,27 +1,23 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { humaniseBackend, transportPresentation } from "@waypoint/web-core/backends";
+import { transportPresentation } from "@waypoint/web-core/backends";
 import type { LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
-import { envSummary } from "@waypoint/web-core/launch/env";
-import { defaultModelLabel, modelChoices } from "@waypoint/web-core/launch/models";
+import { advancedOverrides } from "@waypoint/web-core/launch/form";
+import { defaultModelChoiceLabel, effortChoices, modelChoices } from "@waypoint/web-core/launch/models";
 import { effortLabel } from "@waypoint/web-core/modelDisplay";
 import type { Backend } from "@waypoint/web-core/types";
 import { selectUsageSource, usageSourceChoices } from "@waypoint/web-core/usageLimitSource";
 
-import { Button } from "@/components/ui/Button";
-import { ChoiceField, type ChoiceOption } from "@/components/ui/Choice";
-import { Sheet } from "@/components/ui/Dialog";
-import { Field, TextArea, TextInput } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { SettingsRow } from "@/components/ui/Settings";
-import { cx } from "@/lib/cx";
+import { ChoiceField } from "@/components/ui/Choice";
+import { Field, TextInput } from "@/components/ui/Field";
 import { usePointerUI } from "@/lib/layout";
 
-import { EnvRows } from "./EnvRows";
+import { Disclosure, EnvField, LinesField } from "./AdvancedFields";
 import { FolderField } from "./FolderField";
+import { agentOptions, transportOptions } from "./options";
 import styles from "./LaunchFields.module.css";
 
 interface LaunchFieldsProps {
@@ -40,12 +36,7 @@ interface LaunchFieldsProps {
   children?: ReactNode;
 }
 
-export function agentOptions(agents: Backend[], catalog: BackendCatalog): ChoiceOption[] {
-  return agents.map((id) => ({ value: id, label: humaniseBackend(id, catalog) }));
-}
-
-// The fields New and Schedule share: what runs and how, where, and its tuning.
-// Interface, Account, Permission mode, Model and Effort show only when offered.
+// The fields New and Schedule share.
 export function LaunchFields({
   form,
   catalog,
@@ -62,9 +53,7 @@ export function LaunchFields({
   const pointer = usePointerUI();
   const id = useId();
   const { caps } = form;
-  const transport = transportPresentation(form.transport, catalog);
   const modelOptions = modelChoices(form.modelInfo?.models.filter((model) => !model.hidden) ?? [], form.model);
-  const effortOptions = form.effort && !caps.effortOptions.includes(form.effort) ? [form.effort, ...caps.effortOptions] : caps.effortOptions;
 
   const title = pointer ? (
     <Field label="Title" htmlFor={`${id}-title`}>
@@ -86,11 +75,8 @@ export function LaunchFields({
           <ChoiceField
             label="Interface"
             value={form.transport}
-            hint={transport.description}
-            options={caps.transports.map((value) => {
-              const shown = transportPresentation(value, catalog);
-              return { value, label: shown.name, detail: shown.description };
-            })}
+            hint={transportPresentation(form.transport, catalog).description}
+            options={transportOptions(caps.transports, catalog)}
             onChange={form.setTransport}
             disabled={busy}
           />
@@ -139,7 +125,7 @@ export function LaunchFields({
                 label="Model"
                 value={form.model}
                 options={[
-                  { value: "", label: defaultModelLabel(form.modelInfo?.default_model_label) },
+                  { value: "", label: defaultModelChoiceLabel(form.modelInfo?.default_model_label) },
                   ...modelOptions.map((model) => ({ value: model.id, label: model.label, detail: model.description ?? undefined })),
                 ]}
                 onChange={form.setModel}
@@ -150,7 +136,10 @@ export function LaunchFields({
               <ChoiceField
                 label="Effort"
                 value={form.effort}
-                options={[{ value: "", label: "Default" }, ...effortOptions.map((level) => ({ value: level, label: effortLabel(level) }))]}
+                options={[
+                  { value: "", label: "Default" },
+                  ...effortChoices(caps.effortOptions, form.effort).map((level) => ({ value: level, label: effortLabel(level) })),
+                ]}
                 onChange={form.setEffort}
                 disabled={busy}
               />
@@ -166,147 +155,57 @@ export function LaunchFields({
   );
 }
 
-function advancedSummary(form: LaunchForm): string {
-  const parts: string[] = [];
-  if (form.usageSelection.source !== "plugin") parts.push("usage");
-  if (form.envEntries.some((entry) => !entry.removed && entry.key.trim())) parts.push("environment");
-  if (form.caps.supportsCustomArgs && form.customArgsText.trim()) parts.push("arguments");
-  if (form.caps.supportsConfigOverrides && form.configOverridesText.trim()) parts.push("overrides");
-  return parts.length ? `Sets ${parts.join(", ")}` : "No overrides";
-}
-
-const firstLine = (text: string) => text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-
-// Usage source, environment, CLI arguments and config overrides: inline on a
-// pointer client, each a row that opens its editor on touch.
+// Usage source, environment, CLI arguments and config overrides.
 function Advanced({ form, busy }: { form: LaunchForm; busy: boolean }) {
   const pointer = usePointerUI();
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<"env" | "args" | "overrides" | null>(null);
   const { caps } = form;
   const showUsage = form.usageProviderOptions.length > 0 || form.usageSelection.source === "usage_provider";
   const usage = usageSourceChoices(form.usageProviderOptions, form.usageSelection);
-
-  const usageFields = showUsage ? (
-    <>
-      <ChoiceField
-        label="Usage limits from"
-        value={usage.value}
-        options={usage.choices}
-        onChange={(choice) => {
-          const next = selectUsageSource(form.usageProviderOptions, choice);
-          if (next) form.setUsageSelection(next);
-        }}
-        disabled={busy}
-      />
-      {usage.accounts.length > 0 ? (
-        <ChoiceField
-          label="Usage account"
-          value={form.usageSelection.accountKey ?? ""}
-          options={usage.accounts.map((account) => ({ value: account.account_key, label: account.account_label }))}
-          onChange={(accountKey) => form.setUsageSelection({ ...form.usageSelection, accountKey })}
-          disabled={busy}
-        />
-      ) : null}
-    </>
-  ) : null;
-
-  const env = <EnvRows entries={form.envEntries} onChange={form.setEnvEntries} disabled={busy} />;
-  const argsArea = (
-    <TextArea
-      id={`${id}-args`}
-      rows={3}
-      spellCheck={false}
-      autoCapitalize="none"
-      autoCorrect="off"
-      mono
-      value={form.customArgsText}
-      onChange={(event) => form.setCustomArgsText(event.target.value)}
-      disabled={busy}
-    />
-  );
-  const overridesArea = (
-    <TextArea
-      id={`${id}-overrides`}
-      rows={3}
-      spellCheck={false}
-      autoCapitalize="none"
-      autoCorrect="off"
-      mono
-      value={form.configOverridesText}
-      onChange={(event) => form.setConfigOverridesText(event.target.value)}
-      disabled={busy}
-    />
-  );
+  const overrides = advancedOverrides(form, caps);
 
   return (
     <section className={styles.advanced}>
-      <button type="button" className={styles.disclosure} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className={styles.disclosureTitle}>Advanced</span>
-        {open ? null : <span className={styles.disclosureDetail}>{advancedSummary(form)}</span>}
-        <Icon name={open ? "chevron-up" : "chevron-down"} size={18} />
-      </button>
-      {open ? (
-        pointer ? (
-          <div className={styles.grid}>
-            {usageFields}
-            <div className={cx(styles.span, styles.envField)}>
-              <span className={styles.fieldLabel}>Environment variables</span>
-              {env}
-            </div>
-            {caps.supportsCustomArgs ? (
-              <Field label="CLI arguments" htmlFor={`${id}-args`}>
-                {argsArea}
-              </Field>
-            ) : null}
-            {caps.supportsConfigOverrides ? (
-              <Field label="Config overrides" htmlFor={`${id}-overrides`}>
-                {overridesArea}
-              </Field>
-            ) : null}
-          </div>
-        ) : (
-          <div className={styles.rows}>
-            {usageFields}
-            <SettingsRow
-              label="Environment"
-              detail={envSummary(form.envEntries) || "None"}
-              mono={Boolean(envSummary(form.envEntries))}
-              onPress={() => setEditing("env")}
-            />
-            {caps.supportsCustomArgs ? (
-              <SettingsRow
-                label="CLI arguments"
-                detail={firstLine(form.customArgsText) || "None"}
-                mono={Boolean(firstLine(form.customArgsText))}
-                onPress={() => setEditing("args")} />
-            ) : null}
-            {caps.supportsConfigOverrides ? (
-              <SettingsRow
-                label="Config overrides"
-                detail={firstLine(form.configOverridesText) || "None"}
-                mono={Boolean(firstLine(form.configOverridesText))}
-                onPress={() => setEditing("overrides")}
+      <Disclosure title="Advanced" summary={overrides.length ? `Sets ${overrides.join(", ")}` : "No overrides"}>
+        <div className={pointer ? styles.grid : styles.rows}>
+          {showUsage ? (
+            <>
+              <ChoiceField
+                label="Usage limits from"
+                value={usage.value}
+                options={usage.choices}
+                onChange={(choice) => {
+                  const next = selectUsageSource(form.usageProviderOptions, choice);
+                  if (next) form.setUsageSelection(next);
+                }}
+                disabled={busy}
               />
-            ) : null}
+              {usage.accounts.length > 0 ? (
+                <ChoiceField
+                  label="Usage account"
+                  value={form.usageSelection.accountKey ?? ""}
+                  options={usage.accounts.map((account) => ({ value: account.account_key, label: account.account_label }))}
+                  onChange={(accountKey) => form.setUsageSelection({ ...form.usageSelection, accountKey })}
+                  disabled={busy}
+                />
+              ) : null}
+            </>
+          ) : null}
+          <div className={styles.span}>
+            <EnvField entries={form.envEntries} onChange={form.setEnvEntries} disabled={busy} />
           </div>
-        )
-      ) : null}
-      {pointer ? null : (
-        <Sheet
-          open={editing !== null}
-          onClose={() => setEditing(null)}
-          title={editing === "env" ? "Environment" : editing === "args" ? "CLI arguments" : "Config overrides"}
-          footer={
-            <Button variant="primary" block onClick={() => setEditing(null)}>
-              Done
-            </Button>
-          }
-        >
-          {editing === "env" ? env : editing === "args" ? argsArea : editing === "overrides" ? overridesArea : null}
-        </Sheet>
-      )}
+          {caps.supportsCustomArgs ? (
+            <LinesField label="CLI arguments" value={form.customArgsText} onChange={form.setCustomArgsText} disabled={busy} />
+          ) : null}
+          {caps.supportsConfigOverrides ? (
+            <LinesField
+              label="Config overrides"
+              value={form.configOverridesText}
+              onChange={form.setConfigOverridesText}
+              disabled={busy}
+            />
+          ) : null}
+        </div>
+      </Disclosure>
     </section>
   );
 }

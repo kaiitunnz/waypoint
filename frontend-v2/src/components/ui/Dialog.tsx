@@ -22,7 +22,7 @@ interface DialogProps {
   footer?: ReactNode;
   // No padding around the body, for content that brings its own (lists, pickers).
   flush?: boolean;
-  // Modal only. `xl` is a tall two-column workspace, such as the launch form.
+  // Modal only.
   size?: "md" | "lg" | "xl";
   // Replaces the title block, for a heading with its own controls; `title` still names the dialog.
   header?: ReactNode;

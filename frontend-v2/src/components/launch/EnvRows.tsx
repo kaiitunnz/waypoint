@@ -5,7 +5,7 @@ import {
   editEnvValue,
   envRowState,
   envValueDisplay,
-  removeEnvEntry,
+  stageEnvRemoval,
   undoEnvEntry,
   updateEnvEntry,
   type EnvEntry,
@@ -25,10 +25,7 @@ interface EnvRowsProps {
   disabled?: boolean;
 }
 
-const machine = { spellCheck: false, autoCapitalize: "none", autoComplete: "off", autoCorrect: "off" } as const;
-
-// One row per variable: the key in full, the value short or masked, and a pencil
-// and a ×. Replacing or removing a value shows inline until undone.
+// Replacing or removing a value is staged on the row until undone.
 export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
   return (
     <div className={styles.editor}>
@@ -37,17 +34,12 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
           {entries.map((entry) => {
             const state = envRowState(entry);
             const label = entry.key || "variable";
-            const undo = (
-              <Button variant="text" size="sm" disabled={disabled} onClick={() => onChange(undoEnvEntry(entries, entry.id))}>
-                Undo
-              </Button>
-            );
             return (
               <li key={entry.id} className={cx(styles.row, state === "add" && styles.added)}>
                 {state === "add" ? (
                   <TextInput
-                    {...machine}
                     mono
+                    autoComplete="off"
                     aria-label="Variable name"
                     placeholder="KEY"
                     data-autofocus=""
@@ -68,21 +60,15 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                   </span>
                 ) : (
                   <TextInput
-                    {...machine}
                     mono
+                    autoComplete="off"
                     aria-label={`Value of ${label}`}
                     placeholder="value"
                     autoFocus={state === "edit"}
                     disabled={disabled}
                     className={styles.valueInput}
                     value={entry.value}
-                    onChange={(event) =>
-                      onChange(
-                        state === "add"
-                          ? updateEnvEntry(entries, entry.id, { value: event.target.value })
-                          : editEnvValue(entries, entry.id, event.target.value),
-                      )
-                    }
+                    onChange={(event) => onChange(editEnvValue(entries, entry.id, event.target.value))}
                   />
                 )}
                 <span className={styles.actions}>
@@ -100,13 +86,15 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                         label={`Remove ${label}`}
                         size="sm"
                         disabled={disabled}
-                        onClick={() => onChange(removeEnvEntry(entries, entry.id))}
+                        onClick={() => onChange(stageEnvRemoval(entries, entry.id))}
                       >
                         <Icon name="close" size={16} />
                       </IconButton>
                     </>
                   ) : (
-                    undo
+                    <Button variant="text" size="sm" disabled={disabled} onClick={() => onChange(undoEnvEntry(entries, entry.id))}>
+                      Undo
+                    </Button>
                   )}
                 </span>
               </li>

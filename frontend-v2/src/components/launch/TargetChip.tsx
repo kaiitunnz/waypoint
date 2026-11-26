@@ -37,17 +37,12 @@ export function TargetChip({ disabled }: { disabled?: boolean }) {
   const choose = (target: LaunchTargetSummary | null) => {
     launchTargets.selectTarget(target?.id ?? "");
     setOpen(false);
-    if (needsPassword(target)) setConnecting(target!.id);
+    if (target && needsPassword(target)) setConnecting(target.id);
   };
 
-  const rows: { key: string; target: LaunchTargetSummary | null; name: string; detail: string }[] = [
-    { key: "", target: null, name: hostName, detail: "This host" },
-    ...launchTargets.targets.map((target) => ({
-      key: target.id,
-      target,
-      name: target.name,
-      detail: needsPassword(target) ? "SSH password required" : "SSH target",
-    })),
+  const rows: { key: string; target: LaunchTargetSummary | null; name: string }[] = [
+    { key: "", target: null, name: hostName },
+    ...launchTargets.targets.map((target) => ({ key: target.id, target, name: target.name })),
   ];
 
   return (
@@ -88,7 +83,7 @@ export function TargetChip({ disabled }: { disabled?: boolean }) {
                   </span>
                   <span className={styles.text}>
                     <span className={styles.rowName}>{row.name}</span>
-                    <span className={styles.detail}>{row.detail}</span>
+                    <span className={styles.detail}>{rowLamp.label}</span>
                   </span>
                   {selected ? <Icon name="check" size={18} /> : null}
                 </button>
@@ -97,10 +92,10 @@ export function TargetChip({ disabled }: { disabled?: boolean }) {
           })}
         </ul>
       </Flyout>
-      {connecting && connectingTarget ? (
+      {connectingTarget ? (
         <SshConnectDialog
           targetName={connectingTarget.name}
-          onConnect={(password) => launchTargets.connect(connecting, password)}
+          onConnect={(password) => launchTargets.connect(connectingTarget.id, password)}
           onClose={() => setConnecting(null)}
         />
       ) : null}

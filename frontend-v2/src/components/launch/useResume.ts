@@ -4,11 +4,10 @@ import { useMemo, useState } from "react";
 
 import { deleteThread, importBackendThread } from "@waypoint/web-core/api";
 import { agentTransports, type BackendCatalog } from "@waypoint/web-core/backends";
-import { useImportModels } from "@waypoint/web-core/hooks/useImportModels";
+import { useImportModels, type ImportModels } from "@waypoint/web-core/hooks/useImportModels";
 import { useResumableThreads } from "@waypoint/web-core/hooks/useResumableThreads";
 import { clampTransport } from "@waypoint/web-core/launch/form";
 import { entriesToRecord, recordToEntries, type EnvEntry } from "@waypoint/web-core/launch/env";
-import { threadDiscoveryBackends } from "@waypoint/web-core/launch/launchDefaults";
 import {
   canDeleteThread,
   clampThreadFilter,
@@ -17,9 +16,9 @@ import {
   mergeThreads,
   showsImportModel,
   threadCounts,
+  threadDiscoveryBackends,
   threadFormAgent,
-  threadImportChoices,
-  threadImportRequest,
+  threadImportBody,
   threadProfileScope,
   type AgentThread,
   type ThreadFilter,
@@ -28,7 +27,7 @@ import type { Backend, SessionRecord, SessionTransport } from "@waypoint/web-cor
 
 import { handleAuthFailure } from "@/lib/auth";
 
-export const THREAD_PAGE = 8;
+const THREAD_PAGE = 8;
 
 interface ResumeOptions {
   host: string;
@@ -62,7 +61,7 @@ export interface ResumeState {
   transport: SessionTransport;
   setTransport: (transport: SessionTransport) => void;
   showModel: boolean;
-  models: ReturnType<typeof useImportModels>;
+  models: ImportModels;
   envEntries: EnvEntry[];
   setEnvEntries: (entries: EnvEntry[]) => void;
   threads: AgentThread[];
@@ -134,7 +133,15 @@ export function useResume({
   const setEnvEntries = (entries: EnvEntry[]) => setEnv((current) => ({ ...current, entries }));
 
   const showModel = showsImportModel(filter, formAgent, catalog);
-  const models = useImportModels(host, token, formAgent, launchTargetId || null, scopeProfile, enabled && showModel);
+  const models = useImportModels(
+    host,
+    token,
+    formAgent,
+    launchTargetId || null,
+    scopeProfile,
+    enabled && showModel,
+    handleAuthFailure,
+  );
 
   const all = useMemo(() => mergeThreads(threadsByBackend, backends), [threadsByBackend, backends]);
   const counts = useMemo(() => threadCounts(threadsByBackend, backends), [threadsByBackend, backends]);
@@ -156,25 +163,16 @@ export function useResume({
 
   async function resume(): Promise<SessionRecord | null> {
     if (!selected) return null;
-    const choices = threadImportChoices(
-      selected,
+    const body = threadImportBody({
+      thread: selected,
       filter,
-      { transport, launchEnv: entriesToRecord(envEntries), model: models.selected, showModel },
+      choices: { transport, launchEnv: entriesToRecord(envEntries), model: models.selected },
+      scope: { launchTargetId, backend: formBackend, accountProfileId: scopeProfile },
+      importHistory,
       defaultLaunchEnvByBackend,
       catalog,
-    );
-    const session = await importBackendThread(
-      host,
-      token,
-      selected.backend,
-      threadImportRequest({
-        thread: selected,
-        launchTargetId,
-        accountProfileId: threadProfileScope(selected.backend, formBackend, scopeProfile),
-        choices,
-        importHistory,
-      }),
-    );
+    });
+    const session = await importBackendThread(host, token, selected.backend, body);
     removeThread(selected.backend, selected.id);
     return session;
   }

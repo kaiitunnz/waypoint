@@ -38,10 +38,6 @@
 
 /* ─── Body ─── */
 
-.layout {
-  display: block;
-}
-
 .main {
   display: flex;
   flex-direction: column;
@@ -53,17 +49,6 @@
 
 .touchModes {
   padding-bottom: 2px;
-}
-
-/* On touch the mode switch spans the sheet, one equal segment per mode. */
-.touchModes > [role="radiogroup"] {
-  display: flex;
-  width: 100%;
-}
-
-.touchModes [role="radio"] {
-  flex: 1 1 0;
-  justify-content: center;
 }
 
 /* The modal has a fixed height, so the columns scroll on their own. */
@@ -81,33 +66,6 @@
 .withColumn {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.heading {
-  font-size: var(--f-body);
-  font-weight: 600;
-  color: var(--text-strong);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.preview {
-  font-size: var(--f-meta);
-  color: var(--muted);
-}
-
-.preview strong {
-  color: var(--text-strong);
 }
 
 /* ─── Footer ─── */

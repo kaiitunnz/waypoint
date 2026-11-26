@@ -29,21 +29,17 @@ interface FolderFieldProps {
   disabled?: boolean;
 }
 
-// A folder on one line, cut from the left so its last part stays; hover or a long press shows it whole.
 function FolderPath({ path }: { path: string }) {
   return <PathLabel {...splitPath(path)} full={path} />;
 }
 
-const machine = { spellCheck: false, autoCapitalize: "none", autoComplete: "off", autoCorrect: "off" } as const;
-
-// The working directory: recent folders, then the server's completions for what
-// is typed. A combobox on a pointer client; on touch a row that opens a sheet.
+// The working directory: recent folders, then the server's completions for what is typed.
 export function FolderField(props: FolderFieldProps) {
   const pointer = usePointerUI();
   return pointer ? <FolderCombobox {...props} /> : <FolderRow {...props} />;
 }
 
-function ErrorLine({ id, path }: { id: string; path: string }) {
+function ErrorLine({ id, path }: { id?: string; path: string }) {
   return (
     <span className={styles.error} id={id} role="alert">
       Folder not found: <code>{path}</code>
@@ -97,7 +93,7 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
     <Field label="Folder" htmlFor={id} className={styles.field}>
       <span className={styles.wrap}>
         <TextInput
-          {...machine}
+          autoComplete="off"
           ref={input}
           id={id}
           mono
@@ -190,7 +186,7 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
           setOpen(true);
         }}
       />
-      {error && !open ? <ErrorLine id={`${id}-row-error`} path={error} /> : null}
+      {error && !open ? <ErrorLine path={error} /> : null}
       <Sheet
         open={open}
         onClose={() => setOpen(false)}
@@ -203,11 +199,12 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
       >
         <div className={styles.sheetBody}>
           <TextInput
-            {...machine}
             mono
+            autoComplete="off"
             data-autofocus=""
             aria-label="Folder"
             aria-invalid={error && draft === error ? true : undefined}
+            aria-describedby={error && draft === error ? `${id}-error` : undefined}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {

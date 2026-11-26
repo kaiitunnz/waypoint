@@ -19,6 +19,16 @@
   white-space: nowrap;
 }
 
+.block {
+  display: flex;
+  width: 100%;
+}
+
+.block .segment {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
 .on {
   background: var(--fill-raised);
   color: var(--text-strong);

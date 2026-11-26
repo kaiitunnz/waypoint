@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useBackendCatalog, humaniseBackend } from "@waypoint/web-core/backends";
 import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
+import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
@@ -55,13 +56,16 @@ export function SessionsHome() {
   const launch = useLaunchContext(host, token, launchTargets.targets, launchTargets.activeTargetId, handleAuthFailure);
   const [launchRequest, setLaunchRequest] = useState<LaunchRequest | null>(null);
   const { refresh: refreshLaunch } = launch;
+  const { sessions: knownSessions, schedules: knownSchedules } = feed;
   const openLaunch = useCallback(
     (request: LaunchRequest) => {
+      // Folders the server knows join the recent folders.
+      if (knownSessions) seedRecentCwdsFromHistory(host, knownSessions, knownSchedules);
       setLaunchRequest(request);
       // Presets may have changed in another tab or client.
       void refreshLaunch();
     },
-    [refreshLaunch],
+    [host, knownSessions, knownSchedules, refreshLaunch],
   );
   const searching = query.trim() !== "";
 

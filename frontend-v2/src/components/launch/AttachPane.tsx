@@ -8,8 +8,8 @@ import type { Backend } from "@waypoint/web-core/types";
 import { ChoiceField } from "@/components/ui/Choice";
 import { Field, TextInput } from "@/components/ui/Field";
 
-import { agentOptions } from "./LaunchFields";
-import styles from "./LaunchDialog.module.css";
+import { agentOptions } from "./options";
+import styles from "./AttachPane.module.css";
 
 export interface AttachState {
   target: string;
@@ -35,9 +35,6 @@ export function AttachPane({ value, onChange, agents, catalog, busy }: AttachPan
           id={`${id}-pane`}
           mono
           data-autofocus=""
-          spellCheck={false}
-          autoCapitalize="none"
-          autoCorrect="off"
           disabled={busy}
           value={value.target}
           onChange={(event) => onChange({ ...value, target: event.target.value })}

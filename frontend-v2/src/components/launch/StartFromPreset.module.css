@@ -13,14 +13,20 @@
   align-items: baseline;
   gap: 12px;
   width: 100%;
-  min-height: 38px;
+  min-height: 44px;
   padding: 6px 4px;
   border-radius: var(--r-sm);
   text-align: left;
 }
 
-.preset:hover {
-  background: var(--fill-quiet);
+@media (hover: hover) and (pointer: fine) {
+  .preset {
+    min-height: 38px;
+  }
+
+  .preset:hover {
+    background: var(--fill-quiet);
+  }
 }
 
 .name {

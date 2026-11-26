@@ -53,9 +53,6 @@
   overflow-wrap: anywhere;
 }
 
-.mono {
-  font-family: var(--mono);
-}
 
 .detail {
   font-size: var(--f-meta);

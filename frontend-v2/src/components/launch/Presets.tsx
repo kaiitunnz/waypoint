@@ -4,7 +4,14 @@ import { useId, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { humaniseBackend } from "@waypoint/web-core/backends";
-import { filterPresets, orderPresets, presetSubLabel, specSummaryChips, summarizeSpec } from "@waypoint/web-core/launch/presets";
+import {
+  deletePresetMessage,
+  filterPresets,
+  orderPresets,
+  presetSubLabel,
+  specSummaryChips,
+  summarizeSpec,
+} from "@waypoint/web-core/launch/presets";
 import type {
   AccountProfile,
   SessionPresetSpec,
@@ -171,7 +178,6 @@ export function PresetRow({ controls, catalog }: { controls: PresetControls; cat
   );
 }
 
-// Search, save, and every preset with its actions; choosing one applies it.
 function PresetPicker({
   controls,
   catalog,
@@ -234,13 +240,15 @@ function PresetPicker({
                 </button>
                 {preset.is_default ? <DefaultMark label /> : null}
                 {selected ? null : (
-                  <MenuButton
-                    label={`${preset.name} actions`}
-                    title={preset.name}
-                    size="sm"
-                    items={menuItems(preset, false)}
-                    onSelect={(id) => onMenu(controls, preset, id)}
-                  />
+                  <span className={styles.lineMenu}>
+                    <MenuButton
+                      label={`${preset.name} actions`}
+                      title={preset.name}
+                      size="sm"
+                      items={menuItems(preset, false)}
+                      onSelect={(id) => onMenu(controls, preset, id)}
+                    />
+                  </span>
                 )}
               </div>
               {selected ? (
@@ -253,7 +261,7 @@ function PresetPicker({
                       Set as default
                     </Button>
                   )}
-                  <Button variant="text" size="sm" className={styles.danger} disabled={controls.busy} onClick={() => controls.askDelete(preset)}>
+                  <Button variant="danger" size="sm" disabled={controls.busy} onClick={() => controls.askDelete(preset)}>
                     Delete
                   </Button>
                 </div>
@@ -267,7 +275,6 @@ function PresetPicker({
   );
 }
 
-// The save form and the delete confirmation, shared by the column and the picker.
 export function PresetDialogs({
   controls,
   spec,
@@ -285,7 +292,6 @@ export function PresetDialogs({
     <>
       {controls.saving ? (
         <PresetSaveDialog
-          asDefault={controls.saving.asDefault}
           spec={spec}
           catalog={catalog}
           profiles={profiles}
@@ -298,7 +304,7 @@ export function PresetDialogs({
       <ConfirmDialog
         open={controls.pendingDelete !== null}
         title="Delete preset"
-        detail={controls.pendingDelete?.message ?? ""}
+        detail={controls.pendingDelete ? deletePresetMessage(controls.pendingDelete) : ""}
         confirmLabel="Delete"
         onConfirm={controls.confirmDelete}
         onClose={controls.cancelDelete}
@@ -308,7 +314,6 @@ export function PresetDialogs({
 }
 
 function PresetSaveDialog({
-  asDefault: initialDefault,
   spec,
   catalog,
   profiles,
@@ -317,7 +322,6 @@ function PresetSaveDialog({
   onClose,
   onSave,
 }: {
-  asDefault: boolean;
   spec: SessionPresetSpec;
   catalog: BackendCatalog;
   profiles: AccountProfile[];
@@ -330,13 +334,11 @@ function PresetSaveDialog({
   const pointer = usePointerUI();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [asDefault, setAsDefault] = useState(initialDefault);
+  const [asDefault, setAsDefault] = useState(false);
   const chips = specSummaryChips(summarizeSpec(spec), profiles, usageProviders);
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    // React carries a portaled form's submit up to the launch form it sits in.
-    event.stopPropagation();
     if (!name.trim() || busy) return;
     void onSave({ name: name.trim(), description: description.trim() || null, spec, is_default: asDefault });
   }
@@ -366,9 +368,6 @@ function PresetSaveDialog({
             mono
             data-autofocus=""
             value={name}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
             onChange={(event) => setName(event.target.value)}
           />
         </Field>

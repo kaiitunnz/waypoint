@@ -22,3 +22,12 @@
   font-size: var(--f-meta);
   color: var(--muted);
 }
+
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--f-meta);
+  color: var(--error);
+}

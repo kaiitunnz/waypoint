@@ -8,7 +8,7 @@ import { normalizeToolName } from "@waypoint/web-core/events";
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
-import { decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
+import { decideAsk, decidesInline, decisionView } from "@waypoint/web-core/pendingAskActions";
 import {
   approvalBody,
   approvalBodyForTool,
@@ -26,6 +26,7 @@ import { DecisionCard } from "@/components/session/attention/DecisionCard";
 import { AskControllerProvider, SessionContextProvider } from "@/components/session/SessionContext";
 import { useAskLocks } from "@/components/sessions/AskLocks";
 import { SourceLine } from "@/components/sessions/SourceLine";
+import { ActionChip } from "@/components/ui/ActionChip";
 import { withoutRetry } from "@/components/sessions/useAskResponder";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
@@ -113,44 +114,59 @@ function QuestionDetail({ ask }: { ask: PendingQuestionAsk }) {
   );
 }
 
-// The request as the transcript has it, so an edit shows its diff and a long
-// command is whole. Null until read.
-function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { body: ApprovalBodyModel; cut: boolean } | null {
+// How far back the request is looked for.
+const REQUEST_WINDOW = 20;
+
+type RequestState = { status: "loading" } | { status: "failed" } | { status: "ready"; body: ApprovalBodyModel };
+
+// The request as the transcript has it, so an edit shows its diff and any request
+// is whole. Where the transcript does not turn it up, only an ask that carries
+// its own request stands in for it.
+function useRequestBody(ask: PendingApprovalAsk | PendingPlanAsk): { request: RequestState; retry: () => void } {
   const { host, token } = useShellData();
   const sessionId = ask.session_id;
   const approvalId = ask.kind === "approval" ? ask.approval.approval_id : null;
-  const [found, setFound] = useState<{ id: string; body: ApprovalBodyModel | null } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // What one read turned up: the request, none among the recent events, or no read.
+  const [found, setFound] = useState<{ key: string; read: ApprovalBodyModel | "missing" | "failed" } | null>(null);
+  const key = `${approvalId} ${attempt}`;
 
   useEffect(() => {
     if (approvalId === null) return;
     let active = true;
-    fetchEvents(host, token, sessionId, { messages: 5 })
+    fetchEvents(host, token, sessionId, { messages: REQUEST_WINDOW })
       .then((page) => {
         const event = page.events.find(
           (entry) => entry.kind === "approval_request" && entry.metadata?.approval_id === approvalId,
         );
-        if (active) setFound({ id: approvalId, body: event ? approvalBody(event) : null });
+        if (active) setFound({ key, read: event ? approvalBody(event) : "missing" });
       })
       .catch((error) => {
         if (!active) return;
         if (isAuthError(error)) handleAuthFailure();
-        else setFound({ id: approvalId, body: null });
+        else setFound({ key, read: "failed" });
       });
     return () => {
       active = false;
     };
-  }, [host, token, sessionId, approvalId]);
+  }, [host, token, sessionId, approvalId, key]);
 
-  if (ask.kind === "plan_approval") return { body: { kind: "plan", plan: ask.plan.text }, cut: false };
-  if (!found || found.id !== approvalId) return null;
-  if (found.body) return { body: found.body, cut: false };
-  const { tool_name: tool, tool_input: input, tool_input_truncated: cut } = ask.approval;
-  return { body: approvalBodyForTool(normalizeToolName(tool), input, ask.body ?? ask.title), cut };
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  const resolve = (): RequestState => {
+    if (ask.kind === "plan_approval") return { status: "ready", body: { kind: "plan", plan: ask.plan.text } };
+    if (!found || found.key !== key) return { status: "loading" };
+    if (typeof found.read !== "string") return { status: "ready", body: found.read };
+    if (found.read === "failed" || !decidesInline(ask)) return { status: "failed" };
+    const { tool_name: tool, tool_input: input } = ask.approval;
+    return { status: "ready", body: approvalBodyForTool(normalizeToolName(tool), input, ask.body ?? ask.title) };
+  };
+  return { request: resolve(), retry };
 }
 
 function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingPlanAsk; cwd: string; agent: string }) {
   const { host, token } = useShellData();
-  const request = useRequestBody(ask);
+  const { request, retry } = useRequestBody(ask);
+  const body = request.status === "ready" ? request.body : null;
   const { actions, supportsNote } = decisionView(ask);
   const context = useMemo(
     () => ({
@@ -173,8 +189,9 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         key={ask.id}
         roomy
         title={ask.title}
-        copyText={request ? approvalCopyText(request.body, text) : text}
+        copyText={body ? approvalCopyText(body, text) : text}
         copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
+        locked={!body}
         actions={actions.map((action) => ({
           id: action.decision,
           label: action.label,
@@ -186,8 +203,19 @@ function RequestDetail({ ask, cwd, agent }: { ask: PendingApprovalAsk | PendingP
         // The card retries a not-ready agent itself.
         decide={(decision, note) => decideAsk(host, token, ask, decision, note, { attempts: 1 })}
       >
-        {request ? <ApprovalBody body={request.body} /> : <p className={styles.note}>Loading…</p>}
-        {request?.cut ? <p className={styles.note}>Shortened</p> : null}
+        {body ? (
+          <ApprovalBody body={body} />
+        ) : request.status === "loading" ? (
+          <p className={styles.note}>Loading…</p>
+        ) : (
+          <div className={styles.failed} role="alert">
+            <p>{"Couldn't load the request"}</p>
+            <ActionChip icon="refresh" onClick={retry}>
+              Retry
+            </ActionChip>
+          </div>
+        )}
+        {body?.kind === "plan" && !body.plan.trim() ? <p className={styles.note}>No plan text</p> : null}
       </DecisionCard>
     </SessionContextProvider>
   );

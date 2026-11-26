@@ -32,6 +32,8 @@ interface DecisionCardProps<Id extends string> {
   availability?: PendingAsk["availability"];
   // Shares the reply's phase with the ask's other surfaces.
   lockId?: string;
+  // Holds every action back while there is not yet anything to decide on.
+  locked?: boolean;
   // On its own screen: the body takes its full height.
   roomy?: boolean;
 }
@@ -48,13 +50,14 @@ export function DecisionCard<Id extends string>({
   children,
   availability = "actionable",
   lockId,
+  locked = false,
   roomy,
 }: DecisionCardProps<Id>) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const { phase, send, busy: pending, dismiss } = useAskResponder(lockId);
   const sending = (id: Id) => phase.state === "sending" && phase.action === id;
-  const busy = pending || availability !== "actionable";
+  const busy = pending || locked || availability !== "actionable";
 
   const run = (id: Id) => {
     if (busy) return;

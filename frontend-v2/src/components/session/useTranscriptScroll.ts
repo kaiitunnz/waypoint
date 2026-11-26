@@ -69,7 +69,7 @@ export function useTranscriptScroll(turns: TranscriptTurn[], pendingCount: numbe
       requestAnimationFrame(() => {
         // A toggle that is gone or hidden has no position to keep.
         if (closing && toggle.getClientRects().length > 0) el.scrollTop += toggle.getBoundingClientRect().top - top;
-        follow.current = settled(next.hold?.resumeOnSend ?? false, closing, el.scrollTop, fromEnd(el));
+        follow.current = settled(next, closing, el.scrollTop, fromEnd(el));
         setAway(!follow.current.following && fromEnd(el) > 1);
         remember();
       });

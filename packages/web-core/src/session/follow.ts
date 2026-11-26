@@ -18,9 +18,9 @@ export function toggled(state: Follow, scrollTop: number): Follow {
 }
 
 // The toggled fold has laid out. Closing one that leaves the view at the end follows again.
-export function settled(resumeOnSend: boolean, closing: boolean, scrollTop: number, fromEnd: number): Follow {
+export function settled(state: Follow, closing: boolean, scrollTop: number, fromEnd: number): Follow {
   if (closing && fromEnd <= 1) return FOLLOWING;
-  return { following: false, hold: { scrollTop, resumeOnSend } };
+  return { following: false, hold: { scrollTop, resumeOnSend: state.hold?.resumeOnSend ?? false } };
 }
 
 export function scrolled(state: Follow, scrollTop: number, fromEnd: number): Follow {

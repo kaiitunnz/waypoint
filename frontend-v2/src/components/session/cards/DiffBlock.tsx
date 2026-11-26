@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/events";
-import { DIFF_MARKER } from "@waypoint/web-core/highlight";
+import { DIFF_MARKER, type DiffLine } from "@waypoint/web-core/highlight";
 import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
 import { compactDiff, fullDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
@@ -20,6 +20,31 @@ import { PathLabel } from "./PathLabel";
 import { Tokens } from "./Tokens";
 
 const COMPACT_LINES = 6;
+
+function Line({ line }: { line: DiffLine }) {
+  return (
+    <div className={cx(styles.line, line.kind === "add" && styles.addLine, line.kind === "del" && styles.delLine)}>
+      <span className={styles.no}>{line.kind === "del" ? line.oldNo : line.newNo}</span>
+      <span className={cx(line.kind === "add" && styles.addSign, line.kind === "del" && styles.delSign)}>{DIFF_MARKER[line.kind]}</span>
+      <span>
+        <Tokens tokens={line.tokens} />
+      </span>
+    </div>
+  );
+}
+
+// Unchanged lines between two changes that the diff carries: they open where they are.
+function ContextFold({ lines }: { lines: DiffLine[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {open ? lines.map((line, index) => <Line key={index} line={line} />) : null}
+      <div className={styles.context}>
+        <Disclosure open={open} total={lines.length} noun="unchanged lines" onToggle={() => setOpen(!open)} />
+      </div>
+    </>
+  );
+}
 
 function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader: boolean }) {
   const lines = useHighlightedDiff(file.diff, file.path);
@@ -56,23 +81,11 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
       ) : full.length > 0 ? (
         <div className={cx(styles.code, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
           {rows.map((row, index) => {
-            if (row.kind === "fold") {
-              return (
-                <div key={index} className={styles.fold}>
-                  {row.count === null ? "Unchanged lines" : `${row.count} unchanged ${row.count === 1 ? "line" : "lines"}`}
-                </div>
-              );
-            }
-            const { line } = row;
+            if (row.kind === "line") return <Line key={index} line={row.line} />;
+            if (row.lines) return <ContextFold key={index} lines={row.lines} />;
             return (
-              <div key={index} className={cx(styles.line, line.kind === "add" && styles.addLine, line.kind === "del" && styles.delLine)}>
-                <span className={styles.no}>{line.kind === "del" ? line.oldNo : line.newNo}</span>
-                <span className={cx(line.kind === "add" && styles.addSign, line.kind === "del" && styles.delSign)}>
-                  {DIFF_MARKER[line.kind]}
-                </span>
-                <span>
-                  <Tokens tokens={line.tokens} />
-                </span>
+              <div key={index} className={styles.fold}>
+                {row.count === null ? "Unchanged lines" : `${row.count} unchanged ${row.count === 1 ? "line" : "lines"}`}
               </div>
             );
           })}

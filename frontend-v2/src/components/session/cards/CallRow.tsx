@@ -6,16 +6,15 @@ import { TODO_MARKER, TODO_STATUS_LABEL, type TodoEntry } from "@waypoint/web-co
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
+import clamp from "./Clamp.module.css";
 import { Disclosure } from "./Disclosure";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { PathLabel } from "./PathLabel";
+import { useClamp } from "./useClamp";
 import { useFold } from "./useFold";
-
-const COMMAND_LINES = 6;
-const OUTPUT_LINES = 4;
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
   return (
@@ -45,13 +44,18 @@ function Lines({ text }: { text: string }) {
 }
 
 function Command({ text }: { text: string }) {
-  const fold = useFold(text, COMMAND_LINES, "start");
+  const fold = useFold(text, "start");
+  const { content, chip } = useClamp<HTMLDivElement>(fold.open || fold.hidden > 0);
   return (
     <>
-      <div className={cx(styles.text, styles.mono)}>
-        <Lines text={fold.shown} />
+      <div className={cx(styles.text, styles.mono, !fold.open && clamp.clamp)}>
+        <div ref={content}>
+          <Lines text={fold.shown} />
+        </div>
       </div>
-      {fold.foldable ? <Disclosure open={fold.open} total={fold.total} onToggle={fold.toggle} /> : null}
+      <div ref={chip}>
+        <Disclosure open={fold.open} total={fold.hidden > 0 ? fold.total : undefined} onToggle={fold.toggle} />
+      </div>
     </>
   );
 }
@@ -101,7 +105,7 @@ export function CallRow({ row }: { row: CallView }) {
       ) : null}
       {row.output ? (
         <div className={styles.inset}>
-          <FoldedText text={row.output} lines={OUTPUT_LINES} keep="end" className={styles.out} />
+          <FoldedText text={row.output} keep="end" className={styles.out} />
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

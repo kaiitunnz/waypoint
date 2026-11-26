@@ -101,6 +101,11 @@
   .hasStats .glyphs {
     display: none;
   }
+
+  .body,
+  .counts {
+    padding-left: 12px;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {

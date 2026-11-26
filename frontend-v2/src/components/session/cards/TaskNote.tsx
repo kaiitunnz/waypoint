@@ -17,8 +17,6 @@ import { EventTime } from "./EventTime";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
 
-const REPORT_LINES = 8;
-
 function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") return <p className={styles.caption}>Loading report…</p>;
   if (state.status === "error") return <p className={styles.caption}>Report preview unavailable. Open the full file.</p>;
@@ -26,7 +24,7 @@ function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (preview.binary || preview.content === null) return <p className={styles.caption}>Binary report. Open the full file.</p>;
   return (
     <>
-      <FoldedText text={preview.content} lines={REPORT_LINES} keep="start" className={styles.result} />
+      <FoldedText text={preview.content} keep="start" className={styles.result} />
       {preview.truncated ? <p className={styles.caption}>Preview: first {Math.round(preview.content_bytes / 1024)} KB of the full report</p> : null}
     </>
   );
@@ -76,9 +74,9 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
       {teaser && !open ? <p className={styles.teaser}>{teaser}</p> : null}
       {open ? (
         <div className={styles.body}>
-          {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} lines={REPORT_LINES} keep="start" className={styles.result} /> : null}
+          {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} keep="start" className={styles.result} /> : null}
           {caption(view.resultPreview, view.resultTruncated)}
-          {view.event && !supersedes(view.event) ? <FoldedText text={view.event} lines={REPORT_LINES} keep="start" className={styles.result} /> : null}
+          {view.event && !supersedes(view.event) ? <FoldedText text={view.event} keep="start" className={styles.result} /> : null}
           {caption(view.event, view.eventTruncated)}
           {view.note ? <p className={styles.text}>{view.note}</p> : null}
           {caption(view.note, view.noteTruncated)}
@@ -88,7 +86,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
               <span className={styles.label}>{reportSpec !== null || inlineReports.length > 0 ? "Full report" : "Full output"}</span>
               {inlineReports.map((text, index) =>
                 text.trim() ? (
-                  <FoldedText key={index} text={text} lines={REPORT_LINES} keep="start" className={styles.result} />
+                  <FoldedText key={index} text={text} keep="start" className={styles.result} />
                 ) : (
                   <p className={styles.caption} key={index}>
                     No output

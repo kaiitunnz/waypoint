@@ -92,6 +92,15 @@
   text-align: left;
 }
 
+/* Stays in view while the code beside it scrolls sideways. */
+.context {
+  position: sticky;
+  left: 0;
+  width: fit-content;
+  padding: 4px 8px;
+  font-family: var(--sans);
+}
+
 .foot {
   margin-top: 6px;
 }

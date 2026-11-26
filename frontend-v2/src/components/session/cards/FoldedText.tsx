@@ -2,28 +2,34 @@
 
 import { cx } from "@/lib/cx";
 
+import clamp from "./Clamp.module.css";
 import { Disclosure } from "./Disclosure";
 import styles from "./FoldedText.module.css";
+import { useClamp } from "./useClamp";
 import { useFold } from "./useFold";
 
 interface FoldedTextProps {
   text: string;
-  // Lines shown until it is opened, from the start or the end of the text.
-  lines: number;
+  // Which end of the text stays in view while it is folded.
   keep: "start" | "end";
   className: string;
 }
 
-export function FoldedText({ text, lines, keep, className }: FoldedTextProps) {
-  const fold = useFold(text, lines, keep);
+export function FoldedText({ text, keep, className }: FoldedTextProps) {
+  const fold = useFold(text, keep);
+  const { content, chip } = useClamp<HTMLSpanElement>(fold.open || fold.hidden > 0);
   return (
     <>
-      <pre className={cx(className, fold.open && styles.open)}>{fold.shown}</pre>
-      {fold.foldable ? (
-        <div className={styles.fold}>
-          <Disclosure open={fold.open} total={fold.total} onToggle={fold.toggle} />
-        </div>
-      ) : null}
+      <pre className={cx(className, fold.open && styles.open)}>
+        <span className={cx(clamp.content, !fold.open && (keep === "end" ? clamp.keepEnd : clamp.clamp))}>
+          <span ref={content} className={clamp.content}>
+            {fold.shown}
+          </span>
+        </span>
+      </pre>
+      <div ref={chip} className={styles.fold}>
+        <Disclosure open={fold.open} total={fold.hidden > 0 ? fold.total : undefined} onToggle={fold.toggle} />
+      </div>
     </>
   );
 }

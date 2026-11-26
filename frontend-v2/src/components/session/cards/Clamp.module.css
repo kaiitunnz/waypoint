@@ -1,0 +1,19 @@
+/* A folded block shows eight visual lines, however its text wraps. The count
+   matches FOLD_LINES in useFold. */
+.clamp {
+  display: block;
+  max-height: 8lh;
+  overflow: hidden;
+}
+
+/* Keeps the end in view, clipping from the top. */
+.keepEnd {
+  composes: clamp;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.content {
+  display: block;
+}

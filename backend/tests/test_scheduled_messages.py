@@ -1257,6 +1257,33 @@ async def test_send_now_on_a_due_recurrence_counts_as_that_run(
     assert sent.scheduled_at > due
 
 
+async def test_a_refused_send_now_keeps_a_due_occurrence_due(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+
+    async def refuse(session_id: str, request) -> SessionRecord:
+        raise HTTPException(
+            status_code=http.HTTP_409_CONFLICT, detail="session is busy"
+        )
+
+    monkeypatch.setattr(runtime, "handle_input", refuse)
+    record = runtime.scheduler.create_message_schedule(
+        "sess-1",
+        ScheduledMessageCreateRequest(text="tick", cron="* * * * *", timezone="UTC"),
+    )
+    due = datetime.now(UTC) - timedelta(seconds=1)
+    runtime.storage.update_scheduled_message(record.id, scheduled_at=due)
+
+    with pytest.raises(HTTPException):
+        await runtime.scheduler.send_message_now(record.id)
+
+    kept = runtime.storage.get_scheduled_message(record.id)
+    assert kept is not None
+    assert kept.scheduled_at == due
+    assert kept.last_run_at is None
+
+
 async def test_send_now_reports_a_message_held_by_focus(tmp_path, monkeypatch) -> None:
     runtime = _runtime_with_session(tmp_path)
     sends = _capture_sends(runtime, monkeypatch)

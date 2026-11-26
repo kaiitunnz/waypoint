@@ -436,19 +436,27 @@ class Scheduler:
                 if item.session_id == record.session_id
             ]
             oldest_idle_batch = session_idle[0].idle_batch if session_idle else None
+        claimed_next = None
         if (
             record.cron is not None
             and record.timezone is not None
             and record.scheduled_at <= now
         ):
             # The due occurrence is this send, so the loop must not run it too.
-            next_at = next_occurrence_after(record.cron, record.timezone, now)
-            storage.claim_recurring_message(record.id, record.scheduled_at, next_at)
+            claimed_next = next_occurrence_after(record.cron, record.timezone, now)
+            storage.claim_recurring_message(
+                record.id, record.scheduled_at, claimed_next
+            )
         try:
             result = await self._send_input(record)
-        except HTTPException:
-            raise
         except Exception as exc:
+            if claimed_next is not None:
+                # Nothing was delivered, so the occurrence is still due.
+                storage.claim_recurring_message(
+                    record.id, claimed_next, record.scheduled_at
+                )
+            if isinstance(exc, HTTPException):
+                raise
             log.exception("send-now delivery failed", extra={"msg_id": record.id})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)

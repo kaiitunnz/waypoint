@@ -18,7 +18,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
-import { type TerminalSubmitResult } from "@/lib/composer";
+import { type TerminalSubmitResult } from "@waypoint/web-core/sessionDelivery";
 import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { useCommandCompletions } from "@waypoint/web-core/composer-completions";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";

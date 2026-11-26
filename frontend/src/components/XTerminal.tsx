@@ -1,321 +1,55 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useImperativeHandle, useRef } from "react";
 
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
-import {
-  type TerminalAppearance,
-  terminalThemeFor,
-} from "@/lib/terminalTheme";
+import { useXTerminal, type XTerminalHandle } from "@waypoint/web-core/hooks/useXTerminal";
+import type { TerminalAppearance } from "@waypoint/web-core/session/terminal";
 
-export interface XTerminalHandle {
-  write(data: string): void;
-  reset(): void;
-  fit(): void;
-  resize(cols: number, rows: number): void;
-  cols(): number;
-  rows(): number;
-  focus(): void;
-  blur(): void;
-  // Synchronous stdin toggle, so a focus() in the same tap lands on a writable
-  // textarea and mobile browsers raise the keyboard.
-  setInputEnabled(enabled: boolean): void;
-  scrollToBottom(): void;
-  // Select the light/dark surface. The connection layer calls this on the
-  // appearance control frame before writing the seed, and resets it to dark
-  // before every (re)connect so a prior light session can't bleed through.
-  setAppearance(appearance: TerminalAppearance): void;
-}
+import { terminalThemeFor } from "@/lib/terminalTheme";
+
+export type { XTerminalHandle };
 
 interface XTerminalProps {
   readOnly?: boolean;
-  // When false, the terminal does not fit its grid to the container. The
-  // server owns the geometry (emulated panes like claude_tty are pinned to a
-  // fixed size) and announces it out of band; the parent applies it via the
-  // imperative ``resize()`` handle. Fitting here would override that and
-  // misalign the cell-positioned stream, so the host scrolls instead.
-  // Defaults to true (resizable tmux behavior).
+  // When false the server owns the grid (claude_tty) and the parent applies it
+  // through ``resize()``; the host scrolls. Fixed at mount.
   autoFit?: boolean;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
-  // Fires whenever the user's distance from the live cursor changes. Used
-  // by SessionDetail to surface a "jump to live" pill once the viewport
-  // has slipped into the scrollback.
+  // Surfaces the "jump to live" pill once the view slips into scrollback.
   onScrollChange?: (isAtBottom: boolean) => void;
-  // The light/dark surface for this pane. Defaults to dark so the terminal
-  // always mounts on the safe ground; the connection layer overrides it via
-  // the imperative handle once the server resolves the agent's theme.
+  // Dark until the connection resolves the agent's theme.
   appearance?: TerminalAppearance;
   className?: string;
 }
 
-
-function refitOnResize(host: HTMLElement, fit: FitAddon): () => void {
-  const ro = new ResizeObserver(() => {
-    try {
-      fit.fit();
-    } catch {
-      // Container detached mid-resize; ignore until next tick.
-    }
+export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XTerminal(
+  { readOnly = false, autoFit = true, onData, onResize, onScrollChange, appearance = "dark", className },
+  ref,
+) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const handle = useXTerminal(containerRef, {
+    readOnly,
+    autoFit,
+    themeFor: terminalThemeFor,
+    appearance,
+    onData,
+    onResize,
+    onScrollChange,
   });
-  ro.observe(host);
-  return () => ro.disconnect();
-}
+  useImperativeHandle(ref, () => handle, [handle]);
 
-// Keeps a scrolling host on its bottom row as it shrinks, unless the user has
-// scrolled up.
-function pinToBottomOnResize(host: HTMLElement): () => void {
-  let pinnedToBottom = true;
-  const onScroll = () => {
-    pinnedToBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 2;
-  };
-  host.addEventListener("scroll", onScroll, { passive: true });
-  const ro = new ResizeObserver(() => {
-    if (pinnedToBottom) host.scrollTop = host.scrollHeight;
-  });
-  ro.observe(host);
-  return () => {
-    ro.disconnect();
-    host.removeEventListener("scroll", onScroll);
-  };
-}
-
-export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
-  function XTerminal(
-    {
-      readOnly = false,
-      autoFit = true,
-      onData,
-      onResize,
-      onScrollChange,
-      appearance = "dark",
-      className,
-    },
-    ref,
-  ) {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const termRef = useRef<Terminal | null>(null);
-    const fitRef = useRef<FitAddon | null>(null);
-    const onDataRef = useRef(onData);
-    const onResizeRef = useRef(onResize);
-    const onScrollChangeRef = useRef(onScrollChange);
-    const wasAtBottomRef = useRef(true);
-
-    useEffect(() => {
-      onDataRef.current = onData;
-    }, [onData]);
-    useEffect(() => {
-      onResizeRef.current = onResize;
-    }, [onResize]);
-    useEffect(() => {
-      onScrollChangeRef.current = onScrollChange;
-    }, [onScrollChange]);
-
-    useEffect(() => {
-      const host = containerRef.current;
-      if (!host) return;
-      const term = new Terminal({
-        fontFamily:
-          '"JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace',
-        fontSize: 13,
-        lineHeight: 1.25,
-        // The pane stream emits cell-level deltas with explicit CUP
-        // positioning for the cursor on every frame, so we never rely
-        // on xterm's own blink timer to advertise where the cursor is.
-        // A still underline reads as part of the TUI rather than the
-        // browser.
-        cursorBlink: false,
-        cursorStyle: "underline",
-        theme: terminalThemeFor(appearance),
-        scrollback: 20000,
-        allowProposedApi: true,
-        disableStdin: readOnly,
-        // On a fixed grid a mouse-tracking TUI captures plain drags, so ⌥-drag
-        // selects on macOS (Shift-drag elsewhere), and ⌥-click must not type
-        // cursor keys into the TUI.
-        macOptionClickForcesSelection: !autoFit,
-        altClickMovesCursor: autoFit,
-      });
-      const fit = autoFit ? new FitAddon() : null;
-      if (fit) term.loadAddon(fit);
-      term.loadAddon(new WebLinksAddon());
-      term.open(host);
-
-      // Fixed-grid panes scroll the host (.xterm-host--scroll); xterm would
-      // consume the wheel as cursor keys or mouse reports and cancel it.
-      const keepHostWheel = (event: WheelEvent) => event.stopPropagation();
-      if (!autoFit) {
-        host.addEventListener("wheel", keepHostWheel, { capture: true, passive: true });
-      }
-
-      // Subscribe before the first fit so the initial dimension change
-      // (default 80x24 → fitted size) actually reaches the parent. Then
-      // push the current dims unconditionally after setup; if fit() was
-      // a no-op (already at target size or threw on a 0-sized host) we
-      // still report what the terminal believes its size is.
-      const onDataSub = term.onData((data) => {
-        onDataRef.current?.(data);
-      });
-      const onResizeSub = term.onResize(({ cols, rows }) => {
-        onResizeRef.current?.({ cols, rows });
-      });
-      // ``viewportY < baseY`` means the user is reading scrollback. Edge-
-      // trigger the callback only on transitions to avoid spamming React
-      // state on every scroll-tick.
-      const emitScrollState = () => {
-        const buf = term.buffer.active;
-        const atBottom = buf.viewportY >= buf.baseY;
-        if (atBottom !== wasAtBottomRef.current) {
-          wasAtBottomRef.current = atBottom;
-          onScrollChangeRef.current?.(atBottom);
-        }
-      };
-      const onScrollSub = term.onScroll(emitScrollState);
-
-      // OSC 52 is the terminal-clipboard protocol Claude Code (and Codex
-      // TUI) emit for `/copy`. Format: ``\x1b]52;<targets>;<payload>\x07``
-      // where ``<targets>`` is one or more of c (clipboard), p (primary),
-      // q (secondary), s (selection), 0–7 (cut buffers), and ``<payload>``
-      // is base64 (or "?" for a read query, which we ignore for security).
-      // Without this handler xterm.js drops the sequence silently and the
-      // user's `/copy` looks broken even though the CLI did its job.
-      const osc52Sub = term.parser.registerOscHandler(52, (data) => {
-        const sep = data.indexOf(";");
-        if (sep < 0) return true;
-        const payload = data.slice(sep + 1);
-        // "?" is a clipboard read; we deliberately don't surface page
-        // clipboard contents back to the wrapped CLI.
-        if (payload === "?" || payload === "") return true;
-        try {
-          const binary = atob(payload);
-          const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-          const text = new TextDecoder().decode(bytes);
-          navigator.clipboard?.writeText(text)?.catch(() => {
-            // Async write can reject when the clipboard API is gated
-            // (no transient activation, insecure context, missing
-            // permission). The CLI's /tmp/claude-<uid>/response.md is
-            // the documented fallback in those cases. The second ``?.``
-            // is load-bearing: without it, ``.catch`` runs on the
-            // optional chain's ``undefined`` result and throws.
-          });
-        } catch {
-          // Bad base64, missing clipboard API, or insecure context — silent
-          // fallback; the CLI also wrote /tmp/claude-<uid>/response.md for
-          // exactly this case.
-        }
-        return true;
-      });
-
-      // Initial fit can throw if the container is still 0-sized (animation,
-      // hidden tab, etc.) — guard so we don't crash the React tree.
-      try {
-        fit?.fit();
-      } catch {
-        // ResizeObserver below will retry once the container has a size.
-      }
-      termRef.current = term;
-      fitRef.current = fit;
-      onResizeRef.current?.({ cols: term.cols, rows: term.rows });
-
-      // Resizable panes refit on container changes. Fixed-grid panes keep the
-      // server-driven grid and scroll the host.
-      const stopObservingHost = fit ? refitOnResize(host, fit) : pinToBottomOnResize(host);
-
-      return () => {
-        onDataSub.dispose();
-        onResizeSub.dispose();
-        onScrollSub.dispose();
-        osc52Sub.dispose();
-        host.removeEventListener("wheel", keepHostWheel, { capture: true });
-        stopObservingHost();
-        term.dispose();
-        termRef.current = null;
-        fitRef.current = null;
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
-      const term = termRef.current;
-      if (!term) return;
-      term.options.disableStdin = readOnly;
-    }, [readOnly]);
-
-    // Declarative backstop for the imperative setAppearance below: keep the
-    // live theme in sync when the prop changes across re-renders. A repaint of
-    // the visible grid is needed because xterm's DOM renderer bakes colours
-    // into each cell, so a theme swap alone leaves already-painted cells stale.
-    useEffect(() => {
-      const term = termRef.current;
-      if (!term) return;
-      term.options.theme = terminalThemeFor(appearance);
-      term.refresh(0, term.rows - 1);
-    }, [appearance]);
-
-    useImperativeHandle(ref, () => ({
-      write: (data: string) => {
-        termRef.current?.write(data);
-      },
-      reset: () => {
-        termRef.current?.reset();
-      },
-      fit: () => {
-        try {
-          fitRef.current?.fit();
-        } catch {
-          // see above
-        }
-      },
-      // Used for fixed-grid panes: the server dictates the grid size and we
-      // apply it directly rather than fitting to the container. The grid can
-      // exceed the viewport, so land the scroll at the bottom — the live row
-      // is the grid's last line, and the fixed grid repaints in place so this
-      // stays put as content updates (the user can still scroll up).
-      resize: (cols: number, rows: number) => {
-        const term = termRef.current;
-        if (!term || cols <= 0 || rows <= 0) return;
-        term.resize(cols, rows);
-        const host = containerRef.current;
-        if (host) {
-          requestAnimationFrame(() => {
-            host.scrollTop = host.scrollHeight;
-          });
-        }
-      },
-      cols: () => termRef.current?.cols ?? 80,
-      rows: () => termRef.current?.rows ?? 24,
-      focus: () => termRef.current?.focus(),
-      blur: () => termRef.current?.blur(),
-      setInputEnabled: (enabled: boolean) => {
-        const term = termRef.current;
-        if (term) term.options.disableStdin = !enabled;
-      },
-      scrollToBottom: () => {
-        termRef.current?.scrollToBottom();
-      },
-      setAppearance: (appearance: TerminalAppearance) => {
-        const term = termRef.current;
-        if (!term) return;
-        term.options.theme = terminalThemeFor(appearance);
-        term.refresh(0, term.rows - 1);
-      },
-    }));
-
-    return (
-      <div
-        ref={containerRef}
-        // Fixed-grid panes own a scroll viewport (the grid can exceed the
-        // container); resizable panes must not scroll so mouse events pass
-        // through to the backend.
-        className={`${className ?? "xterm-host"}${autoFit ? "" : " xterm-host--scroll"}`}
-        style={{ width: "100%", height: "100%" }}
-      />
-    );
-  },
-);
+  return (
+    <div
+      ref={containerRef}
+      // A fixed grid can exceed the pane, so its host scrolls; a resizable one
+      // must not, so mouse events reach the backend.
+      className={`${className ?? "xterm-host"}${autoFit ? "" : " xterm-host--scroll"}`}
+      style={{ width: "100%", height: "100%" }}
+    />
+  );
+});
 
 export default XTerminal;

@@ -225,7 +225,8 @@ describe("scheduled summary", () => {
     expect(summary.overflow).toBe(1);
     expect(summary.items.map((item) => item.key)).toEqual(["message:m1", "launch:a"]);
     expect(summary.items[0]).toMatchObject({ target: "Fix race", whenLabel: "in 30m", kind: "message" });
-    expect(summary.items[1]).toMatchObject({ target: "Dependabot sweep", recurring: true, preview: "/repo" });    expect(summary.total).toBe(5);
+    expect(summary.items[1]).toMatchObject({ target: "Dependabot sweep", recurring: true, preview: "/repo" });
+    expect(summary.total).toBe(5);
   });
 
   it("labels a when-idle message by its trigger, not its queue time", () => {

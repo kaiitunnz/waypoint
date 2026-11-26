@@ -45,7 +45,6 @@ export function ScheduledSessionsGroup({
   const modelLabel = useScheduleModels(host, token, schedules);
   const [clearing, setClearing] = useState(false);
 
-
   const upcoming = schedules.filter((schedule) => schedule.status === "pending");
   const recent = schedules.filter((schedule) => schedule.status !== "pending");
   const ordered = [...upcoming, ...recent];

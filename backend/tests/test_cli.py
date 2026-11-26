@@ -3139,7 +3139,11 @@ def _message_schedule_handler(
     if path.endswith("/send-now") and request.method == "POST":
         schedule_id = path.split("/")[-2]
         return httpx.Response(
-            200, json={"message_schedule": {"id": schedule_id, "status": "sent"}}
+            200,
+            json={
+                "message_schedule": {"id": schedule_id, "status": "sent"},
+                "held": False,
+            },
         )
     if path.startswith("/api/message-schedules/") and request.method == "DELETE":
         schedule_id = path.rsplit("/", 1)[-1]
@@ -3252,7 +3256,7 @@ def test_schedule_message_send_now(
     )
     assert result.exit_code == 0
     out = json.loads(result.stdout)
-    assert out["message_schedule"] == {"id": "ms1", "status": "sent"}
+    assert out == {"message_schedule": {"id": "ms1", "status": "sent"}, "held": False}
 
 
 def test_schedule_message_create_with_scheduled_at(

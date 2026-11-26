@@ -1340,9 +1340,11 @@ class WaypointClient:
         return data
 
     def send_message_schedule_now(self, schedule_id: str) -> dict[str, Any]:
+        """Returns ``message_schedule`` and ``held``: whether the session held the
+        message (Focus, a dialog, a restore) instead of sending it."""
         data: dict[str, Any] = self._request(
             "POST", f"/api/message-schedules/{schedule_id}/send-now"
-        ).json()["message_schedule"]
+        ).json()
         return data
 
     def clear_message_schedule_history(

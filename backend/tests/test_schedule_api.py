@@ -228,6 +228,7 @@ async def test_send_now_delivers_once_then_refuses(tmp_path: Path, monkeypatch) 
         )
     assert first.status_code == 200
     assert first.json()["message_schedule"]["status"] == "sent"
+    assert first.json()["held"] is False
     assert sent == ["now please"]
     assert again.status_code == 409
     assert again.json()["detail"] == "message schedule is sent"

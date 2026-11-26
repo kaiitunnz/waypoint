@@ -5952,7 +5952,7 @@ def schedule_message_send_now(
     """
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"message_schedule": c.send_message_schedule_now(schedule_id)},
+        lambda c: c.send_message_schedule_now(schedule_id),
     )
 
 

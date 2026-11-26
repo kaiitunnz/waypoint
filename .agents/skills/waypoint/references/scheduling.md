@@ -65,9 +65,10 @@ session's input without auto-submitting it (the default submits). A record moves
 
 `send-now` delivers a pending message immediately, attachments included. A
 one-time or when-idle message becomes `sent`; a recurring one delivers a single
-occurrence and keeps its next run. A message that already ran or was cancelled
-is refused (409). A failed delivery is recorded on the schedule and returned as
-the error.
+occurrence and keeps its next run. The response's `held` is true when the
+session held the message (Focus, an open dialog, a restore) rather than sending
+it. A message that already ran, was cancelled or is being sent is refused (409),
+and a refused delivery leaves the message pending.
 
 ## Send at the next idle point
 

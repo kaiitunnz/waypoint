@@ -3266,12 +3266,8 @@ class SessionRuntime:
             return self.storage.update_session(session.id, status=SessionStatus.EXITED)
 
     async def _terminate_agent(self, session: SessionRecord) -> None:
-        # Route through the plugin (not the transport) so a session whose
-        # adapter slot was never warmed in this process — e.g. an opencode
-        # session terminated while the user's active backend is codex —
-        # cleans up gracefully instead of 503'ing on a missing adapter.
-        # Plugin hooks already do soft `.get()` lookups and no-op when the
-        # adapter is missing.
+        # Route through the plugin: its hooks no-op when the session's adapter
+        # was never started in this process.
         try:
             await self.registry.plugin_for(session).terminate_session(self, session)
         except Exception:

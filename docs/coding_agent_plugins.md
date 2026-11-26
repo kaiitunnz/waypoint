@@ -548,8 +548,9 @@ session status; on `FAILED` it records nothing. `answer_question` holds
 `runtime.questions.operation(session_id, tool_use_id)` from provider delivery
 until the answer event is persisted; a concurrent operation on the same request
 gets a 409. Provider-originated endings must carry the request id (OpenCode's
-`form.replied` / `form.cancelled` normalize to correlated closure notes). Without the protocol the tracker closes the session's open questions
-and rejects cancels.
+`form.replied` / `form.cancelled` normalize to correlated closure notes).
+Without the protocol the tracker closes the session's open questions and
+rejects cancels.
 
 An agent that keeps working after it asks gets a stand-in card instead of a
 parked request: its plugin delivers the answer as an ordinary message and
@@ -788,25 +789,23 @@ the protocol nor need it.
 OpenCode is driven over its 2.x server API: one `opencode serve` process per
 launch target, working directory, CLI args and environment, each behind a
 password Waypoint generates. A 1.x server is refused with an upgrade message.
-Servers of a launch target start one at a time until the first has migrated a
-1.x history.
 
 - A Waypoint session covers its OpenCode session and that session's subagents:
   their approvals and questions appear in it, and it stays running until all of
   them finish. Their transcripts are not shown.
-- Interrupt stops the subagents too. OpenCode then runs the session to take their
-  results, and the session stays interrupted until new input.
+- Interrupt stops the subagents too. OpenCode then runs the session to take
+  their results, and the session stays interrupted until new input.
 - Permission modes are the permission rulesets of the session and its
   subagents, rewritten on a mode change and on restore. In plan mode the session
-  switches to the plan agent and its subagents, including ones started later,
-  ask. A subagent that refuses its rules gets a note and leaves the change in
-  place. "Approve for session" adds
-  allow rules, which a mode change, restore or fork resets. OpenCode's own
-  `always` reply allows for the whole project and is not used.
+  runs the plan agent, and its subagents, including ones started later, ask.
+  When a subagent's rules cannot be written, the session gets a note and the
+  mode change stands.
+- "Approve for session" adds allow rules, which a mode change, restore or fork
+  resets; in plan mode they reach the subagents, not the plan agent. OpenCode's
+  own `always` reply allows for the whole project and is not used.
 - Model, effort (a model variant) and agent are selected on the session when
   they change. An effort the model has no variant for is refused, or dropped
   with a note when a session is launched with it.
-- A skill runs as a prompt, a slash command through the command endpoint.
 - The tmux transport passes `--standalone`, so the TUI's tools see the session's
   environment. A custom `--server` argument conflicts with it.
 

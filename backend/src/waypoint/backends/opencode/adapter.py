@@ -239,11 +239,8 @@ class OpenCodeAdapter:
 
         log.info("starting local opencode server on %s:%d", self._host, self._port)
         auth = ServerAuth.generate()
-        # Spawn directly with the requested port (0 = let the kernel pick) and
-        # parse the bound port from the server's "listening on" log line. The
-        # previous bind/close/spawn dance left a TOCTOU window where another
-        # process could grab the port between probe and spawn; here EADDRINUSE
-        # surfaces as the child exiting with stderr we re-raise.
+        # Port 0 lets the kernel pick; the bound port is read from the
+        # "listening on" line, and a failed bind surfaces as the child exiting.
         self._server_process = await asyncio.create_subprocess_exec(
             binary,
             "serve",
@@ -535,9 +532,6 @@ class OpenCodeAdapter:
             # ``start`` sees the event task end, and fails.
             return
         active = [state for state in self._sessions.values() if not state.closing]
-        # Snapshot ids before we clear `_sessions` so the plugin's
-        # auto-reconnect loop knows which sessions to restore once the
-        # remote comes back.
         active_session_ids = [state.session_id for state in active]
 
         for state in active:
@@ -593,12 +587,9 @@ class OpenCodeAdapter:
     # ── Event stream ────────────────────────────────────────────────────
 
     async def _listen_events(self) -> None:
-        # The stream does not support resume, so a mid-session disconnect is
-        # unrecoverable: events generated while the connection was down would be
-        # silently dropped. The retry budget is therefore only spent before the
-        # first event (server still warming up). Once one has arrived, any error
-        # or clean EOF is a server death, which surfaces the disconnect instead
-        # of pretending the transcript is still live.
+        # Events are not replayed, so once one has arrived any error or EOF is a
+        # server death. Before that the server may still be warming up, and
+        # the stream is retried.
         consecutive_failures = 0
         delivered_any = False
         try:
@@ -780,8 +771,7 @@ class OpenCodeAdapter:
         emission: normalize.Emission,
         status: SessionStatus | None = None,
     ) -> None:
-        """Emit with ``status``, by default the one the session's state gives.
-        Nothing is emitted for a session being closed."""
+        """Emit with ``status``, by default the one the session's state gives."""
         # Handling that awaited the server may resume after the close, and its
         # event would revive the session.
         if state.closing:
@@ -1177,7 +1167,7 @@ class OpenCodeAdapter:
                     raise OpenCodeError(
                         f"failed to allow this for the session: {exc}"
                     ) from exc
-            # Subagents started later get these rules rather than the root's.
+            # Subagents started later get these rules too.
             if (subagent := state.subagent_permissions) is not None:
                 state.subagent_permissions = subagent + [
                     rule for rule in rules if rule not in subagent
@@ -1495,8 +1485,7 @@ class OpenCodeAdapter:
         open_questions: Collection[str] = (),
     ) -> None:
         """Drive an existing OpenCode session. ``open_approvals`` and
-        ``open_questions`` are the ids of the cards the transcript still shows.
-        The caller records the restore note."""
+        ``open_questions`` are the ids of the cards the transcript still shows."""
         await self.start()
         try:
             info = await self._session_info(opencode_session_id)
@@ -1957,13 +1946,8 @@ class OpenCodeAdapter:
     async def get_session_messages(
         self, opencode_session_id: str
     ) -> list[dict[str, Any]]:
-        """The full message history of a session, oldest first.
-
-        Unlike ``get_session``/``list_sessions``, failures are raised:
-        ``runtime.seed_thread_history``'s reader contract expects a raise to
-        signal "history unavailable" so it can degrade to a plain resume with a
-        system note instead of seeding an empty transcript.
-        """
+        """The full message history of a session, oldest first. A failure
+        raises, which history seeding reads as unavailable."""
         await self.start()
         try:
             return await self._list(
@@ -2018,8 +2002,8 @@ def _path_id(opencode_session_id: str) -> str:
 
 
 def _files(attachments: list[ResolvedAttachment] | None) -> list[dict[str, str]]:
-    # Inline data URLs rather than host paths: the server may run on a remote
-    # host that can't see the local attachments directory.
+    # Data URLs: the server may run on a host that cannot see the local
+    # attachments directory.
     return [
         {"uri": attachment.to_data_url(), "name": attachment.spec.filename}
         for attachment in attachments or []

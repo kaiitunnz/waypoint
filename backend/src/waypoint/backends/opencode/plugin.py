@@ -366,7 +366,6 @@ class OpenCodePlugin(DefaultLaunchContract):
                     runtime, session, agent=None, pre_plan_mode=None
                 )
 
-                # Emit system note so transcript shows that plan mode exited
                 await runtime._emit_adapter_event(
                     session_id,
                     EventKind.SYSTEM_NOTE,
@@ -715,11 +714,11 @@ class OpenCodePlugin(DefaultLaunchContract):
     def native_thread_artifacts(
         self, session: SessionRecord, config_dir: str | None = None
     ) -> list[Path]:
-        # No config-dir env var / account-profile support in phase 1.
+        # OpenCode has no config-dir env var.
         return []
 
     def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
-        # No config-dir env var / account-profile support in phase 1.
+        # OpenCode has no config-dir env var.
         return None
 
     def on_session_deleted(

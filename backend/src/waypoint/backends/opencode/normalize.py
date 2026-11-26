@@ -1,7 +1,7 @@
 """OpenCode 2.x events and history messages as Waypoint events.
 
-Every function returns ``(kind, text, metadata)``; the live path adds the
-session status.
+Each converter returns an ``Emission``, ``(kind, text, metadata)``; the live
+path adds the session status.
 """
 
 import json

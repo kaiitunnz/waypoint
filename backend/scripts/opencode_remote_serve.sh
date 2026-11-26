@@ -27,8 +27,8 @@ TARGET_CWD=${1:-}
 shift || true
 
 # The first stdin line is the server password: sent this way it is on no
-# command line. 2.x reads either password variable; 1.x is given one too, so
-# that its version can be reported.
+# command line. 2.x reads either password variable; 1.x reads
+# OPENCODE_SERVER_PASSWORD, so it is secured while it is identified.
 IFS= read -r SERVER_PASSWORD
 export OPENCODE_SERVER_USERNAME=opencode
 export OPENCODE_SERVER_PASSWORD="$SERVER_PASSWORD"

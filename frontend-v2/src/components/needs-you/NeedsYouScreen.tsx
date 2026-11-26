@@ -16,6 +16,9 @@ import { NeedsYouContext } from "./NeedsYouContext";
 import { QueuePane } from "./QueuePane";
 import styles from "./NeedsYouScreen.module.css";
 
+// Kept in an item's history entry: the queue is the entry under it.
+const OVER_QUEUE = "needsYouOverQueue";
+
 const QUEUE_WIDTH: PaneWidthConfig = {
   storageKey: "waypoint.inboxSidebarWidth",
   defaultWidth: 400,
@@ -39,18 +42,20 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
     detail.current?.scrollTo(0, 0);
   }, [selected]);
 
+  // Each item entry records, when first shown, whether it was pushed over the queue.
+  // The record stays with the entry, which outlives this screen. Only the single column
+  // pushes; a row beside the item replaces.
   const previous = useRef<string | null | undefined>(undefined);
-  // Whether opening the item added a history entry, so that "back" can step over
-  // it. Only the single column pushes; a row beside the item replaces.
-  const opened = useRef(false);
   useEffect(() => {
-    if (selected === null) opened.current = false;
-    else if (previous.current === null) opened.current = !columns;
+    const state = window.history.state;
+    if (selected !== null && state && !(OVER_QUEUE in state)) {
+      window.history.replaceState({ ...state, [OVER_QUEUE]: previous.current === null && !columns }, "");
+    }
     previous.current = selected;
   }, [selected, columns]);
 
   const leave = useCallback(() => {
-    if (!columns && opened.current) router.back();
+    if (!columns && window.history.state?.[OVER_QUEUE]) router.back();
     else router.replace("/inbox", { scroll: false });
   }, [columns, router]);
 
@@ -84,7 +89,7 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
             {children}
             {columns && selected === null ? (
               <div className={styles.placeholder}>
-                <EmptyState title="Select an item to read it" />
+                <EmptyState title="No item selected" />
               </div>
             ) : null}
           </div>

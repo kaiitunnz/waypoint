@@ -71,10 +71,10 @@ export function DetailFrame({ source, sessionId, onDelete, children }: DetailFra
 }
 
 // An item that is loading, gone, or no longer waiting.
-export function DetailState({ title, sessionId }: { title: string; sessionId?: string }) {
+export function DetailState({ title, sessionId, action }: { title: string; sessionId?: string; action?: ReactNode }) {
   return (
     <DetailFrame sessionId={sessionId}>
-      <EmptyState title={title} />
+      <EmptyState title={title} action={action} />
     </DetailFrame>
   );
 }

@@ -26,6 +26,8 @@
 .action > * {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 44px;
   min-height: 44px;
   margin-block: -14px;
 }

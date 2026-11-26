@@ -11,6 +11,7 @@ export interface MenuButtonItem {
   id: string;
   label: string;
   tone?: "default" | "danger";
+  disabled?: boolean;
 }
 
 interface MenuButtonProps {
@@ -58,6 +59,7 @@ export function MenuButton({ label, title, subtitle, items, onSelect, size = "md
           {items.map((item) => (
             <MenuItem
               key={item.id}
+              disabled={item.disabled}
               tone={item.tone}
               onSelect={() => {
                 setOpen(false);

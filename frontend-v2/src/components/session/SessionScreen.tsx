@@ -65,6 +65,16 @@ export function SessionScreen({ id }: { id: string }) {
   const [view, setView] = useState<SessionView>("chat");
   const goHome = useCallback(() => router.replace("/"), [router]);
   const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
+  // A second reattach would restart the session the first one restored.
+  const [reconnecting, setReconnecting] = useState(false);
+  const reconnect = async () => {
+    setReconnecting(true);
+    try {
+      await reattach(id);
+    } finally {
+      setReconnecting(false);
+    }
+  };
 
   // A failed first load fills the page; any later failure is a toast.
   const { error, errorCount } = stream;
@@ -117,7 +127,14 @@ export function SessionScreen({ id }: { id: string }) {
   const sessionActions = [
     { id: "refresh", label: "Refresh", run: () => window.location.reload() },
     ...(composerAvailability(session, catalog).dormant
-      ? [{ id: "reconnect", label: "Reconnect session", run: () => void reattach(id) }]
+      ? [
+          {
+            id: "reconnect",
+            label: reconnecting ? "Reconnecting…" : "Reconnect session",
+            disabled: reconnecting,
+            run: () => void reconnect(),
+          },
+        ]
       : []),
   ];
   const overflow = session ? (
